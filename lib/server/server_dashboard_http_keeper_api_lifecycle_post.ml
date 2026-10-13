@@ -442,7 +442,16 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                   | Some Keeper_state_machine.Paused
                     when not (persist_keeper_pause ()) ->
                     Error "paused-state persist failed after clear"
-                  | Some Keeper_state_machine.Paused | Some _ | None ->
+                  | Some
+                      ( Keeper_state_machine.Paused
+                      | Keeper_state_machine.Offline
+                      | Keeper_state_machine.Running
+                      | Keeper_state_machine.Failing
+                      | Keeper_state_machine.Draining
+                      | Keeper_state_machine.Stopped
+                      | Keeper_state_machine.Crashed
+                      | Keeper_state_machine.Restarting )
+                  | None ->
                     invalidate_keeper_execution_surfaces ~config ();
                     Ok ())
               in

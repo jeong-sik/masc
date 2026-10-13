@@ -225,7 +225,10 @@ let exit_code result =
   match result.failure with
   | None -> 0
   | Some (Unavailable _) -> 2
-  | Some _ -> 1
+  | Some (Rate_limited _) | Some (Quota_exhausted _) | Some (Provider_overloaded _)
+  | Some (Provider_auth_refused _) | Some (Provider_unreachable _) | Some (Model_not_found _)
+  | Some (Provider_rejected _) | Some (Timed_out) | Some (Tool_not_called)
+  | Some (Tool_result_not_consumed) | Some (Empty_response) | Some (Model_unreported) -> 1
 ;;
 
 type unmeasured =
@@ -669,7 +672,43 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                 ~scope:(Runtime_instance.quota_scope_of_runtime runtime) config
            then Error (Quota_exhausted detail)
            else Error (Provider_rejected detail)
-         | Error (Client_error error) ->
+         | Error (Client_error
+             (( Runtime_muse_serve.Turn_input_write_failed _
+              | Runtime_muse_serve.Protocol_error _
+              | Runtime_muse_serve.Rpc_error _
+              | Runtime_muse_serve.Capability_not_granted _
+              | Runtime_muse_serve.Session_not_durable
+              | Runtime_muse_serve.Session_model_mismatch _
+              | Runtime_muse_serve.Session_workspace_mismatch _
+              | Runtime_muse_serve.Session_approval_mode_mismatch _
+              | Runtime_muse_serve.Turn_failed
+                  { kind =
+                      ( Runtime_muse_msp.Step_limit
+                      | Runtime_muse_msp.Config_error
+                      | Runtime_muse_msp.Projection_error
+                      | Runtime_muse_msp.Log_error
+                      | Runtime_muse_msp.Workflow_launch_error
+                      | Runtime_muse_msp.Environment_error
+                      | Runtime_muse_msp.Launch_error
+                      | Runtime_muse_msp.Unrecognized_error_kind _ )
+                  ; retryable = false
+                  ; _
+                  }
+              | Runtime_muse_serve.Turn_cancelled
+              | Runtime_muse_serve.Unsupported_server_request _
+              | Runtime_muse_serve.Runtime_shutting_down
+              | Runtime_muse_serve.Process_exited
+                  { status =
+                      ( None
+                      | Some
+                          ( Runtime_muse_serve.Exit_clean
+                          | Runtime_muse_serve.Exit_unhandled
+                          | Runtime_muse_serve.Exit_config_or_credential
+                          | Runtime_muse_serve.Exit_session_lease_held
+                          | Runtime_muse_serve.Exit_code _
+                          | Runtime_muse_serve.Exit_signal _ ) )
+                  ; _
+                  } ) as error)) ->
            Error (Provider_rejected (Runtime_muse_serve.error_to_string error)))
       | Runtime_execution.Antigravity_cli execution ->
         let config = { (Runtime_antigravity.default_config ~cwd:cwd_path ~model:execution.model) with
@@ -687,7 +726,12 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
          | Error (Client_error (Runtime_antigravity.Invalid_config _)) ->
            Error (Unavailable (Invalid_configuration "Antigravity readiness configuration is invalid"))
          | Error (Client_error (Runtime_antigravity.Timeout _)) -> Error Timed_out
-         | Error (Client_error err) ->
+         | Error (Client_error
+             (( Runtime_antigravity.Protocol_error _
+              | Runtime_antigravity.State_callback_failed _
+              | Runtime_antigravity.Turn_failed _
+              | Runtime_antigravity.Process_exited _
+              | Runtime_antigravity.Unhandled_exception _ ) as err)) ->
            Error (Provider_rejected (Runtime_antigravity.error_to_string err)))
       | Runtime_execution.Agent_core provider_cfg ->
         (match
@@ -701,6 +745,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
            Error
              (Unavailable
                 (Invalid_credential (Runtime_instance.dispatch_credential_error_to_string error)))
+         | Error (Runtime_instance.Undeclared_credential _ as error) ->
+           Error
+             (Unavailable
+                (Missing_credential (Runtime_instance.dispatch_credential_error_to_string error)))
          | Ok () ->
            let seed =
              Runtime_inference.seed_of_thinking_support
@@ -766,7 +814,48 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                     this arm is the mapping's completeness, not a producer
                     seen here. *)
                  Error Timed_out
-               | Error error -> Error (failure_of_agent_core_error error)
+               | Error
+                   (( Agent_core.Error.Api
+                        ( Agent_core.Retry.RateLimited _
+                        | Agent_core.Retry.Overloaded _
+                        | Agent_core.Retry.ServerError _
+                        | Agent_core.Retry.AuthError _
+                        | Agent_core.Retry.AuthorizationError _
+                        | Agent_core.Retry.PaymentRequired _
+                        | Agent_core.Retry.InvalidRequest _
+                        | Agent_core.Retry.NotFound _
+                        | Agent_core.Retry.ContextOverflow _
+                        | Agent_core.Retry.InputCapacity _
+                        | Agent_core.Retry.NetworkError _ )
+                    | Agent_core.Error.Provider
+                        ( Llm_provider.Error.MissingApiKey _
+                        | Llm_provider.Error.InvalidConfig _
+                        | Llm_provider.Error.ParseError _
+                        | Llm_provider.Error.ProviderWireError _
+                        | Llm_provider.Error.ProviderReportedError _
+                        | Llm_provider.Error.UnknownVariant _
+                        | Llm_provider.Error.ProviderUnavailable _
+                        | Llm_provider.Error.EmptyCompletion _
+                        | Llm_provider.Error.RepeatingGeneration _
+                        | Llm_provider.Error.RateLimit _
+                        | Llm_provider.Error.HardQuota _
+                        | Llm_provider.Error.CapacityExhausted _
+                        | Llm_provider.Error.AuthError _
+                        | Llm_provider.Error.AuthorizationError _
+                        | Llm_provider.Error.ServerError _
+                        | Llm_provider.Error.NetworkError _
+                        | Llm_provider.Error.InvalidRequest _
+                        | Llm_provider.Error.NotFound _
+                        | Llm_provider.Error.ProviderTerminal _ )
+                    | Agent_core.Error.Agent _
+                    | Agent_core.Error.Mcp _
+                    | Agent_core.Error.Config _
+                    | Agent_core.Error.Serialization _
+                    | Agent_core.Error.Io _
+                    | Agent_core.Error.Orchestration _
+                    | Agent_core.Error.Internal _
+                    | Agent_core.Error.Internal_carried _ ) as error) ->
+                 Error (failure_of_agent_core_error error)
                | Ok result ->
                  (match result.stop_reason with
                   | Runtime_agent.Completed ->
@@ -774,8 +863,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                       { model = result.response.model
                       ; text = Agent_core.Types.text_of_response result.response
                       }
-                  | stop_reason ->
-                    Error (Provider_rejected (unfinished_run_reason stop_reason))))))
+                  | (Runtime_agent_context.Yielded_to_operation_queued _ | Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.Yielded_after_repeated_tool_call _ | Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _) as stop_reason -> Error (Provider_rejected (unfinished_run_reason stop_reason))))))
       | Runtime_execution.Claude_code execution ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with
@@ -824,7 +912,16 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                 (with_usage_window
                    rate_limit
                    (Runtime_claude_code.error_to_string error)))
-         | Error error ->
+         | Error
+             (( Runtime_claude_code.Protocol_error _
+              | Runtime_claude_code.Unsupported_control_request _
+              | Runtime_claude_code.Turn_transport_interrupted _
+              | Runtime_claude_code.Context_window_exceeded _
+              | Runtime_claude_code.Turn_failed _
+              | Runtime_claude_code.Turn_failed_with_observation _
+              | Runtime_claude_code.Stopped_by_host _
+              | Runtime_claude_code.Process_exited _
+              | Runtime_claude_code.Unhandled_exception _ ) as error) ->
            Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
       | Runtime_execution.Codex_app_server execution ->
         (match Runtime_verification_codex_home.prepare ?source_home:execution.account_home ~directory:cwd_path () with
@@ -878,7 +975,17 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
              (failure_of_codex_turn
                 (Runtime_codex_app_server.error_to_string error)
                 codex_error_info)
-         | Error error ->
+         | Error
+             (( Runtime_codex_app_server.Reasoning_effort_admission_failed _
+              | Runtime_codex_app_server.Turn_input_write_failed _
+              | Runtime_codex_app_server.Protocol_error _
+              | Runtime_codex_app_server.Rpc_error _
+              | Runtime_codex_app_server.Unsupported_server_request _
+              | Runtime_codex_app_server.Context_window_exceeded _
+              | Runtime_codex_app_server.Stopped_by_host _
+              | Runtime_codex_app_server.Turn_interrupted
+              | Runtime_codex_app_server.Runtime_shutting_down
+              | Runtime_codex_app_server.Process_exited _ ) as error) ->
            Error
              (Provider_rejected (Runtime_codex_app_server.error_to_string error)))))
   in

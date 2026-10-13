@@ -78,9 +78,12 @@ let is_trailing_blank_assistant (message : Agent_core.Types.message) =
     List.for_all
       (function
         | Agent_core.Types.Text text -> String.trim text = ""
-        | _ -> false)
+        | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+        | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+        | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ -> false)
       blocks
-  | _, _ -> false
+  | (Agent_core.Types.System, _) | (Agent_core.Types.User, _) | (Agent_core.Types.Tool, _) -> false
 ;;
 
 let drop_trailing_blank_assistants messages =
@@ -101,7 +104,9 @@ let suffix_records_tool_activity (messages : Agent_core.Types.message list) =
        List.exists
          (function
            | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ -> true
-           | _ -> false)
+           | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+           | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+           | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> false)
          message.Agent_core.Types.content)
     messages
 ;;
@@ -127,7 +132,12 @@ let drop_trailing_assistants messages =
         | _ -> rest
       in
       drop true rest
-    | reversed -> List.rev reversed, dropped
+    | ([]
+      | { Agent_core.Types.role =
+            ( Agent_core.Types.System | Agent_core.Types.User | Agent_core.Types.Tool )
+        ; _
+        }
+        :: _) as reversed -> List.rev reversed, dropped
   in
   drop false (List.rev messages)
 ;;

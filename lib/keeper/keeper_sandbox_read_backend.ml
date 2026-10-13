@@ -320,7 +320,9 @@ let run_command_with_capture ?turn_sandbox_factory
                (match Fs_compat.load_owned_regular_file ~ownership_root:capture_dir path with
                 | Ok (Some bytes) when String.length bytes = byte_length -> Ok (status, bytes)
                 | Ok _ | Error _ -> Error "Frozen runtime binary capture is missing or changed")
-             | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
+             | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), Process_output_capture.Complete_file _)
+             | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), Process_output_capture.Incomplete_file _)
+             | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), Process_output_capture.Capture_failed _) ->
                Error "Frozen runtime binary command failed or did not produce complete stdout")
           | Ok (_, _, _, None) -> Error "Frozen runtime has no authoritative binary output capture"))
     | Ok Docker_fallback ->
@@ -547,7 +549,11 @@ let read_file ?turn_sandbox_factory ?(start_line = 1) ~config ~(meta : keeper_me
                 "%s_read_failed: path_is_directory: %s (Read requires a file; to \
                  list a directory use Execute with ls, e.g. argv=['ls','-la','%s'])"
                 profile_label host_path host_path))
-      | _ -> read ()
+      | { Unix.st_kind =
+            ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+            | Unix.S_SOCK )
+        ; _
+        } -> read ()
       | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
         Error
           (Missing_file

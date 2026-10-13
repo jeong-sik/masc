@@ -314,7 +314,7 @@ let running_keeper_count (config : Workspace.config) : int =
        (fun count name ->
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) when runtime_keepalive_running config meta -> count + 1
-         | _ -> count)
+         | Ok (None) | Error _ | Ok (Some _) -> count)
        0
 
 (* #10710: bounded fiber pool for per-keeper dashboard enrichment. Each
@@ -577,7 +577,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 let disk_crashes =
                   (try
                      Keeper_crash_persistence.recent_crashes
-                       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+                       ~cluster_root:(Workspace.dated_store_cluster_root config)
                        ~name:m.name ~max_entries:20
                    with
                    | Eio.Cancel.Cancelled _ as exn -> raise exn

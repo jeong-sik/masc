@@ -257,8 +257,7 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config ~context_message 
                 ~tool_name:None
                 ~tool_use_id:None
                 ~detail)
-         | decision ->
-           Error
+         | (Hooks.AdjustParams _ | Hooks.ElicitInput _ | Hooks.ElicitToolApproval _ | Hooks.Nudge _ | Hooks.Block _) as decision -> Error
              (Pipeline_common.illegal_hook_decision_core_error
                 ~hook_name:"after_turn"
                 ~stage:Hooks.After_turn
@@ -947,7 +946,7 @@ let%test "last_tool_results_from finds tool results in last tool message" =
   | [ Ok { content = "result1"; _ }
     ; Error { message = "error msg"; recoverable = false; error_class = None }
     ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 let%test "last_tool_results_from ignores tool results outside tool role" =
@@ -1056,7 +1055,7 @@ let%test "last_tool_results_from picks last tool-result message" =
   in
   match Agent_turn.last_tool_results_from msgs with
   | [ Ok { content = "second"; _ } ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 let%test "last_tool_results_from ignores mixed content outside tool role" =
@@ -1103,7 +1102,7 @@ let%test "last_tool_results_from error tool result" =
   in
   match Agent_turn.last_tool_results_from msgs with
   | [ Error { message = "fail msg"; recoverable = false; error_class = None } ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 (* --- Additional pipeline tests --- *)

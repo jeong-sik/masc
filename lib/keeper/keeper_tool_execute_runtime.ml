@@ -26,9 +26,9 @@ let elapsed_duration_ms ~start_time ~end_time =
   let elapsed_ms = (end_time -. start_time) *. 1000. in
   match classify_float elapsed_ms with
   | FP_nan | FP_infinite -> 0
-  | _ when elapsed_ms <= 0. -> 0
-  | _ when elapsed_ms < 1. -> 1
-  | _ -> int_of_float elapsed_ms
+  | FP_normal | FP_subnormal | FP_zero when elapsed_ms <= 0. -> 0
+  | FP_normal | FP_subnormal | FP_zero when elapsed_ms < 1. -> 1
+  | FP_normal | FP_subnormal | FP_zero -> int_of_float elapsed_ms
 
 let model_execute_location_fields ~config ~meta ~args ~cwd =
   let execution_location =
@@ -108,7 +108,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
     match meta.sandbox_profile with
     | Docker ->
       Keeper_tool_execute_path.execute_cwd_resolution_error_public_message error
-    | _ -> private_message
+    | Micro_vm | Remote_ssh -> private_message
   in
   Keeper_tool_execution.failure
     ~class_:Tool_result.Policy_rejection

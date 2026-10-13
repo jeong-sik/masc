@@ -26,11 +26,26 @@ type flow =
   ; batches : flow_batch list
   }
 
+(* What kind of skill a profile describes and how it runs. An instruction
+   skill always runs on demand, so kind and execution never vary apart. *)
+type surface =
+  | Instruction_skill
+  | Composition_skill of Keeper_tool_composition_catalog.execution_mode
+
+let kind_label = function
+  | Instruction_skill -> "instruction"
+  | Composition_skill _ -> "composition"
+;;
+
+let execution_label = function
+  | Instruction_skill -> "on_demand"
+  | Composition_skill mode -> Keeper_tool_composition_catalog.execution_mode_to_string mode
+;;
+
 type profile =
   { reference : Skill_reference.t
-  ; kind : string
+  ; surface : surface
   ; activation_tool : string
-  ; execution : string
   ; body_bytes : int
   ; discovery_bytes : int
   ; tool_schema_bytes : int option
@@ -200,9 +215,8 @@ let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =
   match skill.surface with
      | Keeper_skill_catalog.Instruction ->
        { reference
-         ; kind = "instruction"
+         ; surface = Instruction_skill
          ; activation_tool = Keeper_tool_composition_catalog.skill_tool_name
-         ; execution = "on_demand"
          ; body_bytes
          ; discovery_bytes = instruction_discovery_bytes reference skill.description
          ; tool_schema_bytes = None
@@ -220,10 +234,8 @@ let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =
        in
        let tool_schema_bytes = composition_tool_component_bytes entry in
        { reference
-         ; kind = "composition"
+         ; surface = Composition_skill entry.execution
          ; activation_tool = Keeper_tool_composition_catalog.tool_name entry
-         ; execution =
-             Keeper_tool_composition_catalog.execution_mode_to_string entry.execution
          ; body_bytes
          ; discovery_bytes = Option.value ~default:0 tool_schema_bytes
          ; tool_schema_bytes
@@ -293,21 +305,30 @@ let to_yojson profile =
   in
   `Assoc
     [ "reference", Skill_reference.to_yojson profile.reference
-    ; "kind", `String profile.kind
+    ; "kind", `String (kind_label profile.surface)
     ; "activation_tool", `String profile.activation_tool
-    ; "execution", `String profile.execution
+    ; "execution", `String (execution_label profile.surface)
     ; ( "capabilities"
       , `Assoc
           [ "as_skill", `Bool true
-          ; "as_tool", `Bool (String.equal profile.kind "composition")
+          ; ( "as_tool"
+            , `Bool
+                (match profile.surface with
+                 | Composition_skill _ -> true
+                 | Instruction_skill -> false) )
           ; "batch", `Bool (profile.node_count > 1)
           ; "parallel", `Bool (profile.max_parallelism > 1)
-          ; "async", `Bool (String.equal profile.execution "async")
+          ; ( "async"
+            , `Bool
+                (match profile.surface with
+                 | Composition_skill Keeper_tool_composition_catalog.Async -> true
+                 | Composition_skill Keeper_tool_composition_catalog.Inline
+                 | Instruction_skill -> false) )
           ; ( "tool_scope"
             , `String
-                (if String.equal profile.kind "composition"
-                 then "registered_tools_only"
-                 else "model_orchestrated") )
+                (match profile.surface with
+                 | Composition_skill _ -> "registered_tools_only"
+                 | Instruction_skill -> "model_orchestrated") )
           ] )
     ; ( "context"
       , `Assoc

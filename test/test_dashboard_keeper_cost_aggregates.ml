@@ -443,12 +443,11 @@ let default_window_minutes = 24 * 60
 (* Write [rows] straight into the day file their own [ts_unix] names, so a
    row can land in yesterday's file as the writer would have put it. *)
 let write_dated_rows config keeper_name rows =
-  let base_dir =
-    Dated_jsonl.base_dir (Keeper_types_support.keeper_metrics_store config keeper_name)
-  in
+  let location = Keeper_types_support.keeper_store_location config keeper_name Metrics in
+  let base_dir = Dated_jsonl.Store.dir location in
   List.iter
     (fun (ts, fields) ->
-      let dated = Jsonl_writer.dated_path ~base_dir ~ts in
+      let dated = Dated_jsonl.Store.dated_path location ~ts in
       let month_dir = Filename.concat base_dir dated.month_dir in
       let rec mkdir_p dir =
         if not (Sys.file_exists dir) then (
@@ -599,11 +598,11 @@ let test_an_unreadable_store_is_a_failure () =
            reads first and is fine; today's file fails after it. *)
         let yesterday = today_starts -. 1.0 in
         write_dated_rows config "broken" [ (yesterday, turn_json ~ts:yesterday ~tokens:10) ];
-        let base_dir =
-          Dated_jsonl.base_dir (Keeper_types_support.keeper_metrics_store config "broken")
+        let location =
+          Keeper_types_support.keeper_store_location config "broken" Metrics
         in
         (* Today's file is a directory: a path the store cannot read. *)
-        let dated = Jsonl_writer.dated_path ~base_dir ~ts:now in
+        let dated = Dated_jsonl.Store.dated_path location ~ts:now in
         if not (Sys.file_exists (Filename.dirname dated.path)) then
           Unix.mkdir (Filename.dirname dated.path) 0o755;
         Unix.mkdir dated.path 0o755)

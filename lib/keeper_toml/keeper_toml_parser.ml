@@ -85,7 +85,7 @@ let rec flatten_table path fields =
       let path = path @ [ key ] in
       match value with
       | Otoml.TomlTable nested -> flatten_table path nested
-      | value -> [ string_of_path path, toml_value_of_otoml value ])
+      | (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) as value -> [ string_of_path path, toml_value_of_otoml value ])
     fields
 ;;
 
@@ -102,5 +102,8 @@ let parse_toml content =
   match Otoml.Parser.from_string_result content with
   | Error message -> Error message
   | Ok (Otoml.TomlTable fields) -> Ok (flatten_table [] fields)
-  | Ok _ -> Error "otoml returned a non-table document root"
+  | Ok (Otoml.TomlString _) | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+  | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
+  | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+  | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> Error "otoml returned a non-table document root"
 ;;

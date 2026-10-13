@@ -318,34 +318,44 @@ let effective_disable_parallel_tool_use
   caller_disabled || (tools_present && not supports_parallel_tool_calls)
 ;;
 
-let anthropic_thinking_control_from_sources ~catalog ~manifest model_id =
+(* The lookups below take a parsed [Model_id.t]. Each public entry parses the
+   caller's string once here and answers [None] for a malformed id, as every
+   lookup did when each of them parsed (and discarded) the id itself. *)
+let with_model_id model_id f =
   match Model_identifiers.Model_id.of_string model_id with
+  | Ok model_id -> f model_id
   | Error _ -> None
-  | Ok _ ->
-    let manifest_value () =
-      match manifest with
-      | None -> None
-      | Some manifest ->
-        Option.bind (Capability_manifest.lookup manifest model_id) (fun entry ->
-          Option.map
-            anthropic_thinking_control_of_vocab_value
-            entry.anthropic_thinking_control)
-    in
-    (match catalog with
-     | None -> manifest_value ()
-     | Some catalog ->
-       (match Model_catalog.lookup_result catalog model_id with
-        | Ok entry ->
-          Option.map
-            anthropic_thinking_control_of_vocab_value
-            entry.anthropic_thinking_control
-        | Error Model_catalog.No_such_row -> manifest_value ()
-        | Error (Model_catalog.Malformed_model_id _) -> None))
+;;
+
+let anthropic_thinking_control_from_sources ~catalog ~manifest model_id =
+  let manifest_value () =
+    match manifest with
+    | None -> None
+    | Some manifest ->
+      (match
+         Capability_manifest.lookup manifest model_id
+       with
+       | Some entry ->
+         Option.map
+           anthropic_thinking_control_of_vocab_value
+           entry.anthropic_thinking_control
+       | None -> None)
+  in
+  match catalog with
+  | None -> manifest_value ()
+  | Some catalog ->
+    (match Model_catalog.lookup catalog model_id with
+     | Some entry ->
+       Option.map
+         anthropic_thinking_control_of_vocab_value
+         entry.anthropic_thinking_control
+     | None -> manifest_value ())
 ;;
 
 let anthropic_thinking_control_for_model_id model_id =
-  anthropic_thinking_control_from_sources
-    ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()) model_id
+  with_model_id model_id
+    (anthropic_thinking_control_from_sources
+       ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()))
 ;;
 
 (* [anthropic_thinking_control_for_model_id] reads only bare rows: the bare
@@ -361,25 +371,23 @@ let anthropic_thinking_control_for_model_id model_id =
 let anthropic_thinking_control_for_provider_from_catalog
       ~catalog
       ~(provider_label : string)
-      ~(model_id : string)
+      ~(model_id : Model_identifiers.Model_id.t)
   =
   match catalog with
   | None -> None
   | Some catalog ->
-    (match
-       Model_catalog.lookup_for_provider_result
-         catalog ~provider_name:provider_label ~model_id
-     with
-     | Ok entry ->
+    (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id with
+     | Some entry ->
        Option.map
          anthropic_thinking_control_of_vocab_value
          entry.anthropic_thinking_control
-     | Error (Model_catalog.Malformed_model_id _ | Model_catalog.No_such_row) -> None)
+     | None -> None)
 ;;
 
 let anthropic_thinking_control_for_provider_model_id ~provider_label ~model_id =
-  anthropic_thinking_control_for_provider_from_catalog
-    ~catalog:(Model_catalog.global ()) ~provider_label ~model_id
+  with_model_id model_id (fun model_id ->
+    anthropic_thinking_control_for_provider_from_catalog
+      ~catalog:(Model_catalog.global ()) ~provider_label ~model_id)
 ;;
 
 let anthropic_capabilities =
@@ -1335,7 +1343,7 @@ let%test "apply_manifest_entry applies assistant_tool_content_format" =
   | Ok [ entry ] ->
     (apply_manifest_entry entry).assistant_tool_content_format
     = Assistant_tool_content_empty_string
-  | _ -> false
+  | Ok ([] | _ :: _ :: _) | Error _ -> false
 ;;
 
 let%test "apply_manifest_entry without reasoning_replay keeps base default" =
@@ -1447,29 +1455,28 @@ let apply_catalog_entry ~catalog ~wire (entry : Model_catalog.model_entry) : cap
 let for_model_id_from_catalog catalog model_id =
   match catalog with
   | Some catalog ->
-    (match Model_catalog.lookup_result catalog model_id with
-     | Ok entry -> Some (apply_catalog_entry ~catalog ~wire:None entry)
-     | Error (Model_catalog.Malformed_model_id _ | Model_catalog.No_such_row) -> None)
+    (match Model_catalog.lookup catalog model_id with
+     | Some entry -> Some (apply_catalog_entry ~catalog ~wire:None entry)
+     | None -> None)
   | None -> None
 ;;
 
-let for_model_id_catalog model_id = for_model_id_from_catalog (Model_catalog.global ()) model_id
+let for_model_id_catalog model_id =
+  with_model_id model_id (for_model_id_from_catalog (Model_catalog.global ()))
 ;;
 
 (** Look up capabilities for [model_id] against an explicit manifest,
     falling back to the catalog lookup ({!for_model_id_catalog}) when no
     manifest entry matches. *)
 let for_model_id_with_manifest_from_catalog ~catalog manifest model_id =
-  match Model_identifiers.Model_id.of_string model_id with
-  | Error _ -> None
-  | Ok _ ->
-    (match Capability_manifest.lookup manifest model_id with
-     | Some entry -> Some (apply_manifest_entry entry)
-     | None -> for_model_id_from_catalog catalog model_id)
+  match Capability_manifest.lookup manifest model_id with
+  | Some entry -> Some (apply_manifest_entry entry)
+  | None -> for_model_id_from_catalog catalog model_id
 ;;
 
 let for_model_id_with_manifest manifest model_id =
-  for_model_id_with_manifest_from_catalog ~catalog:(Model_catalog.global ()) manifest model_id
+  with_model_id model_id
+    (for_model_id_with_manifest_from_catalog ~catalog:(Model_catalog.global ()) manifest)
 ;;
 
 (** Look up capabilities for [model_id].
@@ -1478,41 +1485,40 @@ let for_model_id_with_manifest manifest model_id =
     manifest. Returns [None] when neither source has a matching entry;
     there is no built-in fallback table. *)
 let for_model_id_from_sources ~catalog ~manifest model_id =
-  match Model_identifiers.Model_id.of_string model_id with
-  | Error _ -> None
-  | Ok _ ->
-    (match catalog with
-     | Some catalog ->
-       (match Model_catalog.lookup_result catalog model_id with
-        | Ok entry -> Some (apply_catalog_entry ~catalog ~wire:None entry)
-        | Error Model_catalog.No_such_row ->
-          (match manifest with
-           | Some manifest -> for_model_id_with_manifest_from_catalog ~catalog:(Some catalog) manifest model_id
-           | None -> for_model_id_from_catalog (Some catalog) model_id)
-        | Error (Model_catalog.Malformed_model_id _) -> None)
+  match catalog with
+  | Some catalog ->
+    (match Model_catalog.lookup catalog model_id with
+     | Some entry -> Some (apply_catalog_entry ~catalog ~wire:None entry)
      | None ->
        (match manifest with
-        | Some manifest -> for_model_id_with_manifest_from_catalog ~catalog:None manifest model_id
-        | None -> None))
+        | Some manifest -> for_model_id_with_manifest_from_catalog ~catalog:(Some catalog) manifest model_id
+        | None -> for_model_id_from_catalog (Some catalog) model_id))
+  | None ->
+    (match manifest with
+     | Some manifest -> for_model_id_with_manifest_from_catalog ~catalog:None manifest model_id
+     | None -> None)
 ;;
 
 let for_model_id model_id =
-  for_model_id_from_sources
-    ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()) model_id
+  with_model_id model_id
+    (for_model_id_from_sources
+       ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()))
 ;;
 
 (* The provider-scoped row, and nothing else. Split from the provider-wide
    base below so a caller can put the model's own row between them. *)
-let for_provider_model_id_row ~catalog ~wire ~(provider_label : string) ~(model_id : string) =
+let for_provider_model_id_row
+      ~catalog
+      ~wire
+      ~(provider_label : string)
+      ~(model_id : Model_identifiers.Model_id.t)
+  =
   match catalog with
   | None -> None
   | Some catalog ->
-    (match
-       Model_catalog.lookup_for_provider_result
-         catalog ~provider_name:provider_label ~model_id
-     with
-     | Ok entry -> Some (apply_catalog_entry ~catalog ~wire entry)
-     | Error (Model_catalog.Malformed_model_id _ | Model_catalog.No_such_row) -> None)
+    (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id with
+     | Some entry -> Some (apply_catalog_entry ~catalog ~wire entry)
+     | None -> None)
 ;;
 
 (* The provider's own [capabilities_base] -- what every model of that provider
@@ -1549,11 +1555,8 @@ let for_provider_model_id_from_sources
       ~wire
       ~(allow_bare_fallback : bool)
       ~(provider_label : string)
-      ~(model_id : string)
+      ~(model_id : Model_identifiers.Model_id.t)
   =
-  match Model_identifiers.Model_id.of_string model_id with
-  | Error _ -> None
-  | Ok _ ->
     (match for_provider_model_id_row ~catalog ~wire ~provider_label ~model_id with
      | Some _ as caps -> caps
      | None ->
@@ -1590,9 +1593,10 @@ let for_provider_model_id_from_sources
 ;;
 
 let for_provider_model_id ~wire ~allow_bare_fallback ~provider_label ~model_id =
-  for_provider_model_id_from_sources
-    ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ())
-    ~wire ~allow_bare_fallback ~provider_label ~model_id
+  with_model_id model_id (fun model_id ->
+    for_provider_model_id_from_sources
+      ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ())
+      ~wire ~allow_bare_fallback ~provider_label ~model_id)
 ;;
 
 type request_policy =
@@ -1602,6 +1606,9 @@ type request_policy =
 
 let resolve_request_policy ~wire ~allow_bare_fallback ~provider_label
       ~anthropic_provider_label ~model_id =
+  match Model_identifiers.Model_id.of_string model_id with
+  | Error _ -> { model_capabilities = None; anthropic_thinking_control = None }
+  | Ok model_id ->
   let catalog = Model_catalog.global () in
   let manifest = Capability_manifest.global () in
   let model_capabilities = for_provider_model_id_from_sources
@@ -1634,15 +1641,13 @@ let thinking_control_token_for_provider_model_id
       ~(provider_label : string)
       ~(model_id : string)
   =
-  match Model_catalog.global () with
-  | None -> None
-  | Some catalog ->
-    (match
-       Model_catalog.lookup_for_provider_result
-         catalog ~provider_name:provider_label ~model_id
-     with
-     | Ok entry -> token_of_declared_format entry.Model_catalog.thinking_control_format
-     | Error (Model_catalog.Malformed_model_id _ | Model_catalog.No_such_row) -> None)
+  with_model_id model_id (fun model_id ->
+    match Model_catalog.global () with
+    | None -> None
+    | Some catalog ->
+      (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id with
+       | Some entry -> token_of_declared_format entry.Model_catalog.thinking_control_format
+       | None -> None))
 ;;
 
 [@@@coverage off]
@@ -1780,7 +1785,7 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
 ;;
 
 let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
-  { id_prefix
+  { id_prefix = Model_identifiers.Id_prefix.of_string_exn id_prefix
   ; base_label = None
   ; max_context_tokens = None
   ; max_output_tokens = None
@@ -2321,7 +2326,7 @@ let%test "capabilities_for_provider_label: nvidia" =
 (* ── Prefix ordering invariant ──────────────────── *)
 
 (* Each case is a model_id and the expected capability fingerprint.
-   Prefix dispatch now lives in [Model_catalog.lookup_result], which must pick the
+   Prefix dispatch now lives in [Model_catalog.lookup], which must pick the
    LONGEST matching [id_prefix]. If that ordering regressed, these specific
    models would be matched by a more general prefix (e.g. [glm-4] instead
    of [glm-4.7-flashx]) and return wrong capabilities. The test catches

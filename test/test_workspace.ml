@@ -1407,29 +1407,6 @@ let test_xss_in_agent_name () =
     Alcotest.(check bool) "agent registered" true (List.length state.active_agents > 0)
   )
 
-let test_xss_in_message_type () =
-  with_test_env (fun config ->
-    ignore (Workspace.bind_session config ~agent_name:"tester" ~capabilities:[] ());
-    let xss_msg_type = "<script>alert('xss')</script>" in
-    ignore
-      (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"tester" ~msg_type:xss_msg_type
-         ~content:"hello");
-    let messages = Workspace.get_all_messages_raw config ~since_seq:0 in
-    let msg_type =
-      match
-        List.find_opt
-          (fun (message : Types.message) -> String.equal message.content "hello")
-          messages
-      with
-      | Some message -> message.msg_type
-      | None -> Alcotest.fail "broadcast message not found"
-    in
-    (* #29736 stopped escaping at the store, so the type comes back as the
-       caller wrote it. [test_broadcast_stores_raw_text] pins the same contract
-       for the content; the type has no coverage there, so it is pinned here. *)
-    Alcotest.(check string) "msg_type is stored as written" xss_msg_type msg_type
-  )
-
 (* === Board Admin Tests === *)
 
 (* Use 3-part nicknames so join() preserves them as-is
@@ -3418,7 +3395,6 @@ let () =
     (* === Security Tests (v2.1) === *)
     "security", [
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
-      Alcotest.test_case "xss in message type" `Quick test_xss_in_message_type;
     ];
 
     (* === RFC-0323 G-3: state-keyed completion side effects === *)

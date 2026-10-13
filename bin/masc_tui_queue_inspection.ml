@@ -218,7 +218,9 @@ let operation_lines json =
 let edited_input ~message operation =
   let* input = field "input" operation in
   let* input = Masc.Keeper_chat_operation_payload.input_of_json input in
-  let media = List.filter (function Masc.Keeper_multimodal_input.User_text _ -> false | _ -> true) input.user_blocks in
+  let media = List.filter (function
+    | Masc.Keeper_multimodal_input.User_text _ -> false
+    | Masc.Keeper_multimodal_input.User_image _ | User_document _ | User_audio _ -> true) input.user_blocks in
   Ok (Masc.Keeper_chat_operation_payload.input_to_json ~message
     ~user_blocks:(Masc.Keeper_multimodal_input.User_text message :: media)
     ~turn_instructions:input.turn_instructions ~surface_context:input.surface_context ~attachments:input.attachments)

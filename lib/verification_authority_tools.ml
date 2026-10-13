@@ -484,7 +484,7 @@ let media_result t tool ~name ~args ~start_time =
               Keeper_tool_filesystem_runtime.read_owned_bytes
                 ~ownership_root:t.ownership_root ~path ?cwd
                 ~max_bytes:(max_media_source_bytes + 1) ()
-            | result -> result)
+            | (Ok _ | Error _) as result -> result)
        in
        (match bytes with
         | Error detail when Verification_media_inspection.is_pdf path "" || Verification_media_inspection.is_presentation path || Verification_media_inspection.is_mp4 path "" ->

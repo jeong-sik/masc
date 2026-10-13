@@ -640,7 +640,7 @@ let play_mutation_outcome = function
     (match Masc.Tui_decode.play_invite_refusal ~status_code ~body with
      | Some said -> Post_refused said
      | None -> mutation_outcome answer)
-  | answer -> mutation_outcome answer
+  | (Ok _ | Error _) as answer -> mutation_outcome answer
 
 let issue_play_invite ~expected_base_path ~expected_masc_root ~host ~port ~name ~hours =
   http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/play/invites"
@@ -669,7 +669,7 @@ let revoke_play_invite ~expected_base_path ~expected_masc_root ~host ~port ~name
       (match Masc.Tui_decode.play_revoke_release_failure ~status_code ~body with
        | Some detail -> Revoke_release_failed detail
        | None -> Revoke_other (Post_unanswered (Masc.Tui_decode.http_status_error ~status_code ~body)))
-  | answer -> Revoke_other (play_mutation_outcome answer)
+  | (Ok _ | Error _) as answer -> Revoke_other (play_mutation_outcome answer)
 
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
@@ -1667,7 +1667,12 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
                              Some
                                (Masc_tui_context_inspector.Reasoning_lines
                                   lines)
-                         | _ -> None)
+                         | Masc_tui_keeper_chat_history.Addressed_to_keeper _
+                         | Masc_tui_keeper_chat_history.Delivery_failed _
+                         | Masc_tui_keeper_chat_history.Skill_activity _
+                         | Masc_tui_keeper_chat_history.Gate_activity _
+                         | Masc_tui_keeper_chat_history.Memory_activity _
+                         | Masc_tui_keeper_chat_history.Fusion_conclusion _ -> None)
                     page.Masc_tui_keeper_chat_history.decoded.rows
                 in
                 Ok

@@ -30,15 +30,19 @@ let storage_space_exhaustion_total = Atomic.make 0
 let last_storage_space_exhaustion_ts = Atomic.make None
 
 let note_exception ?(site = "unknown") exn =
-  match exn with
-  | Unix.Unix_error (Unix.ENOSPC, _, _) ->
+  match System_error_class.errno_of_exn exn with
+  | Some System_error_class.Enospc ->
     Atomic.incr storage_space_exhaustion_total;
     Atomic.set last_storage_space_exhaustion_ts (Some (Time_compat.now ()));
     Log.Keeper.error
       "disk_observation: typed storage-space exhaustion site=%s exception=%s"
       site
       (Printexc.to_string exn)
-  | _ -> ()
+  | Some
+      System_error_class.(
+        Emfile | Enfile | Eacces | Eperm | Enoent | Econnrefused | Etimedout
+        | Other_errno _)
+  | None -> ()
 ;;
 
 let reset_for_tests () =
@@ -119,7 +123,7 @@ let probe_uncached path =
         With_process.drain_lines
     with
     | lines, Unix.WEXITED 0 -> parse_df_output ~path lines
-    | _lines, status ->
+    | _lines, ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status) ->
       let detail = "df -Pk " ^ With_process.status_to_string status in
       Log.Keeper.warn "disk_observation: probe failed path=%s detail=%s" path detail;
       Probe_error detail

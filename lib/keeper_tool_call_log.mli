@@ -174,9 +174,8 @@ val execution_evidence_of_metadata : Yojson.Safe.t option -> Yojson.Safe.t optio
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
-    store. Call once at startup. [MASC_TOOL_CALL_LOG_RETENTION_DAYS] controls
-    opportunistic retention; default is 30 days, and values <= 0 disable
-    pruning. *)
+    store. Call once at startup. The server's prune pass removes its day files
+    by age. *)
 
 val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
 (** [start_flush_fiber ~sw ~clock] enables bounded asynchronous appends and
@@ -198,6 +197,9 @@ val flush_now : unit -> unit
     focused tests. An uncommitted failure requeues the row and raises. Post-commit failures
     are raised after draining the remaining rows; returning
     normally means every row taken by this drain committed. *)
+
+val store : unit -> Dated_jsonl.t option
+(** [store ()] is the initialized durable store, if any. *)
 
 val store_dir : unit -> string option
 (** [store_dir ()] returns the initialized durable store directory, if any. *)

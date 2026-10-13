@@ -65,7 +65,7 @@ val get_store : unit -> Dated_jsonl.t
 
 module For_testing : sig
   val reset_store : unit -> unit
-  val set_store : base_dir:string -> unit
+  val set_store : base_path:string -> unit
 end
 
 (** {1 Hashing} *)

@@ -13,6 +13,12 @@ type error =
   | Idempotency_conflict of Operation.Operation_id.t
   | Store_unavailable of string
   | Integrity_error of string
+  | Native_call_unsettled
+      (** The operation's native call blocks this change: it is still active
+          without a terminal disposition, or it holds an unknown-effect receipt
+          that cannot complete or resume. The store is intact. An active call
+          is settled by recording its disposition; an unknown-effect receipt
+          allows only a failed or cancelled settlement. *)
 
 type admission =
   | Accepted of Operation.t

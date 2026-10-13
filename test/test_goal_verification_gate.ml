@@ -1750,7 +1750,8 @@ let test_proof_effect_delivery_recovers_audit_and_partial_recipients () =
         check int "audit intent survives failure" 1 (List.length pending.pending_events);
         let notice = match pending.pending_notifications with [notice] -> notice | _ -> fail "expected one notice" in
         (match notice.delivery with
-         | Goal_store.Pending_recipients remaining -> check (list string) "only failed recipient remains" ["beta"] remaining
+         | Goal_store.Pending_recipients remaining ->
+             check (list string) "only failed recipient remains" ["beta"] (remaining :> string list)
          | Awaiting_recipients -> fail "snapshot did not commit");
         check int "healthy recipient is not blocked by failed audit" 1 (List.length (notification_rows config "alpha" notice.notification_id));
         check int "failure window has expected durable beta rows" (if fail_after_append then 1 else 0)

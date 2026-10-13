@@ -335,7 +335,8 @@ let endpoint_base_url (endpoint : Voice_config.endpoint) =
     (match endpoint.base_url with
      | Some value -> Some (normalize_base_url value)
      | None -> Some default_elevenlabs_base_url)
-  | _ -> Option.map normalize_base_url endpoint.base_url
+  | { transport = Openai_compat | Voice_mcp | Macos_say | Espeak_ng | Whisper_cli; _ } ->
+    Option.map normalize_base_url endpoint.base_url
 ;;
 
 (* The address a request to this endpoint is sent to, resolved the way the

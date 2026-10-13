@@ -267,6 +267,10 @@
 
 (env
  (_
+  ; Test assertions match the one case they check and fail on the rest, so
+  ; listing every other constructor would only bury the assertion.
+  (flags
+   (:standard -w -4))
   (env-vars
    ; Ignore shell-level workspace overrides so tests stay isolated in temp dirs.
    ; Prevent inherited shell MASC_BASE_PATH from binding tests to real
@@ -555,6 +559,7 @@
   test_keeper_tool_execute_typed_input
   test_keeper_sandbox_containment
   test_keeper_microvm_teardown_on_shutdown
+  test_keeper_bundle_worktrees
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
@@ -913,6 +918,7 @@
   test_keeper_tool_execute_typed_input
   test_keeper_sandbox_containment
   test_keeper_microvm_teardown_on_shutdown
+  test_keeper_bundle_worktrees
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
@@ -2637,6 +2643,7 @@
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
+(include stanzas/test_dated_jsonl_store.inc)
 (include stanzas/test_play_role_permissions.inc)
 (include stanzas/test_play_screen.inc)
 (include stanzas/test_play_page.inc)
@@ -2806,6 +2813,7 @@
 
 (include stanzas/test_keeper_turn_dispatch_authority.inc)
 (include stanzas/test_keeper_owner.inc)
+(include stanzas/test_keeper_owner_open_native_call.inc)
 (include stanzas/test_keeper_chat_operation_http.inc)
 
 (include stanzas/test_keeper_meta_current_keyset.inc)
@@ -2939,6 +2947,7 @@
 (include stanzas/test_runtime_agent_execution_restart.inc)
 (include stanzas/test_keeper_native_result_retention.inc)
 (include stanzas/test_keeper_native_context_resume.inc)
+(include stanzas/test_keeper_native_reconcile_after_dispatch.inc)
 (include stanzas/test_keeper_ingress_native_restart.inc)
 (include stanzas/test_keeper_native_repetition_recovery.inc)
 
@@ -4466,6 +4475,7 @@
 
 (include stanzas/test_keeper_prompt_capture.inc)
 (include stanzas/test_keeper_provider_input_snapshot.inc)
+(include stanzas/test_keeper_store_locations.inc)
 (include stanzas/test_keeper_projection_change.inc)
 
 (include stanzas/test_keeper_operator_note.inc)
@@ -5977,6 +5987,8 @@
 (include stanzas/test_keeper_memory_select_provider_wire.inc)
 
 (include stanzas/test_keeper_event_genealogy_capture.inc)
+
+(include stanzas/test_keeper_librarian_admission_mode.inc)
 
 (test
  (name test_tui_keeper_call_evidence)

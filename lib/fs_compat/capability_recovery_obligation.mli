@@ -242,11 +242,27 @@ val locator
   -> initial_target:entry_observation
   -> (locator, validation_error) result
 
+(** {!locator} for a caller that already holds parsed components, so the two
+    component errors cannot occur. The allowed-root path and the empty-parent
+    identity are checked as in {!locator}. *)
+val locator_of_leaves
+  :  allowed_root_path:string
+  -> allowed_root:identity
+  -> parent_components:Capability_leaf.t list
+  -> parent:identity
+  -> target_leaf:Capability_leaf.t
+  -> initial_target:entry_observation
+  -> (locator, validation_error) result
+
 val locator_allowed_root_path : locator -> string
 val locator_allowed_root : locator -> identity
-val locator_parent_components : locator -> string list
+
+(** The components as parsed. A reader that needs their spelling converts
+    them where it uses them. *)
+val locator_parent_components : locator -> Capability_leaf.t list
+
 val locator_parent : locator -> identity
-val locator_target_leaf : locator -> string
+val locator_target_leaf : locator -> Capability_leaf.t
 
 val prepared_operation_id : prepared -> operation_id
 val prepared_locator : prepared -> locator

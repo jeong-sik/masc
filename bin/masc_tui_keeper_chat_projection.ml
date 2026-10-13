@@ -1214,7 +1214,16 @@ let decode_data_event ~request state json =
       (* A reconnect can replay several complete checkpoint segments. Only a
          validated checkpoint boundary admits another run for this request. *)
       { initial_decode_state with acceptance = state.acceptance }
-    | _ -> state in
+    | ( (None | Some (Run_finished | Run_error _))
+      , ( None
+        | Some
+            { turn_outcome =
+                ( Visible_reply | Continuation_checkpoint
+                | Terminal_effect_settled | Awaiting_gate_approval
+                | No_visible_reply )
+            ; _
+            } )
+      , _ ) -> state in
   match state.terminal with
   | Some _ -> Error Duplicate_terminal
   | None -> (

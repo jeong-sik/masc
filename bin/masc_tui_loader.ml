@@ -1033,7 +1033,8 @@ let load_runtime_surface ~(host : string) ~(port : int) ~(force : bool) :
              | Ok json -> Masc_tui_runtime_evidence.decode json
              | Error _ -> Error "runtime history unavailable; check server support and operator access" in
            Ok { rsl_resolved; rsl_probe; rsl_evidence })
-  | _ -> Error "runtime surface loader lost a projection read"
+  | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ :: _ :: _ ->
+      Error "runtime surface loader lost a projection read"
 
 (** Load the tool calls keepers are holding, for the Approvals surface. *)
 let load_keeper_tool_approvals ~(host : string) ~(port : int) :

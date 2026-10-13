@@ -32,7 +32,10 @@ let equal left right =
   | Operator_paused { operator_actor = Keeper_down },
     Operator_paused { operator_actor = Keeper_down } ->
     true
-  | Operator_paused _, Operator_paused _ -> false
+  | Operator_paused { operator_actor = Grpc_directive },
+    Operator_paused { operator_actor = Keeper_down }
+  | Operator_paused { operator_actor = Keeper_down },
+    Operator_paused { operator_actor = Grpc_directive } -> false
 ;;
 
 let hash = function

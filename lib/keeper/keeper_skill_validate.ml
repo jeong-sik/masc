@@ -77,7 +77,17 @@ let handle ~descriptors ~config ~args =
            ~code:(Keeper_skill_catalog.error_code error)
            ~message:(Keeper_skill_catalog.error_to_string error)
            (identity @ [ "bytes", `Int bytes; "max_bytes", `Int max_bytes ])
-       | Error (Invalid_document error) ->
+       | Error
+           (Invalid_document
+              (( Keeper_skill_catalog.Definition_rejected _
+               | Keeper_skill_catalog.Unterminated_composition_block _
+               | Keeper_skill_catalog.Multiple_composition_blocks _
+               | Keeper_skill_catalog.Composition_rejected _
+               | Keeper_skill_catalog.Not_exactly_one_composition _
+               | Keeper_skill_catalog.Composition_name_mismatch _
+               | Keeper_skill_catalog.Composition_info_near_miss _
+               | Keeper_skill_catalog.Duplicate_skill _
+               | Keeper_skill_catalog.Body_blank _ ) as error)) ->
          failure ~class_:Tool_result.Policy_rejection
            ~code:(Keeper_skill_catalog.error_code error)
            ~message:(Keeper_skill_catalog.error_to_string error) identity

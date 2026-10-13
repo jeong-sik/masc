@@ -530,7 +530,8 @@ let preserves_stated (record : record) =
     (match position, history_at_start with
      | Empty_atom_history, (Fresh_history | Continued_history | Continued_history_from _)
      | No_atom_history, Fresh_history -> true
-     | _ -> false)
+     | (No_atom_history, (Continued_history | Continued_history_from _))
+     | ((Stale_noop | Atom_history _), _) -> false)
 ;;
 
 (* [history_stated] sets its state outright at a line that cannot be decoded,

@@ -11,36 +11,48 @@ let with_dir f =
   let dir = Filename.temp_dir "keeper-metrics-storage-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () -> f dir)
 
-let test_disabled_keeps_all () = with_dir @@ fun dir ->
-  let store = Storage.create ~base_dir:dir ~max_bytes:0 in
+(* One keeper's metrics store under a temporary cluster root. *)
+let location ?(keeper_name = "k") root =
+  Dated_jsonl.Store.keeper
+    (Dated_jsonl.Store.cluster_root root)
+    ~keeper:keeper_name
+    Dated_jsonl.Store.Keeper.Metrics
+
+let store_dir ?keeper_name root = Dated_jsonl.Store.dir (location ?keeper_name root)
+
+let create ?keeper_name root ~max_bytes =
+  Storage.create ~location:(location ?keeper_name root) ~max_bytes
+
+let test_disabled_keeps_all () = with_dir @@ fun root ->
+  let store = create root ~max_bytes:0 in
   for i = 1 to 20 do Storage.append store (row i) done;
   check (list int) "zero retains every row" (List.init 20 ((+) 1)) (values store)
 
-let test_rotation_keeps_accepting_rows () = with_dir @@ fun dir ->
-  let store = Storage.create ~base_dir:dir ~max_bytes:(2 * row_bytes) in
+let test_rotation_keeps_accepting_rows () = with_dir @@ fun root ->
+  let store = create root ~max_bytes:(2 * row_bytes) in
   List.iter (fun i -> Storage.append store (row i)) [1; 2; 3; 4];
   check (list int) "full completed file is pruned and new rows remain" [3; 4] (values store);
   Storage.append store (row 5);
   check (list int) "next rotation keeps a preceding row alongside the new one" [4; 5] (values store)
 
-let test_prunes_old_days () = with_dir @@ fun dir ->
-  let old_path = Filename.concat dir "2000-01/01.jsonl" in
+let test_prunes_old_days () = with_dir @@ fun root ->
+  let old_path = Filename.concat (store_dir root) "2000-01/01.jsonl" in
   Fs_compat.mkdir_p (Filename.dirname old_path);
   Fs_compat.save_file old_path (Yojson.Safe.to_string (row 1) ^ "\n");
-  let store = Storage.create ~base_dir:dir ~max_bytes:row_bytes in
+  let store = create root ~max_bytes:row_bytes in
   Storage.append store (row 2);
   check bool "older completed day is removed" false (Sys.file_exists old_path);
   check (list int) "current metric survives" [2] (values store)
 
-let test_reopen_lower_target () = with_dir @@ fun dir ->
-  let prior = Storage.create ~base_dir:dir ~max_bytes:0 in
+let test_reopen_lower_target () = with_dir @@ fun root ->
+  let prior = create root ~max_bytes:0 in
   List.iter (fun i -> Storage.append prior (row i)) [1; 2; 3];
-  let reopened = Storage.create ~base_dir:dir ~max_bytes:row_bytes in
+  let reopened = create root ~max_bytes:row_bytes in
   Storage.append reopened (row 4);
   check (list int) "new target takes effect when store reopens" [4] (values reopened)
 
-let test_oversized_row_is_preserved () = with_dir @@ fun dir ->
-  let store = Storage.create ~base_dir:dir ~max_bytes:row_bytes in
+let test_oversized_row_is_preserved () = with_dir @@ fun root ->
+  let store = create root ~max_bytes:row_bytes in
   let large = `Assoc ["i", `Int 1; "detail", `String (String.make 100 'x')] in
   Storage.append store large;
   check string "one oversized metric is preserved whole"
@@ -49,10 +61,12 @@ let test_oversized_row_is_preserved () = with_dir @@ fun dir ->
   Storage.append store (row 2);
   check (list int) "next row rotates the oversized file" [2] (values store)
 
-let test_stores_and_auxiliary_logs_are_independent () = with_dir @@ fun dir ->
-  let a = Storage.create ~base_dir:(Filename.concat dir "a/metrics") ~max_bytes:row_bytes in
-  let b = Storage.create ~base_dir:(Filename.concat dir "b/metrics") ~max_bytes:0 in
-  let auxiliary = Filename.concat dir "a/decisions.jsonl" in
+let test_stores_and_auxiliary_logs_are_independent () = with_dir @@ fun root ->
+  let a = create ~keeper_name:"a" root ~max_bytes:row_bytes in
+  let b = create ~keeper_name:"b" root ~max_bytes:0 in
+  let auxiliary =
+    Filename.concat (Filename.dirname (store_dir ~keeper_name:"a" root)) "decisions.jsonl"
+  in
   Fs_compat.mkdir_p (Filename.dirname auxiliary);
   Fs_compat.save_file auxiliary "keep auxiliary log";
   List.iter (fun i -> Storage.append a (row i); Storage.append b (row i)) [1; 2; 3];
@@ -61,8 +75,8 @@ let test_stores_and_auxiliary_logs_are_independent () = with_dir @@ fun dir ->
   check string "auxiliary log is outside this policy" "keep auxiliary log"
     (Fs_compat.load_file auxiliary)
 
-let test_guard_refusal_is_observable () = with_dir @@ fun dir ->
-  let store = Storage.create ~base_dir:dir ~max_bytes:row_bytes in
+let test_guard_refusal_is_observable () = with_dir @@ fun root ->
+  let store = create root ~max_bytes:row_bytes in
   Dated_jsonl.set_append_guard (fun _ -> ());
   Fun.protect ~finally:(fun () -> Dated_jsonl.set_append_guard (fun f -> f ())) (fun () ->
     match Storage.append store (row 1) with
@@ -71,10 +85,11 @@ let test_guard_refusal_is_observable () = with_dir @@ fun dir ->
   Storage.append store (row 2);
   check (list int) "refusal does not poison subsequent writes" [2] (values store)
 
-let test_io_failure_can_recover () = with_dir @@ fun dir ->
-  let base_dir = Filename.concat dir "collision" in
+let test_io_failure_can_recover () = with_dir @@ fun root ->
+  let base_dir = store_dir root in
+  Fs_compat.mkdir_p (Filename.dirname base_dir);
   Fs_compat.save_file base_dir "not a directory";
-  let store = Storage.create ~base_dir ~max_bytes:row_bytes in
+  let store = create root ~max_bytes:row_bytes in
   (match Storage.append store (row 1) with
    | () -> fail "invalid store path was reported as successful"
    | exception (Sys_error _ | Unix.Unix_error _ | Eio.Io _) -> ());
@@ -82,15 +97,15 @@ let test_io_failure_can_recover () = with_dir @@ fun dir ->
   Storage.append store (row 2);
   check (list int) "I/O refusal leaves store reusable" [2] (values store)
 
-let test_continues_across_sequence_width_and_reopen () = with_dir @@ fun dir ->
+let test_continues_across_sequence_width_and_reopen () = with_dir @@ fun root ->
   (* Fixed-width values keep exactly two rows in the configured byte target. *)
   let row i = `Assoc ["i", `String (Printf.sprintf "%04d" i)] in
   let bytes = String.length (Yojson.Safe.to_string (row 1)) + 1 in
   let write storage first last =
     for i = first to last do Storage.append storage (row i) done in
-  let storage = Storage.create ~base_dir:dir ~max_bytes:(bytes * 2) in
+  let storage = create root ~max_bytes:(bytes * 2) in
   write storage 1 1002;
-  let reopened = Storage.create ~base_dir:dir ~max_bytes:(bytes * 2) in
+  let reopened = create root ~max_bytes:(bytes * 2) in
   write reopened 1003 1010;
   let store = Storage.read_store reopened in
   let values rows = List.map (fun json -> Yojson.Safe.Util.(json |> member "i" |> to_string)) rows in
@@ -103,18 +118,18 @@ let test_continues_across_sequence_width_and_reopen () = with_dir @@ fun dir ->
     | Error err -> fail (Dated_jsonl.read_error_to_string err) in
   check (list string) "strict recent reader sees the same newest values" expected (values strict)
 
-let test_segment_order_across_digit_boundary () = with_dir @@ fun dir ->
+let test_segment_order_across_digit_boundary () = with_dir @@ fun root ->
   let tm = Unix.gmtime (Unix.gettimeofday ()) in
   let month = Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) in
   let day = Printf.sprintf "%02d" tm.Unix.tm_mday in
-  let month_dir = Filename.concat dir month in
+  let month_dir = Filename.concat (store_dir root) month in
   Fs_compat.mkdir_p month_dir;
   List.iter (fun sequence ->
     Fs_compat.save_file (Filename.concat month_dir (Printf.sprintf "%s.%03d.jsonl" day sequence))
       (Yojson.Safe.to_string (row sequence) ^ "\n")) [998; 999; 1000];
   Fs_compat.save_file (Filename.concat month_dir (day ^ ".jsonl"))
     (Yojson.Safe.to_string (row 1001) ^ "\n");
-  let store = Storage.create ~base_dir:dir ~max_bytes:0 |> Storage.read_store in
+  let store = create root ~max_bytes:0 |> Storage.read_store in
   let expected = [998; 999; 1000; 1001] in
   let values rows = List.map (fun json -> Yojson.Safe.Util.(json |> member "i" |> to_int)) rows in
   let date = month ^ "-" ^ day in
@@ -128,7 +143,7 @@ let test_segment_order_across_digit_boundary () = with_dir @@ fun dir ->
     (List.map (fun seq -> Printf.sprintf "%s.%03d.jsonl" day seq) [998;999;1000] @ [day ^ ".jsonl"])
     (List.map Filename.basename paths);
   let row_bytes = String.length (Yojson.Safe.to_string (row 1001)) + 1 in
-  let bounded = Storage.create ~base_dir:dir ~max_bytes:(row_bytes * 2) in
+  let bounded = create root ~max_bytes:(row_bytes * 2) in
   Storage.append bounded (row 1002);
   check (list int) "prune removes 998/999/1000 before 1001" [1001;1002]
     (values (Dated_jsonl.read_recent (Storage.read_store bounded) 10))

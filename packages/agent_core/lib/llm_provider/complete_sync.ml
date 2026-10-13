@@ -50,7 +50,9 @@ let%test "run_with_body_deadline does not relabel a nested timeout exception" =
   (* A refused budget is the resolver's failure, not a relabeling one: say so
      rather than report it under this test's name with no reason. *)
   | Error (Http_client.AcceptRejected { reason }) -> failwith reason
-  | Error _ -> failwith "run_with_body_deadline: the test deadline was refused"
+  | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.ProviderTerminal _)
+  | Error (Http_client.ProviderFailure _) -> failwith "run_with_body_deadline: the test deadline was refused"
 ;;
 
 let provider_parse_failure ?parser message =
@@ -229,7 +231,27 @@ let%test "sync: an error finish without a provider condition is provider-reporte
              Http_client.Provider_reported_error { error_type = Some "provider_unavailable" }
          ; message = "Provider disconnected"
          }) -> true
-   | Ok _ | Error _ -> false)
+   | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+   | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+   | Error (Http_client.ProviderTerminal _) | Error
+        (Http_client.ProviderFailure
+           { kind =
+               ( Http_client.Capacity_exhausted _
+               | Http_client.Hard_quota _
+               | Http_client.Capability_mismatch _
+               | Http_client.Cli_policy_invalid _
+               | Http_client.Cli_startup_failed _
+               | Http_client.Provider_parse_error _
+               | Http_client.Provider_wire_error _
+               | Http_client.Provider_reported_error _
+               | Http_client.Provider_interrupted
+               | Http_client.Response_body_too_large _
+               | Http_client.Empty_completion _
+               | Http_client.Context_overflow _
+               | Http_client.Repeating_generation _
+               | Http_client.Unknown_provider_failure _ )
+           ; _
+           }) -> false)
   && (match
         parse
           {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"},"error":{"code":400,"message":"bad"}}]}|}
@@ -239,7 +261,27 @@ let%test "sync: an error finish without a provider condition is provider-reporte
             { kind = Http_client.Provider_reported_error { error_type = None }
             ; message = "bad"
             }) -> true
-      | Ok _ | Error _ -> false)
+      | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+      | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+      | Error (Http_client.ProviderTerminal _) | Error
+        (Http_client.ProviderFailure
+           { kind =
+               ( Http_client.Capacity_exhausted _
+               | Http_client.Hard_quota _
+               | Http_client.Capability_mismatch _
+               | Http_client.Cli_policy_invalid _
+               | Http_client.Cli_startup_failed _
+               | Http_client.Provider_parse_error _
+               | Http_client.Provider_wire_error _
+               | Http_client.Provider_reported_error _
+               | Http_client.Provider_interrupted
+               | Http_client.Response_body_too_large _
+               | Http_client.Empty_completion _
+               | Http_client.Context_overflow _
+               | Http_client.Repeating_generation _
+               | Http_client.Unknown_provider_failure _ )
+           ; _
+           }) -> false)
   &&
   match parse {|{"error":{"message":"Invalid API key","type":"invalid_request_error"}}|} with
   | Error
@@ -248,7 +290,27 @@ let%test "sync: an error finish without a provider condition is provider-reporte
             Http_client.Provider_reported_error { error_type = Some "invalid_request_error" }
         ; message = "Invalid API key"
         }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) | Error
+        (Http_client.ProviderFailure
+           { kind =
+               ( Http_client.Capacity_exhausted _
+               | Http_client.Hard_quota _
+               | Http_client.Capability_mismatch _
+               | Http_client.Cli_policy_invalid _
+               | Http_client.Cli_startup_failed _
+               | Http_client.Provider_parse_error _
+               | Http_client.Provider_wire_error _
+               | Http_client.Provider_reported_error _
+               | Http_client.Provider_interrupted
+               | Http_client.Response_body_too_large _
+               | Http_client.Empty_completion _
+               | Http_client.Context_overflow _
+               | Http_client.Repeating_generation _
+               | Http_client.Unknown_provider_failure _ )
+           ; _
+           }) -> false
 ;;
 
 let%test "sync: a top-level 502 is that refusal with the error object as its body" =
@@ -264,7 +326,14 @@ let%test "sync: a top-level 502 is that refusal with the error object as its bod
       (Http_client.HttpError
         { code = 502; body = Http_client.Received body; retry_after_header = None }) ->
     String.equal body {|{"error":{"code":502,"message":"Provider disconnected"}}|}
-  | Ok _ | Error _ -> false
+  | Ok _ | Error
+    (Http_client.HttpError
+       { code = _
+       ; body = (Http_client.Received _ | Http_client.Not_received_in_window)
+       ; retry_after_header = _
+       }) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 let%test "sync: an unreadable response is a provider parse failure" =
@@ -284,7 +353,27 @@ let%test "sync: an unreadable response is a provider parse failure" =
     String.equal
       parser
       (Provider_config.string_of_provider_kind Provider_config.OpenAI_compat)
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) | Error
+        (Http_client.ProviderFailure
+           { kind =
+               ( Http_client.Capacity_exhausted _
+               | Http_client.Hard_quota _
+               | Http_client.Capability_mismatch _
+               | Http_client.Cli_policy_invalid _
+               | Http_client.Cli_startup_failed _
+               | Http_client.Provider_parse_error _
+               | Http_client.Provider_wire_error _
+               | Http_client.Provider_reported_error _
+               | Http_client.Provider_interrupted
+               | Http_client.Response_body_too_large _
+               | Http_client.Empty_completion _
+               | Http_client.Context_overflow _
+               | Http_client.Repeating_generation _
+               | Http_client.Unknown_provider_failure _ )
+           ; _
+           }) -> false
 ;;
 
 (* Arrears, an exhausted package or an expired plan arrive as the typed
@@ -306,7 +395,27 @@ let%test "glm quota exhaustion is a typed hard quota" =
       | Error
           (Http_client.ProviderFailure
              { kind = Http_client.Hard_quota { retry_after = None }; _ }) -> true
-      | Error _ | Ok _ -> false)
+      | Error (Http_client.HttpError _) | Ok _ | Error (Http_client.NetworkError _)
+      | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+      | Error (Http_client.ProviderTerminal _) | Error
+        (Http_client.ProviderFailure
+           { kind =
+               ( Http_client.Capacity_exhausted _
+               | Http_client.Hard_quota _
+               | Http_client.Capability_mismatch _
+               | Http_client.Cli_policy_invalid _
+               | Http_client.Cli_startup_failed _
+               | Http_client.Provider_parse_error _
+               | Http_client.Provider_wire_error _
+               | Http_client.Provider_reported_error _
+               | Http_client.Provider_interrupted
+               | Http_client.Response_body_too_large _
+               | Http_client.Empty_completion _
+               | Http_client.Context_overflow _
+               | Http_client.Repeating_generation _
+               | Http_client.Unknown_provider_failure _ )
+           ; _
+           }) -> false)
     [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313" ]
 ;;
 
@@ -319,7 +428,9 @@ let%test "glm rate limit stays an http 429" =
       {|{"error":{"code":"1305","message":"too many requests"}}|}
   with
   | Error (Http_client.HttpError { code = 429; _ }) -> true
-  | Error _ | Ok _ -> false
+  | Error (Http_client.HttpError _) | Ok _ | Error (Http_client.NetworkError _)
+  | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+  | Error (Http_client.ProviderTerminal _) | Error (Http_client.ProviderFailure _) -> false
 ;;
 
 type resolved_sync_transport =
@@ -354,7 +465,16 @@ let%test "response-received transport failures retain their observed status" =
       { status = 200; error = Http_client.ProviderFailure _ } -> true
   | Sync_response _
   | Sync_failure_before_response _
-  | Sync_failure_after_response _ -> false
+  | Sync_failure_after_response
+      { status = _
+      ; error =
+          ( Http_client.HttpError _
+          | Http_client.NetworkError _
+          | Http_client.TimeoutError _
+          | Http_client.AcceptRejected _
+          | Http_client.ProviderTerminal _
+          | Http_client.ProviderFailure _ )
+      } -> false
 ;;
 
 let complete_http

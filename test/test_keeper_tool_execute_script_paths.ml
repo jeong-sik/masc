@@ -63,8 +63,10 @@ let suite =
   ; dest_test "git worktree add target" [ "/tmp/wt" ] "git worktree add /tmp/wt"
   ; dest_test "git worktree add target ignores the trailing commit-ish" [ "/tmp/wt" ]
       "git worktree add /tmp/wt my-branch"
+  ; dest_test "git worktree remove target" [ "/tmp/wt" ] "git worktree remove /tmp/wt"
   ; empty_test "git without -C or worktree-add owns nothing" "git status --short"
   ; outside_test "git worktree add via variable refused" "git worktree add $DEST"
+  ; outside_test "git worktree remove via variable refused" "git worktree remove $DEST"
   ; dest_test "mkdir literal targets" [ "/tmp/a"; "/tmp/b" ] "mkdir -p /tmp/a /tmp/b"
   ; dest_test "rm flags skipped" [ "/tmp/a" ] "rm -rf /tmp/a"
   ; dest_test "cp both operands" [ "/tmp/a"; "/tmp/b" ] "cp /tmp/a /tmp/b"
@@ -116,6 +118,10 @@ let judge_suite =
       "git worktree add /tmp/wt"
   ; judge_test "argv git worktree add outside allowed prefix is rejected" ~expect_ok:false
       "git worktree add /etc/wt"
+  ; judge_test "argv git worktree remove inside allowed prefix" ~expect_ok:true
+      "git worktree remove /tmp/wt"
+  ; judge_test "argv git worktree remove outside allowed prefix is rejected" ~expect_ok:false
+      "git worktree remove /etc/wt"
   ; judge_test "argv mkdir outside allowed prefix is rejected" ~expect_ok:false "mkdir /etc/x"
   ; judge_test "unnameable operand (glob) is left to the box, not rejected" ~expect_ok:true
       "mkdir /tmp/t634-*"

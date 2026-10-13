@@ -210,7 +210,8 @@ let toml_lookup path keys =
       |> List.find_map (fun key ->
         match List.assoc_opt key doc with
         | Some (Keeper_toml_loader.Toml_string value) -> trim_opt (Some value)
-        | _ -> None))
+        | Some (Keeper_toml_loader.Toml_int _ | (Keeper_toml_loader.Toml_float _ | (Keeper_toml_loader.Toml_bool _ | (Keeper_toml_loader.Toml_string_array _ | (Keeper_toml_loader.Toml_array _ | (Keeper_toml_loader.Toml_table _ | (Keeper_toml_loader.Toml_inline_table _ | (Keeper_toml_loader.Toml_table_array _ | (Keeper_toml_loader.Toml_offset_datetime _ | (Keeper_toml_loader.Toml_local_datetime _ | (Keeper_toml_loader.Toml_local_date _ | Keeper_toml_loader.Toml_local_time _)))))))))))
+        | None -> None))
 ;;
 
 let resolve_relative_path ~roots raw_path =

@@ -1,7 +1,8 @@
 module M = Keeper_memory_os_current
 let ( let* ) = Result.bind
 type token = Offset of int
-type pending = { through : int; atom : Yojson.Safe.t option; official : Yojson.Safe.t option }
+type pending =
+  { through : int; atom : M.durable_range_id option; official : M.official_range_id option }
 type state = { after : int; pending : pending option }
 let offset (Offset value) = value
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
@@ -10,8 +11,8 @@ let path ~runtime_keepers_dir ~keeper_name =
   path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
 let optional f = function None -> `Null | Some value -> f value
 let json state = `Assoc ["after",`Int state.after; "pending",optional (fun p ->
-  `Assoc ["through",`Int p.through; "atom",optional Fun.id p.atom;
-          "official",optional Fun.id p.official]) state.pending]
+  `Assoc ["through",`Int p.through; "atom",optional M.durable_range_id_to_json p.atom;
+          "official",optional M.official_range_id_to_json p.official]) state.pending]
 let decode raw =
   let open Yojson.Safe.Util in
   try
@@ -26,15 +27,22 @@ let decode raw =
       | row ->
         keys ["through";"atom";"official"] row;
         let opt key = match member key row with `Null -> None | value -> Some value in
-        Some { through=row |> member "through" |> to_int; atom=opt "atom"; official=opt "official" } in
-    if after < 0 || Option.fold ~none:false ~some:(fun p -> p.through < after
-      || (p.atom=None && p.official=None)) pending then Error "invalid external read cursor"
+        Some (row |> member "through" |> to_int, opt "atom", opt "official") in
+    if after < 0 || Option.fold ~none:false ~some:(fun (through, atom, official) -> through < after
+      || (atom=None && official=None)) pending then Error "invalid external read cursor"
     else
-      let valid decode = function None -> true | Some value -> Result.is_ok (decode value) in
-      if Option.fold ~none:true ~some:(fun p ->
-          valid M.durable_range_id_of_json p.atom && valid M.official_range_id_of_json p.official) pending
-      then Ok {after;pending}
-      else Error "invalid external cursor Memory receipt identity"
+      let identity decode = function
+        | None -> Ok None
+        | Some value ->
+          (match decode value with
+           | Ok range -> Ok (Some range)
+           | Error _ -> Error "invalid external cursor Memory receipt identity") in
+      match pending with
+      | None -> Ok {after;pending=None}
+      | Some (through, atom, official) ->
+        let* atom = identity M.durable_range_id_of_json atom in
+        let* official = identity M.official_range_id_of_json official in
+        Ok {after;pending=Some {through;atom;official}}
   with Yojson.Json_error detail -> Error detail
      | Yojson.Safe.Util.Type_error (detail,_) -> Error detail
 let load ~runtime_keepers_dir ~keeper_name =
@@ -60,23 +68,20 @@ let read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name =
   match state.pending with
   | None -> Ok (Offset state.after)
   | Some p ->
-    let scope = function
-      | Some (`Assoc fields) ->
-        (match List.assoc_opt "receipt_scope" fields with
-         | Some (`String value) -> Ok value
-         | _ -> Error "external read receipt has no scope")
-      | Some _ -> Error "external read receipt is not an object"
-      | None -> Ok runtime_keepers_dir in
-    let* atom_scope = scope p.atom in
-    let* official_scope = scope p.official in
+    let atom_scope = match p.atom with
+      | Some (range : M.durable_range_id) -> range.receipt_scope
+      | None -> runtime_keepers_dir in
+    let official_scope = match p.official with
+      | Some (range : M.official_range_id) -> range.receipt_scope
+      | None -> runtime_keepers_dir in
     let* atom = M.committed_durable_range ~keepers_dir:memory_keepers_dir
       ~keeper_id:keeper_name ~receipt_scope:atom_scope in
     let* official = M.committed_official_range ~keepers_dir:memory_keepers_dir
       ~keeper_id:keeper_name ~receipt_scope:official_scope in
-    let matches expected actual = match expected,actual with
-      | None,_ -> true | Some a,Some b -> a=b | Some _,None -> false in
-    if matches p.atom (Option.map M.durable_range_id_to_json atom)
-       && matches p.official (Option.map M.official_range_id_to_json official) then
+    let matches encode expected actual = match expected,actual with
+      | None,_ -> true | Some a,Some b -> encode a = encode b | Some _,None -> false in
+    if matches M.durable_range_id_to_json p.atom atom
+       && matches M.official_range_id_to_json p.official official then
       let* () = acknowledge ~runtime_keepers_dir ~keeper_name in Ok (Offset p.through)
     else Ok (Offset state.after)
 let prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (Offset after) ~through ~atom ~official =
@@ -101,8 +106,7 @@ let prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (Offset after)
        || same M.official_range_id_to_json official prior_official then
       Error "a committed Memory range cannot acknowledge a new external snapshot"
     else save ~runtime_keepers_dir ~keeper_name
-      {after;pending=Some {through;atom=Option.map M.durable_range_id_to_json atom;
-                          official=Option.map M.official_range_id_to_json official}}
+      {after;pending=Some {through;atom;official}}
 
 let inspect ~keepers_dir ~keeper_id =
   let runtime_keepers_dir = keepers_dir and keeper_name = keeper_id in

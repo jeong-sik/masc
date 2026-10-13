@@ -23,7 +23,7 @@ let retention_days () =
 let prune_mu = Stdlib.Mutex.create ()
 let last_prune_day_by_base_dir : (string, string) Hashtbl.t = Hashtbl.create 64
 
-(* The layout this key indexes is decided by [Jsonl_writer.dated_path]; ask it
+(* The layout this key indexes is decided by [Jsonl_writer.utc_calendar_day]; ask it
    for the key rather than rebuilding the same [gmtime]/[sprintf] pair here. A
    second spelling of the same key drifts silently — nothing compares them. *)
 let today_key () = Jsonl_writer.day_key ~ts:(Unix.gettimeofday ())
@@ -90,8 +90,9 @@ let mandatory_clock_refs_for_event = function
     [ "edge_id"; "lane" ]
   | Turn_finished ->
     [ "edge_id"; "lane" ]
-  | _ ->
-    [ "edge_id"; "lane" ]
+  | Phase_gate_decided | Runtime_routed | Runtime_execution_built | Runtime_completed
+  | Runtime_failed | Pre_dispatch_blocked | Context_injected | History_projection_observed
+  | Event_bus_correlated | Checkpoint_loaded -> [ "edge_id"; "lane" ]
 
 let clock_refs_has_keys keys clock_refs_json =
   match clock_refs_json with

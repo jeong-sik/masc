@@ -150,13 +150,13 @@ let rec remove_tree path =
 
 (* A day file [age_days] old, named by the module that owns the writer's
    day-file layout. *)
-let write_day_file ~store_dir ~age_days =
+let write_day_file location ~age_days =
   let ts = Unix.gettimeofday () -. (float_of_int age_days *. Masc_time_constants.day) in
-  let dated = Jsonl_writer.dated_path ~base_dir:store_dir ~ts in
-  mkdir_p (Filename.dirname dated.Jsonl_writer.path);
-  let oc = open_out dated.Jsonl_writer.path in
+  let dated = Dated_jsonl.Store.dated_path location ~ts in
+  mkdir_p (Filename.dirname dated.Dated_jsonl.Store.path);
+  let oc = open_out dated.path in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc "{}\n");
-  dated.Jsonl_writer.path
+  dated.path
 
 (* The pass both prunes call, run against a workspace whose runtime.toml
    names a window. [toml] = None leaves the file out. *)
@@ -176,9 +176,9 @@ let with_workspace ~toml f =
      let oc = open_out path in
      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content));
   let masc_root = Filename.concat base_path ".masc" in
-  let store_dir = Filename.concat masc_root (List.hd Prune.top_level_dated_stores) in
-  let ten_days_old = write_day_file ~store_dir ~age_days:10 in
-  let three_days_old = write_day_file ~store_dir ~age_days:3 in
+  let audit = Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Audit) in
+  let ten_days_old = write_day_file audit ~age_days:10 in
+  let three_days_old = write_day_file audit ~age_days:3 in
   Eio_main.run @@ fun _env ->
   f (Prune.prune_jsonl_at_resolved_window ~base_path ~masc_root) ~ten_days_old ~three_days_old
 

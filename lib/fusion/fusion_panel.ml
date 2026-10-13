@@ -47,7 +47,47 @@ let attempt_of_result ~(model : string)
        렌더된다. [Api (Retry.Timeout _)] 외곽 래퍼와 다른 variant 이지만 같은
        타임아웃이다 (CLAUDE.md §Unknown→Permissive/catch-all 회피). *)
     Error (Fusion_types.Timeout, Fusion_types.zero_usage)
-  | Error e ->
+  | Error
+      (( Agent_core.Error.Api
+           ( Llm_provider.Retry.RateLimited _
+           | Llm_provider.Retry.Overloaded _
+           | Llm_provider.Retry.ServerError _
+           | Llm_provider.Retry.AuthError _
+           | Llm_provider.Retry.AuthorizationError _
+           | Llm_provider.Retry.PaymentRequired _
+           | Llm_provider.Retry.InvalidRequest _
+           | Llm_provider.Retry.NotFound _
+           | Llm_provider.Retry.ContextOverflow _
+           | Llm_provider.Retry.InputCapacity _
+           | Llm_provider.Retry.NetworkError _ )
+       | Agent_core.Error.Provider
+           ( Llm_provider.Error.MissingApiKey _
+           | Llm_provider.Error.InvalidConfig _
+           | Llm_provider.Error.ParseError _
+           | Llm_provider.Error.ProviderWireError _
+           | Llm_provider.Error.ProviderReportedError _
+           | Llm_provider.Error.UnknownVariant _
+           | Llm_provider.Error.ProviderUnavailable _
+           | Llm_provider.Error.EmptyCompletion _
+           | Llm_provider.Error.RepeatingGeneration _
+           | Llm_provider.Error.RateLimit _
+           | Llm_provider.Error.HardQuota _
+           | Llm_provider.Error.CapacityExhausted _
+           | Llm_provider.Error.AuthError _
+           | Llm_provider.Error.AuthorizationError _
+           | Llm_provider.Error.ServerError _
+           | Llm_provider.Error.NetworkError _
+           | Llm_provider.Error.InvalidRequest _
+           | Llm_provider.Error.NotFound _
+           | Llm_provider.Error.ProviderTerminal _ )
+       | Agent_core.Error.Agent _
+       | Agent_core.Error.Mcp _
+       | Agent_core.Error.Config _
+       | Agent_core.Error.Serialization _
+       | Agent_core.Error.Io _
+       | Agent_core.Error.Orchestration _
+       | Agent_core.Error.Internal _
+       | Agent_core.Error.Internal_carried _ ) as e) ->
     Error
       ( Fusion_types.Provider_error
           (Fusion_agent_core.provider_error_detail ~runtime_id:model
@@ -58,7 +98,11 @@ let bridge_failure_of_error (error : Agent_core.Error.t) : Fusion_types.panel_fa
   match error with
   | Agent_core.Error.Api (Agent_core.Retry.Timeout _)
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
-  | _ -> Fusion_types.Bridge_error (Agent_core.Error.to_string error)
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | Llm_provider.Retry.NetworkError _))))))))))
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _ | (Llm_provider.Error.InvalidConfig _ | (Llm_provider.Error.ParseError _ | (Llm_provider.Error.ProviderWireError _ | (Llm_provider.Error.ProviderReportedError _ | (Llm_provider.Error.UnknownVariant _ | (Llm_provider.Error.ProviderUnavailable _ | (Llm_provider.Error.EmptyCompletion _ | (Llm_provider.Error.RepeatingGeneration _ | (Llm_provider.Error.RateLimit _ | (Llm_provider.Error.HardQuota _ | (Llm_provider.Error.CapacityExhausted _ | (Llm_provider.Error.AuthError _ | (Llm_provider.Error.AuthorizationError _ | (Llm_provider.Error.ServerError _ | (Llm_provider.Error.NetworkError _ | (Llm_provider.Error.InvalidRequest _ | (Llm_provider.Error.NotFound _ | Llm_provider.Error.ProviderTerminal _))))))))))))))))))
+  | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ -> Fusion_types.Bridge_error (Agent_core.Error.to_string error)
 
 let panel_failure_of_route_failure : Fusion_seat.route_failure -> Fusion_types.panel_failure
   = function

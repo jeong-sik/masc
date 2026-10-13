@@ -793,7 +793,8 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
          | Sys_error detail -> Error (config_error ~field:"native_workspace" detail)
          | Unix.Unix_error (error, _, _) ->
            Error (config_error ~field:"native_workspace" (Unix.error_message error)))
-      | _ -> Ok () in
+      | (Runtime_antigravity_home.Shared_workspace _, None)
+      | (Runtime_antigravity_home.Private_workspace, _) -> Ok () in
     let* native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-workspace" (fun () ->
         Runtime_antigravity_home.prepare_native_workspace home ~workspace:native_workspace)
       |> Result.map_error home_error_to_core_error in
@@ -922,7 +923,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       match !session_state with
       | { Session_store.phase = (Ready | Settled _ | Recovery_required _); _ } ->
         Ok ()
-      | expected ->
+      | { Session_store.phase =
+            ( Session_store.Start _
+            | Session_store.Active _
+            | Session_store.Turn_inflight _ )
+        ; _
+        } as expected ->
         Session_store.require_recovery
           ~base_path
           ~keeper_name
@@ -937,7 +943,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | Transient ->
         (match !session_state with
          | { phase = (Ready | Settled _ | Recovery_required _); _ } -> Ok ()
-         | expected ->
+         | { phase =
+               ( Session_store.Start _
+               | Session_store.Active _
+               | Session_store.Turn_inflight _ )
+           ; _
+           } as expected ->
            Session_store.release_transient
              ~base_path
              ~keeper_name
@@ -991,7 +1002,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
              loses nothing the assert provided and does not take the process
              with it -- masc#28983's shape, where a wildcard promise became an
              Assert_failure at run time. *)
-          | _, other ->
+          | ( _
+            , (( Session_store.Ready
+               | Session_store.Start _
+               | Session_store.Active _
+               | Session_store.Recovery_required _
+               | Session_store.Settled _ ) as other) ) ->
             let phase_name =
               match other with
               | Session_store.Ready -> "Ready"
@@ -1190,8 +1206,10 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           (match stop, !terminal_error with
            | Host.Terminal_tool_boundary _, _
           when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
-           | _, Some detail -> Error (internal_error detail)
-           | _, None -> settle_host_stop stop)
+           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), Some detail ->
+             Error (internal_error detail)
+           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), None ->
+             settle_host_stop stop)
         | Ok (`Completed turn) ->
           recovery_failure := Session_store.Protocol_failed;
           (match turn.trajectory_error with
@@ -1273,7 +1291,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
           let runtime_observation =
             Runtime_observation.runtime_observation_with_metrics
               ~runtime_id
-              ~selected_model_raw:(Some turn.model)
+              ~selected_model:(Some turn.model)
               ~capture
               ~attempt_details_source:"antigravity_cli"
               ~agent_core_internal_runtime_allowed:false

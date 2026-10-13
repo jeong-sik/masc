@@ -64,6 +64,7 @@ let make_telemetry ?canonical_model_id () : Agent_core.Types.inference_telemetry
   ; reasoning_effort = None
   ; canonical_model_id
   ; reasoning_source = None
+  ; reasoning_prefix = None
   ; effective_context_window = None
   ; provider_internal_action_count = None
   ; ttfrc_ms = None

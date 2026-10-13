@@ -7,10 +7,8 @@
     optional recommended-action JSON.
 
     One read path, {!latest_active}, whose record serializes through
-    {!to_yojson}.  This said "two read paths" and named a
-    [latest_active_json] that is not in the tree.  One write path:
-    {!record}, which auto-chains supersedes by reading the
-    current latest before append. *)
+    {!to_yojson}.  One write path: {!record}, which auto-chains
+    supersedes by reading the current latest before append. *)
 
 (** {1 Types} *)
 
@@ -21,14 +19,29 @@ type target_type = Workspace
     explicitly so the JSONL on-disk format remains
     backward-compatible. *)
 
+(** Where a judgment applies. Closed, so every per-surface policy (the
+    freshness default in {!Operator_control_action}) answers for each one. *)
+type surface =
+  | Command_namespace
+  | Intervene
+
+(** How sure the judge is, as a finite number in [\[0.0, 1.0\]]. The only
+    way to make one is {!Confidence.of_float}, so a record cannot carry a
+    value its own reader would refuse. *)
+module Confidence : sig
+  type t = private float
+
+  val of_float : float -> t option
+  (** [None] for NaN, infinities, and values outside [\[0.0, 1.0\]]. *)
+end
+
 type record = {
   judgment_id : string;
-  surface : string;
+  surface : surface;
   target_type : target_type;
   target_id : string option;
-  status : string;
   summary : string;
-  confidence : float;
+  confidence : Confidence.t;
   generated_at : string;
   generated_at_unix : float;
   fresh_until : string;
@@ -54,9 +67,19 @@ val target_type_to_string : target_type -> string
 (** [Workspace -> "workspace"].  Pinned literal for the on-disk JSONL format. *)
 
 val target_type_of_string : string -> target_type option
-(** Accepts only the canonical [["workspace"]] target type for [Workspace].
-    Historical [["root"]] / [["namespace"]] aliases are rejected at the parse
-    boundary. *)
+(** Accepts only the canonical [["workspace"]] target type for [Workspace]. *)
+
+(** {1 surface codec} *)
+
+val all_of_surface : surface list
+
+val surface_to_string : surface -> string
+(** [Command_namespace -> "command.namespace"], [Intervene -> "intervene"].
+    Pinned literals for the on-disk JSONL format. *)
+
+val surface_of_string : string -> surface option
+(** Inverse of {!surface_to_string}; exact match, no trimming or case
+    folding. *)
 
 (** {1 JSON codec} *)
 
@@ -67,12 +90,13 @@ val to_yojson : record -> Yojson.Safe.t
     judgment posts from other JSONL records. *)
 
 val of_yojson : Yojson.Safe.t -> (record, string) result
-(** Parses the JSON object back to a record.  Fail-fast:
-    returns [Error "missing target_type"] / [Error "invalid
-    target_type"] when the [target_type] field is missing or
-    unrecognised; field-by-field reads via Yojson.Util may
-    raise [Type_error] which is caught and surfaced as
-    [Error]. *)
+(** Parses the JSON object back to a record.  Fail-fast: every member
+    {!to_yojson} writes is required, so a missing one is
+    [Error "missing <key>"] and a wrong JSON type, an unrecognised
+    [target_type] or an out-of-range [confidence] is
+    [Error "invalid <key>"] / [Error "confidence out of range"].
+    [target_id], [model_name], [runtime_name] and [recommended_action]
+    may be [null]. *)
 
 (** {1 Freshness} *)
 
@@ -107,7 +131,7 @@ val load_all : Workspace.config -> record list
 
 val latest_active :
   Workspace.config ->
-  surface:string ->
+  surface:surface ->
   target_type:target_type ->
   target_id:string option ->
   record option
@@ -119,11 +143,11 @@ val latest_active :
 
 val record :
   Workspace.config ->
-  surface:string ->
+  surface:surface ->
   target_type:target_type ->
   target_id:string option ->
   summary:string ->
-  confidence:float ->
+  confidence:Confidence.t ->
   ?model_name:string ->
   ?runtime_name:string ->
   ?recommended_action:Yojson.Safe.t ->
@@ -154,11 +178,6 @@ val record :
       list if first).
     - [generated_at_unix] and [fresh_until_unix]: required numeric timestamps;
       the write boundary does not reparse display strings.
-    - [confidence]: clamped to [\[0.0, 1.0\]].
+    - [confidence]: a {!Confidence.t}, so it is already in range.
     - [summary]: trimmed.
-    - [evidence_refs]: trimmed + empty entries dropped.
-
-    {2 status}
-
-    Always [["active"]] on write.  A future "let's add a
-    superseded status" change must touch this contract. *)
+    - [evidence_refs]: trimmed + empty entries dropped. *)

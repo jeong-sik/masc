@@ -966,7 +966,20 @@ let lifecycle_display_for_row row event =
         { verb = Keeper_lifecycle_events.Reconciled; _ }
     , Some Keeper_status_runtime.Cp_paused ) ->
     display_of_phase_event Keeper_state_machine.Paused
-  | (Keeper_lifecycle_events.Custom_event _ | Keeper_lifecycle_events.Phase_event _), _ ->
+  | ( ( Keeper_lifecycle_events.Custom_event
+          { verb =
+              ( Keeper_lifecycle_events.Started
+              | Keeper_lifecycle_events.Restarted
+              | Keeper_lifecycle_events.Supervisor_cleaned
+              | Keeper_lifecycle_events.Purged
+              | Keeper_lifecycle_events.Admission_denied )
+          ; _
+          }
+      | Keeper_lifecycle_events.Phase_event _ )
+    , _ )
+  | ( Keeper_lifecycle_events.Custom_event
+        { verb = Keeper_lifecycle_events.Reconciled; _ }
+    , (None | Some (Keeper_status_runtime.Cp_surface _)) ) ->
     lifecycle_display_of_event event
 ;;
 
@@ -1130,7 +1143,7 @@ let running_keeper_names (config : Workspace.config) =
     match Keeper_meta_store.read_meta config name with
     | Ok (Some meta) when Keeper_status_bridge.runtime_keepalive_running config meta ->
       Some name
-    | _ -> None)
+    | Ok (None) | Error _ | Ok (Some _) -> None)
 ;;
 
 let patch_surface_json_for_running_keepers (config : Workspace.config) = function
@@ -1619,27 +1632,18 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
      with
      | Ok json -> json
      | Error `Timeout ->
-       let exn =
-         Dashboard_cache.Compute_timeout (execution_default_light_cache_key, false)
-       in
-       publish_failure exn;
+       let role = Dashboard_cache.Compute_owner in
+       publish_failure
+         (Dashboard_cache.Compute_timeout
+            { key = execution_default_light_cache_key; role });
        Log.Dashboard.warn
          "dashboard execution force refresh timed out: %s (%.0fs)"
          execution_default_light_cache_key
          timeout_sec;
-       `Assoc
-         [ "error", `String "computation_timeout"
-         ; "message",
-           `String
-             (Printf.sprintf
-                "Dashboard %s timed out after %.0fs"
-                execution_default_light_cache_key
-                timeout_sec)
-         ; "generated_at", `String (Masc_domain.now_iso ())
-         ; "timeout_kind", `String "owner"
-         ; "timeout_sec", `Float timeout_sec
-         ; "key", `String execution_default_light_cache_key
-         ])
+       Dashboard_cache.timeout_envelope_json
+         ~kind:(Dashboard_cache.timeout_kind_of_role role)
+         ~key:execution_default_light_cache_key
+         ~timeout_sec)
     |> with_execution_metadata
          ~config
          ~cache_key:execution_default_light_cache_key

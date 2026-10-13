@@ -218,7 +218,10 @@ let strip_reasoning_blocks (message : Agent_core.Types.message) =
          match block with
          | Agent_core.Types.Thinking { signature = None; _ }
          | Agent_core.Types.ReasoningDetails _ -> kept, stripped + 1
-         | _ -> block :: kept, stripped)
+         | Agent_core.Types.Thinking { signature = Some _;_} | Agent_core.Types.Text _
+         | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+         | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+         | Agent_core.Types.Audio _ -> block :: kept, stripped)
       ([], 0)
       message.content
   in
@@ -241,7 +244,12 @@ let clear_tool_result_blocks (message : Agent_core.Types.message) =
          | Agent_core.Types.ToolResult { outcome = Agent_core.Types.Tool_failed _; _ }
            -> block
          | Agent_core.Types.ToolResult
-             ({ content; json; content_blocks; _ } as result) ->
+             ({ content
+              ; json
+              ; content_blocks
+              ; outcome = Agent_core.Types.Tool_succeeded
+              ; _
+              } as result) ->
            if String.equal content cleared_tool_result_content
               && Option.is_none json
               && Option.is_none content_blocks
@@ -254,7 +262,10 @@ let clear_tool_result_blocks (message : Agent_core.Types.message) =
                ; json = None
                ; content_blocks = None
                })
-         | _ -> block)
+         | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+         | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+         | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+         | Agent_core.Types.Audio _ -> block)
       message.content
   in
   { message with Agent_core.Types.content }, !cleared_count

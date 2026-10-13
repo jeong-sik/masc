@@ -20,7 +20,11 @@ let keeper_runtime_entries =
 ;;
 
 let keeper_web_search_entries =
-  keeper_registry_entries (fun row -> String.equal row.category "web_search")
+  keeper_registry_entries (fun row ->
+    match row.category with
+    | Keeper_runtime_setting_registry.Web_search -> true
+    | Spawn | Turn | Bootstrap | Lifecycle | Heartbeat | Diagnostics | Supervisor
+    | Metrics | Memory | Media | Transport | Sandbox | Otel -> false)
 ;;
 
 let server_entries =
@@ -79,9 +83,6 @@ let runtime_entries =
       "Escalate malformed env parses to Config_error";
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
       "Enable telemetry collection";
-    entry ~default:"30" "MASC_TELEMETRY_RETENTION_DAYS"
-      "Telemetry JSONL day-file retention days. Positive values override; \
-       non-positive disables retention.";
     entry ~default:"52428800" "MASC_TELEMETRY_MAX_BYTES"
       "Telemetry JSONL byte cap. Positive values override; non-positive \
        disables byte-cap pruning.";

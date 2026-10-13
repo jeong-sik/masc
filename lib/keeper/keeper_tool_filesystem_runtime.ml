@@ -946,7 +946,8 @@ let append_capability ~on_cancelled file content =
     , None
     , Fs_compat.Capability_append_target_not_checked )
     when outcome.requested_bytes = 0 -> Ok ()
-  | _ -> Error (Content_write_append outcome)
+  | (None, None, (Fs_compat.Capability_append_target_changed | Fs_compat.Capability_append_target_check_failed _))
+  | (None, Some _, _) | (Some _, _, _) | (None, None, Capability_append_target_not_checked) -> Error (Content_write_append outcome)
 ;;
 
 let created_directory_operation stage f =
@@ -2728,7 +2729,9 @@ let handle_file_write_content_with_outcome
               with
               | Error Fs_compat.Capability_append_open_missing ->
                 create_missing_entry ()
-              | Error open_error ->
+              | Error
+                  (( Fs_compat.Capability_append_open_invalid_leaf _
+                   | Fs_compat.Capability_append_open_failed _ ) as open_error) ->
                 observe_capability_append_open_error
                   ~keeper_name:meta.name
                   ~target

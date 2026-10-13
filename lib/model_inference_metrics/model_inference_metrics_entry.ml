@@ -247,7 +247,7 @@ let parse_error_label = function
 
 let parse_error_detail = function
   | Invalid_current_cost_row error -> Cost_ledger.decode_error_to_string error
-  | error -> parse_error_label error
+  | (Not_assoc | Invalid_ts_unix | Missing_ts_unix | Out_of_window | No_telemetry_object | Missing_outcome | Missing_usage_reported | Missing_telemetry_reported | Missing_success_model | Missing_success_inference_identity | Missing_error_model_attribution | Invalid_executed_runtime_id) as error -> parse_error_label error
 ;;
 
 (* [Out_of_window] and [Not_assoc] are routine in mixed jsonl streams; we never

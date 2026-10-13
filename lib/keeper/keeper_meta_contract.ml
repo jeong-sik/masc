@@ -418,7 +418,7 @@ let effective_meta_of_profile_defaults
             one of: %s, or declare a sandbox_profile this host can serve"
            meta.name
            (String.concat ", " Keeper_microvm_backend.valid_strings))
-  | Ok sandbox_profile ->
+  | Ok ((Docker | Micro_vm | Remote_ssh) as sandbox_profile) ->
     match
       missing_required_sandbox_image_error ~keeper_name:meta.name
         sandbox_profile defaults

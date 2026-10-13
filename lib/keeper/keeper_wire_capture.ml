@@ -10,15 +10,18 @@ let redact redaction text =
 (* Dated per-day store, mirroring the cost-ledger appender
    ([Keeper_hooks_agent_core_cost_events.emit_cost_event]); concurrent keepers
    serialise on a per-day file rather than one global blob. *)
-let wire_capture_dir masc_root = Filename.concat masc_root "wire-capture"
+let wire_capture_location masc_root =
+  Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Wire_capture)
+;;
+
+let wire_capture_dir masc_root = Dated_jsonl.Store.dir (wire_capture_location masc_root)
 
 (** Cache [Dated_jsonl.t] handles per MASC root so the diagnostic harness does
     not recreate the store (and re-scan/re-prune) on every request/response
     capture. The cache is keyed by the effective root path and invalidated when
-    retention or byte-budget configuration changes. *)
+    the byte budget changes. *)
 type store_entry =
   { store : Dated_jsonl.t
-  ; retention_days : int
   ; max_bytes : int
   }
 
@@ -26,45 +29,19 @@ let store_cache : (string, store_entry) Hashtbl.t = Hashtbl.create 16
 let store_cache_mu = Stdlib.Mutex.create ()
 
 let store_for ~masc_root =
-  let retention_days = Env_config_keeper.KeeperWireCapture.retention_days () in
   let max_bytes = Env_config_keeper.KeeperWireCapture.max_bytes () in
   Stdlib.Mutex.protect store_cache_mu (fun () ->
     match Hashtbl.find_opt store_cache masc_root with
     | Some entry
-      when entry.retention_days = retention_days && entry.max_bytes = max_bytes ->
+      when entry.max_bytes = max_bytes ->
       entry
     | _ ->
       let store =
-        Dated_jsonl.create
-          ~base_dir:(wire_capture_dir masc_root)
-          ~retention_days
-          ~max_bytes
-          ()
+        Dated_jsonl.open_store ~max_bytes (wire_capture_location masc_root)
       in
-      let entry = { store; retention_days; max_bytes } in
+      let entry = { store; max_bytes } in
       Hashtbl.replace store_cache masc_root entry;
       entry)
-;;
-
-type prune_error =
-  | Retention_prune_failed of
-      { path : string
-      ; detail : string
-      }
-
-let prune_error_to_string = function
-  | Retention_prune_failed { path; detail } ->
-    Printf.sprintf "wire-capture retention prune failed path=%s: %s" path detail
-;;
-
-let prune_expired ~masc_root =
-  let path = wire_capture_dir masc_root in
-  try
-    let { store; retention_days; _ } = store_for ~masc_root in
-    Ok (Dated_jsonl.prune store ~days:retention_days)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Retention_prune_failed { path; detail = Printexc.to_string exn })
 ;;
 
 type record_skip_reason =

@@ -14,20 +14,24 @@ module StringSet = Set_util.StringSet
 
 (* The directory this store occupies under [.masc]. Exposed so readers of the
    same store name it from here instead of spelling the literal. *)
-let store_dirname = "activity-events"
+let store_dirname = Dated_jsonl.Store.Cluster.(relative_path Activity_events)
 
-let root_dir (config : Workspace_utils.config) =
-  Filename.concat (Workspace_utils.masc_dir config) store_dirname
+let location (config : Workspace_utils.config) =
+  Dated_jsonl.Store.cluster
+    (Workspace_utils.dated_store_cluster_root config)
+    Dated_jsonl.Store.Cluster.Activity_events
+
+let root_dir (config : Workspace_utils.config) = Dated_jsonl.Store.dir (location config)
 
 (* [Jsonl_writer] owns the YYYY-MM/DD.jsonl layout. This module used to spell
    it out again, and it read the clock once for the month and once more for
    the day, so a write that crossed midnight on the last of a month could put
    the new day's file under the old month's directory (#27143). *)
 let current_dated_path (config : Workspace_utils.config) =
-  Jsonl_writer.dated_path_now ~base_dir:(root_dir config)
+  Dated_jsonl.Store.dated_path_now (location config)
 
 let day_path (config : Workspace_utils.config) =
-  (current_dated_path config).Jsonl_writer.path
+  (current_dated_path config).Dated_jsonl.Store.path
 
 let seq_path (config : Workspace_utils.config) =
   Filename.concat (root_dir config) "_seq"
@@ -37,10 +41,10 @@ let lock_path (config : Workspace_utils.config) =
 
 (* Takes the path the caller is about to append to, so the directory made and
    the file opened come from one reading of the clock. *)
-let ensure_dirs config (dated : Jsonl_writer.dated_path) =
+let ensure_dirs config (dated : Dated_jsonl.Store.dated_path) =
   Workspace_utils.mkdir_p (root_dir config);
   (* [month_dir] is the directory name, not a path; the full one is here. *)
-  Workspace_utils.mkdir_p (Filename.dirname dated.Jsonl_writer.path)
+  Workspace_utils.mkdir_p (Filename.dirname dated.Dated_jsonl.Store.path)
 
 let read_current_seq config =
   match Safe_ops.read_file_safe (seq_path config) with
@@ -904,7 +908,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
           |> sanitize_event_traced
         in
         let json_line = Yojson.Safe.to_string (event_to_yojson value) in
-        append_line dated.Jsonl_writer.path (json_line ^ "\n");
+        append_line dated.Dated_jsonl.Store.path (json_line ^ "\n");
         (value, json_line))
   in
   let encoded = format_sse_event_data ~seq:value.seq json_line in

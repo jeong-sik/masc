@@ -171,7 +171,8 @@ let start ~sw ~env ~root ~publish:publish_artifact ~session_id ~websocket_url =
             match data, artifact with
             | `Assoc fields, Some (Ok value) -> `Assoc (("artifact",value) :: fields)
             | `Assoc fields, Some (Error reason) -> `Assoc (("artifactError",`String reason) :: fields)
-            | _ -> data) rows in
+            | (`Assoc _, None)
+            | ((`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))), _) -> data) rows in
           let state = !failure in
           Ok (`Assoc ["sessionId",`String session_id;"downloads",`List records;
             "observation",`String (if state = None then "connected" else "interrupted");

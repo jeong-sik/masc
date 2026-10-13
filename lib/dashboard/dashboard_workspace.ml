@@ -87,17 +87,15 @@ let mentions_of_message (msg : Masc_domain.message) =
 
 let message_id (msg : Masc_domain.message) = Printf.sprintf "msg-%09d" msg.seq
 
-(* The three session messages are the whole of what this hides. A second arm
-   used to hide anything starting with "lifecycle_" as well, but nothing in
-   the repo writes such a msg_type: [Workspace_broadcast.broadcast] defaults
-   to "broadcast" and the only callers that override it are the three named
-   here (workspace_lifecycle.ml:120, :190, :257). A prefix guard for a
-   namespace no producer uses does not hide anything -- it only makes the
-   next reader look for the producer. *)
+(* The session messages [Workspace_lifecycle] writes are hidden. Every other
+   kind, and a type this build does not write, is shown. *)
 let is_workspace_message (msg : Masc_domain.message) =
-  match String.lowercase_ascii (String.trim msg.msg_type) with
-  | "session_bound" | "session_rebound" | "session_ended" -> false
-  | _ -> true
+  match Masc_domain.message_kind_of_string msg.msg_type with
+  | Some
+      ( Masc_domain.Msg_session_bound
+      | Masc_domain.Msg_session_rebound
+      | Masc_domain.Msg_session_ended ) -> false
+  | Some (Masc_domain.Msg_broadcast | Masc_domain.Msg_cache_invalidated) | None -> true
 ;;
 
 let message_json (msg : Masc_domain.message) =

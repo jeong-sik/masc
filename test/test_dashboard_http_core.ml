@@ -3961,7 +3961,8 @@ let test_execution_parameterized_timeout_keeps_request_metadata () =
   for _attempt = 1 to 3 do
     let timeout = Dashboard_cache.get_or_compute_with_timeout key
         ~ttl:120.0 ~clock ~timeout_sec:0.01
-        (fun () -> raise (Dashboard_cache.Compute_timeout (key, false))) in
+        (fun () ->
+          raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner })) in
     check bool "timeout does not publish a successful payload" true
       (Dashboard_cache.is_timeout_envelope timeout)
   done;
@@ -6107,7 +6108,11 @@ let shrink_result = Alcotest.(option (pair string int))
 
 let test_context_shrink_detection () =
   let base = shrink_base_meta () in
-  let shrink meta fields = Keeper_config_post.context_shrink_of_patch ~meta fields in
+  let shrink meta fields =
+    match Keeper_config_post.validate_dashboard_config_patch fields with
+    | Ok patch -> Keeper_config_post.context_shrink_of_patch ~meta patch
+    | Error error -> Alcotest.fail error
+  in
   check shrink_result "cap introduced where there was none is a shrink"
     (Some ("unset (full model window)", 1000))
     (shrink (with_max_override base None) [ ("max_context_override", `Int 1000) ]);
@@ -6125,31 +6130,41 @@ let test_context_shrink_detection () =
     (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
 ;;
 
-let test_config_patch_input_policy () =
-  let meta = shrink_base_meta () in
-  List.iter (fun wire ->
-    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", `String wire] with
-    | Ok () -> () | Error error -> Alcotest.fail error) ["small"; "wide"];
-  List.iter (fun value ->
-    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", value] with
-    | Error _ -> () | Ok () -> Alcotest.fail "invalid config policy accepted")
-    [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
+(* The two control fields come back typed and leave the persisted fields; the
+   handler no longer reads them from the JSON again. *)
+let test_config_patch_separates_control_fields () =
+  match
+    Keeper_config_post.validate_dashboard_config_patch
+      [ ("name", `String "shrink-fixture");
+        ("confirm_context_shrink", `Bool true);
+        ("expected_config_revision", `String "revision");
+        ("max_context_override", `Int 1000) ]
+  with
+  | Error error -> Alcotest.fail error
+  | Ok patch ->
+    Alcotest.(check bool) "confirmation is read" true
+      patch.Keeper_config_post.confirm_context_shrink;
+    Alcotest.(check (list string)) "only persisted fields remain, in order"
+      [ "name"; "max_context_override" ]
+      (List.map fst patch.Keeper_config_post.config_fields);
+    Alcotest.(check bool) "the checked cap is what gets persisted" true
+      (Yojson.Safe.equal (`Int 1000)
+         (List.assoc "max_context_override" patch.Keeper_config_post.config_fields))
 ;;
 
 let test_config_patch_accepts_typed_skills () =
-  let meta = shrink_base_meta () in
   let validate fields =
-    Keeper_config_post.validate_dashboard_config_patch ~meta fields
+    Keeper_config_post.validate_dashboard_config_patch fields
   in
   let check_ok label fields =
     match validate fields with
-    | Ok () -> ()
+    | Ok _ -> ()
     | Error error -> Alcotest.failf "%s: %s" label error
   in
   let check_error label fields =
     match validate fields with
     | Error _ -> ()
-    | Ok () -> Alcotest.failf "%s unexpectedly accepted" label
+    | Ok _ -> Alcotest.failf "%s unexpectedly accepted" label
   in
   check_ok "empty object selects all" [ "skills", `Assoc [] ];
   check_ok "empty names select none"
@@ -6163,25 +6178,24 @@ let test_config_patch_accepts_typed_skills () =
   check_error "skills must be an object" [ "skills", `List [] ]
 ;;
 
-(* [remote_endpoint] takes a string or an explicit null, so it cannot sit in
-   [dashboard_config_string_fields]: that list demands a string and would
-   refuse the null an operator sends to detach the endpoint. Whether the name
+(* [remote_endpoint] takes a string or an explicit null, unlike the plain
+   string fields, which refuse the null an operator sends to detach the
+   endpoint. Whether the name
    is declared under [exec.ssh.endpoints], and whether the profile admits an
    endpoint at all, are decided later by [Keeper_turn_up_args.parse]. *)
 let test_config_patch_remote_endpoint_shape () =
-  let meta = shrink_base_meta () in
   let validate fields =
-    Keeper_config_post.validate_dashboard_config_patch ~meta fields
+    Keeper_config_post.validate_dashboard_config_patch fields
   in
   let check_ok label fields =
     match validate fields with
-    | Ok () -> ()
+    | Ok _ -> ()
     | Error error -> Alcotest.failf "%s: %s" label error
   in
   let check_error label fields =
     match validate fields with
     | Error _ -> ()
-    | Ok () -> Alcotest.failf "%s unexpectedly accepted" label
+    | Ok _ -> Alcotest.failf "%s unexpectedly accepted" label
   in
   check_ok "an endpoint name is accepted"
     [ "remote_endpoint", `String "builder" ];
@@ -6547,6 +6561,34 @@ let test_config_post_requires_expected_revision () =
       ~name {|{"activation_mode":"autonomous"}|}
   in
   expect_http_status "missing revision HTTP 400" 400 raw;
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+(* The dashboard checks only that [input_policy] is a string; the value is
+   read by [Keeper_turn_up_args.parse], which runs before anything is
+   written. A value parse cannot read is answered 400 and the keeper TOML
+   stays as it was. *)
+let test_config_post_refuses_an_unreadable_input_policy_without_a_write () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-input-policy-refused" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let before = read_file toml_path in
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"input_policy":"automatic"}|}
+  in
+  expect_http_status "unreadable input_policy HTTP 400" 400 raw;
+  let body = Yojson.Safe.to_string json in
+  check bool "the refusal names the accepted policies" true
+    (String_util.contains_substring body "input_policy must be small or wide");
+  (* The removed dashboard check said the same words and added
+     "(received string)"; its absence is what shows parse refused. *)
+  check bool "the refusal is parse's, not the dashboard's" false
+    (String_util.contains_substring body "(received");
+  check string "keeper TOML unchanged" before (read_file toml_path);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
@@ -8159,7 +8201,8 @@ let () =
             test_context_shrink_detection;
           test_case "config patch accepts typed Skills" `Quick
             test_config_patch_accepts_typed_skills;
-          test_case "config patch input policy" `Quick test_config_patch_input_policy;
+          test_case "config patch separates control fields" `Quick
+            test_config_patch_separates_control_fields;
           test_case "config patch shape-checks remote_endpoint" `Quick
             test_config_patch_remote_endpoint_shape;
           test_case "config POST atomically restarts runtime" `Quick
@@ -8172,6 +8215,8 @@ let () =
             test_config_post_mid_turn_policy_needs_the_lanes_proxy;
           test_case "config POST requires expected revision" `Quick
             test_config_post_requires_expected_revision;
+          test_case "config POST refuses an unreadable input_policy without a write" `Quick
+            test_config_post_refuses_an_unreadable_input_policy_without_a_write;
           test_case "stale config POST loses with typed 409" `Quick
             test_config_post_rejects_second_writer_with_same_revision;
           test_case "direct assignment stale writer loses without a write" `Quick

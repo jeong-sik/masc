@@ -54,7 +54,17 @@ let visible filter (event : Observer.event) =
           | Masc.Lane_addon_resource_events.Acquire_failed | Masc.Lane_addon_resource_events.Release_incomplete -> true
           | Masc.Lane_addon_resource_events.Acquired | Masc.Lane_addon_resource_events.Release_confirmed -> false)
       | Observer.Agent_core { Observer.kind = Observer.Telemetry; _ } -> false
-      | Observer.Agent_core _ -> true
+      | Observer.Agent_core
+          { Observer.kind =
+              ( Observer.Tool_called | Observer.Tool_completed
+              | Observer.Turn_started | Observer.Turn_ready
+              | Observer.Turn_completed | Observer.Agent_started
+              | Observer.Agent_completed _ | Observer.Agent_failed _
+              | Observer.Agent_yielded _ | Observer.Agent_input_required _
+              | Observer.Tool_approval_completed
+              | Observer.Agent_core_other _ )
+          ; _
+          } -> true
       | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
       | Observer.Snapshot _
       (* A reply sends one stream frame per token, and a queue-size change is
@@ -1212,7 +1222,18 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
             when String.equal started_id id
                  && Option.equal String.equal agent completed.Observer.agent ->
               Some ((completed.Observer.at -. at) *. 1000.)
-          | Observer.Agent_core _ | Observer.Keeper_heartbeat _
+          | Observer.Agent_core
+              { Observer.kind =
+                  ( Observer.Tool_called | Observer.Tool_completed
+                  | Observer.Turn_started | Observer.Turn_ready
+                  | Observer.Turn_completed | Observer.Agent_started
+                  | Observer.Agent_completed _ | Observer.Agent_failed _
+                  | Observer.Agent_yielded _ | Observer.Agent_input_required _
+                  | Observer.Tool_approval_completed | Observer.Telemetry
+                  | Observer.Agent_core_other _ )
+              ; _
+              }
+          | Observer.Keeper_heartbeat _
           | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
           | Observer.Keeper_turn_observation _
           | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
@@ -1293,8 +1314,7 @@ let evidence_fields (entry : entry) =
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
       ] @ schedule_fields
-  | event ->
-      let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+  | (Observer.Internal_agent_runs_changed | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
       [ some "Source" "observer event"
       ; some "Event" row.label
       ; some "Detail" row.detail

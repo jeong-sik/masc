@@ -18,6 +18,17 @@ let tmpdir prefix =
   Fs_compat.mkdir_p path;
   path
 
+
+(* Every store here is a listed store under a fresh temporary root. The
+   store's directory is [Dated_jsonl.Store.dir location]; it exists, as the
+   temporary directory did before. *)
+let store_under root = Dated_jsonl.Store.(cluster (cluster_root root) Cluster.Audit)
+
+let temp_store prefix =
+  let location = store_under (tmpdir prefix) in
+  Fs_compat.mkdir_p (Dated_jsonl.Store.dir location);
+  location
+
 let heartbeat ?(timestamp = "2026-08-21T12:00:00Z")
     ?(name = "keeper-main") count =
   `Assoc
@@ -202,7 +213,8 @@ let write_raw_lines base_dir month filename lines =
     (String.concat "\n" lines ^ "\n")
 
 let test_load_does_not_backfill_rejected_rows () =
-  let base_dir = tmpdir "tui_metrics_tail_physical_bound" in
+  let location = temp_store "tui_metrics_tail_physical_bound" in
+  let base_dir = Dated_jsonl.Store.dir location in
   write_raw_lines base_dir "2026-01" "31.jsonl"
     [ Yojson.Safe.to_string (heartbeat 0)
     ; Yojson.Safe.to_string (heartbeat 1)
@@ -211,7 +223,7 @@ let test_load_does_not_backfill_rejected_rows () =
     ; Yojson.Safe.to_string (heartbeat 2)
     ];
   let snapshot =
-    Dated_jsonl.create ~base_dir ()
+    Dated_jsonl.open_store location
     |> fun store ->
     Tail.load ~store ~expected_keeper:"keeper-main" ~limit:4
   in
@@ -230,11 +242,12 @@ let test_load_does_not_backfill_rejected_rows () =
   | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Storage_error _) | None -> fail "physical row errors were hidden"
 
 let test_load_surfaces_malformed_newest_without_backfill () =
-  let base_dir = tmpdir "tui_metrics_tail_malformed_newest" in
+  let location = temp_store "tui_metrics_tail_malformed_newest" in
+  let base_dir = Dated_jsonl.Store.dir location in
   write_raw_lines base_dir "2026-01" "31.jsonl"
     [ Yojson.Safe.to_string (heartbeat 1); "not-json" ];
   let snapshot =
-    Dated_jsonl.create ~base_dir ()
+    Dated_jsonl.open_store location
     |> fun store ->
     Tail.load ~store ~expected_keeper:"keeper-main" ~limit:1
   in
@@ -251,7 +264,8 @@ let test_load_surfaces_malformed_newest_without_backfill () =
   | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Storage_error _) | None -> fail "malformed newest row was hidden"
 
 let test_load_spans_months_and_rotations () =
-  let base_dir = tmpdir "tui_metrics_tail_order" in
+  let location = temp_store "tui_metrics_tail_order" in
+  let base_dir = Dated_jsonl.Store.dir location in
   write_rows base_dir "2026-01" "31.jsonl" [ heartbeat 1; heartbeat 2 ]
     ~terminate:true;
   write_rows base_dir "2026-02" "01.001.jsonl" [ heartbeat 3 ]
@@ -260,7 +274,7 @@ let test_load_spans_months_and_rotations () =
     ~terminate:true;
   write_rows base_dir "2026-02" "01.jsonl" [ heartbeat 5; heartbeat 6 ]
     ~terminate:true;
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   let snapshot =
     Tail.load ~store ~expected_keeper:"keeper-main" ~limit:5
   in
@@ -270,11 +284,12 @@ let test_load_spans_months_and_rotations () =
   check bool "valid rotated tail has no error" true (Option.is_none snapshot.error)
 
 let test_load_keeps_unterminated_newest_row () =
-  let base_dir = tmpdir "tui_metrics_tail_unterminated" in
+  let location = temp_store "tui_metrics_tail_unterminated" in
+  let base_dir = Dated_jsonl.Store.dir location in
   write_rows base_dir "2026-02" "02.jsonl" [ heartbeat 8; heartbeat 9 ]
     ~terminate:false;
   let snapshot =
-    Dated_jsonl.create ~base_dir ()
+    Dated_jsonl.open_store location
     |> fun store ->
     Tail.load ~store ~expected_keeper:"keeper-main" ~limit:1
   in
@@ -284,10 +299,11 @@ let test_load_keeps_unterminated_newest_row () =
     (Option.is_none snapshot.error)
 
 let test_load_surfaces_invalid_layout () =
-  let base_dir = tmpdir "tui_metrics_tail_invalid_layout" in
+  let location = temp_store "tui_metrics_tail_invalid_layout" in
+  let base_dir = Dated_jsonl.Store.dir location in
   Fs_compat.mkdir_p (Filename.concat base_dir "2026-aa");
   let snapshot =
-    Dated_jsonl.create ~base_dir ()
+    Dated_jsonl.open_store location
     |> fun store ->
     Tail.load ~store ~expected_keeper:"keeper-main" ~limit:1
   in
@@ -304,7 +320,8 @@ let test_load_surfaces_invalid_layout () =
   | Some Tail.Remote_workspace | Some Tail.Workspace_unconfirmed | Some (Tail.Row_errors _) | None -> fail "invalid layout was hidden"
 
 let test_load_is_bounded_by_tail_not_file_size () =
-  let base_dir = tmpdir "tui_metrics_tail_sparse" in
+  let location = temp_store "tui_metrics_tail_sparse" in
+  let base_dir = Dated_jsonl.Store.dir location in
   let month_dir = Filename.concat base_dir "2026-02" in
   Fs_compat.mkdir_p month_dir;
   let path = Filename.concat month_dir "03.jsonl" in
@@ -323,7 +340,7 @@ let test_load_is_bounded_by_tail_not_file_size () =
   Gc.full_major ();
   let allocated_before = Gc.allocated_bytes () in
   let snapshot =
-    Dated_jsonl.create ~base_dir ()
+    Dated_jsonl.open_store location
     |> fun store ->
     Tail.load ~store ~expected_keeper:"keeper-main" ~limit:1
   in

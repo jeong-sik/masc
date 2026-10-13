@@ -27,18 +27,11 @@ let dashboard_surface = "/api/v1/dashboard/tools"
    already record a coverage_gap that bypasses this SLO. *)
 let freshness_slo_s = Masc_time_constants.hour
 
-let store_dir masc_root = Filename.concat masc_root "tool_usage"
+(* [masc_root] is the cluster's root. *)
+let location masc_root =
+  Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Tool_usage)
 
-(* Opt-in: unset keeps everything. A malformed value now means the same here
-   as in every other store (#27110). *)
-let retention_days () =
-  match
-    Env_config_core.get_retention_days
-      ~default:Env_config_core.Retain_forever
-      "MASC_TOOL_USAGE_LOG_RETENTION_DAYS"
-  with
-  | Env_config_core.Retain_forever -> None
-  | Env_config_core.Prune_after_days days -> Some days
+let store_dir masc_root = Dated_jsonl.Store.dir (location masc_root)
 
 let ts_of_record = Dashboard_tool_source_freshness.latest_ts_of_record
 
@@ -149,8 +142,7 @@ let init ?cluster_name ~base_path () =
   let dir = store_dir masc_root in
   (try
      Fs_compat.mkdir_p dir;
-     let retention_days = retention_days () in
-     let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
+     let store = Dated_jsonl.open_store (location masc_root) in
      Atomic.set store_ref (Some store)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Atomic.set store_ref None;
@@ -231,7 +223,7 @@ let install ~on_io_failure =
           ~tool_name
           ~disposition:result
           ~caller:(extract_caller result)
-    | _ -> ())
+    | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ())
 
 (* -- Read utilities (for analysis) -- *)
 
@@ -252,7 +244,7 @@ let source_metadata_json ~masc_root =
   in
   let entry_count, latest_ts =
     if exists && not store_not_directory then
-      let store = Dated_jsonl.create ~base_dir:durable_store () in
+      let store = Dated_jsonl.open_store (location masc_root) in
       (count_entries store, latest_ts store)
     else
       (0, None)

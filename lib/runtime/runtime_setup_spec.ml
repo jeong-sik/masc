@@ -20,7 +20,9 @@ let protocol = function Ollama -> "ollama-http" | Messages -> "messages-http"
   | Claude_code -> "claude-code" | Codex -> "codex-app-server" | Antigravity -> "antigravity-cli"
   | Muse -> "muse-serve"
   | Llama_cpp | Vllm | Openai_compatible -> "openai-compatible-http"
-let http = function Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> true | _ -> false
+let http = function
+  | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> true
+  | Claude_code | Codex | Antigravity | Muse -> false
 let safe_text value = value <> "" && String.trim value = value
   && not (String.exists (function '\000'..'\031' | '\127' -> true | _ -> false) value)
 let required fields key = match List.assoc_opt key fields with
@@ -119,7 +121,9 @@ let of_json ?home_dir = function
       | _ -> invalid "choice" in
     let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input";"existing_provider_id"]
       @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind";"request_path"] else ["command"])
-      @ (match choice with Claude_code | Codex | Muse -> ["account_home"] | _ -> [])
+      @ (match choice with
+        | Claude_code | Codex | Muse -> ["account_home"]
+        | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity -> [])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
     let* requested_provider_id = optional fields "existing_provider_id" in
@@ -145,7 +149,8 @@ let of_json ?home_dir = function
         | Messages,Some "anthropic" -> Ok Anthropic | Messages,Some "kimi" -> Ok Kimi
         | (Llama_cpp | Vllm | Openai_compatible),(None | Some "openai_compat") -> Ok Openai_compat
         | (Llama_cpp | Vllm | Openai_compatible),Some "glm" -> Ok Glm
-        | _ -> invalid "provider_kind" in
+        | (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex
+          | Antigravity | Muse), _ -> invalid "provider_kind" in
       let* request_path = match List.assoc_opt "request_path" fields with
         | None -> Ok None
         | Some (`String value) when safe_text value ->
@@ -163,14 +168,23 @@ let of_json ?home_dir = function
       Ok (Http {endpoint;credential;kind;request_path}))
     else (
       let* command = if List.mem_assoc "command" fields then required fields "command"
-        else Ok (match choice with Claude_code -> "claude" | Codex -> "codex" | Muse -> "muse" | _ -> "agy") in
+        else (match choice with
+          | Claude_code -> Ok "claude"
+          | Codex -> Ok "codex"
+          | Muse -> Ok "muse"
+          | Antigravity -> Ok "agy"
+          (* The five http-guarded choices return above, so this arm is
+             unreachable; it stays to keep the match exhaustive over future
+             choices instead of silently defaulting them. *)
+          | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages -> invalid "command") in
       let* account_home =
         if List.mem_assoc "account_home" fields
         then required fields "account_home" |> Result.map Option.some
         else Ok None in
       let* account_home = match account_home,choice with
         | None,Muse -> invalid "account_home"
-        | None,_ -> Ok None
+        | (None, Ollama) | (None, Llama_cpp) | (None, Vllm) | (None, Openai_compatible)
+        | (None, Messages) | (None, Claude_code) | (None, Codex) | (None, Antigravity) -> Ok None
         | Some home,_ when Runtime_account_home.is_valid home -> Ok (Some home)
         | Some _,_ -> invalid "account_home" in
       let* oauth,timeout = if choice <> Antigravity then Ok (None,None) else (
@@ -240,7 +254,14 @@ let connection_matches spec (provider : Runtime_schema.provider) =
     | None, None, None -> true
     | None, Some (Env_reference name), Some (Runtime_schema.Env configured) -> name=configured
     | None, Some (File_reference path), Some (Runtime_schema.File configured) -> path=configured
-    | _ -> false in
+    | Some _, None, (None | Some (Runtime_schema.Env _ | Runtime_schema.File _))
+    | Some _, Some (Env_reference _ | File_reference _),
+      (None | Some (Runtime_schema.Env _ | Runtime_schema.File _ | Runtime_schema.Inline _))
+    | None, None,
+      Some (Runtime_schema.Env _ | Runtime_schema.File _ | Runtime_schema.Inline _)
+    | None, Some (Env_reference _), (None | Some (Runtime_schema.File _ | Runtime_schema.Inline _))
+    | None, Some (File_reference _), (None | Some (Runtime_schema.Env _ | Runtime_schema.Inline _))
+      -> false in
   let connection_matches = match spec.transport, provider.transport with
     | Client client, Runtime_schema.Cli command ->
       client.command=command && account_home_matches spec.choice client.account_home provider.account_home
@@ -278,7 +299,10 @@ let for_existing_inline_provider spec (provider : Runtime_schema.provider) =
       (* Provenance belongs to this parsed configured provider, not to a
          temporary file or a JSON assertion. The locked resolver rechecks it. *)
       for_provider {spec with existing_inline=Some (provider.id, original)} provider
-  | _ -> None
+  | (Http { credential = None;_}, None, Some (Runtime_schema.Env _ | Runtime_schema.File _))
+  | (Http { credential = None;_}, None, None) | (Http { credential = None;_}, Some _, _)
+  | (Http { credential = Some _;_}, _, _) | (Client _, _, _)
+  | (Http {credential=None; _ }, None, Some (Inline _)) -> None
 let resolve_provider spec providers =
   let selected = match spec.declared_provider_id with
     | Some _ as selected -> selected | None -> spec.requested_provider_id in

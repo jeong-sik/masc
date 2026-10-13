@@ -10,6 +10,11 @@ let wiki_index_id = "wiki"
 let wiki_index_json_id = "wiki.json"
 let wiki_topic_prefix = "wiki/"
 
+(* The wiki's append-only log is one of its two own files, so it is not in
+   [Tool_wiki.list_pages]. It is read as [masc://wiki/log]. [log] is a
+   reserved page name, so no page can take that URI. *)
+let wiki_log_topic = Filename.chop_suffix Wiki_journal.log_file ".md"
+
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
 
@@ -34,6 +39,77 @@ module For_testing = struct
   let blocking_io_execution_context () =
     run_blocking_resource_io Eio_guard.execution_context
 end
+
+(* One listed resource per wiki page. The pages are otherwise reachable only
+   through the [masc://wiki/{topic}] template, which a client that lists
+   resources cannot expand, so it could not open a page. A page whose header
+   does not read is listed by file name with the reason, as the index resource
+   does. A file whose name is not a valid page topic is not listed: its URI
+   would not read back as the same file ([notes.json.md] reads as a JSON
+   request for [notes]; [?] and [#] fall to URI parsing), and the index
+   resource still shows it with its reason. The log is listed once it exists.
+
+   Known limits, tracked as task-2309: every listing reads each page file and
+   the whole log, and the TUI Resources screen does not follow [nextCursor], so
+   a listing longer than one page (512 entries by default) is cut off at its
+   end, which is where the wiki entries sort. *)
+let wiki_resources ~base_path : Mcp_server.mcp_resource list =
+  run_blocking_resource_io (fun () ->
+    let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in
+    let pages =
+      Tool_wiki.list_pages ~base_path
+      |> List.filter_map (fun path ->
+        match Fs_compat.load_file path with
+        | exception Sys_error _ -> None
+        | content ->
+          let file = Filename.basename path in
+          let topic = Filename.chop_suffix file ".md" in
+          match Tool_wiki.validate_page_name topic with
+          | Error _ -> None
+          | Ok _ ->
+          let uri = uri_of_topic topic in
+          let size = String.length content in
+          (match Tool_wiki.parse_frontmatter content with
+           | Ok (fm : Tool_wiki.frontmatter) ->
+             Some
+               (Mcp_server.make_resource
+                  ~title:(fm.title :> string)
+                  ~size
+                  ~uri
+                  ~name:topic
+                  ~description:(fm.summary :> string)
+                  ~mime_type:"text/markdown"
+                  ())
+           | Error error ->
+             Some
+               (Mcp_server.make_resource
+                  ~size
+                  ~uri
+                  ~name:file
+                  ~description:(Tool_wiki.frontmatter_error_to_string error)
+                  ~mime_type:"text/markdown"
+                  ())))
+    in
+    let log_path =
+      Filename.concat (Tool_wiki.wiki_root ~base_path) Wiki_journal.log_file
+    in
+    let log =
+      match Fs_compat.load_file log_path with
+      | exception Sys_error _ -> []
+      | content ->
+        [ Mcp_server.make_resource
+            ~title:"Wiki log"
+            ~size:(String.length content)
+            ~uri:(uri_of_topic wiki_log_topic)
+            ~name:wiki_log_topic
+            ~description:
+              "One line per wiki page creation or update, oldest first. Lines are only appended."
+            ~mime_type:"text/markdown"
+            ()
+        ]
+    in
+    log @ pages)
+;;
 
 let handle_read_resource_eio state id params =
   match params with
@@ -321,6 +397,14 @@ let handle_read_resource_eio state id params =
                   | Some path ->
                     let content = Fs_compat.load_file path in
                     ("text/markdown", Some content)
+                  | None when String.equal topic wiki_log_topic ->
+                    (* The log is not a page, so the listing above has no
+                       entry for it. The path is the constant file name, never
+                       the client's topic. *)
+                    let log_path = Filename.concat wiki_dir Wiki_journal.log_file in
+                    (match Fs_compat.load_file log_path with
+                     | content -> ("text/markdown", Some content)
+                     | exception Sys_error _ -> ("text/markdown", None))
                   | None -> ("text/markdown", None)
                 end
               end)

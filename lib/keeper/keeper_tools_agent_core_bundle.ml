@@ -43,7 +43,23 @@ let initial_terminal_effect_state = function
       ; _
       } ->
     Keeper_tools_agent_core.Terminal_effect_completed receipt
-  | Some _ | None -> Keeper_tools_agent_core.Terminal_effect_open
+  | None
+  | Some
+      { Keeper_tools_agent_core.outcome =
+          ( Keeper_gate_replay.Applied _
+          | Keeper_gate_replay.Applied_with_warning _ )
+      ; terminal_effect_receipt = None
+      ; _
+      }
+  | Some
+      { Keeper_tools_agent_core.outcome =
+          ( Keeper_gate_replay.Not_applicable
+          | Keeper_gate_replay.Failed _
+          | Keeper_gate_replay.Indeterminate _
+          | Keeper_gate_replay.Repair_required _
+          | Keeper_gate_replay.Resolution_absent _ )
+      ; _
+      } -> Keeper_tools_agent_core.Terminal_effect_open
 ;;
 
 (* The failure callback every ordinary descriptor's handler receives. The
@@ -223,7 +239,10 @@ let make_tool_bundle_for_descriptors_with_policy
           ; outcome
           ; terminal_effect_receipt = replay_execution.terminal_effect_receipt
           }
-    | _ -> None
+    | None, _
+    | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_rejected _; _ }, _
+    | Some { Keeper_event_queue.decision = Keeper_event_queue.Hitl_approved; _ }, None ->
+      None
   in
   let record_gate_result =
     Option.map
@@ -680,7 +699,44 @@ let make_tool_bundle_for_descriptors_with_policy
         let name = descriptor.public_name in
         if List.length (List.filter (String.equal name) offered_names) <> 1 then
           invalid_arg ("Lane Add-on tool collides with the assembled Keeper surface: " ^ name)
-    | _ -> ()) descriptors;
+    | Keeper_tool_descriptor.Tool_execute | Keeper_tool_descriptor.Tool_search_files
+    | Keeper_tool_descriptor.Tool_read_file | Keeper_tool_descriptor.Tool_edit_file
+    | Keeper_tool_descriptor.Tool_write_file | Keeper_tool_descriptor.Tool_lane_status
+    | Keeper_tool_descriptor.Tool_tools_list | Keeper_tool_descriptor.Tool_capability_search
+    | Keeper_tool_descriptor.Tool_context_status | Keeper_tool_descriptor.Tool_peer_artifact
+    | Keeper_tool_descriptor.Tool_artifact_read | Keeper_tool_descriptor.Tool_skill_validate
+    | Keeper_tool_descriptor.Tool_skill_publish | Keeper_tool_descriptor.Tool_workspace_memory_read
+    | Keeper_tool_descriptor.Tool_memory_search | Keeper_tool_descriptor.Tool_memory_select
+    | Keeper_tool_descriptor.Tool_memory_retract | Keeper_tool_descriptor.Tool_memory_write
+    | Keeper_tool_descriptor.Tool_constitution_write | Keeper_tool_descriptor.Tool_constitution_read
+    | Keeper_tool_descriptor.Tool_constitution_remove | Keeper_tool_descriptor.Tool_wiki_search
+    | Keeper_tool_descriptor.Tool_wiki_read | Keeper_tool_descriptor.Tool_surface_read
+    | Keeper_tool_descriptor.Tool_surface_post | Keeper_tool_descriptor.Tool_person_note_set
+    | Keeper_tool_descriptor.Tool_ide_annotate | Keeper_tool_descriptor.Tool_voice_dispatch
+    | Keeper_tool_descriptor.Tool_task_dispatch | Keeper_tool_descriptor.Tool_board_dispatch
+    | Keeper_tool_descriptor.Tool_masc_task_dispatch
+    | Keeper_tool_descriptor.Tool_masc_plan_dispatch | Keeper_tool_descriptor.Tool_masc_run_dispatch
+    | Keeper_tool_descriptor.Tool_masc_agent_dispatch
+    | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
+    | Keeper_tool_descriptor.Tool_masc_misc_dispatch | Keeper_tool_descriptor.Tool_web_search
+    | Keeper_tool_descriptor.Tool_web_fetch | Keeper_tool_descriptor.Tool_browser_tabs
+    | Keeper_tool_descriptor.Tool_browser_read | Keeper_tool_descriptor.Tool_browser_session
+    | Keeper_tool_descriptor.Tool_browser_goto | Keeper_tool_descriptor.Tool_browser_act
+    | Keeper_tool_descriptor.Tool_browser_instruct | Keeper_tool_descriptor.Tool_browser_interact
+    | Keeper_tool_descriptor.Tool_masc_control_dispatch
+    | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+    | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+    | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
+    | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+    | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
+    | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+    | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
+    | Keeper_tool_descriptor.Tool_masc_fusion_status
+    | Keeper_tool_descriptor.Tool_masc_fusion_decision
+    | Keeper_tool_descriptor.Tool_masc_file_dispatch
+    | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
+    | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
+    | Keeper_tool_descriptor.Tool_analyze_image -> ()) descriptors;
   { tools
   ; agent_core_tools =
       always_loaded
@@ -714,7 +770,8 @@ let make_tool_bundle_for_descriptors_with_policy
              match descriptor.model_output_projection with
              | Tool_output.Store_above _ ->
                Runtime_execution.claude_code_inline_result_bytes
-             | projection -> Tool_output.inline_ceiling_bytes projection
+             | Tool_output.Inline_up_to _ as projection ->
+               Tool_output.inline_ceiling_bytes projection
            in
            List.map
              (fun model_name -> model_name, bound)

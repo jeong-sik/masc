@@ -253,7 +253,7 @@ let degrade_blocks_messages rewrite_block messages =
                   in
                   ToolResult { result with content; content_blocks = Some blocks }
                 end
-              | block -> block))
+              | (ToolResult { content_blocks = None;_} | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _) as block -> block))
         message.content
     in
     { message with content }
@@ -284,7 +284,8 @@ let degrade_document_messages ~wire_form ~supports_document_input messages =
            Some
              ( document_omitted_note ~media_type
              , document_omitted_placeholder ~media_type )
-       | _ -> None)
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Image _ | Audio _ -> None)
     messages
 ;;
 
@@ -335,7 +336,8 @@ let degrade_audio_messages ~supports_audio_input messages =
          Some
            ( audio_omitted_note ~media_type
            , audio_omitted_placeholder ~media_type )
-       | _ -> None)
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Image _ | Document _ | Audio _ -> None)
     messages
 ;;
 
@@ -347,7 +349,8 @@ let degrade_image_messages ~supports_image_input messages =
          Some
            ( image_omitted_note ~media_type
            , image_omitted_placeholder ~media_type )
-       | _ -> None)
+       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+       | Document _ | Audio _ | Image _ -> None)
     messages
 ;;
 
@@ -404,29 +407,13 @@ let rec content_block_to_json_with
       ; "input", input
       ]
   | ToolResult { tool_use_id; content; outcome; content_blocks; _ } ->
-    let content_json =
-      match content_blocks with
-      | Some blocks ->
-        (* Structured result: emit the blocks (text/image/...) as the
-           tool_result content array. *)
-        `List (List.map (content_block_to_json_with ~tool_result_content_style) blocks)
-      | None ->
-        (match tool_result_content_style with
-         | Tool_result_content_string -> `String (Utf8_sanitize.sanitize content)
-         | Tool_result_content_text_blocks ->
-           `List
-             [ `Assoc
-                 [ "type", `String "text"
-                 ; "text", `String (Utf8_sanitize.sanitize content)
-                 ]
-             ])
-    in
     `Assoc
-      [ "type", `String "tool_result"
-      ; "tool_use_id", `String tool_use_id
-      ; "content", content_json
-      ; "is_error", `Bool (tool_result_outcome_is_error outcome)
-      ]
+      (tool_result_wire_fields_with
+         ~tool_result_content_style
+         ~tool_use_id
+         ~content
+         ~outcome
+         content_blocks)
   | Image { media_type; data; source_type } ->
     `Assoc
       [ "type", `String "image"
@@ -457,10 +444,49 @@ let rec content_block_to_json_with
             ; "data", `String data
             ] )
       ]
+
+and tool_result_wire_fields_with
+      ~tool_result_content_style
+      ~tool_use_id
+      ~content
+      ~outcome
+      content_blocks
+  =
+  let content_json =
+    match content_blocks with
+    | Some blocks ->
+      (* Structured result: emit the blocks (text/image/...) as the
+         tool_result content array. *)
+      `List (List.map (content_block_to_json_with ~tool_result_content_style) blocks)
+    | None ->
+      (match tool_result_content_style with
+       | Tool_result_content_string -> `String (Utf8_sanitize.sanitize content)
+       | Tool_result_content_text_blocks ->
+         `List
+           [ `Assoc
+               [ "type", `String "text"
+               ; "text", `String (Utf8_sanitize.sanitize content)
+               ]
+           ])
+  in
+  [ "type", `String "tool_result"
+  ; "tool_use_id", `String tool_use_id
+  ; "content", content_json
+  ; "is_error", `Bool (tool_result_outcome_is_error outcome)
+  ]
 ;;
 
 let content_block_to_json =
   content_block_to_json_with ~tool_result_content_style:Tool_result_content_string
+;;
+
+let tool_result_wire_fields ~tool_use_id ~content ~outcome =
+  tool_result_wire_fields_with
+    ~tool_result_content_style:Tool_result_content_string
+    ~tool_use_id
+    ~content
+    ~outcome
+    None
 ;;
 
 type content_block_decode_error =
@@ -673,7 +699,8 @@ let merge_tool_result_followup_user_messages messages =
         }
       in
       aux (merged :: acc) rest
-    | msg :: rest -> aux (msg :: acc) rest
+    | ({ role = System | User | Assistant | Tool; _ } as msg) :: rest ->
+      aux (msg :: acc) rest
     | [] -> List.rev acc
   in
   aux [] messages

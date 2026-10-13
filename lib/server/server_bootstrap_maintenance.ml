@@ -599,7 +599,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     | Dispatch_outcome.Handled, Some r ->
       Tool_metrics.record r;
       Tool_metrics_persist.enqueue ~masc_root:tool_metrics_masc_root r
-    | _ -> ());
+    | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ());
   (* RFC-0234 scheduled automation runner.  Public schedule tools and the
      dashboard-only approval route only mutate the durable ledger; this loop is
      the production caller that observes due rows and emits at-most-once generic wake signals.  It
@@ -878,11 +878,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            try
              let config = Mcp_server.workspace_config state in
              let outcome =
-               (* Window, store list and fold are shared with the startup
-                  pass in Server_runtime_startup_maintenance — the two inline
-                  sums this replaces had already drifted (this pass lacked
-                  resilience_audit; the startup pass lacked
-                  tool_calls/transition-audit). *)
+               (* Window and stores are shared with the startup pass in
+                  Server_runtime_startup_maintenance. *)
                Server_runtime_startup_maintenance.prune_jsonl_at_resolved_window
                  ~base_path:config.base_path
                  ~masc_root:(Workspace.masc_dir config)
@@ -1015,8 +1012,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                 (fun (keeper, operation_id, verdict) ->
                    match verdict with
                    | Keeper_chat_journal_audit.Match -> ()
-                   | verdict ->
-                     Otel_metric_store.inc_counter
+                   | (Keeper_chat_journal_audit.Journal_missing | Keeper_chat_journal_audit.Journal_truncated | Keeper_chat_journal_audit.Mismatch _ | Keeper_chat_journal_audit.Journal_unreadable _ | Keeper_chat_journal_audit.Journal_corrupt _ | Keeper_chat_journal_audit.Store_unreadable _ | Keeper_chat_journal_audit.Liveness_unknown _) as verdict -> Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string ChatJournalAuditMismatches)
                        ~labels:
                          [ "keeper", keeper

@@ -18,7 +18,20 @@ let error_to_string = function
       (Operation_id.to_string operation.operation_id)
       (failure_stage_to_string stage)
       detail
-  | Finalization_blocked operation ->
+  | Finalization_blocked
+      ({ phase =
+           ( Prepared
+           | Joining_lanes
+           | Joined_idle
+           | Finalizing_tasks _
+           | Cleanup_ready _
+           | Reconciliation_required _
+           | Finalized _
+           | Owner_absent _
+           | Operator_absence_acknowledged _
+           | Superseded _ )
+       ; _
+       } as operation) ->
     Printf.sprintf
       "Keeper shutdown finalization blocked in operation %s"
       (Operation_id.to_string operation.operation_id)
@@ -485,7 +498,15 @@ let remove_meta_file ~config operation cleanup =
         | Ok None -> Ok ()
         | Ok (Some _) -> Error "Keeper metadata exists without its Owner"
         | Error detail -> Error detail)
-     | Error error -> Error (Keeper_owner_registry.command_error_to_string error))
+     | Error
+         (( Keeper_owner_registry.Command_lookup_failed
+              ( Keeper_owner_registry.Inventory_not_installed _
+              | Keeper_owner_registry.Owner_unavailable _
+              | Keeper_owner_registry.Owner_initialization_failed _
+              | Keeper_owner_registry.Inventory_stopping )
+          | Keeper_owner_registry.Command_lifecycle_reserved _
+          | Keeper_owner_registry.Command_rejected _ ) as error) ->
+       Error (Keeper_owner_registry.command_error_to_string error))
 ;;
 
 (* What a failed owner-side admission release means once the owner registry
@@ -782,23 +803,23 @@ let complete_cleanup
      call. Dropping it would send Apple's removal spelling to a guest another
      runtime booted -- or, since the teardown refuses an unnamed runtime,
      remove nothing at all and leave the guest running. *)
-  let sandbox_backend =
+  let effective_meta =
     (* The exact owner projection carries durable metadata. Its decoder leaves
        the TOML-owned microvm_backend unset; use the canonical profile resolution
        used at boot before choosing the teardown runtime. *)
-    match
-      Result.bind
-        (read_operation_meta ~config operation)
-        (Keeper_meta_contract.effective_meta_result ~base_path:config.base_path)
-    with
-    | Error detail -> Error detail
-    | Ok meta ->
-      Ok
-        ( (match meta.Keeper_meta_contract.sandbox_profile with
-           | Docker -> Keeper_sandbox.Docker
-           | Micro_vm -> Keeper_sandbox.Micro_vm
-           | Remote_ssh -> Keeper_sandbox.Remote_ssh)
-        , meta.Keeper_meta_contract.microvm_backend )
+    Result.bind
+      (read_operation_meta ~config operation)
+      (Keeper_meta_contract.effective_meta_result ~base_path:config.base_path)
+  in
+  let sandbox_backend =
+    Result.map
+      (fun (meta : Keeper_meta_contract.keeper_meta) ->
+         ( (match meta.sandbox_profile with
+            | Docker -> Keeper_sandbox.Docker
+            | Micro_vm -> Keeper_sandbox.Micro_vm
+            | Remote_ssh -> Keeper_sandbox.Remote_ssh)
+         , meta.microvm_backend ))
+      effective_meta
   in
   let require_released_summary_owner () =
     match operation.cleanup_intent.reason with
@@ -823,7 +844,9 @@ let complete_cleanup
            (`Draining
               (Keeper_approval_queue_result.summary_owner_retirement_error_to_string
                  error))
-       | Error error ->
+       | Error
+           (Keeper_approval_queue_result.Summary_owner_retirement_storage_error _
+            as error) ->
          Error
            (`Failed
               (Printf.sprintf
@@ -931,6 +954,49 @@ let complete_cleanup
           (match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
            | Retain_operator_pause -> ()
            | Remove_meta ->
+             (* The teardown above leaves the volumes, since a paused keeper
+                comes back to its work volume. This one is not coming back.
+                Logged rather than blocking, like the teardown: the warning
+                names what to remove by hand. *)
+             (match
+                match sandbox_backend with
+                | Error detail -> Error detail
+                | Ok (backend, microvm_backend) ->
+                  Keeper_turn_sandbox_runtime.remove_keeper_volumes_by_name
+                    ~keeper_name:operation.keeper_name
+                    ~backend
+                    ?microvm_backend
+                    ()
+              with
+              | Ok () -> ()
+              | Error detail ->
+                Log.Keeper.warn
+                  ~keeper_name:operation.keeper_name
+                  "keeper removed but its volumes were not: %s"
+                  detail);
+             (* The worktrees its clones registered stay on disk the same
+                way. A dirty one is removed with it; a locked one is refused by git
+                and named in a warning. *)
+             (match effective_meta with
+              | Error detail ->
+                Log.Keeper.warn
+                  ~keeper_name:operation.keeper_name
+                  "keeper removed but its worktrees were not looked for: %s"
+                  detail
+              | Ok meta ->
+                Keeper_bundle_worktrees.remove_keeper_worktrees
+                  ~run_argv:(fun ~timeout_sec argv ->
+                    Process_eio.run_argv_with_status ~timeout_sec argv)
+                  ~timeout_sec:
+                    (Env_config_sandbox.Shell_timeout.timeout_sec
+                       ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+                       ())
+                  ~base_path:config.base_path
+                  ~keeper_name:operation.keeper_name
+                  ~profile:
+                    (Keeper_types_profile_sandbox.sandbox_profile_to_config
+                       meta.sandbox_profile)
+                |> Keeper_bundle_worktrees.log_outcomes ~keeper_name:operation.keeper_name);
              (match
                 Keeper_dos_controller.release_retired ~config
                   ~keeper_name:operation.keeper_name
@@ -965,7 +1031,9 @@ let run ~config ~entry ?successor_operation_id operation =
                   ?successor_operation_id
                   ready
                   cleanup
-              | _ -> Error Unsupported_phase))))
+              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+              | Reconciliation_required _ | Finalized _ | Owner_absent _
+              | Operator_absence_acknowledged _ | Blocked _ | Superseded _ -> Error Unsupported_phase))))
   | Finalizing_tasks settled_task_ids ->
     (match read_operation_meta ~config operation with
      | Error detail -> block ~config operation Meta_read detail
@@ -984,7 +1052,9 @@ let run ~config ~entry ?successor_operation_id operation =
                   ?successor_operation_id
                   ready
                   cleanup
-              | _ -> Error Unsupported_phase))))
+              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+              | Reconciliation_required _ | Finalized _ | Owner_absent _
+              | Operator_absence_acknowledged _ | Blocked _ | Superseded _ -> Error Unsupported_phase))))
   | Cleanup_ready cleanup ->
     complete_cleanup
       ~config

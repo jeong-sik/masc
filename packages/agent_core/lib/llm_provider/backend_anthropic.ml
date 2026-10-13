@@ -13,6 +13,12 @@ let request_output_token_receipt = Request_artifact_internal.output_token_receip
 
 let binding_controls_beta = "thinking-binding-controls-2026-08-01"
 
+(* Measurement switch (RFC-AC-041 Q15, task-2306): set to a false value to stop
+   sending [thinking.block_binding.prefix_mismatch_behavior = "drop_block"] on
+   adaptive Sonnet/Haiku 5.5 completions. Read per request; the default keeps
+   the current behaviour. *)
+let drop_block_env_var = "AGENT_CORE_ANTHROPIC_DROP_BLOCK"
+
 let request_headers ~body headers =
   let has_binding =
     match Yojson.Safe.from_string body with
@@ -54,6 +60,28 @@ let observe_input_transformations json =
     | _ ->
       []
   in
+  (let message =
+     match json with
+     | `Assoc fields ->
+       (match List.assoc_opt "message" fields with
+        | Some (`Assoc inner) -> inner
+        | _ -> fields)
+     | _ -> []
+   in
+   let str key =
+     match List.assoc_opt key message with
+     | Some (`String value) -> [ key, `String value ]
+     | _ -> []
+   in
+   (* One line per response, including zero transformations, so a mismatch
+      rate has a denominator. Carries no block contents or signatures. *)
+   Diag.info "anthropic" "%s"
+     (Yojson.Safe.to_string
+        (`Assoc
+            ((("event", `String "thinking_input_transformation_summary")
+              :: str "id")
+             @ str "model"
+             @ [ "count", `Int (List.length transformations) ]))));
   List.iter
     (function
       | `Assoc fields ->
@@ -245,18 +273,38 @@ let validate_thinking_controls wire (config : Provider_config.t) =
       (Printf.sprintf
          "model %S disabled thinking accepts only low, medium or high effort"
          config.model_id)
-  | _, Some false, Some effort ->
+  | _, Some false,
+    Some
+      ((Reasoning_effort.None_ | Minimal | Low | Medium | High | XHigh | Max | Ultra)
+       as effort) ->
     Error
       (Printf.sprintf
          "model %S cannot set reasoning_effort %S when enable_thinking=false"
          config.model_id
          (Reasoning_effort.to_string effort))
-  | Capabilities.Anthropic_always_adaptive, Some false, _ ->
+  | Capabilities.Anthropic_always_adaptive, Some false, None ->
     Error
       (Printf.sprintf
          "model %S cannot disable always-on adaptive thinking"
          config.model_id)
-  | _, _, _ -> Provider_config.validate_reasoning_effort_request config
+  | ( ( Capabilities.Anthropic_adaptive_default
+      | Capabilities.Anthropic_adaptive_disabled_through_high
+      | Capabilities.Anthropic_adaptive_between_tools
+      | Capabilities.Anthropic_adaptive_preferred
+      | Capabilities.Anthropic_adaptive_only
+      | Capabilities.Anthropic_always_adaptive )
+    , (None | Some (true | false))
+    , ( None
+      | Some
+          ( Reasoning_effort.None_
+          | Reasoning_effort.Minimal
+          | Reasoning_effort.Low
+          | Reasoning_effort.Medium
+          | Reasoning_effort.High
+          | Reasoning_effort.XHigh
+          | Reasoning_effort.Max
+          | Reasoning_effort.Ultra ) ) ) ->
+    Provider_config.validate_reasoning_effort_request config
 ;;
 
 let output_config_for_config _mode (config : Provider_config.t) =
@@ -405,10 +453,14 @@ and anthropic_tool_result_content_block_to_json = function
       ]
 ;;
 
+let anthropic_role_tag = function
+  | Assistant -> "assistant"
+  | User | System | Tool -> "user"
+;;
+
 let anthropic_message_to_json (msg : message) =
-  let role = match msg.role with Assistant -> "assistant" | User | System | Tool -> "user" in
   `Assoc
-    [ "role", `String role
+    [ "role", `String (anthropic_role_tag msg.role)
     ; "content", `List (List.map anthropic_content_block_to_json msg.content)
     ]
 ;;
@@ -478,6 +530,36 @@ let project_tools_for_kind kind tools =
   | Provider_config.Ollama
   | Provider_config.Gemini
   | Provider_config.Glm -> tools
+;;
+
+(* The request head the prefix digest chains from. This models the API's own
+   prefix check — top-level [system] text and the [tools] set — not the wire
+   bytes: parameters outside those ([output_config], [tool_choice], [thinking]
+   settings, sampling, budgets) and [cache_control] markers are not part of
+   the check, so hashing them would drop thinking the API accepts and force
+   needless regeneration. Deliberately not shared with the body builders: if
+   the wire gains a marker, the head must not follow. *)
+let prefix_head ~tools (config : Provider_config.t) =
+  let system =
+    match config.system_prompt with
+    | Some s when not (Api_common.string_is_blank s) ->
+      Some ("system", `String (Utf8_sanitize.sanitize s))
+    | _ -> None
+  in
+  let tools =
+    match tools with
+    | [] -> None
+    | ts -> Some ("tools", `List (project_tools_for_kind config.kind ts))
+  in
+  List.filter_map Fun.id [ system; tools ]
+;;
+
+let verify_prefix_binding ~head messages =
+  Reasoning_history_projection.verify_prefix_binding
+    ~head
+    ~encode_block:anthropic_content_block_to_json
+    ~role_tag:anthropic_role_tag
+    messages
 ;;
 
 let build_request_payload
@@ -558,15 +640,49 @@ let build_request_payload
       projection.messages
   in
   let messages = Api_common.merge_tool_result_followup_user_messages projected_messages in
+  (* Prefix binding runs on the merged list the wire serializes: only the
+     Anthropic kind verifies here. Its thinking toggle always resolves
+     Require_identical_source, while Kimi — the one other kind reaching
+     serialization — carries rotation-tolerant reasoning this backend must
+     not second-guess. *)
+  let messages =
+    match config.kind with
+    | Provider_config.Anthropic -> (
+      let head = prefix_head ~tools config in
+      match verify_prefix_binding ~head messages with
+      | Error error ->
+        invalid_arg
+          ("Backend_anthropic.build_request: "
+           ^ Reasoning_history_projection.prefix_verify_error_to_string error)
+      | Ok verdict ->
+        Reasoning_history_projection.observe_prefix_drops
+          ~component:"backend_anthropic"
+          ~stream:
+            (match request_mode with
+             | Completion { stream; _ } -> stream
+             | Count_tokens -> false)
+          verdict;
+        verdict.Reasoning_history_projection.messages)
+    | Provider_config.Kimi
+    | Provider_config.OpenAI_compat
+    | Provider_config.Ollama
+    | Provider_config.Gemini
+    | Provider_config.Glm -> messages
+  in
   (match config.kind, caps.supports_assistant_prefill, List.rev messages with
    | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->
      invalid_arg
        (Printf.sprintf
           "Backend_anthropic.build_request: model %S does not accept a final assistant prefill; end messages with a user turn"
           config.model_id)
-   | Provider_config.Anthropic, (true | false), _
-   | (Provider_config.Kimi | Provider_config.OpenAI_compat | Provider_config.Ollama
-     | Provider_config.Gemini | Provider_config.Glm), _, _ -> ());
+   | ( ( Provider_config.Anthropic
+       | Provider_config.Kimi
+       | Provider_config.OpenAI_compat
+       | Provider_config.Ollama
+       | Provider_config.Gemini
+       | Provider_config.Glm )
+     , (true | false)
+     , ([] | { role = System | User | Assistant | Tool; _ } :: _) ) -> ());
   let message_to_json =
     match config.kind with
     | Provider_config.Anthropic -> anthropic_message_to_json
@@ -677,18 +793,33 @@ let build_request_payload
   let body =
     let thinking = thinking_config_for_config thinking_mode config in
     let thinking =
-      match request_mode, thinking_mode, config.enable_thinking, thinking with
-      | Completion _,
-        Anthropic_control (Capabilities.Anthropic_adaptive_between_tools
-                           | Capabilities.Anthropic_adaptive_disabled_through_high),
-        Some true, Some (`Assoc fields) ->
-        (* These catalog policies describe Sonnet/Haiku 5.5. Their adaptive
-           wire accepts binding controls; between_tools and disabled do not.
-           The server validates the actual serialized prefix, including any
-           intentional window or tool-schema changes. *)
+      (* These catalog policies describe Sonnet/Haiku 5.5. Their adaptive
+         wire accepts binding controls; between_tools and disabled do not.
+         The server validates the actual serialized prefix, including any
+         intentional window or tool-schema changes. *)
+      let binds_prefix_mismatch =
+        match request_mode, thinking_mode with
+        | Completion _,
+          Anthropic_control (Capabilities.Anthropic_adaptive_between_tools
+                             | Capabilities.Anthropic_adaptive_disabled_through_high)
+          -> true
+        | Completion _,
+          ( Anthropic_control (Capabilities.Anthropic_adaptive_default
+                               | Capabilities.Anthropic_adaptive_preferred
+                               | Capabilities.Anthropic_adaptive_only
+                               | Capabilities.Anthropic_always_adaptive)
+          | Anthropic_no_policy
+          | Kimi_flag )
+        | Count_tokens, (Anthropic_control _ | Anthropic_no_policy | Kimi_flag) -> false
+      in
+      match binds_prefix_mismatch, config.enable_thinking, thinking with
+      | true, Some true, Some (`Assoc fields)
+        when Env_parse.bool_env ~default:true drop_block_env_var ->
         Some (`Assoc (("block_binding",
           `Assoc [ "prefix_mismatch_behavior", `String "drop_block" ]) :: fields))
-      | _ -> thinking
+      | true, Some true, (None | Some _)
+      | true, (Some false | None), (None | Some _)
+      | false, (Some true | Some false | None), (None | Some _) -> thinking
     in
     match thinking with
     | Some thinking -> ("thinking", thinking) :: body
@@ -859,4 +990,51 @@ let build_count_tokens_request ~config ~messages ?tools () =
     invalid_arg
       ("Backend_anthropic.build_count_tokens_request: Anthropic-compatible Messages "
        ^ "provider required")
+;;
+
+let transmitted_reasoning_prefix
+      ~(config : Provider_config.t)
+      ~messages
+      ~tools
+      ~response_content
+      ()
+  =
+  (* This backend records for the Anthropic kind only; every other kind it
+     can serve returns None, and replay fails closed. (Gemini binds
+     signatures too and gets its own adoption separately.) An admitted body
+     is recorded too: [Complete_common.serialize_final_http_request_unadmitted]
+     builds it with [build_request_artifact] from the same config, messages
+     and tools read here, and the head covers only system and tools. Frozen
+     thinking control is serialized only on the exact-output and count-tokens
+     paths, which never reach this function. *)
+  match config.kind with
+  | Provider_config.Anthropic -> (
+    match Types.content_has_reasoning_artifact response_content with
+    | false -> None
+    | true -> (
+      match project_history config messages with
+      | Error _ -> None
+      | Ok projection ->
+        let merged =
+          Api_common.merge_tool_result_followup_user_messages projection.messages
+        in
+        let head = prefix_head ~tools config in
+        (match verify_prefix_binding ~head merged with
+         | Error _ -> None
+         | Ok verdict ->
+           let message_digest =
+             Reasoning_history_projection.content_wire_digest
+               ~encode_block:anthropic_content_block_to_json
+               response_content
+           in
+           Some
+             { Types.Reasoning_prefix.request_digest =
+                 verdict.Reasoning_history_projection.final_digest
+             ; message_digest
+             })))
+  | Provider_config.Kimi
+  | Provider_config.OpenAI_compat
+  | Provider_config.Ollama
+  | Provider_config.Gemini
+  | Provider_config.Glm -> None
 ;;

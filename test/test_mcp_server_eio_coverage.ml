@@ -275,10 +275,10 @@ let test_is_valid_request_id_object () =
   check bool "object invalid" false (Mcp_transport_protocol.is_valid_request_id (`Assoc []))
 
 (* ============================================================
-   validate_initialize_params Tests
+   initialize_protocol_version Tests
    ============================================================ *)
 
-let test_validate_initialize_params_valid () =
+let test_initialize_protocol_version_valid () =
   let params = `Assoc [
     ("protocolVersion", `String "2024-11-05");
     ("clientInfo", `Assoc [
@@ -287,16 +287,16 @@ let test_validate_initialize_params_valid () =
     ]);
     ("capabilities", `Assoc []);
   ] in
-  match Mcp_transport_protocol.validate_initialize_params (Some params) with
-  | Ok () -> ()
+  match Mcp_transport_protocol.initialize_protocol_version (Some params) with
+  | Ok version -> check string "requested version" "2024-11-05" version
   | Error e -> fail ("unexpected error: " ^ e)
 
-let test_validate_initialize_params_none () =
-  match Mcp_transport_protocol.validate_initialize_params None with
+let test_initialize_protocol_version_none () =
+  match Mcp_transport_protocol.initialize_protocol_version None with
   | Error "Missing params" -> ()
   | _ -> fail "expected Missing params"
 
-let test_validate_initialize_params_missing_version () =
+let test_initialize_protocol_version_missing_version () =
   let params = `Assoc [
     ("clientInfo", `Assoc [
       ("name", `String "test");
@@ -304,9 +304,9 @@ let test_validate_initialize_params_missing_version () =
     ]);
     ("capabilities", `Assoc []);
   ] in
-  match Mcp_transport_protocol.validate_initialize_params (Some params) with
+  match Mcp_transport_protocol.initialize_protocol_version (Some params) with
   | Error msg -> check bool "error contains Missing" true (String.length msg > 0)
-  | Ok () -> fail "expected error"
+  | Ok _ -> fail "expected error"
 
 (* ============================================================
    jsonrpc_request_of_yojson Tests
@@ -442,10 +442,10 @@ let () =
       test_case "invalid session rejected" `Quick
         test_tool_invocation_identity_rejects_invalid_session;
     ];
-    "validate_initialize_params", [
-      test_case "valid" `Quick test_validate_initialize_params_valid;
-      test_case "none" `Quick test_validate_initialize_params_none;
-      test_case "missing version" `Quick test_validate_initialize_params_missing_version;
+    "initialize_protocol_version", [
+      test_case "valid" `Quick test_initialize_protocol_version_valid;
+      test_case "none" `Quick test_initialize_protocol_version_none;
+      test_case "missing version" `Quick test_initialize_protocol_version_missing_version;
     ];
     "jsonrpc_request_of_yojson", [
       test_case "valid" `Quick test_jsonrpc_request_of_yojson_valid;

@@ -37,13 +37,17 @@ let detect_host ~run =
         | [] -> Unsupported)
       | Error _ -> Unsupported)
     | _ -> Unsupported)
-  | _ -> Unsupported
+  | Ok _, Error _ | Error _, (Ok _ | Error _) -> Unsupported
 let system_runner argv =
   match Process_eio.run_argv_with_status_split_or_refusal
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Env_config_sandbox.Shell_timeout.Read ()) argv with
   | Ok (Unix.WEXITED 0, stdout, _) -> Ok stdout
   | Error (Process_eio.Executable_not_found _) -> Error Missing_command
-  | Ok _ | Error _ -> Error Command_failed
+  | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _)
+  | Error (Process_eio.Empty_argv
+          | Process_eio.Spawn_failed _
+          | Process_eio.Child_setup_failed _
+          | Process_eio.Cwd_unavailable _) -> Error Command_failed
 let state_message = function
   | Service_ready -> "Service responded; image preparation and guest verification are still required."
   | Missing_prerequisite reason | Unsupported_host reason | Unsupported_capability reason
@@ -141,7 +145,8 @@ let probe ~host ~run ~require_rootless ~require_userns backend =
   | Remote_ssh, _ -> Needs_configuration
       "Select a configured SSH endpoint and verify its remote execution; SSH is not a disposable guest"
   | _, Unsupported -> Unsupported_host "Supported hosts are macOS and Linux on ARM64 or x64"
-  | Apple_container, (Linux _ | Macos {architecture=X64; _}) ->
+  | (Apple_container, Linux (Arm64)) | (Apple_container, Linux (X64))
+  | (Apple_container, Macos { architecture = X64; _ }) ->
     Unsupported_host "Apple Container requires Apple Silicon and macOS 26 or newer"
   | Apple_container, Macos {major; _} when major < 26 ->
     Unsupported_host "Apple Container requires macOS 26 or newer"
@@ -153,15 +158,15 @@ let probe ~host ~run ~require_rootless ~require_userns backend =
          if apple_default_kernel_configured ~run then Service_ready
          else Missing_prerequisite kernel_missing_reason
        | Error reason -> Probe_failed reason)
-     | unanswered -> unanswered)
+     | (Missing_prerequisite _ | Unsupported_host _ | Unsupported_capability _ | Probe_failed _ | Needs_configuration _) as unanswered -> unanswered)
   | Nerdctl_kata, Macos _ -> Unsupported_host "Kata setup requires a Linux host with hardware virtualization"
-  | Nerdctl_kata, Linux _ ->
+  | (Nerdctl_kata, Linux (Arm64)) | (Nerdctl_kata, Linux (X64)) ->
     command ~run ["nerdctl"; "info"; "--format"; "{{json .}}"] (fun stdout ->
       json stdout (function
         | `Assoc fields when List.assoc_opt "OSType" fields = Some (`String "linux") ->
           command ~run ["kata-runtime"; "check"; "--no-network-checks"] (fun _ -> Service_ready)
         | _ -> Probe_failed "nerdctl did not report a Linux containerd service"))
-  | Docker, (Macos _ | Linux _) ->
+  | (Docker, (Macos _ | Linux (Arm64))) | (Docker, Linux (X64)) ->
     command ~run ["docker"; "info"; "--format"; "{{json .}}"] (fun stdout ->
       json stdout (function
         | `Assoc fields when List.assoc_opt "OSType" fields = Some (`String "linux") ->
@@ -183,7 +188,7 @@ let recommend ~host ~configured entries =
   | _ ->
     let candidates = match host with
       | Macos {architecture=Arm64; major} when major >= 26 -> [Apple_container; Docker]
-      | Macos _ | Linux _ -> [Docker]
+      | Macos _ | Linux (Arm64) | Linux (X64) -> [Docker]
       | Unsupported -> [] in
     List.find_opt ready candidates
 let state_id = function Service_ready -> "service_ready" | Missing_prerequisite _ -> "missing_prerequisite"
@@ -214,7 +219,13 @@ let catalog_json ~host ~configured entries =
            | Some backend -> ["--microvm-backend"; Keeper_microvm_backend.to_string backend]));
       "recommended", `Bool (recommended = Some row.backend);
       "advanced", `Bool (List.mem row.backend [Nerdctl_kata; Microsandbox; Remote_ssh])]) entries)]
-let selection_of_contents ~path ~contents ~profile:requested ~microvm_backend:requested_backend ~network_mode:requested_network =
+(* Where a microvm declaration names no backend. [Refuse_unnamed] is the setup
+   wizard's rule: the operator chooses and the written TOML shows the choice.
+   [Resolve_like_boot] is the server's: the keeper takes the host's runtime
+   through the same function boot reads, and where the host has none the boot
+   refuses, so this does too. *)
+type unnamed_backend = Refuse_unnamed | Resolve_like_boot
+let select ~unnamed_backend ~path ~contents ~profile:requested ~microvm_backend:requested_backend ~network_mode:requested_network =
   let open Result.Syntax in
   let* defaults = Keeper_types_profile.materialization_defaults_of_content ~path contents
     |> Result.map_error Keeper_types_profile.keeper_toml_load_error_to_string in
@@ -228,7 +239,15 @@ let selection_of_contents ~path ~contents ~profile:requested ~microvm_backend:re
     | Micro_vm -> (match requested_backend, defaults.microvm_backend with
       | Some b, _ -> Ok (of_microvm b)
       | None, Some b -> Ok (of_microvm b)
-      | None, None -> Error "Choose a microVM backend explicitly; no host default is written on your behalf") in
+      | None, None -> (match unnamed_backend with
+        | Refuse_unnamed ->
+          Error "Choose a microVM backend explicitly; no host default is written on your behalf"
+        | Resolve_like_boot ->
+          (match Keeper_meta_contract.microvm_backend_of_profile_defaults defaults with
+           | Some b -> Ok (of_microvm b)
+           | None -> Error ("microvm_backend_unresolved: sandbox_profile \"microvm\" has no runtime on this host. Set microvm_backend to one of: "
+               ^ String.concat ", " Keeper_microvm_backend.valid_strings
+               ^ ", or declare a sandbox_profile this host can serve")))) in
   let sandbox_profile = match chosen_profile with Keeper_sandbox_config.Docker -> Keeper_types_profile_sandbox.Docker | Micro_vm -> Micro_vm | Remote_ssh -> Remote_ssh in
   (* #37523: the image, like the backend above, is named by the operator; the
      wizard does not write one on their behalf. Same rule as boot. *)
@@ -249,13 +268,16 @@ let declaration_fault_id = function
   | Declaration_invalid -> "declaration_invalid" | Declaration_unreadable -> "declaration_unreadable"
 let configuration_error_json {kind; detail} =
   `Assoc ["kind", `String (declaration_fault_id kind); "detail", `String detail]
-let declaration ~base_path =
+let selection_of_contents = select ~unnamed_backend:Refuse_unnamed
+let read_declaration ~unnamed_backend ~base_path =
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
   match In_channel.with_open_text path In_channel.input_all with
   | contents ->
-    selection_of_contents ~path ~contents ~profile:None ~microvm_backend:None ~network_mode:None
+    select ~unnamed_backend ~path ~contents ~profile:None ~microvm_backend:None ~network_mode:None
     |> Result.map_error (fun detail -> {kind=Declaration_invalid; detail})
   | exception Sys_error detail -> Error {kind=Declaration_unreadable; detail}
+let declaration = read_declaration ~unnamed_backend:Refuse_unnamed
+let boot_declaration = read_declaration ~unnamed_backend:Resolve_like_boot
 let inspect ~base_path =
   let host = detect_host ~run:system_runner in
   let declared = Option.map (fun base_path -> declaration ~base_path) base_path in

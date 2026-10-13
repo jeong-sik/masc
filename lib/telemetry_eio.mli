@@ -16,11 +16,11 @@
     — callers consume the
     typed event ADT and the convenience emitters / readers only.
 
-    The date-split telemetry store applies bounded retention by default:
-    [MASC_TELEMETRY_RETENTION_DAYS] defaults to 30 and
-    [MASC_TELEMETRY_MAX_BYTES] defaults to 52428800. Positive values override;
-    non-positive values disable the matching bound. The byte cap prunes oldest
-    completed day-files while preserving the current day-file. *)
+    The date-split telemetry store is size-capped:
+    [MASC_TELEMETRY_MAX_BYTES] defaults to 52428800. A positive value
+    overrides; a non-positive value disables the cap. The cap prunes oldest
+    completed day-files while preserving the current day-file. The server's
+    prune pass removes day files by age ({!Dated_jsonl.prune_listed_stores}). *)
 
 type config = Workspace_utils.config
 

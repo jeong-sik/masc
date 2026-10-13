@@ -375,7 +375,12 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
       (match effective_provider_kind ?registry_entry provider with
        | Some Llm_provider.Provider_config.Ollama ->
          Llm_provider.Provider_config.OpenAI_compat
-       | Some kind -> kind
+       | Some
+           (( Llm_provider.Provider_kind.Anthropic
+            | Llm_provider.Provider_kind.Kimi
+            | Llm_provider.Provider_kind.OpenAI_compat
+            | Llm_provider.Provider_kind.Gemini
+            | Llm_provider.Provider_kind.Glm ) as kind) -> kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api ->
     (match effective_provider_kind ?registry_entry provider with
@@ -418,12 +423,21 @@ let normalize_http_request_path ~kind ~base_url ~request_path =
   match kind with
   | Llm_provider.Provider_config.OpenAI_compat ->
     normalize_openai_compat_request_path ~base_url ~request_path
-  | _ -> request_path
+  | Llm_provider.Provider_kind.Anthropic
+  | Llm_provider.Provider_kind.Kimi
+  | Llm_provider.Provider_kind.Ollama
+  | Llm_provider.Provider_kind.Gemini
+  | Llm_provider.Provider_kind.Glm -> request_path
 
 let default_http_request_path ~kind ~base_url =
   let request_path = match kind with
     | Llm_provider.Provider_config.OpenAI_compat -> Masc_network_defaults.chat_completions_path
-    | _ -> Llm_provider.Provider_config.request_path_default_for_kind kind in
+    | Llm_provider.Provider_kind.Anthropic
+    | Llm_provider.Provider_kind.Kimi
+    | Llm_provider.Provider_kind.Ollama
+    | Llm_provider.Provider_kind.Gemini
+    | Llm_provider.Provider_kind.Glm ->
+      Llm_provider.Provider_config.request_path_default_for_kind kind in
   normalize_http_request_path ~kind ~base_url ~request_path
 
 let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~registry_entry ~kind
@@ -465,7 +479,26 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
       (match provider.api_format, kind with
        | Runtime_schema.Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
          Masc_network_defaults.chat_completions_path
-       | _ ->
+       | Runtime_schema.Chat_completions_api,
+         ( Llm_provider.Provider_kind.Anthropic
+         | Llm_provider.Provider_kind.Kimi
+         | Llm_provider.Provider_kind.Ollama
+         | Llm_provider.Provider_kind.Gemini
+         | Llm_provider.Provider_kind.Glm )
+       | ( ( Runtime_schema.Messages_api
+           | Runtime_schema.Ollama_api
+           | Runtime_schema.Gemini_api
+           | Runtime_schema.Vertex_gemini_api
+           | Runtime_schema.Codex_app_server_runtime
+           | Runtime_schema.Antigravity_cli_runtime
+           | Runtime_schema.Claude_code_runtime
+           | Runtime_schema.Muse_serve_runtime ),
+           ( Llm_provider.Provider_kind.Anthropic
+           | Llm_provider.Provider_kind.Kimi
+           | Llm_provider.Provider_kind.OpenAI_compat
+           | Llm_provider.Provider_kind.Ollama
+           | Llm_provider.Provider_kind.Gemini
+           | Llm_provider.Provider_kind.Glm ) ) ->
          (match registry_entry with
           | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
           | None -> Llm_provider.Provider_config.request_path_default_for_kind kind))
@@ -638,7 +671,15 @@ let with_client_history_replay
            Llm_provider.Capabilities.reasoning_replay_override =
              Llm_provider.Capabilities.Force_latest_user_turn_tool_calls
          }
-     | Some _ | None -> declared)
+     | Some
+         { Llm_provider.Capabilities.reasoning_replay_override =
+             ( Llm_provider.Capabilities.Force_no_replay
+             | Llm_provider.Capabilities.Force_drop_without_tool_preserve_with_tool
+             | Llm_provider.Capabilities.Force_latest_user_turn_tool_calls
+             | Llm_provider.Capabilities.Force_preserve_always )
+         ; _
+         }
+     | None -> declared)
   | Llm_provider.Provider_kind.Kimi
   | Llm_provider.Provider_kind.OpenAI_compat
   | Llm_provider.Provider_kind.Ollama

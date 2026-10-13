@@ -397,7 +397,45 @@ let stimulus_identity_equal a b =
        first committed row owns the payload, so comparing the payload again
        would turn that representation upgrade into a second execution. *)
     true
-  | _ -> identity_payload a.payload = identity_payload b.payload
+  | ( ( Board_signal
+          { kind =
+              ( Post_created | Post_updated _ | Comment_added _
+              | Reaction_changed _ | Vote_cast _ )
+          ; _
+          }
+      | Board_attention
+          { signal =
+              { kind =
+                  ( Post_created | Post_updated _ | Comment_added _
+                  | Reaction_changed _ | Vote_cast _ )
+              ; _
+              }
+          ; _
+          }
+      | Bootstrap | Fusion_completed _
+      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
+      | Delegate_completed _ | Composition_completed _ | Task_outcome _ )
+    , ( Board_signal
+          { kind =
+              ( Post_created | Post_updated _ | Comment_added _
+              | Reaction_changed _ | Vote_cast _ )
+          ; _
+          }
+      | Board_attention
+          { signal =
+              { kind =
+                  ( Post_created | Post_updated _ | Comment_added _
+                  | Reaction_changed _ | Vote_cast _ )
+              ; _
+              }
+          ; _
+          }
+      | Bootstrap | Fusion_completed _
+      | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+      | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
+      | Delegate_completed _ | Composition_completed _ | Task_outcome _ ) ) ->
+    identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =
   match queue.back_rev with
@@ -463,7 +501,7 @@ let low_to_normal_aging_threshold_sec = 3600.0
 let effective_urgency ~now (s : stimulus) : urgency =
   match s.urgency with
   | Low when now -. s.arrived_at >= low_to_normal_aging_threshold_sec -> Normal
-  | u -> u
+  | (Immediate | Normal | Low) as u -> u
 ;;
 
 let effective_urgency_rank ~now (s : stimulus) : int =
@@ -1128,22 +1166,22 @@ let payload_of_yojson json =
     let* terminal_kind =
       string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
     in
+    let with_message terminal =
+      let* () =
+        exact_fields
+          ~context:"stimulus.payload.terminal"
+          ~expected:[ "kind"; "message" ]
+          terminal_fields
+      in
+      let* message =
+        string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
+      in
+      Ok (terminal message)
+    in
     let* terminal =
       match terminal_kind with
-      | "replied" | "failed" ->
-        let* () =
-          exact_fields
-            ~context:"stimulus.payload.terminal"
-            ~expected:[ "kind"; "message" ]
-            terminal_fields
-        in
-        let* message =
-          string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
-        in
-        Ok
-          (if String.equal terminal_kind "replied"
-           then Delegate_replied message
-           else Delegate_failed message)
+      | "replied" -> with_message (fun message -> Delegate_replied message)
+      | "failed" -> with_message (fun message -> Delegate_failed message)
       | "no_reply" ->
         let* () =
           exact_fields
@@ -1217,6 +1255,18 @@ let payload_of_yojson json =
     let* terminal_kind =
       string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
     in
+    let with_message terminal =
+      let* () =
+        exact_fields
+          ~context:"stimulus.payload.terminal"
+          ~expected:[ "kind"; "message" ]
+          terminal_fields
+      in
+      let* message =
+        string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
+      in
+      Ok (terminal message)
+    in
     let* terminal =
       match terminal_kind with
       | "succeeded" ->
@@ -1227,20 +1277,8 @@ let payload_of_yojson json =
             terminal_fields
         in
         Ok Composition_succeeded
-      | "failed" | "cancelled" ->
-        let* () =
-          exact_fields
-            ~context:"stimulus.payload.terminal"
-            ~expected:[ "kind"; "message" ]
-            terminal_fields
-        in
-        let* message =
-          string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
-        in
-        Ok
-          (if String.equal terminal_kind "failed"
-           then Composition_failed message
-           else Composition_cancelled message)
+      | "failed" -> with_message (fun message -> Composition_failed message)
+      | "cancelled" -> with_message (fun message -> Composition_cancelled message)
       | value ->
         Error (Printf.sprintf "unknown keeper composition terminal kind: %s" value)
     in

@@ -5,6 +5,11 @@
     names the lines, the highest string first. A note that carried technique
     markup keeps its fret and gets a [*] after it.
 
+    Repeat signs are barlines: a bar an [\ro] opened starts past [|:], one a
+    [\rc N] closed ends in [:|xN|] with the count of total plays, and [\ae]
+    numbers ride the left barline as [|1,3|]. The close edge ends at a
+    barline so the next bar's marks join past one.
+
     A sixteenth note is one cell wide, or wider in a measure where a fret
     would otherwise touch the slot after it, so the frets of two beats never
     run together. A tab wider than the pane breaks at bar lines into systems,

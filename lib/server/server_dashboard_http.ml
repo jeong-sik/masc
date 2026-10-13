@@ -540,7 +540,9 @@ let dashboard_gate_retry_http_json ~workspace_config ~base_path ~requested_by ~(
       Ok ()
     | Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable _ ->
       Ok ()
-    | _ -> Error "retry request disposition is not operator-rearmable"
+    | Keeper_approval_queue_rules_types.Summary_attempt_ready
+    | Keeper_approval_queue_rules_types.Summary_attempt_in_flight
+    | Keeper_approval_queue_rules_types.Summary_attempt_settled -> Error "retry request disposition is not operator-rearmable"
   in
   match
     Keeper_gate.retry_blocked_auto_judge

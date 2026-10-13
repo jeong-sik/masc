@@ -27,21 +27,35 @@ let table ~path ~keys = function
     (match List.filter (fun (key, _) -> not (List.mem key keys)) entries with
      | [] -> Ok (Some entries)
      | (key, _) :: _ -> Error (path ^ "." ^ key ^ " is not a supported setting"))
-  | Some _ -> Error (path ^ " must be a TOML table")
+  | Some
+      Otoml.(
+        TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _
+        | TomlOffsetDateTime _ | TomlLocalDateTime _ | TomlLocalDate _
+        | TomlLocalTime _ | TomlArray _ | TomlTableArray _) ->
+    Error (path ^ " must be a TOML table")
 
 let fields = function None -> [] | Some entries -> entries
 let enabled ~path entries =
   match List.assoc_opt "enabled" entries with
   | None -> Ok true
   | Some (Otoml.TomlBoolean value) -> Ok value
-  | Some _ -> Error (path ^ ".enabled must be a boolean")
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error (path ^ ".enabled must be a boolean")
 
 let absolute ~path entries key =
   match List.assoc_opt key entries with
   | None -> Ok None
   | Some (Otoml.TomlString value)
     when String.trim value <> "" && not (Filename.is_relative value) -> Ok (Some value)
-  | Some _ -> Error (path ^ "." ^ key ^ " must be a non-empty absolute path")
+  | Some
+      Otoml.(
+        TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _
+        | TomlOffsetDateTime _ | TomlLocalDateTime _ | TomlLocalDate _
+        | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlInlineTable _
+        | TomlTableArray _) ->
+    Error (path ^ "." ^ key ^ " must be a non-empty absolute path")
 
 let parse_automation ~path entries =
   let* driver = absolute ~path entries "geckodriver" in
@@ -66,7 +80,13 @@ let port ~path entries =
   match List.assoc_opt "port" entries with
   | None -> Ok default_live_bidi_port
   | Some (Otoml.TomlInteger value) when value >= 1 && value <= max_port -> Ok value
-  | Some _ -> Error (Printf.sprintf "%s.port must be an integer from 1 to %d" path max_port)
+  | Some
+      Otoml.(
+        TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _
+        | TomlOffsetDateTime _ | TomlLocalDateTime _ | TomlLocalDate _
+        | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlInlineTable _
+        | TomlTableArray _) ->
+    Error (Printf.sprintf "%s.port must be an integer from 1 to %d" path max_port)
 
 (* A table that is there names a Firefox to start, so both paths are needed. *)
 let parse_live_bidi ~path = function

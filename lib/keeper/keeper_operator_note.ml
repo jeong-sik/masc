@@ -146,7 +146,8 @@ let read ~config ~keeper =
 let pending ~config ~keeper =
   match read ~config ~keeper with
   | Ok ({ consumed_at = None; _ } as note) -> Some note
-  | Ok _ | Error _ -> None
+  | Ok { consumed_at = Some _; _ }
+  | Error (Read_unknown_keeper _ | No_note | Malformed _) -> None
 ;;
 
 let mark_consumed ~config ~keeper ~absolute_turn =
@@ -154,7 +155,7 @@ let mark_consumed ~config ~keeper ~absolute_turn =
   (* Nothing to stamp is the ordinary case; anything else means the note is
      there and unreadable, which the save arm below already reports. *)
   | Error No_note -> ()
-  | Error err ->
+  | Error ((Read_unknown_keeper _ | Malformed _) as err) ->
     Log.Keeper.warn
       ~keeper_name:keeper
       "operator note consumption stamp skipped: %s"

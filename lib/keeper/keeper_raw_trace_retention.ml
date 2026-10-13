@@ -114,7 +114,11 @@ let regular_trace_files dir =
            let path = Filename.concat dir entry in
            (match Unix.lstat path with
             | { Unix.st_kind = Unix.S_REG; _ } -> Some path
-            | _ -> None
+            | { Unix.st_kind =
+                  ( Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+                  | Unix.S_SOCK )
+              ; _
+              } -> None
             | exception Unix.Unix_error _ -> None)
          else None))
 ;;

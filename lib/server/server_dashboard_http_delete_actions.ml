@@ -583,7 +583,7 @@ let purge_keeper_root_logs config keeper_name =
       | Keeper_runtime_root_entry.Keeper { keeper_name = owner;
           artifact = (Decision_log | Feedback_log | Tla_trace_log); _ } ->
         String.equal owner keeper_name
-      | Keeper _ -> false)
+      | Keeper { artifact = Metadata; _ } -> false)
   in
   let rec remove = function
     | [] -> Ok ()
@@ -598,7 +598,8 @@ let purge_keeper_root_logs config keeper_name =
         (match remove_path_strict path with
          | Error _ as error -> error
          | Ok _ -> remove rest)
-      | Ok (Some _) -> Error ("Keeper log path is not a file: " ^ path)
+      | Ok (Some { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK); _ }) ->
+        Error ("Keeper log path is not a file: " ^ path)
   in
   Result.bind entries remove
 ;;
@@ -662,7 +663,29 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
            ~base_path:config.Workspace.base_path ~keeper_name with
          | Error _ as error -> error
          | Ok () -> remove rest)
-      | artifact :: rest ->
+      | (( Keeper_metrics_store_artifact
+         | Keeper_runtime_directory_artifact
+         | Keeper_memory_current_artifact
+         | Keeper_librarian_range_receipt_artifact
+         | Keeper_memory_admission_queue_artifact
+         | Keeper_memory_publication_artifact
+         | Keeper_memory_retraction_plan_artifact
+         | Keeper_memory_source_current_artifact
+         | Keeper_working_context_recall_artifact
+         | Keeper_working_context_artifact
+         | Keeper_memory_journal_artifact
+         | Keeper_memory_journal_lock_artifact
+         | Keeper_memory_absorbed_artifact
+         | Keeper_memory_events_artifact
+         | Keeper_turn_boundaries_artifact
+         | Keeper_librarian_progress_artifact
+         | Keeper_external_read_cursor_artifact
+         | Keeper_librarian_official_progress_artifact
+         | Keeper_configuration_artifact
+         | Keeper_chat_store_artifact
+         | Keeper_antigravity_home_artifact _
+         | Keeper_antigravity_prepare_lock_artifact _
+         | Keeper_muse_home_artifact _ ) as artifact) :: rest ->
         (match keeper_artifact_path config keeper_name artifact with
          | None ->
            Error "dashboard Keeper purge artifact plan lost its typed projection"
@@ -714,7 +737,21 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                  ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path
                    ~base_path:config.Workspace.base_path)
                  (fun () -> remove_path_strict path)
-             | _ -> remove_path_strict path) with
+             | Keeper_metrics_store_artifact | Keeper_root_logs_artifact
+             | Keeper_runtime_directory_artifact | Keeper_memory_current_artifact
+             | Keeper_librarian_range_receipt_artifact | Keeper_memory_admission_queue_artifact
+             | Keeper_memory_publication_artifact | Keeper_memory_retraction_plan_artifact
+             | Keeper_memory_source_current_artifact | Keeper_working_context_recall_artifact
+             | Keeper_working_context_artifact | Keeper_memory_journal_artifact
+             | Keeper_memory_journal_lock_artifact | Keeper_memory_absorbed_artifact
+             | Keeper_memory_events_artifact | Keeper_turn_boundaries_artifact
+             | Keeper_librarian_progress_artifact | Keeper_external_read_cursor_artifact
+             | Keeper_librarian_official_progress_artifact | Keeper_playground_bundles_artifact
+             | Keeper_runtime_configuration_artifact | Keeper_chat_store_artifact
+             | Keeper_board_attention_candidates_artifact
+             | Keeper_board_attention_partitions_artifact | Agent_artifact_bundle _
+             | Keeper_antigravity_home_artifact _ | Keeper_antigravity_prepare_lock_artifact _
+             | Keeper_muse_home_artifact _ -> remove_path_strict path) with
             | Error _ as error -> error
             | Ok outcome ->
               (match artifact with
@@ -879,7 +916,9 @@ let handle_board_close_post ~agent_name req reqd body_str =
          let status =
            match err with
            | Board.Validation_error _ -> `Bad_request
-           | _ -> `Not_found
+           | Board_types.Invalid_id _ | Board_types.Post_not_found _
+           | Board_types.Comment_not_found _ | Board_types.Io_error _ | Board_types.Already_voted _
+           | Board_types.Already_exists _ | Board_types.Unauthorized _ -> `Not_found
          in
          respond_error ~status ~request:req reqd
            (Board_tool.board_error_to_string err))
@@ -962,17 +1001,35 @@ let respond_configuration_removal ~request reqd
 let keeper_purge_status_to_json (operation : Keeper_shutdown_types.t) =
   let completed = match operation.phase with
     | Finalized { completion = Completion_delivered Dashboard_keeper_purged; _ } -> true
-    | _ -> false in
+    | Keeper_shutdown_types.Finalized { completion = Keeper_shutdown_types.Completion_delivered (Keeper_shutdown_types.Supervisor_cleaned);_}
+    | Keeper_shutdown_types.Finalized { completion = (Keeper_shutdown_types.Completion_not_requested | (Keeper_shutdown_types.Completion_pending _ | Keeper_shutdown_types.Completion_delivery_failed _));_}
+    | Keeper_shutdown_types.Prepared | Keeper_shutdown_types.Joining_lanes
+    | Keeper_shutdown_types.Joined_idle | Keeper_shutdown_types.Finalizing_tasks _
+    | Keeper_shutdown_types.Cleanup_ready _ | Keeper_shutdown_types.Reconciliation_required _
+    | Keeper_shutdown_types.Owner_absent _ | Keeper_shutdown_types.Operator_absence_acknowledged _
+    | Keeper_shutdown_types.Blocked _ | Keeper_shutdown_types.Superseded _ -> false in
   `Assoc ["completed", `Bool completed;
     "can_retry", `Bool (match operation.phase with
       | Finalized { completion = (Completion_pending Dashboard_keeper_purged
           | Completion_delivery_failed { action = Dashboard_keeper_purged; _ }); _ } -> true
-      | _ -> false);
+      | Keeper_shutdown_types.Finalized { completion = Keeper_shutdown_types.Completion_pending (Keeper_shutdown_types.Supervisor_cleaned);_}
+      | Keeper_shutdown_types.Finalized { completion = Keeper_shutdown_types.Completion_delivery_failed { action = Keeper_shutdown_types.Supervisor_cleaned;_};_}
+      | Keeper_shutdown_types.Finalized { completion = (Keeper_shutdown_types.Completion_not_requested | Keeper_shutdown_types.Completion_delivered _);_}
+      | Keeper_shutdown_types.Prepared | Keeper_shutdown_types.Joining_lanes
+      | Keeper_shutdown_types.Joined_idle | Keeper_shutdown_types.Finalizing_tasks _
+      | Keeper_shutdown_types.Cleanup_ready _ | Keeper_shutdown_types.Reconciliation_required _
+      | Keeper_shutdown_types.Owner_absent _ | Keeper_shutdown_types.Operator_absence_acknowledged _
+      | Keeper_shutdown_types.Blocked _ | Keeper_shutdown_types.Superseded _ -> false);
     "phase", `String (Keeper_shutdown_types.phase_to_string operation.phase);
     "failure", (match operation.phase with
       | Blocked failure -> `String failure.detail
       | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } -> `String detail
-      | _ -> `Null);
+      | Keeper_shutdown_types.Finalized { completion = (Keeper_shutdown_types.Completion_not_requested | (Keeper_shutdown_types.Completion_pending _ | Keeper_shutdown_types.Completion_delivered _));_}
+      | Keeper_shutdown_types.Prepared | Keeper_shutdown_types.Joining_lanes
+      | Keeper_shutdown_types.Joined_idle | Keeper_shutdown_types.Finalizing_tasks _
+      | Keeper_shutdown_types.Cleanup_ready _ | Keeper_shutdown_types.Reconciliation_required _
+      | Keeper_shutdown_types.Owner_absent _ | Keeper_shutdown_types.Operator_absence_acknowledged _
+      | Keeper_shutdown_types.Superseded _ -> `Null);
     "operation", Keeper_shutdown_store.to_json operation]
 ;;
 
@@ -1034,7 +1091,9 @@ let add_delete_action_routes router =
                | Keeper_shutdown_store.Operation operation ->
                  (match operation.cleanup_intent.reason with
                   | Dashboard_keeper_purge _ -> keeper_purge_status_to_json operation :: operations, errors
-                  | _ -> operations, errors)
+                  | Keeper_shutdown_types.Operator_stop_retain_meta
+                  | Keeper_shutdown_types.Operator_stop_remove_meta
+                  | Keeper_shutdown_types.Supervisor_cleanup -> operations, errors)
                | Corrupt_record record ->
                  operations, `Assoc ["keeper_name", `String record.keeper_name;
                    "operation_id", `String (Keeper_shutdown_types.Operation_id.to_string record.operation_id);
@@ -1064,7 +1123,14 @@ let add_delete_action_routes router =
                 | Error error ->
                   let status = match error with
                     | Keeper_shutdown_store.Not_found _ -> `Not_found
-                    | _ -> `Internal_server_error in
+                    | Keeper_shutdown_store.Already_exists _ | Keeper_shutdown_store.Io_error _
+                    | Keeper_shutdown_store.Decode_error _
+                    | Keeper_shutdown_store.Invalid_operation _
+                    | Keeper_shutdown_store.Identity_mismatch _
+                    | Keeper_shutdown_store.Revision_conflict _
+                    | Keeper_shutdown_store.Supersession_phase_mismatch _
+                    | Keeper_shutdown_store.Supersession_intent_mismatch _
+                    | Keeper_shutdown_store.Invalid_supersession_actor _ -> `Internal_server_error in
                   respond_error ~status ~request:req reqd
                     (Keeper_shutdown_store.error_to_string error)
                 | Ok operation ->

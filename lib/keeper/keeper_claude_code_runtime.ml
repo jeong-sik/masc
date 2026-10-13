@@ -495,7 +495,20 @@ let recovery_failure_of_attempt ~session_mode ~gate_continuation error =
       (if tool_effect_attempted || response_emitted
        then Session_store.Activity_observed
        else Session_store.No_activity_observed)
-  | (Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), _ ->
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Invalid_config _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Spawn_failed _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Protocol_error _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Subscription_required _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Unsupported_control_request _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Turn_transport_interrupted _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Context_window_exceeded _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Turn_failed _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Turn_failed_with_observation _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Stopped_by_host _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Quota_blocked _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Process_exited _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Unhandled_exception _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Timeout _) ->
     recovery_failure_of_client_error error
 ;;
 
@@ -603,7 +616,34 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
      with
      | Ok _ -> ()
      | Error _ -> ())
-  | Ok _ -> ()
+  | Ok None
+  | Ok
+      (Some
+        { Session_store.phase =
+            ( Ready | Start _ | Active _ | Turn_inflight _ | Settled _ )
+        ; _
+        })
+  | Ok
+      (Some
+        { Session_store.phase =
+            Recovery_required
+              { failure =
+                  ( Pre_dispatch_failed
+                  | Transient_spawn_failed
+                  | Owner_stopped_turn
+                  | Retryable_turn_failed
+                  | Transport_interrupted
+                  | Protocol_failed
+                  | Provider_rejected
+                  | Input_rejected (Bootstrap_floor_exceeded | Effect_fenced)
+                  | Host_hook_failed
+                  | State_persistence_failed
+                  | Process_restarted
+                  | Vendor_session_full _ )
+              ; _
+              }
+        ; _
+        }) -> ()
 ;;
 
 (* The client reaches MASC tools through this handler, so entering it is the
@@ -1049,7 +1089,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       match !session_state with
       | { Session_store.phase = (Ready | Settled _ | Recovery_required _); _ } ->
         Ok ()
-      | expected ->
+      | ({ Session_store.phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
         (match
            Session_store.require_recovery
              ~base_path
@@ -1069,7 +1109,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
       | Transient ->
         (match !session_state with
          | { phase = (Ready | Settled _ | Recovery_required _); _ } -> Ok ()
-         | expected ->
+         | ({ phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
            (match
               Session_store.release_transient
                 ~base_path
@@ -1138,7 +1178,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
              loses nothing the assert provided and does not take the process
              with it -- masc#28983's shape, where a wildcard promise became an
              Assert_failure at run time. *)
-          | _, other ->
+          | ( _
+            , (( Session_store.Ready
+               | Session_store.Start _
+               | Session_store.Active _
+               | Session_store.Recovery_required _
+               | Session_store.Settled _ ) as other) ) ->
             let phase_name =
               match other with
               | Session_store.Ready -> "Ready"
@@ -1297,9 +1342,24 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
             | Host.Terminal_tool_boundary _, _
           when Option.is_some on_official_client_tool_boundary ->
               settle_host_stop ~latest_request_input stop
-            | _, Some detail -> Error (internal_error detail)
-            | _, None -> settle_host_stop ~latest_request_input stop)
-         | Error error ->
+            | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+              , Some detail ) -> Error (internal_error detail)
+            | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+              , None ) -> settle_host_stop ~latest_request_input stop)
+         | Error
+             (( Runtime_claude_code.Invalid_config _
+              | Runtime_claude_code.Spawn_failed _
+              | Runtime_claude_code.Protocol_error _
+              | Runtime_claude_code.Subscription_required _
+              | Runtime_claude_code.Unsupported_control_request _
+              | Runtime_claude_code.Turn_transport_interrupted _
+              | Runtime_claude_code.Context_window_exceeded _
+              | Runtime_claude_code.Turn_failed _
+              | Runtime_claude_code.Turn_failed_with_observation _
+              | Runtime_claude_code.Quota_blocked _
+              | Runtime_claude_code.Process_exited _
+              | Runtime_claude_code.Unhandled_exception _
+              | Runtime_claude_code.Timeout _ ) as error) ->
            (* A resumed session is refused on the vendor's own conversation,
               which a smaller masc range does not change: the resume prompt is
               the same at every capacity. The retry is therefore a fresh start
@@ -1314,7 +1374,12 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
                 , Runtime_claude_code.Context_window_exceeded
                     { tool_effect_attempted = false; response_emitted = false; _ } ) ->
                 true
-              | _ -> false);
+              | (Runtime_claude_code.Start, (Some _ | None), Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_})
+              | (Runtime_claude_code.Start, (Some _ | None), Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_})
+              | (Runtime_claude_code.Start, (Some _ | None), (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_failed _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _)))))))))))))
+              | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_})
+              | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_})
+              | (Runtime_claude_code.Resume _, None, (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_failed _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _))))))))))))) -> false);
            (* A provider can reject after the child process spawned but
               before any response or MCP tool effect. Preserve the typed
               no-effect fact so failover is allowed for that narrow case.
@@ -1434,7 +1499,7 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
            let runtime_observation =
              Runtime_observation.runtime_observation_with_metrics
                ~runtime_id
-               ~selected_model_raw:(Some turn.model)
+               ~selected_model:(Some turn.model)
                ~capture
                ~attempt_details_source:"claude_code"
                ~agent_core_internal_runtime_allowed:false

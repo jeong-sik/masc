@@ -364,7 +364,8 @@ let handle_content_with_endpoint
                (match evidence with
                 | Some evidence -> Keeper_tool_execution.with_file_change_evidence evidence execution
                 | None -> execution)
-             | status, (None | Some _) ->
+             | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status),
+               (None | Some _) ->
                failure ~class_:Tool_result.Runtime_failure ~target
                  (Printf.sprintf
                     "remote write failed (%s) on endpoint %s: %s"
@@ -462,7 +463,7 @@ let handle_content_with_endpoint
                   | Unix.WEXITED code when code = patch_source_missing_exit ->
                     failure ~class_:Tool_result.Workflow_rejection ~target
                       (Keeper_tool_filesystem_guidance.patch_target_missing_text ())
-                  | status ->
+                  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status ->
                     failure ~class_:Tool_result.Runtime_failure ~target
                       (Printf.sprintf
                          "remote read of the patch source failed (%s) on endpoint %s: %s"

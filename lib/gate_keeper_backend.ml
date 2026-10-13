@@ -300,7 +300,9 @@ let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
            with
            | Error (Keeper_owner_registry.Command_lookup_failed _) ->
              Gate_protocol.Unavailable_result
-           | Error error ->
+           | Error
+               (( Keeper_owner_registry.Command_lifecycle_reserved _
+                | Keeper_owner_registry.Command_rejected _ ) as error) ->
              Gate_protocol.Keeper_error_result
                (redact_text (Keeper_owner_registry.command_error_to_string error))
            | Ok acceptance ->

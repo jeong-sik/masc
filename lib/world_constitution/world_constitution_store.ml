@@ -78,8 +78,20 @@ let append_at ~base_path ~expected_end_offset entry =
     | Fs_compat.Private_file_failed_with_cleanup_failure
         { error = Fs_compat.End_offset_mismatch { expected; actual }; _ } ->
       Error (Ledger_moved { expected; actual })
-    | Fs_compat.Private_file_failed error
-    | Fs_compat.Private_file_failed_with_cleanup_failure { error; _ } ->
+    | Fs_compat.Private_file_failed
+        (( Fs_compat.Incomplete_jsonl_tail
+         | Fs_compat.Incomplete_jsonl_tail_truncate_failed _
+         | Fs_compat.Invalid_jsonl_suffix
+         | Fs_compat.Negative_expected_end_offset _
+         | Fs_compat.Durable_jsonl_append_failed _ ) as error)
+    | Fs_compat.Private_file_failed_with_cleanup_failure
+        { error =
+            ( Fs_compat.Incomplete_jsonl_tail
+            | Fs_compat.Incomplete_jsonl_tail_truncate_failed _
+            | Fs_compat.Invalid_jsonl_suffix
+            | Fs_compat.Negative_expected_end_offset _
+            | Fs_compat.Durable_jsonl_append_failed _ ) as error
+        ; _ } ->
       Error (Write_failed { path; detail = append_failure_detail error }))
 
 type rejected_line = {

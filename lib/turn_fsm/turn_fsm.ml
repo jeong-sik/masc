@@ -104,7 +104,14 @@ let turn_state_label : type a. a turn_state -> string = function
       to_tla_symbol (Failed reason) ^ ":" ^ failure_reason_label reason
   | Cancelled reason ->
       to_tla_symbol (Cancelled reason) ^ ":" ^ cancel_reason_label reason
-  | state -> to_tla_symbol state
+  | Idle -> to_tla_symbol Idle
+  | Phase_gating -> to_tla_symbol Phase_gating
+  | Runtime_routing -> to_tla_symbol Runtime_routing
+  | Awaiting_provider -> to_tla_symbol Awaiting_provider
+  | Streaming -> to_tla_symbol Streaming
+  | Awaiting_tool_result -> to_tla_symbol Awaiting_tool_result
+  | Completing -> to_tla_symbol Completing
+  | Done -> to_tla_symbol Done
 
 let pp_failure_reason fmt = function
   | Failure_runtime_unavailable { base; resolved } ->
@@ -306,7 +313,47 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
          && stop_unchanged
          && same_observable_state from_state to_state ->
       Some TerminalStutter
-  | _ -> None
+  | Any
+      ( Idle
+      | Phase_gating
+      | Runtime_routing
+      | Awaiting_provider
+      | Streaming
+      | Awaiting_tool_result
+      | Completing
+      | Done
+      | Failed
+          ( Failure_runtime_unavailable _
+          | Failure_provider_error _
+          | Failure_receipt_lost _
+          | Failure_runtime_error _
+          | Failure_unexpected_exception _ )
+      | Cancelled
+          ( Cancelled_supervisor_stop
+          | Cancelled_external
+          | Cancelled_provider_timeout
+          | Cancelled_input_required ) ),
+    Any
+        ( Idle
+        | Phase_gating
+        | Runtime_routing
+        | Awaiting_provider
+        | Streaming
+        | Awaiting_tool_result
+        | Completing
+        | Done
+        | Failed
+          ( Failure_runtime_unavailable _
+          | Failure_provider_error _
+          | Failure_receipt_lost _
+          | Failure_runtime_error _
+          | Failure_unexpected_exception _ )
+        | Cancelled
+          ( Cancelled_supervisor_stop
+          | Cancelled_external
+          | Cancelled_provider_timeout
+          | Cancelled_input_required ) ) ->
+      None
 
 let assert_transition_allowed ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_state) () =
   match classify_transition ?ctx ~from_state ~to_state () with

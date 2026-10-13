@@ -1147,7 +1147,11 @@ let prepare_restore ~dir ~slot ~ledger_dir ~saves_dir_of =
       ~format:checkpoint_format with
     | Ok checkpoint -> Ok checkpoint
     | Error (Machine_checkpoint.Unreadable message) -> Error (Unreadable message)
-    | Error e -> Error (Checkpoint_refused e) in
+    | Error
+        ((Machine_checkpoint.No_slot _
+         | Machine_checkpoint.Other_machine _
+         | Machine_checkpoint.Other_format _
+         | Machine_checkpoint.Corrupt _) as e) -> Error (Checkpoint_refused e) in
   let* meta = meta_of_json checkpoint.Machine_checkpoint.meta in
   let* m = match Dos_snapshot.restore checkpoint.machine_bytes with
     | Ok m -> Ok m
@@ -1255,7 +1259,12 @@ let lookup_autosave ~dir =
       ~format:checkpoint_format
   with
   | Error (Machine_checkpoint.No_slot _) -> No_autosave
-  | Error e -> Autosave_unreadable (Machine_checkpoint.error_to_string e)
+  | Error
+      ((Machine_checkpoint.Unreadable _
+       | Machine_checkpoint.Other_machine _
+       | Machine_checkpoint.Other_format _
+       | Machine_checkpoint.Corrupt _) as e) ->
+    Autosave_unreadable (Machine_checkpoint.error_to_string e)
   | Ok { Machine_checkpoint.meta; modified; header = _ } ->
     (match meta_of_json meta with
      | Error e -> Autosave_unreadable (error_to_string e)

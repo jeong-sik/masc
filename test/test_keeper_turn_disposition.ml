@@ -244,6 +244,30 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
        "expected credential-unavailable Turn_configuration_error, got %s"
        (Registry.failure_reason_to_string other)
    | None -> Alcotest.fail "expected credential-unavailable failure reason");
+  let undeclared =
+    Runtime_instance.dispatch_credential_error_to_core_error
+      (Runtime_instance.Undeclared_credential { provider_id = "keyed-provider" })
+  in
+  (match classify undeclared with
+   | Some (Registry.Turn_configuration_error { code; field; detail }) ->
+     Alcotest.(check string)
+       "undeclared credential code"
+       "credential_undeclared"
+       code;
+     Alcotest.(check (option string))
+       "undeclared credential field names the block to add"
+       (Some "providers.keyed-provider.credentials")
+       field;
+     Alcotest.(check string)
+       "undeclared credential safe detail"
+       "provider requires an API key but its runtime row declares no credential; \
+        add a credentials block naming the environment variable that holds the key"
+       detail
+   | Some other ->
+     Alcotest.failf
+       "expected undeclared-credential Turn_configuration_error, got %s"
+       (Registry.failure_reason_to_string other)
+   | None -> Alcotest.fail "expected undeclared-credential failure reason");
   let secret = "invalid-config-must-not-reach-operator" in
   let marker_shaped_detail =
     Keeper_internal_error.core_error_of_masc_internal_error

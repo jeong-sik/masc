@@ -363,8 +363,7 @@ let classify_unix_error = function
   | Unix.EHOSTUNREACH -> Dns_failure
   | Unix.EMFILE | Unix.ENFILE | Unix.ENOBUFS -> Local_resource_exhaustion
   | Unix.EADDRNOTAVAIL -> Local_resource_exhaustion
-  | unclassified_unix_error ->
-    let (_ : Unix.error) = unclassified_unix_error in
+  | (Unix.E2BIG | Unix.EACCES | Unix.EAGAIN | Unix.EBADF | Unix.EBUSY | Unix.ECHILD | Unix.EDEADLK | Unix.EDOM | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG | Unix.EINTR | Unix.EINVAL | Unix.EIO | Unix.EISDIR | Unix.EMLINK | Unix.ENAMETOOLONG | Unix.ENODEV | Unix.ENOENT | Unix.ENOEXEC | Unix.ENOLCK | Unix.ENOMEM | Unix.ENOSPC | Unix.ENOSYS | Unix.ENOTDIR | Unix.ENOTEMPTY | Unix.ENOTTY | Unix.ENXIO | Unix.EPERM | Unix.ERANGE | Unix.EROFS | Unix.ESPIPE | Unix.ESRCH | Unix.EXDEV | Unix.EWOULDBLOCK | Unix.EINPROGRESS | Unix.EALREADY | Unix.ENOTSOCK | Unix.EDESTADDRREQ | Unix.EMSGSIZE | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT | Unix.EAFNOSUPPORT | Unix.EADDRINUSE | Unix.ENETDOWN | Unix.ENETRESET | Unix.ECONNABORTED | Unix.EISCONN | Unix.ENOTCONN | Unix.ESHUTDOWN | Unix.ETOOMANYREFS | Unix.EHOSTDOWN | Unix.ELOOP | Unix.EOVERFLOW | Unix.EUNKNOWNERR _) as unclassified_unix_error -> let (_ : Unix.error) = unclassified_unix_error in
     Unknown
 ;;
 
@@ -1046,11 +1045,13 @@ let classify_eio_backend_error = function
 ;;
 
 let rec classify_eio_error = function
-  | Eio.Net.E (Eio.Net.Connection_failure (Eio.Net.Refused _)) -> Connection_refused
-  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.No_matching_addresses) -> Dns_failure
-  | Eio.Net.E (Eio.Net.Connection_failure Eio.Net.Timeout) -> Timeout
-  | Eio.Net.E (Eio.Net.Connection_reset backend) ->
-    Option.value (classify_eio_backend_error backend) ~default:End_of_file
+  | Eio.Net.E net_error ->
+    (match net_error with
+     | Eio.Net.Connection_failure (Eio.Net.Refused _) -> Connection_refused
+     | Eio.Net.Connection_failure Eio.Net.No_matching_addresses -> Dns_failure
+     | Eio.Net.Connection_failure Eio.Net.Timeout -> Timeout
+     | Eio.Net.Connection_reset backend ->
+       Option.value (classify_eio_backend_error backend) ~default:End_of_file)
   | Eio.Exn.X backend ->
     Option.value (classify_eio_backend_error backend) ~default:Unknown
   | Eio.Exn.Multiple_io errors ->
@@ -1118,7 +1119,9 @@ let%test "classify_network_exn: Eio.Time.Timeout is Http_operation" =
      timeouts are intercepted before this point, so this stays accurate. *)
   match classify_network_exn Eio.Time.Timeout with
   | Some (TimeoutError { phase = Http_operation; _ }) -> true
-  | _ -> false
+  | Some (TimeoutError { phase = (Queue | (First_token | (Wall_clock | (Capacity_backpressure | (Non_streaming_body | (Stream_body | (Provider_step | (Cli_stdout_idle | (Unknown_timeout | Stream_idle _)))))))));_})
+  | Some (HttpError _ | (NetworkError _ | (AcceptRejected _ | (ProviderTerminal _ | ProviderFailure _))))
+  | None -> false
 ;;
 
 let%test "classify_network_exn: non-network exn is None (propagates)" =
@@ -1476,7 +1479,17 @@ let%test "prepare_sync_request rejects missing host before dispatch" =
   | Ok _
   | Error
       ( HttpError _
-      | NetworkError _
+      | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file )
+          }
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -1489,7 +1502,17 @@ let%test "prepare_sync_request rejects unsupported schemes before dispatch" =
   | Ok _
   | Error
       ( HttpError _
-      | NetworkError _
+      | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file )
+          }
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -2555,7 +2578,7 @@ let pre_header_deadline
 let%test "pre-header phase: a first-event budget stands in for an undeclared connect budget" =
   match pre_header_deadline ~connect:Unbounded ~first_event:(Bounded ((), 600.0)) with
   | Bounded ((), 600.0), First_event_budget -> true
-  | _ -> false
+  | (Unbounded | Bounded (_, _)), (Connect_budget | First_event_budget) -> false
 ;;
 
 let%test "pre-header phase: the narrower declared budget names itself" =
@@ -2564,13 +2587,14 @@ let%test "pre-header phase: the narrower declared budget names itself" =
     , pre_header_deadline ~connect:(Bounded ((), 900.0)) ~first_event:(Bounded ((), 600.0)) )
   with
   | (Bounded ((), 30.0), Connect_budget), (Bounded ((), 600.0), First_event_budget) -> true
-  | _ -> false
+  | ( ((Unbounded | Bounded (_, _)), (Connect_budget | First_event_budget))
+    , ((Unbounded | Bounded (_, _)), (Connect_budget | First_event_budget)) ) -> false
 ;;
 
 let%test "pre-header phase: nothing declared stays unbounded" =
   match pre_header_deadline ~connect:Unbounded ~first_event:Unbounded with
   | Unbounded, Connect_budget -> true
-  | _ -> false
+  | (Unbounded, First_event_budget) | (Bounded (_, _), _) -> false
 ;;
 
 let with_post_stream
@@ -2813,7 +2837,28 @@ let with_post_stream
            { message = "no response headers before the first-event budget ran out"
            ; phase = First_token
            })
-    | (Ok _ | Error _), (Connect_budget | First_event_budget) -> post_result
+    | ((Ok _ | Error (HttpError _)), (Connect_budget | First_event_budget))
+    | (Error (NetworkError _), (Connect_budget | First_event_budget))
+    | ( Error
+          (TimeoutError
+             { message = _
+             ; phase =
+                 ( Queue
+                 | First_token
+                 | Wall_clock
+                 | Capacity_backpressure
+                 | Http_operation
+                 | Non_streaming_body
+                 | Stream_body
+                 | Stream_idle _
+                 | Provider_step
+                 | Cli_stdout_idle
+                 | Unknown_timeout )
+             })
+      , (Connect_budget | First_event_budget) )
+    | (Error (AcceptRejected _), (Connect_budget | First_event_budget))
+    | (Error (ProviderTerminal _), (Connect_budget | First_event_budget))
+    | (Error (ProviderFailure _), (Connect_budget | First_event_budget)) -> post_result
   in
   (* Phase 1b: body consumption. Deliberately OUTSIDE [catch_network]: a
      body-phase [Eio.Time.Timeout] is phase-distinct from the connect /
@@ -3510,7 +3555,17 @@ let%test "catch_network maps End_of_file to NetworkError with kind" =
   | Ok _
   | Error
       ( HttpError _
-      | NetworkError _
+      | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | Unknown )
+          }
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -3552,7 +3607,17 @@ let%test "catch_network classifies Unix ECONNREFUSED" =
   | Ok _
   | Error
       ( HttpError _
-      | NetworkError _
+      | NetworkError
+          { message = _
+          ; kind =
+              ( Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          }
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -3567,7 +3632,17 @@ let%test "catch_network classifies Unix ETIMEDOUT" =
   | Ok _
   | Error
       ( HttpError _
-      | NetworkError _
+      | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          }
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -3622,7 +3697,23 @@ let%test "oversized response is typed without draining" =
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
-      | ProviderFailure _ ) -> false
+      | ProviderFailure
+          { kind =
+              ( Capacity_exhausted _
+              | Hard_quota _
+              | Capability_mismatch _
+              | Cli_policy_invalid _
+              | Cli_startup_failed _
+              | Provider_parse_error _
+              | Provider_wire_error _
+              | Provider_reported_error _
+              | Provider_interrupted
+              | Empty_completion _
+              | Context_overflow _
+              | Repeating_generation _
+              | Unknown_provider_failure _ )
+          ; message = _
+          } ) -> false
 ;;
 
 (* ── typed Eio classification tests ───────────────────── *)
@@ -3635,7 +3726,17 @@ let%test "classify_network_exn: typed Eio refused" =
       (eio_exn (Eio.Exn.X (Eio_unix.Unix_error (Unix.ECONNREFUSED, "connect", ""))))
   with
   | Some (NetworkError { kind = Connection_refused; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3646,7 +3747,17 @@ let%test "classify_network_exn: typed Eio timeout" =
       (eio_exn (Eio.Exn.X (Eio_unix.Unix_error (Unix.ETIMEDOUT, "connect", ""))))
   with
   | Some (NetworkError { kind = Timeout; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3657,7 +3768,17 @@ let%test "classify_network_exn: typed Eio Unix backend resource exhaustion" =
       (eio_exn (Eio.Exn.X (Eio_unix.Unix_error (Unix.EMFILE, "socket", ""))))
   with
   | Some (NetworkError { kind = Local_resource_exhaustion; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3684,7 +3805,17 @@ let%test "https_init_error_network_kind: TLS config remains TLS" =
 let%test "classify_network_exn: plain Tls_alert is Tls_error" =
   match classify_network_exn (Tls_eio.Tls_alert Tls.Packet.HANDSHAKE_FAILURE) with
   | Some (NetworkError { kind = Tls_error; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3692,7 +3823,17 @@ let%test "classify_network_exn: plain Tls_alert is Tls_error" =
 let%test "classify_network_exn: plain Tls_failure is Tls_error" =
   match classify_network_exn (Tls_eio.Tls_failure (`Fatal `No_application_protocol)) with
   | Some (NetworkError { kind = Tls_error; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3714,7 +3855,17 @@ let%test "classify_network_exn: unknown backend printer text does not classify" 
     classify_network_exn (eio_exn (Eio.Exn.X Test_backend.Tls_socket_closed_test))
   with
   | Some (NetworkError { kind = Unknown; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3741,7 +3892,17 @@ let%test "classify_network_exn: Multiple_io prefers non-retryable kind" =
          ])
   with
   | Some (NetworkError { kind = Local_resource_exhaustion; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3755,7 +3916,17 @@ let%test "classify_network_exn: Multiple_io falls back to first known kind" =
          ])
   with
   | Some (NetworkError { kind = End_of_file; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3769,7 +3940,17 @@ let%test "classify_network_exn: Multiple_io keeps a leading reset as a known kin
          ])
   with
   | Some (NetworkError { kind = Connection_reset; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3783,7 +3964,17 @@ let%test "classify_network_exn: Multiple_io does not prefer a reset over a refus
          ])
   with
   | Some (NetworkError { kind = Connection_refused; _ }) -> true
-  | Some (HttpError _ | NetworkError _ | TimeoutError _ | AcceptRejected _)
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;

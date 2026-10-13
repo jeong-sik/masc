@@ -191,7 +191,15 @@ let restore_admission ~config ~ownerless_policy ~keeper_name ~operation_id =
               keeper_name
               (Operation_id.to_string operation_id)
               (Operation_id.to_string existing)))
-  | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
+  | Error
+      (( Keeper_owner_registry.Command_lookup_failed
+           ( Keeper_owner_registry.Inventory_not_installed _
+           | Keeper_owner_registry.Owner_unavailable _
+           | Keeper_owner_registry.Owner_initialization_failed _
+           | Keeper_owner_registry.Inventory_stopping )
+       | Keeper_owner_registry.Command_lifecycle_reserved _
+       | Keeper_owner_registry.Command_rejected _ ) as error) ->
+    Error (Keeper_owner_registry.command_error_to_string error)
 ;;
 
 let restore_inventory_admission ~config inventory =
@@ -543,7 +551,12 @@ let rec retry_completion ~config ~keeper_name ~operation_id =
           (Completion_pending Dashboard_keeper_purged
           | Completion_delivery_failed { action = Dashboard_keeper_purged; _ }); _ } ->
         start_or_error ~config ~entry:None operation |> Result.map_error (fun error -> `Submit error)
-      | _ -> Error `Not_ready
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_pending (Supervisor_cleaned);_})
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_delivery_failed { action = Supervisor_cleaned;_};_})
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_delivered (Supervisor_cleaned);_})
+      | (Dashboard_keeper_purge _, Finalized { completion = Completion_not_requested;_})
+      | (Dashboard_keeper_purge _, (Prepared | (Joining_lanes | (Joined_idle | (Finalizing_tasks _ | (Cleanup_ready _ | (Reconciliation_required _ | (Owner_absent _ | (Operator_absence_acknowledged _ | (Blocked _ | Superseded _))))))))))
+      | ((Operator_stop_retain_meta | (Operator_stop_remove_meta | Supervisor_cleanup)), _) -> Error `Not_ready
 ;;
 
 let rec submit ~config ~entry ~request =
@@ -565,8 +578,23 @@ let rec submit ~config ~entry ~request =
           | Ok ({ lane_ownership = Registered_lane lane_id; _ } as operation)
             when Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane) ->
             start_or_error ~config ~entry:(Some entry) operation
-          | Ok operation -> Error (Existing_operation_lane_mismatch operation)))
-    | Error error -> Error (Prepare_error error)
+          | Ok
+              ({ lane_ownership = Registered_lane _ | Dormant_meta; _ } as operation) ->
+            Error (Existing_operation_lane_mismatch operation)))
+    | Error
+        (( Keeper_shutdown_prepare_join.Registry_lane_replaced
+         | Keeper_shutdown_prepare_join.Dormant_registry_lane_present
+         | Keeper_shutdown_prepare_join.Meta_snapshot_missing
+         | Keeper_shutdown_prepare_join.Meta_snapshot_identity_changed
+         | Keeper_shutdown_prepare_join.Meta_snapshot_read_failed _
+         | Keeper_shutdown_prepare_join.Task_discovery_failed _
+         | Keeper_shutdown_prepare_join.Owner_command_failed _
+         | Keeper_shutdown_prepare_join.Prepare_persist_failed _
+         | Keeper_shutdown_prepare_join.Cancellation_failed _
+         | Keeper_shutdown_prepare_join.Join_failed _
+         | Keeper_shutdown_prepare_join.Join_phase_mismatch _
+         | Keeper_shutdown_prepare_join.Join_record_update_failed _ ) as error) ->
+      Error (Prepare_error error)
 ;;
 
 let rec submit_dormant ~config ~meta ~request =
@@ -585,8 +613,22 @@ let rec submit_dormant ~config ~meta ~request =
          (match existing_operation_intent ~request operation with
           | Error _ as error -> error
           | Ok operation -> start_or_error ~config ~entry:None operation)
-       | Ok operation -> Error (Existing_operation_lane_mismatch operation))
-    | Error error -> Error (Prepare_error error)
+       | Ok ({ lane_ownership = Registered_lane _; _ } as operation) ->
+         Error (Existing_operation_lane_mismatch operation))
+    | Error
+        (( Keeper_shutdown_prepare_join.Registry_lane_replaced
+         | Keeper_shutdown_prepare_join.Dormant_registry_lane_present
+         | Keeper_shutdown_prepare_join.Meta_snapshot_missing
+         | Keeper_shutdown_prepare_join.Meta_snapshot_identity_changed
+         | Keeper_shutdown_prepare_join.Meta_snapshot_read_failed _
+         | Keeper_shutdown_prepare_join.Task_discovery_failed _
+         | Keeper_shutdown_prepare_join.Owner_command_failed _
+         | Keeper_shutdown_prepare_join.Prepare_persist_failed _
+         | Keeper_shutdown_prepare_join.Cancellation_failed _
+         | Keeper_shutdown_prepare_join.Join_failed _
+         | Keeper_shutdown_prepare_join.Join_phase_mismatch _
+         | Keeper_shutdown_prepare_join.Join_record_update_failed _ ) as error) ->
+      Error (Prepare_error error)
 ;;
 
 (* Boot recovery is the reconciliation procedure for an admission-time
@@ -840,7 +882,14 @@ let recover_operation
              keeps it ([keeps_fence_after_unfinished_replay]). *)
           log_boot_replay_outcome blocked;
           Ok blocked
-        | Error error -> Error (Keeper_shutdown_finalize.error_to_string error))
+        | Error
+            (( Keeper_shutdown_finalize.Store_error _
+             | Keeper_shutdown_finalize.Unsupported_phase
+             | Keeper_shutdown_finalize.Finalization_blocked _
+             | Keeper_shutdown_finalize.Finalization_draining _
+             | Keeper_shutdown_finalize.Completion_failed _
+             | Keeper_shutdown_finalize.Admission_release_failed _ ) as error) ->
+          Error (Keeper_shutdown_finalize.error_to_string error))
      | Prepared
      | Joining_lanes
      | Reconciliation_required _
@@ -911,7 +960,8 @@ let recover_claimed
     (* Retained deletion evidence has no authority over a new same-name Keeper. *)
     Ok operation
   | Superseded _ when (match operation.cleanup_intent.reason with
-      | Dashboard_keeper_purge _ -> true | _ -> false) -> Ok operation
+      | Dashboard_keeper_purge _ -> true | Operator_stop_retain_meta | Operator_stop_remove_meta
+                                         | Supervisor_cleanup -> false) -> Ok operation
   | Owner_absent _
   | Operator_absence_acknowledged _ -> Ok operation
   | Prepared
@@ -920,7 +970,14 @@ let recover_claimed
   | Finalizing_tasks _
   | Cleanup_ready _
   | Reconciliation_required _
-  | Finalized _
+  | Finalized
+      { completion =
+          ( Completion_not_requested
+          | Completion_pending _
+          | Completion_delivery_failed _
+          | Completion_delivered Supervisor_cleaned )
+      ; _
+      }
   | Blocked _
   | Superseded _ ->
   match recover_operation ~config ?successor_operation_id operation with
@@ -931,7 +988,20 @@ let recover_claimed
        the evidence, so neither the admission transition nor the reclaim
        below applies to it. *)
     Ok observed
-  | Ok recovered ->
+  | Ok
+      ({ phase =
+           ( Prepared
+           | Joining_lanes
+           | Joined_idle
+           | Finalizing_tasks _
+           | Cleanup_ready _
+           | Reconciliation_required _
+           | Finalized _
+           | Operator_absence_acknowledged _
+           | Blocked _
+           | Superseded _ )
+       ; _
+       } as recovered) ->
     if
       Keeper_shutdown_types.requires_admission_fence recovered
       || keeps_fence_after_unfinished_replay recovered
@@ -1044,7 +1114,15 @@ let redrive_walk ~(config : Workspace.config) (operation : Keeper_shutdown_types
      | Some holder when Operation_id.equal holder operation.operation_id ->
        Some Walk_admission_release
      | Some _ | None -> None)
-  | Finalized _, (Dormant_meta | Registered_lane _) -> Some Walk_recovery
+  | ( Finalized
+        { completion =
+            ( Completion_not_requested
+            | Completion_pending _
+            | Completion_delivery_failed _
+            | Completion_delivered Supervisor_cleaned )
+        ; _
+        }
+    , (Dormant_meta | Registered_lane _) ) -> Some Walk_recovery
   | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Dormant_meta -> Some Walk_recovery
   | (Joined_idle | Finalizing_tasks _ | Cleanup_ready _), Registered_lane _ -> None
   | ( ( Prepared

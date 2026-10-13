@@ -218,9 +218,17 @@ let test_scope_kinds_do_not_collide () =
     None
     (Q.active_until ~scope:provider_row_scope ~now:100.0)
 
-let test_registry_default_credential_is_shared_scope () =
+(* A catalog row no longer names the environment variable that holds its key:
+   since agent-core catalog rows state the auth *fact* ([requires_api_key]),
+   not the env name, an undeclared credential resolves to no reference at all
+   ([effective_credential_reference] answers [None] for both [glm] and
+   [zai-image]). A shared window is therefore the declared case: two rows that
+   name the same credential env in runtime.toml. *)
+let test_declared_credential_is_shared_scope () =
   let credential provider_id =
-    Runtime_adapter.effective_credential_reference ~provider_id None
+    Runtime_adapter.effective_credential_reference
+      ~provider_id
+      (Some (Runtime_schema.Env "ZAI_API_KEY"))
   in
   let glm_scope =
     Q.scope_of_credential ~provider_id:"glm" (credential "glm")
@@ -231,7 +239,7 @@ let test_registry_default_credential_is_shared_scope () =
   reset ();
   Q.note_exhausted ~scope:glm_scope ~resets_at:500.0;
   Alcotest.(check bool)
-    "registry rows sharing ZAI_API_KEY share a quota window"
+    "rows declaring the same credential env share a quota window"
     true
     (Option.is_some (Q.active_until ~scope:image_scope ~now:100.0))
 
@@ -364,9 +372,9 @@ let () =
             `Quick
             test_scope_kinds_do_not_collide
         ; Alcotest.test_case
-            "registry default credential shares scope"
+            "declared credential shares scope"
             `Quick
-            test_registry_default_credential_is_shared_scope
+            test_declared_credential_is_shared_scope
         ; Alcotest.test_case
             "selected environment alias owns scope"
             `Quick

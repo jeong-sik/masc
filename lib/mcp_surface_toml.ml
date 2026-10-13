@@ -164,7 +164,11 @@ let surface_of_pairs pairs =
           if String.length suffix >= 2 && not (String.equal (String.trim suffix) "")
           then Ok suffix
           else Error "tool_help.name_suffix must be at least two characters and not all whitespace"
-        | Some other ->
+        | Some
+            (( Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+             | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+             | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) as other) ->
           Error
             (sprintf "tool_help.name_suffix must be a string, got %s" (toml_shape other))
       in

@@ -1529,7 +1529,7 @@ let agent_speak_json
                   "Voice MCP path used for agent=%s; no browser audio clip available (no HTTP TTS endpoint)."
                   agent_id);
              Ok result)
-        | other -> other)
+        | (Ok _ | Error _) as other -> other)
 ;;
 
 let decode_agent_speak_result payload =
@@ -1699,7 +1699,7 @@ let measure_noise_floor ~agent_id () =
            with
            | Ok amplitude -> Some amplitude
            | Error _ -> None)
-         | _ -> None)
+         | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None)
 ;;
 
 (* Run [f] on a copy with the room subtracted; when either sox step fails,
@@ -1736,8 +1736,8 @@ let with_noise_reduced_audio ~audio_file ~f =
       with
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
       | Unix.WEXITED 0, _ -> f reduced
-      | _ -> f audio_file)
-    | _ -> f audio_file)
+      | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> f audio_file)
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> f audio_file)
 ;;
 
 (* How often the level is re-read while recording. Each read is a seek and a
@@ -1917,7 +1917,7 @@ let watch_capture_level
              "voice capture: room %.1f dB, speech above %.1f dB"
              (db_of_amplitude floor)
              (db_of_amplitude floor +. capture.Voice_config.trigger_margin_db)
-         | _ -> ());
+         | (Calibrating _, (Calibrating _ | Speaking _)) | ((Listening _ | Speaking _), _) -> ());
         step next)
   in
   let start = Eio.Time.now clock in

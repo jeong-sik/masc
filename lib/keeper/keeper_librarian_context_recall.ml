@@ -32,7 +32,11 @@ let index_of_json = function
        when String.trim generation <> "" && String.equal generation (String.trim generation)
             && revision > 0 && pocket_count >= 0 && source_count >= 0 ->
        Ok { generation; revision; pocket_count; source_count; artifact }
-     | _ -> Error "invalid working context recall index fields")
+     | _, _, _, _,
+       ( Tool_output.Not_normalized_artifact_ref
+       | Tool_output.Invalid_normalized_artifact_ref _
+       | Tool_output.Decoded_normalized_artifact_ref _ ) ->
+       Error "invalid working context recall index fields")
   | _ -> Error "invalid working context recall index"
 
 let read file =

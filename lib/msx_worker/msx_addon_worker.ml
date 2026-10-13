@@ -16,7 +16,8 @@ let response ?(extra_content = []) result : S.tool_result =
         | None -> []
         | Some Tool_result.Workflow_rejection | Some Tool_result.Policy_rejection ->
             ["io.github.jeong-sik/masc.machine.failure", `String "rejected"]
-        | Some _ -> ["io.github.jeong-sik/masc.machine.failure", `String "failed"] in
+        | Some (Tool_result.Dependency_unavailable) | Some (Tool_result.Runtime_failure)
+        | Some (Tool_result.Operator_cancelled) -> ["io.github.jeong-sik/masc.machine.failure", `String "failed"] in
       Some (`Assoc (failure @ fields)) }
 
 let screen ~tool_name ~start_time ~arguments =
@@ -81,7 +82,10 @@ let observation history () =
       "subject_id", `String "msx"; "clock", `Null; "actor", `Null;
       "fields", `Assoc ["machine_loaded", `Bool false; "machine_live", live_snapshot ()]; "evidence", `List []; "related_ids", `List []]];
       "coverage", `List []])
-  | Error error -> Error (Msx_lane.error_to_string error)
+  | Error
+      (( Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved
+       | Msx_lane.Invalid_request _ | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ ) as error) ->
+    Error (Msx_lane.error_to_string error)
   | Ok capture ->
       let o = capture.Msx_lane.observation in
       let inputs = Machine_input_history.publish history ~incarnation:capture.incarnation

@@ -89,6 +89,9 @@ type mcp_error =
 type credential_carrier =
   | InlineCredential
   | FileCredential
+  | UndeclaredCredential
+      (** The catalog states the endpoint takes an API key and the runtime row
+          declares no credential block for it. *)
 
 type config_error =
   | MissingEnvVar of { var_name : string }

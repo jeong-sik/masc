@@ -47,7 +47,7 @@ burst 시 fleet-wide 11+ keeper, 3000 entries 안 18+ 발생. dashboard model at
 | L1120 | `` `Failure `` | non-cascadable | N/A (error path) | error-path marker 필요 |
 | L1180 | `` `Failure `` | `exhausted_after_filter` | N/A (error path) | error-path marker 필요 |
 
-L969 branch 의 코드 주석은 *"Should be unreachable with accept_on_exhaustion:false, but handle gracefully"* — invariant violation counter (`Runtime_metrics.on_runtime_invariant_violation`) 가 tick 되지만 *실행은 계속* 한다. branch fire 시 `outcome=`Success`` 로 row 가 write 되고 `selected_model_raw=None` 인 채로 parse drop 발생.
+L969 branch 의 코드 주석은 *"Should be unreachable with accept_on_exhaustion:false, but handle gracefully"* — invariant violation counter (`Runtime_metrics.on_runtime_invariant_violation`) 가 tick 되지만 *실행은 계속* 한다. branch fire 시 `outcome=`Success`` 로 row 가 write 되고 `selected_model=None` 인 채로 parse drop 발생.
 
 ### 1.3 Anti-pattern 매핑
 
@@ -74,7 +74,7 @@ let observation =
   Runtime_observation.runtime_observation_with_metrics
     ~runtime_id:error_runtime_id
     ?strategy:!runtime_strategy_name_ref ~configured_labels
-    ~candidate_count ~selected_model_raw:None ~capture ()
+    ~candidate_count ~selected_model:None ~capture ()
 in
 ```
 
@@ -85,7 +85,7 @@ let observation =
     ~runtime_id:error_runtime_id
     ?strategy:!runtime_strategy_name_ref ~configured_labels
     ~candidate_count
-    ~selected_model_raw:
+    ~selected_model:
       (Some (Runtime_runtime_candidate.model_health_key candidate))
     ~capture ()
 in
@@ -98,7 +98,7 @@ in
 `L658`, `L939`, `L1098`, `L1120`, `L1180`:
 
 ```ocaml
-~selected_model_raw:None  (* error path: attribution via runtime_id/candidate_models *)
+~selected_model:None  (* error path: attribution via runtime_id/candidate_models *)
 ```
 
 근거: outcome 이 `` `Failure ``/`` `Rejected `` 일 때 read-side (`model_inference_metrics.ml:419-426`) 는 `candidate_models` 첫 element 또는 `runtime_id` fallback 으로 model attribute. None 이 *의도된* 값임을 코드 reader 가 즉시 인지하도록 inline comment 추가.
@@ -150,7 +150,7 @@ read-side success path 는 `selected_model` / `model_used` 둘 중 하나만 받
 
 ```bash
 # write-side 8/8 audit
-rg -n '~selected_model_raw:None' lib/keeper/keeper_turn_driver.ml | wc -l
+rg -n '~selected_model:None' lib/keeper/keeper_turn_driver.ml | wc -l
 # PR-1 후: 5 (error path 5 사이트, 모두 inline comment marker 보유)
 # PR-1 후 grep 'error path' 동반: 5
 ```
@@ -178,7 +178,7 @@ query the configured telemetry backend for runtime_model_attribution_fallback_hi
 ### 4.3 Test 추가
 
 - `test/test_model_inference_metrics.ml`: PR-1 의 L969 fix 가 새 row 를 runtime attribution 으로 처리하는 unit test 추가.
-- `test/test_keeper_turn_driver.ml` (또는 동등): `Runtime_fsm.Accept` unreachable branch 가 fire 될 때 `selected_model_raw=Some` 로 record_runtime 호출되는지 검증.
+- `test/test_keeper_turn_driver.ml` (또는 동등): `Runtime_fsm.Accept` unreachable branch 가 fire 될 때 `selected_model=Some` 로 record_runtime 호출되는지 검증.
 
 ## 5. Sequencing
 

@@ -47,7 +47,7 @@ let rec mkdir_p path =
 ;;
 
 (* Day file for [ts] computed independently of the module under test, mirroring
-   the write path ([Jsonl_writer.dated_path], UTC). Seeding through this rather
+   the write path ([Dated_jsonl.Store.dated_path], UTC). Seeding through this rather
    than through [AQ.day_string_of_ts] keeps the reader honest: a reader
    that switched to local time would stop finding rows the writer placed here. *)
 let audit_day_file ~base_path ts =

@@ -445,7 +445,8 @@ let detach_ready writer =
     | [], (Draining | Failed _ | Closed) ->
       Eio.Mutex.unlock writer.mu;
       None
-    | newest_first, _ ->
+    | (newest_first, Accepting) | (newest_first, Draining) | (newest_first, Failed _)
+    | (newest_first, Closed) ->
       let command_count = writer.queue_depth in
       writer.newest_first <- [];
       writer.queue_depth <- 0;

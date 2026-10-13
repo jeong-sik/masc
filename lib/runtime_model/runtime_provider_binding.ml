@@ -15,31 +15,6 @@ let normalize_provider_id provider_id =
   |> String.map (fun c -> if c = '-' then '_' else c)
 ;;
 
-let provider_name_of_kind (kind : Llm_provider.Provider_config.provider_kind) =
-  let cfg =
-    Llm_provider.Provider_config.make ~kind ~model_id:"auto" ~base_url:"" ()
-  in
-  Llm_provider.Provider_registry.provider_name_of_config cfg
-;;
-
-let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  match Runtime_binding.binding_for_provider_config cfg with
-  | Some binding -> binding.Runtime_binding.id
-  | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
-;;
-
-(* Two bindings can share a provider, so the model and base URL come along:
-   the label has to say which endpoint a call actually reached. *)
-let provider_endpoint_label_of_config (cfg : Llm_provider.Provider_config.t) =
-  match cfg.kind with
-  | Llm_provider.Provider_config.OpenAI_compat ->
-    let base_url = String.trim cfg.base_url in
-    if base_url = ""
-    then provider_label_of_config cfg
-    else Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg) cfg.model_id base_url
-  | _ -> provider_label_of_config cfg
-;;
-
 let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
@@ -86,7 +61,7 @@ let provider_name_matches_default_local_openai_runtime provider_name =
 let provider_name_matches_kind_default provider_name kind =
   String.equal
     (normalize_provider_id provider_name)
-    (normalize_provider_id (provider_name_of_kind kind))
+    (normalize_provider_id (Llm_provider.Provider_config.string_of_provider_kind kind))
 ;;
 
 let default_headers_for_kind (kind : Llm_provider.Provider_config.provider_kind) =

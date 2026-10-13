@@ -444,7 +444,8 @@ let apply_meta (state : state) command =
         (Keeper_identity_mismatch
            { expected = state.keeper_name; actual = meta.name })
     | None, Delete_if_snapshot _ -> Ok (publish_transition state No_persistence)
-    | None, _ -> Error Meta_missing
+    | (None, Pause _) | (None, Resume _) | (None, Reset_latch _) | (None, Retain_shutdown_latch _)
+    | (None, Update_profile _) | (None, Commit_turn_runtime _) | (None, Set_current_task _) -> Error Meta_missing
     | Some meta, command -> apply_existing state meta command
 ;;
 

@@ -40,6 +40,18 @@ let test_untyped_errors_do_not_become_fd_facts () =
     (member_int "system_fd_exhaustion_observations_total" fields)
 ;;
 
+let test_other_errnos_do_not_become_fd_facts () =
+  FD.reset_for_tests ();
+  List.iter
+    (fun code -> FD.note_exception ~site:"test.other" (Unix.Unix_error (code, "open", "fixture")))
+    [ Unix.ENOSPC; Unix.EACCES; Unix.EAGAIN; Unix.EUNKNOWNERR 4242 ];
+  let fields = FD.projection_fields () in
+  check int "process error count unchanged" 0
+    (member_int "process_fd_exhaustion_observations_total" fields);
+  check int "system error count unchanged" 0
+    (member_int "system_fd_exhaustion_observations_total" fields)
+;;
+
 let test_external_signal_is_telemetry_only () =
   FD.reset_for_tests ();
   let ts = 1234.5 in
@@ -137,6 +149,7 @@ let () =
     [ ( "typed errors"
       , [ test_case "EMFILE and ENFILE" `Quick test_typed_fd_errors_are_observed
         ; test_case "untyped text is ignored" `Quick test_untyped_errors_do_not_become_fd_facts
+        ; test_case "other errnos are ignored" `Quick test_other_errnos_do_not_become_fd_facts
         ] )
     ; "external signal", [ test_case "telemetry only" `Quick test_external_signal_is_telemetry_only ]
     ; "runtime state", [ test_case "facts without admission" `Quick test_runtime_state_contains_facts_not_admission ]

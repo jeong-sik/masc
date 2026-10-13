@@ -2908,7 +2908,7 @@ max-concurrent = 1
   let observation =
     let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
     Runtime_observation.runtime_observation_with_metrics
-      ~runtime_id:answering_runtime ~selected_model_raw:None ~capture ()
+      ~runtime_id:answering_runtime ~selected_model:None ~capture ()
   in
   let prompt_metrics =
     Masc.Keeper_agent_prompt_metrics.build_prompt_metrics

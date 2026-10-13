@@ -157,7 +157,11 @@ let blob_response ~base_path ~sha256 =
         `OK )
   | Error (Tool_blob_store.Too_large { actual; maximum; _ }) ->
       too_large_response actual maximum, `Payload_too_large
-  | Error error ->
+  | Error
+      ((Tool_blob_store.Invalid_sha256 _
+       | Tool_blob_store.Owned_read_failed _
+       | Tool_blob_store.Invalid_max_bytes _
+       | Tool_blob_store.Integrity_mismatch _) as error) ->
       Log.Misc.error
         "tool blob read failed sha256=%s cause=%s"
         sha256
@@ -230,7 +234,11 @@ let add_routes router =
                  | Error (Tool_blob_store.Too_large { actual; maximum; _ }) ->
                    respond_json_value_with_cors ~status:`Payload_too_large request reqd
                      (too_large_response actual maximum)
-                 | Error error ->
+                 | Error
+                     ((Tool_blob_store.Invalid_sha256 _
+                      | Tool_blob_store.Owned_read_failed _
+                      | Tool_blob_store.Invalid_max_bytes _
+                      | Tool_blob_store.Integrity_mismatch _) as error) ->
                    Log.Misc.error "tool blob raw read failed sha256=%s cause=%s"
                      sha256 (Tool_blob_store.fetch_error_to_string error);
                    respond_json_value_with_cors ~status:`Service_unavailable request reqd

@@ -1409,7 +1409,9 @@ let footer_hints_code ~pane =
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
-         { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
+         { b with label = (match pane with
+           | Code_tree -> "move"
+           | Code_file | Code_diff | Code_notes | Code_history -> "scroll") }
        else b)
   |> hints_of_bindings
   |> fun hints ->
@@ -1863,7 +1865,10 @@ let help_sections ?current () =
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
            | Lanes -> entries [preflight_detail_binding]
-           | _ -> []
+           | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
+           | Overview | Acting | Metrics | Clients | Board | Approvals | Planning | Schedules
+           | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
+           | Config | Resources | Tools | System_logs -> []
          in
          (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
       help_surfaces

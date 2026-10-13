@@ -536,7 +536,7 @@ let decode_stripped ?directory_name contents =
              ; metadata_values
              ; body
              }
-         | diagnostics, _, _, _, _, _ -> Unloadable diagnostics)
+         | (diagnostics, Ok _, _, _, _, _) | (diagnostics, Error _, _, _, _, _) -> Unloadable diagnostics)
      | Ok _ -> Unloadable [ Frontmatter_not_mapping ])
 ;;
 

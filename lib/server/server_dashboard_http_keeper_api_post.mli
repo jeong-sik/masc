@@ -74,28 +74,42 @@ val refresh_keeper_execution_surfaces :
 val invalidate_keeper_execution_surfaces :
   config:Workspace_utils.config -> unit -> unit
 
-(** [context_shrink_of_patch ~meta fields] is [Some (previous_display, new_value)]
-    when the config patch reduces the keeper's context window below its current
+(** A checked [max_context_override] value: [null] clears the cap, a
+    positive integer sets it. *)
+type max_context_override_change =
+  | Clear_max_context_override
+  | Set_max_context_override of int
+
+(** Pure validation of a dashboard config patch body: duplicate keys, the
+    allowed-field list, and per-field types/contracts. [remote_endpoint] is
+    checked for shape only -- a non-blank string, or null to detach it;
+    whether the name is declared under [exec.ssh.endpoints] and whether the
+    profile admits an endpoint at all are decided by [Keeper_turn_up_args.parse]
+    on the apply path. [Ok patch] means {!handle_keeper_config_post} would
+    proceed to apply [patch.config_fields]. [confirm_context_shrink] defaults
+    to [false]; [expected_config_revision] is parsed and required by the
+    handler before this check and is only kept out of [config_fields] here. *)
+type dashboard_config_patch = {
+  confirm_context_shrink : bool;
+  max_context_override : max_context_override_change option;
+      (** [None] when the patch does not send the field. *)
+  config_fields : (string * Yojson.Safe.t) list;
+      (** The patch without its two control fields, in request order. *)
+}
+
+val validate_dashboard_config_patch :
+  (string * Yojson.Safe.t) list ->
+  (dashboard_config_patch, string) result
+
+(** [context_shrink_of_patch ~meta patch] is [Some (previous_display, new_value)]
+    when [patch] reduces the keeper's context window below its current
     setting (introduces a cap where there was none, or lowers an existing cap),
     else [None]. Used by {!handle_keeper_config_post} to require an explicit
     [confirm_context_shrink] acknowledgement before applying a shrink. *)
 val context_shrink_of_patch :
   meta:Keeper_meta_contract.keeper_meta ->
-  (string * Yojson.Safe.t) list ->
+  dashboard_config_patch ->
   (string * int) option
-
-(** Pure validation of a dashboard config patch body: duplicate keys, the
-    allowed-field list, and per-field types/contracts (including the shared
-    autonomous wake-prompt contract). [remote_endpoint] is checked for shape
-    only -- a non-blank string, or null to detach it; whether the name is
-    declared under [exec.ssh.endpoints] and whether the profile admits an
-    endpoint at all are decided by [Keeper_turn_up_args.parse] on the apply
-    path. [Ok ()] means {!handle_keeper_config_post} would proceed to apply
-    it. *)
-val validate_dashboard_config_patch :
-  meta:Keeper_meta_contract.keeper_meta ->
-  (string * Yojson.Safe.t) list ->
-  (unit, string) result
 
 val handle_keeper_config_post :
   sw:Eio.Switch.t ->

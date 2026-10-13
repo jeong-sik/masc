@@ -57,7 +57,7 @@ let source assembly selected_blocks (message : Agent_core.Types.message) =
                Some (List.filter_map (fun (i, (span : Assembly.span)) ->
                  match span.kind with
                  | Block id when List.exists (Prompt_block_id.equal id) ids -> Some i
-                 | _ -> None) (List.mapi (fun i span -> i, span) receipt.spans)))
+                 | Block _ | Unattributed _ -> None) (List.mapi (fun i span -> i, span) receipt.spans)))
       in
       (match selected with
        | None ->
@@ -83,7 +83,10 @@ let source assembly selected_blocks (message : Agent_core.Types.message) =
     (match message.role, message.content, assembly with
      | System, [Text _], None -> Unavailable Missing_issuer
      | System, [Text actual], Some assembly -> inspect assembly actual
-     | _ -> Unavailable Unsupported_carrier)
+     | (Agent_core.Types.System, (Agent_core.Types.Text _)::_::_, _)
+     | (Agent_core.Types.System, (Agent_core.Types.Thinking _ | (Agent_core.Types.ReasoningDetails _ | (Agent_core.Types.RedactedThinking _ | (Agent_core.Types.ToolUse _ | (Agent_core.Types.ToolResult _ | (Agent_core.Types.Image _ | (Agent_core.Types.Document _ | Agent_core.Types.Audio _)))))))::_, _)
+     | (Agent_core.Types.System, [], _)
+     | ((Agent_core.Types.User | (Agent_core.Types.Assistant | Agent_core.Types.Tool)), _, _) -> Unavailable Unsupported_carrier)
 
 let encoded_carrier ~assembly ~selected_blocks message =
   let text = Keeper_official_client_context_codec.encode message in

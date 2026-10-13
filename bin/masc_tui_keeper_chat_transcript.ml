@@ -605,7 +605,17 @@ let ending_source t = t.ending_source
 let awaiting_continuation t =
   match t.phase, t.reply with
   | Waiting, Some { reply_outcome = Masc.Keeper_turn_outcome.Continuation_checkpoint; _ } -> true
-  | (Waiting | Working | Stream_ended | Stream_failed _), _ -> false
+  | ( (Waiting | Working | Stream_ended | Stream_failed _)
+    , ( None
+      | Some
+          { reply_outcome =
+              ( Masc.Keeper_turn_outcome.Visible_reply
+              | Masc.Keeper_turn_outcome.Continuation_checkpoint
+              | Masc.Keeper_turn_outcome.Terminal_effect_settled
+              | Masc.Keeper_turn_outcome.Awaiting_gate_approval
+              | Masc.Keeper_turn_outcome.No_visible_reply )
+          ; _
+          } ) ) -> false
 let admission t = t.admission
 let interrupt t = t.interrupt
 let note_interrupt t interrupt =
@@ -1286,7 +1296,7 @@ let apply_tool_result ~now t ~(occurrence : Live.tool_occurrence) ~execution_id 
       (Printf.sprintf
          "KEEPER_TOOL_RESULT_READY conflicts for stream occurrence %s: %s != %s"
          (occurrence_label occurrence) recorded execution_id)
-  | Some returned ->
+  | Some ({ authority = Masc_execution; _ } as returned) ->
     (match
        List.find_opt
          (fun (call : live_tool_call) ->
@@ -1595,7 +1605,8 @@ let apply_delta ~now t (delta : Live.delta) =
       let since, older =
         let rec split acc = function
           | ((Node_segment_boundary | Node_superseded _) :: _) as older -> (acc, older)
-          | node :: rest -> split (node :: acc) rest
+          | ((Node_response_boundary | Node_thinking _ | Node_text _
+             | Node_tool _) as node) :: rest -> split (node :: acc) rest
           | [] -> (acc, [])
         in
         split [] t.reversed_trail
@@ -1940,7 +1951,17 @@ let apply_delta ~now t (delta : Live.delta) =
          t.phase <- Waiting;
          t.ended_at <- None;
          t.settled_at <- None
-       | _, (Some _ | None) ->
+       | ( (Waiting | Working | Stream_ended | Stream_failed _)
+         , ( None
+           | Some
+               { reply_outcome =
+                   ( Masc.Keeper_turn_outcome.Visible_reply
+                   | Masc.Keeper_turn_outcome.Continuation_checkpoint
+                   | Masc.Keeper_turn_outcome.Terminal_effect_settled
+                   | Masc.Keeper_turn_outcome.Awaiting_gate_approval
+                   | Masc.Keeper_turn_outcome.No_visible_reply )
+               ; _
+               } ) ) ->
          t.phase <- Stream_ended;
          t.ending_source <- Ending_heard_in_stream;
          t.ended_at <- Some now;
@@ -2307,7 +2328,17 @@ let compute_drawn t =
   let current_text item =
     match item.origin, item.superseded, item.drawn with
     | Text_stretch id, None, Drawn_text _ -> id >= t.response_first_stretch
-    | _ -> false
+    | Text_stretch _, None,
+      (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_reply _
+      | Drawn_status _ | Drawn_error _)
+    | Text_stretch _, Some _,
+      (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_text _
+      | Drawn_reply _ | Drawn_status _ | Drawn_error _)
+    | ( Admission_of_request _ | Thinking_stretch _ | Tool_stretch _
+      | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _ ),
+      (None | Some _),
+      (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _ | Drawn_text _
+      | Drawn_reply _ | Drawn_status _ | Drawn_error _) -> false
   in
   let text_count = List.length (List.filter current_text items) in
   (* The flat canonical reply can stand for the last text stretch only. A
@@ -2323,7 +2354,8 @@ let compute_drawn t =
             let last =
               match item.superseded, item.drawn with
               | None, (Drawn_tools _ | Drawn_skill _) -> None
-              | _ -> if current_text item then Some index else last
+              | (None, (Drawn_thinking _ | (Drawn_text _ | (Drawn_reply _ | (Drawn_status _ | Drawn_error _)))))
+              | (Some _, _) -> if current_text item then Some index else last
             in
             (index + 1, last))
       (0, None) projected
@@ -2338,7 +2370,17 @@ let compute_drawn t =
         (match List.nth_opt scoped_items index with
          | Some (_, Some observed) -> expected = observed
          | Some (_, None) | None -> false)
-    | Some _, _ | None, _ -> false in
+    | ( ( None
+        | Some
+            { reply_outcome =
+                ( Masc.Keeper_turn_outcome.Visible_reply
+                | Masc.Keeper_turn_outcome.Continuation_checkpoint
+                | Masc.Keeper_turn_outcome.Terminal_effect_settled
+                | Masc.Keeper_turn_outcome.Awaiting_gate_approval
+                | Masc.Keeper_turn_outcome.No_visible_reply )
+            ; _
+            } )
+      , (None | Some _) ) -> false in
   let items, last_text =
     match unseen with
     | [] -> items, last_text
@@ -2408,7 +2450,18 @@ let compute_drawn t =
             List.mapi (fun index item ->
               if index = last then { reply_item with origin = item.origin; at = item.at }
               else item) items)
-  | Some { reply_text; reply_at; reply_outcome; reply_turn_ref; _ } ->
+  | Some
+      { reply_text
+      ; reply_at
+      ; reply_outcome =
+          ( ( Masc.Keeper_turn_outcome.Visible_reply
+            | Masc.Keeper_turn_outcome.Continuation_checkpoint
+            | Masc.Keeper_turn_outcome.Terminal_effect_settled
+            | Masc.Keeper_turn_outcome.Awaiting_gate_approval
+            | Masc.Keeper_turn_outcome.No_visible_reply ) as reply_outcome )
+      ; reply_turn_ref
+      ; _
+      } ->
       (* Nothing is chunked for a control outcome, and a visible reply with
          no text has nothing to chunk: the one row that says how the turn
          ended comes from the recorded reply. *)

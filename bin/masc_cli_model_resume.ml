@@ -41,7 +41,7 @@ let run ~base_path ~port ~agent =
                      ~headers ~body:"{}" () with
              | Error _ -> Refused "The workspace server did not answer. Retry when it is running."
              | Ok (status, body) -> response ~status body)
-        | _ -> Refused "The workspace server is not ready. Retry when workspace preparation finishes."))) in
+        | Ok _ | Error _ -> Refused "The workspace server is not ready. Retry when workspace preparation finishes."))) in
     match outcome with
     | Resumed {exact_output_available} ->
       print_endline "The running workspace has loaded your saved model settings.";

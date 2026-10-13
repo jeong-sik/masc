@@ -581,7 +581,8 @@ let rec validate_schema_value ~path schema value =
      | Some (`String "number") ->
        (match json_type value with
         | Integer_type | Number_type -> Ok ()
-        | actual -> Error (Type_mismatch { path; expected = Number_type; actual }))
+        | (Null_type | Boolean_type | String_type | Array_type | Object_type) as actual ->
+          Error (Type_mismatch { path; expected = Number_type; actual }))
      | Some (`String "boolean") -> validate_schema_scalar ~path Boolean_type value
      | Some unsupported ->
        (match nullable_schema_type unsupported, value with

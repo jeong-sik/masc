@@ -56,7 +56,8 @@ let firefox_failure_message (config : Browser_configuration.live_bidi) = functio
       "Firefox exited (%s) before port %d answered. Another Firefox may have %s open; \
        quit it and the next server start opens this one."
       (status_text status) config.port config.profile
-  | Exited_before_listening status ->
+  | Exited_before_listening
+      (( None | Some (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ) as status) ->
     Printf.sprintf "Firefox exited (%s) before port %d answered." (status_text status) config.port
   | Not_listening seconds ->
     Printf.sprintf "Firefox did not open port %d within %.0f s." config.port seconds

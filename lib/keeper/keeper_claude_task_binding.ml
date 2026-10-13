@@ -82,7 +82,8 @@ let observe_input t (observation : Input.observation) =
        t.invocation <-
          (match observation.frame, observation.phase with
           | None, Input.Prepared -> Ticket observation.ticket
-          | _ -> Conflicted)
+          | (None, (Input.Written | (Input.Write_unknown | (Input.Consumed | Input.Settled _))))
+          | (Some _, _) -> Conflicted)
    | Ticket ticket when not (same_ticket ticket observation.ticket) ->
        t.invocation <- Conflicted
    | Ticket _ | Conflicted -> ());

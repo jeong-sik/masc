@@ -65,7 +65,30 @@ let is_surface_post_row ~first_ts ~last_ts (row : Store.chat_message) =
 
 let is_terminal_event = function
   | Events.Run_finished _ | Events.Event_error _ -> true
-  | _ -> false
+  | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
+  | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
+  | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
+  | Keeper_chat_events.Text_delta _ | Keeper_chat_events.External_effect_completed _
+  | Keeper_chat_events.Reply_details _ | Keeper_chat_events.Continuation_checkpoint _
+  | Keeper_chat_events.Provider_retry_observed _
+  | Keeper_chat_events.Agent_core_runtime_attempt_started _
+  | Keeper_chat_events.Agent_core_stream_message_start _
+  | Keeper_chat_events.Agent_core_stream_message_delta _
+  | Keeper_chat_events.Agent_core_stream_message_stop _
+  | Keeper_chat_events.Agent_core_content_block_start _
+  | Keeper_chat_events.Agent_core_content_block_stop _ | Keeper_chat_events.Model_content_activity _
+  | Keeper_chat_events.Agent_core_thinking_delta _
+  | Keeper_chat_events.Agent_core_thinking_signature_delta _
+  | Keeper_chat_events.Agent_core_media_delta _
+  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _
+  | Keeper_chat_events.Tool_call_args _ | Keeper_chat_events.Tool_call_args_snapshot _
+  | Keeper_chat_events.Tool_call_end _ | Keeper_chat_events.Native_tool_start _
+  | Keeper_chat_events.Native_tool_end (_, _) | Keeper_chat_events.Native_tool_progress (_, _)
+  | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
+  | Keeper_chat_events.Tool_result_ready _ | Keeper_chat_events.Tool_transcript_committed _
+  | Keeper_chat_events.Link_block _ | Keeper_chat_events.Image_block _
+  | Keeper_chat_events.Status_block _ | Keeper_chat_events.Audio_block _
+  | Keeper_chat_events.Tool_context_block _ -> false
 ;;
 
 let last_terminal_event entries =
@@ -83,7 +106,32 @@ let last_reply_details entries =
   |> List.filter_map (fun (entry : Journal.journaled_event) ->
        match entry.event with
        | Events.Reply_details details -> Some details
-       | _ -> None)
+       | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
+       | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
+       | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
+       | Keeper_chat_events.Text_delta _ | Keeper_chat_events.External_effect_completed _
+       | Keeper_chat_events.Run_finished _ | Keeper_chat_events.Event_error _
+       | Keeper_chat_events.Continuation_checkpoint _ | Keeper_chat_events.Provider_retry_observed _
+       | Keeper_chat_events.Agent_core_runtime_attempt_started _
+       | Keeper_chat_events.Agent_core_stream_message_start _
+       | Keeper_chat_events.Agent_core_stream_message_delta _
+       | Keeper_chat_events.Agent_core_stream_message_stop _
+       | Keeper_chat_events.Agent_core_content_block_start _
+       | Keeper_chat_events.Agent_core_content_block_stop _
+       | Keeper_chat_events.Model_content_activity _
+       | Keeper_chat_events.Agent_core_thinking_delta _
+       | Keeper_chat_events.Agent_core_thinking_signature_delta _
+       | Keeper_chat_events.Agent_core_media_delta _
+       | Keeper_chat_events.Agent_core_stream_protocol_error _
+       | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_args _
+       | Keeper_chat_events.Tool_call_args_snapshot _ | Keeper_chat_events.Tool_call_end _
+       | Keeper_chat_events.Native_tool_start _ | Keeper_chat_events.Native_tool_end (_, _)
+       | Keeper_chat_events.Native_tool_progress (_, _)
+       | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
+       | Keeper_chat_events.Tool_result_ready _ | Keeper_chat_events.Tool_transcript_committed _
+       | Keeper_chat_events.Link_block _ | Keeper_chat_events.Image_block _
+       | Keeper_chat_events.Status_block _ | Keeper_chat_events.Audio_block _
+       | Keeper_chat_events.Tool_context_block _ -> None)
   |> List.rev
   |> function
   | details :: _ -> Some details
@@ -112,13 +160,15 @@ let lifecycle_terminal (row : Store.chat_message) =
 let lifecycle_ends_run_error row =
   match lifecycle_terminal row with
   | Some Store.Run_error -> true
-  | _ -> false
+  | Some (Keeper_chat_types.Run_started | (Keeper_chat_types.Text_message_start | (Keeper_chat_types.Text_message_end | Keeper_chat_types.Run_finished)))
+  | None -> false
 ;;
 
 let is_terminal_result_slot (row : Store.chat_message) =
   match row.delivery_provenance with
   | Some { Delivery.transcript_slot = Delivery.Terminal_result; _ } -> true
-  | _ -> false
+  | Some { transcript_slot = (Delivery.Accepted_user | (Delivery.Approval_request | (Delivery.Approval_resolution | (Delivery.Approval_replay | (Delivery.Approval_replay_correction | (Delivery.Approval_continuation | (Delivery.Tool_call _ | Delivery.Tool_delivery _)))))));_}
+  | None -> false
 ;;
 
 let is_terminal_row (row : Store.chat_message) =
@@ -161,7 +211,30 @@ let terminal_outcome_mismatch ~terminal_event rows =
         rows
     in
     not failure_recorded
-  | _ -> false
+  | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
+  | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
+  | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
+  | Keeper_chat_events.Text_delta _ | Keeper_chat_events.External_effect_completed _
+  | Keeper_chat_events.Reply_details _ | Keeper_chat_events.Continuation_checkpoint _
+  | Keeper_chat_events.Provider_retry_observed _
+  | Keeper_chat_events.Agent_core_runtime_attempt_started _
+  | Keeper_chat_events.Agent_core_stream_message_start _
+  | Keeper_chat_events.Agent_core_stream_message_delta _
+  | Keeper_chat_events.Agent_core_stream_message_stop _
+  | Keeper_chat_events.Agent_core_content_block_start _
+  | Keeper_chat_events.Agent_core_content_block_stop _ | Keeper_chat_events.Model_content_activity _
+  | Keeper_chat_events.Agent_core_thinking_delta _
+  | Keeper_chat_events.Agent_core_thinking_signature_delta _
+  | Keeper_chat_events.Agent_core_media_delta _
+  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_start _
+  | Keeper_chat_events.Tool_call_args _ | Keeper_chat_events.Tool_call_args_snapshot _
+  | Keeper_chat_events.Tool_call_end _ | Keeper_chat_events.Native_tool_start _
+  | Keeper_chat_events.Native_tool_end (_, _) | Keeper_chat_events.Native_tool_progress (_, _)
+  | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
+  | Keeper_chat_events.Tool_result_ready _ | Keeper_chat_events.Tool_transcript_committed _
+  | Keeper_chat_events.Link_block _ | Keeper_chat_events.Image_block _
+  | Keeper_chat_events.Status_block _ | Keeper_chat_events.Audio_block _
+  | Keeper_chat_events.Tool_context_block _ -> false
 ;;
 
 (* Rule 3: the persisted terminal text is [Reply_details.reply]; both sides
@@ -189,7 +262,32 @@ let tool_rows_mismatch entries rows =
       (fun (entry : Journal.journaled_event) ->
          match entry.event with
          | Events.Tool_result_ready { execution_id; _ } -> Some execution_id
-         | _ -> None)
+         | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
+         | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
+         | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
+         | Keeper_chat_events.Text_delta _ | Keeper_chat_events.External_effect_completed _
+         | Keeper_chat_events.Run_finished _ | Keeper_chat_events.Event_error _
+         | Keeper_chat_events.Reply_details _ | Keeper_chat_events.Continuation_checkpoint _
+         | Keeper_chat_events.Provider_retry_observed _
+         | Keeper_chat_events.Agent_core_runtime_attempt_started _
+         | Keeper_chat_events.Agent_core_stream_message_start _
+         | Keeper_chat_events.Agent_core_stream_message_delta _
+         | Keeper_chat_events.Agent_core_stream_message_stop _
+         | Keeper_chat_events.Agent_core_content_block_start _
+         | Keeper_chat_events.Agent_core_content_block_stop _
+         | Keeper_chat_events.Model_content_activity _
+         | Keeper_chat_events.Agent_core_thinking_delta _
+         | Keeper_chat_events.Agent_core_thinking_signature_delta _
+         | Keeper_chat_events.Agent_core_media_delta _
+         | Keeper_chat_events.Agent_core_stream_protocol_error _
+         | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_args _
+         | Keeper_chat_events.Tool_call_args_snapshot _ | Keeper_chat_events.Tool_call_end _
+         | Keeper_chat_events.Native_tool_start _ | Keeper_chat_events.Native_tool_end (_, _)
+         | Keeper_chat_events.Native_tool_progress (_, _)
+         | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
+         | Keeper_chat_events.Tool_transcript_committed _ | Keeper_chat_events.Link_block _
+         | Keeper_chat_events.Image_block _ | Keeper_chat_events.Status_block _
+         | Keeper_chat_events.Audio_block _ | Keeper_chat_events.Tool_context_block _ -> None)
       entries
     |> sorted_execution_ids
   in
@@ -451,7 +549,14 @@ let sweep ~base_dir ~lookback_sec ~liveness ~audited () =
                 | Leave -> results, audited
                 | Report (Liveness_unknown _ as verdict) ->
                   (keeper_name, operation_id, verdict) :: results, audited
-                | Report verdict ->
+                | Report
+                    (( Match
+                     | Mismatch _
+                     | Journal_missing
+                     | Journal_unreadable _
+                     | Journal_truncated
+                     | Journal_corrupt _
+                     | Store_unreadable _ ) as verdict) ->
                   ( (keeper_name, operation_id, verdict) :: results
                   , Audited.add (keeper_name, operation_id) audited )
               end)

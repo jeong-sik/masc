@@ -364,13 +364,15 @@ let%test "thinking_control_format encoder preserves the exact template token" =
 let%test "thinking_control_format encoder rejects an empty public token" =
   match encode_thinking_control_format (Chat_template_token "") with
   | Error (Invalid_token { token = ""; invalidity = Empty_token }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Unknown_label _) | Error (Token_required) | Error (Token_forbidden)
+  | Error (Invalid_token { invalidity = Empty_token | Leading_or_trailing_whitespace; _ }) -> false
 ;;
 
 let%test "thinking_control_format encoder rejects a whitespace-only public token" =
   match encode_thinking_control_format (Chat_template_token " \t ") with
   | Error (Invalid_token { token = " \t "; invalidity = Empty_token }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Unknown_label _) | Error (Token_required) | Error (Token_forbidden)
+  | Error (Invalid_token { invalidity = Empty_token | Leading_or_trailing_whitespace; _ }) -> false
 ;;
 
 let%test "thinking_control_format encoder rejects a padded public token" =
@@ -378,7 +380,8 @@ let%test "thinking_control_format encoder rejects a padded public token" =
   | Error
       (Invalid_token
          { token = " <|think|> "; invalidity = Leading_or_trailing_whitespace }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Unknown_label _) | Error (Token_required) | Error (Token_forbidden)
+  | Error (Invalid_token { invalidity = Empty_token | Leading_or_trailing_whitespace; _ }) -> false
 ;;
 
 let%test "thinking_control_format canonical labels are unique" =
@@ -391,7 +394,7 @@ let%test "thinking_control_format decoder rejects noncanonical labels exactly" =
     (fun label ->
        match decode_thinking_control_format { label; token = None } with
        | Error (Unknown_label rejected) -> String.equal rejected label
-       | Ok _ | Error _ -> false)
+       | Ok _ | Error (Token_required) | Error (Token_forbidden) | Error (Invalid_token _) -> false)
     [ " thinking_object"
     ; "thinking_object "
     ; "Thinking_object"
@@ -419,7 +422,8 @@ let%test "chat_template_token rejects an empty token" =
     decode_thinking_control_format { label = chat_template_token_label; token = Some "" }
   with
   | Error (Invalid_token { invalidity = Empty_token; _ }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Unknown_label _) | Error (Token_required) | Error (Token_forbidden)
+  | Error (Invalid_token { invalidity = Leading_or_trailing_whitespace; _ }) -> false
 ;;
 
 let%test "chat_template_token rejects a whitespace-only token as empty" =
@@ -428,7 +432,8 @@ let%test "chat_template_token rejects a whitespace-only token as empty" =
       { label = chat_template_token_label; token = Some " \t " }
   with
   | Error (Invalid_token { token = " \t "; invalidity = Empty_token }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Unknown_label _) | Error (Token_required) | Error (Token_forbidden)
+  | Error (Invalid_token { invalidity = Empty_token | Leading_or_trailing_whitespace; _ }) -> false
 ;;
 
 let%test "chat_template_token rejects a padded token without normalizing it" =
@@ -439,7 +444,8 @@ let%test "chat_template_token rejects a padded token without normalizing it" =
   | Error
       (Invalid_token
          { token = " <|think|> "; invalidity = Leading_or_trailing_whitespace }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Unknown_label _) | Error (Token_required) | Error (Token_forbidden)
+  | Error (Invalid_token { invalidity = Empty_token | Leading_or_trailing_whitespace; _ }) -> false
 ;;
 
 let%test "optional thinking_control_format preserves absence without a default" =

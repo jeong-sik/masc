@@ -115,7 +115,16 @@ let is_reference = valid_reference
 
 let table ~path = function
   | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> Ok fields
-  | _ -> Error (Expected_table { path })
+  | Otoml.TomlString _
+  | Otoml.TomlInteger _
+  | Otoml.TomlFloat _
+  | Otoml.TomlBoolean _
+  | Otoml.TomlOffsetDateTime _
+  | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _
+  | Otoml.TomlLocalTime _
+  | Otoml.TomlArray _
+  | Otoml.TomlTableArray _ -> Error (Expected_table { path })
 
 (* Every key a table may carry is named by its reader; anything else is an
    error rather than ignored, so a misspelt field cannot read as absent. *)
@@ -128,7 +137,10 @@ let string_field ~path ~field fields =
   match List.assoc_opt field fields with
   | None -> Error (Missing_field { path; field })
   | Some (Otoml.TomlString value) -> Ok value
-  | Some _ -> Error (Expected_string { path; field })
+  | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _) | Some (Otoml.TomlBoolean _)
+  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error (Expected_string { path; field })
 
 let reference_key = "reference"
 

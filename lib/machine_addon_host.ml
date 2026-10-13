@@ -54,7 +54,8 @@ let event_batch ~principal ~name =
   | Some (Lane_addon_sources.Machine_changed Machine_lane.Dos) -> Some (dos_event_batch ~author)
   | Some (Lane_addon_sources.Machine_changed Machine_lane.Msx) ->
       Some (Machine_addon_events.create ~author ~relay:Machine_msx_host_events.relay)
-  | Some _ | None -> None
+  | Some (Lane_addon_sources.Tool_completed) | None | Some (Lane_addon_sources.Browser_changed)
+  | Some (Lane_addon_sources.Fusion_changed _) -> None
 
 let execution_machine operation arguments =
   match operation with
@@ -64,7 +65,31 @@ let execution_machine operation arguments =
       | Misc_dos_press | Misc_dos_click | Misc_dos_type) -> Some Machine_lane.Dos
   | Some Tool_schemas_misc.Misc_dos_pass ->
       (match pass_target arguments with Ok None -> None | Ok (Some _) | Error _ -> Some Machine_lane.Dos)
-  | Some _ | None -> None
+  | Some (Tool_schemas_misc.Misc_lane_declaration_read) | None
+  | Some (Tool_schemas_misc.Misc_lane_declaration_save) | Some (Tool_schemas_misc.Misc_lane_updates)
+  | Some (Tool_schemas_misc.Misc_lane_attach) | Some (Tool_schemas_misc.Misc_lane_inspect)
+  | Some (Tool_schemas_misc.Misc_lane_observe) | Some (Tool_schemas_misc.Misc_lane_slice)
+  | Some (Tool_schemas_misc.Misc_lane_detach) | Some (Tool_schemas_misc.Misc_lane_evidence)
+  | Some (Tool_schemas_misc.Misc_lane_act) | Some (Tool_schemas_misc.Misc_lane_action_status)
+  | Some (Tool_schemas_misc.Misc_ask) | Some (Tool_schemas_misc.Misc_ask_status)
+  | Some (Tool_schemas_misc.Misc_ask_withdraw) | Some (Tool_schemas_misc.Misc_config)
+  | Some (Tool_schemas_misc.Misc_dashboard) | Some (Tool_schemas_misc.Misc_gc)
+  | Some (Tool_schemas_misc.Misc_keeper_waiting_inventory) | Some (Tool_schemas_misc.Misc_tool_help)
+  | Some (Tool_schemas_misc.Misc_web_fetch) | Some (Tool_schemas_misc.Misc_web_search)
+  | Some (Tool_schemas_misc.Misc_browser_tabs) | Some (Tool_schemas_misc.Misc_browser_read)
+  | Some (Tool_schemas_misc.Misc_browser_session) | Some (Tool_schemas_misc.Misc_browser_goto)
+  | Some (Tool_schemas_misc.Misc_browser_act) | Some (Tool_schemas_misc.Misc_browser_interact)
+  | Some (Tool_schemas_misc.Misc_browser_instruct) | Some (Tool_schemas_misc.Misc_msx_eject)
+  | Some (Tool_schemas_misc.Misc_msx_export_disk) | Some (Tool_schemas_misc.Misc_msx_save)
+  | Some (Tool_schemas_misc.Misc_msx_screen) | Some (Tool_schemas_misc.Misc_msx_meta)
+  | Some (Tool_schemas_misc.Misc_msx_checkpoint_info) | Some (Tool_schemas_misc.Misc_msx_peek)
+  | Some (Tool_schemas_misc.Misc_msx_ram_diff) | Some (Tool_schemas_misc.Misc_portrait_read)
+  | Some (Tool_schemas_misc.Misc_candle_balance) | Some (Tool_schemas_misc.Misc_candle_catalog)
+  | Some (Tool_schemas_misc.Misc_candle_purchase) | Some (Tool_schemas_misc.Misc_candle_equip)
+  | Some (Tool_schemas_misc.Misc_candle_gift) | Some (Tool_schemas_misc.Misc_dos_meta)
+  | Some (Tool_schemas_misc.Misc_dos_inventory) | Some (Tool_schemas_misc.Misc_dos_eject)
+  | Some (Tool_schemas_misc.Misc_dos_screen) | Some (Tool_schemas_misc.Misc_dos_peek)
+  | Some (Tool_schemas_misc.Misc_play_room) | Some (Tool_schemas_misc.Misc_dos_save) -> None
 
 let require_activity machine =
   match Runtime.machine_configuration () with

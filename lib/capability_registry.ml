@@ -238,8 +238,7 @@ let surface_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_sch
       |> List.filter (fun (schema : Masc_domain.tool_schema) ->
              Tool_catalog.is_public_mcp schema.name)
       |> require_unique_schemas ~label:"public MCP capability surface"
-  | _ ->
-      all_projection_seeds_from public_tool_source_schemas
+  | Spawned_agent_mcp | Keeper -> all_projection_seeds_from public_tool_source_schemas
       |> List.filter (fun (seed : capability_seed) -> seed.projection.surface = surface)
       |> List.map (fun (seed : capability_seed) -> projection_to_schema seed.projection)
       |> require_unique_schemas ~label:"capability surface"

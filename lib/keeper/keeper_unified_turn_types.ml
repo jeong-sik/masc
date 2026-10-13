@@ -234,7 +234,16 @@ let registry_failure_reason_of_terminal_reason
   let detail =
     match core_error with
     | Some (Agent_core.Error.Config _) -> "provider configuration failed"
-    | Some error ->
+    | Some
+        (( Agent_core.Error.Api _
+         | Agent_core.Error.Provider _
+         | Agent_core.Error.Agent _
+         | Agent_core.Error.Mcp _
+         | Agent_core.Error.Serialization _
+         | Agent_core.Error.Io _
+         | Agent_core.Error.Orchestration _
+         | Agent_core.Error.Internal _
+         | Agent_core.Error.Internal_carried _ ) as error) ->
       (* A fence's raw error is a JSON envelope whose cause comes last, so a
          prefix preview shows only the repeated fields and cuts the cause. *)
       (match
@@ -262,7 +271,25 @@ let registry_failure_reason_of_terminal_reason
            ; field = None
            ; detail = "configured provider is unsupported"
            })
-    | Some (Agent_core.Error.Config (CredentialUnavailable _)) ->
+    | Some
+        (Agent_core.Error.Config
+           (CredentialUnavailable
+              { provider_id; carrier = Agent_core.Error.UndeclaredCredential })) ->
+      Some
+        (Keeper_registry.Turn_configuration_error
+           { code = "credential_undeclared"
+           ; field = Some (Printf.sprintf "providers.%s.credentials" provider_id)
+           ; detail =
+               "provider requires an API key but its runtime row declares no \
+                credential; add a credentials block naming the environment \
+                variable that holds the key"
+           })
+    | Some
+        (Agent_core.Error.Config
+           (CredentialUnavailable
+              { carrier = Agent_core.Error.InlineCredential | Agent_core.Error.FileCredential
+              ; _
+              })) ->
       Some
         (Keeper_registry.Turn_configuration_error
            { code = "credential_unavailable"
@@ -276,7 +303,12 @@ let registry_failure_reason_of_terminal_reason
            ; field = None
            ; detail = "configuration contains a sensitive inline value"
            })
-    | Some _ | None -> None
+    | Some (Agent_core.Error.Api _) | None | Some (Agent_core.Error.Provider _)
+    | Some (Agent_core.Error.Agent _) | Some (Agent_core.Error.Mcp _)
+    | Some (Agent_core.Error.Config (Agent_core.Error.InvalidConfig _))
+    | Some (Agent_core.Error.Serialization _)
+    | Some (Agent_core.Error.Io _) | Some (Agent_core.Error.Orchestration _)
+    | Some (Agent_core.Error.Internal _) | Some (Agent_core.Error.Internal_carried _) -> None
   in
   match configuration_failure with
   | Some _ as reason -> reason
@@ -306,7 +338,9 @@ let registry_failure_reason_of_terminal_reason
          ; agent_core_timeout =
              (match c with
               | Keeper_turn_terminal_code.Agent_core_error { timeout; _ } -> timeout
-              | _ -> None)
+              | Keeper_turn_terminal_code.Healthy | Keeper_turn_terminal_code.Fiber_unresolved
+              | Keeper_turn_terminal_code.Operator_interrupt
+              | Keeper_turn_terminal_code.Provider_runtime_error _ -> None)
          ; reason = None
          })
   | Keeper_turn_disposition.Runtime_attempts_exhausted ->
@@ -426,7 +460,13 @@ let record_turn_tool_events
               ~keeper_name
               ~tool_name
               ~outcome:"error")
-       | _ -> tracker)
+       | Agent_core.Event_bus.AgentStarted _ | Agent_core.Event_bus.AgentCompleted _
+       | Agent_core.Event_bus.AgentYielded _ | Agent_core.Event_bus.AgentInputRequired _
+       | Agent_core.Event_bus.AgentFailed _ | Agent_core.Event_bus.TurnStarted _
+       | Agent_core.Event_bus.TurnReady _ | Agent_core.Event_bus.TurnCompleted _
+       | Agent_core.Event_bus.HandoffRequested _ | Agent_core.Event_bus.HandoffCompleted _
+       | Agent_core.Event_bus.ElicitationCompleted _ | Agent_core.Event_bus.ToolApprovalCompleted _
+       | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> tracker)
     tracker
     events
 ;;

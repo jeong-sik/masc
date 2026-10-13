@@ -13,6 +13,8 @@ type directive_argument =
   | Tempo_number
   | Time_signature_numbers
   | Tuning_notes
+  | Repeat_count
+  | Alternate_ending_numbers
 
 type failure =
   | Unclosed of unclosed
@@ -34,6 +36,9 @@ type failure =
   | No_music
   | Too_many_strings of int
   | String_past_tuning of { string : int; strings : int }
+  | Repeat_count_out_of_range of string
+  | Alternate_ending_out_of_range of string
+  | Repeat_without_bar
 
 type note = {
   fret : string;
@@ -50,6 +55,9 @@ type beat = {
 type measure = {
   units : int;
   beats : beat list;
+  repeat_start : bool;
+  repeat_end : int option;
+  endings : int list;
 }
 
 type t = {
@@ -90,6 +98,8 @@ let failure_text = function
   | Missing_argument Tempo_number -> "\\tempo expects a number"
   | Missing_argument Time_signature_numbers -> "\\ts expects two numbers"
   | Missing_argument Tuning_notes -> "\\tuning expects note names"
+  | Missing_argument Repeat_count -> "\\rc expects a number"
+  | Missing_argument Alternate_ending_numbers -> "\\ae expects numbers"
   | Second_tuning -> "a second \\tuning directive"
   | Tuning_after_music -> "a \\tuning after the first note"
   | Quoted_without_title -> "a quoted string with no \\title before it"
@@ -111,6 +121,11 @@ let failure_text = function
   | Too_many_strings strings -> Printf.sprintf "a tuning of %d strings" strings
   | String_past_tuning { string; strings } ->
       Printf.sprintf "string %d on a %d-string tuning" string strings
+  | Repeat_count_out_of_range count ->
+      Printf.sprintf "a repeat count of \"%s\" is not 1 or more" (quoted count)
+  | Alternate_ending_out_of_range ending ->
+      Printf.sprintf "an alternate ending of \"%s\" is not 1 to 31" (quoted ending)
+  | Repeat_without_bar -> "a repeat sign with no bar"
 
 (* A beat's length in sixteenth notes, the unit every position is counted in. *)
 let units_of_digits = function
@@ -139,6 +154,9 @@ type directive =
   | Tempo
   | Time_signature
   | Tuning
+  | Repeat_open
+  | Repeat_close
+  | Alternate_endings
 
 type token =
   | Tk_directive of directive
@@ -154,6 +172,9 @@ let directive_of_word = function
   | "tempo" -> Some Tempo
   | "ts" -> Some Time_signature
   | "tuning" -> Some Tuning
+  | "ro" -> Some Repeat_open
+  | "rc" -> Some Repeat_close
+  | "ae" -> Some Alternate_endings
   | _ -> None
 
 let tokenize source =
@@ -393,14 +414,29 @@ type sounding = {
   s_notes : note list;  (* [] is a rest *)
 }
 
+(* The repeat signs read since the last bar line, waiting for the open
+   measure to close: an [\ro], the latest [\rc] count, and every [\ae]
+   number. A sign belongs to the bar it stands in. *)
+type marks = {
+  m_start : bool;
+  m_end : int option;
+  m_endings : int list;
+}
+
+let no_marks = { m_start = false; m_end = None; m_endings = [] }
+
+let marks_pending marks =
+  marks.m_start || Option.is_some marks.m_end || not (List.is_empty marks.m_endings)
+
 (* Measures and the open measure are both kept newest beat first, so the beat
    an effect or a trailing duration belongs to is at hand whichever side of a
-   bar line it is on. *)
+   bar line it is on. A closed measure keeps the signs its bar carried. *)
 type builder = {
   b_tuning : string list option;
   b_default : int;
-  b_measures : sounding list list;  (* newest measure first, each newest beat first *)
-  b_beats : sounding list;          (* the open measure, newest beat first *)
+  b_measures : (marks * sounding list) list;  (* newest measure first, each newest beat first *)
+  b_beats : sounding list;  (* the open measure, newest beat first *)
+  b_marks : marks;  (* the signs of the open measure *)
 }
 
 (* A beat that says its own length sets the length for the beats after it,
@@ -413,16 +449,21 @@ let mark_latest_beat state =
   let mark beat = { beat with s_notes = List.map (fun note -> { note with marked = true }) beat.s_notes } in
   match state.b_beats, state.b_measures with
   | beat :: earlier, _ -> Ok { state with b_beats = mark beat :: earlier }
-  | [], (beat :: earlier) :: measures ->
-      Ok { state with b_measures = (mark beat :: earlier) :: measures }
-  | [], ([] :: _ | []) -> Error Effect_without_note
+  | [], (marks, beat :: earlier) :: measures ->
+      Ok { state with b_measures = (marks, mark beat :: earlier) :: measures }
+  | [], ((_, []) :: _ | []) -> Error Effect_without_note
 
 (* Digits, and nothing is done with their value: a tempo is read and not
    drawn, so its size is not this module's to refuse. *)
 let number_argument missing tokens =
   match tokens with
-  | Tk_word word :: rest when String.length word > 0 && String.for_all is_digit word -> Ok rest
-  | _ -> Error (Missing_argument missing)
+  | Tk_word word :: rest ->
+    (if String.length word > 0 && String.for_all is_digit word
+     then Ok rest
+     else Error (Missing_argument missing))
+  | [] -> Error (Missing_argument missing)
+  | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
+    Error (Missing_argument missing)
 
 (* A tuning's note names, highest string first, as written: [E4] names its
    line [E]. The collection stops at the first token that is not a note name,
@@ -455,7 +496,70 @@ let collect_tuning tokens =
         (match note_name word with
          | Some name -> collect (name :: names) rest
          | None -> List.rev names, tokens)
-    | _ -> List.rev names, tokens
+    | [] -> List.rev names, tokens
+    | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
+      List.rev names, tokens
+  in
+  collect [] tokens
+
+(* A repeat count is drawn, so unlike a tempo its size is this module's to
+   refuse: all digits, fitting in an int, and a count that plays. A word
+   that is no number is a missing count, the way a [\tempo] with no number
+   is. *)
+let repeat_count word =
+  if String.length word = 0 || not (String.for_all is_digit word) then
+    Error (Missing_argument Repeat_count)
+  else
+    match int_of_string_opt word with
+    | Some count when count >= 1 -> Ok count
+    | _ -> Error (Repeat_count_out_of_range word)
+
+(* Alternate endings are the passes 1 to 31, the way alphaTab numbers them.
+   The collection stops at the first token that is not a number, which is
+   where the music resumes. alphaTab's syntax and the writer's canonical form
+   wrap several endings in parentheses, [\ae (1 2 3)], which the tokenizer
+   delivers as one chord token; its members are unpacked as that list. *)
+let collect_endings tokens =
+  let endings_of_members members =
+    let parsed =
+      List.map
+        (fun member ->
+          if String.length member > 0 && String.for_all is_digit member then
+            int_of_string_opt member
+          else None)
+        members
+    in
+    let numbers = List.filter_map (fun ending -> ending) parsed in
+    if
+      List.for_all Option.is_some parsed
+      && numbers <> []
+      && List.for_all (fun ending -> ending >= 1 && ending <= 31) numbers
+    then Some numbers
+    else None
+  in
+  let rec collect found tokens =
+    match tokens with
+    | Tk_word word :: rest when String.length word > 0 && String.for_all is_digit word -> (
+        match int_of_string_opt word with
+        | Some ending when ending >= 1 && ending <= 31 -> collect (ending :: found) rest
+        | _ -> Error (Alternate_ending_out_of_range word))
+    | Tk_chord (inner, None) :: rest when found = [] -> (
+        let members =
+          String.split_on_char ' ' inner
+          |> List.filter (fun member -> not (String.equal member ""))
+        in
+        match endings_of_members members with
+        | Some endings -> collect (List.rev_append endings found) rest
+        | None -> Error (Alternate_ending_out_of_range inner))
+    | []
+    | ( Tk_word _
+      | Tk_chord (_, (None | Some _))
+      | Tk_directive _
+      | Tk_unknown_directive _
+      | Tk_quoted
+      | Tk_effect _
+      | Tk_bar )
+      :: _ -> Ok (List.rev found, tokens)
   in
   collect [] tokens
 
@@ -497,15 +601,21 @@ let started state =
   not (List.is_empty state.b_beats && List.is_empty state.b_measures)
 
 (* The counts are settled once a measure is whole: each beat starts where the
-   one before it ended. *)
-let place_beats soundings =
+   one before it ended. The bar's signs settle with it: an [\ro], the latest
+   [\rc] count, and the [\ae] numbers as a set. *)
+let place_beats marks soundings =
   let beats, units =
     List.fold_left
       (fun (beats, start) sounding ->
         { start; span = sounding.s_span; notes = sounding.s_notes } :: beats, start + sounding.s_span)
       ([], 0) soundings
   in
-  { units; beats = List.rev beats }
+  { units
+  ; beats = List.rev beats
+  ; repeat_start = marks.m_start
+  ; repeat_end = marks.m_end
+  ; endings = List.sort_uniq Int.compare marks.m_endings
+  }
 
 let read source =
   let ( let* ) = Result.bind in
@@ -513,20 +623,28 @@ let read source =
   let rec step state tokens =
     match tokens with
     | [] ->
-        (* A bar line with nothing between it and the next -- a leading or a
-           doubled [|] -- holds no beat and is no measure. *)
-        let measures =
-          List.rev_map List.rev (state.b_beats :: state.b_measures)
-          |> List.filter_map (function [] -> None | soundings -> Some (place_beats soundings))
-        in
-        let tuning = Option.value state.b_tuning ~default:default_tuning in
-        (match measures with
-         | [] -> Error No_music
-         | _ :: _ -> Ok { tuning; measures })
+        (* A sign with no bar of its own fails before the music is counted:
+           with no bar it marks nothing, whether or not earlier bars sang. *)
+        if List.is_empty state.b_beats && marks_pending state.b_marks then Error Repeat_without_bar
+        else
+          (* A bar line with nothing between it and the next -- a leading or a
+             doubled [|] -- holds no beat and is no measure. *)
+          let measures =
+            List.rev ((state.b_marks, state.b_beats) :: state.b_measures)
+            |> List.filter_map (function
+                 | _, [] -> None
+                 | marks, soundings -> Some (place_beats marks (List.rev soundings)))
+          in
+          let tuning = Option.value state.b_tuning ~default:default_tuning in
+          (match measures with
+           | [] -> Error No_music
+           | _ :: _ -> Ok { tuning; measures })
     | Tk_directive Title :: rest ->
         (match rest with
          | Tk_quoted :: after -> step state after
-         | _ -> Error (Missing_argument Title_text))
+         | [] -> Error (Missing_argument Title_text)
+         | (Tk_directive _ | Tk_unknown_directive _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
+           Error (Missing_argument Title_text))
     | Tk_directive Tempo :: rest ->
         let* after = number_argument Tempo_number rest in
         step state after
@@ -546,6 +664,33 @@ let read source =
               | 0 -> Error (Missing_argument Tuning_notes)
               | strings when strings > max_strings -> Error (Too_many_strings strings)
               | _ -> step { state with b_tuning = Some names } after))
+    | Tk_directive Repeat_open :: rest ->
+        step { state with b_marks = { state.b_marks with m_start = true } } rest
+    | Tk_directive Repeat_close :: rest -> (
+        match rest with
+        | Tk_word word :: after -> (
+            match repeat_count word with
+            | Ok count ->
+                step { state with b_marks = { state.b_marks with m_end = Some count } } after
+            | Error failure -> Error failure)
+        | []
+        | ( Tk_directive _
+          | Tk_unknown_directive _
+          | Tk_quoted
+          | Tk_effect _
+          | Tk_chord _
+          | Tk_bar )
+          :: _ -> Error (Missing_argument Repeat_count))
+    | Tk_directive Alternate_endings :: rest -> (
+        match collect_endings rest with
+        | Error failure -> Error failure
+        | Ok ([], _) -> Error (Missing_argument Alternate_ending_numbers)
+        | Ok (endings, after) ->
+            step
+              { state with
+                b_marks = { state.b_marks with m_endings = state.b_marks.m_endings @ endings }
+              }
+              after)
     | Tk_unknown_directive name :: _ -> Error (Unknown_directive name)
     | Tk_quoted :: _ -> Error Quoted_without_title
     | Tk_effect text :: rest ->
@@ -557,7 +702,17 @@ let read source =
         let* notes = chord_notes ~strings:(string_count state) inner in
         step (push_beat ?said notes state) rest
     | Tk_bar :: rest ->
-        step { state with b_measures = state.b_beats :: state.b_measures; b_beats = [] } rest
+        (* A sign on a bar with no beat marks a measure that is dropped, and
+           with it the sign's meaning. *)
+        if List.is_empty state.b_beats && marks_pending state.b_marks then Error Repeat_without_bar
+        else
+          step
+            { state with
+              b_measures = (state.b_marks, state.b_beats) :: state.b_measures
+            ; b_beats = []
+            ; b_marks = no_marks
+            }
+            rest
     (* alphaTex ends its metadata with a lone [.]: it separates the directives
        from the music and is no beat. *)
     | Tk_word "." :: rest when not (started state) -> step state rest
@@ -565,4 +720,6 @@ let read source =
         let* state = beat_of_word state word in
         step state rest
   in
-  step { b_tuning = None; b_default = quarter; b_measures = []; b_beats = [] } tokens
+  step
+    { b_tuning = None; b_default = quarter; b_measures = []; b_beats = []; b_marks = no_marks }
+    tokens

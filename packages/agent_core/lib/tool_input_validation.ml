@@ -62,7 +62,12 @@ let matches_type (expected : Types.param_type) (value : Yojson.Safe.t) : bool =
   | Types.Boolean, `Bool _ -> true
   | Types.Array, `List _ -> true
   | Types.Object, `Assoc _ -> true
-  | _ -> false
+  | (Types.Object, (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+  | (Types.Array, (`Assoc _ | (`Null | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+  | (Types.Boolean, (`Assoc _ | (`Null | (`List _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
+  | (Types.Number, (`Assoc _ | (`Null | (`List _ | (`Bool _ | `String _)))))
+  | (Types.Integer, (`Assoc _ | (`Null | (`List _ | (`Bool _ | (`Float _ | `String _))))))
+  | (Types.String, (`Assoc _ | (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | `Intlit _))))))) -> false
 ;;
 
 let matches_json_schema_type type_name = function

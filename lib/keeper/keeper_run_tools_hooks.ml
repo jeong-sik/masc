@@ -125,7 +125,7 @@ type ctx =
 let relax_strict_tool_choice_for_keeper = function
   | Some (Agent_core.Types.Any | Agent_core.Types.Tool _) ->
     Some Agent_core.Types.Auto
-  | other -> other
+  | (Some (Agent_core.Types.Auto | Agent_core.Types.None_) | None) as other -> other
 
 let project_model_input ~base_path ~gate_replay_evidence messages =
   match gate_replay_evidence with
@@ -1335,7 +1335,7 @@ let assemble_hooks
                     extra_system_context = ctx
                   ; tool_choice
                   }
-              | _event -> Agent_core.Hooks.Continue))
+              | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue))
       }
     in
     let hooks = Agent_core.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in

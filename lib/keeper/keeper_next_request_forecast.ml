@@ -255,7 +255,13 @@ let read_composition (components : Turn_record.input_component list) =
           instructions, schemas + component.bytes, blocks, first_round
         | Turn_record.Prompt_block Prompt_block_id.Keeper_instructions ->
           instructions + component.bytes, schemas, blocks, first_round
-        | Turn_record.Prompt_block id ->
+        | Turn_record.Prompt_block
+            (( Prompt_block_id.Dynamic_context
+             | Prompt_block_id.Temporal_summary
+             | Prompt_block_id.Memory_os_recall
+             | Prompt_block_id.Librarian_working_context
+             | Prompt_block_id.Operator_note
+             | Prompt_block_id.Skill_compositions ) as id) ->
           ( instructions
           , schemas
           , (id, component.bytes) :: blocks

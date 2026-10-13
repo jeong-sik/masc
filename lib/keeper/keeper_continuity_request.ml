@@ -65,10 +65,13 @@ let to_json ~runtime_id ~selection ~(range : range) ~wire =
 
 let record_best_effort ~config ~keeper_name ~runtime_id ~selection ~range ~wire =
   let append () =
-    let base_dir = Filename.concat
-        (Filename.concat (Workspace.keepers_runtime_dir config) keeper_name)
-        "continuity-requests" in
-    Dated_jsonl.append (Dated_jsonl.create ~base_dir ())
+    let location =
+      Dated_jsonl.Store.keeper
+        (Workspace.dated_store_cluster_root config)
+        ~keeper:keeper_name
+        Dated_jsonl.Store.Keeper.Continuity_requests
+    in
+    Dated_jsonl.append (Dated_jsonl.open_store location)
       (to_json ~runtime_id ~selection ~range ~wire)
   in
   match append () with

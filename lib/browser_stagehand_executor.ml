@@ -259,7 +259,7 @@ let guard_result result =
   Result.map_error
     (function
       | Browser_lane.Refused detail -> Browser_lane.Rejected_before_effect detail
-      | answer -> answer)
+      | (Browser_lane.Lane_absent | Browser_lane.Timed_out | Browser_lane.Answered _ | Browser_lane.Rejected_before_effect _) as answer -> answer)
     result
 ;;
 

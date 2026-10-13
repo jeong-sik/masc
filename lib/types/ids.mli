@@ -91,9 +91,7 @@ module Turn_id : sig
 end
 
 (** Keeper identifier — deterministic UUIDv5 derived from
-    [keeper:<name>:<path>]. Nested {!Keeper_id.Trace_id} and
-    {!Keeper_id.Task_id} modules carry validated string newtypes used
-    on tracing/auth boundaries. *)
+    [keeper:<name>:<path>]. *)
 module Keeper_id : sig
   type t
   val of_string : string -> t
@@ -103,18 +101,6 @@ module Keeper_id : sig
   val generate : name:string -> path:string -> t
   val to_yojson : t -> Yojson.Safe.t
   val of_yojson : Yojson.Safe.t -> (t, string) result
-  module Trace_id : sig
-    type t
-    val of_string : string -> (t, string) result
-    val to_string : t -> string
-    val equal : t -> t -> bool
-  end
-  module Task_id : sig
-    type t
-    val of_string : string -> (t, string) result
-    val to_string : t -> string
-    val equal : t -> t -> bool
-  end
 end
 
 (** Credential identifier — random UUIDv4. *)

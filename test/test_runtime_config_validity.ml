@@ -247,7 +247,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
       Llm_provider.Model_catalog.lookup_for_provider
         catalog
         ~provider_name
-        ~model_id:runpod_model_id
+        ~model_id:(Llm_provider.Model_identifiers.Model_id.of_string_exn runpod_model_id)
     with
     | None ->
       failf
@@ -362,7 +362,8 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma (
   let model_id = "gemma4-coder-fable5-q4km" in
   let provider_name = "runpod_rtxa6000" in
   (match
-     Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+     Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name
+       ~model_id:(Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
    with
    | None ->
      failf
@@ -400,7 +401,8 @@ let test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat () =
   let model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" in
   let provider_name = "ollama" in
   (match
-     Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+     Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name
+       ~model_id:(Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
    with
    | None ->
      failf
@@ -459,7 +461,8 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
         expected
     =
     match
-      Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+      Llm_provider.Model_catalog.lookup_for_provider catalog ~provider_name
+       ~model_id:(Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
     with
     | None ->
       failf
@@ -514,7 +517,7 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
            caps.reasoning_replay_override = Force_preserve_always))
   in
   let expect_bare_kimi_k27_wire_semantics model_id =
-    (match Llm_provider.Model_catalog.lookup catalog model_id with
+    (match Llm_provider.Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) with
      | None -> failf "expected deployment AGENT_CORE catalog row for %s" model_id
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
@@ -645,7 +648,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
      Llm_provider.Model_catalog.lookup_for_provider
        catalog
        ~provider_name:"ollama_cloud"
-       ~model_id:"deepseek-v4-pro"
+       ~model_id:(Llm_provider.Model_identifiers.Model_id.of_string_exn "deepseek-v4-pro")
    with
    | None -> fail "expected exact Ollama Cloud deepseek-v4-pro catalog row"
    | Some entry ->

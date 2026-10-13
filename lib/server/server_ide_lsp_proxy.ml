@@ -548,7 +548,7 @@ let fpath_within ~base path =
      | Some rel ->
        if List.exists (String.equal "..") (Fpath.segs rel) then None else Some rel
      | None -> None)
-  | _ -> None
+  | Ok _, (Ok _ | Error _) | Error _, (Ok _ | Error _) -> None
 ;;
 
 let relative_to_string rel =
@@ -602,7 +602,7 @@ let workspace_root_for_initialize ~base_path root_uri =
   match
     (match Fpath.of_string candidate with
      | Ok p when Fpath.is_abs p -> Some p
-     | _ -> None)
+     | Ok _ | Error _ -> None)
   with
   | Some candidate ->
     (* Keep the original segments until realpath: [link/..] is not generally
@@ -1073,7 +1073,11 @@ let dispatch_fields cs fields =
      | Some CodeAction, Some n -> relay_or_empty cs ~method_:CodeAction ~empty:(`List []) params n
      | Some Folding_range, Some n ->
        relay_or_empty cs ~method_:Folding_range ~empty:(`List []) params n
-     | _ ->
+     | None, _
+     | Some (Initialize | Shutdown), None
+     | Some (Did_open | Did_change | Did_save | Did_close), _
+     | Some (Hover | CodeLens | Diagnostic | Completion | CodeAction | Folding_range), None
+     | Some (InlayHint | Definition | References | Document_symbol | Document_highlight), _ ->
        (match id_opt with
         | Some n ->
           (* Other read-only requests with a textDocument URI → forward to LSP.

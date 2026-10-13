@@ -227,7 +227,12 @@ let apply_lsp_answer (state : state) request result =
          (* A different file, or this one not readable yet: ask for it.
             [start] answers Already_loading if that is the read already in
             flight, so a jump into the file being read does not double it. *)
-         | Some _ | None ->
+         | Some
+             ( _
+             , ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+               | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+               | Masc_tui_fetched.Failed _ ) )
+         | None ->
              state.code_target_line <- Some location.ll_line;
              Load_file location.ll_path
        end

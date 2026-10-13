@@ -397,13 +397,13 @@ let propagate_cancellation outcome =
   match outcome with
   | Error (Operation_failed ((Eio.Cancel.Cancelled _ as exn), backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
-  | outcome -> outcome
+  | (Ok _ | Error (Directory_chain_failed _ | Operation_failed _)) as outcome -> outcome
 ;;
 
 let completion_of_outcome = function
   | Ok () -> Prepared
   | Error (Operation_failed (Eio.Cancel.Cancelled _, _)) -> Retry
-  | Error failure -> Failed failure
+  | Error ((Directory_chain_failed _ | Operation_failed _) as failure) -> Failed failure
 ;;
 
 let directory_chain ?ownership_root dir =

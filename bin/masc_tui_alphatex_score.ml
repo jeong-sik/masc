@@ -509,14 +509,41 @@ let repeat_count word =
 
 (* Alternate endings are the passes 1 to 31, the way alphaTab numbers them.
    The collection stops at the first token that is not a number, which is
-   where the music resumes. *)
+   where the music resumes. alphaTab's syntax and the writer's canonical form
+   wrap several endings in parentheses, [\ae (1 2 3)], which the tokenizer
+   delivers as one chord token; its members are unpacked as that list. *)
 let collect_endings tokens =
+  let endings_of_members members =
+    let parsed =
+      List.map
+        (fun member ->
+          if String.length member > 0 && String.for_all is_digit member then
+            int_of_string_opt member
+          else None)
+        members
+    in
+    let numbers = List.filter_map (fun ending -> ending) parsed in
+    if
+      List.for_all Option.is_some parsed
+      && numbers <> []
+      && List.for_all (fun ending -> ending >= 1 && ending <= 31) numbers
+    then Some numbers
+    else None
+  in
   let rec collect found tokens =
     match tokens with
     | Tk_word word :: rest when String.length word > 0 && String.for_all is_digit word -> (
         match int_of_string_opt word with
         | Some ending when ending >= 1 && ending <= 31 -> collect (ending :: found) rest
         | _ -> Error (Alternate_ending_out_of_range word))
+    | Tk_chord (inner, None) :: rest when found = [] -> (
+        let members =
+          String.split_on_char ' ' inner
+          |> List.filter (fun member -> not (String.equal member ""))
+        in
+        match endings_of_members members with
+        | Some endings -> collect (List.rev_append endings found) rest
+        | None -> Error (Alternate_ending_out_of_range inner))
     | _ -> Ok (List.rev found, tokens)
   in
   collect [] tokens

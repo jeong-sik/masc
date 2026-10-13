@@ -9,7 +9,11 @@
 
     Repeat signs stand in the bar they mark: [\ro] opens the repeat, [\rc N]
     closes it with the count of total plays, and [\ae n …] names the ending
-    passes the bar plays on. A second [\rc] says the count again; [\ae]
+    passes the bar plays on. [\ae] also takes alphaTab's own parenthesized
+    list, [\ae (1 2 3)], which is the form the writer emits; a single pass
+    may carry or drop the parentheses. [N] counts total plays the way
+    alphaTab's example does: [\ro … \rc 2] plays the passage twice. A second
+    [\rc] says the count again; [\ae]
     numbers gather across the bar. A sign with no bar of its own -- on a bar
     with no beat, or after the last bar -- fails rather than being dropped.
     Open and close are not paired: a close without an open, or an open

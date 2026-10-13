@@ -144,6 +144,19 @@ let test_endings_gather_across_the_bar () =
   check_signs "each bar keeps its own" ":4 0.6 \\ae 1 | :4 3.6 \\ae 2"
     [ false, None, [ 1 ]; false, None, [ 2 ] ]
 
+(* alphaTab's own syntax and the writer's canonical form wrap several endings
+   in parentheses; a single ending may carry them or not. *)
+let test_endings_read_alphaTabs_parenthesized_form () =
+  check_signs "parenthesized members are the list" ":4 0.6 \\ae (1 2 3)"
+    [ false, None, [ 1; 2; 3 ] ];
+  check_signs "one member may keep the parentheses" ":4 0.6 \\ae (2)"
+    [ false, None, [ 2 ] ];
+  check_signs "one member may drop the parentheses" ":4 0.6 \\ae 4"
+    [ false, None, [ 4 ] ];
+  check_signs "parentheses then music, alphaTab's example"
+    "\\ro :4 0.6 | \\ae (1 2 3) :4 3.6 \\rc 2"
+    [ true, None, []; false, Some 2, [ 1; 2; 3 ] ]
+
 (* The endings stop where the music resumes: the note after them still
    sounds on its count. *)
 let test_endings_stop_where_music_resumes () =
@@ -314,6 +327,8 @@ let () =
             test_a_second_close_says_the_count_again
         ; Alcotest.test_case "endings gather across the bar" `Quick
             test_endings_gather_across_the_bar
+        ; Alcotest.test_case "endings read alphaTab's parenthesized form" `Quick
+            test_endings_read_alphaTabs_parenthesized_form
         ; Alcotest.test_case "endings stop where music resumes" `Quick
             test_endings_stop_where_music_resumes
         ; Alcotest.test_case "all marks on one bar" `Quick test_all_marks_on_one_bar

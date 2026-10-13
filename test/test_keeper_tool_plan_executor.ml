@@ -1200,14 +1200,22 @@ let provider_content ~base_path result =
 let record_provider_trial ~base_path ~scenario ~task ~expected original projected =
   let baseline = provider_content ~base_path original in
   let selected = provider_content ~base_path projected in
+  let references_in_json json =
+    match Tool_output.normalized_artifact_refs_in_json_strict json with
+    | Ok references -> references
+    | Error detail -> fail detail
+  in
   let references =
-    List.filter_map (fun content ->
+    List.concat_map (fun content ->
       match Tool_output.decode_from_agent_core content with
-      | Tool_output.Decoded reference -> Some reference
-      | Tool_output.Not_marker -> None
+      | Tool_output.Decoded reference -> [ reference ]
+      | Tool_output.Not_marker ->
+        (match Yojson.Safe.from_string content with
+         | json -> references_in_json json
+         | exception Yojson.Json_error _ -> [])
       | Tool_output.Invalid_marker { detail } -> fail detail) [ baseline; selected ]
     @ Tool_result.retained_artifacts projected
-    @ Tool_output.normalized_artifact_refs_in_json (Tool_result.data projected)
+    @ references_in_json (Tool_result.data projected)
     |> List.sort_uniq (fun left right -> String.compare left.Tool_output.sha256 right.Tool_output.sha256)
   in
   let pages = List.concat_map (fun (reference : Tool_output.artifact_ref) ->

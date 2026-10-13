@@ -28,9 +28,6 @@ let is_downstream_pipe_closed = function
   | Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> true
   | Unix.Unix_error (Unix.EPIPE, _, _) -> true
   | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EPIPE, _, _)), _) -> true
-  | Sys_error msg
-    when String_util.contains_substring (String.lowercase_ascii msg) "broken pipe" ->
-    true
   | _ -> false
 [@@warning "-4"]
 

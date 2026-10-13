@@ -901,7 +901,7 @@ let%test "parse_ollama_response maps overflow done_reason to ContextWindowExceed
 let%test "parse_ollama_response returns Error on error field" =
   let json = {|{"error":"model \"nonexistent\" not found, try pulling it first"}|} in
   match parse_ollama_response json with
-  | Error msg -> String.starts_with ~prefix:"model" msg
+  | Error msg -> String.equal msg {|model "nonexistent" not found, try pulling it first|}
   | Ok _ -> false
 ;;
 

@@ -6565,6 +6565,30 @@ let test_config_post_requires_expected_revision () =
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
 
+(* The dashboard checks only that [input_policy] is a string; the value is
+   read by [Keeper_turn_up_args.parse], which runs before anything is
+   written. A value parse cannot read is answered 400 and the keeper TOML
+   stays as it was. *)
+let test_config_post_refuses_an_unreadable_input_policy_without_a_write () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-input-policy-refused" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let before = read_file toml_path in
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"input_policy":"automatic"}|}
+  in
+  expect_http_status "unreadable input_policy HTTP 400" 400 raw;
+  check bool "the refusal is parse's" true
+    (String_util.contains_substring (Yojson.Safe.to_string json)
+       "input_policy must be small or wide");
+  check string "keeper TOML unchanged" before (read_file toml_path);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
 let with_direct_assignment_model_catalog f =
   let module Catalog = Llm_provider.Model_catalog in
   (* Assignment publication validates the configured provider/model against
@@ -8187,6 +8211,8 @@ let () =
             test_config_post_mid_turn_policy_needs_the_lanes_proxy;
           test_case "config POST requires expected revision" `Quick
             test_config_post_requires_expected_revision;
+          test_case "config POST refuses an unreadable input_policy without a write" `Quick
+            test_config_post_refuses_an_unreadable_input_policy_without_a_write;
           test_case "stale config POST loses with typed 409" `Quick
             test_config_post_rejects_second_writer_with_same_revision;
           test_case "direct assignment stale writer loses without a write" `Quick

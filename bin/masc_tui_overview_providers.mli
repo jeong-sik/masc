@@ -22,9 +22,69 @@
 type section = {
   title : string;
   lines : string list;
-      (** The section's rows in draw order: reported accounts first, then by
-          account name. *)
+      (** The section's rows in draw order, grouped as {!plan} orders them. *)
 }
+
+(** What the runtime catalogue says about an account's quota scope. *)
+type observed =
+  | Not_observed_exhausted
+  | Observed_exhausted of float option
+      (** The latest [quota_resets_at] among the scope's exhausted runtimes;
+          [None] when none of them states one. *)
+
+val observed_exhaustion :
+  runtimes:Masc_tui_types.overview_quota_reading -> string -> observed
+(** The catalogue's [quota_exhausted] joined by quota scope. A catalogue that
+    was not read or failed observes nothing. *)
+
+val window_at_limit : Masc.Tui_decode_usage.provider_usage_window -> bool
+(** The reported value is at or past the full value of its own unit, on a
+    window that gates model calls. The same decision counts the header's
+    [At limit (reported)] and puts a window in {!Unusable_now}. *)
+
+(** Which block of the Plan an account's windows are drawn in. *)
+type plan_section =
+  | Unusable_now
+      (** Windows at their limit, and the gating windows of an account the
+          catalogue observed exhausted. *)
+  | Usable  (** Every other reported window. *)
+  | No_report
+      (** Accounts with no window to show: nothing heard since the server
+          started, or an explicit report with no windows. *)
+
+type plan_entry = {
+  pe_account : Masc.Tui_decode_usage.provider_usage_account;
+  pe_observed : observed;
+  pe_windows : Masc.Tui_decode_usage.provider_usage_window list;
+      (** The account's windows that belong to this section, in draw order.
+          Empty when the account has no window to show. *)
+}
+
+type plan_group = {
+  pg_section : plan_section;
+  pg_entries : plan_entry list;
+}
+
+val plan :
+  now:float ->
+  runtimes:Masc_tui_types.overview_quota_reading ->
+  Masc.Tui_decode_usage.provider_usage_account list ->
+  plan_group list
+(** Sections in the order [Unusable_now], [Usable], [No_report]; a section
+    with no entry is absent. An account whose windows differ in state has an
+    entry in each section it has a window in. An account the catalogue
+    observed exhausted always has an [Unusable_now] entry.
+
+    - [Unusable_now]: the account with the longest wait for a reset first,
+      where a window with no reset time waits longest; an account's wait is
+      its longest. Its windows are in the same order. An account with no
+      window uses the catalogue's reopen time. Ties go by account name.
+    - [Usable]: the account whose most used gating window is the most used
+      first; windows that gate nothing and amounts with no cap come last. Its
+      windows are in the same order. Ties go by account name.
+    - [No_report]: by account name.
+
+    Windows that tie keep the server's order. *)
 
 val scope_id : Masc.Tui_decode_usage.provider_usage_account -> string
 (** The server's id for the scope, as its usage history names it. *)

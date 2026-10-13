@@ -242,6 +242,199 @@ let exhausted_tag ~now = function
         (Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s"
            (clock_text ~now at) (span_text (at -. now)))
 
+(* ---- what can be used now ----------------------------------------------- *)
+
+(* A limit that spending it refuses model calls on. A limit the server could
+   not classify counts here too: nothing says it does not gate. *)
+let gates_model_calls = function
+  | Masc.Tui_decode_usage.Role_gates_model_calls
+  | Masc.Tui_decode_usage.Role_unclassified_limit -> true
+  | Masc.Tui_decode_usage.Role_counts_other_use -> false
+
+(* The one decision behind the header's "At limit (reported)" count and the
+   Unusable section: the provider's own report is at its full value, on a
+   window that gates model calls. *)
+let window_at_limit (window : Masc.Tui_decode_usage.provider_usage_window) =
+  gates_model_calls window.puw_role && at_or_past_full window.puw_utilization
+
+let observed_blocked = function
+  | Observed_exhausted _ -> true
+  | Not_observed_exhausted -> false
+
+(* A window cannot be used now when its report is at its limit, or when the
+   runtime catalogue observed the whole account exhausted and the window
+   gates model calls. *)
+let blocks_use_now ~observed window =
+  window_at_limit window
+  ||
+  match observed with
+  | Observed_exhausted _ -> gates_model_calls window.Masc.Tui_decode_usage.puw_role
+  | Not_observed_exhausted -> false
+
+type plan_section =
+  | Unusable_now
+  | Usable
+  | No_report
+
+(* Draw order of the sections. *)
+let all_sections = [ Unusable_now; Usable; No_report ]
+
+let section_rank = function
+  | Unusable_now -> 0
+  | Usable -> 1
+  | No_report -> 2
+
+type plan_entry = {
+  pe_account : Masc.Tui_decode_usage.provider_usage_account;
+  pe_observed : observed;
+  pe_windows : Masc.Tui_decode_usage.provider_usage_window list;
+      (** The account's windows that belong to this section, drawn first to
+          last. Empty for an account with no window to show. *)
+}
+
+type plan_group = {
+  pg_section : plan_section;
+  pg_entries : plan_entry list;
+}
+
+(* How long until a window opens again. A window with no reset time is the
+   longest wait there is. *)
+type reset_wait =
+  | Waits_for of float
+  | No_reset_stated
+
+let wait_of ~now = function
+  | None -> No_reset_stated
+  | Some at -> Waits_for (at -. now)
+
+let longest_wait_first left right =
+  match (left, right) with
+  | No_reset_stated, No_reset_stated -> 0
+  | No_reset_stated, Waits_for _ -> -1
+  | Waits_for _, No_reset_stated -> 1
+  | Waits_for l, Waits_for r -> Float.compare r l
+
+let longer_wait left right =
+  if longest_wait_first left right <= 0 then left else right
+
+(* How much of a window is used, for ordering. A window that gates nothing,
+   an amount with no cap and a value that is not a number press on nothing. *)
+type pressure =
+  | Used_share of float
+  | Unmeasured
+
+let pressure_of (window : Masc.Tui_decode_usage.provider_usage_window) =
+  if not (gates_model_calls window.puw_role) then Unmeasured
+  else
+    match share_of_full window.puw_utilization with
+    | Some share when Float.is_finite share -> Used_share share
+    | Some _ | None -> Unmeasured
+
+let most_pressed_first left right =
+  match (left, right) with
+  | Used_share l, Used_share r -> Float.compare r l
+  | Used_share _, Unmeasured -> -1
+  | Unmeasured, Used_share _ -> 1
+  | Unmeasured, Unmeasured -> 0
+
+let window_wait ~now (window : Masc.Tui_decode_usage.provider_usage_window) =
+  wait_of ~now window.puw_resets_at
+
+let observed_wait ~now = function
+  | Observed_exhausted at -> wait_of ~now at
+  | Not_observed_exhausted -> No_reset_stated
+
+(* [List.stable_sort] keeps the server's order for windows that tie. *)
+let sort_windows_by compare_key windows =
+  List.stable_sort (fun left right -> compare_key left right) windows
+
+let entry_wait ~now entry =
+  match entry.pe_windows with
+  | [] -> observed_wait ~now entry.pe_observed
+  | first :: rest ->
+      List.fold_left
+        (fun longest window -> longer_wait longest (window_wait ~now window))
+        (window_wait ~now first) rest
+
+let entry_pressure entry =
+  match entry.pe_windows with
+  | [] -> Unmeasured
+  | first :: rest ->
+      List.fold_left
+        (fun worst window ->
+          let pressure = pressure_of window in
+          if most_pressed_first pressure worst < 0 then pressure else worst)
+        (pressure_of first) rest
+
+(* One account becomes one entry per section it has a window in. An account
+   observed exhausted always has an entry in Unusable_now, even with no
+   window to show, so its catalogue state is drawn. *)
+let entries_of ~now (observed, (account : Masc.Tui_decode_usage.provider_usage_account)) =
+  let entry windows =
+    { pe_account = account; pe_observed = observed; pe_windows = windows }
+  in
+  match account.pua_state with
+  | Masc.Tui_decode_usage.Account_not_reported_since_start
+  | Masc.Tui_decode_usage.Account_reported_no_windows _ ->
+      [ ((if observed_blocked observed then Unusable_now else No_report), entry []) ]
+  | Masc.Tui_decode_usage.Account_reported (first, rest) ->
+      let blocked, open_ =
+        List.partition (blocks_use_now ~observed) (first :: rest)
+      in
+      let blocked =
+        sort_windows_by
+          (fun left right ->
+            longest_wait_first (window_wait ~now left) (window_wait ~now right))
+          blocked
+      in
+      let open_ =
+        sort_windows_by
+          (fun left right -> most_pressed_first (pressure_of left) (pressure_of right))
+          open_
+      in
+      (match (blocked, observed_blocked observed) with
+       | [], false -> []
+       | [], true | _ :: _, true | _ :: _, false -> [ (Unusable_now, entry blocked) ])
+      @ (match open_ with [] -> [] | _ :: _ -> [ (Usable, entry open_) ])
+
+let compare_entries ~now section left right =
+  let primary =
+    match section with
+    | Unusable_now -> longest_wait_first (entry_wait ~now left) (entry_wait ~now right)
+    | Usable -> most_pressed_first (entry_pressure left) (entry_pressure right)
+    | No_report -> 0
+  in
+  match primary with
+  | 0 -> String.compare (scope_name left.pe_account) (scope_name right.pe_account)
+  | order -> order
+
+(* Unusable windows first, then the rest with the least left first, then
+   accounts that have not reported. Ties go by account name. *)
+let plan ~now ~runtimes accounts =
+  let placed =
+    List.concat_map
+      (fun (account : Masc.Tui_decode_usage.provider_usage_account) ->
+        entries_of ~now (observed_exhaustion ~runtimes account.pua_scope, account))
+      accounts
+  in
+  List.filter_map
+    (fun section ->
+      let entries =
+        List.filter_map
+          (fun (placed_in, entry) ->
+            if Int.equal (section_rank placed_in) (section_rank section) then Some entry
+            else None)
+          placed
+      in
+      match entries with
+      | [] -> None
+      | _ :: _ ->
+          Some
+            { pg_section = section
+            ; pg_entries = List.stable_sort (compare_entries ~now section) entries
+            })
+    all_sections
+
 (* The account's email, read from its client's login file, for each provider
    billed to it. Two providers on one scope normally name one account; if they
    name two, both are drawn, since that is what the login files say. *)
@@ -297,28 +490,30 @@ type row =
   | Email_row of string
       (** Account identity metadata, separate from window measurements. *)
 
-(* Exhausted accounts first: a short budget cuts the section from the bottom,
-   and the rows it keeps should be the ones that explain a stuck Keeper. Then
-   accounts that reported, then the silent ones. *)
-let account_rank observed (account : Masc.Tui_decode_usage.provider_usage_account) =
-  match (observed, account.pua_state) with
-  | Observed_exhausted _, _ -> 0
-  | Not_observed_exhausted, Masc.Tui_decode_usage.Account_reported _ -> 1
-  | Not_observed_exhausted, Masc.Tui_decode_usage.Account_reported_no_windows _ -> 1
-  | Not_observed_exhausted, Masc.Tui_decode_usage.Account_not_reported_since_start -> 2
-
 (* Keep accounts without measured windows visible and distinguish no report
    since startup from a provider's explicit empty-window report. *)
-let account_rows ~now ~history (observed, (account : Masc.Tui_decode_usage.provider_usage_account)) =
+let entry_rows ~now ~history section entry =
+  let account = entry.pe_account in
   let name = scope_name account in
-  let tag = exhausted_tag ~now observed in
-  match account.pua_state, tag with
-  | Masc.Tui_decode_usage.Account_not_reported_since_start, tag ->
-      [ Silent_row { name; tag; state_text = "No usage report since server start" } ]
-  | Masc.Tui_decode_usage.Account_reported_no_windows { observed_at; source }, tag ->
-      [ Silent_row { name; tag; state_text = "Provider reported no usage windows · Last report "
-          ^ clock_text ~now observed_at ^ " · " ^ Terminal_text.single_line source } ]
-  | Masc.Tui_decode_usage.Account_reported (first, rest), (None | Some _) ->
+  let tag =
+    match section with
+    | Unusable_now -> exhausted_tag ~now entry.pe_observed
+    | Usable | No_report -> None
+  in
+  match entry.pe_windows with
+  | [] ->
+      let state_text =
+        match account.pua_state with
+        | Masc.Tui_decode_usage.Account_not_reported_since_start ->
+            "No usage report since server start"
+        | Masc.Tui_decode_usage.Account_reported_no_windows { observed_at; source } ->
+            "Provider reported no usage windows \xc2\xb7 Last report "
+            ^ clock_text ~now observed_at ^ " \xc2\xb7 " ^ Terminal_text.single_line source
+        | Masc.Tui_decode_usage.Account_reported _ ->
+            "No reported window gates model calls"
+      in
+      [ Silent_row { name; tag; state_text } ]
+  | first :: rest ->
       (* Windows of one report share its hearing time; a window heard at
          another time says its own. *)
       Window_row
@@ -352,11 +547,9 @@ let meter_min_cells = 10
    it being full refuses no model call. A limit the server could not classify
    is drawn like one that gates, since nothing says it does not. *)
 let window_tone (window : Masc.Tui_decode_usage.provider_usage_window) =
-  match window.puw_role with
-  | Masc.Tui_decode_usage.Role_counts_other_use -> Some Ansi.dim
-  | Masc.Tui_decode_usage.Role_gates_model_calls | Masc.Tui_decode_usage.Role_unclassified_limit ->
-      if at_or_past_full window.puw_utilization then Some (Theme.bad ())
-      else None
+  if not (gates_model_calls window.puw_role) then Some Ansi.dim
+  else if at_or_past_full window.puw_utilization then Some (Theme.bad ())
+  else None
 
 let role_text = function
   | Masc.Tui_decode_usage.Role_gates_model_calls -> "Model call limit"
@@ -481,6 +674,11 @@ let draw_rows ~now ~width rows =
   in
   arrange groups
 
+let section_title = function
+  | Unusable_now -> "Unusable now"
+  | Usable -> "Usable"
+  | No_report -> "No report"
+
 let title_text () = Printf.sprintf " %sPlan usage%s" Ansi.bold Ansi.reset
 
 let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~account_emails ~now
@@ -496,29 +694,33 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
             ]
         }
   | Types.Providers_read { Masc.Tui_decode_usage.puws_since = _; puws_accounts } ->
-      let ordered =
+      let observed_accounts =
         List.map
           (fun (account : Masc.Tui_decode_usage.provider_usage_account) ->
             (observed_exhaustion ~runtimes account.pua_scope, account))
           puws_accounts
-        |> List.stable_sort (fun (oa, a) (ob, b) ->
-               match Int.compare (account_rank oa a) (account_rank ob b) with
-               | 0 -> String.compare (scope_name a) (scope_name b)
-               | order -> order)
       in
-      let accounts =
-        List.filter_map
-          (fun ((_, account) as entry) ->
-            match account_rows ~now ~history entry with
-            | [] -> None
-            | rows -> Some (account, rows))
-          ordered
+      let groups = plan ~now ~runtimes puws_accounts in
+      let group_blocks =
+        List.map
+          (fun { pg_section; pg_entries } ->
+            let rows =
+              List.concat_map
+                (fun entry ->
+                  place_email
+                    (account_email ~account_emails entry.pe_account)
+                    (entry_rows ~now ~history pg_section entry))
+                pg_entries
+            in
+            (pg_section, List.length pg_entries, rows))
+          groups
       in
       let rows =
         List.concat_map
-          (fun (account, rows) ->
-            place_email (account_email ~account_emails account) rows)
-          accounts
+          (fun (section, count, rows) ->
+            Printf.sprintf " %s (%d)" (section_title section) count
+            :: draw_rows ~now ~width rows)
+          group_blocks
       in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
@@ -547,21 +749,16 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
       let reporting = List.length (List.filter (fun (_, account) ->
         match account.Masc.Tui_decode_usage.pua_state with
         | Masc.Tui_decode_usage.Account_reported _ | Masc.Tui_decode_usage.Account_reported_no_windows _ -> true
-        | Masc.Tui_decode_usage.Account_not_reported_since_start -> false) ordered) in
+        | Masc.Tui_decode_usage.Account_not_reported_since_start -> false) observed_accounts) in
       let full_reports = List.length (List.filter (fun (_, account) ->
         match account.Masc.Tui_decode_usage.pua_state with
         | Masc.Tui_decode_usage.Account_reported (first, rest) ->
-          List.exists (fun (window:Masc.Tui_decode_usage.provider_usage_window) ->
-            (match window.puw_role with
-             | Masc.Tui_decode_usage.Role_gates_model_calls
-             | Masc.Tui_decode_usage.Role_unclassified_limit -> true
-             | Masc.Tui_decode_usage.Role_counts_other_use -> false)
-            && at_or_past_full window.puw_utilization) (first :: rest)
+            List.exists window_at_limit (first :: rest)
         | Masc.Tui_decode_usage.Account_not_reported_since_start
-        | Masc.Tui_decode_usage.Account_reported_no_windows _ -> false) ordered) in
+        | Masc.Tui_decode_usage.Account_reported_no_windows _ -> false) observed_accounts) in
       let blocked = match runtimes with
         | Types.Quota_read _ -> string_of_int (List.length (List.filter (function
-            | Observed_exhausted _, _ -> true | Not_observed_exhausted, _ -> false) ordered))
+            | Observed_exhausted _, _ -> true | Not_observed_exhausted, _ -> false) observed_accounts))
         | Types.Quota_unread | Types.Quota_failed _ -> "unknown" in
       let trend_as_of = match history with
         | Types.Provider_history_read trend ->
@@ -573,7 +770,7 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
         | Types.Provider_history_error _ -> " · Trend unavailable" in
       let summary =
         [ Printf.sprintf "Accounts %d · Reporting %d · At limit (reported) %d · Blocked (observed) %s"
-            (List.length ordered) reporting full_reports blocked
+            (List.length observed_accounts) reporting full_reports blocked
         ; "█ used · ░ remaining at last report · 0 zero · · no daily report"
         ; "○ reported no windows · $ uncapped USD use · ↓ below zero · ↑ above limit"
         ; "Login does not reset quota" ^ trend_as_of ^ " · v:Trend graphs" ]
@@ -588,5 +785,5 @@ let section ~(providers : Types.overview_providers_reading) ~history ~runtimes ~
       | _ :: _ ->
           Some
             { title = title_text ()
-            ; lines = summary @ draw_rows ~now ~width rows @ notes
+            ; lines = summary @ rows @ notes
             }

@@ -593,6 +593,266 @@ let test_usd_cards_do_not_invent_a_percentage () =
   check (option (float 0.0001)) "an uncapped amount has no fabricated percentage" None
     (Providers.share_of_full (Masc.Tui_decode_usage.Utilization_usd { used = 12.3456; limit = None }))
 
+(* ---- plan: sections and order, asserted on typed data ------------------ *)
+
+let plan_section_t =
+  testable
+    (fun formatter section ->
+      Format.pp_print_string formatter
+        (match section with
+         | Providers.Unusable_now -> "Unusable_now"
+         | Providers.Usable -> "Usable"
+         | Providers.No_report -> "No_report"))
+    (fun left right ->
+      match (left, right) with
+      | Providers.Unusable_now, Providers.Unusable_now
+      | Providers.Usable, Providers.Usable
+      | Providers.No_report, Providers.No_report -> true
+      | ( Providers.Unusable_now, (Providers.Usable | Providers.No_report)
+        | Providers.Usable, (Providers.Unusable_now | Providers.No_report)
+        | Providers.No_report, (Providers.Unusable_now | Providers.Usable) ) -> false)
+
+let json_time = function None -> "null" | Some at -> Printf.sprintf "%.1f" at
+
+(* A window named by [id] (its limit id), so a test reads the order off ids. *)
+let percent_window ?(role = "gates_model_calls") ?resets ?(observed_at = 1790180000.0) ~id
+    percent =
+  Printf.sprintf
+    {|{"limit_id":%S,"window":{"kind":"five_hour"},"role":%S,"utilization":{"unit":"percent","value":%d},"resets_at":%s,"observed_at":%.1f,"source":"t"}|}
+    id role percent (json_time resets) observed_at
+
+let usd_window ?(role = "gates_model_calls") ?resets ~id ~used limit =
+  Printf.sprintf
+    {|{"limit_id":%S,"window":{"kind":"provider_label","label":"credit"},"role":%S,"utilization":{"unit":"usd","value":%.4f,"limit":%s},"resets_at":%s,"observed_at":1790180000.0,"source":"t"}|}
+    id role used
+    (match limit with None -> "null" | Some limit -> Printf.sprintf "%.4f" limit)
+    (json_time resets)
+
+let account_json ~name windows =
+  Printf.sprintf
+    {|{"scope":"scope:%s","scope_id":%S,"providers":[{"id":%S,"display_name":%S}],"state":"reported","windows":[%s]}|}
+    name name name name (String.concat "," windows)
+
+let silent_json name =
+  Printf.sprintf
+    {|{"scope":"scope:%s","scope_id":%S,"providers":[{"id":%S,"display_name":%S}],"state":"not_reported_since_start","windows":[]}|}
+    name name name name
+
+let empty_report_json name =
+  Printf.sprintf
+    {|{"scope":"scope:%s","scope_id":%S,"providers":[{"id":%S,"display_name":%S}],"state":"reported_no_windows","observed_at":1790180000.0,"source":"t","windows":[]}|}
+    name name name name
+
+let decode_accounts accounts =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf {|{"provider_usage_windows_since":1.0,"provider_usage_windows":[%s]}|}
+         (String.concat "," accounts))
+  in
+  match Masc.Tui_decode_usage.decode_provider_usage_windows json with
+  | Ok reading -> reading
+  | Error detail -> failf "fixture should decode: %s" detail
+
+let exhausted_scope ?resets name =
+  runtime ?resets ~scope:("scope:" ^ name) ~exhausted:true (name ^ ".model")
+
+let shape groups =
+  List.map
+    (fun { Providers.pg_section; pg_entries } ->
+      ( pg_section
+      , List.map
+          (fun (entry : Providers.plan_entry) ->
+            ( Providers.scope_id entry.pe_account
+            , List.map
+                (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
+                  Option.value ~default:"-" window.puw_limit_id)
+                entry.pe_windows ))
+          pg_entries ))
+    groups
+
+let plan_shape ?(runtimes = Types.Quota_unread) accounts =
+  shape
+    (Providers.plan ~now ~runtimes (decode_accounts accounts).puws_accounts)
+
+let shape_t = list (pair plan_section_t (list (pair string (list string))))
+let hour = 3600.0
+
+(* The sketch the operator approved: a priced key at its limit with no
+   reset, an account whose weekly window is at its limit, accounts with room,
+   and one that has not reported. Antigravity has windows in two sections. *)
+let test_plan_splits_accounts_by_window_state () =
+  check shape_t "sections and order"
+    [ ( Providers.Unusable_now
+      , [ ("openrouter", [ "credit" ])
+        ; ("antigravity", [ "gemini-7d" ]) ] )
+    ; ( Providers.Usable
+      , [ ("kimi", [ "usage"; "5h" ])
+        ; ("ollama", [ "7d" ])
+        ; ("antigravity", [ "3p-5h" ])
+        ; ("openrouter", [ "key-usage" ]) ] )
+    ; (Providers.No_report, [ ("codex", []) ])
+    ]
+    (plan_shape
+       [ account_json ~name:"antigravity"
+           [ percent_window ~id:"3p-5h" ~resets:(now +. 5.0 *. hour) 0
+           ; percent_window ~id:"gemini-7d" ~resets:(now +. 22.0 *. hour) 100 ]
+       ; account_json ~name:"ollama" [ percent_window ~id:"7d" 43 ]
+       ; account_json ~name:"kimi"
+           [ percent_window ~id:"5h" ~resets:(now +. 0.5 *. hour) 56
+           ; percent_window ~id:"usage" ~resets:(now +. 150.0 *. hour) 83 ]
+       ; account_json ~name:"openrouter"
+           [ usd_window ~id:"credit" ~used:100.0 (Some 100.0)
+           ; usd_window ~role:"counts_other_use" ~id:"key-usage" ~used:12.3456 None ]
+       ; silent_json "codex"
+       ])
+
+(* An unusable account with the longest wait is first; a window with no
+   reset time waits longest; a reset that has passed waits least. *)
+let test_unusable_order_is_longest_wait_first () =
+  check shape_t "no reset, then longest, then shortest, then passed"
+    [ ( Providers.Unusable_now
+      , [ ("none", [ "a" ])
+        ; ("long", [ "a" ])
+        ; ("short", [ "a" ])
+        ; ("passed", [ "a" ]) ] ) ]
+    (plan_shape
+       [ account_json ~name:"passed" [ percent_window ~id:"a" ~resets:(now -. 60.0) 100 ]
+       ; account_json ~name:"short" [ percent_window ~id:"a" ~resets:(now +. hour) 100 ]
+       ; account_json ~name:"long" [ percent_window ~id:"a" ~resets:(now +. 30.0 *. hour) 100 ]
+       ; account_json ~name:"none" [ percent_window ~id:"a" 100 ]
+       ]);
+  check shape_t "an account waits as long as its longest unusable window"
+    [ ( Providers.Unusable_now
+      , [ ("two", [ "week"; "day" ]); ("one", [ "day" ]) ] ) ]
+    (plan_shape
+       [ account_json ~name:"one" [ percent_window ~id:"day" ~resets:(now +. 5.0 *. hour) 100 ]
+       ; account_json ~name:"two"
+           [ percent_window ~id:"day" ~resets:(now +. hour) 100
+           ; percent_window ~id:"week" ~resets:(now +. 100.0 *. hour) 100 ]
+       ])
+
+let test_ties_go_by_account_name () =
+  check shape_t "equal waits, equal use and silent accounts are by name"
+    [ ( Providers.Unusable_now, [ ("alpha", [ "a" ]); ("beta", [ "a" ]) ] )
+    ; ( Providers.Usable, [ ("cedar", [ "a" ]); ("delta", [ "a" ]) ] )
+    ; (Providers.No_report, [ ("echo", []); ("fig", []) ]) ]
+    (plan_shape
+       [ silent_json "fig"
+       ; account_json ~name:"delta" [ percent_window ~id:"a" 50 ]
+       ; account_json ~name:"beta" [ percent_window ~id:"a" ~resets:(now +. hour) 100 ]
+       ; silent_json "echo"
+       ; account_json ~name:"cedar" [ percent_window ~id:"a" 50 ]
+       ; account_json ~name:"alpha" [ percent_window ~id:"a" ~resets:(now +. hour) 100 ]
+       ])
+
+(* Usable is the least left first. A window that gates nothing, an amount
+   with no cap and a value that is not a number press on nothing. *)
+let test_usable_order_is_most_used_first () =
+  check shape_t "most used first, unmeasured last"
+    [ ( Providers.Usable
+      , [ ("high", [ "mid"; "low" ])
+        ; ("mid", [ "a" ])
+        ; ("low", [ "a" ])
+        ; ("other-use", [ "a" ])
+        ; ("uncapped", [ "a" ]) ] ) ]
+    (plan_shape
+       [ account_json ~name:"uncapped" [ usd_window ~id:"a" ~used:9.0 None ]
+       ; account_json ~name:"other-use"
+           [ percent_window ~role:"counts_other_use" ~id:"a" 100 ]
+       ; account_json ~name:"low" [ percent_window ~id:"a" 10 ]
+       ; account_json ~name:"high"
+           [ percent_window ~id:"low" 5; percent_window ~id:"mid" 99 ]
+       ; account_json ~name:"mid" [ percent_window ~id:"a" 60 ]
+       ])
+
+let test_a_full_window_that_gates_nothing_is_usable () =
+  check shape_t "other use at 100 percent is not unusable"
+    [ (Providers.Usable, [ ("zai", [ "tokens"; "time" ]) ]) ]
+    (plan_shape
+       [ account_json ~name:"zai"
+           [ percent_window ~role:"counts_other_use" ~id:"time" 100
+           ; percent_window ~id:"tokens" 30 ]
+       ]);
+  check shape_t "an unclassified limit at 100 percent is unusable"
+    [ (Providers.Unusable_now, [ ("zai", [ "mystery" ]) ]) ]
+    (plan_shape
+       [ account_json ~name:"zai" [ percent_window ~role:"unclassified_limit" ~id:"mystery" 100 ] ])
+
+(* The catalogue observed the account exhausted: every window that gates
+   model calls is unusable whatever it reports; a silent account is too; an
+   account with only other-use windows keeps an entry in both sections. *)
+let test_observed_exhaustion_blocks_gating_windows () =
+  let runtimes =
+    Types.Quota_read
+      [ exhausted_scope ~resets:(now +. 2.0 *. hour) "kimi"
+      ; exhausted_scope "codex"
+      ; exhausted_scope "zai"
+      ; runtime ~scope:"scope:ollama" ~exhausted:false "ollama.model"
+      ]
+  in
+  check shape_t "observed accounts move to the unusable section"
+    [ ( Providers.Unusable_now
+      , [ ("codex", []); ("zai", []); ("kimi", [ "usage"; "5h" ]) ] )
+    ; (Providers.Usable, [ ("ollama", [ "7d" ]); ("zai", [ "time" ]) ])
+    ; (Providers.No_report, [ ("echo", []) ]) ]
+    (plan_shape ~runtimes
+       [ account_json ~name:"kimi"
+           [ percent_window ~id:"5h" ~resets:(now +. 0.5 *. hour) 56
+           ; percent_window ~id:"usage" ~resets:(now +. 3.0 *. hour) 83 ]
+       ; silent_json "codex"
+       ; silent_json "echo"
+       ; account_json ~name:"zai" [ percent_window ~role:"counts_other_use" ~id:"time" 100 ]
+       ; account_json ~name:"ollama" [ percent_window ~id:"7d" 43 ]
+       ]);
+  check shape_t "an unread catalogue observes nothing"
+    [ (Providers.Usable, [ ("kimi", [ "usage"; "5h" ]) ]) ]
+    (plan_shape ~runtimes:Types.Quota_unread
+       [ account_json ~name:"kimi"
+           [ percent_window ~id:"5h" 56; percent_window ~id:"usage" 83 ] ]);
+  check shape_t "a failed catalogue observes nothing"
+    [ (Providers.No_report, [ ("codex", []) ]) ]
+    (plan_shape ~runtimes:(Types.Quota_failed "HTTP 500") [ silent_json "codex" ])
+
+(* An account that reported no windows has nothing to measure. *)
+let test_an_empty_report_is_no_report () =
+  check shape_t "reported with no windows"
+    [ (Providers.No_report, [ ("empty", []) ]) ]
+    (plan_shape [ empty_report_json "empty" ])
+
+(* The header's "At limit (reported)" and the Unusable section are one
+   decision. *)
+let test_at_limit_is_the_header_decision () =
+  let decoded =
+    decode_accounts
+      [ account_json ~name:"a"
+          [ percent_window ~id:"full" 100
+          ; percent_window ~id:"other" ~role:"counts_other_use" 100
+          ; percent_window ~id:"open" 99
+          ; usd_window ~id:"usd" ~used:5.0 (Some 5.0)
+          ; usd_window ~id:"uncapped" ~used:500.0 None ]
+      ]
+  in
+  let windows =
+    match (List.hd decoded.puws_accounts).pua_state with
+    | Masc.Tui_decode_usage.Account_reported (first, rest) -> first :: rest
+    | Masc.Tui_decode_usage.Account_not_reported_since_start
+    | Masc.Tui_decode_usage.Account_reported_no_windows _ -> fail "fixture reports windows"
+  in
+  check (list (pair string bool)) "which windows are at their limit"
+    [ ("full", true); ("other", false); ("open", false); ("usd", true); ("uncapped", false) ]
+    (List.map
+       (fun (window : Masc.Tui_decode_usage.provider_usage_window) ->
+         (Option.value ~default:"-" window.puw_limit_id, Providers.window_at_limit window))
+       windows);
+  let drawn =
+    match Providers.section ~history:Types.Provider_history_unread
+            ~providers:(Types.Providers_read decoded) ~runtimes:Types.Quota_unread
+            ~account_emails:Types.Account_emails_unread ~now ~width with
+    | Some section -> String.concat "\n" (List.map plain section.lines)
+    | None -> fail "a read draws a section"
+  in
+  check bool "the account is counted once" true (contains ~affix:"At limit (reported) 1" drawn)
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
@@ -618,5 +878,19 @@ let () =
         ; test_case "unknown role is rejected" `Quick test_unknown_role_is_rejected
         ; test_case "account emails name their accounts" `Quick
             test_account_emails_name_their_accounts
+        ; test_case "plan splits accounts by window state" `Quick
+            test_plan_splits_accounts_by_window_state
+        ; test_case "unusable order is longest wait first" `Quick
+            test_unusable_order_is_longest_wait_first
+        ; test_case "ties go by account name" `Quick test_ties_go_by_account_name
+        ; test_case "usable order is most used first" `Quick
+            test_usable_order_is_most_used_first
+        ; test_case "a full window that gates nothing is usable" `Quick
+            test_a_full_window_that_gates_nothing_is_usable
+        ; test_case "observed exhaustion blocks gating windows" `Quick
+            test_observed_exhaustion_blocks_gating_windows
+        ; test_case "an empty report is no report" `Quick test_an_empty_report_is_no_report
+        ; test_case "at limit is the header decision" `Quick
+            test_at_limit_is_the_header_decision
         ] )
     ]

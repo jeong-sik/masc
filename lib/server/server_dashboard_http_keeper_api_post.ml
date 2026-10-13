@@ -861,16 +861,27 @@ let validate_dashboard_string_list_field key = function
       loop 0 items
   | other -> dashboard_field_type_error key "an array of strings" other
 
+type max_context_override_change =
+  | Clear_max_context_override
+  | Set_max_context_override of int
+
 let validate_dashboard_max_context_override = function
-  | `Null -> Ok ()
+  | `Null -> Ok Clear_max_context_override
   | `Int value ->
-      Keeper_config.validate_max_context_override_value value |> Result.map ignore
+      Keeper_config.validate_max_context_override_value value
+      |> Result.map (fun value -> Set_max_context_override value)
   | other -> dashboard_field_type_error "max_context_override" "an integer or null" other
 
+let max_context_override_json = function
+  | Clear_max_context_override -> `Null
+  | Set_max_context_override value -> `Int value
+
 (* What one checked field contributes. The two control fields are consumed by
-   [handle_keeper_config_post] and never persisted. *)
+   [handle_keeper_config_post] and never persisted. [max_context_override] is
+   persisted and also read by [context_shrink_of_patch]. *)
 type checked_config_field =
   | Persisted_field of string * Yojson.Safe.t
+  | Max_context_override of max_context_override_change
   | Confirm_context_shrink of bool
   | Expected_config_revision
 
@@ -899,7 +910,8 @@ let validate_dashboard_config_field field value =
        | `String raw when Option.is_some (Keeper_input_policy.of_string raw) -> Ok ()
        | other -> dashboard_field_type_error key "small or wide" other)
   | Field_max_context_override ->
-    persisted (validate_dashboard_max_context_override value)
+    validate_dashboard_max_context_override value
+    |> Result.map (fun change -> Max_context_override change)
   | Field_confirm_context_shrink ->
     (match value with
      | `Bool confirm -> Ok (Confirm_context_shrink confirm)
@@ -934,10 +946,11 @@ let validate_dashboard_config_field field value =
 
 type dashboard_config_patch = {
   confirm_context_shrink : bool;
+  max_context_override : max_context_override_change option;
   config_fields : (string * Yojson.Safe.t) list;
 }
 
-let validate_dashboard_config_patch ~meta:_ fields =
+let validate_dashboard_config_patch fields =
   match duplicate_assoc_keys fields with
   | _ :: _ as duplicates ->
       Error
@@ -967,11 +980,23 @@ let validate_dashboard_config_patch ~meta:_ fields =
                       check
                         { patch with config_fields = (key, value) :: patch.config_fields }
                         rest
+                  | Ok (Max_context_override change) ->
+                      let key = dashboard_config_field_key Field_max_context_override in
+                      check
+                        { patch with
+                          max_context_override = Some change;
+                          config_fields =
+                            (key, max_context_override_json change) :: patch.config_fields }
+                        rest
                   | Ok (Confirm_context_shrink confirm) ->
                       check { patch with confirm_context_shrink = confirm } rest
                   | Ok Expected_config_revision -> check patch rest)
            in
-           check { confirm_context_shrink = false; config_fields = [] } known)
+           check
+             { confirm_context_shrink = false;
+               max_context_override = None;
+               config_fields = [] }
+             known)
 
 (* [Some (previous_display, new_value)] when the patch reduces the keeper's
    context window below its current setting — introducing a cap where there was
@@ -979,14 +1004,15 @@ let validate_dashboard_config_patch ~meta:_ fields =
    the field is absent, set to Null (removing the cap = expand), or raised.
    Compares the persisted override only; a stricter check against the live
    checkpoint token size is a follow-up. *)
-let context_shrink_of_patch ~(meta : Keeper_meta_contract.keeper_meta) fields =
-  match List.assoc_opt "max_context_override" fields with
-  | Some (`Int new_v) ->
+let context_shrink_of_patch ~(meta : Keeper_meta_contract.keeper_meta)
+    (patch : dashboard_config_patch) =
+  match patch.max_context_override with
+  | None | Some Clear_max_context_override -> None
+  | Some (Set_max_context_override new_v) ->
     (match meta.Keeper_meta_contract.max_context_override with
      | None -> Some ("unset (full model window)", new_v)
      | Some old_v when new_v < old_v -> Some (string_of_int old_v, new_v)
      | Some _ -> None)
-  | _ -> None
 
 let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event =
   Dashboard_cache.invalidate (keeper_config_cache_key config name);
@@ -1108,10 +1134,10 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                    (Printf.sprintf "keeper name mismatch: route=%S body=%S" name
                       (Option.value ~default:"" body_name))
                else
-                 (match validate_dashboard_config_patch ~meta:meta0 fields with
+                 (match validate_dashboard_config_patch fields with
                   | Error msg -> respond_error reqd msg
-                  | Ok { confirm_context_shrink; config_fields = fields } ->
-                      (match context_shrink_of_patch ~meta:meta0 fields with
+                  | Ok ({ confirm_context_shrink; config_fields = fields; _ } as patch) ->
+                      (match context_shrink_of_patch ~meta:meta0 patch with
                        | Some (previous, new_v) when not confirm_context_shrink ->
                            respond_error reqd
                              (Printf.sprintf

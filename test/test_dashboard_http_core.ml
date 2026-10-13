@@ -6108,7 +6108,11 @@ let shrink_result = Alcotest.(option (pair string int))
 
 let test_context_shrink_detection () =
   let base = shrink_base_meta () in
-  let shrink meta fields = Keeper_config_post.context_shrink_of_patch ~meta fields in
+  let shrink meta fields =
+    match Keeper_config_post.validate_dashboard_config_patch fields with
+    | Ok patch -> Keeper_config_post.context_shrink_of_patch ~meta patch
+    | Error error -> Alcotest.fail error
+  in
   check shrink_result "cap introduced where there was none is a shrink"
     (Some ("unset (full model window)", 1000))
     (shrink (with_max_override base None) [ ("max_context_override", `Int 1000) ]);
@@ -6129,9 +6133,8 @@ let test_context_shrink_detection () =
 (* The two control fields come back typed and leave the persisted fields; the
    handler no longer reads them from the JSON again. *)
 let test_config_patch_separates_control_fields () =
-  let meta = shrink_base_meta () in
   match
-    Keeper_config_post.validate_dashboard_config_patch ~meta
+    Keeper_config_post.validate_dashboard_config_patch
       [ ("name", `String "shrink-fixture");
         ("confirm_context_shrink", `Bool true);
         ("expected_config_revision", `String "revision");
@@ -6143,24 +6146,25 @@ let test_config_patch_separates_control_fields () =
       patch.Keeper_config_post.confirm_context_shrink;
     Alcotest.(check (list string)) "only persisted fields remain, in order"
       [ "name"; "max_context_override" ]
-      (List.map fst patch.Keeper_config_post.config_fields)
+      (List.map fst patch.Keeper_config_post.config_fields);
+    Alcotest.(check bool) "the checked cap is what gets persisted" true
+      (Yojson.Safe.equal (`Int 1000)
+         (List.assoc "max_context_override" patch.Keeper_config_post.config_fields))
 ;;
 
 let test_config_patch_input_policy () =
-  let meta = shrink_base_meta () in
   List.iter (fun wire ->
-    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", `String wire] with
+    match Keeper_config_post.validate_dashboard_config_patch ["input_policy", `String wire] with
     | Ok _ -> () | Error error -> Alcotest.fail error) ["small"; "wide"];
   List.iter (fun value ->
-    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", value] with
+    match Keeper_config_post.validate_dashboard_config_patch ["input_policy", value] with
     | Error _ -> () | Ok _ -> Alcotest.fail "invalid config policy accepted")
     [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
 ;;
 
 let test_config_patch_accepts_typed_skills () =
-  let meta = shrink_base_meta () in
   let validate fields =
-    Keeper_config_post.validate_dashboard_config_patch ~meta fields
+    Keeper_config_post.validate_dashboard_config_patch fields
   in
   let check_ok label fields =
     match validate fields with
@@ -6190,9 +6194,8 @@ let test_config_patch_accepts_typed_skills () =
    is declared under [exec.ssh.endpoints], and whether the profile admits an
    endpoint at all, are decided later by [Keeper_turn_up_args.parse]. *)
 let test_config_patch_remote_endpoint_shape () =
-  let meta = shrink_base_meta () in
   let validate fields =
-    Keeper_config_post.validate_dashboard_config_patch ~meta fields
+    Keeper_config_post.validate_dashboard_config_patch fields
   in
   let check_ok label fields =
     match validate fields with

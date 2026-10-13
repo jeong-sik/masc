@@ -1,8 +1,8 @@
 (** Coverage tests for Tool_wiki — Wiki page management
 
     Tests dispatch routing, input validation, and handler integration
-    for 4 tools: masc_wiki_list, masc_wiki_read, masc_wiki_add,
-    masc_wiki_search
+    for 5 tools: masc_wiki_list, masc_wiki_read, masc_wiki_create,
+    masc_wiki_update, masc_wiki_search
 
     The wiki lives under the context's [base_path]; each test hands the
     tools a temp directory as that workspace.
@@ -124,15 +124,75 @@ let dispatch_exn ctx ~name ~args =
   | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
   | None -> failwith ("dispatch returned None for " ^ name)
 
-let test_add_on_fresh_base () =
+let dispatch_result ctx ~name ~args =
+  match Tool_wiki.dispatch ctx ~name ~args with
+  | Some result -> result
+  | None -> failwith ("dispatch returned None for " ^ name)
+
+let create_args
+      ?(page = "test-page")
+      ?(title = "Test Page")
+      ?(summary = "One line about the page")
+      ?(source = "research")
+      ?(body = "page body")
+      ?tags
+      ()
+  =
+  `Assoc
+    ([ "page", `String page
+     ; "title", `String title
+     ; "summary", `String summary
+     ; "source", `String source
+     ; "body", `String body
+     ]
+     @
+     match tags with
+     | None -> []
+     | Some tags -> [ "tags", `List (List.map (fun tag -> `String tag) tags) ])
+
+let without field = function
+  | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+  | other -> other
+
+let create ctx args = dispatch_exn ctx ~name:"masc_wiki_create" ~args
+
+let create_ok ctx args =
+  let ok, msg = create ctx args in
+  if not ok then Alcotest.failf "create should succeed: %s" msg
+
+let read_file (ctx : Tool_wiki.context) page =
+  In_channel.with_open_text
+    (Tool_wiki.page_path ~base_path:ctx.base_path page)
+    In_channel.input_all
+
+let frontmatter_of ctx page =
+  match Tool_wiki.parse_frontmatter (read_file ctx page) with
+  | Ok frontmatter -> frontmatter
+  | Error error ->
+    Alcotest.failf "%s does not read: %s" page (Tool_wiki.frontmatter_error_to_string error)
+
+let update_args ?title ?summary ?tags ~page ~base_revision ~body () =
+  let optional name = function
+    | None -> []
+    | Some value -> [ name, `String value ]
+  in
+  `Assoc
+    ([ "page", `String page; "base_revision", `Int base_revision; "body", `String body ]
+     @ optional "title" title
+     @ optional "summary" summary
+     @
+     match tags with
+     | None -> []
+     | Some tags -> [ "tags", `List (List.map (fun tag -> `String tag) tags) ])
+
+let update ctx args = dispatch_exn ctx ~name:"masc_wiki_update" ~args
+
+let test_create_on_fresh_base () =
   List.iter (fun title ->
     with_temp_base_path ~prepare_wiki:false (fun ctx ->
       Alcotest.(check bool) "wiki initially absent" false
         (Sys.file_exists (Tool_wiki.wiki_root ~base_path:ctx.base_path));
-      let ok, _ = dispatch_exn ctx ~name:"masc_wiki_add"
-          ~args:(`Assoc ["title", `String title; "content", `String "fresh base evidence";
-                         "source", `String "experiment"]) in
-      Alcotest.(check bool) "first add succeeds" true ok;
+      create_ok ctx (create_args ~page:"fresh" ~title ~body:"fresh base evidence" ());
       let ok, content = dispatch_exn ctx ~name:"masc_wiki_read"
           ~args:(`Assoc ["topic", `String title]) in
       Alcotest.(check bool) "saved page readable" true ok;
@@ -153,8 +213,8 @@ let test_dispatch_unknown () =
 let test_dispatch_all_known () =
   with_temp_base_path (fun ctx ->
     let tools = [
-      "masc_wiki_list"; "masc_wiki_read"; "masc_wiki_add";
-      "masc_wiki_search";
+      "masc_wiki_list"; "masc_wiki_read"; "masc_wiki_create";
+      "masc_wiki_update"; "masc_wiki_search";
     ] in
     List.iter (fun name ->
       let result = Tool_wiki.dispatch ctx ~name ~args:(`Assoc []) in
@@ -189,164 +249,258 @@ let test_read_nonexistent_topic () =
     let args = `Assoc [("topic", `String "nonexistent_topic")] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_read" ~args in
     Alcotest.(check bool) "nonexistent fails" false ok;
-    Alcotest.(check bool) "error mentions not found" true
-      (msg_contains ~needle:"not found" msg || msg_contains ~needle:"no" msg)
+    Alcotest.(check bool) "error names the topic" true
+      (msg_contains ~needle:"No page matching 'nonexistent_topic'" msg)
   )
 
 (* The list -> read contract: masc_wiki_list surfaces the frontmatter title,
-   so reading back that exact title must resolve the document. Before the fix,
-   read matched only the slug filename (which drops the title's spaces, colons,
-   and case), so a title query never matched. *)
+   so reading back that exact title must resolve the page. The page name
+   carries none of the title's spaces, colons or case. *)
 let test_read_by_title_roundtrip () =
   with_temp_base_path (fun ctx ->
     let title = "Blocker Chain V3: Repos Exists, The Real Blocker" in
-    let add_args = `Assoc [
-      ("title", `String title);
-      ("content", `String "Body of the document for round-trip.");
-      ("source", `String "direct_experience");
-    ] in
-    let (added, _) = dispatch_exn ctx ~name:"masc_wiki_add" ~args:add_args in
-    Alcotest.(check bool) "add succeeds" true added;
+    create_ok ctx
+      (create_args ~page:"blocker-chain" ~title ~body:"Body of the page for round-trip." ());
     let read_args = `Assoc [("topic", `String title)] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
     Alcotest.(check bool) "read by exact title succeeds" true ok;
     Alcotest.(check bool) "returns the body" true
-      (msg_contains ~needle:"Body of the document" msg)
+      (msg_contains ~needle:"Body of the page" msg);
+    Alcotest.(check bool) "returns the revision the next update needs" true
+      (msg_contains ~needle:"revision: 1" msg)
   )
 
 let test_read_by_title_case_insensitive_partial () =
   with_temp_base_path (fun ctx ->
-    let _ = dispatch_exn ctx ~name:"masc_wiki_add" ~args:(`Assoc [
-      ("title", `String "Root Cause: Orphan Count Analysis");
-      ("content", `String "details about orphan counting");
-      ("source", `String "observation");
-    ]) in
+    create_ok ctx
+      (create_args ~page:"orphan-count" ~title:"Root Cause: Orphan Count Analysis" ());
     let read_args = `Assoc [("topic", `String "root cause: orphan count")] in
     let (ok, _) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
     Alcotest.(check bool) "case-insensitive partial title match" true ok
   )
 
-(* Slug queries must keep working — the fix adds title matching, it does not
-   replace filename matching. *)
-let test_read_by_slug_still_works () =
+(* A page is also found by part of its name. *)
+let test_read_by_page_name () =
   with_temp_base_path (fun ctx ->
-    let _ = dispatch_exn ctx ~name:"masc_wiki_add" ~args:(`Assoc [
-      ("title", `String "Slug Query Doc");
-      ("content", `String "slug body");
-      ("source", `String "research");
-    ]) in
+    create_ok ctx (create_args ~page:"slug-query-doc" ~title:"Unrelated Title" ());
     let read_args = `Assoc [("topic", `String "slug-query")] in
     let (ok, _) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
-    Alcotest.(check bool) "slug substring still matches" true ok
+    Alcotest.(check bool) "page name substring matches" true ok
   )
 
 (* ============================================================
-   wiki_add tests
+   wiki_create tests
    ============================================================ *)
 
-let test_add_missing_title () =
+let test_create_missing_field field () =
   with_temp_base_path (fun ctx ->
-    let args = `Assoc [("content", `String "some content")] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
-    Alcotest.(check bool) "missing title fails" false ok;
-    Alcotest.(check bool) "error mentions title" true (msg_contains ~needle:"title" msg)
-  )
-
-let test_add_missing_content () =
-  with_temp_base_path (fun ctx ->
-    let args = `Assoc [("title", `String "test doc")] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
-    Alcotest.(check bool) "missing content fails" false ok;
-    Alcotest.(check bool) "error mentions content" true (msg_contains ~needle:"content" msg)
-  )
-
-let test_add_invalid_source () =
-  with_temp_base_path (fun ctx ->
-    let args = `Assoc [
-      ("title", `String "test doc");
-      ("content", `String "some content");
-      ("source", `String "invalid_source_type");
-    ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
-    Alcotest.(check bool) "invalid source fails" false ok;
-    Alcotest.(check bool) "mentions source" true (msg_contains ~needle:"source" msg)
-  )
-
-(* The schema requires [source]. A document written without one would record a
-   kind of work its writer never named, so the call is refused and nothing is
-   written. *)
-let test_add_missing_source () =
-  with_temp_base_path (fun ctx ->
-    let args = `Assoc [
-      ("title", `String "unsourced doc");
-      ("content", `String "some content");
-    ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
-    Alcotest.(check bool) "missing source fails" false ok;
+    let (ok, msg) = create ctx (without field (create_args ())) in
+    Alcotest.(check bool) ("missing " ^ field ^ " fails") false ok;
     Alcotest.(check bool) "names the missing field" true
-      (msg_contains ~needle:"source is required" msg);
-    Alcotest.(check (list string)) "no document written" [] (wiki_pages ctx)
-  )
+      (msg_contains ~needle:(field ^ " is required") msg);
+    Alcotest.(check (list string)) "no page written" [] (wiki_pages ctx))
+
+let test_create_invalid_source () =
+  with_temp_base_path (fun ctx ->
+    let (ok, msg) = create ctx (create_args ~source:"invalid_source_type" ()) in
+    Alcotest.(check bool) "invalid source fails" false ok;
+    Alcotest.(check bool) "mentions source" true (msg_contains ~needle:"source" msg);
+    Alcotest.(check (list string)) "no page written" [] (wiki_pages ctx))
 
 (* The reader requires [author], so the writer refuses a caller with no name
    instead of writing a page the wiki then reports as unreadable. *)
-let test_add_with_blank_author_is_refused () =
+let test_create_with_blank_author_is_refused () =
   with_temp_base_path (fun ctx ->
     let ctx = { ctx with Tool_wiki.agent_name = "  " } in
-    let args = `Assoc [
-      ("title", `String "unsigned doc");
-      ("content", `String "some content");
-      ("source", `String "research");
-    ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
+    let (ok, msg) = create ctx (create_args ()) in
     Alcotest.(check bool) "blank author fails" false ok;
     Alcotest.(check bool) "names the author" true
       (msg_contains ~needle:"no agent name" msg);
-    Alcotest.(check (list string)) "no document written" [] (wiki_pages ctx)
+    Alcotest.(check (list string)) "no page written" [] (wiki_pages ctx)
   )
 
 (* The wiki is the caller's workspace, not whatever MASC_BASE_PATH the
    process happens to hold. *)
 let test_wiki_follows_context_base_path () =
   with_temp_base_path (fun ctx ->
-    let (ok, _) =
-      dispatch_exn ctx ~name:"masc_wiki_add"
-        ~args:(`Assoc [
-          ("title", `String "Workspace Doc");
-          ("content", `String "body");
-          ("source", `String "observation");
-        ])
-    in
-    Alcotest.(check bool) "add succeeds" true ok;
-    Alcotest.(check int) "written under the context workspace" 1
-      (List.length (wiki_pages ctx));
+    create_ok ctx (create_args ~page:"workspace-doc" ());
+    Alcotest.(check (list string)) "written under the context workspace"
+      [ "workspace-doc.md" ] (wiki_pages ctx);
     Alcotest.(check bool) "nothing under MASC_BASE_PATH" false
       (Sys.file_exists (Tool_wiki.wiki_root ~base_path:decoy_base_path)))
 
-let test_add_success () =
+(* The file is named by [page] alone: no date, nothing taken from the title. *)
+let test_create_names_the_file_by_page () =
   with_temp_base_path (fun ctx ->
-    let args = `Assoc [
-      ("title", `String "test knowledge");
-      ("content", `String "This is test content for the wiki.");
-      ("source", `String "direct_experience");
-    ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
-    Alcotest.(check bool) "add succeeds" true ok;
-    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"wiki" msg)
-  )
+    create_ok ctx
+      (create_args ~page:"saju-palja" ~title:"사주팔자" ~tags:[ "band"; "song" ] ());
+    Alcotest.(check (list string)) "one file, named by page" [ "saju-palja.md" ]
+      (wiki_pages ctx);
+    let frontmatter = frontmatter_of ctx "saju-palja" in
+    Alcotest.(check string) "title kept as written" "사주팔자" frontmatter.title;
+    Alcotest.(check string) "summary kept" "One line about the page" frontmatter.summary;
+    Alcotest.(check int) "starts at revision 1" 1 frontmatter.revision;
+    Alcotest.(check string) "author is the caller" "test-agent" frontmatter.author;
+    Alcotest.(check (list string)) "tags kept" [ "band"; "song" ] frontmatter.tags)
 
-let test_add_with_tags () =
+(* Two titles in a script the name cannot carry used to collapse into one
+   file and the second silently replaced the first. *)
+let test_two_korean_titles_do_not_collide () =
   with_temp_base_path (fun ctx ->
-    let args = `Assoc [
-      ("title", `String "tagged knowledge");
-      ("content", `String "Content with tags.");
-      ("source", `String "direct_experience");
-      ("tags", `List [`String "ocaml"; `String "testing"]);
-    ] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_add" ~args in
-    Alcotest.(check bool) "add with tags" true ok;
-    Alcotest.(check bool) "response confirms add" true (msg_contains ~needle:"added" msg || msg_contains ~needle:"success" msg || msg_contains ~needle:"wiki" msg)
-  )
+    create_ok ctx (create_args ~page:"saju-palja" ~title:"사주팔자" ~body:"first" ());
+    create_ok ctx (create_args ~page:"bamseom" ~title:"밤섬" ~body:"second" ());
+    Alcotest.(check (list string)) "both pages exist"
+      [ "bamseom.md"; "saju-palja.md" ]
+      (List.sort String.compare (wiki_pages ctx));
+    Alcotest.(check bool) "the first page still holds its own body" true
+      (String_util.contains_substring (read_file ctx "saju-palja") "first"))
+
+let test_create_refuses_an_existing_page () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx (create_args ~page:"taken" ~body:"original body" ());
+    let before = read_file ctx "taken" in
+    let (ok, msg) = create ctx (create_args ~page:"taken" ~body:"replacement body" ()) in
+    Alcotest.(check bool) "second create fails" false ok;
+    Alcotest.(check bool) "points at update" true
+      (msg_contains ~needle:"masc_wiki_update" msg);
+    Alcotest.(check string) "the page is untouched" before (read_file ctx "taken"))
+
+let test_create_refuses_a_bad_page_name () =
+  List.iter
+    (fun page ->
+       with_temp_base_path (fun ctx ->
+         let (ok, _) = create ctx (create_args ~page ()) in
+         Alcotest.(check bool) (Printf.sprintf "page %S is refused" page) false ok;
+         Alcotest.(check (list string)) "no page written" [] (wiki_pages ctx)))
+    [ ""; "Upper"; "사주팔자"; "has space"; "-leading"; "trailing-"; "dot.name"
+    ; "under_score"; "index"; "log"; "../escape" ]
+
+let test_create_refuses_a_multi_line_title_or_summary () =
+  with_temp_base_path (fun ctx ->
+    let (ok, msg) = create ctx (create_args ~title:"two\nlines" ()) in
+    Alcotest.(check bool) "multi-line title fails" false ok;
+    Alcotest.(check bool) "names the title" true (msg_contains ~needle:"title must be one line" msg);
+    let (ok, msg) = create ctx (create_args ~summary:"two\nlines" ()) in
+    Alcotest.(check bool) "multi-line summary fails" false ok;
+    Alcotest.(check bool) "names the summary" true
+      (msg_contains ~needle:"summary must be one line" msg);
+    Alcotest.(check (list string)) "no page written" [] (wiki_pages ctx))
+
+(* ============================================================
+   wiki_update tests
+   ============================================================ *)
+
+let test_update_replaces_the_body_and_adds_one_to_the_revision () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx
+      (create_args ~page:"notes" ~title:"Notes" ~source:"experiment" ~tags:[ "a" ]
+         ~body:"first body" ());
+    let created = frontmatter_of ctx "notes" in
+    let (ok, msg) = update ctx (update_args ~page:"notes" ~base_revision:1 ~body:"second body" ()) in
+    Alcotest.(check bool) ("update succeeds: " ^ msg) true ok;
+    let updated = frontmatter_of ctx "notes" in
+    let content = read_file ctx "notes" in
+    Alcotest.(check int) "revision is 2" 2 updated.revision;
+    Alcotest.(check bool) "new body is there" true
+      (String_util.contains_substring content "second body");
+    Alcotest.(check bool) "old body is gone" false
+      (String_util.contains_substring content "first body");
+    Alcotest.(check string) "title kept" created.title updated.title;
+    Alcotest.(check string) "summary kept" created.summary updated.summary;
+    Alcotest.(check string) "author kept" created.author updated.author;
+    Alcotest.(check string) "created kept" created.created updated.created;
+    Alcotest.(check bool) "source kept" true (created.source = updated.source);
+    Alcotest.(check (list string)) "tags kept" created.tags updated.tags)
+
+let test_update_can_change_title_summary_and_tags () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx (create_args ~page:"notes" ~tags:[ "a" ] ());
+    let (ok, msg) =
+      update ctx
+        (update_args ~page:"notes" ~base_revision:1 ~body:"b" ~title:"새 제목"
+           ~summary:"new summary" ~tags:[ "x"; "y" ] ())
+    in
+    Alcotest.(check bool) ("update succeeds: " ^ msg) true ok;
+    let updated = frontmatter_of ctx "notes" in
+    Alcotest.(check string) "title changed" "새 제목" updated.title;
+    Alcotest.(check string) "summary changed" "new summary" updated.summary;
+    Alcotest.(check (list string)) "tags changed" [ "x"; "y" ] updated.tags)
+
+(* The writer read revision 1, someone else moved the page to 2. The update is
+   refused, the page keeps the other writer's body, and the refusal carries
+   what the writer needs to merge and send again. *)
+let test_stale_update_is_refused_with_the_current_page () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx (create_args ~page:"shared" ~body:"first body" ());
+    let (ok, _) = update ctx (update_args ~page:"shared" ~base_revision:1 ~body:"other writer's body" ()) in
+    Alcotest.(check bool) "first update succeeds" true ok;
+    let before = read_file ctx "shared" in
+    let result =
+      dispatch_result ctx ~name:"masc_wiki_update"
+        ~args:(update_args ~page:"shared" ~base_revision:1 ~body:"my stale body" ())
+    in
+    Alcotest.(check bool) "stale update fails" false (Tool_result.is_success result);
+    Alcotest.(check string) "the page is untouched" before (read_file ctx "shared");
+    let data = Tool_result.data result in
+    let open Yojson.Safe.Util in
+    Alcotest.(check int) "refusal carries the current revision" 2
+      (data |> member "current_revision" |> to_int);
+    Alcotest.(check string) "refusal carries the current body" "other writer's body\n"
+      (data |> member "body" |> to_string);
+    Alcotest.(check bool) "the message carries the body too" true
+      (String_util.contains_substring (Tool_result.message result) "other writer's body");
+    (* The writer merges and sends again with the revision it was handed. *)
+    let (ok, msg) =
+      update ctx
+        (update_args ~page:"shared" ~base_revision:2
+           ~body:"other writer's body\nplus my change" ())
+    in
+    Alcotest.(check bool) ("resend succeeds: " ^ msg) true ok;
+    Alcotest.(check int) "revision is 3" 3 (frontmatter_of ctx "shared").revision)
+
+let test_update_refuses_a_page_that_does_not_exist () =
+  with_temp_base_path (fun ctx ->
+    let (ok, msg) = update ctx (update_args ~page:"absent" ~base_revision:1 ~body:"b" ()) in
+    Alcotest.(check bool) "update of an absent page fails" false ok;
+    Alcotest.(check bool) "points at create" true (msg_contains ~needle:"masc_wiki_create" msg);
+    Alcotest.(check (list string)) "no page written" [] (wiki_pages ctx))
+
+(* [source] says what kind of work the page first came from. *)
+let test_update_cannot_change_the_source () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx (create_args ~page:"notes" ~source:"research" ());
+    let before = read_file ctx "notes" in
+    let args =
+      match update_args ~page:"notes" ~base_revision:1 ~body:"b" () with
+      | `Assoc fields -> `Assoc (("source", `String "experiment") :: fields)
+    in
+    let (ok, msg) = update ctx args in
+    Alcotest.(check bool) "update with a source fails" false ok;
+    Alcotest.(check bool) "names the source" true (msg_contains ~needle:"source cannot change" msg);
+    Alcotest.(check string) "the page is untouched" before (read_file ctx "notes"))
+
+let test_update_missing_field field () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx (create_args ~page:"notes" ());
+    let before = read_file ctx "notes" in
+    let (ok, msg) =
+      update ctx (without field (update_args ~page:"notes" ~base_revision:1 ~body:"b" ()))
+    in
+    Alcotest.(check bool) ("missing " ^ field ^ " fails") false ok;
+    Alcotest.(check bool) "names the missing field" true
+      (msg_contains ~needle:(field ^ " is required") msg);
+    Alcotest.(check string) "the page is untouched" before (read_file ctx "notes"))
+
+(* A page whose header does not read has no revision to compare, so it is
+   not rewritten. *)
+let test_update_refuses_a_page_whose_header_does_not_read () =
+  with_temp_base_path (fun ctx ->
+    let hand_written = "---\ntitle: Hand Written\n---\n\nbody\n" in
+    write_wiki_page ctx ~filename:"hand.md" hand_written;
+    let (ok, msg) = update ctx (update_args ~page:"hand" ~base_revision:1 ~body:"b" ()) in
+    Alcotest.(check bool) "update fails" false ok;
+    Alcotest.(check bool) "says why" true (msg_contains ~needle:"does not read" msg);
+    Alcotest.(check string) "the page is untouched" hand_written (read_file ctx "hand"))
 
 (* ============================================================
    wiki_search tests
@@ -370,64 +524,38 @@ let test_search_schema_allows_runtime_query_rejection () =
     false
     (List.mem "query" (schema_required_fields schema))
 
-let test_search_with_query () =
+let test_search_finds_a_page_by_its_body () =
   with_temp_base_path (fun ctx ->
-    let args = `Assoc [("query", `String "test")] in
-    let (ok, msg) = dispatch_exn ctx ~name:"masc_wiki_search" ~args in
-    (* Succeeds even with no results *)
+    create_ok ctx (create_args ~page:"found" ~title:"Found Page" ~body:"needle in the body" ());
+    create_ok ctx (create_args ~page:"other" ~title:"Other Page" ~body:"nothing here" ());
+    let (ok, msg) =
+      dispatch_exn ctx ~name:"masc_wiki_search" ~args:(`Assoc [ "query", `String "needle" ])
+    in
     Alcotest.(check bool) "search ok" true ok;
-    Alcotest.(check bool) "response is substantive" true (String.length msg > 5)
-  )
+    Alcotest.(check bool) "names the matching page" true
+      (msg_contains ~needle:"**Found Page** found.md" msg);
+    Alcotest.(check bool) "leaves the other page out" false
+      (msg_contains ~needle:"Other Page" msg))
 
-
-let test_add_schema_has_no_confidence () =
-  let schema = required_schema "masc_wiki_add" in
-  Alcotest.(check bool)
-    "confidence is not an input property"
-    false
-    (schema_has_property schema "confidence");
-  Alcotest.(check bool)
-    "confidence is not required"
-    false
-    (List.mem "confidence" (schema_required_fields schema))
-
-(* Nothing writes a self-scored number or an empty verifier list into the
-   document any more, so nothing downstream can read one back. *)
-let test_added_frontmatter_carries_only_observable_fields () =
-  with_temp_base_path (fun ctx ->
-    let (added, _) =
-      dispatch_exn ctx ~name:"masc_wiki_add"
-        ~args:(`Assoc [
-          ("title", `String "Frontmatter Shape");
-          ("content", `String "body");
-          ("source", `String "direct_experience");
-        ])
-    in
-    Alcotest.(check bool) "add succeeds" true added;
-    let root = Tool_wiki.wiki_root ~base_path:ctx.base_path in
-    let path =
-      match wiki_pages ctx with
-      | [ single ] -> Filename.concat root single
-      | other ->
-        Alcotest.failf "expected exactly one document, got %d" (List.length other)
-    in
-    let written = In_channel.with_open_text path In_channel.input_all in
-    Alcotest.(check bool) "no confidence field" false
-      (msg_contains ~needle:"confidence:" written);
-    Alcotest.(check bool) "no verified_by field" false
-      (msg_contains ~needle:"verified_by:" written);
-    Alcotest.(check bool) "records the author" true
-      (msg_contains ~needle:"author: test-agent" written);
-    Alcotest.(check bool) "records the source" true
-      (msg_contains ~needle:"source: direct_experience" written)
-  )
+let test_create_schema_requires_what_the_handler_requires () =
+  let schema = required_schema "masc_wiki_create" in
+  Alcotest.(check (list string))
+    "required fields"
+    [ "body"; "page"; "source"; "summary"; "title" ]
+    (List.sort String.compare (schema_required_fields schema));
+  let schema = required_schema "masc_wiki_update" in
+  Alcotest.(check (list string))
+    "update required fields"
+    [ "base_revision"; "body"; "page" ]
+    (List.sort String.compare (schema_required_fields schema));
+  Alcotest.(check bool) "update offers no source" false (schema_has_property schema "source")
 
 (* ============================================================
-   Documents whose frontmatter does not read
+   Pages whose frontmatter does not read
    ============================================================
 
-   A document written by hand can carry any [source]. List, read and search
-   name such a document by filename with the reason; none of them prints the
+   A page written by hand can carry any [source]. List, read and search
+   name such a page by filename with the reason; none of them prints the
    raw value as if it were one of the four. *)
 
 let unknown_source_note =
@@ -436,26 +564,19 @@ let unknown_source_note =
 
 let test_unknown_source_is_named_not_passed_through () =
   with_temp_base_path (fun ctx ->
-    let (added, _) =
-      dispatch_exn ctx ~name:"masc_wiki_add"
-        ~args:(`Assoc [
-          ("title", `String "Readable Doc");
-          ("content", `String "shared marker");
-          ("source", `String "research");
-        ])
-    in
-    Alcotest.(check bool) "add succeeds" true added;
+    create_ok ctx
+      (create_args ~page:"readable" ~title:"Readable Doc" ~body:"shared marker" ());
     write_wiki_page ctx ~filename:"hand-written.md"
-      "---\ntitle: Hand Written\nsource: operation\nauthor: codex\n---\n\nshared marker\n";
+      "---\ntitle: Hand Written\nsummary: s\nsource: operation\nauthor: codex\n---\n\nshared marker\n";
     write_wiki_page ctx ~filename:"no-source.md"
-      "---\ntitle: No Source\nauthor: codex\n---\n\nshared marker\n";
+      "---\ntitle: No Source\nsummary: s\nauthor: codex\n---\n\nshared marker\n";
     let (ok, listing) = dispatch_exn ctx ~name:"masc_wiki_list" ~args:(`Assoc []) in
     Alcotest.(check bool) "list ok" true ok;
-    Alcotest.(check bool) "readable document shows its source" true
+    Alcotest.(check bool) "readable page shows its source" true
       (msg_contains ~needle:"**Readable Doc** (research, test-agent" listing);
     Alcotest.(check bool) "unknown source named with its reason" true
       (msg_contains ~needle:("- hand-written.md (" ^ unknown_source_note ^ ")") listing);
-    Alcotest.(check bool) "unknown source never listed as a document title" false
+    Alcotest.(check bool) "unknown source never listed as a page title" false
       (msg_contains ~needle:"**Hand Written**" listing);
     Alcotest.(check bool) "absent source named" true
       (msg_contains ~needle:"- no-source.md (no source in frontmatter)" listing);
@@ -473,25 +594,42 @@ let test_unknown_source_is_named_not_passed_through () =
     Alcotest.(check bool) "read by filename ok" true ok;
     Alcotest.(check bool) "read heading carries the reason" true
       (msg_contains ~needle:("## hand-written.md (" ^ unknown_source_note ^ ")") body);
-    Alcotest.(check bool) "read returns the document" true
+    Alcotest.(check bool) "read returns the page" true
       (msg_contains ~needle:"shared marker" body)
   )
 
 (* A header missing a field the writer always writes, a block that never
-   closes, and a source outside ASCII. Each is named with its own reason: the
-   missing title is not printed as an empty bold title, the unclosed block is
-   not reported as a missing source although its source line is there, and the
-   non-ASCII source is quoted as written rather than as escaped bytes. *)
+   closes, a source outside ASCII, and a revision that is not a number. Each is
+   named with its own reason: the missing title is not printed as an empty bold
+   title, the unclosed block is not reported as a missing source although its
+   source line is there, and the non-ASCII source is quoted as written rather
+   than as escaped bytes. *)
 let test_header_that_does_not_read_names_its_reason () =
   with_temp_base_path (fun ctx ->
+    let header fields = "---\n" ^ String.concat "\n" fields ^ "\n---\n\nbody\n" in
     write_wiki_page ctx ~filename:"no-title.md"
-      "---\nsource: research\nauthor: codex\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
+      (header [ "summary: s"; "source: research"; "author: codex"; "created: 2026-09-22"
+              ; "revision: 1"; "tags: []" ]);
     write_wiki_page ctx ~filename:"empty-author.md"
-      "---\ntitle: Empty Author\nsource: research\nauthor:\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
+      (header [ "title: Empty Author"; "summary: s"; "source: research"; "author:"
+              ; "created: 2026-09-22"; "revision: 1"; "tags: []" ]);
     write_wiki_page ctx ~filename:"unclosed.md"
-      "---\ntitle: Unclosed\nsource: research\nauthor: codex\n\nbody\n";
+      "---\ntitle: Unclosed\nsummary: s\nsource: research\nauthor: codex\n\nbody\n";
     write_wiki_page ctx ~filename:"korean-source.md"
-      "---\ntitle: Korean Source\nsource: 연구\nauthor: codex\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
+      (header [ "title: Korean Source"; "summary: s"; "source: 연구"; "author: codex"
+              ; "created: 2026-09-22"; "revision: 1"; "tags: []" ]);
+    write_wiki_page ctx ~filename:"no-summary.md"
+      (header [ "title: No Summary"; "source: research"; "author: codex"
+              ; "created: 2026-09-22"; "revision: 1"; "tags: []" ]);
+    write_wiki_page ctx ~filename:"no-revision.md"
+      (header [ "title: No Revision"; "summary: s"; "source: research"; "author: codex"
+              ; "created: 2026-09-22"; "tags: []" ]);
+    write_wiki_page ctx ~filename:"bad-revision.md"
+      (header [ "title: Bad Revision"; "summary: s"; "source: research"; "author: codex"
+              ; "created: 2026-09-22"; "revision: two"; "tags: []" ]);
+    write_wiki_page ctx ~filename:"zero-revision.md"
+      (header [ "title: Zero Revision"; "summary: s"; "source: research"; "author: codex"
+              ; "created: 2026-09-22"; "revision: 0"; "tags: []" ]);
     let (ok, listing) = dispatch_exn ctx ~name:"masc_wiki_list" ~args:(`Assoc []) in
     Alcotest.(check bool) "list ok" true ok;
     Alcotest.(check bool) "missing title named" true
@@ -502,37 +640,15 @@ let test_header_that_does_not_read_names_its_reason () =
     Alcotest.(check bool) "unclosed block named as unclosed" true
       (msg_contains ~needle:"- unclosed.md (frontmatter has no closing ---)" listing);
     Alcotest.(check bool) "non-ASCII source quoted as written" true
-      (msg_contains ~needle:"- korean-source.md (source \"연구\" is not one of:" listing))
-
-(* ============================================================
-   Workflow: add → list → read → search
-   ============================================================ *)
-
-let test_full_workflow () =
-  with_temp_base_path (fun ctx ->
-    (* Step 1: Add a document *)
-    let add_args = `Assoc [
-      ("title", `String "workflow test");
-      ("content", `String "Knowledge about OCaml testing patterns.");
-      ("source", `String "direct_experience");
-    ] in
-    let (ok1, _) = dispatch_exn ctx ~name:"masc_wiki_add" ~args:add_args in
-    Alcotest.(check bool) "add succeeds" true ok1;
-    (* Step 2: List documents *)
-    let (ok2, msg2) = dispatch_exn ctx ~name:"masc_wiki_list" ~args:(`Assoc []) in
-    Alcotest.(check bool) "list succeeds" true ok2;
-    Alcotest.(check bool) "list has content" true (String.length msg2 > 0);
-    (* Step 3: Search *)
-    let search_args = `Assoc [("query", `String "OCaml")] in
-    let (ok3, _) = dispatch_exn ctx ~name:"masc_wiki_search" ~args:search_args in
-    Alcotest.(check bool) "search succeeds" true ok3;
-    (* Step 4: Read the document *)
-    let read_args = `Assoc [("topic", `String "workflow-test")] in
-    let (ok4, msg4) = dispatch_exn ctx ~name:"masc_wiki_read" ~args:read_args in
-    (* May fail if filename convention differs — just check dispatch *)
-    ignore ok4;
-    Alcotest.(check bool) "read has response" true (String.length msg4 > 0)
-  )
+      (msg_contains ~needle:"- korean-source.md (source \"연구\" is not one of:" listing);
+    Alcotest.(check bool) "missing summary named" true
+      (msg_contains ~needle:"- no-summary.md (no summary in frontmatter)" listing);
+    Alcotest.(check bool) "missing revision named" true
+      (msg_contains ~needle:"- no-revision.md (no revision in frontmatter)" listing);
+    Alcotest.(check bool) "non-numeric revision named" true
+      (msg_contains ~needle:"- bad-revision.md (revision \"two\" is not a whole number from 1)" listing);
+    Alcotest.(check bool) "revision 0 named" true
+      (msg_contains ~needle:"- zero-revision.md (revision \"0\" is not a whole number from 1)" listing))
 
 (* ============================================================
    Test runner
@@ -541,37 +657,53 @@ let test_full_workflow () =
 let () =
   Alcotest.run "Tool_wiki" [
     ("dispatch", [
-      Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown; Alcotest.test_case "all known tools dispatch" `Quick test_dispatch_all_known;
+      Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown;
+      Alcotest.test_case "all known tools dispatch" `Quick test_dispatch_all_known;
     ]);
     ("wiki_list", [
       Alcotest.test_case "empty list" `Quick test_list_empty;
     ]);
     ("wiki_read", [
-      Alcotest.test_case "empty topic" `Quick test_read_empty_topic; Alcotest.test_case "nonexistent topic" `Quick test_read_nonexistent_topic; Alcotest.test_case "read by exact title (list->read contract)" `Quick test_read_by_title_roundtrip; Alcotest.test_case "read by case-insensitive partial title" `Quick test_read_by_title_case_insensitive_partial; Alcotest.test_case "read by slug still works" `Quick test_read_by_slug_still_works;
+      Alcotest.test_case "empty topic" `Quick test_read_empty_topic;
+      Alcotest.test_case "nonexistent topic" `Quick test_read_nonexistent_topic;
+      Alcotest.test_case "read by exact title (list->read contract)" `Quick test_read_by_title_roundtrip;
+      Alcotest.test_case "read by case-insensitive partial title" `Quick test_read_by_title_case_insensitive_partial;
+      Alcotest.test_case "read by page name" `Quick test_read_by_page_name;
     ]);
-    ("wiki_add", [
-      Alcotest.test_case "fresh base creates the wiki and reads the page" `Quick test_add_on_fresh_base; Alcotest.test_case "missing title" `Quick test_add_missing_title; Alcotest.test_case "missing content" `Quick test_add_missing_content; Alcotest.test_case "invalid source" `Quick test_add_invalid_source; Alcotest.test_case "missing source" `Quick test_add_missing_source; Alcotest.test_case "blank author" `Quick test_add_with_blank_author_is_refused; Alcotest.test_case "success" `Quick test_add_success; Alcotest.test_case "with tags" `Quick test_add_with_tags; Alcotest.test_case "library follows the context base path" `Quick
-        test_wiki_follows_context_base_path;
+    ("wiki_create", [
+      Alcotest.test_case "fresh base creates the wiki and reads the page" `Quick test_create_on_fresh_base;
+      Alcotest.test_case "missing title" `Quick (test_create_missing_field "title");
+      Alcotest.test_case "missing summary" `Quick (test_create_missing_field "summary");
+      Alcotest.test_case "missing body" `Quick (test_create_missing_field "body");
+      Alcotest.test_case "missing source" `Quick (test_create_missing_field "source");
+      Alcotest.test_case "missing page" `Quick (test_create_missing_field "page");
+      Alcotest.test_case "invalid source" `Quick test_create_invalid_source;
+      Alcotest.test_case "blank author" `Quick test_create_with_blank_author_is_refused;
+      Alcotest.test_case "wiki follows the context base path" `Quick test_wiki_follows_context_base_path;
+      Alcotest.test_case "the file is named by page" `Quick test_create_names_the_file_by_page;
+      Alcotest.test_case "two Korean titles do not collide" `Quick test_two_korean_titles_do_not_collide;
+      Alcotest.test_case "an existing page is refused" `Quick test_create_refuses_an_existing_page;
+      Alcotest.test_case "a bad page name is refused" `Quick test_create_refuses_a_bad_page_name;
+      Alcotest.test_case "a multi-line title or summary is refused" `Quick test_create_refuses_a_multi_line_title_or_summary;
+      Alcotest.test_case "schemas require what the handlers require" `Quick test_create_schema_requires_what_the_handler_requires;
     ]);
-    ("unreadable_source", [
-      Alcotest.test_case "unknown source is named, not passed through" `Quick
-        test_unknown_source_is_named_not_passed_through; Alcotest.test_case "header that does not read names its reason" `Quick
-        test_header_that_does_not_read_names_its_reason;
+    ("wiki_update", [
+      Alcotest.test_case "replaces the body and adds one to the revision" `Quick test_update_replaces_the_body_and_adds_one_to_the_revision;
+      Alcotest.test_case "can change title, summary and tags" `Quick test_update_can_change_title_summary_and_tags;
+      Alcotest.test_case "a stale update is refused with the current page" `Quick test_stale_update_is_refused_with_the_current_page;
+      Alcotest.test_case "a page that does not exist is refused" `Quick test_update_refuses_a_page_that_does_not_exist;
+      Alcotest.test_case "the source cannot change" `Quick test_update_cannot_change_the_source;
+      Alcotest.test_case "missing base_revision" `Quick (test_update_missing_field "base_revision");
+      Alcotest.test_case "missing body" `Quick (test_update_missing_field "body");
+      Alcotest.test_case "a header that does not read is not rewritten" `Quick test_update_refuses_a_page_whose_header_does_not_read;
     ]);
     ("wiki_search", [
-      Alcotest.test_case "empty query" `Quick test_search_empty_query; Alcotest.test_case
-        "schema lets runtime reject empty query"
-        `Quick
-        test_search_schema_allows_runtime_query_rejection; Alcotest.test_case "with query" `Quick test_search_with_query;
+      Alcotest.test_case "empty query" `Quick test_search_empty_query;
+      Alcotest.test_case "query is rejected at run time, not by the schema" `Quick test_search_schema_allows_runtime_query_rejection;
+      Alcotest.test_case "finds a page by its body" `Quick test_search_finds_a_page_by_its_body;
     ]);
-    ("confidence_purged", [
-
-
-      Alcotest.test_case "add schema has no confidence" `Quick
-        test_add_schema_has_no_confidence; Alcotest.test_case "frontmatter carries only observable fields" `Quick
-        test_added_frontmatter_carries_only_observable_fields;
-    ]);
-    ("workflow", [
-      Alcotest.test_case "add list search read" `Quick test_full_workflow;
+    ("unreadable", [
+      Alcotest.test_case "unknown source is named, not passed through" `Quick test_unknown_source_is_named_not_passed_through;
+      Alcotest.test_case "a header that does not read names its reason" `Quick test_header_that_does_not_read_names_its_reason;
     ]);
   ]

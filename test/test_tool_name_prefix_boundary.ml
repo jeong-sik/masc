@@ -13,7 +13,7 @@
     The pairs that make it a rule rather than a habit split across the line
     for the same noun. [keeper_task_claim] is this Keeper taking a task;
     [masc_task_history] is the shared record of who took what.
-    [keeper_wiki_read] is this Keeper reading; [masc_wiki_add] writes
+    [keeper_wiki_read] is this Keeper reading; [masc_wiki_create] writes
     to the shelf everyone shares.
 
     Both prefixes are called by Keepers, so the boundary is not "who calls

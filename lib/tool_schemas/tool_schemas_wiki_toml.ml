@@ -1,4 +1,4 @@
-(** The four wiki tools, read from [config/tools/masc_wiki_*.toml] (RFC
+(** The five wiki tools, read from [config/tools/masc_wiki_*.toml] (RFC
     prompts-and-tool-definitions-outside-ocaml §2.2).
 
     Each value is decoded once at module initialization. A missing file or a
@@ -11,7 +11,7 @@
     [Tool_schemas_wiki] carries it beside the schema so the descriptor
     never types its own.
 
-    [masc_wiki_add]'s [source] enum is a literal in its TOML file.
+    [masc_wiki_create]'s [source] enum is a literal in its TOML file.
     [Tool_wiki.wiki_source] owns that vocabulary, and the "wiki source
     enum" case in [test_enum_mirror_sync] compares the two.
     [test_wiki_tool_toml_parity] keeps the publication order and which
@@ -30,5 +30,6 @@ let loaded_of_name name : Tool_definition_toml.loaded =
 
 let list = loaded_of_name "masc_wiki_list"
 let read = loaded_of_name "masc_wiki_read"
-let add = loaded_of_name "masc_wiki_add"
+let create = loaded_of_name "masc_wiki_create"
+let update = loaded_of_name "masc_wiki_update"
 let search = loaded_of_name "masc_wiki_search"

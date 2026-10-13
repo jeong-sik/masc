@@ -3,7 +3,8 @@
 type operation =
   | List_pages
   | Read_page
-  | Add_page
+  | Create_page
+  | Update_page
   | Search_pages
 [@@deriving enumerate]
 
@@ -17,7 +18,8 @@ type definition =
 let operation_id = function
   | List_pages -> "list"
   | Read_page -> "read"
-  | Add_page -> "add"
+  | Create_page -> "create"
+  | Update_page -> "update"
   | Search_pages -> "search"
 ;;
 
@@ -34,8 +36,12 @@ let definition_for = function
   | List_pages -> definition List_pages ~read_only:true Tool_schemas_wiki_toml.list
   (* masc_wiki_read *)
   | Read_page -> definition Read_page ~read_only:true Tool_schemas_wiki_toml.read
-  (* masc_wiki_add *)
-  | Add_page -> definition Add_page ~read_only:false Tool_schemas_wiki_toml.add
+  (* masc_wiki_create *)
+  | Create_page ->
+    definition Create_page ~read_only:false Tool_schemas_wiki_toml.create
+  (* masc_wiki_update *)
+  | Update_page ->
+    definition Update_page ~read_only:false Tool_schemas_wiki_toml.update
   (* masc_wiki_search *)
   | Search_pages ->
     definition Search_pages ~read_only:true Tool_schemas_wiki_toml.search

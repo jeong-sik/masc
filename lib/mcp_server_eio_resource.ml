@@ -246,9 +246,11 @@ let handle_read_resource_eio state id params =
                 in
                 let metadata_fields (fm : Tool_wiki.frontmatter) =
                   [ ("title", `String fm.title)
+                  ; ("summary", `String fm.summary)
                   ; ("source", `String (Tool_wiki.source_to_string fm.source))
                   ; ("author", `String fm.author)
                   ; ("created", `String fm.created)
+                  ; ("revision", `Int fm.revision)
                   ; ("tags", `List (List.map (fun t -> `String t) fm.tags))
                   ]
                 in

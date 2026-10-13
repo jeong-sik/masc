@@ -96,8 +96,9 @@ let strict_success_names =
     "masc_heartbeat";
     "masc_keeper_down";
     "masc_keeper_list";
-    "masc_wiki_add";
+    "masc_wiki_create";
     "masc_wiki_list";
+    "masc_wiki_update";
     "masc_messages";
     "masc_plan_set_task";
     "masc_start";
@@ -508,12 +509,14 @@ let ensure_wiki_topic fixture =
   | None ->
       mkdir_p (Filename.concat fixture.base_path "docs/wiki");
       ignore
-        (execute_tool_ok fixture ~name:"masc_wiki_add"
+        (execute_tool_ok fixture ~name:"masc_wiki_create"
            ~arguments:
              (`Assoc
                [
+                 ("page", `String "tool-matrix-wiki");
                  ("title", `String "Tool Matrix Wiki");
-                 ("content", `String "knowledge");
+                 ("summary", `String "tool matrix fixture page");
+                 ("body", `String "knowledge");
                  ("source", `String "direct_experience");
                  ("tags", `List [ `String "tool-matrix" ]);
                ]));
@@ -587,10 +590,9 @@ let prepare_for_name fixture name =
     | Some task_id -> fixture.task_id <- Some task_id
     | None -> failwith ("failed to parse goalless task id from: " ^ body)
   end;
-  if name = "masc_wiki_add" then
-    mkdir_p (Filename.concat fixture.base_path "docs/wiki");
-  if List.mem name [ "masc_wiki_list"; "masc_wiki_read"; "masc_wiki_search" ] then
-    ignore (ensure_wiki_topic fixture);
+  if List.mem name
+       [ "masc_wiki_list"; "masc_wiki_read"; "masc_wiki_search"; "masc_wiki_update" ]
+  then ignore (ensure_wiki_topic fixture);
   (* masc_handover_* tools pruned from registry; no preparation needed. *)
   let _ = ensure_handover in
   ()
@@ -722,6 +724,9 @@ let field_value fixture ~tool_name field_name schema =
   | "output" -> `String "tool matrix output"
   | "criteria" -> `List []
   | "topic" -> `String (ensure_wiki_topic fixture)
+  (* The fixture page is at revision 1, which is what the generic integer
+     value sends as [base_revision]. *)
+  | "page" when tool_name = "masc_wiki_update" -> `String (ensure_wiki_topic fixture)
   | "include_candidates" -> `Bool true
   | "mode" -> (
       match enum_choice with

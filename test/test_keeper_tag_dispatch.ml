@@ -141,16 +141,18 @@ let test_wiki_follows_config_not_env () =
             ~tag:Tool_dispatch.Mod_wiki ~name ~args
         in
         (match
-           dispatch_wiki "masc_wiki_add"
+           dispatch_wiki "masc_wiki_create"
              (`Assoc
-               [ "title", `String "Keeper Workspace Doc"
-               ; "content", `String "written through the keeper path"
+               [ "page", `String "keeper-workspace-doc"
+               ; "title", `String "Keeper Workspace Doc"
+               ; "summary", `String "Written through the keeper path"
+               ; "body", `String "written through the keeper path"
                ; "source", `String "observation"
                ])
          with
          | Some tr when Tool_result.is_success tr -> ()
-         | Some tr -> failf "masc_wiki_add should succeed: %s" (Tool_result.message tr)
-         | None -> fail "masc_wiki_add returned None");
+         | Some tr -> failf "masc_wiki_create should succeed: %s" (Tool_result.message tr)
+         | None -> fail "masc_wiki_create returned None");
         let config_wiki = Tool_wiki.wiki_root ~base_path:config.base_path in
         check bool "document written under the config workspace" true
           (Sys.file_exists config_wiki

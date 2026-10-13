@@ -93,7 +93,7 @@ mime_type = "text/markdown"
 uri = "masc://wiki.json"
 name = "Wiki Index (JSON)"
 title = "Wiki (JSON)"
-description = "Wiki pages as JSON with title, source, author, created, and tags. A page whose frontmatter does not read carries the reason in unreadable instead."
+description = "Wiki pages as JSON with title, summary, source, author, created, revision, and tags. A page whose frontmatter does not read carries the reason in unreadable instead."
 mime_type = "application/json"
 
 [[resources]]
@@ -142,7 +142,7 @@ mime_type = "text/markdown"
 uri_template = "masc://wiki/{topic}.json"
 name = "Wiki Page (JSON)"
 title = "Wiki Page (JSON)"
-description = "Read one wiki page as JSON: its content with title, source, author, created, and tags, or with the reason in unreadable when its frontmatter does not read"
+description = "Read one wiki page as JSON: its content with title, summary, source, author, created, revision, and tags, or with the reason in unreadable when its frontmatter does not read"
 mime_type = "application/json"
 
 [[resource_templates]]

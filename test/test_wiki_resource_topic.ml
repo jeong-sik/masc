@@ -143,18 +143,18 @@ let test_missing_wiki_has_empty_json_index () =
 ;;
 
 (* The resources read a page the way the wiki tools do. A document
-   [masc_wiki_add] would write shows its source as the vocabulary word,
+   [masc_wiki_create] would write shows its source as the vocabulary word,
    not as a link; a document whose header does not read is named by filename
    with the tools' reason and is given no title, source, or fields the writer
    never writes. *)
 let readable_document =
-  "---\ntitle: Alpha Doc\nsource: research\nauthor: codex\ncreated: 2026-09-22\n\
-   updated: 2026-09-22\ntags: [alpha, keeper]\n---\nAlpha body\n"
+  "---\ntitle: Alpha Doc\nsummary: What alpha holds\nsource: research\nauthor: codex\n\
+   created: 2026-09-22\nupdated: 2026-09-22\nrevision: 3\ntags: [alpha, keeper]\n---\nAlpha body\n"
 ;;
 
 let url_source_document =
-  "---\ntitle: Beta Doc\nsource: https://example.com/beta\nauthor: codex\n\
-   created: 2026-09-22\ntags: []\n---\nBeta body\n"
+  "---\ntitle: Beta Doc\nsummary: What beta holds\nsource: https://example.com/beta\nauthor: codex\n\
+   created: 2026-09-22\nrevision: 1\ntags: []\n---\nBeta body\n"
 ;;
 
 let beta_reason =
@@ -209,10 +209,14 @@ let test_json_index_carries_written_fields_only () =
     let json = json_text state "masc://wiki.json" in
     let alpha = document_named "alpha" json in
     check (list string) "readable document fields"
-      [ "topic"; "title"; "source"; "author"; "created"; "tags"; "uri" ]
+      [ "topic"; "title"; "summary"; "source"; "author"; "created"; "revision"; "tags"; "uri" ]
       (keys alpha);
     check string "source is the vocabulary word" "research"
       Yojson.Safe.Util.(alpha |> member "source" |> to_string);
+    check string "summary is served" "What alpha holds"
+      Yojson.Safe.Util.(alpha |> member "summary" |> to_string);
+    check int "revision is served" 3
+      Yojson.Safe.Util.(alpha |> member "revision" |> to_int);
     let beta = document_named "beta" json in
     check (list string) "unreadable document fields" [ "topic"; "unreadable"; "uri" ]
       (keys beta);

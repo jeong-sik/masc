@@ -2962,10 +2962,12 @@ let test_handle_request_resources_read_matrix () =
   write_text_file (Filename.concat wiki_dir "alpha.md")
     {|---
 title: Alpha Doc
+summary: What alpha holds
 source: research
 author: codex
 created: 2026-03-12
 updated: 2026-03-12
+revision: 1
 tags: [alpha, keeper]
 ---
 Alpha body

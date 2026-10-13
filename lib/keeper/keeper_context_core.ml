@@ -263,6 +263,8 @@ let patch_checkpoint_last_assistant
        && Option.is_none msg.tool_call_id
     then msg
     else
+      (* The reconstruction keeps metadata only: name/tool_call_id stay
+         dropped because assistant messages never carry them in practice. *)
       Agent_core.Types.make_message
         ~metadata:msg.metadata
         ~role:Agent_core.Types.Assistant

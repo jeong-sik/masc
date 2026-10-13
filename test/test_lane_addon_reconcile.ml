@@ -329,7 +329,11 @@ max_reply_bytes = 4096
     await_ready clock config fresh_id;
     check bool "new installation owns a different state volume" true
       (Hashtbl.find state.state_owners old_id <> Hashtbl.find state.state_owners fresh_id);
-    detach clock config old_id;
+    (* The changed declaration cannot be deleted through its stale live handle.
+       Remove desired state and reconcile before testing retained history. *)
+    Sys.remove path;
+    ignore (reconcile config directory);
+    await_detached clock config old_id;
     write path (declaration ~id:"observer" ~manifest ());
     ignore (reconcile config directory);
     check int "detached history still protects the original state" 2 (List.length (starts state));

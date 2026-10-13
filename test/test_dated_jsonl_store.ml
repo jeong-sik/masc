@@ -144,8 +144,8 @@ type expected_rule =
 let expected_rule = function
   | Store.Base Transition_audit -> Window
   | Store.Base Audit_approvals -> Window
-  | Store.Base Tool_events -> Never
-  | Store.Base Keeper_wake_payload -> Never
+  | Store.Base Tool_events -> Window
+  | Store.Base Keeper_wake_payload -> Window
   | Store.Base Verdicts -> Never
   | Store.Cluster Audit -> Window
   | Store.Cluster Telemetry -> Window
@@ -157,15 +157,15 @@ let expected_rule = function
   | Store.Cluster Costs -> Window
   | Store.Cluster Provider_usage_history -> Days 16
   | Store.Cluster Wire_capture -> Setting
-  | Store.Cluster Schedule_signals -> Never
-  | Store.Cluster Telemetry_coverage_gaps -> Never
+  | Store.Cluster Schedule_signals -> Window
+  | Store.Cluster Telemetry_coverage_gaps -> Window
   | Store.Keeper Metrics -> Window
   | Store.Keeper Execution_receipts -> Window
   | Store.Keeper Turn_records -> Window
   | Store.Keeper Provider_inputs -> Window
   | Store.Keeper Memory_recall_artifacts -> Window
   | Store.Keeper Crash_events -> Window
-  | Store.Keeper Continuity_requests -> Never
+  | Store.Keeper Continuity_requests -> Window
   | Store.Reaction_ledger -> Window
   | Store.Decision_audit -> Window
 ;;

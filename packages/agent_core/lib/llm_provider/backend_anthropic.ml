@@ -13,6 +13,12 @@ let request_output_token_receipt = Request_artifact_internal.output_token_receip
 
 let binding_controls_beta = "thinking-binding-controls-2026-08-01"
 
+(* Measurement switch (RFC-AC-041 Q15, task-2306): set to a false value to stop
+   sending [thinking.block_binding.prefix_mismatch_behavior = "drop_block"] on
+   adaptive Sonnet/Haiku 5.5 completions. Read per request; the default keeps
+   the current behaviour. *)
+let drop_block_env_var = "AGENT_CORE_ANTHROPIC_DROP_BLOCK"
+
 let request_headers ~body headers =
   let has_binding =
     match Yojson.Safe.from_string body with
@@ -54,6 +60,28 @@ let observe_input_transformations json =
     | _ ->
       []
   in
+  (let message =
+     match json with
+     | `Assoc fields ->
+       (match List.assoc_opt "message" fields with
+        | Some (`Assoc inner) -> inner
+        | _ -> fields)
+     | _ -> []
+   in
+   let str key =
+     match List.assoc_opt key message with
+     | Some (`String value) -> [ key, `String value ]
+     | _ -> []
+   in
+   (* One line per response, including zero transformations, so a mismatch
+      rate has a denominator. Carries no block contents or signatures. *)
+   Diag.info "anthropic" "%s"
+     (Yojson.Safe.to_string
+        (`Assoc
+            ((("event", `String "thinking_input_transformation_summary")
+              :: str "id")
+             @ str "model"
+             @ [ "count", `Int (List.length transformations) ]))));
   List.iter
     (function
       | `Assoc fields ->
@@ -706,7 +734,8 @@ let build_request_payload
       | Completion _,
         Anthropic_control (Capabilities.Anthropic_adaptive_between_tools
                            | Capabilities.Anthropic_adaptive_disabled_through_high),
-        Some true, Some (`Assoc fields) ->
+        Some true, Some (`Assoc fields)
+        when Env_parse.bool_env ~default:true drop_block_env_var ->
         (* These catalog policies describe Sonnet/Haiku 5.5. Their adaptive
            wire accepts binding controls; between_tools and disabled do not.
            The server validates the actual serialized prefix, including any

@@ -283,19 +283,20 @@ let test_container_exec_probe_argv_prefers_probe_prefix () =
     (Keeper_sandbox_remote.probe_argv state)
 ;;
 
+let build_box : Exec_ssh_endpoint.t =
+  { name = "build-box"; host = "build.example"; user = "masc"; port = 22
+  ; identity_file = ".masc/ssh/build-box.key"
+  ; known_hosts_file = ".masc/ssh/known_hosts.d/build-box"
+  ; remote_root = "/srv/masc/playground"; connect_timeout_sec = 1
+  ; max_concurrent_sessions = 1; env_allowlist = []; capabilities = []; private_home = false
+  ; allowed_paths = [] }
+;;
+
 (* The OpenSSH probe stays one shell word, because sshd hands the remote
    command to a shell. *)
 let test_openssh_probe_stays_one_word () =
   let base_path = temp_dir () in
-  let endpoint : Exec_ssh_endpoint.t =
-    { name = "build-box"; host = "build.example"; user = "masc"; port = 22
-    ; identity_file = ".masc/ssh/build-box.key"
-    ; known_hosts_file = ".masc/ssh/known_hosts.d/build-box"
-    ; remote_root = "/srv/masc/playground"; connect_timeout_sec = 1
-    ; max_concurrent_sessions = 1; env_allowlist = []; capabilities = []; private_home = false
-    ; allowed_paths = [] }
-  in
-  match Keeper_sandbox_ssh.create ~base_path ~keeper_name:"keeper-a" ~endpoint () with
+  match Keeper_sandbox_ssh.create ~base_path ~keeper_name:"keeper-a" ~endpoint:build_box () with
   | Error error -> fail error
   | Ok state ->
     check string "workspace root" "/srv/masc/playground/keeper-a"
@@ -307,6 +308,41 @@ let test_openssh_probe_stays_one_word () =
      | [] -> fail "empty probe argv");
     check string "lane prefix" "remote_ssh"
       (Keeper_sandbox_remote.lane_prefix (Keeper_sandbox_remote.transport state))
+;;
+
+(* A shim from another release is repaired where the transport keeps it: on
+   the remote host for OpenSSH, in this host's shim directory for a microVM
+   guest, in the container for Docker. One sentence for all three told the
+   operator of a microVM to run the SSH bootstrap. *)
+let test_the_outdated_shim_repair_is_the_transports () =
+  let base_path = temp_dir () in
+  let bootstrap = "masc-exec-ssh-bootstrap" in
+  let asset = "the masc-exec-shim-linux-ARCH asset of " ^ Build_version.current in
+  (match Keeper_sandbox_ssh.create ~base_path ~keeper_name:"keeper-a" ~endpoint:build_box () with
+   | Error error -> fail error
+   | Ok state ->
+     check string "OpenSSH: the bootstrap, for this endpoint"
+       (Printf.sprintf "reinstall it with %s --endpoint build-box --shim <%s>" bootstrap asset)
+       (Keeper_sandbox_remote.outdated_shim_repair state));
+  let microvm =
+    Keeper_sandbox_remote.outdated_shim_repair (make_state ~base_path ~cli:"container")
+  in
+  let host_shim =
+    Filename.concat (Config_dir_resolver.microvm_shim_dir ~base_path) "masc-exec-shim"
+  in
+  check bool "microVM: the host's copy, by its path" true
+    (contains (Printf.sprintf "replace %s with %s" host_shim asset) microvm);
+  check bool "microVM: and the hash beside it" true (contains ".sha256" microvm);
+  check bool "microVM: not the SSH bootstrap" false (contains bootstrap microvm);
+  let docker =
+    Keeper_sandbox_remote.outdated_shim_repair (make_docker_state ~base_path ~cli:"docker")
+  in
+  check string "Docker: the path the server execs, and no claim about who placed it"
+    (Printf.sprintf
+       "replace the shim container %s runs at %s with %s; whatever started that \
+        container put it there"
+       guest_name shim_path asset)
+    docker
 ;;
 
 let run_request runner ?(env = [| "LANG=C" |]) ?(cwd = None) () =
@@ -487,6 +523,31 @@ let test_observe_support_is_what_the_shim_advertises () =
   check bool "a shim without the box" false (supported "probe-plain");
   check bool "a shim with the box" true (supported "probe-observe");
   check bool "a probe that fails" false (supported "cli-not-found")
+;;
+
+(* The stub's shim names no release, which the server reports as outdated. The
+   line it logs for a microVM guest is the one an operator reads, so it is
+   read here as logged: the host path of this workspace, not the bootstrap. *)
+let test_the_outdated_shim_warning_names_the_microvm_repair () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"probe-plain" in
+  let state = make_state ~base_path ~cli in
+  (* Asking is what probes; this stub's shim offers no box. *)
+  check bool "a shim without the box" false (Keeper_sandbox_remote.observe_supported state);
+  let host_shim =
+    Filename.concat (Config_dir_resolver.microvm_shim_dir ~base_path) "masc-exec-shim"
+  in
+  match
+    Log.Ring.recent ~limit:50 ~module_filter:"Keeper" ()
+    |> List.find_opt (fun (entry : Log.Ring.entry) -> contains host_shim entry.message)
+  with
+  | None -> fail "no log line names this workspace's shim"
+  | Some entry ->
+    check bool "it is the outdated-shim warning" true
+      (contains ("remote_shim_outdated: endpoint " ^ guest_name) entry.message);
+    check bool "and it does not send a microVM to the SSH bootstrap" false
+      (contains "masc-exec-ssh-bootstrap" entry.message)
 ;;
 
 (* A shim one release behind speaks v2. The runner reads that from the
@@ -808,6 +869,10 @@ let () =
               test_container_exec_probe_argv_prefers_probe_prefix
           ; test_case "openssh probe stays one word" `Quick
               test_openssh_probe_stays_one_word
+          ; test_case "an outdated shim's repair is the transport's" `Quick
+              test_the_outdated_shim_repair_is_the_transports
+          ; test_case "the outdated-shim warning names the microVM repair" `Quick
+              test_the_outdated_shim_warning_names_the_microvm_repair
           ; test_case "binary transport retains complete raw bytes" `Quick test_binary_stdout_is_complete_and_not_rewritten
           ; test_case "frame, exit and injected env" `Quick
               test_frame_exit_and_injected_env

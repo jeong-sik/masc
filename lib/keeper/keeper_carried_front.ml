@@ -182,23 +182,29 @@ let current_generation_floor ~config ~keeper_name ~trace_id =
                 "turn boundary line %d: %s"
                 line
                 (Keeper_turn_boundaries.read_error_to_string error))
-         | (_, Ok record) :: rest
-           when Keeper_turn_boundaries.restarts_history ~trace_id record ->
-           (match record.Keeper_turn_boundaries.event with
-            | Keeper_turn_boundaries.Turn_ended { turn_ref; _ } ->
-              (* The turn began from an empty history, so its end line states
-                 the atoms are numbered from zero again: the generation
-                 boundary, whether or not a turn-start marker was ever
-                 written. The boundary covers the turns that ended before the
-                 restarting turn, not the turn itself. *)
-              let turn = Ids.Turn_ref.absolute_turn turn_ref in
-              loop
-                (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn))
-                latest_turn
-                rest
-            | Keeper_turn_boundaries.History_restarted _ ->
-              loop latest_turn latest_turn rest)
-         | (_, Ok _) :: rest -> loop latest_turn floor rest
+         | (_, Ok record) :: rest ->
+           (* The boundary a restart line states covers the turns that ended
+              before it. A [History_restarted] marker names no turn of its
+              own, so it takes the latest turn of the trace from the end
+              lines below it, and every end line of the trace -- restarting
+              or not -- advances that latest turn. A turn that began from an
+              empty history restates the atoms from zero whether or not a
+              turn-start marker was ever written, so its own end line fences
+              too, and it covers the turns before it, not itself. *)
+           let floor =
+             if Keeper_turn_boundaries.restarts_history ~trace_id record
+             then latest_turn
+             else floor
+           in
+           let latest_turn =
+             match record.Keeper_turn_boundaries.event with
+             | Keeper_turn_boundaries.Turn_ended { turn_ref; _ }
+               when String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id ->
+               let turn = Ids.Turn_ref.absolute_turn turn_ref in
+               Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn)
+             | _ -> latest_turn
+           in
+           loop latest_turn floor rest
        in
        loop None None lines)
 ;;

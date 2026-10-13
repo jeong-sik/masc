@@ -1128,6 +1128,37 @@ let test_detached_unreadable_history_does_not_hold_its_declaration () =
     detach clock config observer;
     detach clock config counter)
 
+let test_documented_manual_repair_values_make_records_readable () =
+  let visibilities = [
+    {|{"kind": "shared"}|};
+    {|{"kind": "operator"}|};
+    {|{"kind": "keeper", "keeper": "keeper-a"}|} ] in
+  let accesses = [
+    {|{"kind": "operator_configuration"}|};
+    {|{"kind": "keeper", "keeper": "keeper-a"}|};
+    {|{"kind": "unauthenticated"}|} ] in
+  List.iter (fun visibility ->
+    List.iter (fun access ->
+      with_fixture (fun env _ config directory packages _ ->
+        let clock = Eio.Stdenv.clock env in
+        let manifest = package packages "ready" in
+        let repair json =
+          json
+          |> replace_field "visibility" (Yojson.Safe.from_string visibility)
+          |> replace_field "source_access" (Yojson.Safe.from_string access) in
+        ignore (seed_records config (fixture_records ~transform:repair ()));
+        write (Filename.concat directory "dos-counter.toml") (declaration ~id:"dos-counter" ~manifest ());
+        let result = reconcile config directory in
+        let label = visibility ^ " with " ^ access in
+        check int (label ^ ": no issue names dos-counter") 0
+          (List.length (issues_of "dos-counter" result));
+        check int (label ^ ": no issue names dos-output-statistics") 0
+          (List.length (issues_of "dos-output-statistics" result));
+        let id = declared_instance config "dos-counter" |> text "instance_id" in
+        await_ready clock config id;
+        check_application config "dos-counter" "applied";
+        detach clock config id)) accesses) visibilities
+
 let test_unreadable_records_hold_only_the_declaration_they_name () =
   with_fixture (fun env _ config directory packages state ->
     let clock = Eio.Stdenv.clock env in
@@ -1358,6 +1389,8 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_unreadable_records_hold_only_the_declaration_they_name;
   test_case "a declaration waits for its unreadable records and applies once they are gone" `Quick
     test_declaration_waits_for_its_unreadable_records_then_applies;
+  test_case "the documented manual repair values make records readable" `Quick
+    test_documented_manual_repair_values_make_records_readable;
   test_case "an unreadable record keeps the document owner it may name" `Quick
     test_detached_unreadable_record_keeps_the_document_owner;
   test_case "a disabled declaration with unreadable records keeps its document owner" `Quick

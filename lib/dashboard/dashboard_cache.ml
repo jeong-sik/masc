@@ -300,43 +300,54 @@ let should_restore_stale_after_failure exn =
 
 (* The one shape a timed-out compute takes on the wire.
 
-   Every timeout path in this module goes through [timeout_error_json], and the
-   only sanctioned reader is [is_timeout_envelope] beside it. Both read
-   [timeout_error_code], so changing the wire value cannot leave a reader
-   behind — a recognizer that lives in another module and matches the string
-   itself drifts silently the moment a producer changes.
+   Every timeout path, in this module and outside it, goes through
+   [timeout_envelope_json], and the only sanctioned reader is
+   [is_timeout_envelope] beside it. Both read [timeout_error_code], so changing
+   the wire value cannot leave a reader behind — a recognizer that lives in
+   another module and matches the string itself drifts silently the moment a
+   producer changes. The same holds for a producer: one that writes the object
+   by hand keeps the old shape when this one changes.
 
    The envelope still travels in-band, as a value indistinguishable from a
    computed payload until a reader checks; #28400 tracks moving it out of band
    and giving it its own HTTP status. *)
 let timeout_error_code = "computation_timeout"
 
-type timeout_envelope = {
-  key : string;
-  timeout_sec : float;
-  timeout_kind : string;
-  waiting : bool;
-}
+(* Which wait ran out. It used to be a label string beside a [waiting] flag;
+   the message matched the label and then the flag, so a label could be paired
+   with a flag it never occurs with. *)
+type timeout_kind =
+  | Timeout_owner (* the caller's own compute exceeded its window *)
+  | Timeout_waiter (* the caller was waiting on another fiber's compute *)
+  | Timeout_compute (* a computing slot yielded no result within [max_wait_sec] *)
+  | Timeout_circuit_open (* repeated timeouts for the key: failing fast *)
 
-let timeout_envelope_message { key; timeout_sec; timeout_kind; waiting } =
-  match timeout_kind with
-  | "circuit_open" ->
+let timeout_kind_to_string = function
+  | Timeout_owner -> "owner"
+  | Timeout_waiter -> "waiter"
+  | Timeout_compute -> "compute"
+  | Timeout_circuit_open -> "circuit_open"
+
+let timeout_envelope_message ~kind ~key ~timeout_sec =
+  match kind with
+  | Timeout_circuit_open ->
     Printf.sprintf "Dashboard %s is failing fast after repeated cache timeouts" key
-  | _ when waiting ->
+  | Timeout_waiter ->
     Printf.sprintf
       "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
       key timeout_sec
-  | _ -> Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
+  | Timeout_owner | Timeout_compute ->
+    Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
 
-let timeout_envelope_json envelope =
+let timeout_envelope_json ~kind ~key ~timeout_sec =
   `Assoc
     [
       ("error", `String timeout_error_code);
-      ("message", `String (timeout_envelope_message envelope));
+      ("message", `String (timeout_envelope_message ~kind ~key ~timeout_sec));
       ("generated_at", `String (Masc_domain.now_iso ()));
-      ("timeout_kind", `String envelope.timeout_kind);
-      ("timeout_sec", `Float envelope.timeout_sec);
-      ("key", `String envelope.key);
+      ("timeout_kind", `String (timeout_kind_to_string kind));
+      ("timeout_sec", `Float timeout_sec);
+      ("key", `String key);
     ]
 
 let is_timeout_envelope = function
@@ -357,13 +368,10 @@ let () =
   Http_server_eio.Response.register_timeout_envelope_recognizer
     is_timeout_envelope
 
-let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
-  let timeout_kind =
-    match timeout_kind with
-    | Some timeout_kind -> timeout_kind
-    | None -> if waiting then "waiter" else "owner"
-  in
-  timeout_envelope_json { key; timeout_sec; timeout_kind; waiting }
+(* [Compute_timeout] carries whether the caller was waiting on another
+   fiber's compute. *)
+let timeout_kind_of_compute_timeout ~waiting =
+  if waiting then Timeout_waiter else Timeout_owner
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.
@@ -726,7 +734,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
        | None ->
            let fallback_val = ref None in
            let fallback_payload = Prepared (payload_of_json ~origin:Timeout
-             (timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ()))) in
+             (timeout_envelope_json
+                ~kind:Timeout_compute ~key ~timeout_sec:(max_wait_sec ()))) in
            atomic_update table (fun map ->
              match SMap.find_opt key map with
              | Some (Computing { token = c; stale; _ }) when c = token ->
@@ -884,7 +893,7 @@ let get_or_compute_value_with_timeout ~preparation
     key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
     Prepared (payload_of_json ~origin:Timeout
-      (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec))
+      (timeout_envelope_json ~kind:Timeout_circuit_open ~key ~timeout_sec))
   else
     let compute = offloaded_value ~preparation compute in
     let with_timeout f = compute_under_timeout ~clock ~timeout_sec ~key f in
@@ -902,7 +911,8 @@ let get_or_compute_value_with_timeout ~preparation
     | Compute_timeout (key, waiting) ->
         record_timeout_circuit key;
         Prepared (payload_of_json ~origin:Timeout
-          (timeout_error_json ~waiting key timeout_sec))
+          (timeout_envelope_json
+             ~kind:(timeout_kind_of_compute_timeout ~waiting) ~key ~timeout_sec))
 
 let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
     key ~ttl ~clock ~timeout_sec compute =
@@ -918,7 +928,9 @@ let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
              (fun () -> force_cached_payload value)
            with Compute_timeout (key, waiting) ->
              record_timeout_circuit key;
-             payload_of_json ~origin:Timeout (timeout_error_json ~waiting key timeout_sec))
+             payload_of_json ~origin:Timeout
+               (timeout_envelope_json
+                  ~kind:(timeout_kind_of_compute_timeout ~waiting) ~key ~timeout_sec))
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   get_or_compute_value_with_timeout ~preparation:Cache_json

@@ -54,6 +54,8 @@ val record_memory_recall_read_error :
 (** {1 User Message Extraction} *)
 
 val user_messages_newest_first : Agent_core.Types.message list -> string list
+(** Visible user-authored text only. Runtime-context carriers are omitted;
+    invalid or duplicate carrier provenance is omitted with a diagnostic. *)
 
 val load_history_user_messages_result :
   path:string ->
@@ -61,7 +63,9 @@ val load_history_user_messages_result :
   accept:(string -> bool) ->
   (string list, Keeper_memory_recall_exn_class.t) result * int
 (** Scan retained user messages newest-first until [limit] messages satisfy
-    [accept], or the file ends. Internal History sources remain excluded.
+    [accept], or the file ends. Internal History sources and runtime-context
+    carriers remain excluded. Invalid or duplicate carrier provenance counts
+    as an unreadable row rather than a user-authored message.
     There is no raw-row or candidate-message cap. A missing file is [Ok []];
     other read failures are [Error class]. The second value counts visited
     rows that could not be decoded, including those visited before a failure.

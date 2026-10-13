@@ -1978,6 +1978,83 @@ let test_history_search_deduplicates_identical_messages () =
     [ text ] (search "shared-endpoint")
 ;;
 
+let test_history_search_excludes_runtime_context () =
+  let module Context = Agent_core.Types.Extra_system_context_provenance in
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "history-provenance" in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let user ~metadata text =
+    Agent_core.Types.make_message ~role:Agent_core.Types.User ~metadata
+      [ Agent_core.Types.Text text ]
+  in
+  let carrier_metadata =
+    let invalid =
+      match Context.metadata with
+      | [ key, _ ] -> [ key, `Bool false ]
+      | _ -> Alcotest.fail "expected the canonical runtime-context marker"
+    in
+    [ "present", Context.metadata
+    ; "historical", Context.historical_metadata
+    ; "invalid", invalid
+    ; "duplicate", Context.metadata @ Context.historical_metadata
+    ]
+  in
+  let carriers location =
+    List.map
+      (fun (kind, metadata) ->
+         user ~metadata ("history-provenance runtime-context-only-sentinel " ^ location ^ " " ^ kind))
+      carrier_metadata
+  in
+  let ordinary location =
+    user ~metadata:[ "unrelated", `String "preserve user text" ]
+      ("history-provenance ordinary " ^ location)
+  in
+  let ctx_work =
+    List.fold_left Masc.Keeper_context_runtime.append
+      (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      (ordinary "checkpoint" :: carriers "checkpoint")
+  in
+  let session =
+    Masc.Keeper_context_runtime.create_session ~session_id:trace_id
+      ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config)
+  in
+  List.iteri
+    (fun index message ->
+       Masc.Keeper_context_runtime.persist_message ~keeper_name:meta.name
+         ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:(index + 1))
+         session message)
+    (ordinary "disk" :: carriers "disk");
+  let malformed_metadata =
+    match Masc.Keeper_context_core.message_to_json
+            (user ~metadata:[] "history-provenance runtime-context-only-sentinel malformed") with
+    | `Assoc fields -> `Assoc (("metadata", `List []) :: fields)
+    | _ -> Alcotest.fail "message serializer returned a non-object"
+  in
+  Out_channel.with_open_gen [ Open_wronly; Open_append ] 0o600
+    (Masc.Keeper_types_support.keeper_history_path config trace_id)
+    (fun output ->
+       output_string output (Yojson.Safe.to_string malformed_metadata ^ "\n"));
+  List.iter
+    (fun source ->
+       let search query =
+         Runtime.keeper_memory_search_json ~config ~meta ~ctx_work
+           ~args:(`Assoc [ "source", `String source; "query", `String query ])
+         |> Yojson.Safe.from_string
+       in
+       let result = search "history-provenance" in
+       Alcotest.(check (list string))
+         "only user text is searchable from checkpoint and disk"
+         [ "history-provenance ordinary checkpoint"; "history-provenance ordinary disk" ]
+         (List.sort String.compare (match_texts result));
+       Alcotest.(check int) "invalid provenance and malformed metadata are reported" 3
+         (int_field "unreadable_rows" (json_field "history_read_errors" result));
+       Alcotest.(check (list string)) "context alone cannot become a history match" []
+         (match_texts (search "runtime-context-only-sentinel")))
+    [ "history"; "all" ]
+;;
+
 let history_search_noise count =
   List.init count (fun index -> Printf.sprintf "Routine deployment note %d" index)
 ;;
@@ -4142,6 +4219,10 @@ let () =
             "history search deduplicates identical messages"
             `Quick
             test_history_search_deduplicates_identical_messages
+        ; Alcotest.test_case
+            "history and all search exclude runtime context from checkpoint and disk"
+            `Quick
+            test_history_search_excludes_runtime_context
         ; Alcotest.test_case "history search reaches retained current messages" `Quick
             (check_retained_history_match ~checkpoint_texts:[]
                ~current_texts:("Migration prerequisite: amber database" :: history_search_noise 75))

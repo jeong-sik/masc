@@ -725,6 +725,8 @@ let handle_keeper_turn_interrupt ~actor state request reqd =
              | Interrupt_result Operation_settling -> ["signalled", `Bool false; "reason", `String "settling"]
              | Interrupt_result Operation_maintenance_running ->
                ["signalled", `Bool false; "reason", `String "maintenance_running"]
+             | Interrupt_result Operation_slot_held_by_autonomous_turn ->
+               ["signalled", `Bool false; "reason", `String "slot_held_by_autonomous_turn"]
              | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail])
           | Error error -> ["signalled", `Bool false; "reason", `String "interrupt_failed";
               "detail", `String (Keeper_owner_registry.command_error_to_string error)] in
@@ -747,6 +749,8 @@ let handle_keeper_turn_interrupt ~actor state request reqd =
                   | Interrupt_result Operation_settling -> ["signalled", `Bool false; "reason", `String "settling"]
                   | Interrupt_result Operation_maintenance_running ->
                     ["signalled", `Bool false; "reason", `String "maintenance_running"]
+                  | Interrupt_result Operation_slot_held_by_autonomous_turn ->
+                    ["signalled", `Bool false; "reason", `String "slot_held_by_autonomous_turn"]
                   | Interrupt_result (Operation_interrupt_failed detail) -> ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail])
                | Error error -> ["signalled", `Bool false; "reason", `String "owner_unavailable";
                    "detail", `String (Keeper_owner_registry.command_error_to_string error)] in

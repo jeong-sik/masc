@@ -4840,6 +4840,38 @@ let test_truncated_auth_probe_without_stderr_keeps_detail () =
          | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
 ;;
 
+let test_truncated_auth_probe_truncates_long_stderr () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1
+         ~auth_stderr:(String.make 400 'a') []
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+                check bool "long stderr is capped with an ellipsis" true
+                  (Astring.String.is_infix
+                     ~affix:("; stderr: " ^ String.make 300 'a' ^ "…") detail)
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
+let test_blank_auth_stderr_keeps_detail_bare () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 ~auth_stderr:"   " []
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+                check bool "no stderr marker for blank stderr" false
+                  (Astring.String.is_infix ~affix:"; stderr:" detail)
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
 let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
   let base_path = temp_workspace () in
   let tool =
@@ -6023,6 +6055,14 @@ let () =
             "truncated auth probe without stderr keeps detail"
             `Quick
             test_truncated_auth_probe_without_stderr_keeps_detail
+        ; test_case
+            "truncated auth probe truncates long stderr"
+            `Quick
+            test_truncated_auth_probe_truncates_long_stderr
+        ; test_case
+            "blank auth stderr keeps detail bare"
+            `Quick
+            test_blank_auth_stderr_keeps_detail_bare
         ; test_case
             "turn spawn failure is pre-dispatch with tools"
             `Quick

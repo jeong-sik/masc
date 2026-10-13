@@ -3,11 +3,11 @@ rfc: "setup-web-search-and-browser-lane"
 title: "웹 검색과 브라우저 레인도 음성처럼 다시 열리는 설정 명령을 갖는다"
 status: Draft
 created: 2026-09-17
-updated: 2026-09-17
+updated: 2026-10-13
 author: claude
 supersedes: []
 superseded_by: null
-related: []
+related: ["browser-keeper-firefox", "browser-live-one-connection"]
 ---
 
 # RFC: 다시 열리는 설정 명령 (setup-web-search-and-browser-lane)
@@ -29,6 +29,11 @@ related: []
 
 이 RFC 는 웹 검색과 브라우저 레인을 같은 모양으로 만든다. 설치 마법사에 단계를
 더하는 것이 아니라, 언제든 다시 실행되는 명령을 먼저 만들고 마법사가 그것을 부른다.
+
+2026-10-13 개정. 웹 검색(§4.1)은 #42821 로 구현했다. 브라우저(§4.2, §4.3)는 이
+RFC 를 쓴 9/17 뒤에 두 번째 경로가 생겨서 다시 썼다. MASC 서버가 전용 Firefox 와
+host 를 직접 띄우는 BiDi 경로다(RFC browser-keeper-firefox, 10/09). 브라우저를
+연결하는 길이 이제 둘이므로, 명령은 어느 쪽인지 묻고 그 길에 필요한 것만 쓴다.
 
 ## 1. 지금 일어나는 일
 
@@ -129,6 +134,60 @@ SearXNG 는 키가 필요 없는 유일한 공급자이고, 그것을 로컬에 
 `browser_lane_check` 는 판정이 `Absent` 이면 체크를 만들지 않는다. 설치한 뒤에
 어긋난 경우만 조언으로 나온다.
 
+### 1.3 두 번째 경로 — 서버가 띄우는 BiDi Firefox
+
+1.2 는 9/17 에 확인한 것이다. 그 뒤로 확장 없이 붙는 길이 생겼다
+(`docs/design/browser-bidi-live-host.md`, 확인 2026-10-13).
+
+- `runtime.toml` 에 `[browser.live.bidi]` (`firefox`, `profile`, 선택 `port`) 가
+  있고 `[browser.live] enabled` 가 꺼져 있지 않으면, 서버가 시작할 때 그 프로필의
+  Firefox 와 host 를 띄운다. 서버를 다시 띄워도 둘은 계속 돌고, 죽었으면 다음 서버
+  시작에 다시 띄운다.
+- 조건이 하나 있다. 브라우저 레인이 먼저 설치되어 있어야 한다. host 를 설치된
+  `launch` 로 띄우기 때문이고, 설치가 안 되어 있으면 서버는 둘 다 띄우지 않는다.
+  그래서 1.2 의 설치 절차는 이 길에서도 앞에 서 있다.
+- 확장이 필요 없다. 브라우저를 끄면 임시 부가기능이 사라지는 문제가 이 길에는 없다.
+- 대신 얻는 것과 잃는 것이 있다. Remote Agent 포트에는 인증이 없어서 로컬
+  프로세스 누구나 그 브라우저를 움직이고 쿠키를 읽는다. 지금 설계는 전용 프로필에
+  일하는 사이트만 로그인해 두어 범위를 줄인다(RFC browser-live-one-connection
+  결정 1). `activate_tab` 은 확장 연결만 한다. Firefox 만 된다. Zen 은 BiDi 로
+  시도하지 않았다.
+- 운영자가 그 Firefox 에 한 번 로그인해야 한다. 프로필이 로그인을 기억한다.
+- 확장 연결과 BiDi 연결이 같이 있으면 라이브 레인에 브라우저가 둘이 되어, 연결을
+  지정하지 않은 요청은 `ambiguous_browser_clients` 로 거절된다.
+- 이 표는 지금 운영자가 손으로 쓴다. 서버는 이 표를 스스로 쓰지 않는다(RFC
+  browser-keeper-firefox §2.3). `runtime.toml` 은 모르는 키를 로드 오류로
+  거절하므로, 표를 아는 서버가 설치된 뒤에 써야 한다.
+
+그래서 브라우저 연결에 필요한 일은 길마다 다르다.
+
+| 단계 | 확장 | BiDi |
+|---|---|---|
+| host 설치(토큰, 복사, `launch`, `launch.json`) | 필요 | 필요 |
+| native messaging manifest | 필요 | 필요 없음 |
+| 확장 파일 두 개 | 필요 | 필요 없음 |
+| `[browser.live.bidi]` | 필요 없음 | 필요 |
+| 브라우저에서 사람이 할 일 | `about:debugging` 에서 임시 로드(브라우저를 켤 때마다) | 전용 Firefox 에 한 번 로그인 |
+| 서버 | 재시작 필요 없음 | 재시작 필요(표를 서버가 읽는다) |
+
+### 1.4 live 가 아닌 레인 — automation(Firefox WebDriver)
+
+1.2 와 1.3 은 운영자의 로그인된 브라우저에 붙는 live 레인이다. 로그인이 필요 없는
+독립 조사에는 다른 레인이 이미 있다(`[browser.automation]`, 확인 2026-10-13).
+
+- 서버가 시작할 때 geckodriver 를 띄우고, 서버가 끝나면 내린다. Keeper 가 세션을
+  열고 닫는다(`BrowserSession`, `BrowserGoto`).
+- 세션마다 새 프로필이라 로그인이 남지 않는다. live 브라우저로 등록되지도 않는다
+  (`connectors/browser/host/README.md`).
+- 필요한 것은 geckodriver 실행 파일의 절대 경로 하나다(`geckodriver`, 선택
+  `binary`). host 설치도, 확장도, `[browser.live.bidi]` 도 필요 없다. 서버를 다시
+  띄우면 읽는다.
+- geckodriver 는 설치 경로가 깔아 주지 않는다. `scripts/install.sh`, `docs/INSTALL.md`,
+  `README.md` 어디에도 이름이 없다.
+
+live 와 automation 은 대체 관계가 아니다. 하는 일이 다르다. live 는 운영자가
+로그인해 둔 사이트를 쓰고, automation 은 로그인 없이 공개된 페이지를 읽는다.
+
 ## 2. 마법사에 단계만 더하면 안 되는 이유
 
 설치할 때 한 번 지나가는 화면이 된다. 그 자리에서 건너뛴 사람, 나중에 키를 새로
@@ -217,49 +276,106 @@ cache_ttl_sec  = 900.0
 `provider_has_credentials` 의 match 가 설정을 읽어야 해서 "설정에는 있는데 값이
 없는" 상태가 하나 더 생긴다. 이름은 고정으로 두고 명령이 그 이름을 화면에 낸다.
 
+**구현됨: #42821.** 이 RFC 와 달라진 점이 둘 있다.
+
+- 공급자 목록, 라벨, 자격증명 변수 이름을 `Tool_misc_web_search` 안에 두지 않고
+  `Web_search_provider`(`lib/config`)로 뺐다. 검색 도구의 키 조회 6곳과 설정 명령이
+  같은 표를 읽는다. 위 "같은 읽기 경로" 요구를 판정 함수 하나가 아니라 변수 이름
+  전부로 넓힌 것이다.
+- 명령이 정하는 파일은 서버가 읽는 경로다(`MASC_CONFIG_DIR` 포함). 워크스페이스
+  안의 `.masc/config` 를 고정으로 쓰는 다른 설정 명령과 다르다.
+
 ### 4.2 `Browser_lane_setup` 과 `masc browser-lane-setup`
 
-`install-host.sh` 가 하는 다섯 가지를 바이너리로 옮기고, 스크립트가 하지 않던
-확장 파일 배치를 더한다.
+`install-host.sh` 가 하는 다섯 가지를 바이너리로 옮기고, 브라우저를 연결하는 길을
+고르게 한다. 길은 `--mode extension` 과 `--mode bidi` 이고, 둘 다 줄 수 있다.
+고르지 않으면 아무것도 쓰지 않고 지금 상태와 두 길의 차이를 보여준다.
 
-확장 파일은 `embedded_config` 방식으로 바이너리에 넣는다. `lib/embedded_config/dune`
-가 `ocaml-crunch -m plain` 으로 `config/` 트리를 넣는 것과 같은 방식이고, 그래서
-`masc init` 이 네트워크 없이 `.masc/config/` 를 만든다. 확장도 같은 자리에 넣으면
-소스 체크아웃도 curl 도 필요 없어지고, 확장과 native host 의 판이 항상 맞는다.
-지금은 태그를 맞춰 받으라고 README 가 당부하는 것이 유일한 안전장치다.
+**항상 하는 일**(1.3 의 표에서 두 길이 같이 필요한 것):
 
-명령이 하는 일:
+1. `masc-browser-host` 를 찾는다(PATH, 그다음 설치 위치).
+2. 토큰, host 복사, `launch`, `launch.json` 을 스크립트와 같은 파일, 같은 권한으로
+   쓴다.
 
-1. `masc-browser-host` 를 찾는다 (PATH, 그다음 설치 위치)
-2. 토큰, host 복사, `launch`, `launch.json`, native messaging manifest — 스크립트와
-   같은 파일을 같은 권한으로 쓴다
-3. 내장한 확장 파일 두 개를 `.masc/browser-lane/extension/` 에 쓴다
-4. Firefox 나 Zen 이 있는지 보고, 있으면 `about:debugging#/runtime/this-firefox` 에서
-   할 일을 알려준다
-5. `Browser_lane_launcher.observe` 의 판정을 그대로 낸다
+**`--mode extension` 이 더하는 일:**
+
+3. native messaging manifest 를 OS 별 위치에 쓴다.
+4. 내장한 확장 파일 두 개를 `.masc/browser-lane/extension/` 에 쓴다.
+5. 브라우저에서 할 일을 알린다. `about:debugging#/runtime/this-firefox` 에서
+   `manifest.json` 을 임시로 불러오고, 브라우저를 다시 켜면 다시 불러야 한다.
+
+확장 파일은 `embedded_skills` 가 `skills/` 를 넣는 것과 같은 방식으로 바이너리에
+넣는다(`ocaml-crunch -m plain`, `lib/embedded_config/dune`). 소스 체크아웃도 curl
+도 필요 없어지고, 확장과 host 의 판이 항상 맞는다. 지금은 태그를 맞춰 받으라고
+README 가 당부하는 것이 유일한 안전장치다.
+
+**`--mode bidi` 가 더하는 일:**
+
+3. `runtime.toml` 에 `[browser.live.bidi]` 를 쓴다. `Voice_setup` 과 같이
+   `Runtime.edit_config_text` 와 `Toml_line_editor` 를 지나므로 주석과 다른 표는
+   그대로 남는다. 쓴 뒤 `Browser_configuration` 으로 다시 읽어 loader 가 거절할
+   표는 쓰지 않는다.
+   - `firefox`: `--firefox PATH`. 주지 않으면 macOS 는
+     `/Applications/Firefox.app/Contents/MacOS/firefox`, Linux 는 PATH 의
+     `firefox` 를 절대 경로로 풀어 쓴다. loader 가 절대 경로만 받는다. 못 찾으면
+     아무것도 쓰지 않고 `--firefox` 를 알린다.
+   - `profile`: `--profile PATH`. 주지 않으면 `$HOME/masc-keeper-firefox-profile`.
+     숨김 디렉터리 밑에 두지 않는다. Snap 으로 깐 Firefox 는 홈의 숨김 파일에 닿지
+     못한다. 디렉터리가 없으면 만든다.
+   - `port`: `--port N`. 주지 않으면 표에 쓰지 않고 기본값 9222 를 쓴다. 그
+     포트가 이미 답하고 있으면 알린다. 일상 Firefox 가 그 플래그로 떠 있으면
+     host 가 세션을 거절한다.
+   - 표가 이미 있으면 값을 바꾸지 않고 현재 값을 보여준다. 운영자가 고른 프로필을
+     덮어쓰면 로그인을 잃는다. 바꾸려면 플래그를 명시한다.
+4. 사람이 할 일을 알린다. 서버를 다시 띄운 뒤 그 Firefox 가 뜨면 일하는 사이트에
+   한 번 로그인한다. 포트에 인증이 없다는 것과 그것을 전용 프로필로 줄인다는 것을
+   같이 적는다.
+
+**두 길 공통, 마지막에:** `Browser_lane_launcher.observe` 의 판정과 `masc doctor`
+의 `browser_bidi_host` 줄이 말하는 것을 그대로 낸다. RFC
+browser-live-one-connection 이 "설정 명령의 확인 단계"로 남겨 둔 일이 이것이다.
+둘 다 고른 경우에는 연결을 지정하지 않은 요청이 거절될 수 있다는 것도 적는다.
 
 `install-host.sh` 는 지운다. 같은 일을 두 곳이 하면 한쪽만 고쳐지는 날이 온다.
-그러면 부르는 쪽도 같이 바꿔야 한다. `scripts/install-local-build.sh:57` 이 이미
-등록된 manifest 를 돌며 이 스크립트를 실행하고 있으므로, 같은 순회를 새 명령으로
-옮긴다. `connectors/browser/host/README.md` 의 curl 절차도 새 명령으로 바꾼다.
+그러면 부르는 쪽도 같이 바꾼다.
+
+- `scripts/install-local-build.sh:57` 은 이미 등록된 manifest 를 돌며 이 스크립트를
+  실행한다. 같은 순회를 새 명령으로 옮긴다.
+- `lib/browser_lane_launcher.ml` 의 `install` / `reinstall` 문장이 스크립트 이름을
+  말한다. 새 명령 이름으로 바꾼다.
+- `connectors/browser/host/README.md` 의 curl 절차와 `scripts/install.sh` 마지막의
+  README 링크 한 줄을 새 명령으로 바꾼다.
 
 ### 4.3 마법사
 
-마법사는 두 명령을 음성과 같은 방식으로 부른다. 설정 로직을 Python 으로 옮겨오지
-않고 `masc web-search-setup`, `masc browser-lane-setup` 을 자식 프로세스로 실행한다.
+마법사는 명령을 음성과 같은 방식으로 부른다. 설정 로직을 Python 으로 옮겨오지 않고
+`masc web-search-setup`, `masc browser-lane-setup` 을 자식 프로세스로 실행한다.
 마법사에서 한 것과 나중에 손으로 한 것이 같은 코드를 지나야 결과가 갈리지 않는다.
 
-자리는 샌드박스 다음, 첫 대화 앞이다. 모델 연결이 끝난 뒤라야 의미가 있고, 첫 대화
-전이라야 첫 턴에서 쓸 수 있다.
+자리는 샌드박스 다음, 첫 대화 앞이다. 모델 연결이 끝난 뒤라야 의미가 있고, 첫
+대화 전이라야 첫 턴에서 쓸 수 있다.
 
 음성처럼 선택 단계이므로 여기서 실패해도 설치를 끝내지 않는다. `select_local_voice`
-가 그 이유를 적어두었다 — 선택인 단계는 자기가 선택인 대상을 무너뜨릴 수 없다.
+가 그 이유를 적어두었다. 선택인 단계는 자기가 선택인 대상을 무너뜨릴 수 없다.
 
-빠른 설치 경로에서는 둘 다 건너뛰고 명령 이름을 알린다. 음성이 지금 그렇게 한다 —
+빠른 설치 경로에서는 둘 다 건너뛰고 명령 이름을 알린다. 음성이 지금 그렇게 한다.
 "imp stays text only. Run masc voice-local-setup to give it a voice later."
 
-브라우저 단계는 Firefox 나 Zen 이 없으면 아예 묻지 않는다. 없는 사람에게 브라우저
-설치부터 권하는 것은 설치 마법사가 할 일이 아니다.
+브라우저 단계는 설치된 브라우저에 맞춰 보여준다.
+
+- Firefox 실행 파일을 찾으면 두 길을 보여준다. 한 줄씩이다. 확장은 "일상 쓰는
+  브라우저에 붙는다. 브라우저를 다시 켜면 부가기능을 다시 불러야 한다." BiDi 는
+  "MASC 가 전용 Firefox 를 직접 띄운다. 다시 불러올 것이 없다. 그 Firefox 에 한 번
+  로그인해야 하고, 같은 컴퓨터의 프로그램이 그 브라우저를 움직일 수 있다."
+- Zen 만 있으면 확장 길만 보여준다. BiDi 는 Zen 으로 시도하지 않았다.
+- 둘 다 없으면 아예 묻지 않는다. 브라우저 설치부터 권하는 것은 설치 마법사가 할
+  일이 아니다.
+
+마법사는 기본값을 대신 고르지 않는다. 어느 길이 맞는지는 그 사람이 일상 브라우저를
+쓰게 할지, 전용 브라우저를 둘지에 달려 있다. 건너뛰기도 고를 수 있어야 한다.
+
+BiDi 길의 로그인은 마법사가 못 한다. 서버를 띄우기 전에는 그 Firefox 가 없기
+때문이다. 마법사는 끝에 "서버가 뜨면 이 Firefox 에서 한 번 로그인하세요" 를 적는다.
 
 ### 4.4 온보딩 체크는 바꾸지 않는다
 
@@ -286,6 +402,16 @@ cache_ttl_sec  = 900.0
   웹 검색 값은 요청할 때 읽으므로 성격도 다르다. 설정 명령을 만든 뒤에도 이 등록이
   따로 이득이면 그때 별도로 다룬다.
 
+- **Remote Agent 포트의 인증.** Firefox 의 성질이라 이 명령이 바꿀 수 없다. loopback
+  만 쓰고 전용 프로필로 범위를 줄이는 설계(RFC browser-live-one-connection 결정 1)를
+  그대로 둔다.
+- **일상 Firefox 에 Remote Agent 켜기.** 명령줄 플래그로만 켜므로 이미 떠 있는
+  Firefox 에는 못 한다.
+- **서버가 `[browser.live.bidi]` 를 스스로 쓰기.** RFC browser-keeper-firefox §2.3
+  이 정한 대로 `runtime.toml` 은 운영자 것이다. 운영자가 이 명령을 실행해야 쓴다.
+- **Zen 의 BiDi.** 시도하지 않았다. 명령은 `--firefox` 가 가리키는 파일을 막지
+  않지만 동작을 약속하지 않는다.
+
 ## 6. 검증
 
 | 확인할 것 | 방법 |
@@ -300,6 +426,21 @@ cache_ttl_sec  = 900.0
 이미 있는 테스트: `test/test_install_script.ml`,
 `test/test_browser_native_host.py`, `connectors/browser/tests/`.
 
+BiDi 길과 두 길 선택을 더한다.
+
+| 확인할 것 | 방법 |
+|---|---|
+| `[browser.live.bidi]` 가 생기고 주석이 살아남는다 | 주석과 다른 표가 든 `runtime.toml` 에 `--mode bidi` 를 돌리고 그 바이트가 그대로인지, `Browser_configuration.of_file` 이 표를 읽는지 본다 |
+| 있는 표를 덮어쓰지 않는다 | 다른 프로필이 적힌 표에 플래그 없이 돌리고 파일이 그대로인지 본다 |
+| Firefox 를 못 찾으면 쓰지 않는다 | PATH 를 비우고 `--firefox` 없이 돌려 파일과 종료 코드를 본다 |
+| 절대 경로가 아닌 값은 쓰지 않는다 | `--firefox firefox`, `--profile ~/x` 를 주고 loader 의 문장이 나오는지 본다 |
+| 확장 길이 스크립트와 같은 결과를 낸다 | 같은 워크스페이스에 스크립트와 `--mode extension` 을 각각 돌려 파일 내용과 권한을 비교한다 |
+| 두 길을 같이 골라도 같은 host 설치를 두 번 하지 않는다 | `--mode extension --mode bidi` 를 두 번 돌려 파일이 같은지 본다 |
+| 판정이 바뀐다 | `masc doctor` 의 `browser_bidi_host` 와 `Browser_lane_launcher.verdict` 를 설정 전후로 본다 |
+
+서버가 이 표로 Firefox 와 host 를 띄우는 일은 RFC browser-keeper-firefox 가 실측했다.
+이 RFC 는 표를 쓰는 데까지만 검증한다.
+
 ## 7. 남는 문제
 
 - temporary add-on 은 브라우저를 다시 켤 때마다 다시 로드해야 한다. 이 RFC 는
@@ -307,3 +448,30 @@ cache_ttl_sec  = 900.0
 - 데스크톱에서 띄운 서버는 셸 rc 에 적은 export 를 읽지 못할 수 있다. 웹 검색 키가
   이 경우에 닿지 않는다. 지금도 같은 상태이고, 이 RFC 가 나쁘게 만들지도 낫게
   만들지도 않는다.
+
+- 마법사에서 두 길을 고를 때 기본값을 어느 쪽에 둘지는 정하지 않았다. 지금 안은
+  기본값 없이 묻는 것이다. 한 번 설정하고 잊는 쪽을 원하면 BiDi, 일상 브라우저를
+  그대로 쓰고 싶으면 확장이다. 운영자가 정한다.
+- 두 길을 같이 쓰면 연결을 지정하지 않은 요청이 거절된다. 명령은 그 사실을 알리고,
+  어느 쪽을 기본으로 삼을지는 Keeper 의 연결 선택 규칙(RFC
+  browser-live-one-connection)에 맡긴다.
+- BiDi 길의 로그인은 사람이 한다. 서버가 뜬 뒤라야 그 Firefox 가 생기므로 설치
+  마법사 안에서는 끝낼 수 없다.
+- 이 명령이 automation 도 설정할지(`--mode automation`)와, 마법사가 어느 길을 먼저
+  보여줄지는 정하지 않았다. automation 은 운영자에게 geckodriver 경로 하나만
+  요구하고 로그인이 필요 없는 조사를 한다. live 는 로그인된 사이트를 쓴다. 마법사가
+  한 길만 먼저 보여줘야 한다면, 첫 대화에서 어느 일이 필요한지로 정한다. 공개
+  페이지를 읽는 일이면 automation 이고, 로그인된 사이트를 쓰는 일이면 live 다.
+
+## 8. 구현 순서
+
+한 PR 이 작업 한 단위(예상 출력 20k token 이하)를 넘지 않게 나눈다. 위에서 아래로
+쌓는다.
+
+1. 웹 검색 명령: #42821. 구현됨.
+2. `Browser_lane_setup` 공통 부분과 `--mode extension`: host 설치를 바이너리로 옮기고
+   확장 파일을 내장하고 `install-host.sh` 를 지운다. 부르는 쪽(`install-local-build.sh`,
+   launcher 문장, README)도 같이 바꾼다.
+3. `--mode bidi`: `[browser.live.bidi]` 를 쓴다. Firefox 탐색과 프로필 기본값.
+4. 마법사 단계: 두 명령을 자식 프로세스로 부르고, 브라우저는 설치된 것에 맞춰 길을
+   보여준다.

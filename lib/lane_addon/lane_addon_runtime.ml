@@ -614,7 +614,13 @@ let commit_output m e ~sources output =
   | Ok () ->
     converge ();
     if not e.stopping then e.phase <- Attached;
-    let* () = persist m e in wake_dependents m e; Ok ()
+    (* The output is published and converged, and dependents read it from the
+       entry, not from the binding file. Wake them in the same step that makes
+       [refreshing] false: persisting yields, and a reader that saw the
+       producer settled could otherwise act before its dependents were told,
+       so one commit reached them after the reader's next action. *)
+    wake_dependents m e;
+    persist m e
   | Error (Lane_addon_store.Observation_rejected detail) -> Error detail
   | Error (Lane_addon_store.Publication_failed {failure;verification_error}) ->
     let cause=Lane_addon_store.observation_write_error_to_string

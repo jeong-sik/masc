@@ -1751,6 +1751,137 @@ type board_post_close_state = {
   bpc_summary: string option;
 }
 
+(** One attachment declared on a board post's [meta.attachments]. The wire
+    writer is the board post handler
+    (lib/board_tool_adapter/board_tool_attachment.ml): a stored entry is
+    [{"kind", "url"|"artifact", "name"?}], and the [artifact] form is the
+    normalized [_blob] wrapper from
+    [Tool_output.normalized_artifact_ref_to_json].
+
+    The strings here are the post author's own text. Nothing is cleaned at
+    decode; a pane cleans what it prints. *)
+type board_attachment_kind =
+  | Ak_image
+  | Ak_video
+  | Ak_youtube
+  | Ak_external_link
+  | Ak_file
+  | Ak_audio
+  | Ak_score
+  | Ak_midi
+  | Ak_unknown of string
+      (** A kind this build was not taught. Carried like
+          {!Post_kind_unknown}: the entry still decodes and a reader can say
+          "unsupported kind" with the wire's own word. *)
+
+type board_attachment_source =
+  | As_url of string
+  | As_artifact of { sha256 : string; bytes : int }
+      (** A blob in the artifact store, as the post handler records it: its
+          digest and its size. The size rides on the entry, so the read
+          pane's label needs no store round-trip. *)
+
+type board_attachment = {
+  ba_kind: board_attachment_kind;
+  ba_source: board_attachment_source;
+  ba_name: string option;
+}
+
+(** One [meta.attachments] entry as read: the attachment, or why the entry
+    could not be read. The failure stays on its entry -- one broken
+    attachment never fails the post or the entries beside it (spec decision
+    5) -- and a broken entry has no kind or source to mistake for real ones. *)
+type board_attachment_entry = (board_attachment, string) result
+
+let board_attachment_kind_of_string = function
+  | "image" -> Ak_image
+  | "video" -> Ak_video
+  | "youtube" -> Ak_youtube
+  | "external_link" -> Ak_external_link
+  | "file" -> Ak_file
+  | "audio" -> Ak_audio
+  | "score" -> Ak_score
+  | "midi" -> Ak_midi
+  | other -> Ak_unknown other
+;;
+
+let is_sha256 text =
+  String.length text = 64
+  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) text
+;;
+
+(* A stored artifact is the handler's normalized [_blob] wrapper, which
+   always carries the digest and the size. Anything else under [artifact] is
+   not its wrapper, and the entry breaks rather than reading as an artifact
+   of unknown size. mime/preview stay in the store. *)
+let board_attachment_artifact = function
+  | `Assoc [ "_blob", `Assoc blob ] -> (
+      match List.assoc_opt "sha256" blob, List.assoc_opt "bytes" blob with
+      | Some (`String sha256), Some (`Int bytes)
+        when is_sha256 sha256 && bytes >= 0 ->
+          Some (As_artifact { sha256; bytes })
+      | _ -> None)
+  | _ -> None
+;;
+
+let decode_board_attachment index entry : board_attachment_entry =
+  let broken detail = Error (Printf.sprintf "attachments[%d] %s" index detail) in
+  let ( let* ) = Result.bind in
+  match entry with
+  | `Assoc entry_fields ->
+      let names, fields =
+        List.partition (fun (key, _) -> String.equal key "name") entry_fields
+      in
+      let kinds, sources =
+        List.partition (fun (key, _) -> String.equal key "kind") fields
+      in
+      let* ba_kind =
+        match kinds with
+        | [ _, `String raw ] -> Ok (board_attachment_kind_of_string raw)
+        | [ _ ] -> broken "kind must be a string"
+        | [] -> broken "kind is missing"
+        | _ -> broken "kind must appear exactly once"
+      in
+      (* The two forms the handler stores. A bare [sha256] is what a client
+         sends, never what a post holds. *)
+      let* ba_source =
+        match sources with
+        | [ "url", `String url ] -> Ok (As_url url)
+        | [ "artifact", artifact ] -> (
+            match board_attachment_artifact artifact with
+            | Some source -> Ok source
+            | None ->
+                broken "artifact must be a normalized _blob carrying a sha256 and its size")
+        | [ "url", _ ] -> broken "url must be a string"
+        | [] -> broken "source is missing"
+        | _ -> broken "must carry exactly one of url or artifact"
+      in
+      let* ba_name =
+        match names with
+        | [] -> Ok None
+        | [ _, `String name ] -> Ok (Some name)
+        | [ _ ] -> broken "name must be a string"
+        | _ -> broken "name must appear exactly once"
+      in
+      Ok { ba_kind; ba_source; ba_name }
+  | _ -> broken "must be an object"
+;;
+
+(* Attachments sit under [meta.attachments]. A post with no [meta], or a
+   meta that did not say attachments, has none. An attachments value that is
+   not a list decodes as one broken entry rather than []: the post claimed
+   attachments it did not deliver, and [] would read as a post that never
+   had any. *)
+let decode_board_attachments json : board_attachment_entry list =
+  match Yojson.Safe.Util.member "meta" json with
+  | `Assoc meta -> (
+      match List.assoc_opt "attachments" meta with
+      | Some (`List entries) -> List.mapi decode_board_attachment entries
+      | Some _ -> [ Error "attachments must be an array" ]
+      | None -> [])
+  | _ -> []
+;;
+
 (** Board post (light projection for list view) *)
 type board_post = {
   bp_id: string;
@@ -1780,6 +1911,10 @@ type board_post = {
   bp_closed: board_post_close_state option;
       (** task-1758/#39356: [None] means open, same reading as the absent
           JSON key it comes from. *)
+  bp_attachments: board_attachment_entry list;
+      (** Decoded from [meta.attachments]; [] when the post carried no meta
+          attachments. A broken entry is carried as its [Error], never
+          dropped and never fatal to the post. *)
 }
 
 (** Board comment *)

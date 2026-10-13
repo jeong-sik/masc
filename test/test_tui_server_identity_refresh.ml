@@ -466,7 +466,7 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
     { bp_id = "same-id"; bp_author = "author"; bp_title = "Thread";
       bp_body = body; bp_votes = 0; bp_comment_count = 0;
       bp_created_at = "2026-10-07"; bp_created_at_unix = None; bp_updated_at = None;
-      bp_hearth = None; bp_kind = None; bp_closed = None } in
+      bp_hearth = None; bp_kind = None; bp_closed = None; bp_attachments = [] } in
   let a = post "A's retained post" and b = post "B's delayed post" in
   let begin_read () = match Detail.start state.board_detail ~post_id:a.bp_id with
     | Detail.Started (next, request) -> state.board_detail <- next; request

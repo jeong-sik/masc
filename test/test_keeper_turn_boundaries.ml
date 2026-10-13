@@ -397,6 +397,13 @@ let append_lines ~keepers_dir lines =
     lines
 ;;
 
+(* A store no append can open: a directory sits where the file goes. *)
+let block_the_store ~keepers_dir =
+  Fs_compat.mkdir_p (Filename.dirname
+    (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id));
+  Unix.mkdir (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id) 0o700
+;;
+
 let test_history_stated_in_store_answers_from_the_tail () =
   with_temp_keepers @@ fun keepers_dir ->
   let describe = function
@@ -414,6 +421,7 @@ let test_history_stated_in_store_answers_from_the_tail () =
   check_stated "a missing store states nothing" "may hold atoms" ();
   append_lines ~keepers_dir
     [ record ~turn:1 ~trace_id:"other" Boundaries.Stale_noop
+    ; history_restarted ()
     ; record ~turn:2 ~history_at_start:Boundaries.Fresh_history Boundaries.No_atom_history
     ];
   check_stated "the trace's last row decides" "stated empty" ();
@@ -498,13 +506,6 @@ let test_purge_plan_removes_the_turn_boundary_log () =
   let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:keeper_id context in
   check bool "plan removes the turn boundary log" true
     (List.exists (fun entry -> entry = Shutdown.Keeper_turn_boundaries_artifact) plan)
-;;
-
-(* A store no append can open: a directory sits where the file goes. *)
-let block_the_store ~keepers_dir =
-  Fs_compat.mkdir_p (Filename.dirname
-    (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id));
-  Unix.mkdir (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id) 0o700
 ;;
 
 let the_store_is_still_blocked ~keepers_dir =

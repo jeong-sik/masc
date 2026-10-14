@@ -1690,7 +1690,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       ^ Yojson.Safe.to_string
           (`List
              [ `String config.base_path; `String config.workspace_path;
-               `String (Workspace.masc_root_dir config);
+               `String (Workspace.masc_dir config);
                `Int generation; query ])
     in
     let compute_with_generation () =

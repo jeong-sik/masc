@@ -121,12 +121,12 @@ let register ~key ~default ~validate ~serialize ~deserialize ?meta () =
 
 let params_file base_path =
   Filename.concat
-    (Workspace_utils.masc_dir_from_base_path ~base_path)
+    (Common.masc_dir_from_base_path ~base_path)
     "runtime_params.json"
 
 let audit_file base_path =
   Filename.concat
-    (Workspace_utils.masc_dir_from_base_path ~base_path)
+    (Common.masc_dir_from_base_path ~base_path)
     "param_audit.jsonl"
 
 let ensure_dir path =

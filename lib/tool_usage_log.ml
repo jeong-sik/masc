@@ -135,7 +135,7 @@ let latest_ts store =
     None
 
 let init ~base_path () =
-  let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
   let dir = store_dir masc_root in
   (try
      Fs_compat.mkdir_p dir;

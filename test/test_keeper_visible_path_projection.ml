@@ -222,7 +222,7 @@ let setup ?sandbox ?always_allow f =
        Masc_test_deps.with_publication_recovery_registry
          ~sw
          ~fs
-         ~registry_root:(Workspace.masc_root_dir config)
+         ~registry_root:(Workspace.masc_dir config)
        @@ fun registry ->
        let publication_recovery =
          { Masc.Keeper_publication_recovery_availability.provider =

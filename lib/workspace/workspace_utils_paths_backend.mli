@@ -7,7 +7,7 @@
 open Workspace_utils_backend_setup
 
 (** The workspace's state root, [<base>/.masc]. *)
-val masc_root_dir : config -> string
+val masc_dir : config -> string
 
 type expected_workspace_error =
   | Invalid_workspace_precondition
@@ -16,10 +16,6 @@ type expected_workspace_error =
 val validate_expected_workspace :
   config:config -> Yojson.Safe.t -> (Yojson.Safe.t, expected_workspace_error) result
 
-(** [<base>/.masc] for a caller holding only [base_path]. *)
-val masc_dir_from_base_path : base_path:string -> string
-
-val masc_dir : config -> string
 val agents_dir : config -> string
 val tasks_dir : config -> string
 val messages_dir : config -> string
@@ -39,10 +35,6 @@ val archive_path : config -> string
     [Common.keepers_runtime_dir_of_base] instead. *)
 val keepers_runtime_dir : config -> string
 
-val keepers_runtime_dir_for_base_path : string -> string
-(** Pure Keeper output directory for an already resolved
-    runtime base path. This is the base-path form of {!keepers_runtime_dir};
-    it opens no backend and creates no directory. *)
 
 val dated_store_root : config -> Dated_jsonl.Store.root
 (** The workspace's state root, for locating a date-split JSONL store
@@ -115,12 +107,9 @@ val backend_cleanup_pubsub :
 
 (** Convert an absolute filesystem path to a backend key.
     Returns [None] when the path is not rooted under
-    [masc_root_dir]. *)
+    [masc_dir]. *)
 val key_of_path : config -> string -> string option
 
-(** Same as [key_of_path] — kept as a separate alias to make
-    cluster-root-rooted lookups explicit at the call site. *)
-val root_key_of_path : config -> string -> string option
 
 val strip_prefix : string -> string -> string
 (** [strip_prefix prefix s] removes the first [String.length prefix]

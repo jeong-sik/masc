@@ -2048,7 +2048,7 @@ let start_keeper_loops_owned
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
-      let masc_root = Workspace.masc_root_dir config in
+      let masc_root = Workspace.masc_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
       let shutdown_blocked_names =
         claimed_persistence.claimed_report.shutdown.blocked_keeper_names

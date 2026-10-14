@@ -146,7 +146,7 @@ let test_workspace_checkpoint_is_replayed ?(damaged_inputs = false)
       let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
       let metadata_path = write_metadata config ~trace_id in
       let config_root =
-        Filename.concat (Masc.Workspace.masc_root_dir config) "config"
+        Filename.concat (Masc.Workspace.masc_dir config) "config"
       in
       let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
       Fs_compat.mkdir_p config_root;

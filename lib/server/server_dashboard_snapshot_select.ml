@@ -66,7 +66,7 @@ let select_tools_response_with ~fallback
   | None, Some snap
     when String.equal snap.tools.base_path config.base_path
       && String.equal snap.tools.workspace_path config.workspace_path
-      && String.equal snap.tools.masc_root (Workspace.masc_root_dir config) ->
+      && String.equal snap.tools.masc_root (Workspace.masc_dir config) ->
     Server_timing.measure
       timing_obj
       (Server_timing.Custom "snapshot_read")
@@ -111,7 +111,7 @@ let select_telemetry_summary_json
        The narrow window without dedup is acceptable for a per-process
        once-only path. *)
     let base_path = config.base_path in
-    let masc_root = Workspace.masc_root_dir config in
+    let masc_root = Workspace.masc_dir config in
     let keeper_keepalive_interval_s =
       Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
       |> float_of_int

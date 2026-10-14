@@ -914,7 +914,7 @@ let test_maintenance_keeps_board_attachment_reference () =
       let board_posts =
         Masc_board_handlers.Board_paths.file_path
           ~workspace_masc_dir:
-            (Workspace_utils.masc_dir_from_base_path ~base_path)
+            (Common.masc_dir_from_base_path ~base_path)
           Masc_board_handlers.Board_paths.Posts
       in
       Fs_compat.mkdir_p (Filename.dirname board_posts);
@@ -963,7 +963,7 @@ let test_maintenance_keeps_prepared_lane_broadcast () =
       ~bytes:(O.artifact_manifest_to_json ~content:"prepared evidence"
         ~structured_content:(`Assoc ["artifact",O.normalized_artifact_ref_to_json child])
         |> Yojson.Safe.to_string) in
-    let workspace = Workspace_utils.masc_dir_from_base_path ~base_path in
+    let workspace = Common.masc_dir_from_base_path ~base_path in
     let prepared = Filename.concat workspace "lane-addons/broadcasts/instance/operation.json" in
     Fs_compat.mkdir_p (Filename.dirname prepared);
     Fs_compat.save_file prepared (Yojson.Safe.to_string (`Assoc ["evidence",`Assoc [

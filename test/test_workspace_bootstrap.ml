@@ -121,7 +121,7 @@ let test_ensure_workspace_bootstrap_creates_root_dirs () =
       let config = Workspace.default_config dir in
       B.ensure_workspace_bootstrap config;
       let root_dir =
-        Workspace_utils.masc_root_dir config
+        Workspace_utils.masc_dir config
       in
       List.iter
         (fun sub ->

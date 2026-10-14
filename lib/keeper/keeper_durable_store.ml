@@ -123,7 +123,7 @@ let transcript_files_under dir =
 
 (* The keepers directory the runtime writes keeper stores under. *)
 let runtime_keepers_dir ~base_path =
-  Workspace.keepers_runtime_dir_for_base_path base_path
+  Common.keepers_runtime_dir_of_base ~base_path
 ;;
 
 let keeper_meta_store =

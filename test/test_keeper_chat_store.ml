@@ -865,7 +865,7 @@ let test_github_hosts_secret_file_is_the_keeper_runtime_one () =
   let expected =
     Filename.concat
       (Filename.concat
-         (Filename.concat (Masc.Workspace.keepers_runtime_dir_for_base_path base_dir) keeper_name)
+         (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path:base_dir) keeper_name)
          "github-cli")
       "hosts.yml"
   in

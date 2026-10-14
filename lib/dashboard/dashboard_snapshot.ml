@@ -16,7 +16,7 @@ type tools_projection = {
 }
 
 let prepare_tools ~(config : Workspace.config) compute =
-  let masc_root = Workspace.masc_root_dir config in
+  let masc_root = Workspace.masc_dir config in
   let json = compute () in
   let raw = Yojson.Safe.to_string json in
   { base_path = config.base_path; workspace_path = config.workspace_path; masc_root;
@@ -311,7 +311,7 @@ let refresh_loop
     let telemetry_summary =
       cached_projection ~ttl:30.0 ~cache:telemetry_cache "telemetry_summary" (fun () ->
         let base_path = config.base_path in
-        let masc_root = Workspace.masc_root_dir config in
+        let masc_root = Workspace.masc_dir config in
         let keeper_keepalive_interval_s =
           Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
           |> float_of_int

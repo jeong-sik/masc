@@ -226,7 +226,7 @@ val validate_workspace_config :
 val set_workspace_config :
   server_state -> Workspace.config -> (unit, workspace_switch_error) result
 (** Atomically replace only the active workspace projection. The requested
-    {!Workspace.masc_root_dir} must exactly equal the process-fixed runtime
+    {!Workspace.masc_dir} must exactly equal the process-fixed runtime
     root; a mismatch is typed and leaves the previous scope unchanged. This
     function performs no filesystem I/O. *)
 

@@ -13,7 +13,7 @@ let resolved_base_path_opt () =
 
 let masc_base_dir () =
   match resolved_base_path_opt () with
-  | Some base_path -> Workspace_utils.masc_dir_from_base_path ~base_path
+  | Some base_path -> Common.masc_dir_from_base_path ~base_path
   | None ->
     invalid_arg
       "MASC workspace is unresolved; pass --base-path or set MASC_BASE_PATH"

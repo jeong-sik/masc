@@ -492,7 +492,7 @@ let test_goal_transition_uses_authenticated_actor () =
     `Assoc [ "base_path", `String base; "masc_root", `String root ] in
   let current = workspace
       (Unix.realpath config.Masc.Workspace.base_path)
-      (Unix.realpath (Masc.Workspace.masc_root_dir config)) in
+      (Unix.realpath (Masc.Workspace.masc_dir config)) in
   let foreign_base = Filename.concat base_path "replacement" in
   let foreign = workspace foreign_base (Filename.concat foreign_base ".masc") in
   let fields =
@@ -567,7 +567,7 @@ let test_board_write_routes_reject_foreign_workspace () =
   let expected root = `Assoc
       [ "base_path", `String (Unix.realpath config.Masc.Workspace.base_path)
       ; "masc_root", `String root ] in
-  let current = expected (Unix.realpath (Masc.Workspace.masc_root_dir config)) in
+  let current = expected (Unix.realpath (Masc.Workspace.masc_dir config)) in
   let post path workspace fields =
     dispatch_json ~router ~token ~path ~extra_headers:[]
       ~body:(Yojson.Safe.to_string (`Assoc (("expected_workspace", workspace) :: fields))) () in

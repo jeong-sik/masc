@@ -366,7 +366,7 @@ let () =
     in
     let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
     let runtime_root = Filename.dirname session_store in
-    let keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
+    let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
     let keepers_with_logs =
       match keepers_with_a_log keepers_dir with
       | Ok keepers -> keepers

@@ -271,7 +271,7 @@ let handle ~(config : Workspace.config) args : tool_result =
       `Assoc
         [
           ("base_path", `String config.base_path);
-          ("masc_root", `String (Workspace.masc_root_dir config));
+          ("masc_root", `String (Workspace.masc_dir config));
           ("config_resolution", Config_dir_resolver.to_json resolution);
         ]
     in

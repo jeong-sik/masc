@@ -2783,7 +2783,7 @@ let () = test "handle_transition_cancel_metric_carries_the_stated_reason" (fun (
 let () = test "add_task_refuses_replaced_workspace_before_creation" (fun () ->
   let ctx = make_test_ctx () in
   let base = Unix.realpath ctx.config.base_path in
-  let root = Unix.realpath (Workspace.masc_root_dir ctx.config) in
+  let root = Unix.realpath (Workspace.masc_dir ctx.config) in
   let create base_path =
     Task.Tool.handle_add_task ~tool_name:"masc_add_task"
       ~start_time:(Tool_timing.start ()) ctx
@@ -2803,7 +2803,7 @@ let () = test "transition_cancel_refuses_replaced_workspace_before_task_change" 
     ~start_time:(Tool_timing.start ()) ctx
     (`Assoc [ "title", `String "Keep this task in its own workspace" ]) in
   let base = Unix.realpath ctx.config.base_path in
-  let root = Unix.realpath (Workspace.masc_root_dir ctx.config) in
+  let root = Unix.realpath (Workspace.masc_dir ctx.config) in
   let cancel base_path =
     Task.Tool.handle_transition ~tool_name:"masc_transition"
       ~start_time:(Tool_timing.start ()) ctx

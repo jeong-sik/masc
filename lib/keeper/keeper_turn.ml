@@ -649,7 +649,7 @@ let run_keeper_invocation_turn_admitted_inner
          slots, starving the synchronous run_turn call (Issue #2610). *)
       (* auto execution session interception removed in #2908 *)
       (* === Harness: trajectory accumulator + eval gate config === *)
-      let masc_root = Workspace.masc_root_dir ctx.config in
+      let masc_root = Workspace.masc_dir ctx.config in
       let trajectory_acc =
         Trajectory.create_accumulator
           ~masc_root

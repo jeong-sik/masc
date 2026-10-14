@@ -218,7 +218,7 @@ let publication_recovery_registry env sw config =
   Masc_test_deps.with_publication_recovery_registry
     ~sw
     ~fs:(Eio.Stdenv.fs env)
-    ~registry_root:(Workspace.masc_root_dir config)
+    ~registry_root:(Workspace.masc_dir config)
     Fun.id
 
 let make_meta name =
@@ -2506,7 +2506,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         in
         Filename.concat
           (Filename.concat
-             (Workspace.masc_root_dir config)
+             (Workspace.masc_dir config)
              ("paused-work-dispositions-"
               ^ Paused_work_receipt.store_version))
           ("keeper-" ^ keeper_hash)
@@ -3034,7 +3034,7 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
       Masc_test_deps.with_publication_recovery_registry
         ~sw:root_sw
         ~fs:(Eio.Stdenv.fs env)
-        ~registry_root:(Workspace.masc_root_dir config)
+        ~registry_root:(Workspace.masc_dir config)
       @@ fun publication_recovery_registry ->
       let stop_target () =
         ignore

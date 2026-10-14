@@ -1317,7 +1317,7 @@ let assemble_hooks
                    [extra_system_context]. *)
                 Keeper_wire_capture.capture_request
                   ~base_path:config.base_path
-                  ~masc_root:(Workspace.masc_root_dir config)
+                  ~masc_root:(Workspace.masc_dir config)
                   ~keeper_name:meta.name
                   ~turn_id:keeper_turn_id
                   ~trace_id:meta.runtime.trace_id

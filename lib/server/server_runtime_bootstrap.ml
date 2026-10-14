@@ -534,7 +534,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       ?input_base_path
       ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
       ~effective_base_path:config.base_path
-      ~effective_masc_root:(Workspace.masc_root_dir config)
+      ~effective_masc_root:(Workspace.masc_dir config)
       ()
     |> Server_base_path_diagnostics.to_yojson
   in

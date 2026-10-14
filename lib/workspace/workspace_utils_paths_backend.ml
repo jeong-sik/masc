@@ -1,7 +1,7 @@
 open Workspace_utils_backend_setup
 
 (* The workspace's state root, [<base>/.masc]. *)
-let masc_root_dir config = Common.masc_dir_from_base_path ~base_path:config.base_path
+let masc_dir config = Common.masc_dir_from_base_path ~base_path:config.base_path
 
 type expected_workspace_error =
   | Invalid_workspace_precondition
@@ -22,7 +22,7 @@ let validate_expected_workspace ~config args =
                && not (Filename.is_relative base) && not (Filename.is_relative root) ->
           let matches =
             try String.equal base (Unix.realpath config.base_path)
-                && String.equal root (Unix.realpath (masc_root_dir config))
+                && String.equal root (Unix.realpath (masc_dir config))
             with Unix.Unix_error _ -> false
           in
           if matches then Ok (`Assoc (List.remove_assoc "expected_workspace" fields))
@@ -30,13 +30,6 @@ let validate_expected_workspace ~config args =
         | _ -> Error Invalid_workspace_precondition)
      | _ -> Error Invalid_workspace_precondition)
   | _ -> Error Invalid_workspace_precondition
-
-(** [<base>/.masc] for a caller that has a [base_path] string and no
-    config. *)
-let masc_dir_from_base_path ~base_path = Common.masc_dir_from_base_path ~base_path
-
-(** Directory resolution. Always resolves to the root .masc/ directory. *)
-let masc_dir config = masc_root_dir config
 
 let agents_dir config = Filename.concat (masc_dir config) "agents"
 (* Segment names for the task store, exposed so a reader holding only a
@@ -77,12 +70,7 @@ let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
    base_path, and workspace-internal / accountability modules that cannot depend
    on Workspace without a cycle, use the Common variant instead. *)
 let keepers_runtime_dir config =
-  Filename.concat (masc_root_dir config) Common.keepers_runtime_dirname
-
-let keepers_runtime_dir_for_base_path base_path =
-  Filename.concat
-    (backend_config_for base_path).base_path
-    Common.keepers_runtime_dirname
+  Filename.concat (masc_dir config) Common.keepers_runtime_dirname
 
 (* The workspace's state root as [Dated_jsonl.Store] takes it. Made here so
    a caller with a config does not spell the directory itself. *)
@@ -203,8 +191,7 @@ let key_of_path_from_root config ~root path =
 
 (* Key mapping is always relative to the .masc root so workspace paths
    are preserved in the backend key (e.g., workspace:state.json). *)
-let key_of_path config path = key_of_path_from_root config ~root:(masc_root_dir config) path
-let root_key_of_path config path = key_of_path_from_root config ~root:(masc_root_dir config) path
+let key_of_path config path = key_of_path_from_root config ~root:(masc_dir config) path
 
 let strip_prefix prefix s =
   if String.length s >= String.length prefix then
@@ -237,19 +224,19 @@ let list_dir config path =
 (* Initialization check                         *)
 (* ============================================ *)
 
-let root_state_path config = Filename.concat (masc_root_dir config) "root-state.json"
+let root_state_path config = Filename.concat (masc_dir config) "root-state.json"
 
 (** Root initialization check - independent of current workspace.
     Used by workspace/cluster management features. *)
 let root_is_initialized config =
   match config.backend with
   | Memory _ ->
-      (match root_key_of_path config (root_state_path config) with
+      (match key_of_path config (root_state_path config) with
        | Some key -> backend_exists config ~key
        | None -> false)
   | FileSystem _ ->
-      Sys.file_exists (masc_root_dir config) &&
-      Sys.is_directory (masc_root_dir config) &&
+      Sys.file_exists (masc_dir config) &&
+      Sys.is_directory (masc_dir config) &&
       Sys.file_exists (root_state_path config)
 
 (* Server-level cache for is_initialized — avoids 3 syscalls per request.

@@ -607,7 +607,7 @@ let append_best_effort ?(site = "runtime_manifest") config manifest =
   match append config manifest with
   | Ok () -> ()
   | Error msg ->
-      let masc_root = Workspace.masc_root_dir config in
+      let masc_root = Workspace.masc_dir config in
       (try
          Telemetry_coverage_gap.record
            ~masc_root

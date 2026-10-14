@@ -404,9 +404,9 @@ let test_checkpoint_settlement_notifies_possible_restore () =
 let test_correlated_checkpoint_route () =
   with_tick_machine (fun () ->
     with_attached_worker (fun ~config ~env ~sw ->
-      Fs_compat.mkdir_p (Masc.Workspace.masc_root_dir config);
+      Fs_compat.mkdir_p (Masc.Workspace.masc_dir config);
       let expected = `Assoc ["base_path",`String (Unix.realpath config.base_path);
-        "masc_root",`String (Unix.realpath (Masc.Workspace.masc_root_dir config))] in
+        "masc_root",`String (Unix.realpath (Masc.Workspace.masc_dir config))] in
       let fields id = ["operation_id",`String id;"slot",`String "quick";"expected_workspace",expected] in
       let body fields = Yojson.Safe.to_string (`Assoc fields) in
       let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
@@ -575,7 +575,7 @@ let test_changes_are_bound_to_the_expected_workspace () =
   with_tick_machine (fun () ->
     with_attached_worker (fun ~config ~env:_ ~sw:_ ->
     let base_path = config.Masc.Workspace.base_path in
-    let masc_root = Masc.Workspace.masc_root_dir config in
+    let masc_root = Masc.Workspace.masc_dir config in
     let expected ~base ~root =
       Printf.sprintf {|"expected_workspace":{"base_path":%S,"masc_root":%S}|} base root
     in
@@ -641,7 +641,7 @@ let test_changes_are_bound_to_the_expected_workspace () =
 let test_live_read_is_bound_to_the_expected_workspace () =
   let base_path = Filename.temp_dir "msx-live-bound-" "" in
   let config = Masc.Workspace.default_config base_path in
-  let masc_root = Masc.Workspace.masc_root_dir config in
+  let masc_root = Masc.Workspace.masc_dir config in
   (try Unix.mkdir masc_root 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let other = Filename.temp_dir "msx-live-other-" "" in
   let precondition = Server_routes_http_routes_lane_addons.live_workspace_precondition ~config in
@@ -678,7 +678,7 @@ let test_tick_is_bound_to_the_expected_workspace () =
     Eio_main.run @@ fun _env ->
     let base_path = Filename.temp_dir "msx-tick-bound-" "" in
     let config = Masc.Workspace.default_config base_path in
-    let masc_root = Masc.Workspace.masc_root_dir config in
+    let masc_root = Masc.Workspace.masc_dir config in
     (try Unix.mkdir masc_root 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
     let expected ~base ~root =
       Printf.sprintf {|"expected_workspace":{"base_path":%S,"masc_root":%S}|} base root
@@ -978,7 +978,7 @@ let test_msx_routes_bind_workspace_before_effects () =
       let base_a = Filename.temp_dir "msx-origin-a" "" in
       Fun.protect ~finally:(fun () -> remove_tree base_a) (fun () ->
         let config_a = Masc.Workspace.default_config base_a in
-        Fs_compat.mkdir_p (Masc.Workspace.masc_root_dir config_a);
+        Fs_compat.mkdir_p (Masc.Workspace.masc_dir config_a);
         Auth.save_auth_config base_b
           { Masc_domain.default_auth_config with enabled = true; require_token = true };
         let token = match Auth.create_token base_b ~agent_name:"bound-tui" ~role:Masc_domain.Admin with
@@ -988,7 +988,7 @@ let test_msx_routes_bind_workspace_before_effects () =
         let config_b = Masc.Mcp_server.workspace_config state in
         let expected config = `Assoc
           ["base_path", `String (Unix.realpath config.Masc.Workspace.base_path);
-           "masc_root", `String (Unix.realpath (Masc.Workspace.masc_root_dir config))] in
+           "masc_root", `String (Unix.realpath (Masc.Workspace.masc_dir config))] in
         let mutations =
           ["press", ["keys", `List [`String "space"]];
            "load", ["cart", `String "game.rom"];
@@ -1006,7 +1006,7 @@ let test_msx_routes_bind_workspace_before_effects () =
             check bool "refusal never writes key ledger" true (Lane.ledger () = before_ledger);
             check bool "refusal preserves machine publication" true (Lane.current_publication () = before_publication);
             check bool "refusal creates no B MSX storage" false
-              (Sys.file_exists (Filename.concat (Masc.Workspace.masc_root_dir config_b) "msx")) in
+              (Sys.file_exists (Filename.concat (Masc.Workspace.masc_dir config_b) "msx")) in
           List.iter (fun (route, fields) ->
             let post bindings = dispatch_request ~method_:"POST" ~path:("/api/v1/msx/" ^ route)
               ~state ~authorization:(Some token)
@@ -1016,7 +1016,7 @@ let test_msx_routes_bind_workspace_before_effects () =
               (status_of_response (post ["expected_workspace", expected config_a]));
             assert_no_effect ();
             let wrong_root = `Assoc ["base_path", `String (Unix.realpath base_b);
-              "masc_root", `String (Unix.realpath (Masc.Workspace.masc_root_dir config_a))] in
+              "masc_root", `String (Unix.realpath (Masc.Workspace.masc_dir config_a))] in
             check int (route ^ " binds both workspace coordinates") 409
               (status_of_response (post ["expected_workspace", wrong_root]));
             assert_no_effect ();

@@ -59,7 +59,7 @@ let count_execution_receipt_entries config keeper_names =
 
 let execution_receipt_coverage_gaps config =
   Telemetry_coverage_gap.read_recent
-    ~masc_root:(Workspace.masc_root_dir config)
+    ~masc_root:(Workspace.masc_dir config)
     ~n:50
   |> List.filter (fun gap ->
        String.equal execution_trust_source

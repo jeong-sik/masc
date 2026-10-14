@@ -352,7 +352,7 @@ let backup_path_for_source ~config ~trace_id
       (source_ref : Keeper_checkpoint_ref.t) =
   let backup_dir =
     Filename.concat
-      (Workspace.masc_root_dir config)
+      (Workspace.masc_dir config)
       (Printf.sprintf
          "backups-checkpoint-purge-%s-%s"
          trace_id
@@ -378,7 +378,7 @@ let ensure_exact_backup ~config ~trace_id ~source_ref source_bytes =
   | None ->
     (match
        Keeper_fs.save_bytes_durable_atomic
-         ~ownership_root:(Workspace.masc_root_dir config)
+         ~ownership_root:(Workspace.masc_dir config)
          backup_path
          source_bytes
      with

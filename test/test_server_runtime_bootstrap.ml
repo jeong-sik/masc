@@ -1141,7 +1141,7 @@ let test_workspace_init_bootstraps_keeper_runtime_dirs () =
   with_temp_dir "startup-keeper-dirs" (fun dir ->
       let config = Workspace.default_config dir in
       ignore (Workspace.init config ~agent_name:None);
-      let root_dir = Workspace.masc_root_dir config in
+      let root_dir = Workspace.masc_dir config in
       let keeper_dir = Filename.concat root_dir "keepers" in
       let traces_dir = Filename.concat root_dir "traces" in
       Alcotest.(check bool) "keeper dir exists" true

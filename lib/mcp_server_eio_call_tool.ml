@@ -276,7 +276,7 @@ let runtime_mcp_masc_root ~base_path =
   | Some masc_root -> masc_root
   | None ->
       let config = Workspace.default_config base_path in
-      Workspace.masc_root_dir config
+      Workspace.masc_dir config
 
 let record_runtime_mcp_trajectory_coverage_gap
     ~(masc_root : string)

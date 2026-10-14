@@ -176,7 +176,7 @@ let () =
   Masc.Runtime_params.restore ~base_path;
   let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
   let runtime_root = Filename.dirname session_store in
-  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
+  let runtime_keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
   (* The keeper names the trace, as the dashboard purge does. A checkpoint's
      own [agent_name] is the agent-core agent's name, the runtime id, not the
      keeper, so nothing under keepers/<name>/ can be found from it (#37770).

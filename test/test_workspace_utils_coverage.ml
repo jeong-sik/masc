@@ -487,7 +487,7 @@ let test_config_carries_its_fields () =
 
 let test_masc_root_dir_is_dot_masc_under_base () =
   let cfg = make_test_config ~base_path:"/home/user/project" in
-  let result = Workspace_utils.masc_root_dir cfg in
+  let result = Workspace_utils.masc_dir cfg in
   check string "root under the base path" "/home/user/project/.masc" result
 
 let test_memory_root_initialization_requires_current_marker () =
@@ -565,7 +565,7 @@ let test_filesystem_read_json_doc_keeps_absence_apart () =
               (Backend.FileSystem.create ~fs:(Eio.Stdenv.fs env) backend_config)
         }
       in
-      let path = Filename.concat (Workspace_utils.masc_root_dir cfg) "doc.json" in
+      let path = Filename.concat (Workspace_utils.masc_dir cfg) "doc.json" in
       let read () = Workspace_utils.read_json_doc cfg path in
       (match read () with
        | Ok None -> ()
@@ -597,7 +597,7 @@ let test_list_dir_prefers_backend_for_memory_keys () =
     ~finally:(fun () -> rm_rf scratch)
     (fun () ->
       let cfg = make_test_config ~base_path:scratch in
-      let workers_dir = Filename.concat (Workspace_utils.masc_root_dir cfg) "workers" in
+      let workers_dir = Filename.concat (Workspace_utils.masc_dir cfg) "workers" in
       Workspace_utils.write_json cfg
         (Filename.concat workers_dir "backend.json")
         (`Assoc [ ("ok", `Bool true) ]);
@@ -612,7 +612,7 @@ let test_memory_commit_distinguishes_local_mirror_failure () =
     ~finally:(fun () -> rm_rf scratch)
     (fun () ->
       let cfg = make_test_config ~base_path:scratch in
-      let masc_dir = Workspace_utils.masc_root_dir cfg in
+      let masc_dir = Workspace_utils.masc_dir cfg in
       Unix.mkdir masc_dir 0o700;
       let tasks_path = Filename.concat masc_dir "tasks" in
       write_file tasks_path "blocks local mirror directory creation";
@@ -642,7 +642,7 @@ let test_pretty_json_persistence_preserves_bytes () =
     ~finally:(fun () -> rm_rf scratch)
     (fun () ->
       let cfg = make_test_config ~base_path:scratch in
-      let root = Workspace_utils.masc_root_dir cfg in
+      let root = Workspace_utils.masc_dir cfg in
       let primary = Filename.concat root "tasks/backlog.json" in
       let recovery = Filename.concat root "tasks/backlog.recovery.json" in
       let read_bytes path =
@@ -721,10 +721,10 @@ let test_default_config_memory_fallback_isolated_by_base_path () =
       let cfg_first = Workspace_utils.default_config first in
       let cfg_second = Workspace_utils.default_config second in
       let first_workers =
-        Filename.concat (Workspace_utils.masc_root_dir cfg_first) "workers"
+        Filename.concat (Workspace_utils.masc_dir cfg_first) "workers"
       in
       let second_workers =
-        Filename.concat (Workspace_utils.masc_root_dir cfg_second) "workers"
+        Filename.concat (Workspace_utils.masc_dir cfg_second) "workers"
       in
       Workspace_utils.write_json cfg_first
         (Filename.concat first_workers "only-first.json")
@@ -911,7 +911,7 @@ let () =
       test_case "angle bracket >" `Quick test_validate_file_path_angle_bracket_gt;
     ];
     "path_helpers", [
-      test_case "masc_root_dir is .masc under the base path" `Quick
+      test_case "masc_dir is .masc under the base path" `Quick
         test_masc_root_dir_is_dot_masc_under_base;
       test_case "memory root initialization requires current marker" `Quick
         test_memory_root_initialization_requires_current_marker;

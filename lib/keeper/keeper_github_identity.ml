@@ -111,7 +111,7 @@ let config_dir ~config ~keeper_name =
    wrote it through [config_dir]. *)
 let config_dir_of_base_path ~base_path ~keeper_name =
   Filename.concat
-    (Filename.concat (Workspace.keepers_runtime_dir_for_base_path base_path) keeper_name)
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
     config_dir_name
 ;;
 

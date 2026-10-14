@@ -839,7 +839,7 @@ let run_isolated_publication_recovery_discovery ~registry_root available =
 ;;
 
 let validate_workspace_config state config =
-  let requested_root = Workspace.masc_root_dir config in
+  let requested_root = Workspace.masc_dir config in
   let runtime_root = state.workspace_runtime.process_masc_root in
   if String.equal requested_root runtime_root
   then Ok ()
@@ -973,7 +973,7 @@ module For_testing = struct
     );
     let state =
       { workspace_runtime =
-          { process_masc_root = Workspace.masc_root_dir config
+          { process_masc_root = Workspace.masc_dir config
           ; scope =
               Atomic.make
                 { config
@@ -1044,7 +1044,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     Session.push_notification_to_active_agents registry ~event
   );
   Keeper_supervisor.set_global_switch sw;
-  let process_masc_root = Workspace.masc_root_dir config in
+  let process_masc_root = Workspace.masc_dir config in
   let publication_recovery_initialized,
       resolve_publication_recovery_initialized =
     Eio.Promise.create ()

@@ -1071,6 +1071,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
      cleared when another post is opened. *)
   (match state.board_attachment_status with
    | Some status ->
+       let status = Terminal_text.single_line status in
        box_line_styled buf cols ~style:(Theme.recede ())
          (Printf.sprintf "  %s" (fit_width status (framed_inner_width cols - 2)))
    | None -> ());

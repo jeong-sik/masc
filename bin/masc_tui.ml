@@ -13670,6 +13670,18 @@ let step_board_read state ~mailbox ~delta =
    answer from this snapshot instead of re-reading runtime.toml per press. *)
 let boot_midi_soundfont : string option ref = ref None
 
+let board_attachment_digit_of_key = function
+  | "1" -> Some 1
+  | "2" -> Some 2
+  | "3" -> Some 3
+  | "4" -> Some 4
+  | "5" -> Some 5
+  | "6" -> Some 6
+  | "7" -> Some 7
+  | "8" -> Some 8
+  | "9" -> Some 9
+  | _ -> None
+
 (* The numbered attachment keys: the pane names each entry [1..9] (broken
    entries included), and this resolves the same number to the same entry,
    then lets the action module save/play/open it. What happened, or why it
@@ -13696,7 +13708,9 @@ let open_board_attachment state ~digit ~host ~port =
             | Some (Ok attachment) ->
                 let fetch ~sha256 =
                   match
-                    Masc_tui_http.http_get ~host ~port
+                    Masc_tui_http.http_get_with_body_limit
+                      ~max_body_bytes:(Some Masc_tui_board_upload.max_attachment_bytes)
+                      ~host ~port
                       ~path:("/api/v1/artifact-bytes/" ^ sha256)
                   with
                   | Error reason -> Error reason
@@ -26982,16 +26996,18 @@ and is loaded on demand through keeper_skill.
                    | Some _ | None ->
                        Masc_tui_code_requests.launch_history_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
                 end)
-       | Some digit
+       | Some key
          when state.view = Board
-              && state.board_mode <> Board_compose
+              && (match state.board_mode with
+                  | Board_read _ -> true
+                  | Board_list | Board_compose -> false)
               && not state.board_comments_focused
-              && String.length digit = 1
-              && digit >= "1"
-              && digit <= "9" ->
+              && Option.is_some (board_attachment_digit_of_key key) ->
            (* The ATTACHMENTS block numbers entries [1..9]; the number opens
               the same entry, whatever its kind wants done with it. *)
-           open_board_attachment state ~digit:(int_of_string digit) ~host ~port
+           Option.iter
+             (fun digit -> open_board_attachment state ~digit ~host ~port)
+             (board_attachment_digit_of_key key)
        | Some "o" when state.view = Board ->
            (match state.board_mode with
             | Board_read post_id

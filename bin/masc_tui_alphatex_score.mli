@@ -22,8 +22,11 @@
     without a close, reads fine.
 
     Technique markup in braces -- a [{…}] after a beat or on a chord member --
-    marks its note and changes nothing else. Markup that changes a beat's
-    length ([{d}], [{tu 3}], [{gr}]) fails the score.
+    marks its note. A dot ([{d}]), a double dot ([{dd}]), a tuplet ([{tu 3}])
+    or a grace note ([{gr}]) changes the latest beat's length: a dotted beat
+    lasts half again, a double-dotted beat half and a quarter again, a
+    tuplet divides the plain length, and a grace note takes no time. A tuplet
+    on a length the ticks cannot divide is not drawn.
 
     Anything else fails too. No word is skipped: a skipped word would take
     its beat with it and move every note after it. *)
@@ -70,7 +73,8 @@ type failure =
 val failure_text : failure -> string
 (** The failure in a sentence a reader can show. *)
 
-(** Counts are in sixteenth notes. *)
+(** Counts are in ticks: a whole note is 384, so every plain length and
+    every dotted or tuplet form lands on an integer. *)
 
 type note = {
   fret : string;  (** as written; [x] for a dead note *)
@@ -78,14 +82,24 @@ type note = {
   marked : bool;  (** technique markup rode on it *)
 }
 
+type duration =
+  | Plain of int
+  | Dotted of int
+  | Double_dotted of int
+  | Tuplet of int * int
+  | Grace
+  | No_duration
+
 type beat = {
-  start : int;  (** from the start of its measure *)
-  span : int;
+  start : int;  (** in ticks, from the start of its measure *)
+  span : int;  (** in ticks *)
+  dur : duration;  (** how the beat reads, for a cell to draw *)
+  marked : bool;  (** a rhythm effect rode on it *)
   notes : note list;  (** [[]] is a rest; at most one note on a string *)
 }
 
 type measure = {
-  units : int;  (** the sum of its beats' spans *)
+  ticks : int;  (** the ticks a whole measure takes *)
   beats : beat list;  (** never empty *)
   repeat_start : bool;  (** a [\ro] opened this bar *)
   repeat_end : int option;  (** a [\rc N] closed it: the count of total plays *)

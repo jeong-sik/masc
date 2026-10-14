@@ -46,14 +46,29 @@ type note = {
   marked : bool;
 }
 
+(* A beat's duration, the way a reader shows it: the plain lengths, the dot
+   that adds half again, the double dot that adds half and a quarter, the
+   tuplet that divides what the plain length would take, and the grace note
+   that takes no time at all. A beat the parser cannot time — a tuplet on a
+   length too small to divide — has no duration. *)
+type duration =
+  | Plain of int
+  | Dotted of int
+  | Double_dotted of int
+  | Tuplet of int * int  (* base length, divide by *)
+  | Grace
+  | No_duration
+
 type beat = {
-  start : int;
-  span : int;
+  start : int;  (* in ticks, counted from the measure's first beat *)
+  span : int;  (* in ticks *)
+  dur : duration;  (* how the beat reads, for a cell to draw *)
+  marked : bool;  (* a rhythm effect rode on it, and a cell draws that *)
   notes : note list;
 }
 
 type measure = {
-  units : int;
+  ticks : int;  (* the ticks a whole measure takes *)
   beats : beat list;
   repeat_start : bool;
   repeat_end : int option;
@@ -135,13 +150,14 @@ let failure_text = function
 
 (* A beat's length in sixteenth notes, the unit every position is counted in. *)
 let units_of_digits = function
-  | "1" -> Some 16
-  | "2" -> Some 8
+  | "1" -> Some 1
+  | "2" -> Some 2
   | "4" -> Some 4
-  | "8" -> Some 2
-  | "16" -> Some 1
+  | "8" -> Some 8
+  | "16" -> Some 16
   | _ -> None
 
+(* The default length before a [:n] says one: a quarter note. *)
 let quarter = 4
 
 let is_whitespace = function ' ' | '\t' | '\n' | '\r' -> true | _ -> false
@@ -363,14 +379,48 @@ let item_failure word = function
   | Item_bad_duration what -> Duration_outside_subset what
   | Item_fret_out_of_range fret -> Fret_out_of_range fret
 
-(* An effect group either decorates a beat or changes how long it lasts. The
-   second kind -- [d] and [dd] dot a beat, [tu] makes a tuplet, [gr] a grace
-   note that takes no time -- moves every later note, so drawing the score
-   without it would draw a different rhythm. *)
-let effect_changes_length text =
-  String.map (fun char -> if is_whitespace char then ' ' else char) text
-  |> String.split_on_char ' '
-  |> List.exists (fun word -> List.mem word [ "d"; "dd"; "tu"; "gr" ])
+(* The rhythm effect words, and the lengths they can ride on. *)
+let dot_effect word = word = "d" || word = "dd"
+let tuplet_effect word = word = "tu"
+let grace_effect word = word = "gr"
+
+(* A rhythm effect reads a beat's length. Inside a chord there is no single
+   beat for it to change, so [chord_notes] rejects it rather than draw the
+   note at a length the effect did not take. *)
+let chord_rhythm_effect text =
+  let words =
+    text
+    |> String.map (fun char -> if is_whitespace char then ' ' else char)
+    |> String.split_on_char ' '
+    |> List.filter (fun word -> not (String.equal word ""))
+  in
+  if List.exists dot_effect words || List.exists tuplet_effect words
+     || List.exists grace_effect words
+  then Some (String.concat " " words)
+  else None
+
+(* The ticks a whole note takes: every other length is a fraction of it, so
+   one unit serves them all and a tuplet divides cleanly. *)
+let whole_note_ticks = 384
+let ticks_of_unit unit = whole_note_ticks / unit
+
+(* The ticks a duration takes, or none when a tuplet rides on a length too
+   small to divide. *)
+let span_of_duration = function
+  | Plain unit -> Some (ticks_of_unit unit)
+  | Dotted unit -> Some ((ticks_of_unit unit * 3) / 2)
+  | Double_dotted unit -> Some ((ticks_of_unit unit * 7) / 4)
+  | Tuplet (unit, divide) ->
+      (* [divide] notes sound where [divide - 1] would: three in the time of
+         two, five in the time of four. *)
+      let base = ticks_of_unit unit in
+      let numerator = base * (divide - 1) in
+      if numerator mod divide = 0 then Some (numerator / divide) else None
+  | Grace -> Some 0
+  | No_duration -> None
+
+(* The ticks a plain unit names, for a length read before a beat carries it. *)
+let ticks_of_said said = span_of_duration (Plain said)
 
 (* A note names a string the tuning has. The tuning is settled before the
    first note ([Tuning_after_music]), so this is known as each note is read. *)
@@ -395,11 +445,19 @@ let chord_notes ~strings inner =
       | None -> Error (Unclosed Effect_group)
       | Some close ->
           let markup = String.sub inner (index + 1) (close - index - 1) in
-          if effect_changes_length markup then Error (Unsupported_rhythm markup)
-          else (
-            match found with
-            | (word, _) :: earlier -> members ((word, true) :: earlier) (close + 1)
-            | [] -> Error Effect_without_note)
+          (* A chord sounds as one beat: a rhythm effect inside it (a dot, a
+             tuplet, a grace) cannot change the beat's length the way one on a
+             lone note does -- there is no "latest beat" inside the chord for
+             it to apply to. Reading it as a no-op would draw the dotted note
+             at its plain length and pull every beat after it one count early,
+             so the chord is rejected instead of silently misread. Technique
+             markup ({v}, {f}, ...) still marks the member it rides. *)
+          (match found with
+           | (word, _) :: earlier ->
+               (match chord_rhythm_effect markup with
+                | Some rhythm -> Error (Unsupported_rhythm rhythm)
+                | None -> members ((word, true) :: earlier) (close + 1))
+           | [] -> Error Effect_without_note)
     else begin
       let rec word_stop i =
         if i < limit && (not (is_whitespace inner.[i])) && inner.[i] <> '{' then
@@ -430,8 +488,10 @@ let chord_notes ~strings inner =
 (* A beat while the score is being read: how long it lasts and what sounds.
    Its count within the measure is fixed once the measure is whole. *)
 type sounding = {
+  s_dur : duration;
   s_span : int;
   s_notes : note list;  (* [] is a rest *)
+  s_marked : bool;  (* a rhythm effect rode on it, and a cell draws that *)
 }
 
 (* The repeat signs read since the last bar line, waiting for the open
@@ -463,13 +523,106 @@ type builder = {
 }
 
 (* A beat that says its own length sets the length for the beats after it,
-   the way a [:n] does. *)
+   the way a [:n] does. [said] is the unit a trailing [.n] names; the tick
+   span is the unit's ticks, found now so a length the ticks cannot hold
+   fails here, before another beat reads it as the new default. *)
 let push_beat ?said notes state =
-  let span = Option.value said ~default:state.b_default in
-  { state with b_beats = { s_span = span; s_notes = notes } :: state.b_beats; b_default = span }
+  let unit = Option.value said ~default:state.b_default in
+  let dur = Plain unit in
+  match span_of_duration dur with
+  | Some span ->
+      Ok
+        { state with
+          b_beats = { s_dur = dur; s_span = span; s_notes = notes; s_marked = false }
+                    :: state.b_beats
+        ; b_default = unit
+        }
+  | None -> Error (Duration_outside_subset (Printf.sprintf ":%d" unit))
+
+(* The words inside an effect group, read the way the group reads: a dot
+   dots, [tu] with a number divides, [gr] takes the note before its time.
+   A group that holds both a dot and a tuplet is not a rhythm this draws:
+   the two change one beat's length different ways, and a cell that drew
+   both would draw neither. *)
+let effect_rhythm text : (int -> duration) option =
+  let words =
+    String.map (fun char -> if is_whitespace char then ' ' else char) text
+    |> String.split_on_char ' '
+    |> List.filter (fun word -> not (String.equal word ""))
+  in
+  let dots = List.filter dot_effect words in
+  let tuplets = List.filter tuplet_effect words in
+  let graces = List.filter grace_effect words in
+  let tuplet_divide = function
+    | [ "tu"; n ] -> int_of_string_opt n
+    | _ -> None
+  in
+  if List.length words = 0 then None
+  else
+    match dots, tuplets, graces with
+    | [ "dd" ], [], [] -> Some (fun unit -> Double_dotted unit)
+    | [ "d" ], [], [] -> Some (fun unit -> Dotted unit)
+    | [], _ :: _, [] when List.length words = 2 && List.exists tuplet_effect words -> (
+        match tuplet_divide words with
+        (* Three in the time of two is the only tuplet the ticks divide
+           exactly on every length the reader allows: a quarter is 64, an
+           eighth 32, a sixteenth 16. A five-tuplet (or any other count)
+           would read a length the ticks cannot hold -- a quarter is 96, and
+           96 times four is not divisible by five -- and pull every later
+           beat onto the wrong count. *)
+        | Some 3 -> Some (fun unit -> Tuplet (unit, 3))
+        | _ -> None)
+    | [], [], [ "gr" ] -> Some (fun _ -> Grace)
+    | _ -> None
+
+(* The span one of [d], [dd], [tu] or [gr] gives a beat, from the plain unit
+   the beat already had. A tuplet on a length the ticks cannot divide is not
+   drawn, and neither is a group the words do not say. *)
+let span_with_effect make_dur markup unit =
+  let dur = make_dur unit in
+  match span_of_duration dur with
+  | Some span -> Ok (dur, span)
+  | None -> Error (Unsupported_rhythm markup)
+
+(* [d] or [dd] rides the latest beat; a tuplet does too, when it can. Either
+   way the default is unchanged: the length after the beat is what it was. *)
+let apply_effect_to_latest state ~make_dur ~markup =
+  let ( let* ) = Result.bind in
+  let unit_of_sound sounding =
+    match sounding.s_dur with
+    | Plain unit -> Some unit
+    | Dotted unit -> Some unit
+    | Double_dotted unit -> Some unit
+    | Tuplet (unit, _) -> Some unit
+    | Grace | No_duration -> None
+  in
+  let apply sounding =
+    match unit_of_sound sounding with
+    | None -> Error (Unsupported_rhythm markup)
+    | Some unit ->
+        let* dur, span = span_with_effect make_dur markup unit in
+        Ok { sounding with s_dur = dur; s_span = span; s_marked = true }
+  in
+  match state.b_beats with
+  | beat :: earlier ->
+      let* beat = apply beat in
+      Ok { state with b_beats = beat :: earlier }
+  | [] -> (
+      match state.b_measures with
+      | (marks, beat :: earlier) :: measures ->
+          let* beat = apply beat in
+          Ok { state with b_measures = (marks, beat :: earlier) :: measures }
+      | (_, []) :: _ | [] -> Error Effect_without_note)
 
 let mark_latest_beat state =
-  let mark beat = { beat with s_notes = List.map (fun note -> { note with marked = true }) beat.s_notes } in
+  let mark (sounding : sounding) =
+    { sounding with
+      s_notes =
+        List.map
+          (fun (note : note) -> { note with marked = true })
+          sounding.s_notes
+    }
+  in
   match state.b_beats, state.b_measures with
   | beat :: earlier, _ -> Ok { state with b_beats = mark beat :: earlier }
   | [], (marks, beat :: earlier) :: measures ->
@@ -591,6 +744,7 @@ let string_count state =
   List.length (Option.value state.b_tuning ~default:default_tuning)
 
 let beat_of_word state word =
+  let ( let* ) = Result.bind in
   let limit = String.length word in
   if limit = 0 then Error (Not_a_note word)
   else
@@ -599,25 +753,38 @@ let beat_of_word state word =
       (match units_of_digits (String.sub word 1 (limit - 1)) with
        | Some units -> Ok { state with b_default = units }
        | None -> Error (Duration_outside_subset word))
-  | 'r' | 'R' when limit = 1 -> Ok (push_beat [] state)
+  | 'r' | 'R' when limit = 1 ->
+      (match ticks_of_said state.b_default with
+       | Some _ -> push_beat [] state
+       | None -> Error (Duration_outside_subset (Printf.sprintf ":%d" state.b_default)))
   | 'r' | 'R' when word.[1] = '.' ->
       (match units_of_digits (String.sub word 2 (limit - 2)) with
-       | Some units -> Ok (push_beat ~said:units [] state)
+       | Some units ->
+           (match ticks_of_said units with
+            | Some _ -> push_beat ~said:units [] state
+            | None -> Error (Duration_outside_subset (String.sub word 1 (limit - 1))))
        | None -> Error (Duration_outside_subset (String.sub word 1 (limit - 1))))
   (* A duration written after a beat's effects ([19.2{v f}.4]) arrives as a
      word of its own; it is that beat's length, and the length after it. *)
   | '.' when limit > 1 ->
       (match units_of_digits (String.sub word 1 (limit - 1)), state.b_beats with
-       | Some units, beat :: earlier ->
-           Ok { state with b_beats = { beat with s_span = units } :: earlier; b_default = units }
+       | Some unit, beat :: earlier ->
+           let dur = Plain unit in
+           (match span_of_duration dur with
+            | Some span ->
+                Ok
+                  { state with
+                    b_beats = { beat with s_dur = dur; s_span = span } :: earlier
+                  ; b_default = unit
+                  }
+            | None -> Error (Duration_outside_subset word))
        | Some _, [] -> Error (Not_a_note word)
        | None, _ -> Error (Duration_outside_subset word))
   | '0'..'9' | 'x' ->
       (match note_item word with
        | Ok (note, said) ->
-           Result.map
-             (fun note -> push_beat ?said [ note ] state)
-             (on_tuning ~strings:(string_count state) note)
+           let* note = on_tuning ~strings:(string_count state) note in
+           push_beat ?said [ note ] state
        | Error error -> Error (item_failure word error))
   | _ -> Error (Not_a_note word)
 
@@ -628,13 +795,19 @@ let started state =
    one before it ended. The bar's signs settle with it: an [\ro], the latest
    [\rc] count, and the [\ae] numbers as a set. *)
 let place_beats marks soundings =
-  let beats, units =
+  let beats, ticks =
     List.fold_left
       (fun (beats, start) sounding ->
-        { start; span = sounding.s_span; notes = sounding.s_notes } :: beats, start + sounding.s_span)
+        { start
+        ; span = sounding.s_span
+        ; dur = sounding.s_dur
+        ; marked = sounding.s_marked
+        ; notes = sounding.s_notes
+        }
+        :: beats, start + sounding.s_span)
       ([], 0) soundings
   in
-  { units
+  { ticks
   ; beats = List.rev beats
   ; repeat_start = marks.m_start
   ; repeat_end = marks.m_end
@@ -731,14 +904,30 @@ let read source =
               after)
     | Tk_unknown_directive name :: _ -> Error (Unknown_directive name)
     | Tk_quoted _ :: _ -> Error Quoted_without_title
-    | Tk_effect text :: rest ->
-        if effect_changes_length text then Error (Unsupported_rhythm text)
-        else
-          let* state = mark_latest_beat state in
-          step state rest
+    | Tk_effect text :: rest -> (
+        match effect_rhythm text with
+        | Some make_dur ->
+            (* [d], [dd], [tu] and [gr] change the latest beat's length. *)
+            let* state = apply_effect_to_latest state ~make_dur ~markup:text in
+            step state rest
+        | None ->
+            (* Markup that names a rhythm effect but does not form one of the
+               supported shapes is not drawn. *)
+            let words =
+              String.map (fun char -> if is_whitespace char then ' ' else char) text
+              |> String.split_on_char ' '
+              |> List.filter (fun word -> not (String.equal word ""))
+            in
+            if List.exists (fun word -> dot_effect word || tuplet_effect word || grace_effect word) words then
+              Error (Unsupported_rhythm text)
+            else (
+              (* Other markup decorates the note; the beat keeps its count. *)
+              let* state = mark_latest_beat state in
+              step state rest))
     | Tk_chord (inner, said) :: rest ->
         let* notes = chord_notes ~strings:(string_count state) inner in
-        step (push_beat ?said notes state) rest
+        let* state = push_beat ?said notes state in
+        step state rest
     | Tk_bar :: rest ->
         (* A sign on a bar with no beat marks a measure that is dropped, and
            with it the sign's meaning. *)

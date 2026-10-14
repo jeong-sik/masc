@@ -17,21 +17,22 @@ let failure : Score.failure Alcotest.testable =
 let shape (score : Score.t) =
   List.map
     (fun (measure : Score.measure) ->
-      ( measure.units
+      ( measure.ticks
       , List.map
           (fun (beat : Score.beat) ->
             ( beat.start
             , beat.span
-            , List.map
-                (fun (note : Score.note) ->
-                  Printf.sprintf "%s@%d%s" note.fret note.on_string
-                    (if note.marked then "*" else ""))
-                beat.notes ))
+            , ( beat.marked
+              , List.map
+                  (fun (note : Score.note) ->
+                    Printf.sprintf "%s@%d%s" note.fret note.on_string
+                      (if note.marked then "*" else ""))
+                  beat.notes ) ))
           measure.beats ))
     score.measures
 
 let music =
-  Alcotest.(result (list (pair int (list (triple int int (list string))))) failure)
+  Alcotest.(result (list (pair int (list (triple int int (pair bool (list string)))))) failure)
 
 let check_music label source expected =
   Alcotest.check music label (Ok expected) (Result.map shape (Score.read source))
@@ -47,58 +48,61 @@ let spike_riff =
 
 let test_spike_riff () =
   check_music "four measures, each beat on its count" spike_riff
-    [ 16, [ 0, 4, [ "0@6" ]; 4, 4, [ "3@6" ]; 8, 4, [ "5@6" ]; 12, 4, [ "3@6" ] ]
-    ; 12, [ 0, 2, [ "5@6" ]; 2, 2, [ "3@6" ]; 4, 4, [ "0@5" ]; 8, 4, [ "3@5" ] ]
-    ; 16, [ 0, 4, [ "5@5" ]; 4, 4, [ "3@5" ]; 8, 8, [ "2@4"; "0@3" ] ]
-    ; 16, [ 0, 16, [ "3@6"; "2@5"; "0@4"; "0@3"; "3@2"; "3@1" ] ]
+    [ 384, [ 0, 96, ( false, [ "0@6" ] ); 96, 96, ( false, [ "3@6" ] ); 192, 96, ( false, [ "5@6" ] )
+           ; 288, 96, ( false, [ "3@6" ] ) ]
+    ; 288, [ 0, 48, ( false, [ "5@6" ] ); 48, 48, ( false, [ "3@6" ] ); 96, 96, ( false, [ "0@5" ] )
+           ; 192, 96, ( false, [ "3@5" ] ) ]
+    ; 384, [ 0, 96, ( false, [ "5@5" ] ); 96, 96, ( false, [ "3@5" ] ); 192, 192, ( false, [ "2@4"; "0@3" ] ) ]
+    ; 384, [ 0, 384, ( false, [ "3@6"; "2@5"; "0@4"; "0@3"; "3@2"; "3@1" ] ) ]
     ]
 
 (* A rest takes its time and sounds nothing; [R] and [r.dur] are rests too. *)
 let test_rests_take_their_time () =
   check_music "a quarter rest between two notes" ":4 0.6 r 3.6"
-    [ 12, [ 0, 4, [ "0@6" ]; 4, 4, []; 8, 4, [ "3@6" ] ] ];
+    [ 288, [ 0, 96, ( false, [ "0@6" ] ); 96, 96, ( false, [] ); 192, 96, ( false, [ "3@6" ] ) ] ];
   check_music "an upper-case rest and one that says its length" ":4 R r.8 5.1"
-    [ 8, [ 0, 4, []; 4, 2, []; 6, 2, [ "5@1" ] ] ]
+    [ 192, [ 0, 96, ( false, [] ); 96, 48, ( false, [] ); 144, 48, ( false, [ "5@1" ] ) ] ]
 
 (* The length last said holds until another is: across a bar line, and after
    a note, a chord or a rest that said its own. *)
 let test_the_last_length_said_carries () =
   check_music "across a bar line" ":8 0.6 | 3.6"
-    [ 2, [ 0, 2, [ "0@6" ] ]; 2, [ 0, 2, [ "3@6" ] ] ];
+    [ 48, [ 0, 48, ( false, [ "0@6" ] ) ]; 48, [ 0, 48, ( false, [ "3@6" ] ) ] ];
   check_music "after a note that said its own" "0.6.8 3.6 5.6"
-    [ 6, [ 0, 2, [ "0@6" ]; 2, 2, [ "3@6" ]; 4, 2, [ "5@6" ] ] ];
+    [ 144, [ 0, 48, ( false, [ "0@6" ] ); 48, 48, ( false, [ "3@6" ] ); 96, 48, ( false, [ "5@6" ] ) ] ];
   check_music "after a chord that said its own" "(0.6 2.5).2 3.6"
-    [ 16, [ 0, 8, [ "0@6"; "2@5" ]; 8, 8, [ "3@6" ] ] ]
+    [ 384, [ 0, 192, ( false, [ "0@6"; "2@5" ] ); 192, 192, ( false, [ "3@6" ] ) ] ]
 
 (* alphaTab's own samples write the length after the effects: 19.2{v f}.4 *)
 let test_a_length_written_after_the_markup () =
   check_music "the half-note default gives way to the quarter" ":2 5.1{v f}.4 :8 7.1"
-    [ 6, [ 0, 4, [ "5@1*" ]; 4, 2, [ "7@1" ] ] ]
+    [ 144, [ 0, 96, ( false, [ "5@1*" ] ); 96, 48, ( false, [ "7@1" ] ) ] ]
 
 let test_a_dead_note () =
-  check_music "x is a fret" ":4 x.6 3.6" [ 8, [ 0, 4, [ "x@6" ]; 4, 4, [ "3@6" ] ] ]
+  check_music "x is a fret" ":4 x.6 3.6"
+    [ 192, [ 0, 96, ( false, [ "x@6" ] ); 96, 96, ( false, [ "3@6" ] ) ] ]
 
 (* Technique markup is not drawn, and the note it rode on is still there:
    same count, same string, same fret, marked. *)
 let test_markup_marks_the_note_and_keeps_it () =
   check_music "after the beat" ":4 3.6 {h} 5.6"
-    [ 8, [ 0, 4, [ "3@6*" ]; 4, 4, [ "5@6" ] ] ];
+    [ 192, [ 0, 96, ( false, [ "3@6*" ] ); 96, 96, ( false, [ "5@6" ] ) ] ];
   check_music "across a bar line it is still the beat before" ":4 3.1 | {v} 5.1"
-    [ 4, [ 0, 4, [ "3@1*" ] ]; 4, [ 0, 4, [ "5@1" ] ] ];
+    [ 96, [ 0, 96, ( false, [ "3@1*" ] ) ]; 96, [ 0, 96, ( false, [ "5@1" ] ) ] ];
   check_music "on one member of a chord" ":4 (3.1{v f} 2.2)"
-    [ 4, [ 0, 4, [ "3@1*"; "2@2" ] ] ];
+    [ 96, [ 0, 96, ( false, [ "3@1*"; "2@2" ] ) ] ];
   check_music "after a space, with parentheses of its own"
     ":1 (12.1 {sib} 14.2 {sib b (0 4)})"
-    [ 16, [ 0, 16, [ "12@1*"; "14@2*" ] ] ]
+    [ 384, [ 0, 384, ( false, [ "12@1*"; "14@2*" ] ) ] ]
 
 let test_what_is_read_and_not_played () =
   check_music "comments" ":4 3.1 // to the end of the line\n5.1 /* or between */ 7.1"
-    [ 12, [ 0, 4, [ "3@1" ]; 4, 4, [ "5@1" ]; 8, 4, [ "7@1" ] ] ];
+    [ 288, [ 0, 96, ( false, [ "3@1" ] ); 96, 96, ( false, [ "5@1" ] ); 192, 96, ( false, [ "7@1" ] ) ] ];
   check_music "the directives and the dot that ends them"
     "\\title \"a \\\"quoted\\\" title\" \\tempo 99999999999999999999 \\ts 4 4 . :4 0.6"
-    [ 4, [ 0, 4, [ "0@6" ] ] ];
+    [ 96, [ 0, 96, ( false, [ "0@6" ] ) ] ];
   check_music "a bar line with nothing before it, or two together" "| :4 0.6 | | 3.6 |"
-    [ 4, [ 0, 4, [ "0@6" ] ]; 4, [ 0, 4, [ "3@6" ] ] ]
+    [ 96, [ 0, 96, ( false, [ "0@6" ] ) ]; 96, [ 0, 96, ( false, [ "3@6" ] ) ] ]
 
 let test_the_tuning_names_the_lines () =
   let tuning source =
@@ -161,7 +165,7 @@ let test_endings_read_alphaTabs_parenthesized_form () =
    sounds on its count. *)
 let test_endings_stop_where_music_resumes () =
   check_music "the note after the endings keeps its beat" ":4 0.6 \\ae 1 3.6"
-    [ 8, [ 0, 4, [ "0@6" ]; 4, 4, [ "3@6" ] ] ];
+    [ 192, [ 0, 96, ( false, [ "0@6" ] ); 96, 96, ( false, [ "3@6" ] ) ] ];
   check_signs "and the bar keeps its ending" ":4 0.6 \\ae 1 3.6" [ false, None, [ 1 ] ]
 
 let test_all_marks_on_one_bar () =
@@ -197,6 +201,44 @@ let test_a_measure_the_pane_cannot_hold () =
   | Error (Too_wide _) -> ()
   | Error other -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
   | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
+
+(* Two beats whose texts are wider than the ticks they hold (two-letter
+   frets on sixteenths, a grace note ahead of a full beat) must not overwrite
+   each other: the second keeps its own cells, so the first is still there. *)
+let test_wide_note_text_does_not_overwrite_the_next_beat () =
+  let string_row lines =
+    (* The first string line after the measure-number row holds string 1,
+       the high E these frets are written on. *)
+    List.nth lines 1
+  in
+  match Alphatex.render_tab ~max_width:40 ":16 12.1 10.1" with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+    let row = string_row lines in
+    let content = String.sub row 2 (String.length row - 2) in
+    Alcotest.(check bool) "both two-letter frets are drawn, the first intact" true
+      (let rec has_both i =
+         i + 5 <= String.length content
+         && ((content.[i] = '1' && content.[i + 1] = '2' && content.[i + 2] = '-'
+              && content.[i + 3] = '1' && content.[i + 4] = '0')
+             || has_both (i + 1))
+       in
+       has_both 0);
+    (* A grace note with a two-letter fret must hold both cells, or the note
+       it leads into draws over its second digit. *)
+    (match Alphatex.render_tab ~max_width:40 ":4 12.1{gr} 5.1" with
+     | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+     | Ok lines ->
+       let row = string_row lines in
+       let content = String.sub row 2 (String.length row - 2) in
+       Alcotest.(check bool) "a two-letter grace note is not overwritten" true
+         (let rec has_grace i =
+            i + 4 <= String.length content
+            && ((content.[i] = '1' && content.[i + 1] = '2' && content.[i + 2] = '-'
+                 && content.[i + 3] = '5')
+                || has_grace (i + 1))
+          in
+          has_grace 0))
 
 (* The rhythm line rides under the lowest string: it is the beat letters
    [w h q e s] at their beats' first cells, with the same left lead and
@@ -403,13 +445,29 @@ let test_lengths_outside_the_subset () =
 
 (* A dot, a tuplet or a grace note changes how long the beat lasts. Passed
    over like other markup, every later note would sit on the wrong count. *)
+(* A dot, a double dot, a tuplet or a grace note changes the latest beat's
+   length. A dotted quarter is 144 ticks, a double-dotted half is 336, and a
+   triplet quarter is 64 -- all exact in the 384-tick whole note. A grace
+   note takes no time: the note after it still sits where the plain length
+   put it. *)
 let test_markup_that_changes_length () =
-  check_failure "a dotted note" ":4 0.6{d} 3.6" (Unsupported_rhythm "d");
-  check_failure "a tuplet" ":8 0.6{tu 3} 3.6 5.6" (Unsupported_rhythm "tu 3");
-  check_failure "a tuplet set for the notes after it" ":4 {tu 3} 3.1 4.1 5.1"
-    (Unsupported_rhythm "tu 3");
-  check_failure "a grace note" ":4 3.1{gr} 5.1" (Unsupported_rhythm "gr");
-  check_failure "inside a chord" ":4 (3.1{d} 2.2)" (Unsupported_rhythm "d")
+  check_music "a dotted note" ":4 0.6{d} 3.6"
+    [ 240, [ 0, 144, ( true, [ "0@6" ] ); 144, 96, ( false, [ "3@6" ] ) ] ];
+  check_music "a double-dotted note" ":2 0.6{dd} 3.6"
+    [ 528, [ 0, 336, ( true, [ "0@6" ] ); 336, 192, ( false, [ "3@6" ] ) ] ];
+  check_music "a triplet quarter" ":4 0.6{tu 3} 3.6 5.6"
+    [ 256, [ 0, 64, ( true, [ "0@6" ] ); 64, 96, ( false, [ "3@6" ] ); 160, 96, ( false, [ "5@6" ] ) ] ];
+  check_music "a grace note takes no time" ":4 3.1{gr} 5.1"
+    [ 96, [ 0, 0, ( true, [ "3@1" ] ); 0, 96, ( false, [ "5@1" ] ) ] ];
+  check_failure "a rhythm effect on a chord member cannot change its length"
+    ":4 (3.1{d} 2.2)" (Unsupported_rhythm "d");
+  check_failure "a tuplet the ticks cannot divide" ":4 0.6{tu 5} 3.6"
+    (Unsupported_rhythm "tu 5");
+  check_failure "a tuplet with no number" ":4 0.6{tu} 3.6" (Unsupported_rhythm "tu");
+  check_failure "a dot and a tuplet together" ":4 0.6{d tu 3} 3.6"
+    (Unsupported_rhythm "d tu 3");
+  check_failure "another tuplet the ticks cannot divide" ":4 0.6{tu 6} 3.6"
+    (Unsupported_rhythm "tu 6")
 
 let test_notes_that_cannot_be_placed () =
   check_failure "markup with no note before it" "{v} :4 3.1" Effect_without_note;
@@ -522,6 +580,8 @@ let () =
             test_a_drawn_tab_stays_inside_the_pane
         ; Alcotest.test_case "a measure the pane cannot hold" `Quick
             test_a_measure_the_pane_cannot_hold
+        ; Alcotest.test_case "wide note text does not overwrite the next beat" `Quick
+            test_wide_note_text_does_not_overwrite_the_next_beat
         ; Alcotest.test_case "a repeated tab stays inside the pane" `Quick
             test_a_repeated_tab_stays_inside_the_pane
         ; Alcotest.test_case "a repeated measure the pane cannot hold" `Quick

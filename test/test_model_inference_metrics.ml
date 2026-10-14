@@ -440,6 +440,7 @@ let test_single_model_success () =
     check (option int) "total_output_tokens" (Some 180) s.total_output_tokens;
     check int "usage samples" 2 s.usage_sample_count;
     check int "telemetry samples" 2 s.telemetry_sample_count;
+    check string "coverage status" "full" (M.coverage_status_to_string s.coverage_status);
     check int "total_tool_calls" 3 s.total_tool_calls;
     check bool "cost > 0" true
       (Option.value ~default:0.0 s.total_cost_usd > 0.0);
@@ -538,6 +539,10 @@ let test_error_turns_counted () =
     let em = Option.get error_model in
     check int "error_count" 1 em.error_count;
     check int "success_count" 0 em.success_count;
+    (* No successful turn leaves nothing missing, so the error-only arm has
+       to come before the full one. *)
+    check string "error-only coverage" "error_only"
+      (M.coverage_status_to_string em.coverage_status);
     check (option (float 0.001)) "error model latency unknown" None em.avg_latency_ms;
     check (option int) "error model input unknown" None em.total_input_tokens;
     check (option (float 0.001)) "error model cost unknown" None em.total_cost_usd)
@@ -748,7 +753,7 @@ let test_coverage_diagnostics_survive_aggregation () =
     ];
     let agg = compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
-    check string "coverage status" "none" s.coverage_status;
+    check string "coverage status" "none" (M.coverage_status_to_string s.coverage_status);
     check int "usage missing count" 1 s.usage_missing_count;
     check int "telemetry missing count" 1 s.telemetry_missing_count;
     check (option string) "primary coverage reason"
@@ -1577,7 +1582,7 @@ let zero_model_stats (model_id : string) ~entry_count
     telemetry_sample_count = entry_count;
     usage_missing_count = 0;
     telemetry_missing_count = 0;
-    coverage_status = "full";
+    coverage_status = M.Coverage_full;
     primary_coverage_stage = None;
     primary_coverage_reason = None;
     coverage_reason_counts = [];
@@ -1625,7 +1630,7 @@ let test_prompt_feedback_redacts_provider_model_identity () =
          ; total_output_tokens = Some 250
          ; usage_missing_count = 1
          ; telemetry_missing_count = 1
-         ; coverage_status = "partial"
+         ; coverage_status = M.Coverage_partial
     }
   in
   let agg : M.aggregate =
@@ -1642,6 +1647,7 @@ let test_prompt_feedback_redacts_provider_model_identity () =
   check bool "contains redacted lane label" true (String_util.contains_substring text lane);
   check bool "contains total turns" true (String_util.contains_substring text "total_turns=10");
   check bool "contains error rate" true (String_util.contains_substring text "error_rate=30.0%");
+  check bool "contains coverage" true (String_util.contains_substring text "coverage=partial");
   check bool "does not expose provider" false (String_util.contains_substring text "openrouter");
   check bool "does not expose raw model" false (String_util.contains_substring text "secret-model")
 

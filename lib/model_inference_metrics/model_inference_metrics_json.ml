@@ -89,7 +89,7 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
     ; "telemetry_sample_count", `Int s.telemetry_sample_count
     ; "usage_missing_count", `Int s.usage_missing_count
     ; "telemetry_missing_count", `Int s.telemetry_missing_count
-    ; "coverage_status", `String s.coverage_status
+    ; "coverage_status", `String (coverage_status_to_string s.coverage_status)
     ; "primary_coverage_stage", Json_util.string_opt_to_json s.primary_coverage_stage
     ; "primary_coverage_reason", Json_util.string_opt_to_json s.primary_coverage_reason
     ; ( "coverage_reason_counts"
@@ -209,7 +209,7 @@ let prompt_lane_line (index : int) (stats : model_stats) =
     (float_field stats.avg_tok_per_sec)
     (int_field stats.total_input_tokens)
     (int_field stats.total_output_tokens)
-    stats.coverage_status
+    (coverage_status_to_string stats.coverage_status)
 ;;
 
 let render_keeper_prompt_feedback (agg : aggregate) =

@@ -13,9 +13,9 @@ open Masc
 module Dos_tools = Dos_machine_tools.Make (Machine_dos_host_events)
 
 let dispatch ~base_path ?(agent = "dos-test") name assoc =
-  match Dos_tools.dispatch ~base_path ~agent ~name ~arguments:(`Assoc assoc) with
-  | Some result -> result
-  | None -> fail (name ^ " is not dispatched by the machine worker")
+  match Machine_controller_contract.dos_tool_of_name name with
+  | Some tool -> Dos_tools.dispatch ~base_path ~agent ~tool ~arguments:(`Assoc assoc)
+  | None -> fail (name ^ " is not a DOS tool")
 ;;
 
 (* Ejects whatever machine is there, as whoever holds it: the machine is

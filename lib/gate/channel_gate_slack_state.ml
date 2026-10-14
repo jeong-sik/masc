@@ -55,9 +55,9 @@ let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
    [status_json] folded startup and binding-store health into the same boolean
    while the registry read the socket alone. Those two facts have their own
    fields ([error], [binding_store_read_ok]) and their own effect on
-   [available]. *)
-let transport_connected () =
-  match Slack_socket_client.connection_state () with
+   [available]. It takes the state rather than reading it, so a status
+   reading that already holds the state does not read it again. *)
+let gateway_connected = function
   | Slack_gateway_state.Connected -> true
   | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
 
@@ -162,10 +162,11 @@ type status = {
   binding_store_error : string;
   configured_bindings : binding list;
   recent_audit : Yojson.Safe.t list;
-  bot_present : bool;
-  app_present : bool;
+  bot_token_present : bool;
+  app_token_present : bool;
   updated_at : string;
   last_ready : ready_info option;
+  pid : int;
 }
 
 let read_status ~audit_limit =
@@ -188,7 +189,7 @@ let read_status ~audit_limit =
   let available =
     app_present && bot_present && startup_ok && binding_store_read_ok
   in
-  let connected = transport_connected () in
+  let connected = gateway_connected gateway_state in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -222,10 +223,11 @@ let read_status ~audit_limit =
     binding_store_error;
     configured_bindings;
     recent_audit;
-    bot_present;
-    app_present;
+    bot_token_present = bot_present;
+    app_token_present = app_present;
     updated_at;
     last_ready = Atomic.get last_ready;
+    pid = (if available then Unix.getpid () else 0);
   }
 
 (* The fields both views share, written once so a field added to one view
@@ -253,8 +255,8 @@ let status_fields status =
   ; ("runtime_bindings_count", `Int (List.length status.configured_bindings))
   ; ("configured_bindings", `List (List.map binding_json status.configured_bindings))
   ; ("recent_audit", `List status.recent_audit)
-  ; ("bot_token_present", `Bool status.bot_present)
-  ; ("app_token_present", `Bool status.app_present)
+  ; ("bot_token_present", `Bool status.bot_token_present)
+  ; ("app_token_present", `Bool status.app_token_present)
   ; ("updated_at", `String status.updated_at)
   ; ( "last_ready_at"
     , `String
@@ -266,7 +268,7 @@ let status_fields status =
         (match status.last_ready with
          | Some r -> r.ready_bot_user_id
          | None -> "") )
-  ; ("pid", `Int (if status.available then Unix.getpid () else 0))
+  ; ("pid", `Int status.pid)
   ]
 
 let status_json ?(audit_limit = 10) () =
@@ -406,8 +408,8 @@ let bound_channels ~keeper_name =
 let connected () =
   (* The in-process gateway (RFC-0317) is the only Slack transport; its run
      loop publishes the typed connection state. Same definition [status_json]
-     reports — see [transport_connected]. *)
-  transport_connected ()
+     reports — see [gateway_connected]. *)
+  gateway_connected (Slack_socket_client.connection_state ())
 
 (* ---- Outbound REST (delegates to Slack_rest_client with the bot token) ---- *)
 

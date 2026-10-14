@@ -408,7 +408,7 @@ MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 �
 ### `imp`에게 브라우저와 GitHub 로그인 주기
 
 setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
-브라우저 줄과 GitHub 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄은
+브라우저, GitHub, 웹 검색 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄은
 해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
 모든 줄의 체크를 해제하면 아무것도 하지 않고 넘어갑니다(번호로 고르는 화면에서는 `0`을 입력하세요).
 
@@ -423,6 +423,13 @@ setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 �
   토큰은 복사본이 넘어가므로, 이 컴퓨터에서 토큰을 폐기하거나 갱신하면 `imp`가 끊깁니다.
   로그인이 없으면 `masc keeper-github login`이 일회용 코드를 보여 주고, 직접 승인하면 됩니다.
   이 줄은 `masc setup`이 끝난 뒤에 실행합니다. 로그인에는 `imp`가 먼저 있어야 하기 때문입니다.
+- **웹 검색.** `masc web-search-setup --base-path <워크스페이스>` 를 실행합니다. 아무것도 쓰지
+  않고 공급자별 상태, 지금 호출이 쓸 검색 순서, 키가 없는 공급자에 export 해야 하는 변수를 보여
+  줍니다. 키를 만들거나 저장하지는 않습니다. 서버는 자기 환경에서 키를 읽습니다. `masc setup` 이
+  시작하는 서버는 이 터미널의 환경에서 `MASC_BASE_PATH`, `MASC_CONFIG_DIR` 만 워크스페이스 값으로
+  바꾼 환경을 받고, 이미 실행 중인 서버는 가진 환경을 그대로 씁니다. 서버를 시작하는 곳에 키를
+  export 한 뒤에 다시 실행하세요. `masc web-search-setup --searxng-url <주소>` 는 다른 실행입니다.
+  `runtime.toml` 의 `[web_search]` 에 씁니다.
 - **Firefox 연결 두 줄(체크 안 됨).** Firefox 를 찾았을 때만 `imp`가 로그인해서 쓸 Firefox 를
   연결하는 줄이 둘 더 나옵니다. `masc browser-lane-setup` 이 여는 두 길입니다.
   - *BiDi*: MASC 가 전용 Firefox 를 로컬 포트의 원격 디버깅으로 직접 띄웁니다. 다시 불러올 것이
@@ -448,6 +455,8 @@ masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 # 부가기능 줄: 평소 쓰는 Firefox
 masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
+# 웹 검색 줄: 어느 공급자에 키가 있는지(아무것도 쓰지 않음)
+masc web-search-setup --base-path "$HOME/masc-workspace"
 # GitHub 줄, 로그인이 있을 때: gh 에 이미 있는 로그인을 imp 에게 줌(토큰은 표준 입력)
 gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
 # GitHub 줄, 로그인이 없을 때: 직접 승인하는 일회용 코드

@@ -419,7 +419,7 @@ voice-local-setup to give it a voice later." 빠른 설치에는 줄을 표시�
 | 항목 | 기본 | 이유 |
 |---|---|---|
 | automation 레인(`Geckodriver`, `Firefox`, `[browser.automation]` 쓰기) | 체크 | 로그인도 포트도 필요 없다. imp 가 공개 페이지를 읽는 일은 이것만으로 된다 |
-| 웹 검색 점검(`masc web-search-setup`, §8 5b — 아직 없음) | 체크 | 키가 없을 때 어느 공급자도 안 되는 이유를 보여준다. 키는 만들어 주지 않는다 |
+| 웹 검색 점검(`masc web-search-setup`, §8 5b — 구현됨 #43145) | 체크 | 키가 없을 때 어느 공급자도 안 되는 이유를 보여준다. 키는 만들어 주지 않는다 |
 | imp 의 GitHub 로그인 | 체크 | 이 컴퓨터의 `gh` 로그인이 있으면 체크 목록의 줄로 보여주고 확정 전에 알림을 먼저 찍는다(기본 체크). 없으면 `masc keeper-github login --keeper imp` 의 기기 코드를 사람이 승인한다. 체크를 풀거나 승인하지 않으면 아무것도 남지 않는다 |
 | BiDi 길 | 해제 | 인증 없는 디버깅 포트를 연다. 그 Firefox 에 사람이 한 번 로그인해야 쓸모가 있다 |
 | 확장 길 | 해제 | 브라우저를 켤 때마다 사람이 `about:debugging` 에서 불러야 한다 |
@@ -623,7 +623,9 @@ BiDi 길과 두 길 선택을 더한다.
    설치된 것에 맞춰 길을 보여준다. 나눠서 한다.
    - 5a. 브라우저(automation) 줄과 GitHub 줄. 구현됨(#43119). 같은 PR 이 `pick` 에
      "아무것도 고르지 않음"(`allow_empty`)을 더했다.
-   - 5b. 웹 검색 점검 줄. `masc web-search-setup` 이 main 에 들어온 뒤에 한다(#42821).
-   - 5c. 해제로 시작하는 줄(BiDi, 확장, Searxng). BiDi 와 확장은 지금 명령을 직접
-     실행해야 한다. Searxng 은 2b 가 먼저다.
+   - 5b. 웹 검색 점검 줄. 옵션 없이 `masc web-search-setup` 을 실행해 아무것도 쓰지
+     않고 공급자별 키 상태를 보여준다. 서버가 받을 환경(`MASC_BASE_PATH`,
+     `MASC_CONFIG_DIR` 제외)으로 실행한다. 구현됨(#43145).
+   - 5c. 해제로 시작하는 줄(BiDi, 확장, Searxng). BiDi 와 확장 줄은 구현됨(#43138).
+     Searxng 은 2b 가 먼저다.
 6. `Chromium`, `Stagehand_extension`: 값이 측정되지 않았으므로 마지막에 한다.

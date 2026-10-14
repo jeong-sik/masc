@@ -2499,9 +2499,9 @@ def quick_sandbox(binary, base_path, backend):
 
 
 # What imp can use once setup ends, offered as one checklist
-# (RFC setup-web-search-and-browser-lane section 4.3). The rows that give imp
-# something safe to do start marked; the ones that open a port or need a human
-# at every browser start do not. Nothing is installed or written until the
+# (RFC setup-web-search-and-browser-lane section 4.3). The browser, web search
+# and GitHub rows start marked; the ones that open a port or need a human at
+# every browser start do not. Nothing is installed or written until the
 # reader confirms the list, and a quick setup only prints it.
 #
 # The three browser keys are also the `--mode` names of `masc browser-lane-setup`,
@@ -2510,6 +2510,7 @@ AUTOMATION_TOOL = 'automation'
 BIDI_TOOL = 'bidi'
 EXTENSION_TOOL = 'extension'
 BROWSER_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL)
+WEB_SEARCH_TOOL = 'web-search'
 GITHUB_TOOL = 'github'
 IMP_KEEPER = 'imp'
 GITHUB_HOST = 'github.com'
@@ -2574,6 +2575,12 @@ def browser_lane_command(base, modes):
 
 def automation_command(base):
     return browser_lane_command(base, (AUTOMATION_TOOL,))
+
+
+def web_search_command(base):
+    """With no option `masc web-search-setup` writes nothing: it prints each
+    provider's state and the variable to export for one that has no key."""
+    return 'masc web-search-setup --base-path ' + shlex.quote(str(base))
 
 
 def github_command(base, login):
@@ -2735,9 +2742,16 @@ def github_row(base):
                    github_command(base, login), checked=True, notice=notice, host_login=login)
 
 
+def web_search_row(base):
+    # "writes nothing" comes first: the picker cuts a line at the terminal width,
+    # and a row that starts marked must not read as one that writes.
+    return ToolRow(WEB_SEARCH_TOOL, 'Web search check (writes nothing) · shows which providers have a key',
+                   web_search_command(base), checked=True)
+
+
 def imp_tool_rows(binary, base):
     """The checklist's rows. Each is looked up on its own: a binary that cannot
-    inspect the browser tools still offers the GitHub login."""
+    inspect the browser tools still offers the web search check and the GitHub login."""
     rows = []
     try:
         rows += browser_rows(binary, base)
@@ -2745,6 +2759,7 @@ def imp_tool_rows(binary, base):
         print(terminal_text(str(error)) + '\nRun ' + automation_command(base) + ' to give imp a browser later.',
               file=sys.stderr)
     rows.append(github_row(base))
+    rows.append(web_search_row(base))
     return rows
 
 
@@ -2836,6 +2851,35 @@ def prepare_browser_lane(binary, base, modes, port=None):
         note_running_server(binary, base, port)
 
 
+# `masc setup` gives the server it starts the workspace's own values for these
+# two in place of the terminal's (Config_dir_resolver.environment_for_workspace).
+# A command that reports what that server will read is run without them, so it
+# opens the same runtime.toml the server will and not one MASC_CONFIG_DIR names.
+WORKSPACE_OWNED_ENVIRONMENT = ('MASC_BASE_PATH', 'MASC_CONFIG_DIR')
+
+
+def server_like_environment():
+    return {key: value for key, value in os.environ.items() if key not in WORKSPACE_OWNED_ENVIRONMENT}
+
+
+def check_web_search(binary, base):
+    """Show which web search providers have a key.
+
+    The command is given only the workspace, so it writes nothing, and it never
+    creates a key: keys are read from the environment of the process that starts
+    the server, which `masc setup` starts from this one. A failure only means
+    the reader did not get to look, so it does not end the journey.
+    """
+    try:
+        failed = subprocess.run([str(binary), 'web-search-setup', '--base-path', str(base)],
+                                stdout=sys.stderr, env=server_like_environment()).returncode != 0
+    except OSError as error:
+        print(terminal_text(str(error)), file=sys.stderr)
+        failed = True
+    if failed:
+        print('Web search was not checked. Run ' + web_search_command(base) + ' to look again.', file=sys.stderr)
+
+
 def choose_imp_tools(binary, base):
     """The rows the reader leaves marked. Nothing runs here."""
     rows = imp_tool_rows(binary, base)
@@ -2920,8 +2964,11 @@ def select_imp_tools(binary, base, port=None):
         confirmed = choose_imp_tools(binary, base)
     except SetupError as error:
         print(terminal_text(str(error)) + '\nContinuing without them. Later: ' + automation_command(base)
-              + ' gives imp a browser, and ' + github_command(base, None) + ' signs it into GitHub.', file=sys.stderr)
+              + ' gives imp a browser, ' + web_search_command(base) + ' shows which web search providers have a key, and '
+              + github_command(base, None) + ' signs it into GitHub.', file=sys.stderr)
         return ()
+    if any(row.key == WEB_SEARCH_TOOL for row in confirmed):
+        check_web_search(binary, base)
     modes = tuple(mode for mode in BROWSER_MODES if any(row.key == mode for row in confirmed))
     if modes:
         try:

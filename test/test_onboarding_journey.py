@@ -1245,7 +1245,7 @@ class ImpTools(unittest.TestCase):
     def test_found_programs_make_a_browser_row_that_names_the_command(self):
         with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')):
             rows = SETUP.imp_tool_rows('/bin/masc', '/work space')
-        self.assertEqual([row.key for row in rows], ['automation', 'bidi', 'extension', 'github'])
+        self.assertEqual([row.key for row in rows], ['automation', 'bidi', 'extension', 'github', 'web-search'])
         self.assertIn('geckodriver and Firefox found', rows[0].label)
         self.assertEqual(rows[0].command,
                          "masc browser-lane-setup --mode automation --base-path '/work space'")
@@ -1287,14 +1287,14 @@ class ImpTools(unittest.TestCase):
                 with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
                         contextlib.redirect_stderr(io.StringIO()) as printed:
                     rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
-                self.assertEqual([row.key for row in rows], ['github'])
+                self.assertEqual([row.key for row in rows], ['github', 'web-search'])
                 self.assertIn('unreadable install action', printed.getvalue())
 
     def test_a_catalog_the_binary_cannot_answer_is_not_read_as_missing_and_leaves_the_github_row(self):
         with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1), completed('', 1)]), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
-        self.assertEqual([row.key for row in rows], ['github'])
+        self.assertEqual([row.key for row in rows], ['github', 'web-search'])
         self.assertIn('left out of this list', printed.getvalue())
 
     def test_the_checklist_starts_marked_and_may_come_back_with_nothing(self):
@@ -1307,10 +1307,14 @@ class ImpTools(unittest.TestCase):
         self.assertEqual([row.key for row in confirmed], ['automation'])
         title, labels = picker.call_args.args[:2]
         self.assertTrue(title.startswith('5 ·'))
-        self.assertEqual(len(labels), 4)
-        # Only the recommended rows start marked: the automation lane and the
-        # GitHub login. The two Firefox routes are a thing to choose.
-        self.assertEqual(picker.call_args.kwargs, dict(multiple=True, defaults=[0, 3], allow_empty=True))
+        self.assertEqual(len(labels), 5)
+        # Only the recommended rows start marked: the automation lane, the
+        # GitHub login and the web search check. The two Firefox routes are a
+        # thing to choose.
+        recommended = [i for i, label in enumerate(labels)
+                       if any(word in label for word in ('geckodriver and Firefox found', 'GitHub', 'Web search'))]
+        self.assertEqual(len(recommended), 3)
+        self.assertEqual(picker.call_args.kwargs, dict(multiple=True, defaults=recommended, allow_empty=True))
         self.assertEqual(run.call_args_list[-2].args[0], SETUP_ARGV)
 
     def test_unmarking_every_row_confirms_nothing_and_runs_nothing(self):
@@ -1329,6 +1333,120 @@ class ImpTools(unittest.TestCase):
             confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
         self.assertEqual([row.key for row in confirmed], ['github'])
         self.assertEqual([call.args[0][1] for call in run.call_args_list], ['prerequisite-actions'] * 2)
+
+    # The web search row. Found by what its label says: where it stands in the
+    # list is the screen's business, and these cases are about what it does.
+    WEB_SEARCH_ARGV = ['/bin/masc', 'web-search-setup', '--base-path', '/workspace']
+
+    @staticmethod
+    def marking(*words):
+        """A `pick` that marks the rows whose label has any of [words]."""
+        return lambda title, labels, **kw: [i for i, label in enumerate(labels) if any(w in label for w in words)]
+
+    def test_the_web_search_row_starts_marked_and_names_a_command_that_writes_nothing(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')):
+            rows = {row.key: row for row in SETUP.imp_tool_rows('/bin/masc', '/work space')}
+        row = rows['web-search']
+        self.assertTrue(row.checked)
+        self.assertEqual(row.command, "masc web-search-setup --base-path '/work space'")
+        # No option that writes: only --base-path, so the command stays a look.
+        self.assertNotIn('--searxng-url', row.command)
+        self.assertNotIn('--provider', row.command)
+        # Early in the label: a narrow picker cuts the end of a line, and a row
+        # that starts marked must not read as one that writes.
+        self.assertIn('writes nothing', row.label[:40])
+
+    def test_a_marked_web_search_row_runs_the_command_with_only_the_base_path(self):
+        replies = self.catalogs('geckodriver', 'firefox') + [completed()]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', side_effect=self.marking('Web search')), \
+                contextlib.redirect_stderr(io.StringIO()):
+            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
+        self.assertEqual([row.key for row in confirmed], ['web-search'])
+        self.assertEqual(run.call_args_list[-1].args[0], self.WEB_SEARCH_ARGV)
+
+    def test_a_check_that_succeeds_says_nothing_more_and_shows_the_commands_output(self):
+        buffer = io.StringIO()
+        with patch.object(SETUP.subprocess, 'run', return_value=completed()) as run, \
+                contextlib.redirect_stderr(buffer):
+            SETUP.check_web_search('/bin/masc', '/workspace')
+        self.assertEqual(buffer.getvalue(), '')
+        # The command's table goes where the wizard's own lines go.
+        self.assertIs(run.call_args.kwargs['stdout'], buffer)
+
+    def test_the_check_is_run_in_the_environment_the_server_will_have(self):
+        # `masc setup` gives the server it starts the workspace's own
+        # MASC_BASE_PATH and MASC_CONFIG_DIR. The command resolves its file from
+        # those two before the --base-path, so left in, they would make the
+        # check read another runtime.toml than the server does. Keys stay.
+        environment = {'PATH': '/usr/bin', 'MASC_BASE_PATH': '/elsewhere', 'MASC_CONFIG_DIR': '/elsewhere/config',
+                       'TAVILY_API_KEY': 'tvly-fixture'}
+        with patch.dict(os.environ, environment, clear=True), \
+                patch.object(SETUP.subprocess, 'run', return_value=completed()) as run, \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.check_web_search('/bin/masc', '/workspace')
+        given = run.call_args.kwargs['env']
+        self.assertNotIn('MASC_BASE_PATH', given)
+        self.assertNotIn('MASC_CONFIG_DIR', given)
+        self.assertEqual((given['PATH'], given['TAVILY_API_KEY']), ('/usr/bin', 'tvly-fixture'))
+
+    def test_an_unmarked_web_search_row_runs_nothing(self):
+        # Only the GitHub row is marked, which waits for imp: nothing runs here.
+        github_only = lambda title, labels, **kw: [i for i, label in enumerate(labels) if 'GitHub' in label]
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')) as run, \
+                patch.object(SETUP, 'pick', side_effect=github_only), \
+                contextlib.redirect_stderr(io.StringIO()):
+            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
+        self.assertEqual([row.key for row in confirmed], ['github'])
+        self.assertNotIn('web-search-setup', [call.args[0][1] for call in run.call_args_list])
+
+    def test_a_refused_web_search_check_does_not_end_setup_and_says_how_to_look_again(self):
+        replies = self.catalogs('geckodriver', 'firefox') + [completed('', 1)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                patch.object(SETUP, 'pick', side_effect=self.marking('Web search')), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
+        self.assertEqual([row.key for row in confirmed], ['web-search'])
+        self.assertIn('Web search was not checked. Run masc web-search-setup --base-path /workspace to look again.',
+                      printed.getvalue())
+
+    def test_a_binary_that_cannot_start_the_check_does_not_end_setup(self):
+        replies = self.catalogs('geckodriver', 'firefox') + [OSError('exec format error')]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                patch.object(SETUP, 'pick', side_effect=self.marking('Web search')), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
+        self.assertEqual([row.key for row in confirmed], ['web-search'])
+        self.assertIn('exec format error', printed.getvalue())
+        self.assertIn('Web search was not checked', printed.getvalue())
+
+    def test_the_web_search_row_does_not_hold_back_the_browser_rows(self):
+        # Confirmed together, the check runs and then the browser command does:
+        # the check is a look and cannot take the write down with it.
+        replies = self.catalogs('geckodriver', 'firefox') + [completed('', 1)] + self.catalogs('geckodriver', 'firefox') \
+            + [completed()]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', side_effect=self.marking('geckodriver and Firefox found', 'Web search')), \
+                contextlib.redirect_stderr(io.StringIO()):
+            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
+        self.assertEqual([row.key for row in confirmed], ['automation', 'web-search'])
+        self.assertEqual(run.call_args_list[-1].args[0], SETUP_ARGV)
+
+    def test_the_quick_setup_lists_the_web_search_row_marked_and_runs_nothing_of_it(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')) as run, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.show_imp_tools('/bin/masc', '/workspace')
+        self.assertRegex(printed.getvalue(), r'\[x\] Web search')
+        self.assertIn('masc web-search-setup --base-path /workspace', printed.getvalue())
+        self.assertNotIn('web-search-setup', [call.args[0][1] for call in run.call_args_list])
+
+    def test_a_cancelled_checklist_names_the_web_search_command_for_later(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')) as run, \
+                patch.object(SETUP, 'pick', side_effect=SETUP.SetupError('setup cancelled')), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.select_imp_tools('/bin/masc', '/workspace')
+        self.assertIn('masc web-search-setup --base-path /workspace', printed.getvalue())
+        self.assertNotIn('web-search-setup', [call.args[0][1] for call in run.call_args_list])
 
     def test_a_cancel_continues_without_the_tools(self):
         with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')) as run, \
@@ -1573,7 +1691,7 @@ class FirefoxRoutes(unittest.TestCase):
 
     def test_firefox_found_shows_both_routes_unmarked_with_their_commands(self):
         rows = {row.key: row for row in self.rows()}
-        self.assertEqual([key for key in rows], ['automation', 'bidi', 'extension', 'github'])
+        self.assertEqual([key for key in rows], ['automation', 'bidi', 'extension', 'github', 'web-search'])
         self.assertEqual((rows['automation'].checked, rows['github'].checked), (True, True))
         self.assertEqual((rows['bidi'].checked, rows['extension'].checked), (False, False))
         self.assertEqual(rows['bidi'].command,
@@ -1596,12 +1714,12 @@ class FirefoxRoutes(unittest.TestCase):
         # Recommending a browser is not this step's job, and a Zen-only computer
         # is not detected: with nothing to attach to there is nothing to ask.
         rows = self.rows(ready_firefox=False)
-        self.assertEqual([row.key for row in rows], ['automation', 'github'])
+        self.assertEqual([row.key for row in rows], ['automation', 'github', 'web-search'])
 
     def test_a_missing_geckodriver_does_not_hide_the_routes(self):
         # The routes need Firefox, not geckodriver.
         rows = self.rows(ready_driver=False)
-        self.assertEqual([row.key for row in rows], ['automation', 'bidi', 'extension', 'github'])
+        self.assertEqual([row.key for row in rows], ['automation', 'bidi', 'extension', 'github', 'web-search'])
 
     def run_modes(self, picked, replies=None):
         # The rows look at both programs once. Preparing looks again at what
@@ -1751,7 +1869,7 @@ class FirefoxRoutes(unittest.TestCase):
         with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
-        self.assertEqual([row.key for row in rows], ['bidi', 'extension', 'github'])
+        self.assertEqual([row.key for row in rows], ['bidi', 'extension', 'github', 'web-search'])
         self.assertIn('left out of this list', printed.getvalue())
 
     def test_an_unreadable_firefox_catalog_leaves_the_automation_row_out_and_no_route(self):
@@ -1759,7 +1877,7 @@ class FirefoxRoutes(unittest.TestCase):
         with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
                 contextlib.redirect_stderr(io.StringIO()):
             rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
-        self.assertEqual([row.key for row in rows], ['github'])
+        self.assertEqual([row.key for row in rows], ['github', 'web-search'])
 
     def test_a_row_has_to_say_whether_it_starts_marked(self):
         # No default: a row that forgot would start marked, and the rows that
@@ -1787,7 +1905,7 @@ class FirefoxRoutes(unittest.TestCase):
         lines = printed.getvalue().splitlines()
         marked = [line for line in lines if line.startswith('  [x] ')]
         unmarked = [line for line in lines if line.startswith('  [ ] ')]
-        self.assertEqual((len(marked), len(unmarked)), (2, 2))
+        self.assertEqual((len(marked), len(unmarked)), (3, 2))
         self.assertTrue(all('(BiDi)' in line or 'add-on' in line for line in unmarked))
         self.assertIn('--mode bidi', printed.getvalue())
         self.assertIn('--mode extension', printed.getvalue())
@@ -2188,6 +2306,77 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
         self.assertIn('is not an executable file now', printed)
         self.assertIn(str(gone), printed)
         self.assertIn('--geckodriver', printed)
+
+    def run_web_search_check(self, root, base, tools, **extra_environment):
+        with open(root / 'stderr.txt', 'w') as sink, \
+                patch.dict(os.environ, dict(isolated_environment(root, tools), **extra_environment), clear=True), \
+                contextlib.redirect_stderr(sink):
+            SETUP.check_web_search(BINARY, str(base))
+        return (root / 'stderr.txt').read_text()
+
+    def test_the_web_search_check_shows_each_provider_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            tools, base = self.workspace(root)
+            runtime = base / '.masc/config/runtime.toml'
+            before = runtime.read_text()
+            files = sorted(str(path.relative_to(root)) for path in root.rglob('*') if path.name != 'stderr.txt')
+            printed = self.run_web_search_check(root, base, tools)
+            self.assertEqual(runtime.read_text(), before)
+            self.assertEqual(files, sorted(str(path.relative_to(root)) for path in root.rglob('*')
+                                           if path.name != 'stderr.txt'), 'no file appeared')
+        self.assertIn('Web search settings in', printed)
+        self.assertIn('Providers, as this shell and runtime.toml leave them:', printed)
+        # The isolated environment holds no key, so the table says what to export.
+        line = next(line for line in printed.splitlines() if line.lstrip().startswith('tavily'))
+        self.assertIn('missing', line)
+        self.assertIn('TAVILY_API_KEY', line)
+        self.assertNotIn('Web search was not checked', printed)
+
+    def test_a_key_exported_where_the_wizard_runs_is_the_one_the_check_sees(self):
+        # `masc setup` starts the server from this environment, so a key here
+        # is the key the server will have.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            tools, base = self.workspace(root)
+            printed = self.run_web_search_check(root, base, tools, TAVILY_API_KEY='tvly-fixture')
+        line = next(line for line in printed.splitlines() if line.lstrip().startswith('tavily'))
+        self.assertIn('ready', line)
+        self.assertNotIn('tvly-fixture', printed, 'a key is never printed')
+
+    def test_an_exported_config_dir_does_not_decide_which_runtime_toml_is_shown(self):
+        # The server `masc setup` starts reads the workspace's file, so the
+        # check shows that one even when the terminal exports MASC_CONFIG_DIR.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            tools, base = self.workspace(root)
+            other = root / 'other-config'
+            other.mkdir()
+            (other / 'runtime.toml').write_text(self.RUNTIME + '[web_search]\nsearxng_url = "http://other.invalid:8080"\n')
+            printed = self.run_web_search_check(root, base, tools, MASC_CONFIG_DIR=str(other))
+        self.assertIn(str(base / '.masc/config/runtime.toml'), printed)
+        self.assertNotIn('other.invalid', printed)
+
+    def test_a_workspace_without_a_runtime_toml_is_said_and_the_journey_goes_on(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            tools, base = self.workspace(root)
+            (base / '.masc/config/runtime.toml').unlink()
+            # The command's own refusal goes to its standard error, which is
+            # this process's descriptor 2 and not the redirected sys.stderr.
+            saved = os.dup(2)
+            try:
+                with open(root / 'command-stderr.txt', 'w') as sink:
+                    os.dup2(sink.fileno(), 2)
+                    try:
+                        printed = self.run_web_search_check(root, base, tools)
+                    finally:
+                        os.dup2(saved, 2)
+            finally:
+                os.close(saved)
+            printed += (root / 'command-stderr.txt').read_text()
+        self.assertIn('No masc workspace', printed)
+        self.assertIn('Web search was not checked. Run masc web-search-setup --base-path', printed)
 
     def test_the_github_hand_over_reaches_the_keeper_lookup_with_the_token_on_standard_input(self):
         # No imp exists in this scratch workspace, so the command ends at

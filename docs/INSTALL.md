@@ -442,8 +442,8 @@ For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and 
 ### Giving `imp` a browser and a GitHub login
 
 After the sandbox, the setup journey asks **5 · Give imp tools (optional)**. It is
-one checklist. The Browser and GitHub rows start marked; the two rows that connect
-a Firefox you choose do not. Nothing is installed or written until you confirm it. Unmark every row to continue without any of them (on a terminal
+one checklist. The Browser, GitHub and Web search rows start marked; the two rows
+that connect a Firefox you choose do not. Nothing is installed or written until you confirm it. Unmark every row to continue without any of them (on a terminal
 that shows numbers, type `0`).
 
 - **Browser.** `imp` reads web pages in a Firefox of its own, driven through
@@ -461,6 +461,15 @@ that shows numbers, type `0`).
   computer disconnects `imp`. Without a login, `masc keeper-github login` shows
   a one-time code for you to approve. This row runs after `masc setup`, because
   the login needs `imp` to exist.
+- **Web search.** Runs `masc web-search-setup --base-path <workspace>`, which
+  writes nothing. It prints each provider's state, the search order a call would
+  use now, and the variable to export for a provider that has no key. A key is
+  never created or stored: the server reads it from its own environment. The
+  server `masc setup` starts gets this terminal's environment with
+  `MASC_BASE_PATH` and `MASC_CONFIG_DIR` set to the workspace's, and a server
+  that is already running keeps the one it has. After exporting a key where the
+  server starts, run the command again. `masc web-search-setup --searxng-url
+  <url>` is a different run: it writes `[web_search]` into `runtime.toml`.
 - **Firefox routes (not marked).** When Firefox is found, two more rows connect
   a Firefox that `imp` can log in with, the same two routes
   [`masc browser-lane-setup`](../connectors/browser/host/README.md) offers:
@@ -490,6 +499,8 @@ masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 # Add-on row: your everyday Firefox
 masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
+# Web search row: which providers have a key (writes nothing)
+masc web-search-setup --base-path "$HOME/masc-workspace"
 # GitHub row, with a login: gives imp the login gh already has (token on standard input)
 gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
 # GitHub row, without a login: a one-time code you approve

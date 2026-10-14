@@ -57,6 +57,25 @@ let read_listing_header ~path ~size =
   end
 ;;
 
+(* The log is append-only and grows without bound, so an explicit read returns
+   its tail rather than the whole file (task-2309). The read is the last
+   [log_read_limit] bytes, starting at a line boundary so the first line is
+   whole; a log at or below the bound is returned as written. The listing's
+   size is the whole file, so a client can tell a tail from the whole. *)
+let log_read_limit = 65536
+
+let read_log_tail ~path ~size =
+  if size <= log_read_limit
+  then Fs_compat.load_file path
+  else begin
+    let from = size - log_read_limit in
+    let text = Fs_compat.read_slice ~path ~from ~len:log_read_limit in
+    match String.index_opt text '\n' with
+    | Some i -> String.sub text (i + 1) (String.length text - i - 1)
+    | None -> text
+  end
+;;
+
 (* One listed resource per page, or [None] when the name is not a valid page
    topic or the file vanished. The URI comes from the validated topic, never
    from concatenating the file name. The size is a stat, so a page's body is
@@ -109,8 +128,8 @@ let page_resource path : Mcp_server.mcp_resource option =
    contributes a stat and, at most, a bounded header prefix, and the log is
    sized by stat. The TUI Resources screen follows [nextCursor], so a listing
    longer than one page is no longer cut off at its end, where the wiki entries
-   sort. Still open: an explicit [masc://wiki/log] read returns the whole file,
-   with no cap or tail read. *)
+   sort. An explicit [masc://wiki/log] read now returns the log's tail
+   ([log_read_limit]) instead of the whole file. *)
 let wiki_resources ~base_path : Mcp_server.mcp_resource list =
   run_blocking_resource_io (fun () ->
     let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in
@@ -432,11 +451,16 @@ let handle_read_resource_eio state id params =
                   | None when String.equal topic wiki_log_topic ->
                     (* The log is not a page, so the listing above has no
                        entry for it. The path is the constant file name, never
-                       the client's topic. *)
+                       the client's topic. The log is append-only and grows
+                       without bound, so the read returns its tail rather than
+                       the whole file (task-2309). *)
                     let log_path = Filename.concat wiki_dir Wiki_journal.log_file in
-                    (match Fs_compat.load_file log_path with
-                     | content -> ("text/markdown", Some content)
-                     | exception Sys_error _ -> ("text/markdown", None))
+                    (match Fs_compat.file_size log_path with
+                     | None -> ("text/markdown", None)
+                     | Some size ->
+                       (match read_log_tail ~path:log_path ~size with
+                        | text -> ("text/markdown", Some text)
+                        | exception Sys_error _ -> ("text/markdown", None)))
                   | None -> ("text/markdown", None)
                 end
               end)

@@ -231,6 +231,8 @@ module For_testing : sig
     ?before_child_dispatch:(unit -> unit) ->
     ?before_plan_execution:(unit -> unit) ->
     ?after_node_observation:(Keeper_tool_plan_executor.node_result -> unit) ->
+    ?before_child_result_publication:(unit -> unit) ->
+    ?before_child_submission_publication:(unit -> unit) ->
     plan:Keeper_tool_plan.t ->
     ?journal:Keeper_tool_execution_journal.worker ->
     tool_name:string -> request_id:string ->

@@ -1283,6 +1283,8 @@ let rec async_worker_result
       ?before_child_dispatch
       ?before_plan_execution
       ?after_node_observation
+      ?before_child_result_publication
+      ?before_child_submission_publication
       ~plan
       ?journal
       ~tool_name
@@ -1332,6 +1334,10 @@ let rec async_worker_result
   | Error rejection,None -> Keeper_msg_async.worker_finished (Tool_result.make_err ~tool_name ~start_time
       ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect rejection.detail)
   | Ok (),_ ->
+  (* These worker-local joins come only from the protected acceptance factory
+     and the canonical reader's typed unavailable branch, never tool text. *)
+  let accepted_children = ref [] in
+  let unavailable_results = ref [] in
   let dispatch_compiled ~attempt ~target ~tool_use_id:_ ~node ~schedule ~input:_ =
     let start_time = Tool_timing.start () in
     let refuse detail = Executor.dispatch_result
@@ -1363,16 +1369,29 @@ let rec async_worker_result
              ~tool_name:(Plan.child_tool_name child.child)
              ~tool_kind:Keeper_tool_descriptor.Async_composition_tool ~parent_invocation
              ~admission:(Original_child {attempt;parent_plan=plan;origin;context})
+             ~on_child_accepted:(fun () -> accepted_children := node.id :: !accepted_children)
+             ?before_result_publication:before_child_submission_publication
              ~config ~meta ~capability_authority ~publication_recovery
              ~ctx_snapshot ~turn_context ?clock () in
          Option.iter (fun after -> after result) after_child_submission;
          Executor.dispatch_result result)
     | Plan.Child_result child ->
       (match Journal.child_result_binding attempt ~plan with
-       | Error error -> refuse (Journal.error_to_string error)
+       | Error error ->
+         unavailable_results := node.id :: !unavailable_results;
+         refuse (Journal.error_to_string error)
        | Ok binding ->
-         let observed = Keeper_composition_dependency_result.handle ~config ~meta
-             ~args:(`Assoc ["binding",Keeper_composition_dependency.composition_to_json binding]) in
+         let read = match before_child_result_publication with
+           | None -> Keeper_composition_dependency_result.read
+           | Some before_manifest_publication ->
+             Keeper_composition_dependency_result.For_testing.read
+               ~after_owner_read:(fun _ -> ()) ~before_manifest_publication in
+         let observed = match read ~config ~meta
+             ~args:(`Assoc ["binding",Keeper_composition_dependency.composition_to_json binding]) with
+           | Ok observed -> observed
+           | Error observed ->
+             unavailable_results := node.id :: !unavailable_results;
+             observed in
          let data = match observed.data with Some data -> data | None -> `String observed.raw_output in
          let result = match observed.disposition with
            | Tool_result.Deferred () -> Tool_result.make_deferred ~tool_name:node.tool_name ~start_time
@@ -1507,31 +1526,29 @@ let rec async_worker_result
        | Executor.Run_journal_rejected _ | Plan_execution_failed _
        | Node_observation_failed _ | Outer_completion_mismatch _ -> None)
   in
-  let interrupted = match continuation,execution with
-    | Some _,Error failure ->
+  let interrupted = match execution with
+    | Error failure ->
       (match failure.Executor.cause with
        | Executor.Tool_did_not_complete node ->
          (match node.execution_origin with
           | Executor.Dispatch_refused -> Some (Tool_result.message node.result)
           | Executor.Fresh_dispatch | Executor.Retained_completion ->
-          match Plan.contract plan node.node_id with
+          if List.exists (Plan.Node_id.equal node.node_id) !unavailable_results
+              || List.exists (Plan.Node_id.equal node.node_id) !accepted_children
+          then Some (Tool_result.message node.result) else
+          match continuation with
           | None -> None
-          | Some {target=Plan.Descriptor_target _;_} -> None
+          | Some _ ->
+          match Plan.contract plan node.node_id with
+          | None | Some {target=(Plan.Descriptor_target _ | Plan.Child_result _);_} -> None
           | Some {target=Plan.Child_submission _;_} ->
             (match node.result with
              | Tool_result.Failed _ -> Some (Tool_result.message node.result)
-             | Tool_result.Completed _ | Tool_result.Deferred _ -> None)
-          | Some {target=Plan.Child_result _;_} ->
-            (match node.result with
-             | Tool_result.Failed {class_=Workflow_rejection;_} ->
-               Some (Tool_result.message node.result)
-             | Tool_result.Failed {class_=(Dependency_unavailable | Policy_rejection
-                 | Runtime_failure | Operator_cancelled);_}
              | Tool_result.Completed _ | Tool_result.Deferred _ -> None))
        | Run_journal_rejected error -> Some (Journal.error_to_string error)
        | Node_observation_failed {detail;_} -> Some detail
        | Plan_execution_failed _ | Outer_completion_mismatch _ -> None)
-    | (None | Some _),(Ok _ | Error _) -> None in
+    | Ok _ -> None in
   match interrupted,waiting_dependencies with
   | Some reason,_ -> Keeper_msg_async.worker_interrupted ~reason
   | None,None -> Keeper_msg_async.worker_finished result
@@ -1807,7 +1824,7 @@ and async_submission_result
 and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
     ~parent_invocation ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
     ~capability_authority ~publication_recovery ~ctx_snapshot ~turn_context
-    ~admission ?clock () =
+    ~admission ?on_child_accepted ?before_result_publication ?clock () =
   let module Draft = Keeper_composition_draft in
   let module Submission = Keeper_composition_named_submission in
   let start_time = Tool_timing.start () in
@@ -1845,7 +1862,9 @@ and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
         |> Result.map_error (fun error -> Submission.Persistence_failed
           (Yojson.Safe.to_string (Draft.error_to_json error))) in
       let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
-      let* run_reference = Draft.record_invocation ~base_path:config.base_path ~nested_activation:activation ~composition_run_id
+      let* run_reference = Draft.record_invocation ~base_path:config.base_path
+          ?nested_activation:(match Draft.nested_calls draft with [] -> None | _::_ -> Some activation)
+          ~composition_run_id
           ~invocation:parent_invocation draft
         |> Result.map_error (fun error -> Submission.Persistence_failed
           (Yojson.Safe.to_string (Draft.error_to_json error))) in
@@ -1903,6 +1922,8 @@ and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
               then Ok () else Error Submission.Source_conflict in
           let* owner = Journal.named_result_owner journal binding
             |> Result.map_error (fun error -> Submission.Journal_rejected error) in
+          (match child_submission with None -> () | Some _ ->
+            Option.iter (fun accepted -> accepted ()) on_child_accepted);
           Ok (Some (Tool_result.make_ok ~tool_name ~start_time
             ~data:(`Assoc (["composition_tool",`String tool_name;
               "execution",`String "async";"request_id",`String binding.request_id;
@@ -1953,6 +1974,7 @@ and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
           async_submission_result ~skill_reference ~journal ~plan
             ?on_producer_accepted:(Option.map (fun submission request_id ->
               Journal.accept_child_submission submission ~request_id
+              |> Result.map (fun () -> Option.iter (fun accepted -> accepted ()) on_child_accepted)
               |> Result.map_error Journal.error_to_string) child_submission)
             ~nested_calls:[]
             ?nested_activation:(match source.producer with
@@ -1963,6 +1985,7 @@ and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
             ~publication_recovery ~ctx_snapshot ~turn_context ?clock () in
       let result = bind_prepared_result ~composition_run_id:source.composition_run_id
           ~run_reference:source.run_reference ~draft_reference:source.draft_reference result in
+      Option.iter (fun before -> before ()) before_result_publication;
       (match Tool_bridge.attach_artifact_manifest
           ~projection:Tool_output.Inline_with_structured_diagnostic ~base_path:config.base_path result with
        | Ok result -> result

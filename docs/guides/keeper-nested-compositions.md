@@ -79,7 +79,7 @@ cannot create replacement acceptance. These are source guarantees until an
 exact-head execution receipt proves the selected scenario; installed runtime,
 visible UI and whole-task speedup remain separate evidence.
 
-An accepted continuation also retains `Lost` when its execution journal rejects
+An owned worker retains `Lost` when its execution journal rejects
 plan admission or a node attempt, or when settlement/observation cannot commit.
 Those infrastructure failures do not establish a whole-child failure. The
 canonical child reader's actual terminal failure still settles the parent as
@@ -87,6 +87,14 @@ failed. Fault scenarios cover the original activation before and after restore,
 the frozen draft before executor admission, and the parent journal before
 submission settlement and result-node lookup. Each restores the original bytes
 and resumes the same accepted child; these fixtures require execution evidence.
+The canonical reader distinguishes a valid observation (including an actual
+failed child) from unavailable observation/publication in its typed result.
+Native result nodes retain the latter without inferring meaning from an error
+class or message. The producer also retains its actual committed child acceptance
+before projecting its acknowledgement, so an acknowledgement-manifest failure
+does not erase the first parent's accepted child. Separate real store faults
+exercise acknowledgement and successful child-result publication, while a
+canonical failed-child scenario verifies that actual failure remains terminal.
 
 Call `keeper_composition_prepare` with `execution: "inline"` or `"async"`, the ordinary outer
 `nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of

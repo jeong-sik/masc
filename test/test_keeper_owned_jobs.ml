@@ -3261,7 +3261,7 @@ pointer = "/content"
   operation ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
     ~publication_recovery ~physical_turn_ref ~delivery ~recorder ~snapshot
 
-let test_fixed_async_skill_child () =
+let test_fixed_async_skill_child ?(child_failure=false) () =
   with_nested_job_skill ~wait_only:true ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
       ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot:_ ->
@@ -3341,12 +3341,22 @@ let test_fixed_async_skill_child () =
       ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
       ~invocation ~clock:(Eio.Stdenv.clock env) () in
   let recovery_started = Mtime_clock.counter () in
-  let resumed_child = resume child_continuation "resume-original-fixed-child" in
-  check bool "fresh supervisor accepts original child continuation" true (Tool_result.is_success resumed_child);
-  check_json "child successor retains the original public binding" (Dependency.composition_to_json binding)
-    (Tool_result.data resumed_child |> member "result_wait");
-  let child_ok,child_completed,_ = await_composition env fixture (Tool_result.data resumed_child) in
-  check bool "actual child resolves its whole original DAG" true child_ok;
+  let restore_output = if child_failure then (
+      let stdout = match (load fixture id).outputs with Some (stdout,_) -> stdout
+        | None -> fail "original completed job has no canonical stdout" in
+      let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:fixture.base_path) in
+      let path = Filename.concat (Filename.concat root (String.sub stdout.sha256 0 2)) stdout.sha256 in
+      let original = read path in
+      Sys.remove path;
+      fun () -> write path original)
+    else fun () -> () in
+  let child_ok,child_completed,_ = Fun.protect ~finally:restore_output (fun () ->
+      let resumed_child = resume child_continuation "resume-original-fixed-child" in
+      check bool "fresh supervisor accepts original child continuation" true (Tool_result.is_success resumed_child);
+      check_json "child successor retains the original public binding" (Dependency.composition_to_json binding)
+        (Tool_result.data resumed_child |> member "result_wait");
+      await_composition env fixture (Tool_result.data resumed_child)) in
+  check bool "actual canonical child outcome is preserved" (not child_failure) child_ok;
   let child_nodes = composition_nodes fixture child_completed in
   let previous_child_nodes = composition_nodes fixture child_wait in
   List.iter (fun field -> check_json ("original child job occurrence " ^ field)
@@ -3355,9 +3365,13 @@ let test_fixed_async_skill_child () =
   let resumed_parent = resume parent_continuation "resume-original-fixed-parent" in
   check bool "whole canonical child result makes original parent ready" true (Tool_result.is_success resumed_parent);
   let parent_ok,completed,parent_completed = await_composition env fixture (Tool_result.data resumed_parent) in
-  check bool "native result barrier completes original parent" true parent_ok;
-  check_json "parent consumes exact complete child export" (`String stdout_bytes)
-    (completed |> member "exports" |> member "stdout" |> member "value");
+  check bool "native result barrier preserves actual whole-child failure" (not child_failure) parent_ok;
+  if child_failure then
+    check_json "failed canonical child provides no successful parent export" (`Bool false)
+      (completed |> member "exports" |> member "stdout" |> member "available")
+  else
+    check_json "parent consumes exact complete child export" (`String stdout_bytes)
+      (completed |> member "exports" |> member "stdout" |> member "value");
   let completed_nodes = composition_nodes fixture completed in
   let scope = prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" in
   let submission_id = scope |> member "submission" |> to_string in
@@ -3490,7 +3504,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
   let scope = prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" in
   let submission_id = scope |> member "submission" |> to_string
   and result_id = scope |> member "result" |> to_string in
-  let continuation = List.fold_left (fun continuation fault ->
+  let fault_continuation continuation fault =
     let module Draft = Masc.Keeper_composition_draft in
     let source = Journal.continuation_source continuation in
     let draft = Draft.load_continuation ~base_path:fixture.base_path ~capability_surface:surface continuation
@@ -3519,6 +3533,15 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
       restore := (fun () -> write path original);
       faulted := true;
       write path "invalid-original-authority-after-accepted-continuation\n" in
+    let interrupt_publication () =
+      check bool "one actual publication boundary is interrupted" false !faulted;
+      let original_root = blob_root ^ ".original-before-publication" in
+      check bool "publication backup does not replace existing evidence" false (Sys.file_exists original_root);
+      Sys.rename blob_root original_root;
+      restore := (fun () -> if Sys.file_exists blob_root then Sys.remove blob_root;
+        Sys.rename original_root blob_root);
+      faulted := true;
+      write blob_root "temporarily unavailable artifact directory\n" in
     let refused_result = ref false in
     let fault_request = Fun.protect ~finally:(fun () -> !restore ()) (fun () ->
       let worker = Atomic.make None in
@@ -3548,6 +3571,10 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
               ?before_plan_execution:(if fault = `Before_plan then Some (fun () -> corrupt draft_file) else None)
               ?after_child_submission:(if fault = `Before_submission_settle
                 then Some (fun _ -> corrupt journal_file) else None)
+              ?before_child_submission_publication:(if fault = `Before_submission_publication
+                then Some interrupt_publication else None)
+              ?before_child_result_publication:(if fault = `Before_result_publication
+                then Some interrupt_publication else None)
               ?after_node_observation:(if fault = `Before_result_lookup then Some (fun node ->
                 if Plan.Node_id.to_string node.Masc.Keeper_tool_plan_executor.node_id = submission_id
                 then corrupt journal_file;
@@ -3578,14 +3605,24 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
       accepted.request_id) in
     let recovery = Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
         |> require "recover original physical attempt completion obligations" in
-    check int "recovery publishes no false logical completion" 0 recovery.delivered;
+    if fault <> `Before_result_publication then
+      check int "recovery publishes no false logical completion" 0 recovery.delivered;
     check int "original recovery authority is now readable" 0 (List.length recovery.failures);
-    check int "recoverable physical attempts enqueue no failed completion" 0 (List.length (pending_completions fixture));
+    check bool "recoverable physical attempt enqueues no logical completion" false
+      (List.exists (fun (selection : Keeper_event_queue_state.pending_selection) ->
+        match selection.source.payload with
+        | Keeper_event_queue.Composition_completed completion ->
+          String.equal completion.cc_request_id fault_request
+        | _ -> false) (pending_completions fixture));
     let retained = candidate journal in
     check string "transient authority fault keeps the accepted physical owner recoverable" fault_request
       (Journal.continuation_request_id retained);
-    check int "authority fault does not invent a dependency wait" 0 (List.length (Journal.continuation_dependencies retained));
-    retained) continuation [`Before_restore;`Before_native;`Before_plan;
+    check_json "authority fault retains the exact original dependency wait"
+      (`List (List.map Dependency.to_json (Journal.continuation_dependencies continuation)))
+      (`List (List.map Dependency.to_json (Journal.continuation_dependencies retained)));
+    retained in
+  let continuation = List.fold_left fault_continuation continuation
+      [`Before_restore;`Before_native;`Before_plan;`Before_submission_publication;
       `Before_submission_settle;`Before_result_lookup] in
   let resumed = resume continuation "recover-physical-parent-ack" in
   check bool "fresh parent recovers actual acknowledgement" true (Tool_result.is_success resumed);
@@ -3620,7 +3657,11 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
   check bool "original child continues without resubmission" true (Tool_result.is_success child_resumed);
   let child_ok,_,_ = await_composition env fixture (Tool_result.data child_resumed) in
   check bool "original child reaches canonical whole result" true child_ok;
-  let parent_resumed = resume (candidate journal) "finish-physical-original-parent" in
+  let continuation = fault_continuation (candidate journal) `Before_result_publication in
+  let canonical_child = Journal.named_result_owner child_journal binding |> require "original successful child remains readable" in
+  (match canonical_child.status with Done {ok=true;_} -> ()
+   | _ -> fail "reader publication fault changed the actual successful child");
+  let parent_resumed = resume continuation "finish-physical-original-parent" in
   let parent_ok,completed,_ = await_composition env fixture (Tool_result.data parent_resumed) in
   check bool "original parent finishes after true child result" true parent_ok;
   check_json "recovered child exports complete original output" (`String stdout_bytes)
@@ -4463,7 +4504,8 @@ let () = match Array.to_list Sys.argv with
       ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag
       ; test_case "prepared DAG launches an owned job and resumes its original result" `Quick test_prepared_job_launch_and_continuation
       ; test_case "interrupted prepared launch resumes the same job without recreating it" `Quick test_interrupted_prepared_launch_resumes_the_same_job
-      ; test_case "fixed async Skill child submits once and resumes its canonical whole result" `Quick test_fixed_async_skill_child
+      ; test_case "fixed async Skill child submits once and resumes its canonical whole result" `Quick (test_fixed_async_skill_child ~child_failure:false)
+      ; test_case "fixed async Skill child preserves an actual canonical whole-child failure" `Quick (test_fixed_async_skill_child ~child_failure:true)
       ; test_case "real parent process loss after child acceptance resumes its original child" `Quick test_native_child_acceptance_survives_physical_parent_loss
       ; test_case "fresh supervisor retains nested child authority through owned-job waits" `Quick
           (test_nested_skill_job_continuation ~fault_after_acceptance:false)

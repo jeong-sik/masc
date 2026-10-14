@@ -39,28 +39,37 @@ let note_text (note : Score.note) = if note.marked then note.fret ^ "*" else not
 
 (* The rhythm line names each beat's length with one letter at its first
    cell, the way ASCII tab writes them: [w h q e s] for the whole, half,
-   quarter, eighth and sixteenth the reader's subset allows. The reader
-   refuses any other count, so a span without a letter here is a span the
-   subset gained without this line gaining its letter; it draws blank
-   rather than a wrong letter. *)
+   quarter, eighth and sixteenth the reader's subset allows. Counts are in
+   ticks (a whole note 384), so the letter rides the plain length a beat
+   still carries after a dot, a tuplet or a grace has changed its span. The
+   reader refuses any other count, so a beat without a plain length here is
+   one the rhythm effects reshaped; it draws blank rather than a wrong
+   letter. *)
 let rhythm_letter (beat : Score.beat) =
-  match beat.span with
-  | 16 -> Some 'w'
-  | 8 -> Some 'h'
-  | 4 -> Some 'q'
-  | 2 -> Some 'e'
-  | 1 -> Some 's'
-  | _ -> None
+  match beat.dur with
+  | Score.Plain 1 | Score.Double_dotted 1 -> Some 'w'
+  | Score.Plain 2 | Score.Double_dotted 2 -> Some 'h'
+  | Score.Plain 4 | Score.Double_dotted 4 -> Some 'q'
+  | Score.Plain 8 | Score.Double_dotted 8 -> Some 'e'
+  | Score.Plain 16 | Score.Double_dotted 16 -> Some 's'
+  | Score.Dotted _ | Score.Tuplet _ | Score.Grace | Score.No_duration | Score.Plain _ | Score.Double_dotted _ ->
+      None
 
-let cells_per_unit (measure : Score.measure) =
-  List.fold_left
-    (fun cells (beat : Score.beat) ->
-      List.fold_left
-        (fun cells note ->
-          let needed = String.length (note_text note) + 1 in
-          max cells ((needed + beat.span - 1) / beat.span))
-        cells beat.notes)
-    1 measure.beats
+(* The cells a measure draws: a cell is one ASCII character, and the ticks
+   a cell holds is fixed, so a beat's width in cells is its ticks divided
+   by the cell's plus the room its note text needs. *)
+let ticks_per_cell = 24
+
+let beat_cells (beat : Score.beat) =
+  if beat.span = 0 then 0
+  else
+    let text_len =
+      List.fold_left (fun len note -> len + String.length (note_text note) + 1) 0 beat.notes
+    in
+    ((beat.span + ticks_per_cell - 1) / ticks_per_cell) + text_len
+
+let measure_cells (measure : Score.measure) =
+  List.fold_left (fun cells beat -> cells + beat_cells beat) 1 measure.beats
 
 (* The line names share one column, so a two-letter name (Eb) does not push
    its line a cell to the right of the others. Every cell is one ASCII
@@ -88,7 +97,7 @@ let right_marks (measure : Score.measure) =
 
 let measure_width (measure : Score.measure) =
   String.length (left_marks measure)
-  + (cells_per_unit measure * measure.units)
+  + measure_cells measure
   + String.length (right_marks measure)
 
 let systems ~max_width (score : Score.t) =
@@ -115,20 +124,21 @@ let systems ~max_width (score : Score.t) =
 (* {1 Drawing} *)
 
 let draw_measure ~strings (measure : Score.measure) =
-  let cells = cells_per_unit measure in
-  let rows = Array.init (strings + 1) (fun _ -> Bytes.make (cells * measure.units) '-') in
+  let cells = measure_cells measure in
+  let rows = Array.init (strings + 1) (fun _ -> Bytes.make cells '-') in
   List.iter
     (fun (beat : Score.beat) ->
       (match rhythm_letter beat with
-       | Some letter -> Bytes.set rows.(strings) (cells * beat.start) letter
+       | Some letter -> Bytes.set rows.(strings) (beat.start / ticks_per_cell) letter
        | None -> ());
       List.iter
         (fun (note : Score.note) ->
-          (* [Score.read] kept the string within the tuning and [cells_per_unit]
-             made the slot wider than the text. *)
+          (* [Score.read] kept the string within the tuning and
+             [ticks_per_cell] made the slot wider than the text. *)
           let text = note_text note in
-          Bytes.blit_string text 0 rows.(note.on_string - 1) (cells * beat.start)
-            (String.length text))
+          let cell = beat.start / ticks_per_cell in
+          if cell + String.length text <= cells then
+            Bytes.blit_string text 0 rows.(note.on_string - 1) cell (String.length text))
         beat.notes)
     measure.beats;
   rows

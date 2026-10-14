@@ -93,29 +93,10 @@ let build_workspace_attention_items config =
     (recent_tool_host_failures ~now:(Time_compat.now ()) ()
     @ pending_items)
 
-let assoc_bool_field ~default key fields =
-  match List.assoc_opt key fields with
-  | Some (`Bool value) -> value
-  | _ -> default
-
-let assoc_string_field key fields =
-  match List.assoc_opt key fields with
-  | Some (`String value) ->
-      let value = String.trim value in
-      if String.equal value "" then None else Some value
-  | _ -> None
-
 let keeper_attention_kind reason =
   match reason with
   | Some reason -> "keeper_" ^ reason
   | None -> "keeper_attention"
-
-let keeper_attention_severity ~reason ~runtime_blocked =
-  match reason, runtime_blocked with
-  | Some "runtime_blocked", _
-  | Some "provider_timeout", _ -> Sev_bad
-  | _, true -> Sev_bad
-  | _ -> Sev_warn
 
 (* Which Keeper and why. Every item in this projection needs operator
    attention, and every surface that draws one titles its list for that, so
@@ -214,32 +195,37 @@ let connector_attention_projection ~base_path ~keeper_name =
       }
 
 let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta) =
-  let attention_fields = Keeper_status_bridge.attention_fields_json config meta in
-  if not (assoc_bool_field ~default:false "needs_attention" attention_fields)
+  let runtime_blocker = Keeper_status_bridge.runtime_blocker_surface_opt config meta in
+  let approval_queue = Keeper_status_bridge.approval_queue_attention config meta in
+  let attention =
+    Keeper_status_bridge.attention_of_surface config meta runtime_blocker approval_queue
+  in
+  if not attention.needs_attention
   then None
   else
-    let runtime_blocker = Keeper_status_bridge.runtime_blocker_surface_opt config meta in
     let blocker_fields =
       Keeper_status_bridge.runtime_blocker_fields_json_of_surface meta runtime_blocker
     in
-    let reason = assoc_string_field "attention_reason" attention_fields in
+    let reason = attention.attention_reason in
     let runtime_blocker_summary =
       Option.map
         (fun (blocker : Keeper_status_bridge.runtime_blocker_surface) ->
            String.trim (Lazy.force blocker.summary))
         runtime_blocker
     in
-    let severity =
-      keeper_attention_severity ~reason
-        ~runtime_blocked:(Option.is_some runtime_blocker)
-    in
+    (* A runtime blocker is the bad case. The reason "runtime_blocked" comes
+       only with one, so the blocker alone decides. *)
+    let severity = if Option.is_some runtime_blocker then Sev_bad else Sev_warn in
     let evidence =
       `Assoc
         [
           ("source", `String "keeper_status_bridge");
           ("keeper_name", `String meta.name);
           ("paused", `Bool meta.paused);
-          ("attention", `Assoc attention_fields);
+          ( "attention",
+            `Assoc
+              (Keeper_status_bridge.attention_fields_json_of meta approval_queue attention)
+          );
           ("runtime_blocker", `Assoc blocker_fields);
         ]
     in

@@ -20,6 +20,10 @@
     - A bearer that matches nothing does not rebuild the index while the
       credentials are unchanged, so unknown tokens cost one stat each.
     - Requests that miss together rebuild the index once, not once each.
+    - An index listed while the directory's last change is inside one file
+      time step is rebuilt once after the step, because a second write in
+      that step may have left the directory's times unchanged. The TTL
+      still caps how long any index serves.
 
     The cache is keyed by [agents_dir config] (per base_path), so each
     test sets up its own temp workspace and cleans up to avoid cross-test
@@ -224,6 +228,51 @@ let test_requests_that_miss_together_rebuild_once () =
           (List.init 5 (fun _ -> ()));
         check (float 0.0) "one rebuild" (before +. 1.0) (index_rebuilds ())))
 
+(* Real clock and file times: the first lookup follows the write within the
+   same step, the second waits the step out. *)
+let test_index_listed_inside_a_time_step_is_rebuilt_once_the_step_ends () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let raw = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
+        let lookup label =
+          match Auth.find_credential_by_token dir ~token:raw with
+          | Ok _ -> ()
+          | Error e -> fail (label ^ ": " ^ Masc_domain.masc_error_to_string e)
+        in
+        let before = index_rebuilds () in
+        lookup "inside the step";
+        lookup "inside the step, again";
+        check (float 0.0) "the step's index serves while the step lasts"
+          (before +. 1.0) (index_rebuilds ());
+        let stats = Unix.stat (Common.agents_dir_from_base_path ~base_path:dir) in
+        let step_end =
+          Float.max stats.Unix.st_mtime stats.Unix.st_ctime
+          +. Auth.Credential_index_expiry_for_testing.time_step_sec
+        in
+        Unix.sleepf (Float.max 0.0 (step_end -. Unix.gettimeofday ()) +. 0.1);
+        lookup "after the step";
+        lookup "after the step, again";
+        check (float 0.0) "one rebuild after the step, then the index serves"
+          (before +. 2.0) (index_rebuilds ())))
+
+let test_time_step_never_outlasts_the_ttl () =
+  let module Expiry = Auth.Credential_index_expiry_for_testing in
+  let stamped_at = 1_000_000.0 in
+  let expires_at dir_changed_at = Expiry.expires_at ~stamped_at ~dir_changed_at in
+  check (float 0.0) "listed after the step: the TTL"
+    (stamped_at +. Expiry.ttl_sec)
+    (expires_at (Some (stamped_at -. Expiry.time_step_sec -. 1.0)));
+  check (float 0.0) "listed inside the step: the step's end"
+    (stamped_at -. 0.5 +. Expiry.time_step_sec)
+    (expires_at (Some (stamped_at -. 0.5)));
+  check (float 0.0) "a file clock far ahead: still the TTL"
+    (stamped_at +. Expiry.ttl_sec) (expires_at (Some (stamped_at +. 3600.0)));
+  check (float 0.0) "no agents directory: the TTL"
+    (stamped_at +. Expiry.ttl_sec) (expires_at None)
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; flag; dir; agent_name; token_out ] when String.equal flag mint_child_flag ->
@@ -250,5 +299,9 @@ let () =
           `Quick test_unknown_bearer_does_not_rebuild_the_index
         ; test_case "requests that miss together rebuild once"
           `Quick test_requests_that_miss_together_rebuild_once
+        ; test_case "an index listed inside a time step is rebuilt once the step ends"
+          `Slow test_index_listed_inside_a_time_step_is_rebuilt_once_the_step_ends
+        ; test_case "a time step never outlasts the TTL"
+          `Quick test_time_step_never_outlasts_the_ttl
         ] )
     ]

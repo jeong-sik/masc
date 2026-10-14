@@ -188,9 +188,12 @@ arguments and source-to-expanded leaf mapping for later durable evidence.
 
 Inline parents refuse async children as `async_child_requires_suspension`.
 Async parents use the native submission and result operands described above;
-an async request receipt is not a child result. Named async Skills retain their
-static read-only admission contract. Expanded inline leaves admit static read-only ordinary Tool contracts and
-the isolated owned-job launch producer with its Serial durable ownership.
+an async request receipt is not a child result. Named async Skills and expanded
+inline leaves admit static read-only ordinary Tool contracts and the isolated
+owned-job launch producer with its Serial durable ownership. An async child can
+start its own job, wait for its original result and export its complete output.
+Fresh continuation reuses the settled launch instead of dispatching it again.
+An unfinished launch without proven replay authority remains refused as above.
 General resource-aware effect admission remains a separate implementation unit.
 
 The focused `test_keeper_composition_nested` scenarios check repeated child

@@ -3305,17 +3305,20 @@ pointer = "/content"
   operation ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
     ~publication_recovery ~physical_turn_ref ~delivery ~recorder ~snapshot
 
-let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=false) () =
-  with_nested_job_skill ~wait_only:true ~parameterized:dynamic_arguments ~execution:Masc.Keeper_tool_composition_catalog.Async
+let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=false) ?(launch_in_child=false) () =
+  with_nested_job_skill ~wait_only:(not launch_in_child) ~parameterized:dynamic_arguments ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
       ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot:_ ->
   let module Async = Masc.Keeper_msg_async in
   let module Ledger = Masc.Keeper_skill_activation_ledger in
   let module Tools = Masc.Keeper_tool_composition_surface in
   let module Plan = Masc.Keeper_tool_plan in
-  let original_job = read (Filename.concat fixture.base_path "physical-original-job") in
+  let original_args,independent_bytes = if dynamic_arguments then
+      let id = read (Filename.concat fixture.base_path "physical-original-job") in
+      argument id,id
+    else `Assoc [],"independent parent work\n" in
   let sibling = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path)
-      ~bytes:(if dynamic_arguments then original_job else "independent parent work\n") ~mime:"text/plain" in
+      ~bytes:independent_bytes ~mime:"text/plain" in
   let child_arguments = if not dynamic_arguments then "args",`Assoc []
     else "input",`Assoc ["kind",`String "object";"fields",`List
       [`Assoc ["name",`String "job_id";"value",`Assoc
@@ -3326,10 +3329,11 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
        `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;child_arguments]];
       "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
   let started = Mtime_clock.counter () in
-  let backend_before_prepare = List.length (calls fixture) in
+  let backend_calls () = if Sys.file_exists fixture.daemon_path then List.length (calls fixture) else 0 in
+  let backend_before_prepare = backend_calls () in
   let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"prepare-fixed-async-child" ~turn:41 "keeper_composition_prepare" recipe) in
-  check int "async child preparation has no backend effects" backend_before_prepare (List.length (calls fixture));
+  check int "async child preparation has no backend effects" backend_before_prepare (backend_calls ());
   let draft = prepared |> member "draft" |> composition_reference "fixed async child draft" in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-fixed-async-child" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
@@ -3350,7 +3354,7 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
    | Journal.Named {skill_reference;activation=Some original;origin=(Nested _ as origin);_} ->
      check bool "child source retains the exact frozen Skill" true (Skill_reference.equal reference skill_reference);
      check_json "child source retains the resolved original arguments"
-       (if dynamic_arguments then argument original_job else `Assoc [])
+       original_args
        (Journal.named_origin_to_yojson origin |> member "args");
      check int "child retains original physical frame" 41
        (Ids.Turn_ref.absolute_turn (Masc.Keeper_skill_activation_recorder.bound_turn_ref original))
@@ -3413,6 +3417,10 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
       await_composition env fixture (Tool_result.data resumed_child)) in
   check bool "actual canonical child outcome is preserved" (not child_failure) child_ok;
   let child_nodes = composition_nodes fixture child_completed in
+  if launch_in_child then (
+    check_json "completed child launch is retained on fresh continuation" (`String "retained_completion")
+      (composition_node "launch" child_nodes |> member "execution_origin");
+    check (option string) "child's own job keeps the original Task" (Some "task-A") (load fixture id).source.task_id);
   let previous_child_nodes = composition_nodes fixture child_wait in
   List.iter (fun field -> check_json ("original child job occurrence " ^ field)
       (composition_node "await" previous_child_nodes |> member field)
@@ -3447,7 +3455,7 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
     (match parent_completed.request_context with Some fields -> List.assoc "source_task_id" fields
       | None -> fail "completed parent source missing");
   Printf.eprintf "%s_ASYNC_CHILD_MEASURE prepare_to_wait_ms=%.3f recovery_ms=%.3f creates=%d starts=%d runtime_reads=%d\n%!"
-    (if dynamic_arguments then "UPSTREAM" else "FIXED")
+    (if launch_in_child then "OWNED_LAUNCH" else if dynamic_arguments then "UPSTREAM" else "FIXED")
     prepare_to_wait_ms (Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000.)
     (effect_count fixture "create") (effect_count fixture "start") !runtime_reads
 
@@ -4647,6 +4655,7 @@ let () = match Array.to_list Sys.argv with
       ; test_case "fixed async Skill child preserves an actual canonical whole-child failure" `Quick (test_fixed_async_skill_child ~child_failure:true)
       ; test_case "typed recovery terminates proven refusal and holds uncertain effects" `Quick test_typed_continuation_recovery
       ; test_case "upstream async Skill arguments survive fresh child and parent continuation" `Quick (test_fixed_async_skill_child ~dynamic_arguments:true)
+      ; test_case "async Skill child launches its own isolated job once and resumes the whole result" `Quick (test_fixed_async_skill_child ~launch_in_child:true)
       ; test_case "upstream enum, type and extra-field rejection creates no child activation" `Quick test_upstream_arguments_reject_before_child_activation
       ; test_case "real parent loss retains upstream arguments and original accepted child" `Quick test_native_child_acceptance_survives_physical_parent_loss
       ; test_case "fresh supervisor retains nested child authority through owned-job waits" `Quick

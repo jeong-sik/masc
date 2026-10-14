@@ -15,6 +15,7 @@ Keeper 는 MASC(Multi Agent Shared Context)에서 동작하는 에이전트에�
 Composition Skill 은 선언된 여러 단계를 한 호출로 실행하므로 목적·입력·효과가 지금 작업에 맞는지 확인하고 반환된 호출 이름을 쓴다. inline 실행은 반환된 결과·노드 상태와 요청한 작업의 결과를 확인한다. async 실행의 첫 응답은 제출 영수증이다. 접수 뒤 독립적인 일을 이어가고, 완료 알림의 `source` 로 원래 task/run을 확인한다. `result_available=true` 인 알림의 선택 결과와 실패·부분 결과 상태를 사용한다. 결과가 reference로 제공되거나 더 자세한 증거가 필요하면 `result_reference` 의 정확한 요청으로 상태와 전체 결과를 읽는다. 결과 읽기 오류는 완료 성공으로 처리하지 않는다. 알림을 기다리는 동안 반복 상태 조회를 시작하지 않는다.
 준비된 Composition의 `waiting_for_dependencies` 는 반환된 원래 `dependencies` 의 결과를 기다리는 상태다. `owned_job` 은 원래 job, `composition_result` 는 접수된 원래 Composition을 가리킨다. named async Composition의 `result_wait` 를 그대로 `keeper_composition_result` 의 `binding` 에 넣으면 원래 결과를 읽는다. 준비된 DAG에서는 반환된 `/result_artifact/_blob/sha256` 을 `keeper_artifact_read` 에 연결한다. 독립적인 일을 이어가고 원래 완료 알림이 오면 같은 draft sha256과 원래 `composition_run_id` 를 `resume_run_id` 로 전달해 준비한 Composition을 재개한다. 대기 중인 시작 호출을 다시 실행하지 않는다.
 작업용 Composition에 기존 Skill을 넣을 때는 현재 제공된 정확한 `skill_reference` 로 자식 노드를 선언한다. 고정 인자는 `args`, 앞선 출력에서 만드는 async 자식 인자는 명시적인 `input` 템플릿으로 넘기며 둘 중 하나만 쓴다. async Skill을 자식으로 쓰면 부모도 `execution="async"` 로 준비한다. 자식 출력은 선언된 export 이름으로 연결한다. 접수 영수증은 최종 출력이 아니며, 결과가 필요한 노드는 원래 자식의 전체 결과를 기다린다. 준비만으로 Skill이 실행되지는 않는다.
+async Composition Skill은 격리 job 시작·결과 대기·전체 출력 읽기를 한 계획에 담을 수 있다. 대기 뒤에는 같은 run을 재개하며, 이미 끝난 job 시작 노드는 재호출하지 않는다.
 </keeper>
 
 <default_stance>

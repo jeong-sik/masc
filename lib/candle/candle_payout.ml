@@ -208,7 +208,10 @@ let validate_settlement (waiting : waiting) events body =
        || List.length observed_ids <> List.length (List.sort_uniq String.compare observed_ids)
     then Error "Keeper eligibility must cover each durable candidate task exactly once"
     else if List.exists (fun (id, keeper) -> match keeper, List.assoc_opt id tasks with
-        | None, Some (Candle_event.Found _) -> false
+        | None, Some (Candle_event.Found {assignee=Some assignee;_}) ->
+          List.mem assignee keepers
+          || List.exists (fun (_, classified_keeper) -> classified_keeper = Some assignee) task_keepers
+        | None, Some (Candle_event.Found {assignee=None;_}) -> false
         | Some keeper, Some (Candle_event.Found {assignee=Some assignee;_}) -> not (String.equal keeper assignee)
         | Some _, Some (Candle_event.Found {assignee=None;_}) -> true
         | (None | Some _), (None | Some Candle_event.Deleted) -> true) task_keepers

@@ -329,6 +329,176 @@ let test_no_linked_task_means_no_candidates () =
   Alcotest.(check (list string)) "keepers" [] decided.candidate_keepers
 ;;
 
+let test_validate_settlement_rejects_partial_keeper_suppression_for_same_assignee () =
+  let snap : E.t =
+    { at = at "2026-09-28T06:32:01Z"
+    ; body =
+        E.Snapshot
+          { goal_id = "goal-1"
+          ; request_id = "req-1"
+          ; verification_run_id = "run-1"
+          ; criterion_revision = "rev-1"
+          ; passed_at = at pass_text
+          ; goal_created_at = at "2026-09-20T01:00:00Z"
+          ; due_date = None
+          ; title = "Ship the ledger"
+          ; metric = None
+          ; target_value = None
+          ; linked_task_ids = [ "task-1"; "task-2"; "task-3" ]
+          }
+    }
+  in
+  let candidates ?(task1_keeper = Some "keeper-a") () : E.t =
+    { at = at "2026-09-29T05:10:00Z"
+    ; body =
+        E.Candidates
+          { goal_id = "goal-1"
+          ; request_id = "req-1"
+          ; verification_run_id = "run-1"
+          ; tasks =
+              [ "task-1", found ~assignee:(Some "keeper-a") ()
+              ; "task-2", found ~assignee:(Some "keeper-a") ()
+              ; "task-3", found ~assignee:(Some "keeper-b") ()
+              ]
+          ; candidate_task_ids = [ "task-1"; "task-2"; "task-3" ]
+          ; candidate_keepers = [ "keeper-a"; "keeper-b" ]
+          ; candidate_task_keepers =
+              [ "task-1", task1_keeper
+              ; "task-2", Some "keeper-a"
+              ; "task-3", Some "keeper-b"
+              ]
+          }
+    }
+  in
+  let trace run_id : Candle_appraisal.trace =
+    { Candle_appraisal.run_id; slot_id = "test.slot" }
+  in
+  let relations =
+    [ { Candle_appraisal.task_id = "task-1"
+      ; relation = Candle_appraisal.Related
+      ; trace = trace "r1"
+      }
+    ; { Candle_appraisal.task_id = "task-2"
+      ; relation = Candle_appraisal.Unrelated
+      ; trace = trace "r2"
+      }
+    ; { Candle_appraisal.task_id = "task-3"
+      ; relation = Candle_appraisal.Related
+      ; trace = trace "r3"
+      }
+    ]
+  in
+  let identity : Candle_appraisal.identity =
+    { goal_id = "goal-1"; request_id = "req-1"; verification_run_id = "run-1" }
+  in
+  let payment weights =
+    E.Paid
+      (ok_or_fail
+         (Candle_payment.make
+            ~distribution:
+              { Candle_math.share_rounding = Candle_math.Largest_remainder
+              ; tie_break = Candle_math.Name_ascending
+              ; deduction_rounding = Candle_math.Floor
+              }
+            ~identity
+            ~grade:(Option.get (Candle_grade.of_string "small"))
+            ~total_milli:1000
+            ~grade_trace:(trace "g")
+            ~relations
+            ~weights_trace:(trace "w")
+            ~weight_max:10
+            ~deduction_rate:10
+            ~deduction_floor:200
+            ~overdue_hours:0
+            ~weights))
+  in
+  let waiting = waiting_for () in
+  Alcotest.(check bool)
+    "consistent per-task keeper classification settles both related keepers"
+    true
+    (Result.is_ok
+       (Candle_payout.validate_settlement
+          waiting
+          [ snap; owed (); candidates () ]
+          (payment [ "keeper-a", 5; "keeper-b", 5 ])));
+  Alcotest.(check bool)
+    "suppressing an admitted keeper to None on one of its tasks is rejected even when candidate_keepers still matches"
+    true
+    (Result.is_error
+       (Candle_payout.validate_settlement
+          waiting
+          [ snap; owed (); candidates ~task1_keeper:None () ]
+          (payment [ "keeper-b", 5 ])))
+;;
+
+let test_validate_settlement_requires_matching_failed_due_date () =
+  let snap ?due_date () : E.t =
+    { at = at "2026-09-28T06:32:01Z"
+    ; body =
+        E.Snapshot
+          { goal_id = "goal-1"
+          ; request_id = "req-1"
+          ; verification_run_id = "run-1"
+          ; criterion_revision = "rev-1"
+          ; passed_at = at pass_text
+          ; goal_created_at = at "2026-09-20T01:00:00Z"
+          ; due_date
+          ; title = "Ship the ledger"
+          ; metric = None
+          ; target_value = None
+          ; linked_task_ids = [ "task-1" ]
+          }
+    }
+  in
+  let cand : E.t =
+    { at = at "2026-09-29T05:10:00Z"
+    ; body =
+        E.Candidates
+          { goal_id = "goal-1"
+          ; request_id = "req-1"
+          ; verification_run_id = "run-1"
+          ; tasks = [ "task-1", found ~assignee:(Some "keeper-a") () ]
+          ; candidate_task_ids = [ "task-1" ]
+          ; candidate_keepers = [ "keeper-a" ]
+          ; candidate_task_keepers = [ "task-1", Some "keeper-a" ]
+          }
+    }
+  in
+  let failed due_date =
+    E.Payout_failed
+      { goal_id = "goal-1"
+      ; request_id = "req-1"
+      ; verification_run_id = "run-1"
+      ; due_date
+      }
+  in
+  let waiting = waiting_for () in
+  Alcotest.(check bool)
+    "matching unreadable due_date is accepted"
+    true
+    (Result.is_ok
+       (Candle_payout.validate_settlement
+          waiting
+          [ snap ~due_date:"not-a-date" (); owed (); cand ]
+          (failed "not-a-date")));
+  Alcotest.(check bool)
+    "mismatched due_date is rejected"
+    true
+    (Result.is_error
+       (Candle_payout.validate_settlement
+          waiting
+          [ snap ~due_date:"2026-09-27" (); owed (); cand ]
+          (failed "not-a-date")));
+  Alcotest.(check bool)
+    "missing Snapshot due_date cannot settle as Payout_failed"
+    true
+    (Result.is_error
+       (Candle_payout.validate_settlement
+          waiting
+          [ snap ?due_date:None (); owed (); cand ]
+          (failed "not-a-date")))
+;;
+
 let () =
   Alcotest.run
     "candle_payout"
@@ -354,6 +524,12 @@ let () =
             test_a_keeper_of_a_task_that_is_not_a_candidate_is_not_a_candidate_keeper
         ; Alcotest.test_case "no linked task means no candidates" `Quick
             test_no_linked_task_means_no_candidates
+        ] )
+    ; ( "validate_settlement"
+      , [ Alcotest.test_case "rejects partial keeper suppression for same assignee" `Quick
+            test_validate_settlement_rejects_partial_keeper_suppression_for_same_assignee
+        ; Alcotest.test_case "requires matching failed due date" `Quick
+            test_validate_settlement_requires_matching_failed_due_date
         ] )
     ; ( "owed_pass"
       , [ Alcotest.test_case "a confirmed pass with a snapshot is owed" `Quick

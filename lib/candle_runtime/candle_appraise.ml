@@ -39,6 +39,36 @@ let related_tasks tasks task_keepers relations =
     | A.Unrelated, _, _
     | A.Related, (Some E.Deleted | None), _
     | A.Related, Some (E.Found _), (Some None | None) -> None) relations
+let overdue_hours_of (pass : Candle_payout.pass) (waiting : Candle_payout.waiting) =
+  match Goal_due.read pass.due_date with
+  | Goal_due.Unreadable_due_date raw -> Error raw
+  | Goal_due.No_due_date -> Ok 0
+  | Goal_due.Due_date d ->
+    Ok (Candle_math.overdue_hours ~due:d.instant ~passed_at:(Candle_time.to_ptime waiting.passed_at))
+let validate_due_date (waiting : Candle_payout.waiting) events body =
+  match Candle_payout.pass_of waiting events with
+  | None -> Error "settlement requires the confirmed Snapshot"
+  | Some pass ->
+    match body, overdue_hours_of pass waiting with
+    | E.Paid p, Ok expected_hours ->
+      if p.overdue_hours = expected_hours then Ok ()
+      else Error "Paid overdue_hours differs from the confirmed Snapshot due_date"
+    | E.Paid _, Error _ ->
+      Error "Paid cannot settle a Snapshot with an unreadable due_date"
+    | E.Unattributed {reason = E.No_candidates; _}, (Ok _ | Error _) ->
+      Ok ()
+    | E.Unattributed {reason = (E.All_unrelated _ | E.No_related_keepers _); _}, Ok _ ->
+      Ok ()
+    | E.Unattributed {reason = (E.All_unrelated _ | E.No_related_keepers _); _}, Error _ ->
+      Error "Unattributed appraisal cannot settle a Snapshot with an unreadable due_date"
+    | E.Payout_failed f, Error raw ->
+      if String.equal f.due_date raw then Ok ()
+      else Error "failed due date differs from the confirmed Snapshot"
+    | E.Payout_failed _, Ok _ ->
+      Error "Payout_failed cannot settle a Snapshot with a readable due_date"
+    | (E.Half_life_set _ | E.Equipped _ | E.Purchased _ | E.Granted _
+      | E.Gifted _ | E.Gifted_item _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _), _ ->
+      Error "settlement does not name the confirmed verifier run"
 let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : Candle_payout.waiting) =
   let identity = identity waiting in
   match Candle_payout.pass_of waiting events, Candle_payout.candidates_of waiting events, candidate_tasks waiting events with
@@ -46,10 +76,7 @@ let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : C
     Ok (E.Unattributed {goal_id=waiting.goal_id;request_id=waiting.request_id;
       verification_run_id=waiting.verification_run_id;reason=E.No_candidates})
   | Some pass, Some candidates, Some tasks ->
-    let hours = match Goal_due.read pass.due_date with
-      | Goal_due.Unreadable_due_date raw -> Error raw
-      | Goal_due.No_due_date -> Ok 0
-      | Goal_due.Due_date d -> Ok (Candle_math.overdue_hours ~due:d.instant ~passed_at:(Candle_time.to_ptime waiting.passed_at)) in
+    let hours = overdue_hours_of pass waiting in
     (match hours with
      | Error due_date ->
        Ok (E.Payout_failed {goal_id=waiting.goal_id;request_id=waiting.request_id;
@@ -128,6 +155,8 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
       let* prepared = Candle_status.prepare ~at ~half_life:current_policy.half_life events
         |> Result.map_error (preparation_error ~at ~events) in
       let* () = Candle_payout.validate_settlement waiting prepared.events body
+        |> Result.map_error (fun detail -> A.Invalid_response detail) in
+      let* () = validate_due_date waiting prepared.events body
         |> Result.map_error (fun detail -> A.Invalid_response detail) in
       let credit = match body with
         | E.Paid payment -> Candle_balance.credit prepared.balance ~at payment |> Result.map (fun _ -> ())

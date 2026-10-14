@@ -59,8 +59,12 @@ let event_batch ~principal ~name =
 
 let execution_machine operation arguments =
   match operation with
-  | Some (Tool_schemas_misc.Misc_msx_load | Misc_msx_restore | Misc_msx_change_disk
-      | Misc_msx_press | Misc_msx_step | Misc_msx_step_until_change) -> Some Machine_lane.Msx
+  | Some (Tool_schemas_misc.Misc_msx tool) ->
+      (match tool with
+       | Msx_tool.(Load | Restore | Change_disk | Press | Step | Step_until_change) ->
+           Some Machine_lane.Msx
+       | Msx_tool.(Eject | Export_disk | Save | Screen | Meta | Checkpoint_info | Peek | Ram_diff) ->
+           None)
   | Some (Tool_schemas_misc.Misc_dos_load | Misc_dos_restore | Misc_dos_step
       | Misc_dos_press | Misc_dos_click | Misc_dos_type) -> Some Machine_lane.Dos
   | Some Tool_schemas_misc.Misc_dos_pass ->
@@ -79,11 +83,7 @@ let execution_machine operation arguments =
   | Some (Tool_schemas_misc.Misc_browser_tabs) | Some (Tool_schemas_misc.Misc_browser_read)
   | Some (Tool_schemas_misc.Misc_browser_session) | Some (Tool_schemas_misc.Misc_browser_goto)
   | Some (Tool_schemas_misc.Misc_browser_act) | Some (Tool_schemas_misc.Misc_browser_interact)
-  | Some (Tool_schemas_misc.Misc_browser_instruct) | Some (Tool_schemas_misc.Misc_msx_eject)
-  | Some (Tool_schemas_misc.Misc_msx_export_disk) | Some (Tool_schemas_misc.Misc_msx_save)
-  | Some (Tool_schemas_misc.Misc_msx_screen) | Some (Tool_schemas_misc.Misc_msx_meta)
-  | Some (Tool_schemas_misc.Misc_msx_checkpoint_info) | Some (Tool_schemas_misc.Misc_msx_peek)
-  | Some (Tool_schemas_misc.Misc_msx_ram_diff) | Some (Tool_schemas_misc.Misc_portrait_read)
+  | Some (Tool_schemas_misc.Misc_browser_instruct) | Some (Tool_schemas_misc.Misc_portrait_read)
   | Some (Tool_schemas_misc.Misc_candle_balance) | Some (Tool_schemas_misc.Misc_candle_catalog)
   | Some (Tool_schemas_misc.Misc_candle_purchase) | Some (Tool_schemas_misc.Misc_candle_equip)
   | Some (Tool_schemas_misc.Misc_candle_gift) | Some (Tool_schemas_misc.Misc_dos_meta)

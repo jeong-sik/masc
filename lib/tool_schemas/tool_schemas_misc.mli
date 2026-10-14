@@ -107,20 +107,7 @@ type misc_operation =
   | Misc_browser_act
   | Misc_browser_interact
   | Misc_browser_instruct
-  | Misc_msx_load
-  | Misc_msx_eject
-  | Misc_msx_export_disk
-  | Misc_msx_save
-  | Misc_msx_restore
-  | Misc_msx_change_disk
-  | Misc_msx_screen
-  | Misc_msx_meta
-  | Misc_msx_checkpoint_info
-  | Misc_msx_press
-  | Misc_msx_step
-  | Misc_msx_step_until_change
-  | Misc_msx_peek
-  | Misc_msx_ram_diff
+  | Misc_msx of Msx_tool.t
   | Misc_portrait_read
   | Misc_candle_balance
   | Misc_candle_catalog

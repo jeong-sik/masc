@@ -12,7 +12,7 @@ This display implementation needs installed runtime/UI verification separately.
 `Keeper_composition_nested.compile` expands an exact, turn-frozen inline Skill
 into the existing typed plan and lowers an async Skill into native submission
 and canonical result nodes. An async child requires an async parent. The source `keeper_composition_prepare` schema now
-accepts this node alternative for task-specific inline drafts. Prepare freezes
+accepts this node alternative for task-specific drafts. Prepare freezes
 the original recipe, flattened plan, exact child references, normalized arguments,
 leaf/export mappings and tool contracts in one owned immutable manifest. Run
 recompiles the recipe against its current frozen surface and compares all recorded
@@ -45,22 +45,46 @@ permission. The exact reference must be model-visible and active on its turn
 surface. Changing the content revision is a refusal, without a name-based fallback
 or a source-file reread.
 
-Arguments pass the same schema validator as a direct named composition call before
-parameter substitution. The compiler checks required fields, types, enums and
-extra fields. This API admits fixed arguments only. Feeding upstream output into
-a child parameter requires a runtime contract barrier before any child leaf runs;
-that separate integration is pending.
+Fixed arguments pass the direct named-call schema validator during preparation.
+An async child can instead declare an explicit `input` template using the ordinary
+literal/output/object/array grammar. Supply exactly one of `args` or `input`:
 
-The native compiler now has distinct fixed child-submission and child-result
+```json
+"input": {
+  "kind": "object",
+  "fields": [{
+    "name": "query",
+    "value": {"kind": "output", "node": "earlier-node", "pointer": "/content"}
+  }]
+}
+```
+
+The native submission node resolves upstream values and checks the frozen Skill
+parameter schema before child activation or broker entry. Missing fields, types,
+enums and extra fields fail that parent branch without activating the child.
+The opaque original parent occurrence supplies the resolved input for both the
+child's parameter binding and its immutable Nested producer source. Continuation
+reuses those arguments and the accepted source; it does not select current values
+or reread a Skill document. Repeated exact references retain separate aliases,
+inputs and child sources. Inline children currently require fixed `args`.
+
+The declared plan and contracts are frozen even when arguments depend on output.
+Parameter substitution is pure and shared with ordinary named Skill calls.
+Validation of the resulting leaf inputs remains part of child execution: a
+parameter that satisfies the Skill schema can still fail a narrower leaf schema.
+Private operand evidence retains declared parameter leaves, while the public
+request grammar continues to reject `param` and compiler metadata.
+
+The native compiler has distinct child-submission and child-result
 operands. Submission is effectful and Serial, with an opaque acknowledgement;
 result observation is readonly and Concurrent, with the bound child's exact
 named-export schema. Schemas are frozen per child, so two result nodes using
 the same tool name cannot borrow each other's output contract. Owned plan
-evidence retains the exact child reference, fixed arguments, bound plan and
+evidence retains the exact child reference, argument template, declared plan and
 recursive contracts. Copying that private evidence into a public request does
 not create a compiler capability.
 
-An async parent can prepare and run a fixed async child through the same exact
+An async parent can prepare and run an async child through the same exact
 reference grammar. Its original Nested activation seals the child producer;
 submission records an immutable parent-occurrence-to-child-source join before
 broker entry. The protected acceptance callback commits the real child membership
@@ -340,7 +364,7 @@ ID reuse, official native starts, duplicate and contradictory facts, sibling
 receipts, corrupt-ledger recovery and a real canonical lock around an in-flight
 attempt reset. It retains the original child activation and checks zero backend
 redispatch after the result. Record an actual run/head before calling these cases
-passed. Dynamic child input, general resource admission,
+passed. Dynamic inline child input, general resource admission,
 installed runtime/UI and matched whole-task timings remain
 separate work.
 

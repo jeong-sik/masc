@@ -915,7 +915,7 @@ let input_schema_of_params = function
       ]
 ;;
 
-type instantiation_error =
+type instantiation_error = Plan.parameter_binding_error =
   | Missing_argument of string
   | Instantiated_plan_rejected of Plan.error
 
@@ -940,28 +940,5 @@ let instantiation_error_to_json = function
    param-free copy built here, revalidated by the same [Plan.create] that
    admitted the declaration, so the executor never meets an unbound name. *)
 let instantiate ~descriptors ~args entry =
-  let lookup name =
-    match args with
-    | `Assoc fields -> List.assoc_opt name fields
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
-    | `Tuple _ | `Variant _ -> None
-  in
-  let rec rebuild rebuilt = function
-    | [] ->
-      (match Plan.create ~descriptors
-               ~branch_failure_policy:(Plan.branch_failure_policy entry.plan)
-               ~exports:(Plan.exports entry.plan) (List.rev rebuilt) with
-       | Ok plan -> Ok plan
-       | Error error -> Error (Instantiated_plan_rejected error))
-    | (node : Plan.node) :: rest ->
-      (match Plan.Json_template.substitute_params ~lookup node.input with
-       | Error (Plan.Json_template.Missing_param param) ->
-         Error (Missing_argument param)
-       | Ok input ->
-         rebuild
-           (Plan.node ~id:node.id ~tool_name:node.tool_name ~after:node.after ~input ()
-            :: rebuilt)
-           rest)
-  in
-  rebuild [] (Plan.nodes entry.plan)
+  Plan.instantiate_params ~descriptors ~args entry.plan
 ;;

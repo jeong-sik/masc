@@ -1385,17 +1385,17 @@ let rec async_worker_result
         let* activation = Keeper_composition_nested_run.admitted_activation nested_run
             ~alias:(Plan.child_alias child.child)
           |> Result.map_error (fun rejection -> rejection.Executor.detail) in
-        let* origin = Journal.child_origin attempt ~plan ~activation
+        let* origin,child_plan = Journal.child_origin attempt ~plan ~activation
           |> Result.map_error Journal.error_to_string in
-        Ok (context,activation,origin) in
+        Ok (context,activation,origin,child_plan) in
       (match original with
        | Error detail -> refuse detail
-       | Ok (context,activation,origin) ->
+       | Ok (context,activation,origin,child_plan) ->
          let parent_invocation = Agent_core.Tool_contract.Invocation.create
              ~tool_use_id:activation.skill_tool_use_id ~turn:activation.agent_core_turn
              ~schedule ~completion:Agent_core.Tool_contract.Continue_after_success in
          let result = named_async_submission_result
-             ~skill_reference:(Plan.child_reference child.child) ~plan:(Plan.child_plan child.child)
+             ~skill_reference:(Plan.child_reference child.child) ~plan:child_plan
              ~tool_name:(Plan.child_tool_name child.child)
              ~tool_kind:Keeper_tool_descriptor.Async_composition_tool ~parent_invocation
              ~admission:(Original_child {attempt;parent_plan=plan;origin;context})

@@ -1718,7 +1718,7 @@ let test_compiled_child_owned_encoding () =
   let encoded_nodes = Yojson.Safe.Util.(encoded |> member "nodes" |> to_list) in
   let operands = List.map (fun n -> Yojson.Safe.Util.member "compiled_child" n) encoded_nodes in
   check bool "compiled route evidence contains fixed child plans" true
-    (List.for_all (fun operand -> Yojson.Safe.Util.member "bound_plan" operand <> `Null) operands);
+    (List.for_all (fun operand -> Yojson.Safe.Util.member "declared_plan" operand <> `Null) operands);
   let contracts = Request.contracts_to_yojson plan |> function Ok json -> json | Error _ -> fail "child contract freeze" in
   check bool "schema definitions do not create artifact references" true
     (match Tool_output.normalized_artifact_refs_in_json_strict (`List [encoded;contracts]) with

@@ -459,7 +459,7 @@ let load_nested_result_children ~base_path source ~result =
       let frozen = List.assoc "scope" fields in
       let* () = if List.exists (Yojson.Safe.equal frozen) calls && not (List.exists (Yojson.Safe.equal frozen) seen)
         then Ok () else malformed "result child scope differs or repeats the original frozen run" in
-      let* call = exact_fields ~names:["alias";"reference";"args";"scope";"exports"] frozen in
+      let* call = exact_fields ~names:["alias";"reference";"arguments";"scope";"exports"] frozen in
       let* alias = match List.assoc "alias" call with `String alias -> Ok alias | _ -> malformed "invalid original child alias" in
       let* reference = Skill_reference.of_yojson (List.assoc "reference" call)
         |> Result.map_error (fun _ -> Malformed_draft "invalid original child reference") in

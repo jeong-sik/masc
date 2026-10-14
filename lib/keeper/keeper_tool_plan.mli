@@ -303,6 +303,15 @@ val branch_failure_policy_of_string : string -> branch_failure_policy option
 
 val branch_failure_policy : t -> branch_failure_policy
 
+type parameter_binding_error =
+  | Missing_argument of string
+  | Instantiated_plan_rejected of error
+
+val instantiate_params : descriptors:Keeper_tool_descriptor.t list ->
+  args:Yojson.Safe.t -> t -> (t, parameter_binding_error) result
+(** Pure per-invocation substitution. The declared plan remains immutable;
+    the returned graph is revalidated against the supplied authority. *)
+
 val create
   :  descriptors:Keeper_tool_descriptor.t list
   -> ?branch_failure_policy:branch_failure_policy
@@ -311,18 +320,31 @@ val create
   -> (t, error) result
 
 type async_child
-(** A fixed native compiler operand. Its exact reference, arguments and bound
-    child plan are immutable. It grants neither Skill nor broker admission. *)
+(** A native compiler operand retaining the exact Skill, argument template,
+    parameter schema and immutable declared plan. It grants no admission. *)
 
 val fixed_async_child : alias:Node_id.t -> reference:Skill_reference.t ->
   tool_name:string -> args:Yojson.Safe.t -> input_schema:Yojson.Safe.t ->
   bound_plan:t -> async_child
+val dynamic_async_child : alias:Node_id.t -> reference:Skill_reference.t ->
+  tool_name:string -> input:Json_template.t -> input_schema:Yojson.Safe.t ->
+  declared_plan:t -> async_child
 val child_alias : async_child -> Node_id.t
 val child_reference : async_child -> Skill_reference.t
 val child_tool_name : async_child -> string
-val child_args : async_child -> Yojson.Safe.t
+val child_input : async_child -> Json_template.t
 val child_input_schema : async_child -> Yojson.Safe.t
 val child_plan : async_child -> t
+
+type child_binding_error =
+  | Child_arguments_rejected of Tool_input_validation.rejection
+  | Fixed_child_input_mismatch
+  | Child_plan_rejected of parameter_binding_error
+
+val child_binding_error_to_string : child_binding_error -> string
+val bind_child_plan : input:Yojson.Safe.t -> async_child -> (t, child_binding_error) result
+(** Validate resolved arguments and bind only the frozen declared plan. For
+    fixed inputs, also require the original literal value. No source reread. *)
 
 type child_nodes = private
   { child : async_child
@@ -468,3 +490,7 @@ type prepared_input = private
 val prepare_inputs
   :  t
   -> ((Node_id.t * prepared_input) list, Node_id.t * execution_error) result
+
+val validate_parameterized_inputs : t -> (unit, Node_id.t * execution_error) result
+(** Check fixed inputs in a declared Skill plan while leaving parameterized
+    inputs for invocation binding. This produces no executable input token. *)

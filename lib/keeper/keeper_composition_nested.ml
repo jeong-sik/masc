@@ -4,6 +4,8 @@ module Catalog = Keeper_tool_composition_catalog
 module Surface = Keeper_capability_surface
 module Inventory = Keeper_skill_inventory
 
+type arguments = Fixed of Yojson.Safe.t | Upstream of Plan.Json_template.t
+
 type scope =
   | Inline of (Plan.Node_id.t * Plan.Node_id.t) list
   | Async of { submission : Plan.Node_id.t; result : Plan.Node_id.t }
@@ -11,7 +13,7 @@ type scope =
 type call =
   { alias : Plan.Node_id.t
   ; reference : Skill_reference.t
-  ; args : Yojson.Safe.t
+  ; arguments : arguments
   ; scope : scope
   ; exports : Plan.export list
   }
@@ -29,6 +31,7 @@ type error =
       }
   | Instruction_reference of Plan.Node_id.t
   | Async_child_requires_suspension of Plan.Node_id.t
+  | Dynamic_inline_arguments of Plan.Node_id.t
   | Child_policy_mismatch of Plan.Node_id.t
   | Arguments_rejected of Plan.Node_id.t * Tool_input_validation.rejection
   | Binding_rejected of Plan.Node_id.t * Catalog.instantiation_error
@@ -43,7 +46,7 @@ type error =
 type nested_node =
   { alias : Plan.Node_id.t
   ; reference : Skill_reference.t
-  ; args : Yojson.Safe.t
+  ; arguments : arguments
   ; after : Plan.Node_id.t list
   }
 
@@ -69,11 +72,10 @@ let input_schema =
       [ "identity", object_ [ "source_id", string_schema; "package_id", string_schema; "name", string_schema ]
           [ "source_id"; "package_id"; "name" ]
       ; "content_revision", string_schema ] [ "identity"; "content_revision" ] in
-  let nested = object_
-      [ "id", string_schema; "skill_reference", reference
-      ; "args", `Assoc [ "type", `String "object" ]
+  let nested field schema = object_
+      [ "id", string_schema; "skill_reference", reference; field, schema
       ; "after", `Assoc [ "type", `String "array"; "items", string_schema ] ]
-      [ "id"; "skill_reference"; "args" ] in
+      [ "id"; "skill_reference"; field ] in
   match Request.input_schema with
   | `Assoc fields ->
     let properties = match List.assoc "properties" fields with
@@ -81,7 +83,9 @@ let input_schema =
     let nodes = match List.assoc "nodes" properties with
       | `Assoc fields -> fields | _ -> invalid_arg "plan schema nodes" in
     let ordinary = List.assoc "items" nodes in
-    let nodes = `Assoc (("items", `Assoc [ "oneOf", `List [ ordinary; nested ] ]) :: List.remove_assoc "items" nodes) in
+    let nodes = `Assoc (("items", `Assoc [ "oneOf", `List
+        [ordinary;nested "args" (`Assoc ["type",`String "object"]);
+         nested "input" (`Assoc ["$ref",`String "#/$defs/template"])] ]) :: List.remove_assoc "items" nodes) in
     `Assoc (("properties", `Assoc (("nodes", nodes) :: List.remove_assoc "nodes" properties))
       :: List.remove_assoc "properties" fields)
   | _ -> invalid_arg "plan schema object"
@@ -93,7 +97,7 @@ let parse_call ~index fields =
   let* () = List.fold_left (fun acc (field, _) ->
       let* seen = acc in
       if List.mem field seen then field_error ~index ~field "duplicate field"
-      else if not (List.mem field [ "id"; "skill_reference"; "args"; "after" ]) then
+      else if not (List.mem field [ "id"; "skill_reference"; "args"; "input"; "after" ]) then
         field_error ~index ~field "unexpected field"
       else Ok (field :: seen)) (Ok []) fields |> Result.map (fun _ -> ()) in
   let id ~field = function
@@ -105,15 +109,19 @@ let parse_call ~index fields =
   let* reference = match List.assoc_opt "skill_reference" fields with
     | Some json -> Skill_reference.of_yojson json |> Result.map_error (fun error -> Invalid_reference { index; error })
     | None -> field_error ~index ~field:"skill_reference" "missing exact pinned reference" in
-  let* args = match List.assoc_opt "args" fields with
-    | Some (`Assoc _ as args) -> Ok args
-    | Some _ | None -> field_error ~index ~field:"args" "expected fixed argument object" in
+  let* arguments = match List.assoc_opt "args" fields,List.assoc_opt "input" fields with
+    | Some (`Assoc _ as args),None -> Ok (Fixed args)
+    | None,Some input -> Request.template_of_json input
+      |> Result.map (fun input -> Upstream input)
+      |> Result.map_error (fun error -> Request_rejected (Request.Node_template_error {index;error}))
+    | Some _,None -> field_error ~index ~field:"args" "expected fixed argument object"
+    | Some _,Some _ | None,None -> field_error ~index ~field:"input" "provide exactly one of args or input" in
   let* after = match List.assoc_opt "after" fields with
     | None -> Ok []
     | Some (`List values) -> List.fold_left (fun acc json ->
         let* ids = acc in let* value = id ~field:"after" json in Ok (value :: ids)) (Ok []) values |> Result.map List.rev
     | Some _ -> field_error ~index ~field:"after" "expected node ID array" in
-  Ok { alias; reference; args; after }
+  Ok { alias; reference; arguments; after }
 ;;
 
 let source_node ~index = function
@@ -172,29 +180,35 @@ let expand ~execution ~capability_surface ~policy = function
       | Catalog.Inline,(Catalog.Inline | Catalog.Async) | Catalog.Async,Catalog.Async -> Ok ()
       | Catalog.Async,Catalog.Inline -> Error (Async_child_requires_suspension node.alias) in
     let* () = if Plan.branch_failure_policy entry.plan = policy then Ok () else Error (Child_policy_mismatch node.alias) in
-    let* args = Tool_input_validation.validate ~schema:(Catalog.input_schema_of_params entry.params)
-        ~name:(Catalog.tool_name entry) ~args:node.args ()
-        |> Result.map_error (fun error -> Arguments_rejected (node.alias, error)) in
-    let* plan = Catalog.instantiate ~descriptors:(Surface.descriptors capability_surface) ~args entry
-        |> Result.map_error (fun error -> Binding_rejected (node.alias, error)) in
+    let input_schema = Catalog.input_schema_of_params entry.params in
+    let* arguments,plan = match node.arguments,entry.execution with
+      | Upstream _,Catalog.Inline -> Error (Dynamic_inline_arguments node.alias)
+      | Upstream input,Catalog.Async -> Ok (Upstream input,entry.plan)
+      | Fixed args,(Catalog.Inline | Catalog.Async) ->
+        let* args = Tool_input_validation.validate ~schema:input_schema
+            ~name:(Catalog.tool_name entry) ~args ()
+          |> Result.map_error (fun error -> Arguments_rejected (node.alias,error)) in
+        let* plan = Catalog.instantiate ~descriptors:(Surface.descriptors capability_surface) ~args entry
+          |> Result.map_error (fun error -> Binding_rejected (node.alias,error)) in
+        Ok (Fixed args,plan) in
     match entry.execution with
     | Catalog.Inline ->
       let mapping = List.map (fun (leaf : Plan.node) -> leaf.id, namespace [ node.alias; leaf.id ]) (Plan.nodes plan) in
       let exports = List.map (fun (export : Plan.export) ->
           Plan.export ~name:export.name ~node_id:(List.assoc export.node_id mapping)
             ~pointer:export.pointer) (Plan.exports plan) in
-      let call = {alias=node.alias;reference=node.reference;args;scope=Inline mapping;exports} in
+      let call = {alias=node.alias;reference=node.reference;arguments;scope=Inline mapping;exports} in
       Ok (Inline_child (node,plan,call))
     | Catalog.Async ->
       let alias = Plan.Node_id.to_string node.alias in
       let submission = namespace_segments [alias;"submission"]
       and result = namespace_segments [alias;"result"] in
-      let child = Plan.fixed_async_child ~alias:node.alias ~reference:node.reference
-          ~tool_name:(Catalog.tool_name entry) ~args ~input_schema:(Catalog.input_schema_of_params entry.params)
-          ~bound_plan:plan in
+      let input = match arguments with Fixed args -> Plan.Json_template.literal args | Upstream input -> input in
+      let child = Plan.dynamic_async_child ~alias:node.alias ~reference:node.reference
+          ~tool_name:(Catalog.tool_name entry) ~input ~input_schema ~declared_plan:plan in
       let exports = List.map (fun (export : Plan.export) ->
         Plan.export ~name:export.name ~node_id:result ~pointer:(Plan.Json_pointer.of_segments [export.name])) (Plan.exports plan) in
-      let call = {alias=node.alias;reference=node.reference;args;scope=Async {submission;result};exports} in
+      let call = {alias=node.alias;reference=node.reference;arguments;scope=Async {submission;result};exports} in
       Ok (Async_child (node,child,call))
 ;;
 
@@ -269,7 +283,12 @@ let flatten nodes =
             Ok (Plan.node ~id:(local leaf.id) ~tool_name:leaf.tool_name ~input ~after () :: children)) (Ok []) (Plan.nodes child) in
         Ok (children @ flattened,compiled)
       | Async_child (node,child,call) ->
-        let* after = outer_dependencies nodes node.after in
+        let original_input = Plan.child_input child in
+        let* after = outer_dependencies nodes (node.after @ Plan.Json_template.dependencies original_input) in
+        let* input = map_template ~output:(resolve_outer_output nodes) original_input in
+        let child = Plan.dynamic_async_child ~alias:(Plan.child_alias child)
+            ~reference:(Plan.child_reference child) ~tool_name:(Plan.child_tool_name child)
+            ~input ~input_schema:(Plan.child_input_schema child) ~declared_plan:(Plan.child_plan child) in
         let submission_id,result_id = match call.scope with
           | Async {submission;result} -> submission,result
           | Inline _ -> invalid_arg "async child scope" in
@@ -278,7 +297,7 @@ let flatten nodes =
   |> Result.map (fun (nodes,children) -> List.rev nodes,List.rev children)
 ;;
 
-let rec validate_leaves plan =
+let rec validate_leaves ?(parameterized=false) plan =
   let* () = List.fold_left (fun acc (node : Plan.node) ->
       let* () = acc in
       match Plan.contract plan node.id with
@@ -286,10 +305,12 @@ let rec validate_leaves plan =
           | Read_only_ordinary_leaf | Owned_job_launch_leaf -> Ok ()
           | Direct_only ->
             Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name }))
-      | Some {target=Plan.Child_submission child;_} -> validate_leaves (Plan.child_plan child.child)
+      | Some {target=Plan.Child_submission child;_} -> validate_leaves ~parameterized:true (Plan.child_plan child.child)
       | Some {target=Plan.Child_result _;_} -> Ok ()
       | None -> Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name })) (Ok ()) (Plan.nodes plan) in
-  Plan.prepare_inputs plan |> Result.map (fun _ -> ()) |> Result.map_error (fun (id, error) -> Inputs_rejected (id, error))
+  (if parameterized then Plan.validate_parameterized_inputs plan
+   else Plan.prepare_inputs plan |> Result.map (fun _ -> ()))
+  |> Result.map_error (fun (id, error) -> Inputs_rejected (id, error))
 ;;
 
 let compile ~execution ~capability_surface json =
@@ -327,7 +348,12 @@ let compile ~execution ~capability_surface json =
 let call_to_json (call : call) = `Assoc
     [ "alias", id_json call.alias
     ; "reference", Skill_reference.to_yojson call.reference
-    ; "args", call.args
+    ; "arguments", (match call.arguments with
+        | Fixed value -> `Assoc ["kind",`String "fixed";"value",value]
+        | Upstream input ->
+          let input = match Request.template_to_yojson input with Ok input -> input
+            | Error (Request.Unsubstituted_param _) -> invalid_arg "public child input contains an unbound parameter" in
+          `Assoc ["kind",`String "upstream";"input",input])
     ; "scope", (match call.scope with
         | Inline mapping -> `Assoc ["kind",`String "inline";"node_mapping",`List (List.map (fun (source,expanded) ->
             `Assoc ["source",id_json source;"expanded",id_json expanded]) mapping)]
@@ -354,6 +380,7 @@ let error_to_json error =
       ; "availability", (match availability with None -> `Null | Some value -> `String (Surface.capability_availability_to_string value)) ]
   | Instruction_reference id -> node "child_is_instruction" id
   | Async_child_requires_suspension id -> node "async_child_requires_suspension" id
+  | Dynamic_inline_arguments id -> node "dynamic_inline_arguments" id
   | Child_policy_mismatch id -> node "child_policy_mismatch" id
   | Arguments_rejected (id, rejection) -> tag "child_arguments_rejected" [ "node_id", id_json id; "detail", `String rejection.message ]
   | Binding_rejected (id, error) -> tag "child_binding_rejected" [ "node_id", id_json id; "error", Catalog.instantiation_error_to_json error ]

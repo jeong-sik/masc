@@ -249,10 +249,12 @@ val validate_plan : worker -> plan:Keeper_tool_plan.t -> (unit, error) result
     (including edges and exports), then check current durable ownership. *)
 
 val child_origin : attempt -> plan:Keeper_tool_plan.t ->
-  activation:Keeper_skill_activation_ledger.activation -> (named_origin, error) result
+  activation:Keeper_skill_activation_ledger.activation ->
+  (named_origin * Keeper_tool_plan.t, error) result
 (** Verify the exact native submission operand and its original canonical
     Nested activation, retaining the parent occurrence independently of the
-    logical child Skill invocation ID. No activation or broker effect. *)
+    logical child Skill invocation ID. Return the child plan bound from this
+    opaque attempt's validated original input. No activation or broker effect. *)
 
 val record_child_submission : attempt -> plan:Keeper_tool_plan.t ->
   child_source:source -> (child_submission, error) result

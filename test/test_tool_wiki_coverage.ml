@@ -1277,6 +1277,22 @@ let test_lint_kind_enum_is_all_kinds () =
   Alcotest.(check (list string)) "enum = Masc.Wiki_lint.all_kinds"
     Masc.Wiki_lint.all_kinds declared
 
+(* A log.md that exists but cannot be read is an error, not an empty log. A
+   directory at that path is the root-independent way to make the read fail:
+   the file is there, so the tool must not answer "nothing is wrong". *)
+let test_lint_reports_an_unreadable_log () =
+  with_temp_base_path (fun ctx ->
+    add_page ctx ~page:"alpha" ~body:"x";
+    let path = Filename.concat (Tool_wiki.wiki_root ~base_path:ctx.base_path) "log.md" in
+    Unix.mkdir path 0o755;
+    let ok, message = dispatch_exn ctx ~name:"masc_wiki_lint" ~args:(`Assoc []) in
+    Alcotest.(check bool) "an unreadable log is an error" false ok;
+    Alcotest.(check bool) "says which file failed" true (msg_contains ~needle:"log.md" message);
+    (* With no log.md at all the same call succeeds and reports zero. *)
+    Unix.rmdir path;
+    let ok, _ = dispatch_exn ctx ~name:"masc_wiki_lint" ~args:(`Assoc []) in
+    Alcotest.(check bool) "no log.md yet is not an error" true ok)
+
 (* ============================================================
    Test runner
    ============================================================ *)
@@ -1359,6 +1375,8 @@ let () =
       Alcotest.test_case "bad arguments are refused" `Quick test_lint_refuses_bad_arguments;
       Alcotest.test_case "a cursor from before the wiki changed is refused" `Quick test_lint_stale_cursor_is_refused;
       Alcotest.test_case "the kind enum is every kind" `Quick test_lint_kind_enum_is_all_kinds;
+      Alcotest.test_case "an unreadable log is an error, not an empty log" `Quick
+        test_lint_reports_an_unreadable_log;
     ]);
     ("unreadable", [
       Alcotest.test_case "unknown source is named, not passed through" `Quick test_unknown_source_is_named_not_passed_through;

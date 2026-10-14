@@ -538,17 +538,34 @@ let lint_nodes ~base_path =
       else None
     | content ->
       (match parse_frontmatter content with
-       | Ok _ ->
+       | Ok frontmatter ->
          let body = page_body content in
          Some
            (Wiki_graph.Readable
               { page = Filename.chop_suffix file ".md"
               ; links = Wiki_link.extract body
               ; sources = Wiki_sources.of_body body
+              ; revision = frontmatter.revision
               })
        | Error error ->
          Some
            (Wiki_graph.Unreadable { file; reason = frontmatter_error_to_string error })))
+
+(* [log.md] read for the lint. A wiki that has never been written has no log
+   yet, and that is an empty log, not a failure to read. A log that is there
+   but cannot be read is an error, not an empty log: "nothing is wrong" and
+   "nothing could be read" must stay different answers (§7). The one parser
+   in the runtime is {!Wiki_log}, so the lint and any later consumer read the
+   same words the same way. *)
+let lint_log ~base_path =
+  let path = Filename.concat (wiki_root ~base_path) Wiki_journal.log_file in
+  if not (Sys.file_exists path)
+  then Ok Wiki_log.empty
+  else (
+    match In_channel.with_open_text path In_channel.input_all with
+    | exception Sys_error message ->
+      Error (Printf.sprintf "log.md exists but could not be read: %s" message)
+    | content -> Ok (Wiki_log.parse content))
 
 let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
   (* A value of the wrong type is refused, not read as "not given": a limit
@@ -590,26 +607,35 @@ let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
   match page_checked with
   | Error message -> workflow_err ~tool_name ~start_time message
   | Ok () ->
-    let nodes = lint_nodes ~base_path:ctx.base_path in
-    let pages_unreadable =
-      List.length
-        (List.filter
-           (function
-             | Wiki_graph.Unreadable _ -> true
-             | Wiki_graph.Readable _ -> false)
-           nodes)
-    in
-    let findings = Wiki_lint.run (Wiki_graph.of_nodes nodes) in
-    (match
-       Wiki_lint_report.render
-         ~pages_total:(List.length nodes)
-         ~pages_unreadable
-         ~findings
-         request
-     with
-     | Error problem ->
-       workflow_err ~tool_name ~start_time (Wiki_lint_report.problem_to_string problem)
-     | Ok json -> text_ok ~tool_name ~start_time (Yojson.Safe.to_string json))
+    (* Read the log first, then the pages: the writer puts the page on disk
+       first and appends the log line after ("Page, then one log line, then the
+       index"), so a log read that happens first can never record a revision
+       the page read afterwards has not reached. The other order would report
+       a revision_log_gap for a write that completed in between. *)
+    (match lint_log ~base_path:ctx.base_path with
+     | Error message -> workflow_err ~tool_name ~start_time message
+     | Ok log ->
+       let nodes = lint_nodes ~base_path:ctx.base_path in
+       let pages_unreadable =
+         List.length
+           (List.filter
+              (function
+                | Wiki_graph.Unreadable _ -> true
+                | Wiki_graph.Readable _ -> false)
+              nodes)
+       in
+       let findings = Wiki_lint.run (Wiki_graph.of_nodes nodes) ~log in
+       (match
+          Wiki_lint_report.render
+            ~pages_total:(List.length nodes)
+            ~pages_unreadable
+            ~log
+            ~findings
+            request
+        with
+        | Error problem ->
+          workflow_err ~tool_name ~start_time (Wiki_lint_report.problem_to_string problem)
+        | Ok json -> text_ok ~tool_name ~start_time (Yojson.Safe.to_string json)))
 
 (* RFC-0189 PR-1b.7 — boundary projection. Handlers are typed; the
    dispatch ABI stays [Tool_result.result option] so external callers

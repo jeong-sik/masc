@@ -3818,18 +3818,21 @@ status: reference
 **Wiki lint (`masc_wiki_lint`)**
 : Wiki의 모든 페이지를 읽어 무엇이 어긋났는지 보고하는 읽기 전용 점검 도구. 페이지·`index.md`·
   `log.md`를 쓰지 않고, 잠금을 잡지 않고, 모델을 부르지 않으며, 같은 페이지 묶음에는 같은
-  순서로 같은 결과를 낸다. 설정 스위치가 없고, 부르지 않으면 아무 일도 일어나지 않는다. 일곱
-  `kind`와 응답 필드는 안정이며, 새 종류(`revision_log_gap` 등)는 둘째 단계에서 더해질 수 있다.
-  결과 한 건을 `finding`이라 부르고 일곱 가지 `kind`가 있다 — `broken_link`(없는 페이지로 가는
+  순서로 같은 결과를 낸다. 설정 스위치가 없고, 부르지 않으면 아무 일도 일어나지 않는다. 여덟
+  `kind`와 응답 필드는 안정이며, 새 종류는 뒤 단계에서 더해질 수 있다.
+  결과 한 건을 `finding`이라 부르고 여덟 가지 `kind`가 있다 — `broken_link`(없는 페이지로 가는
   `[글자](page.md)` 링크)·`unsupported_link`(앵커·상대 경로·`[[위키링크]]`처럼 따라가지 않는
   모양. 보고만 하고 판정하지 않는다)·`orphan`(다른 페이지가 링크하지 않음. 자기 링크와
   `index.md`의 줄은 세지 않는다)·`orphan_unconfirmed`(읽히는 페이지는 링크하지 않지만 머리말이
   안 읽히는 페이지가 링크할 수도 있다)·`missing_sources`(`## Sources` 절에 `repo:`·`board:`·
   `artifact:`·`url:` 줄이 없다)·`hearsay_only`(출처가 `said:` 줄뿐이다)·`unreadable_page`
-  (머리말이 안 읽히거나 파일을 열 수 없다). 코드 펜스·코드 스팬·이미지 안의 링크는 세지 않는다.
+  (머리말이 안 읽히거나 파일을 열 수 없다)·`revision_log_gap`(`log.md`에 페이지가 닿지 못한
+  `r<N>` 줄이 있다. `log_revision`과 `page_revision`이 두 수를 싣는다). `log.md`는 같은
+  파서로 읽고, 모르는 동작 단어 줄과 읽지 못한 줄의 수를 `log_unknown_action`과
+  `log_unreadable_line`으로 함께 낸다. 코드 펜스·코드 스팬·이미지 안의 링크는 세지 않는다.
   **다른 뜻과 구별한다**: 이 점검의 `missing_sources`가 보는 `## Sources` 참조 줄은 frontmatter의
   `source`(획득 방식, → Wiki)와 다른 것이고, Board 글의 `sources`(url·인용)와도 다르다.
-  `finding`은 모델이 낸 판단이 아니라 글자만 읽어 센 결과다. 모순 후보·로그와 revision 어긋남은
+  `finding`은 모델이 낸 판단이 아니라 글자만 읽어 센 결과다. 모순 후보는
   아직 없다. 점검 도중 위키가 쓰이면 응답은 스냅샷이 아니므로 `broken_link`는 한 번 더 돌려 확인한다.
   → [Wiki_lint](../../lib/wiki_lint.mli) · [Wiki_lint_report](../../lib/wiki_lint_report.mli) ·
   [wiki-lint 가이드](../guides/wiki-lint.md)

@@ -32,7 +32,9 @@ val byte_budget : int
 val render
   :  pages_total:int
   -> pages_unreadable:int
+  -> log:Wiki_log.t
   -> findings:Wiki_lint.finding list
   -> request
   -> (Yojson.Safe.t, problem) result
-(** [findings] is the full, sorted output of {!Wiki_lint.run}. *)
+(** [findings] is the full, sorted output of {!Wiki_lint.run}. [log] is the
+    same {!Wiki_log} read; only its two counts are reported. *)

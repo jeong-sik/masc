@@ -7,6 +7,7 @@ type node =
       { page : string  (** The page name, without [.md]. *)
       ; links : Wiki_link.link list
       ; sources : Wiki_sources.t
+      ; revision : int  (** The [revision] header the page carries. *)
       }
   | Unreadable of
       { file : string  (** [<name>.md]. *)
@@ -34,6 +35,10 @@ val links_of : t -> string -> Wiki_link.link list
 
 val sources_of : t -> string -> Wiki_sources.t option
 (** [None] for a page that is not readable or not there. *)
+
+val revision_of : t -> string -> int option
+(** The revision header of one readable page. [None] for a page that is not
+    readable or not there. *)
 
 val incoming : t -> string -> int
 (** How many readable pages other than [name] itself link to it with a

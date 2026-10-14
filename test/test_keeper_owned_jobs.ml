@@ -1252,7 +1252,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "completed result read has no backend operation" before_completed_resume (List.length (calls fixture));
   Printf.printf "OWNED_CONTINUATION_RECOVERY %s\n%!" (Yojson.Safe.to_string
     (`Assoc ["post_binding_losses",`Int (List.length [first_lost_entry;second_lost_entry]);
-      "original_result_to_continuation_completion_ms",`Float recovery_ms;
+      "resume_intake_to_continuation_completion_ms",`Float recovery_ms;
       "backend_calls",`Int (List.length (calls fixture) - before_completed_resume);
       "unstarted_worker_calls",`Int !lost_worker_calls;
       "program_creates",`Int (effect_count fixture "create");
@@ -1311,6 +1311,78 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "retirement leaves no pending marker work" 0 stable.inspected;
   check int "composition never recreates original program" 1 (effect_count fixture "create");
   check int "composition never restarts original program" 1 (effect_count fixture "start")
+
+let test_cancelled_continuation_cannot_restart () =
+  List.iter (fun forget_before_fork -> with_fixture @@ fun env _initialize fixture ->
+    let module Async = Masc.Keeper_msg_async in
+    set_source fixture ~task_id:"task-A" ~turn:41;
+    Call_log.init ~base_path:fixture.base_path ();
+    let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+    let recipe = `Assoc ["execution",`String "async";
+      "nodes",`List [`Assoc ["id",`String "await";"tool",`String "keeper_job_result";
+        "input",`Assoc ["kind",`String "literal";"value",argument id];"after",`List []]];
+      "exports",`List [`Assoc ["name",`String "job";"node",`String "await";"pointer",`String "/job_id"]]] in
+    let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"prepare-cancel"
+        ~turn:41 "keeper_composition_prepare" recipe) in
+    let sha256 = (prepared |> member "draft" |> composition_reference "cancellable draft").sha256 in
+    let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"run-cancel"
+        ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String sha256])) in
+    let _, _, waiting_entry = await_composition env fixture accepted in
+    let run_id = accepted |> member "composition_run_id" |> to_string
+      |> Masc.Keeper_tool_plan.Composition_run_id.of_string |> require "cancelled original run UUID" in
+    let journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper ~composition_run_id:run_id
+      |> require "cancelled original journal" in
+    let candidate = match Journal.waiting_continuation journal with
+      | Ok (Some candidate) -> candidate
+      | Ok None | Error _ -> fail "cancellation fixture has no original job wait" in
+    let backend_before = List.length (calls fixture) in
+    let worker_calls = ref 0 and intent = ref None in
+    let stopped_switch = Eio.Switch.run (fun sw -> sw) in
+    let submission = Async.submit_worker_with_request_id ?request_context:waiting_entry.request_context
+        ~background_sw:stopped_switch ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+        ~on_accepted:(fun request_id ->
+          match Journal.bind_continuation candidate ~request_id with
+          | Error error -> Error (Journal.error_to_string error)
+          | Ok _ ->
+            (match Async.cancel ~base_path:fixture.base_path ~caller:keeper request_id with
+             | Cancellation_requested Durably_committed -> ()
+             | _ -> fail "pre-fork cancellation did not commit its exact intent");
+            (match Async.poll ~base_path:fixture.base_path ~caller:keeper request_id with
+             | Found {status=Cancelling {reason;cancelled_by};_} -> intent := Some (reason,cancelled_by)
+             | Found _ | Absent | Unreadable _ | Rejected _ -> fail "committed cancel intent is unavailable");
+            (* Explicit fixture process-memory reset leaves the actual durable
+               Cancelling record for the exclusive startup recovery path. *)
+            if forget_before_fork then Async.For_testing.forget ~base_path:fixture.base_path ~caller:keeper ~request_id;
+            Ok ())
+        ~f:(fun ~request_id:_ _ -> incr worker_calls;
+          Async.worker_finished (Tool_result.make_ok ~tool_name:"cancelled-continuation"
+            ~start_time:(Tool_timing.start ()) ())) () in
+    let request_id = match submission with
+      | Error (Background_fork_failed {request_id;_}) -> request_id
+      | Error _ | Ok _ -> fail "closed switch did not exercise the failed worker fork" in
+    if forget_before_fork then (
+      (match Async.poll ~base_path:fixture.base_path ~caller:keeper request_id with
+       | Found {status=Cancelling _;_} -> ()
+       | Found _ | Absent | Unreadable _ | Rejected _ -> fail "ordinary polling stole disk-only cancellation");
+      let recovered = Async.recover_lost_disk_records ~base_path:fixture.base_path () in
+      check int "startup does not turn operator cancellation into Lost" 0 recovered.lost;
+      check int "startup finalizes the exact cancellation" 1 recovered.finalized;
+      check int "startup cancellation settlement has no persistence failure" 0 recovered.failed);
+    let terminal = Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper request_id
+      |> require "cancelled continuation canonical terminal" |> Async.durable_terminal_entry in
+    (match terminal.status with
+     | Cancelled {reason;cancelled_by} ->
+       check (option (pair string string)) "terminal preserves exact cancellation reason and actor"
+         !intent (Some (reason,cancelled_by))
+     | _ -> fail "operator cancellation became a resumable Lost request");
+    (match Journal.waiting_continuation journal with
+     | Ok None -> () | Ok (Some _) | Error _ -> fail "cancelled original run regained continuation authority");
+    let discovery = Journal.pending_continuations ~base_path:fixture.base_path |> require "cancelled pending discovery" in
+    check int "cancelled owner dispatches no ready continuation" 0 (List.length discovery.ready);
+    check int "cancelled owner retirement retains no unreadable evidence" 0 (List.length discovery.failures);
+    check int "cancelled continuation starts no worker" 0 !worker_calls;
+    check int "cancelled continuation has no backend effect" backend_before (List.length (calls fixture));
+    check int "cancellation never relaunches the program" 1 (effect_count fixture "start")) [false;true]
 
 let test_job_result_rejects_unavailable_authority () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
@@ -1718,6 +1790,7 @@ let () =
       ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch
       ; test_case "malformed whole source cannot publish a binding" `Quick test_malformed_source_cannot_publish_binding
       ; test_case "public Composition waits and resumes the original job result" `Quick test_public_composition_wait_and_resume
+      ; test_case "cancelled continuation stays cancelled at fork failure and startup" `Quick test_cancelled_continuation_cannot_restart
       ; test_case "job result rejects unavailable owner authority" `Quick test_job_result_rejects_unavailable_authority
       ; test_case "completion enqueue failure recovers original result after restart" `Quick test_completion_delivery_failure_and_restart
       ; test_case "consumed notification survives missing producer ACK" `Quick test_completion_consumed_before_producer_ack

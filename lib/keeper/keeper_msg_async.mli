@@ -311,6 +311,9 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     [on_accepted] runs after the request record is durable and before a worker
     can start. It owns any producer-specific durable acceptance side effect;
     failure returns [Acceptance_persistence_failed] and no worker is forked.
+    A subsequent worker-fork failure preserves a committed [Cancelling]
+    intent as exact [Cancelled], including its reason and actor, instead of
+    making it a resumable [Lost] request.
 
     [on_worker_aborted], when supplied, is invoked exactly once whenever [f]
     is cut off by cancellation before it completes on its own —
@@ -396,7 +399,8 @@ val submit_with_request_id
     exists outside the exact canonical base-path/caller lane. A disk-only
     non-terminal record is returned unchanged: a poller cannot infer that a
     different process does not own its worker. Only the exclusive startup
-    recovery boundary may transition such records to [Lost]. *)
+    recovery boundary may settle such records: [Queued]/[Running] become
+    [Lost], while an existing [Cancelling] intent becomes exact [Cancelled]. *)
 val poll : base_path:string -> caller:string -> string -> load_result
 
 (** Read the canonical durable active partition without consulting process
@@ -438,8 +442,9 @@ val load_canonical_durable_queued :
     worker fork. No inventory, recovery, status mutation, or inference about
     another process's worker ownership occurs. *)
 
-(** Mark persisted non-terminal request records that have no live in-memory
-    worker as [Lost], returning the number of records transitioned. This is
+(** Settle persisted non-terminal request records that have no live in-memory
+    worker: [Queued]/[Running] become [Lost]; [Cancelling] becomes [Cancelled]
+    with its exact reason and actor, counted in [finalized]. This is
     intended for server startup/recovery sweeps. Only the canonical active
     partition and its dedicated atomic staging directory are scanned; the
     terminal partition is excluded. Current-process workers remain protected

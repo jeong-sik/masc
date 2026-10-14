@@ -129,6 +129,9 @@ and admission. Cancellation and unknown effects do not grant continuation, and
 an empty process registry never proves loss. This recovers the original result
 read without another program create/start. It does not itself install server
 scheduling or establish a real process-restart measurement.
+Worker-fork failure and exclusive startup recovery preserve a durable
+`Cancelling` intent as exact `Cancelled`, including its original reason and
+actor. They cannot convert that intent into a resumable Lost worker.
 The journal retains the exact producer-owned job wait separately from the
 provider-facing body. Only this exact read-only leaf may be rechecked; it keeps
 its original execution ID and tool-use ID. Completed siblings reuse their full

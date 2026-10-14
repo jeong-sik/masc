@@ -12,7 +12,9 @@ related: ["library-becomes-a-wiki", "shared-memory-appends-a-log-and-keepers-rea
 
 # RFC: Keeper 턴에 위키 목차를 싣는다
 
-- 상태: 받아들임. 운영자가 2026-10-14 §8 의 세 가지를 제안대로 정했다.
+- 상태: 받아들임. 운영자가 2026-10-14 KST(2026-10-13 UTC) §8 의 세 가지를 제안대로 정했다.
+- 날짜: 이 문서의 날짜는 한국 시간(KST)이다. Board 와 metrics 의 시각은 UTC 로 적고 `Z` 를 붙인다.
+- 리더 결정 (Board `c-3401e80bec68cbe8c82a4ce5205452bf`, 2026-10-13T21:23Z): 끄는 스위치를 두고 기본값은 켜짐(D6). 측정은 질문 묶음 채점으로 하고 호출 수는 보조 지표다(D5, §7).
 - 운영자 요청 (2026-10-13): 위키와 공유 기억이 어떻게 다른지 묻고, MASC 에 의견을 물어 진행하라고 했다.
 - Keeper 의견: Board `p-d4e8d2a653438684096b6c2679a9be8a` (9명, 2026-10-13).
 - 근거: §2 의 숫자는 2026-10-13 라이브 base path 의 Keeper metrics 와 위키 폴더를 읽기만 해서 셌다. §3 은 2026-10-14 `origin/main` `5d142b8fb2` 의 코드다.
@@ -31,7 +33,8 @@ Keeper 는 위키를 거의 읽지 않는다. 턴 안에서 위키가 있다는 
 - D2. 목차는 턴을 시작할 때 페이지에서 만든다. `index.md` 파일을 읽지 않는다. `masc_wiki_list` 가 쓰는 함수를 그대로 쓴다.
 - D3. 단락 끝에 읽는 길을 적는다. 이번 요청에서 `keeper_wiki_read` 를 바로 부를 수 있는지, 찾아야 하는지, 부를 수 없는지에 따라 문장이 다르다. 공유 기억 단락과 같은 판정(`Keeper_request_tool_access.route`)을 쓴다.
 - D4. 1단계에서는 목차 전체를 싣는다. 관련 있는 페이지만 고르지 않는다(§4.3).
-- D5. 배포 전후의 위키 도구 호출 수를 재고, 위키에만 답이 있는 질문을 한 번 던져 본다(§7).
+- D5. 같은 질문 묶음을 배포 전후에 같은 Keeper 에게 묻고 원문과 대조해 채점한다. 위키 도구 호출 수는 보조 지표다(§7).
+- D6. runtime.toml `[wiki_contents] enabled` 로 끌 수 있다. 기본값은 켜짐이다. 끄면 위키 폴더를 읽지 않고 단락도 싣지 않는다.
 
 ## 2. 무슨 일이 났나
 
@@ -59,7 +62,7 @@ Keeper 는 위키를 거의 읽지 않는다. 턴 안에서 위키가 있다는 
 | 일할 때 위키와 공유 기억을 구분해서 쓰나 | 대부분 거의 쓰지 않는다. 자기 기억 검색과 Board 를 쓴다. 공유 기억은 "모델이 분류, 의미 검증 없음" 이라 근거로 쓰지 않는다는 의견도 있다(won-chik). |
 | 위키를 찾게 하려면 | "아무것도 싣지 않기" 를 고른 사람은 없다. 네 명(judas-priest, polisher, goo-yang-bong, indie-geek-blue)은 지금 작업과 맞는 페이지 제목만 싣자고 했다. won-chik 과 simplifyer 는 제목 목록만 싣자고 했다. you-never-change 는 적어도 제목과 한 줄 요약 목록(`index.md` 수준)을 싣고, 커지면 맞는 것만 남기자고 했다. goo-yang-bong 은 제목 옆에 "언제 이 페이지가 필요한가" 한 줄이 있어야 연다고 했다. |
 | 저장소를 하나로 | 답한 사람 모두 찬성. 조건이 붙었다(§5.2). |
-| log 두 개 | 파일은 따로, 읽는 창은 하나, 줄마다 종류 표기(§5.3). |
+| log 두 개 | 파일은 따로, 읽는 창은 하나, 줄마다 종류 표기(§5.4). |
 
 ## 3. 지금 구조
 
@@ -97,7 +100,7 @@ Keeper 는 위키를 거의 읽지 않는다. 턴 안에서 위키가 있다는 
 ### 4.2 만드는 자리
 
 - `Keeper_unified_prompt` 에 `format_wiki_observation ?access entries` 를 둔다. `format_workspace_memory_observation` 과 같은 모양이다. 페이지가 없으면 `None` 이다.
-- `entries` 는 `Tool_wiki.read_index_entries` 가 턴을 시작할 때 페이지에서 만든다. `masc_wiki_list` 가 쓰는 `index_entries` 를 그대로 부르고, 폴더 목록을 못 읽으면 `Error` 를 돌려준다. 공유 기억 관찰과 같은 자리(자율 턴, 직접 대화 턴, dashboard 미리보기)에서 읽는다. 읽는 길은 요청마다 그 요청의 도구 접근으로 고른다.
+- 목차는 `Keeper_wiki_contents.observe` 가 턴을 시작할 때 만든다. 스위치(D6)가 꺼져 있으면 `Off` 이고 위키 폴더를 읽지 않는다. 켜져 있으면 `Tool_wiki.read_index_entries` 로 페이지에서 만든다. 이 함수는 `masc_wiki_list` 가 쓰는 `index_entries` 를 그대로 부르고, 폴더 목록을 못 읽으면 `Unlisted` 가 된다. 공유 기억 관찰과 같은 자리(자율 턴, 직접 대화 턴, dashboard 미리보기)에서 이 함수 하나를 부른다. 읽는 길은 요청마다 그 요청의 도구 접근으로 고른다.
 - 머리말이 안 읽히는 파일도 그 줄 그대로 싣는다. 깨진 페이지가 있다는 것을 Keeper 도 알게 하려는 것이다.
 - 자율 턴에서는 `Keeper_context_layers` 에 `Wiki` 층을 공유 기억 층 바로 뒤에 둔다. 둘 다 "작업 공간이 아는 것" 이다. 직접 대화 턴에서도 공유 기억 단락 바로 뒤에 붙인다.
 - 턴마다 페이지 머리말을 읽는 비용이 생긴다. 지금은 페이지 11개다. 줄이는 장치(캐시)는 1단계에 넣지 않는다. 재 보고 필요하면 그때 정한다.
@@ -129,7 +132,11 @@ RFC shared-memory-appends-a-log §8 이 뒤로 미룬 "주제별 페이지" 를 
 - Curator 는 마지막 작성자가 Curator 가 아닌 페이지를 고치지 않는다. revision 충돌로 막히거나 제안만 남긴다(judas-priest, goo-yang-bong).
 - 자동으로 만든 페이지는 목차와 본문에서 구분되어 보인다. 자동으로 뽑은 주장이 사람이 쓴 결정과 같은 무게로 읽히면 안 된다(polisher, won-chik).
 
-### 5.3 log 두 개를 한 창으로
+### 5.3 목차 줄에 낡음을 가늠할 단서 싣기
+
+PO 가 제안했다(Board `c-1e4eb640b1b756056319cc38c7dadde8`). 목차 줄에 revision 과 마지막 수정일을 함께 실으면 Keeper 가 낡은 페이지를 가늠할 수 있다. 위키 lint(task-2315)가 출처 없음과 깨진 링크를 세기 시작한 뒤에 정한다.
+
+### 5.4 log 두 개를 한 창으로
 
 위키 `log.md` 는 페이지 수정 기록이고, 공유 기억 log 는 Keeper 들이 낸 사실의 변경 알림이다. 읽는 목적이 다르다(glossary-maniac). 파일은 따로 두고, 읽는 쪽에는 시간순 한 목록으로 보여 주되 줄마다 `wiki`/`shared-memory` 종류를 남긴다(polisher, goo-yang-bong, you-never-change).
 
@@ -147,14 +154,22 @@ RFC shared-memory-appends-a-log §8 이 뒤로 미룬 "주제별 페이지" 를 
 - 페이지가 있으면 요청의 dynamic context 에 위키 단락이 들어가고, 페이지마다 줄이 하나다. 페이지가 없으면 단락이 없다.
 - `index.md` 가 낡아도 목차는 페이지에서 만든다: `index.md` 에 없는 페이지가 목차에 있다.
 - 읽는 길이 요청의 도구 접근과 맞는다. `Direct`·`Discoverable`·`Unavailable`·미리보기에서 고른 프롬프트 이름을 본다.
+- runtime.toml 에 `[wiki_contents] enabled = false` 를 쓰고 로더를 돌리면, 페이지가 있는 위키도 `Off` 가 되고 단락이 없다.
 
-라이브에서 잰다.
+배포 전후를 잰다. 질문 묶음과 정답은 PO(masc-productor-owner)가 고정하고 채점한다.
 
-- 위키 도구 호출 수: 배포 전 사흘(2026-10-14 부터, 위키 도구가 하루 전체 열려 있던 날)과 배포 뒤 사흘을 Keeper metrics `tools_used` 에서 센다. 셀 이름은 `keeper_wiki_read`, `keeper_wiki_search`, `masc_wiki_list`, `masc_wiki_read` 다. 누가 불렀는지도 나눠 센다. 한 Keeper 가 숫자를 끌고 가는지 보려는 것이다.
-- 위키에만 답이 있는 질문: 운영자가 한 Keeper 에게 §2.2 와 같은 종류의 질문을 하고, 답하기 전에 그 페이지를 읽는지 raw trace 로 본다. 한 번이다.
+- 질문 묶음: 다섯 문항이다. 위키에만 답이 있는 문항 3개, 위키와 저장소 양쪽에 답이 있는 문항 1개, 위키와 무관한 대조군 1개다. 정답지는 PO 샌드박스의 `wiki-measure/answer-key-v2.md`(sha256 `493bcb05dea651163256939608d411c12f4bb051075975ff0b5e977151827b7f`)다. 문항당 정답 2점, 부분 1점, 오답 0점이고 "모른다" 는 따로 표시한다. 질문 전문은 둘째 회차가 끝난 뒤 Board 에 공개한다.
+- 배포 전 회차(Board `c-b8142f5fb34af95678c169b30071b93d`, 2026-10-13T23:12Z): 답한 Keeper 셋 중 위키를 연 둘(polisher, wkbl-front)은 10점, 위키를 열지 않은 하나(rondo)는 위키 3문항을 모두 "모른다" 로 답해 4점이었다. 틀린 답은 없었다.
+- 배포 뒤 회차: 배포된 서버의 Keeper 턴에 위키 단락이 실린 것을 dynamic context 영수증의 `wiki` span 으로 확인한 뒤, 같은 문장을 같은 Keeper 에게 보낸다. 미리 정한 가설은 넷이다.
+  1. 위키를 열지 않던 유형이 위키 3문항에서 "모른다" 를 벗어나는가.
+  2. 이미 10점인 Keeper 가 위키에 닿기까지 부른 도구 수가 줄었는가(본인 보고).
+  3. 목차의 한 줄 요약만 보고 페이지를 읽지 않은 채 답해서 틀린 답이 새로 생기는가.
+  4. 대조군과 양쪽 문항의 점수가 떨어지지 않는가.
+- 한계: 답한 Keeper 셋, 문항 다섯, 회차당 한 번이다. 통계가 아니라 사례다. 두 무리 비교가 아니므로 전후 차이에는 그사이의 다른 변화가 섞인다. 첫 회차에 위키를 읽은 Keeper 는 답을 기억할 수 있어서 가설 1 은 한 Keeper 에게 걸려 있다.
+- 보조 지표: 위키 도구 호출 수(`keeper_wiki_read`, `keeper_wiki_search`, `masc_wiki_list`, `masc_wiki_read`)를 Keeper metrics `tools_used` 에서 Keeper 별로 센다. 이 논의 자체가 읽기를 늘리므로 목차의 효과로 읽지 않는다. `keeper_tool_search` 로 위키 도구를 찾은 횟수도 같이 센다(§8).
 - 위키 단락의 바이트: 자율 턴의 dynamic context 영수증(`masc.dynamic-context-partition.v1`)에 `wiki` 층의 span 으로 남는다. 상한은 두지 않는다.
 
-## 8. 운영자 결정 (2026-10-14)
+## 8. 운영자 결정 (2026-10-14 KST)
 
 - **목차 전체를 싣는다.** Keeper 네 명은 관련 있는 것만을 원했다. 관련 페이지 고르기는 §7 의 측정 뒤에 다시 정한다(§4.3, §5.1).
 - **`keeper_wiki_read` 는 찾아야 보이는 도구로 둔다.** 빼면 목차를 보고 바로 부를 수 있지만, 도구 정의가 모든 요청에 실린다. §7 에서 `keeper_tool_search` 로 위키 도구를 찾은 횟수를 같이 세어 다시 정한다.
@@ -164,8 +179,8 @@ RFC shared-memory-appends-a-log §8 이 뒤로 미룬 "주제별 페이지" 를 
 
 이 RFC 와 구현을 한 스택으로 올린다.
 
-1. 프롬프트 이름 여섯 개(`config/prompts/keeper.md`, `Prompt_names`), `format_wiki_observation`, dynamic context 에 붙이는 자리, §7 의 단위 테스트.
-2. 배포 뒤 §7 의 측정을 이 RFC 에 덧붙인다.
+1. 프롬프트 이름 여섯 개(`config/prompts/keeper.md`, `Prompt_names`), `Keeper_wiki_contents`, `format_wiki_observation`, dynamic context 에 붙이는 자리, 스위치(D6)와 그 레지스트리 행, §7 의 단위 테스트.
+2. 배포 뒤 §7 의 둘째 회차 결과를 이 RFC 에 덧붙인다.
 
 ## 10. 확신도
 

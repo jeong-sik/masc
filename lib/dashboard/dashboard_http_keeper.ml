@@ -324,6 +324,19 @@ let running_keeper_count (config : Workspace.config) : int =
    [Dashboard_execution.dashboard_enrich_max_fibers]. *)
 let dashboard_keeper_max_fibers = 8
 
+(* Both registry branches of [keepers_dashboard_json] build their
+   [supervisor_diagnostics] here, so they can differ only in values, never in
+   which keys they emit. *)
+let supervisor_diagnostics_json ~restart_count ~crash_log ~last_failure_reason =
+  `Assoc
+    [ ("restart_count", `Int restart_count)
+    ; ("crash_log", `List crash_log)
+    ; ( "last_failure_reason"
+      , match last_failure_reason with
+        | Some r -> `String (Keeper_registry.failure_reason_to_string r)
+        | None -> `Null )
+    ]
+
 let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojson.Safe.t =
   let include_goals = true in
   let history_fragment_filter_enabled =
@@ -589,20 +602,17 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 let combined_log = match disk_crashes with
                   | [] -> crash_log
                   | _ -> disk_crashes in
-                (`Assoc [
-                  ("restart_count", `Int entry.restart_count);
-                  ("crash_log", `List combined_log);
-                  ("last_failure_reason",
-                    match entry.last_failure_reason with
-                    | Some r -> `String (Keeper_registry.failure_reason_to_string r)
-                    | None -> `Null);
-                ], List.length combined_log)
+                ( supervisor_diagnostics_json
+                    ~restart_count:entry.restart_count
+                    ~crash_log:combined_log
+                    ~last_failure_reason:entry.last_failure_reason
+                , List.length combined_log )
             | None ->
-                (`Assoc [
-                  ("restart_count", `Int 0);
-                  ("crash_log", `List []);
-                  ("last_failure_reason", `Null);
-                ], 0)
+                ( supervisor_diagnostics_json
+                    ~restart_count:0
+                    ~crash_log:[]
+                    ~last_failure_reason:None
+                , 0 )
           in
           let outcomes_json =
             compute_outcomes_rollup

@@ -60,14 +60,16 @@ let default_workspace_state config = {
    is what says which messages exist. A counter already at or above the store
    is left exactly as it is.
 
-   It holds the state lock that [next_seq] takes, from reading the store to
-   writing the counter. Without it a message numbered in between could have
-   its number written over by an older read, and the counter would step
-   back. *)
+   It holds the state lock that [next_seq] takes, from reading the counter
+   to writing it. Without it a message numbered in between could have its
+   number written over by an older read, and the counter would step back.
+   The store is read before the lock: a message numbered after that read
+   only raises the counter, and a counter at or above the store is not
+   written. *)
 let reconcile_message_seq config path =
-  with_file_lock config path @@ fun () ->
   let filed = resume_message_seq config in
   if filed > 0 then
+    with_file_lock config path @@ fun () ->
     match read_json config path with
     (* Cancellation is not an unreadable file. Absorbing it here would let a
        shutdown look like state this function chose not to repair, which is the

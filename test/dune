@@ -5554,8 +5554,7 @@
 
 ; Keeper practice summary: autonomous turn-mode/outcome mix folded from the
 ; decision-log tail. The vocabulary-coupling case builds probe rows from
-; the writer's own path/mode label functions; outcome labels stay pinned
-; (decision_outcome_to_label is not exposed) with writer-site citations.
+; the writer's own path, mode and outcome label functions.
 (test
  (name test_dashboard_keeper_practice)
  (modules test_dashboard_keeper_practice)

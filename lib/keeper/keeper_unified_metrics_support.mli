@@ -64,8 +64,7 @@ val visible_run_validation :
 val telemetry_reported_of_result : Keeper_agent_run.run_result -> bool
 val coverage_reason_of_result : Keeper_agent_run.run_result -> string option
 val coverage_stage_of_result : Keeper_agent_run.run_result -> string option
-val coverage_stage_of_no_result_outcome : string -> string
-val coverage_reason_of_no_result_outcome : string -> string
+val coverage_reason_of_no_result_outcome : Keeper_decision_outcome.t -> string
 val validated_evidence_preview : Agent_core.Raw_trace.run_validation -> string
 
 val scheduled_autonomous_outcome_of_result :

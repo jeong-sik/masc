@@ -275,16 +275,10 @@ let coverage_stage_of_result
   then None
   else Some "agent_core"
 
-let coverage_stage_of_no_result_outcome = function
-  | "skipped" | "cancelled" -> "pre_dispatch"
-  | _ -> "unknown"
-
-let coverage_reason_of_no_result_outcome = function
-  | "skipped" -> "skipped_turn"
-  | "cancelled" -> "cancelled_turn"
-  | "partial" -> "partial_turn"
-  | "error" -> "error_turn"
-  | _ -> "no_run_result"
+let coverage_reason_of_no_result_outcome : Keeper_decision_outcome.t -> string =
+  function
+  | Keeper_decision_outcome.Failed -> "error_turn"
+  | Keeper_decision_outcome.(Success | Checkpoint | Input_required) -> "no_run_result"
 
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   has_substantive_tool_calls (Keeper_agent_result.tool_names result)

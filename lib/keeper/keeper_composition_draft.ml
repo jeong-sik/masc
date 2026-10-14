@@ -46,9 +46,44 @@ let error_to_json = function
   | Capability_changed -> `Assoc [ "kind", `String "capability_changed"; "detail", `String "Prepare again against the current frozen tool and Skill surface." ]
 ;;
 
+(* The canonical plan grammar is a recursive JSON Schema: [$defs.template]
+   holds a template whose object fields and array items are templates again.
+   A provider that refuses recursive schemas rejects the whole request, not
+   just a call to this tool (Muse: 400 "Recursive JSON schemas ..."). The tool
+   advertises a non-recursive projection instead: [$defs] is dropped and each
+   template position becomes an object that names the four tagged shapes.
+   Nothing is enforced by that schema -- [Tool_input_validation] reads [oneOf]
+   off the top level only, and [Keeper_tool_plan_request.plan_of_json] below
+   remains the one validator of the template grammar. *)
+let template_ref = `Assoc [ "$ref", `String "#/$defs/template" ]
+
+let template_placeholder =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "description"
+      , `String
+          "Tagged input template, one of {kind:literal,value}, \
+           {kind:output,node,pointer}, {kind:object,fields:[{name,value}]} or \
+           {kind:array,items:[template]}; each value and each item is itself a \
+           template." )
+    ]
+;;
+
+let rec without_recursive_refs = function
+  | `Assoc _ as json when json = template_ref -> template_placeholder
+  | `Assoc fields ->
+    `Assoc
+      (List.filter_map
+         (fun (key, value) ->
+            if String.equal key "$defs" then None else Some (key, without_recursive_refs value))
+         fields)
+  | `List items -> `List (List.map without_recursive_refs items)
+  | other -> other
+;;
+
 let prepare_schema : Masc_domain.tool_schema =
   let input_schema =
-    match Keeper_tool_plan_request.input_schema with
+    match Keeper_tool_plan_request.input_schema |> without_recursive_refs with
     | `Assoc fields ->
       let properties = match List.assoc_opt "properties" fields with
         | Some (`Assoc properties) -> properties | _ -> invalid_arg "canonical plan schema has no properties" in

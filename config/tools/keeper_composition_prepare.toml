@@ -24,7 +24,7 @@ type = "array"
 items = { type = "object" }
 min_items = 1
 required = true
-description = "The canonical structured plan request grammar supplies the exact node and tagged template schema."
+description = "Plan nodes: {id, tool, after, input}. A node input is a tagged template, one of {kind:literal,value}, {kind:output,node,pointer}, {kind:object,fields:[{name,value}]} or {kind:array,items:[template]}; each value and item is itself a template. The advertised schema is not recursive (some providers refuse recursive JSON Schemas); the grammar is validated when the plan is prepared."
 
 [[params]]
 name = "exports"

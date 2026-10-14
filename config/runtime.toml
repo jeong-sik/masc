@@ -16,6 +16,12 @@
 category_cap = 30
 facts_per_category_cap = 30
 
+[wiki_contents]
+# Each Keeper turn carries the wiki table of contents: one line per wiki page
+# (title, file, summary), built from the pages at the start of the turn.
+# false stops listing the wiki and drops the paragraph from every turn.
+enabled = true
+
 [maintenance]
 # Day-file retention for the JSONL stores under .masc, shared by the startup
 # prune and the periodic maintenance prune. Must be a positive integer.

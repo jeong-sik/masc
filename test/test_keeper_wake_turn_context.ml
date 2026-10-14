@@ -750,7 +750,7 @@ let test_direct_turn_reuses_current_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:None
-      ~wiki_index:(Ok [])
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:(Inputs.Current_task task)
@@ -782,7 +782,7 @@ let test_direct_turn_carries_held_task_skills () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:None
-      ~wiki_index:(Ok [])
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:Inputs.No_current_task
@@ -812,7 +812,7 @@ let test_direct_turn_has_no_synthetic_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:None
-      ~wiki_index:(Ok [])
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:Inputs.No_current_task
@@ -848,7 +848,7 @@ let test_direct_turn_discovers_published_workspace_memory () =
       | _ -> fail "saved ledger is unavailable" in
     let render () = Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:(Some (direct_shared_reader ()))
-      ~wiki_index:(Ok [])
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:(Ledger.observe ~base_path)
       ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
@@ -943,8 +943,9 @@ let prompt_fragment name =
   | Error detail -> fail detail
 
 let one_wiki_page =
-  Ok [ Masc.Wiki_journal.Page
-         { file = "pm-setlist.md"; title = "Setlist"; summary = "Usual song order" } ]
+  Masc.Keeper_wiki_contents.Listed
+    [ Masc.Wiki_journal.Page
+        { file = "pm-setlist.md"; title = "Setlist"; summary = "Usual song order" } ]
 
 let test_wiki_contents_come_from_the_pages_not_index_md () =
   let module Wiki = Masc.Tool_wiki in
@@ -968,19 +969,22 @@ let test_wiki_contents_come_from_the_pages_not_index_md () =
                 { file = "rfc-map.md"; title = "rfc-map title"; summary = "rfc-map summary" } ]));
     Out_channel.with_open_text (Filename.concat wiki_root "broken.md")
       (fun oc -> Out_channel.output_string oc "no frontmatter\n");
-    let wiki_index = Wiki.read_index_entries ~base_path in
-    let entries = match wiki_index with Ok entries -> entries | Error detail -> fail detail in
+    let wiki_contents = Masc.Keeper_wiki_contents.observe ~base_path in
+    let entries = match wiki_contents with
+      | Masc.Keeper_wiki_contents.Listed entries -> entries
+      | Unlisted detail -> fail detail
+      | Off -> fail "the wiki contents switch is on by default" in
     check int "one entry per file, broken file included" 3 (List.length entries);
     let direct = Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:(Some (direct_wiki_reader ()))
-      ~wiki_index
+      ~wiki_contents
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
       ~approval_authority_text:"" ~recent_direct_conversation_text:"owner conversation"
       ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" in
     let paragraph =
-      Prompt.format_wiki_observation ~access:(direct_wiki_reader ()) wiki_index |> Option.get in
+      Prompt.format_wiki_observation ~access:(direct_wiki_reader ()) wiki_contents |> Option.get in
     check bool "direct reply uses the same wiki renderer" true (contains ~needle:paragraph direct);
     List.iter (fun entry ->
       check bool "every file has its line" true
@@ -1017,10 +1021,14 @@ let test_wiki_route_follows_actual_request_access () =
 
 let test_wiki_paragraph_needs_pages_and_hides_listing_errors () =
   check (option string) "no page, no paragraph" None
-    (Prompt.format_wiki_observation ~access:(direct_wiki_reader ()) (Ok []));
+    (Prompt.format_wiki_observation ~access:(direct_wiki_reader ())
+       (Masc.Keeper_wiki_contents.Listed []));
+  check (option string) "switched off, no paragraph" None
+    (Prompt.format_wiki_observation ~access:(direct_wiki_reader ()) Masc.Keeper_wiki_contents.Off);
   let detail = "WIKI_LISTING_IO_DETAIL" in
   let failed =
-    Prompt.format_wiki_observation ~access:(direct_wiki_reader ()) (Error detail) |> Option.get in
+    Prompt.format_wiki_observation ~access:(direct_wiki_reader ())
+      (Masc.Keeper_wiki_contents.Unlisted detail) |> Option.get in
   check bool "a listing failure renders the unavailable prompt" true
     (contains ~needle:(prompt_fragment Prompt_names.keeper_context_wiki_unavailable) failed);
   check bool "the IO detail stays out of the model context" false (contains ~needle:detail failed)
@@ -1028,10 +1036,10 @@ let test_wiki_paragraph_needs_pages_and_hides_listing_errors () =
 let test_autonomous_turn_carries_the_wiki_layer () =
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let access = direct_wiki_reader () in
-  let wiki_layer_bytes ?wiki_index () =
+  let wiki_layer_bytes ?wiki_contents () =
     let { Prompt.world_partition; world_state; _ } =
       Prompt.build_prompt ~turn_decision:decision ~current_task:Inputs.No_current_task
-        ~workspace_memory_access:access ?wiki_index ~observation:base_observation () in
+        ~workspace_memory_access:access ?wiki_contents ~observation:base_observation () in
     let bytes =
       Masc.Keeper_context_layers.receipt_to_json world_partition
       |> Yojson.Safe.Util.member "spans" |> Yojson.Safe.Util.to_list
@@ -1042,12 +1050,12 @@ let test_autonomous_turn_carries_the_wiki_layer () =
         | _ -> None) in
     world_state, bytes in
   let paragraph = Prompt.format_wiki_observation ~access one_wiki_page |> Option.get in
-  let world_state, bytes = wiki_layer_bytes ~wiki_index:one_wiki_page () in
+  let world_state, bytes = wiki_layer_bytes ~wiki_contents:one_wiki_page () in
   check bool "the wiki paragraph reaches the autonomous turn" true
     (contains ~needle:paragraph world_state);
   check (list int) "the context receipt counts the wiki layer" [String.length paragraph] bytes;
   let _, absent = wiki_layer_bytes () in
-  check (list int) "no wiki index, no wiki layer" [] absent
+  check (list int) "no wiki contents, no wiki layer" [] absent
 
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   let meta_with_goal =
@@ -1182,7 +1190,7 @@ let lane_notice =
 let direct_context ~lane_updates =
   Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:None
-      ~wiki_index:(Ok [])
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
     ~lane_updates
     ~workspace_memory:Masc.Workspace_memory_ledger.Missing
     ~current_task:Inputs.No_current_task

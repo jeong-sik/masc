@@ -97,7 +97,7 @@ let direct_turn_dynamic_context
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
       ~(workspace_memory : Workspace_memory_ledger.observation)
       ~(workspace_memory_access : Keeper_request_tool_access.t option)
-      ~(wiki_index : (Wiki_journal.entry list, string) result)
+      ~(wiki_contents : Keeper_wiki_contents.t)
       ~(lane_updates : (Yojson.Safe.t,string) result)
       ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
@@ -110,7 +110,7 @@ let direct_turn_dynamic_context
    @ Option.to_list
        (Keeper_unified_prompt.format_workspace_memory_observation ?access:workspace_memory_access workspace_memory)
    @ Option.to_list
-       (Keeper_unified_prompt.format_wiki_observation ?access:workspace_memory_access wiki_index)
+       (Keeper_unified_prompt.format_wiki_observation ?access:workspace_memory_access wiki_contents)
    @ Option.to_list (Lane_addon_subscription.render lane_updates)
    @ [ approval_authority_text
   ; recent_direct_conversation_text
@@ -725,12 +725,12 @@ let run_keeper_invocation_turn_admitted_inner
                Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
              | Missing | Available _ -> ());
             Keeper_workspace_memory_observation_metrics.record workspace_memory;
-            let wiki_index = Domain_pool_ref.submit_io_or_inline (fun () ->
-              Tool_wiki.read_index_entries ~base_path:ctx.config.base_path) in
-            (match wiki_index with
-             | Error detail ->
+            let wiki_contents = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Keeper_wiki_contents.observe ~base_path:ctx.config.base_path) in
+            (match wiki_contents with
+             | Keeper_wiki_contents.Unlisted detail ->
                Log.Keeper.warn "wiki listing unavailable keeper=%s: %s" meta.name detail
-             | Ok _ -> ());
+             | Off | Listed _ -> ());
             let build_turn_prompt ~base_system_prompt:_ ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -796,7 +796,7 @@ let run_keeper_invocation_turn_admitted_inner
                   ~task_skill_surfaces
                   ~workspace_memory
                   ~workspace_memory_access
-                  ~wiki_index
+                  ~wiki_contents
                   ~lane_updates
                   ~approval_authority_text:
                     (Keeper_unified_prompt.format_approval_authority_observation

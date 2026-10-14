@@ -1173,10 +1173,10 @@ let format_workspace_memory_observation ?access = function
    sat in a wiki page. The whole list rides every turn; choosing pages by the
    current task is a later stage the RFC leaves to measurement. *)
 let format_wiki_observation ?access = function
-  | Ok [] -> None
-  | Error _ ->
+  | Keeper_wiki_contents.Off | Keeper_wiki_contents.Listed [] -> None
+  | Keeper_wiki_contents.Unlisted _ ->
     Some (render_fragment Prompt_names.keeper_context_wiki_unavailable [] ^ "\n\n")
-  | Ok (_ :: _ as entries) ->
+  | Keeper_wiki_contents.Listed (_ :: _ as entries) ->
     let route = match access with
       | None -> Prompt_names.keeper_context_wiki_retrieval_preview
       | Some access ->
@@ -1212,7 +1212,7 @@ let build_prompt_internal
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?workspace_memory_access
-    ?(wiki_index = Ok [])
+    ?(wiki_contents = Keeper_wiki_contents.Off)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(recent_work = Keeper_recent_work.Absent)
     ~(observation : Keeper_world_observation.world_observation)
@@ -1605,7 +1605,7 @@ let build_prompt_internal
     | Keeper_context_layers.Workspace_memory ->
       format_workspace_memory_observation ?access:workspace_memory_access workspace_memory
     | Keeper_context_layers.Wiki ->
-      format_wiki_observation ?access:workspace_memory_access wiki_index
+      format_wiki_observation ?access:workspace_memory_access wiki_contents
     | Keeper_context_layers.Repository_freshness ->
       (match repository_freshness with
        | [] -> None
@@ -1922,7 +1922,7 @@ let build_prompt
       ?active_goal_summaries
       ?workspace_memory
       ?workspace_memory_access
-      ?wiki_index
+      ?wiki_contents
       ?lane_updates
       ?repository_freshness
       ?recent_work
@@ -1937,7 +1937,7 @@ let build_prompt
     ?active_goal_summaries
     ?workspace_memory
     ?workspace_memory_access
-    ?wiki_index
+    ?wiki_contents
     ?lane_updates
     ?repository_freshness
     ?recent_work
@@ -1951,7 +1951,7 @@ let build_prompt_preview
       ?active_goal_summaries
       ?workspace_memory
       ?workspace_memory_access
-      ?wiki_index
+      ?wiki_contents
       ?lane_updates
       ?repository_freshness
       ?recent_work
@@ -1965,7 +1965,7 @@ let build_prompt_preview
     ?active_goal_summaries
     ?workspace_memory
     ?workspace_memory_access
-    ?wiki_index
+    ?wiki_contents
     ?lane_updates
     ?repository_freshness
     ?recent_work

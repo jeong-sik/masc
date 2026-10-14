@@ -564,6 +564,16 @@ let all =
       "Ordinary current items per category target; advisory, not a token budget"
   ; setting
       ~reload_class:Next_turn
+      ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperWikiContents.enabled ())))
+      ~env_name:Env_config_keeper.KeeperWikiContents.enabled_env_key
+      ~exposure:(Toml_and_env "wiki_contents.enabled")
+      ~value_kind:Boolean
+      ~default:"true"
+      ~consumers:[ "Keeper_wiki_contents" ]
+      ~category:Turn
+      "Whether each Keeper turn carries the wiki table of contents"
+  ; setting
+      ~reload_class:Next_turn
       ~effective:
         (Reader
            (fun () ->

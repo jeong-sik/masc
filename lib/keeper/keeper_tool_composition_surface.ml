@@ -1281,6 +1281,8 @@ let rec async_worker_result
       ?continuation
       ?after_child_submission
       ?before_child_dispatch
+      ?before_plan_execution
+      ?after_node_observation
       ~plan
       ?journal
       ~tool_name
@@ -1405,6 +1407,19 @@ let rec async_worker_result
          Executor.dispatch_result ~failure_effect_disposition:observed.failure_effect_disposition
            ?deferred_kind:observed.deferred_kind
            (Tool_result.with_retained_artifacts observed.retained_artifacts result)) in
+  let on_node_result = Option.map (fun turn_context ->
+      observe_node_result
+        ?on_receipt_committed:None
+        ~composition_tool:tool_name ~composition_execution
+        ~composition_tool_kind:tool_kind ~composition_run_id
+        ~parent_invocation:source_invocation ~meta ~turn_context) turn_context in
+  let on_node_result = match after_node_observation with
+    | None -> on_node_result
+    | Some after -> Some (fun node ->
+        let* () = match on_node_result with None -> Ok () | Some observe -> observe node in
+        after node;
+        Ok ()) in
+  Option.iter (fun before -> before ()) before_plan_execution;
   let execution =
     execute_keeper_plan
     ~capability_authority
@@ -1423,19 +1438,7 @@ let rec async_worker_result
     ~dispatch_compiled
     ?source_context:turn_context
     ~turn_sandbox_factory:sandbox_factory
-    ?observe_node_result:
-      (Option.map
-         (fun turn_context ->
-            observe_node_result
-              ?on_receipt_committed:None
-              ~composition_tool:tool_name
-              ~composition_execution
-              ~composition_tool_kind:tool_kind
-              ~composition_run_id
-              ~parent_invocation:source_invocation
-              ~meta
-              ~turn_context)
-         turn_context)
+    ?observe_node_result:on_node_result
     ?clock
       ()
   in
@@ -1508,7 +1511,10 @@ let rec async_worker_result
     | Some _,Error failure ->
       (match failure.Executor.cause with
        | Executor.Tool_did_not_complete node ->
-         (match Plan.contract plan node.node_id with
+         (match node.execution_origin with
+          | Executor.Dispatch_refused -> Some (Tool_result.message node.result)
+          | Executor.Fresh_dispatch | Executor.Retained_completion ->
+          match Plan.contract plan node.node_id with
           | None -> None
           | Some {target=Plan.Descriptor_target _;_} -> None
           | Some {target=Plan.Child_submission _;_} ->
@@ -1522,8 +1528,9 @@ let rec async_worker_result
              | Tool_result.Failed {class_=(Dependency_unavailable | Policy_rejection
                  | Runtime_failure | Operator_cancelled);_}
              | Tool_result.Completed _ | Tool_result.Deferred _ -> None))
-       | Run_journal_rejected _ | Node_observation_failed _ | Plan_execution_failed _
-       | Outer_completion_mismatch _ -> None)
+       | Run_journal_rejected error -> Some (Journal.error_to_string error)
+       | Node_observation_failed {detail;_} -> Some detail
+       | Plan_execution_failed _ | Outer_completion_mismatch _ -> None)
     | (None | Some _),(Ok _ | Error _) -> None in
   match interrupted,waiting_dependencies with
   | Some reason,_ -> Keeper_msg_async.worker_interrupted ~reason

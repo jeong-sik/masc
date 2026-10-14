@@ -3487,7 +3487,10 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
         ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
         ~completion:Agent_core.Tool_contract.Continue_after_success)
       ~clock:(Eio.Stdenv.clock env) () in
-  let continuation = List.fold_left (fun continuation late_fault ->
+  let scope = prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" in
+  let submission_id = scope |> member "submission" |> to_string
+  and result_id = scope |> member "result" |> to_string in
+  let continuation = List.fold_left (fun continuation fault ->
     let module Draft = Masc.Keeper_composition_draft in
     let source = Journal.continuation_source continuation in
     let draft = Draft.load_continuation ~base_path:fixture.base_path ~capability_surface:surface continuation
@@ -3498,8 +3501,26 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
     let events = Filename.concat
         (Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id))
         "skill-activation-events.jsonl" in
-    let original_events = read events in
-    let fault_request = Fun.protect ~finally:(fun () -> write events original_events) (fun () ->
+    let journal_file = Filename.concat
+        (Filename.concat
+          (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path)
+            "keeper_msg_requests") "execution_journals")
+          Digestif.SHA256.(digest_string keeper |> to_hex))
+        (Plan.Composition_run_id.to_string run_id ^ ".jsonl") in
+    let blob_root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:fixture.base_path) in
+    let draft_file = Filename.concat
+        (Filename.concat blob_root (String.sub source.draft_reference.sha256 0 2))
+        source.draft_reference.sha256 in
+    let restore = ref (fun () -> ()) in
+    let faulted = ref false in
+    let corrupt path =
+      check bool "one actual authority boundary is corrupted" false !faulted;
+      let original = read path in
+      restore := (fun () -> write path original);
+      faulted := true;
+      write path "invalid-original-authority-after-accepted-continuation\n" in
+    let refused_result = ref false in
+    let fault_request = Fun.protect ~finally:(fun () -> !restore ()) (fun () ->
       let worker = Atomic.make None in
       let settled,notify_settled = Eio.Promise.create () in
       let accepted = Async.submit_worker_with_request_id ?request_context:terminal.request_context
@@ -3512,7 +3533,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
               |> Result.map_error Masc.Keeper_composition_completion_outbox.error_to_string in
             Journal.bind_continuation continuation ~request_id
             |> Result.map (fun admitted -> Atomic.set worker (Some admitted);
-              if not late_fault then write events "invalid-original-activation-after-ACK-ready-acceptance\n")
+              if fault = `Before_restore then corrupt events)
             |> Result.map_error Journal.error_to_string)
           ~on_worker_settled:(fun settlement ->
             Masc.Keeper_composition_completion_wake.on_worker_settled ~base_path:fixture.base_path
@@ -3523,8 +3544,17 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
             Masc.Keeper_tool_composition_surface.For_testing.async_worker_result
               ~composition_execution:Masc.Keeper_tool_composition_catalog.Async ~tool_kind:Descriptor.Async_composition_tool
               ~nested_calls:(Draft.nested_calls draft) ~nested_activation:bound ~continuation
-              ?before_child_dispatch:(if late_fault then Some (fun () ->
-                write events "invalid-original-activation-after-restore-before-native-proof\n") else None)
+              ?before_child_dispatch:(if fault = `Before_native then Some (fun () -> corrupt events) else None)
+              ?before_plan_execution:(if fault = `Before_plan then Some (fun () -> corrupt draft_file) else None)
+              ?after_child_submission:(if fault = `Before_submission_settle
+                then Some (fun _ -> corrupt journal_file) else None)
+              ?after_node_observation:(if fault = `Before_result_lookup then Some (fun node ->
+                if Plan.Node_id.to_string node.Masc.Keeper_tool_plan_executor.node_id = submission_id
+                then corrupt journal_file;
+                if Plan.Node_id.to_string node.node_id = result_id then
+                  match node.execution_origin with
+                  | Masc.Keeper_tool_plan_executor.Dispatch_refused -> refused_result := true
+                  | Fresh_dispatch | Retained_completion -> ()) else None)
               ~plan:(Draft.plan draft) ~journal:worker ~tool_name:Draft.run_tool_name
               ~request_id ~composition_run_id:run_id ~request_sw ~config ~meta:fixture.meta
               ~source_invocation:(Agent_core.Tool_contract.Invocation.create ~tool_use_id:source.parent_tool_use_id
@@ -3542,6 +3572,9 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
         | Error error -> fail (Async.canonical_terminal_error_to_string error) in
       read_loss ();
       Eio.Promise.await settled;
+      check bool "the actual accepted worker reaches the selected fault boundary" true !faulted;
+      if fault = `Before_result_lookup then
+        check bool "actual native result lookup is refused by its unreadable journal" true !refused_result;
       accepted.request_id) in
     let recovery = Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
         |> require "recover original physical attempt completion obligations" in
@@ -3552,7 +3585,8 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
     check string "transient authority fault keeps the accepted physical owner recoverable" fault_request
       (Journal.continuation_request_id retained);
     check int "authority fault does not invent a dependency wait" 0 (List.length (Journal.continuation_dependencies retained));
-    retained) continuation [false;true] in
+    retained) continuation [`Before_restore;`Before_native;`Before_plan;
+      `Before_submission_settle;`Before_result_lookup] in
   let resumed = resume continuation "recover-physical-parent-ack" in
   check bool "fresh parent recovers actual acknowledgement" true (Tool_result.is_success resumed);
   let ok,pending,entry = await_composition env fixture (Tool_result.data resumed) in

@@ -79,6 +79,15 @@ cannot create replacement acceptance. These are source guarantees until an
 exact-head execution receipt proves the selected scenario; installed runtime,
 visible UI and whole-task speedup remain separate evidence.
 
+An accepted continuation also retains `Lost` when its execution journal rejects
+plan admission or a node attempt, or when settlement/observation cannot commit.
+Those infrastructure failures do not establish a whole-child failure. The
+canonical child reader's actual terminal failure still settles the parent as
+failed. Fault scenarios cover the original activation before and after restore,
+the frozen draft before executor admission, and the parent journal before
+submission settlement and result-node lookup. Each restores the original bytes
+and resumes the same accepted child; these fixtures require execution evidence.
+
 Call `keeper_composition_prepare` with `execution: "inline"` or `"async"`, the ordinary outer
 `nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of
 the form above. Pass the returned `draft.sha256` to `keeper_composition_run`.

@@ -229,6 +229,8 @@ module For_testing : sig
     ?continuation:Keeper_tool_execution_journal.continuation ->
     ?after_child_submission:(Tool_result.result -> unit) ->
     ?before_child_dispatch:(unit -> unit) ->
+    ?before_plan_execution:(unit -> unit) ->
+    ?after_node_observation:(Keeper_tool_plan_executor.node_result -> unit) ->
     plan:Keeper_tool_plan.t ->
     ?journal:Keeper_tool_execution_journal.worker ->
     tool_name:string -> request_id:string ->

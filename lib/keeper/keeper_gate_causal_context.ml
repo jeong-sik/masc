@@ -14,6 +14,10 @@ let create ~turn_id ~initial =
   { turn_id; initial; completed_rev = Atomic.make [] }
 ;;
 
+let fork t =
+  { t with completed_rev = Atomic.make (Atomic.get t.completed_rev) }
+;;
+
 let rec record_completed t call =
   let current = Atomic.get t.completed_rev in
   if not (Atomic.compare_and_set t.completed_rev current (call :: current))

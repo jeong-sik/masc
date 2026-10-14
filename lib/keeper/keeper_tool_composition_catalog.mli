@@ -63,6 +63,7 @@ type error =
       { path : string list
       ; mode : string
       }
+  | Invalid_branch_failure_policy of { path : string list; policy : string }
   | Async_tool_not_statically_read_only of
       { name : string
       ; node_id : Keeper_tool_plan.Node_id.t
@@ -168,7 +169,9 @@ type t
 val parse : ?descriptors:Keeper_tool_descriptor.t list -> string -> (t, error) result
 (** Parse one complete TOML document and validate every composition against the
     current canonical Keeper descriptor registry. Unknown fields and malformed
-    tagged templates fail closed. *)
+    tagged templates fail closed. [exports] is a table array of [name], [node]
+    and RFC 6901 [pointer]. Optional [branch_failure_policy] is [fail_fast] or
+    [continue_independent], and is retained when parameters are bound. *)
 
 val entries : t -> entry list
 val find : t -> string -> entry option
@@ -214,6 +217,8 @@ val requires_async_controls : entry list -> bool
 
 val status_tool_name : string
 val cancel_tool_name : string
+val prepare_tool_name : string
+val run_tool_name : string
 
 val skill_tool_name : string
 (** The tool that serves one instruction skill body by name. *)

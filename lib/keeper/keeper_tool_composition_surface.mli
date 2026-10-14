@@ -1,6 +1,8 @@
 (** Materialize validated catalog entries as first-class Agent-Core tools,
-    plus the durable async request controls when an entry is [Async]
-    ({!Keeper_tool_composition_catalog.requires_async_controls}). *)
+    plus transient draft controls and durable async request controls when an entry is [Async]
+    ({!Keeper_tool_composition_catalog.requires_async_controls}). Named inline
+    compositions may overlap when all leaves are statically read-only,
+    ordinary and concurrent, and mutable causal evidence can be forked. *)
 
 val composition_run_summary_tool_name : string
 (** Internal durable row name for one terminal composition run. It is not a
@@ -10,6 +12,8 @@ type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Async_status
   | Async_cancel
+  | Transient_prepare
+  | Transient_run
 
 type instruction_skill =
   { reference : Skill_reference.t
@@ -54,13 +58,17 @@ val make_instruction_skill_tool :
     composition execution. Native Agent-Core invocation identity is preserved. *)
 
 val schema_tool_rows :
+  ?include_drafts:bool ->
   ?skill_compositions:(Keeper_tool_composition_catalog.entry * 'evidence) list ->
   unit ->
   ('evidence schema_tool_origin * Agent_core.Tool.t) list
 (** Handler-free schemas paired with caller-owned composition evidence. This
     preserves typed provenance through materialization instead of recovering it
     from a generated tool name. The async controls are rows exactly when
-    {!make_tools} would build them. *)
+    {!make_tools} would build them. Frozen surfaces also offer the transient
+    prepare/run controls, so they can mint async requests without a shared
+    Skill and carry status/cancel even without a named async composition.
+    [include_drafts=false] is for descriptor-only compatibility surfaces. *)
 
 val instruction_skill_schema_tool :
   instruction_skills:instruction_skill list ->
@@ -107,6 +115,10 @@ val make_tools
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_causal_context:Keeper_gate_causal_context.t
+       (** The owning turn's causal cell. Concurrent read-only compositions
+           fork it per invocation and append their results to both their own
+           history and the turn's [record_gate_result] callback. *)
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?record_gate_result:
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
@@ -157,6 +169,7 @@ module Compatibility : sig
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?continuation_channel:Keeper_continuation_channel.t
     -> ?gate_context:(unit -> Keeper_gate.causal_context)
+    -> ?gate_causal_context:Keeper_gate_causal_context.t
     -> ?gate_grant:Keeper_gate.cycle_grant
     -> ?record_gate_result:
          (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
@@ -175,6 +188,20 @@ end
     without an enclosing Keeper turn. *)
 
 module For_testing : sig
+  val node_result_to_json : Keeper_tool_plan_executor.node_result -> Yojson.Safe.t
+  (** The canonical settlement representation used by the production surface
+      when it persists Skill composition evidence. *)
+
+  val project_execution_result :
+    base_path:string ->
+    plan:Keeper_tool_plan.t ->
+    execution:(Keeper_tool_plan_executor.node_result list,
+               Keeper_tool_plan_executor.failure) result ->
+    Tool_result.result ->
+    (Tool_result.result, Tool_bridge.externalization_error) result
+  (** The production export selection and durable-manifest boundary shared by
+      inline and asynchronous composition results. *)
+
   val result_of_execution :
     tool_name:string ->
     tool_kind:Keeper_tool_descriptor.tool_kind ->

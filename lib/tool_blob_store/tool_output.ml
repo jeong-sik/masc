@@ -237,6 +237,21 @@ type model_projection =
   | Store_above of { threshold_bytes : int }
   | Inline_up_to of { maximum_bytes : int }
 
+type artifact_projection =
+  | Reference_only
+  | Inline_with_reference
+
+let artifact_projection_to_json = function
+  | Reference_only -> `String "reference_only"
+  | Inline_with_reference -> `String "inline_with_reference"
+;;
+
+let artifact_projection_of_json = function
+  | `String "reference_only" -> Ok Reference_only
+  | `String "inline_with_reference" -> Ok Inline_with_reference
+  | _ -> Error "unknown artifact manifest projection"
+;;
+
 let default_model_projection =
   Store_above { threshold_bytes = Common.max_tool_result_wire_bytes }
 

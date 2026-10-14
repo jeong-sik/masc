@@ -790,11 +790,426 @@ let test_failure_payload_keeps_cause_under_truncation () =
     (contains "\"effect_disposition\"" kept)
 ;;
 
+let export_catalog_fixture = {|[[compositions]]
+name = "read-path"
+execution = "inline"
+branch_failure_policy = "continue_independent"
+
+[[compositions.params]]
+name = "file"
+type = "string"
+description = "File to read."
+
+[[compositions.exports]]
+name = "path"
+node = "read"
+pointer = "/path"
+
+[[compositions.nodes]]
+id = "read"
+tool = "Read"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "file_path"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "file"
+|}
+
+let test_export_contract_survives_public_authoring_and_binding () =
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let catalog = match Catalog.parse ~descriptors export_catalog_fixture with
+    | Ok catalog -> catalog | Error error -> fail (Catalog.error_to_string error) in
+  let entry = match Catalog.entries catalog with
+    | [ entry ] -> entry | _ -> fail "expected one composition" in
+  let plan = match Catalog.instantiate ~descriptors ~args:(`Assoc [ "file", `String "probe.txt" ]) entry with
+    | Ok plan -> plan | Error error -> fail (Catalog.instantiation_error_to_string error) in
+  check bool "binding retains failure policy" true (Plan.branch_failure_policy plan = Plan.Continue_independent);
+  check int "binding retains exports" 1 (List.length (Plan.exports plan));
+  let encoded = match Masc.Keeper_tool_plan_request.to_yojson plan with
+    | Ok json -> json | Error _ -> fail "bound plan was not serializable" in
+  let decoded = match Masc.Keeper_tool_plan_request.plan_of_json ~descriptors encoded with
+    | Ok plan -> plan | Error error -> fail (Masc.Keeper_tool_plan_request.error_message error) in
+  check bool "durable recipe retains failure policy" true (Plan.branch_failure_policy decoded = Plan.Continue_independent);
+  check int "durable recipe retains selected fields" 1 (List.length (Plan.exports decoded));
+  let invalid = match encoded with
+    | `Assoc fields -> `Assoc (("exports", `List [ `Assoc [ "name", `String "missing"; "node", `String "read"; "pointer", `String "/undeclared" ] ]) :: List.remove_assoc "exports" fields)
+    | _ -> fail "encoded plan is not an object" in
+  match Masc.Keeper_tool_plan_request.plan_of_json ~descriptors invalid with
+  | Error (Masc.Keeper_tool_plan_request.Plan_rejected (Plan.Invalid_export_pointer _)) -> ()
+  | Error _ | Ok _ -> fail "invalid export survived public plan admission"
+;;
+
+module Draft = Masc.Keeper_composition_draft
+
+let draft_surface ?(tool_deny = []) () =
+  let snapshot = Skill_catalog_snapshot.config_unreadable ~detail:"draft test has no shared Skill source" in
+  Masc.Keeper_capability_surface.create ~tool_deny
+    ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names:None
+    ~global_skill_catalog:Masc.Keeper_skill_catalog.empty
+    ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot) ~task_skills:[]
+;;
+
+let with_draft_base f =
+  let base_path = Filename.temp_file "masc-composition-draft-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  let rec remove path =
+    if Sys.is_directory path then (
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Sys.remove path in
+  Fun.protect ~finally:(fun () -> remove base_path) (fun () -> f base_path)
+;;
+
+let draft_request = `Assoc
+  [ "nodes", `List [ `Assoc [ "id", `String "lane"; "tool", `String "keeper_lane_status" ] ]
+  ; "exports", `List [ `Assoc [ "name", `String "profile"; "node", `String "lane"; "pointer", `String "/profile" ] ] ]
+;;
+
+let test_draft_prepare_and_exact_run_binding () =
+  Eio_main.run @@ fun _env ->
+  with_draft_base @@ fun base_path ->
+  let capability_surface = draft_surface () in
+  let draft = match Draft.prepare ~base_path ~capability_surface ~keeper_name:"fixture"
+      ~execution:Catalog.Async draft_request with
+    | Ok draft -> draft | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)) in
+  let reference = Draft.reference draft in
+  let loaded = match Draft.load ~base_path ~capability_surface ~keeper_name:"fixture" ~sha256:reference.sha256 with
+    | Ok draft -> draft | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)) in
+  check bool "preview mode is execution mode" true (Draft.execution loaded = Catalog.Async);
+  check int "exact exports retained" 1 (List.length (Plan.exports (Draft.plan loaded)));
+  (match Draft.load ~base_path ~capability_surface ~keeper_name:"another" ~sha256:reference.sha256 with
+   | Error Draft.Different_keeper -> () | Error _ | Ok _ -> fail "draft crossed Keeper ownership");
+  let changed = draft_surface ~tool_deny:[ "keeper_tasks_list" ] () in
+  (match Draft.load ~base_path ~capability_surface:changed ~keeper_name:"fixture" ~sha256:reference.sha256 with
+   | Error Draft.Capability_changed -> () | Error _ | Ok _ -> fail "draft was silently rebound to a changed surface");
+  let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"draft-run-fixture"
+      ~turn:7 ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1; execution_mode = Agent_core.Tool_contract.Serial }
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let run = match Draft.record_invocation ~base_path ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~invocation loaded with
+    | Ok reference -> reference | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)) in
+  match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:run.sha256 with
+  | Ok (Some raw) ->
+    (match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string raw) with
+     | Tool_output.Decoded_artifact_manifest { structured_content; _ } ->
+       check string "source invocation durably bound before execution" "draft-run-fixture"
+         Yojson.Safe.Util.(structured_content |> member "tool_use_id" |> to_string)
+     | Tool_output.Not_artifact_manifest -> fail "run binding is not a canonical manifest"
+     | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
+  | Ok None | Error _ -> fail "pre-dispatch run binding is not durable"
+;;
+
+let test_draft_rejects_effects_and_bad_fixed_inputs () =
+  Eio_main.run @@ fun _env ->
+  with_draft_base @@ fun base_path ->
+  let capability_surface = draft_surface () in
+  let prepare json = Draft.prepare ~base_path ~capability_surface ~keeper_name:"fixture" ~execution:Catalog.Inline json in
+  let write = `Assoc [ "nodes", `List [ `Assoc [ "id", `String "write"; "tool", `String "Write" ] ] ] in
+  (match prepare write with
+   | Error (Draft.Unsupported_node { tool_name = "Write"; _ }) -> ()
+   | Error _ | Ok _ -> fail "transient draft admitted an effectful node");
+  let invalid_read = `Assoc [ "nodes", `List [ `Assoc [ "id", `String "read"; "tool", `String "Read"
+      ; "input", `Assoc [ "kind", `String "literal"; "value", `Assoc [ "file_path", `Int 3 ] ] ] ] ] in
+  match prepare invalid_read with
+  | Error (Draft.Inputs_rejected _) -> ()
+  | Error _ | Ok _ -> fail "invalid fixed input survived prepare"
+;;
+
+let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_draft_base @@ fun base_path ->
+  let module Surface = Masc.Keeper_tool_composition_surface in
+  let module Call_log = Masc.Keeper_tool_call_log in
+  let module T = Agent_core.Types in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "fixture"; "activation_mode", `String "manual" ])
+    |> Result.get_ok in
+  let capability_surface = draft_surface () in
+  let ctx_snapshot = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"draft identity fixture" in
+  let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+    { provider = Masc.Keeper_publication_recovery_availability.non_runtime_provider
+    ; keeper_name = meta.name } in
+  Call_log.reset_for_testing ();
+  Fun.protect ~finally:Call_log.reset_for_testing @@ fun () ->
+  Call_log.init ~base_path ();
+  let turn_ctx_cell = if observe then Some (Call_log.create_turn_ctx_cell ()) else None in
+  Option.iter (fun cell -> Call_log.set_turn_context ~cell ~agent_name:meta.name
+    ~turn:7 ~keeper_turn_id:1 ()) turn_ctx_cell;
+  let tools = Surface.make_tools ~capability_surface ~config ~meta ~publication_recovery
+      ~ctx_snapshot ?turn_ctx_cell () in
+  let find name =
+    match List.find_opt (fun (tool, _, _) ->
+      String.equal tool.Agent_core.Tool.schema.name name) tools with
+    | Some (tool, _, _) -> tool | None -> failf "public draft control missing: %s" name in
+  let invoke id name input =
+    let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:id ~turn:7
+        ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
+                  ; execution_mode = Agent_core.Tool_contract.Serial }
+        ~completion:Agent_core.Tool_contract.Continue_after_success in
+    let output = match Agent_core.Tool.execute ~invocation (find name) input with
+      | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
+    let message : T.message =
+      { role = T.Tool
+      ; content = [ T.ToolResult { tool_use_id = id; content = output.content
+                                ; outcome = T.Tool_succeeded; json = None; content_blocks = None } ]
+      ; name = None; tool_call_id = Some id; metadata = [] } in
+    let content = match Llm_provider.Backend_openai_serialize.openai_messages_of_message message with
+      | [ wire ] -> Yojson.Safe.Util.(wire |> member "content" |> to_string)
+      | _ -> fail "provider did not serialize one public draft result" in
+    check string "provider carries exact public tool result" output.content content;
+    check bool "small draft result is immediately readable" false (Tool_output.is_marker content);
+    let envelope = Yojson.Safe.from_string content in
+    check bool "readable provider result retains its manifest root" true
+      Yojson.Safe.Util.(envelope |> member "artifact_manifest" <> `Null);
+    Yojson.Safe.Util.(envelope |> member "structured_content") in
+  let decode_reference value = match Tool_output.normalized_artifact_ref_of_json value with
+    | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+    | Tool_output.Not_normalized_artifact_ref | Tool_output.Invalid_normalized_artifact_ref _ ->
+      fail "public control lost its normalized reference" in
+  let document reference =
+    match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:reference.Tool_output.sha256 with
+    | Ok (Some raw) ->
+      (match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string raw) with
+       | Tool_output.Decoded_artifact_manifest { structured_content; _ } -> structured_content
+       | Tool_output.Not_artifact_manifest -> fail "public draft artifact is not a canonical manifest"
+       | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
+    | Ok None -> fail "advertised public draft artifact is absent"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+  let prepared = invoke "prepare-fixture" Draft.prepare_tool_name
+      (match draft_request with
+       | `Assoc fields -> `Assoc (("execution", `String "inline") :: fields)
+       | _ -> fail "fixture plan is not an object") in
+  let open Yojson.Safe.Util in
+  let draft_reference = prepared |> member "draft" |> decode_reference in
+  let run_parent = "public-draft-run" in
+  let result = invoke run_parent Draft.run_tool_name
+      (`Assoc [ "sha256", `String draft_reference.sha256 ]) in
+  let run_reference = result |> member "run_artifact" |> decode_reference in
+  let binding = document run_reference in
+  let run_id = binding |> member "composition_run_id" |> to_string in
+  check string "result names the persisted pre-dispatch run" run_id
+    (result |> member "composition_run_id" |> to_string);
+  check string "pre-dispatch binding names the original public invocation" run_parent
+    (binding |> member "tool_use_id" |> to_string);
+  check string "run binds the exact prepared draft" draft_reference.sha256
+    (binding |> member "draft" |> decode_reference).sha256;
+  check bool "public run exposes its selected profile" true
+    (result |> member "exports" |> member "profile" |> member "available" |> to_bool);
+  let execution_reference = result |> member "execution_artifact" |> decode_reference in
+  let raw_execution = document execution_reference in
+  let leaf = match raw_execution |> member "nodes" |> to_list with
+    | [ leaf ] -> leaf | _ -> fail "public run did not execute its single leaf" in
+  let expected_leaf_id = Printf.sprintf "composition:%d:%s:%d:%s:4:lane"
+      (String.length run_id) run_id (String.length run_parent) run_parent in
+  check string "actual leaf invocation belongs to the pre-dispatch run" expected_leaf_id
+    (leaf |> member "tool_use_id" |> to_string);
+  Call_log.flush_now ();
+  let rows = Call_log.read_recent ~keeper_name:meta.name () |> Result.get_ok in
+  let row name = match List.find_opt (fun row -> member "tool" row = `String name) rows with
+    | Some row -> row | None -> failf "missing actual composition observation: %s" name in
+  if observe then (
+    let observed_leaf = row "keeper_lane_status" in
+    check string "observer preserves the actual leaf invocation" expected_leaf_id
+      (observed_leaf |> member "tool_use_id" |> to_string);
+    check string "leaf observation names the same durable run" run_id
+      (observed_leaf |> member "composition_run_id" |> to_string));
+  check string "run summary names the same durable run" run_id
+    (row Surface.composition_run_summary_tool_name |> member "composition_run_id" |> to_string)
+;;
+
+let test_read_only_outer_invocations_overlap_without_identity_mixing () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_draft_base @@ fun base_path ->
+  let module Surface = Masc.Keeper_tool_composition_surface in
+  let module Call_log = Masc.Keeper_tool_call_log in
+  let module Recorder = Masc.Keeper_skill_activation_recorder in
+  let module Ledger = Masc.Keeper_skill_activation_ledger in
+  let module Causal = Masc.Keeper_gate_causal_context in
+  let config = Masc.Workspace.default_config base_path in
+  (* Sandbox configuration is TOML-owned, outside the runtime JSON codec. *)
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "overlap"; "activation_mode", `String "manual" ]) with
+    | Ok meta ->
+      { meta with Masc.Keeper_meta_contract.sandbox_profile = Masc.Keeper_types_profile.Docker
+                ; sandbox_image = Some "base" }
+    | Error detail -> failf "overlap fixture Keeper meta decode failed: %s" detail in
+  let image_reference = "composition-overlap:test" in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path [ "base", image_reference ];
+  let read_root = Masc.Keeper_tool_shared_runtime.keeper_playground_root ~config ~meta in
+  (* The public composition and Read authority remain real. Only the Docker
+     transport is synthetic: it runs Read's command on the same fixture
+     bytes after applying the sandbox mount translation. This proves causal
+     overlap and identities, not execution inside a real Docker container. *)
+  let docker_path = Filename.concat base_path "read-docker-fixture" in
+  let script = Printf.sprintf {|#!/bin/sh
+case "$1" in
+  info|image) printf '[]\n'; exit 0;;
+  run)
+    shift
+    while [ "$#" -gt 0 ] && [ "$1" != %s ]; do shift; done
+    [ "$#" -gt 0 ] || exit 2
+    shift
+    [ "$#" -eq 7 ] && [ "$1" = sh ] && [ "$2" = -c ] && [ "$4" = sh ] || exit 2
+    fixture_root=%s
+    fixture_container_root=%s
+    case "$6" in
+      "$fixture_container_root"/*)
+        fixture_path="$fixture_root/${6#"$fixture_container_root"/}"
+        exec "$1" "$2" "$3" "$4" "$5" "$fixture_path" "$7";;
+      *) exit 2;;
+    esac;;
+  *) exit 2;;
+esac
+|} (Filename.quote image_reference) (Filename.quote read_root)
+      (Filename.quote (Masc.Keeper_sandbox.container_root meta.name)) in
+  Out_channel.with_open_bin docker_path (fun channel -> output_string channel script);
+  Unix.chmod docker_path 0o700;
+  let fake_docker_key = "MASC_TEST_FAKE_DOCKER_PATH" in
+  let prior_fake_docker = Env_config_core.raw_value_opt fake_docker_key in
+  Unix.putenv fake_docker_key docker_path;
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv fake_docker_key (Option.value ~default:"" prior_fake_docker)) @@ fun () ->
+  let catalog = Catalog.parse export_catalog_fixture |> Result.get_ok in
+  let entry = match Catalog.entries catalog with
+    | [ entry ] -> entry | _ -> fail "expected the read composition" in
+  let source_id = Skill_source_config.source_id_of_string "workspace" |> Result.get_ok in
+  let package_id = Skill_reference.package_id_of_directory "read-path" |> Result.get_ok in
+  let reference = Skill_reference.make
+      ~identity:(Skill_reference.make_identity ~source_id ~package_id ~name:"read-path")
+      ~content_revision:(Skill_reference.content_revision_of_string (String.make 64 'a') |> Result.get_ok) in
+  let trace_id = meta.runtime.trace_id in
+  ignore (Masc.Keeper_fs.ensure_dir
+    (Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string trace_id)));
+  let activation_context = Recorder.make ~trace_id
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string trace_id) ~absolute_turn:1)
+      ~runtime_id:(fun () -> Some "overlap.runtime")
+      ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision_of_string (String.make 64 'f') |> Result.get_ok)
+      ~task_selection:Masc.Keeper_task_skill_turn.empty |> Result.get_ok in
+  let ctx_snapshot = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"outer overlap fixture" in
+  let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+    { provider = Masc.Keeper_publication_recovery_availability.non_runtime_provider
+    ; keeper_name = meta.name } in
+  Call_log.reset_for_testing ();
+  Fun.protect ~finally:Call_log.reset_for_testing @@ fun () ->
+  Call_log.init ~base_path ();
+  let turn_ctx_cell = Call_log.create_turn_ctx_cell () in
+  Call_log.set_turn_context ~cell:turn_ctx_cell ~agent_name:meta.name ~turn:7 ~keeper_turn_id:1 ();
+  let causal = Causal.create ~turn_id:(Some 1) ~initial:(`Assoc []) in
+  let both_read, release = Eio.Promise.create () in
+  let arrivals = Atomic.make 0 in
+  let record_gate_result ~operation ~input result =
+    Causal.record_tool_result causal ~operation ~input result;
+    if Atomic.fetch_and_add arrivals 1 = 1 then Eio.Promise.resolve release ();
+    (* The first real leaf has returned, but its outer invocation cannot
+       finish until the second invocation has dispatched its own leaf. *)
+    Eio.Promise.await both_read in
+  let tools = Surface.make_tools ~capability_surface:(draft_surface ())
+      ~skill_compositions:[ Surface.{ reference; entry } ] ~config ~meta ~publication_recovery
+      ~ctx_snapshot ~turn_ctx_cell ~gate_causal_context:causal
+      ~gate_context:(fun () -> Causal.snapshot causal) ~record_gate_result
+      ~record_composition_activation:(fun ~invocation ~tool_name ~reference ->
+        Recorder.record_composition ~config activation_context ~invocation ~tool_name reference) () in
+  let tool = match List.find_opt (fun (tool, _, _) ->
+      String.equal tool.Agent_core.Tool.schema.name (Catalog.tool_name entry)) tools with
+    | Some (tool, _, _) -> tool | None -> fail "read composition not materialized" in
+  check bool "read-only outer contract permits overlap" true
+    (Agent_core.Tool.execution_mode tool ~input:(`Assoc []) = Agent_core.Tool_contract.Concurrent);
+  let callback_only = Surface.make_tools ~capability_surface:(draft_surface ())
+      ~skill_compositions:[ Surface.{ reference; entry } ] ~config ~meta ~publication_recovery
+      ~ctx_snapshot ~gate_context:(fun () -> Causal.snapshot causal) () in
+  let callback_only_tool = match List.find_opt (fun (tool, _, _) ->
+      String.equal tool.Agent_core.Tool.schema.name (Catalog.tool_name entry)) callback_only with
+    | Some (tool, _, _) -> tool | None -> fail "callback-only composition not materialized" in
+  check bool "a mutable callback without its causal cell stays serial" true
+    (Agent_core.Tool.execution_mode callback_only_tool ~input:(`Assoc []) = Agent_core.Tool_contract.Serial);
+  let files = [ "left", "left evidence"; "right", "right evidence" ] in
+  List.iter (fun (file, content) ->
+    let channel = open_out (Filename.concat read_root file) in
+    Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel content)) files;
+  let run index file =
+    let id = "outer-" ^ file in
+    let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:id ~turn:7
+        ~schedule:{ planned_index = index; batch_index = 0; batch_size = 2
+                  ; execution_mode = Agent_core.Tool_contract.Concurrent }
+        ~completion:Agent_core.Tool_contract.Continue_after_success in
+    let output = match Agent_core.Tool.execute ~invocation tool
+        (`Assoc [ "file", `String (Filename.concat read_root file) ]) with
+      | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
+    let open Yojson.Safe.Util in
+    let selected = Yojson.Safe.from_string output.content |> member "structured_content"
+        |> member "exports" |> member "path" in
+    check bool (file ^ " selected result available") true (selected |> member "available" |> to_bool);
+    check string (file ^ " receives its own path") (Filename.concat read_root file)
+      (selected |> member "value" |> to_string)
+  in
+  Eio.Fiber.both (fun () -> run 0 "left") (fun () -> run 1 "right");
+  Printf.printf "composition_outer_trial invocations=2 dispatches=%d overlap_proven_by_barrier=true container_transport=fixture model_latency_measured=false\n%!"
+    (Atomic.get arrivals);
+  check int "two actual leaf dispatches overlapped" 2 (Atomic.get arrivals);
+  let open Yojson.Safe.Util in
+  check int "owning turn retains both completions" 2
+    ((Causal.snapshot causal).snapshot |> member "completed_tool_calls" |> to_list |> List.length);
+  let ledger = Ledger.load ~config ~trace_id |> Result.get_ok in
+  check (list string) "durable activations keep separate outer identities" [ "outer-left"; "outer-right" ]
+    (Ledger.activations ledger |> List.map (fun activation ->
+      Ledger.activation_to_yojson activation |> member "skill_tool_use_id" |> to_string) |> List.sort String.compare);
+  Call_log.flush_now ();
+  let rows = Call_log.read_recent ~keeper_name:meta.name () |> Result.get_ok in
+  let summaries = List.filter (fun row -> member "tool" row = `String Surface.composition_run_summary_tool_name) rows in
+  check int "each overlapping invocation has one run summary" 2 (List.length summaries);
+  let run_ids = List.map (fun row -> row |> member "composition_run_id" |> to_string) summaries in
+  check int "overlapping invocations have distinct run identities" 2 (List.sort_uniq String.compare run_ids |> List.length);
+  List.iter (fun summary ->
+    let run_id = summary |> member "composition_run_id" |> to_string in
+    let parent = summary |> member "tool_use_id" |> to_string in
+    let leaf = List.filter (fun row -> member "composition_run_id" row = `String run_id
+        && member "tool" row <> `String Surface.composition_run_summary_tool_name) rows in
+    match leaf with
+    | [ row ] -> check string "leaf observation keeps its own outer parent" parent
+        (row |> member "parent_tool_use_id" |> to_string)
+    | _ -> fail "overlapping run mixed or lost its leaf observations") summaries
+;;
+
+let test_causal_forks_keep_invocation_owned_history () =
+  let module Causal = Masc.Keeper_gate_causal_context in
+  let parent = Causal.create ~turn_id:(Some 1) ~initial:(`Assoc []) in
+  let record cell operation = Causal.record_tool_result cell ~operation ~input:(`Assoc [])
+      (Tool_result.make_ok ~tool_name:operation ~start_time:(Tool_timing.start ()) ()) in
+  record parent "prior";
+  let left = Causal.fork parent in
+  let right = Causal.fork parent in
+  record left "left";
+  record right "right";
+  record parent "later";
+  let operations cell = let open Yojson.Safe.Util in
+    (Causal.snapshot cell).snapshot |> member "completed_tool_calls" |> to_list
+    |> List.map (fun call -> call |> member "operation" |> to_string) in
+  check (list string) "left has its own causal continuation" [ "prior"; "left" ] (operations left);
+  check (list string) "right has its own causal continuation" [ "prior"; "right" ] (operations right);
+  check (list string) "parent retains its own continuation" [ "prior"; "later" ] (operations parent)
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
     [ ( "catalog"
-      , [ test_case
+      , [ test_case "draft prepare and exact run binding" `Quick test_draft_prepare_and_exact_run_binding
+        ; test_case "read-only outer invocations overlap without identity mixing" `Quick
+            test_read_only_outer_invocations_overlap_without_identity_mixing
+        ; test_case "causal forks keep invocation-owned history" `Quick
+            test_causal_forks_keep_invocation_owned_history
+        ; test_case "public draft run keeps one execution identity and readable references" `Quick
+            (test_public_draft_run_preserves_one_execution_identity ~observe:true)
+        ; test_case "public draft run records its summary without optional turn context" `Quick
+            (test_public_draft_run_preserves_one_execution_identity ~observe:false)
+        ; test_case "draft rejects effects and bad fixed inputs" `Quick test_draft_rejects_effects_and_bad_fixed_inputs
+        ; test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
+        ; test_case
             "builds executable typed plan"
             `Quick
             test_catalog_builds_executable_typed_plan

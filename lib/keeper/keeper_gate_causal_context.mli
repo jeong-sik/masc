@@ -16,6 +16,11 @@ val evidence_budget_bytes : int
 
 val create : turn_id:int option -> initial:Yojson.Safe.t -> t
 
+val fork : t -> t
+(** Capture the currently completed calls in a fresh invocation-owned cell.
+    Later records in the parent or a sibling do not change this cell. Its
+    own records still extend the captured causal history. *)
+
 val record_tool_result :
   t -> operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit
 

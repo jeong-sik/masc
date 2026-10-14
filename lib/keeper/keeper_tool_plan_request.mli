@@ -61,6 +61,9 @@ type error =
       { index : int
       ; field : string
       }
+  | Request_invalid_field of { field : string; found : string }
+  | Export_invalid_field of { index : int; field : string; found : string }
+  | Export_template_error of { index : int; error : template_error }
   | Plan_rejected of Keeper_tool_plan.error
 
 type encode_error = Unsubstituted_param of { name : string }
@@ -68,7 +71,9 @@ type encode_error = Unsubstituted_param of { name : string }
 val input_schema : Yojson.Safe.t
 (** Canonical model-visible schema for the JSON grammar parsed by
     {!plan_of_json}. The nested template shapes are advertised here; semantic
-    validation remains owned by {!Keeper_tool_plan.create}. *)
+    validation remains owned by {!Keeper_tool_plan.create}. Optional [exports]
+    select named node-output pointers; [branch_failure_policy] is explicit
+    [fail_fast] or [continue_independent]. *)
 
 val error_message : error -> string
 val error_to_json : error -> Yojson.Safe.t

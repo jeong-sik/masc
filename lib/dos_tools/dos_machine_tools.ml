@@ -24,8 +24,15 @@ open Tool_args
 
 let ( let* ) = Result.bind
 
+(* A refusal happens before the machine is touched: a malformed argument, a
+   machine someone else holds, a slot that does not exist. Left undeclared, a
+   failure reads as effect-outcome-unknown, and a Keeper turn that called this
+   tool ends over a slot name with a dot in it instead of reading the refusal
+   and trying again. The MSX tools declare the same (msx_machine_tools.ml,
+   [refuse]). *)
 let reject ?(data = `Null) ~tool_name ~start_time message =
-  Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection ~start_time ~data message
+  Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect ~start_time ~data message
 ;;
 
 let observation_fields (o : Dos_lane.observation) =

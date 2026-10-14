@@ -342,18 +342,6 @@ status: reference
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 
-**Cluster**
-: `.masc/` 상태 디렉터리 레이아웃을 가르는 이름 범위(`MASC_CLUSTER_NAME`). 기본값은
-  `default`이며 그때 경로는 `<base>/.masc/`다. 다른 이름은
-  `<base>/.masc/clusters/<sanitized>/`를 쓴다. TUI 개요의 `Cluster:` 행이 이 값을
-  보여준다. Turn Boundary와 Read Position 같은 runtime 좌표는 선택한 cluster의
-  디렉터리에만 의미가 있고, 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
-  Memory OS와 Working Context는 cluster가 아니라 Keeper 이름에 귀속되므로 cluster
-  간에 공유된다.
-  → [masc_root_dir_from](../../lib/workspace/workspace_utils_paths_backend.mli),
-  [backend_config_for](../../lib/workspace/workspace_utils_backend_setup.mli),
-  [cluster_name](../../lib/config/env_config_core.mli)
-
 **Workspace Heartbeat**
 : `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
   `Heartbeat_updated`만 실제 쓰기와 Workspace writability를 증명한다. 이는 Keeper의
@@ -3133,8 +3121,7 @@ status: reference
 : Librarian이 Keeper가 아직 처리하지 않은 event·chat 요청을 묶어, 원본 요청에 맥락과
   다음 행동 제안을 붙여 둔 것. 실행 권한도 checkpoint 이력도 아니다. 정리 하나가
   pocket(`Keeper_librarian_context.pocket`)이고, 지금 저장된 pocket 묶음이
-  `Keeper_librarian_context.snapshot`의 `pockets`다. Keeper 이름에 묶인다. cluster 사이에서
-  무엇을 같이 쓰는지는 **Cluster** 항목에 적었다.
+  `Keeper_librarian_context.snapshot`의 `pockets`다. Keeper 이름에 묶인다.
   **다른 뜻 두 개와 구별한다.** ① 코드의 `Keeper_types.working_context`는 이 묶음이 아니라
   실행 중인 Keeper가 쥔 Checkpoint 하나를 감싼 값이다(**Checkpoint** 항목) — 이름만 같다.
   ② 라우트·설정 쪽의 `working-context`/`working_contexts`는 이 묶음을 가리키는
@@ -3300,7 +3287,7 @@ status: reference
 
 **Turn Boundary**
 : 끝난 Keeper turn이 남기는 한 줄(`keepers/<keeper>/turn-boundaries.jsonl`).
-  선택한 cluster의 runtime root 아래에 저장한다. 그 turn이
+  `<base>/.masc` 아래에 저장한다. 그 turn이
   끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.
   History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
@@ -3319,8 +3306,7 @@ status: reference
   줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다. 가장 최근의 이 두 종류
   중 하나부터 현재 History의 끝 경계를 고른다. 그 앞의 줄은 같은 메시지가 반복되어
   digest가 맞더라도 쓰지 않으며, `fresh` turn의 자기 끝 경계는 포함한다.
-  이 파일의 Atom 위치는 선택한 cluster의 History만 가리키는
-  cluster-scoped 좌표다. 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
+  이 파일의 Atom 위치는 이 workspace의 History만 가리키는 좌표다.
 
 **Turn Boundary Position (턴 경계 위치)**
 : `turn-boundaries.jsonl`의 `turn_ended` 줄이 적는, 그 turn이 끝났을 때 History의
@@ -3369,7 +3355,7 @@ status: reference
 
 **Read Position**
 : Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
-  Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.
+  Turn Boundary와 같은 Keeper runtime 디렉터리에 저장한다.
   Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
   읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
   줄 번호로는 지금 History 안의 자리를 말할 수 없다. 공식 클라이언트 턴은 Atom을 남기지
@@ -3380,8 +3366,7 @@ status: reference
   위치 파일은 둘 다, 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
-  이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
-  cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
+  이 값도 이 workspace의 Turn Boundary와 History에만 의미가 있다.
   Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
 **Librarian Range Receipt (완료 범위 영수증)**

@@ -23,7 +23,7 @@
 - gRPC subscriber/heartbeat 상태
 - WebSocket 활성도
 - queue/backpressure hot session
-- 현재 cluster / workspace / managed unit / active operation
+- 현재 workspace / managed unit / active operation
 - transport별 practical path 추천
 
 ## Truth Harness
@@ -117,5 +117,5 @@ curl -sS http://127.0.0.1:8935/ws
 
 - queue pressure가 `watch` 이상이면 먼저 SSE `hot_sessions`를 본다.
 - `gRPC subscribers`가 높고 `broadcast avg`도 같이 오르면 fanout source는 SSE bridge일 가능성이 크다.
-- multi-node / distributed mode에서는 transport 자체보다 `cluster`, `managed_units`, `active_operations`, `stale_units`를 같이 봐야 한다.
+- multi-node / distributed mode에서는 transport 자체보다 `managed_units`, `active_operations`, `stale_units`를 같이 봐야 한다.
 - canonical public control path는 여전히 `POST /mcp`다. WS/gRPC는 특정 latency/duplex 문제가 있을 때 올린다.

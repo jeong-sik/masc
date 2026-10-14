@@ -13,7 +13,7 @@
     measures in §9 (output rejection rate, continuity scoring) need a provider
     and an operator's choice of keeper; they are not here.
 
-    It reads the current Keeper trace in the selected workspace cluster, so what it
+    It reads the current Keeper trace in the workspace, so what it
     prints is counts, atom numbers and digests -- never message text. Adding a
     field that carries text turns a local measurement into a disclosure.
 
@@ -35,7 +35,7 @@ let usage =
   \  --base-path DIR   workspace to read (default: the resolved MASC base path)\n\
   \  --keeper NAME     replay only this keeper; repeatable, default every one\n\
   \                    that has a turn-boundary log\n\
-  \                    Current cluster metadata is required; archived logs\n\
+  \                    Current Keeper metadata is required; archived logs\n\
   \                    without it are skipped, never guessed from log order.\n\
   \  --extent all         each round takes the whole backlog (default)\n\
   \  --extent cut-points  each round takes to the first cut point, which is\n\

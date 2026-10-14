@@ -108,7 +108,7 @@ blob 은 내용 주소라서 2번이 쓰는 파일은 매번 같은 내용이다
 지금 강등 blob 은 "체크포인트에 원문이 살아 있는 파생 캐시" 다(RFC-0363 §3.6). 이 RFC 뒤에는 **지난 결과의 원본이 blob 에만 있다.** 그래서 수명 규칙을 다시 확인해야 한다.
 
 - 체크포인트는 `<base-path>/.masc/traces/` 아래에 있고, `traces` 는 이미 `Tool_blob_maintenance.durable_consumer_basenames` 에 있다. history 스냅샷도 같은 폴더다. 그래서 체크포인트와 스냅샷 안의 marker 는 **등록 변경 없이** 살아 있는 참조로 세어진다. 청소 모듈 문서("durable 참조를 새로 저장하는 변경은 같은 변경에서 소비자 등록")를 이미 만족한다.
-- 청소는 오프라인 helper 가 BasePath lease 를 잡은 동안만 돌고, 연속 두 번의 완전 스캔에서 참조가 없어야 지운다. `<base-path>/.masc/clusters` 가 비어 있지 않으면 청소 자체를 멈춘다. 이 조건은 그대로 둔다.
+- 청소는 오프라인 helper 가 BasePath lease 를 잡은 동안만 돌고, 연속 두 번의 완전 스캔에서 참조가 없어야 지운다.
 - `fetch` 는 파일의 SHA-256 을 확인하고, 다르면 `Integrity_mismatch` 를 돌려준다. 손상은 조용히 지나가지 않는다.
 - 달라지는 위험: `tool_blobs` 를 잃으면 지난 결과 본문을 잃는다. trace 폴더만 복사하면 본문이 따라가지 않는다. §9 의 결정 1 이다.
 

@@ -36,6 +36,7 @@ type scope =
 type evidence =
   { trace_id : Keeper_id.Trace_id.t
   ; activation : Keeper_skill_activation_ledger.activation
+  ; async_evidence : Keeper_skill_activation_ledger.async_evidence
   }
 
 type latest =
@@ -94,23 +95,25 @@ let latest_in_ledger trace_id reference ledger =
              activation.Keeper_skill_activation_ledger.activated_at
          with
          | Ok activated_at ->
-           Some { evidence = { trace_id; activation }; activated_at; ledger_index }
+           Some (activation, activated_at, ledger_index)
          | Error Time_codec.Invalid_rfc3339 ->
            (* The strict ledger decoder and private activation constructor
               already reject this state. *)
            None
        else None)
   |> List.fold_left
-       (fun latest candidate ->
+       (fun latest ((_, candidate_at, candidate_index) as candidate) ->
           match latest with
           | None -> Some candidate
-          | Some current
-            when candidate.activated_at > current.activated_at
-                 || (Float.equal candidate.activated_at current.activated_at
-                     && candidate.ledger_index > current.ledger_index) ->
+          | Some (_, current_at, current_index)
+            when candidate_at > current_at
+                 || (Float.equal candidate_at current_at && candidate_index > current_index) ->
             Some candidate
           | Some current -> Some current)
        None
+  |> Option.map (fun (activation, activated_at, ledger_index) ->
+       let async_evidence = Keeper_skill_activation_ledger.async_evidence_for_activation ledger activation in
+       { evidence = { trace_id; activation; async_evidence }; activated_at; ledger_index })
 ;;
 
 let latest_across_traces candidates =

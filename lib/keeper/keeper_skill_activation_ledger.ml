@@ -5,6 +5,13 @@ include Keeper_skill_activation_types
 type ledger_revision = string
 type workspace_key = string
 
+type async_evidence =
+  { result_deliveries : Keeper_skill_async_delivery.t list
+  ; action_observations : Keeper_skill_async_action.t list
+  }
+
+module Delivery_identity_set = Set.Make (String)
+
 (* The revision is the SHA-256 of the whole canonical ledger, so computing it
    costs a serialisation of every activation. A mutation does not need it --
    only a reader that projects or verifies the ledger does -- so it is computed
@@ -607,6 +614,23 @@ let recorded_part (activation : activation) =
 
 let activation_frame_sha256 activation =
   Digestif.SHA256.(digest_string (Yojson.Safe.to_string (activation_to_yojson (recorded_part activation))) |> to_hex)
+;;
+
+let async_evidence_for_activation ledger (activation : activation) =
+  let frame_sha256 = activation_frame_sha256 activation in
+  let result_deliveries =
+    List.filter (fun (delivery : Keeper_skill_async_delivery.t) ->
+      List.exists (fun (child : Keeper_skill_async_delivery.child_activation) ->
+        String.equal child.skill_tool_use_id activation.skill_tool_use_id
+        && String.equal child.activation_sha256 frame_sha256)
+        delivery.child_activations) ledger.async_result_deliveries
+  in
+  let identities = List.fold_left (fun identities delivery ->
+    Delivery_identity_set.add (Keeper_skill_async_delivery.identity delivery) identities)
+    Delivery_identity_set.empty result_deliveries in
+  let action_observations = List.filter (fun (action : Keeper_skill_async_action.t) ->
+    Delivery_identity_set.mem action.delivery_sha256 identities) ledger.async_actions in
+  { result_deliveries; action_observations }
 ;;
 
 let workspace_key_of_root root =
@@ -1320,8 +1344,23 @@ let exact_key_equal (left : activation) (right : activation) =
   String.equal left.skill_tool_use_id right.skill_tool_use_id
 ;;
 
-let validate_async_result ~expected_trace_id ~activations (delivery : Keeper_skill_async_delivery.t) =
+let validate_async_child (activation : activation)
+      (child : Keeper_skill_async_delivery.child_activation)
+      (delivery : Keeper_skill_async_delivery.t) =
   let invalid detail = Error (Invalid_async_result_evidence detail) in
+  if not (String.equal (activation_frame_sha256 activation) child.activation_sha256)
+  then invalid "original activation frame differs"
+  else if not (Ids.Turn_ref.equal activation.turn_ref delivery.original_turn_ref)
+  then invalid "original child turn differs"
+  else match activation.invocation with
+    | Nested_composition_invocation {scope;_} when
+        String.equal scope.composition_run_id (Keeper_tool_plan.Composition_run_id.to_string delivery.composition_run_id)
+        && String.equal scope.parent_tool_use_id delivery.logical_parent_tool_use_id -> Ok ()
+    | Nested_composition_invocation _ | Instruction_invocation _ | Composition_invocation _ ->
+      invalid "handoff does not belong to the original admitted child run"
+;;
+
+let validate_async_result ~expected_trace_id ~activations (delivery : Keeper_skill_async_delivery.t) =
   if not (String.equal (Ids.Turn_ref.trace_id delivery.original_turn_ref)
       (Keeper_id.Trace_id.to_string expected_trace_id)) then Error Turn_ref_session_mismatch
   else List.fold_left (fun result (child : Keeper_skill_async_delivery.child_activation) ->
@@ -1329,17 +1368,18 @@ let validate_async_result ~expected_trace_id ~activations (delivery : Keeper_ski
     let* () = result in
     match List.find_opt (fun (activation : activation) -> String.equal activation.skill_tool_use_id id) activations with
     | None -> Error (Unknown_event_activation id)
-    | Some activation ->
-      if not (String.equal (activation_frame_sha256 activation) child.activation_sha256)
-      then invalid "original activation frame differs"
-      else if not (Ids.Turn_ref.equal activation.turn_ref delivery.original_turn_ref)
-      then invalid "original child turn differs"
-      else match activation.invocation with
-        | Nested_composition_invocation {scope;_} when
-            String.equal scope.composition_run_id (Keeper_tool_plan.Composition_run_id.to_string delivery.composition_run_id)
-            && String.equal scope.parent_tool_use_id delivery.logical_parent_tool_use_id -> Ok ()
-        | Nested_composition_invocation _ | Instruction_invocation _ | Composition_invocation _ ->
-          invalid "handoff does not belong to the original admitted child run") (Ok ()) delivery.child_activations
+    | Some activation -> validate_async_child activation child delivery)
+    (Ok ()) delivery.child_activations
+;;
+
+let validate_async_action_fact ~delivery ~async_actions action =
+  let invalid detail = Invalid_async_action_evidence detail in
+  let* () = Keeper_skill_async_action.validate_delivery delivery action |> Result.map_error invalid in
+  match List.find_opt (fun known -> String.equal (Keeper_skill_async_action.occurrence_identity known)
+      (Keeper_skill_async_action.occurrence_identity action)) async_actions with
+  | None -> Ok ()
+  | Some known when Keeper_skill_async_action.same_occurrence_fact known action -> Ok ()
+  | Some _ -> Error (invalid "physical occurrence differs across causal links")
 ;;
 
 let validate_async_action ~expected_trace_id ~activations ~async_result_deliveries ~async_actions action =
@@ -1349,12 +1389,47 @@ let validate_async_action ~expected_trace_id ~activations ~async_result_deliveri
   | None -> Error (invalid "unknown causal delivery")
   | Some delivery ->
     let* () = validate_async_result ~expected_trace_id ~activations delivery in
-    let* () = Keeper_skill_async_action.validate_delivery delivery action |> Result.map_error invalid in
-    match List.find_opt (fun known -> String.equal (Keeper_skill_async_action.occurrence_identity known)
-        (Keeper_skill_async_action.occurrence_identity action)) async_actions with
-    | None -> Ok ()
-    | Some known when Keeper_skill_async_action.same_occurrence_fact known action -> Ok ()
-    | Some _ -> Error (invalid "physical occurrence differs across causal links")
+    validate_async_action_fact ~delivery ~async_actions action
+;;
+
+let async_evidence_of_yojson ~expected_trace_id ~(activation : activation) json =
+  let* fields = object_field "async_evidence" json in
+  let* () = exact_fields ~object_name:"async_evidence"
+    ~allowed:["async_result_deliveries"; "async_actions"] fields in
+  let* result_deliveries = match List.assoc_opt "async_result_deliveries" fields with
+    | Some (`List rows) -> List.fold_left (fun result json ->
+      let* values = result in
+      let* delivery = Keeper_skill_async_delivery.of_json json
+        |> Result.map_error (fun detail -> Invalid_async_result_evidence detail) in
+      let* () = if String.equal (Ids.Turn_ref.trace_id delivery.original_turn_ref)
+          (Keeper_id.Trace_id.to_string expected_trace_id) then Ok () else Error Turn_ref_session_mismatch in
+      let* child = match List.find_opt (fun (child : Keeper_skill_async_delivery.child_activation) ->
+          String.equal child.skill_tool_use_id activation.skill_tool_use_id) delivery.child_activations with
+        | None -> Error (Invalid_async_result_evidence "handoff has no selected child")
+        | Some child -> Ok child in
+      let* () = validate_async_child activation child delivery in
+      if List.exists (fun known -> String.equal (Keeper_skill_async_delivery.identity known)
+          (Keeper_skill_async_delivery.identity delivery)) values
+      then Error (Invalid_async_result_evidence "duplicate physical handoff") else Ok (delivery :: values))
+      (Ok []) rows |> Result.map List.rev
+    | Some _ | None -> Error (Expected_object {field="async_result_deliveries"}) in
+  let* action_observations = match List.assoc_opt "async_actions" fields with
+    | Some (`List rows) -> List.fold_left (fun result json ->
+      let* values = result in
+      let* action = Keeper_skill_async_action.of_json json
+        |> Result.map_error (fun detail -> Invalid_async_action_evidence detail) in
+      let* delivery = match List.find_opt (fun delivery -> String.equal
+          (Keeper_skill_async_delivery.identity delivery) action.Keeper_skill_async_action.delivery_sha256)
+          result_deliveries with
+        | None -> Error (Invalid_async_action_evidence "unknown selected causal delivery")
+        | Some delivery -> Ok delivery in
+      let* () = validate_async_action_fact ~delivery ~async_actions:values action in
+      if List.exists (fun known -> String.equal (Keeper_skill_async_action.identity known)
+          (Keeper_skill_async_action.identity action)) values
+      then Error (Invalid_async_action_evidence "duplicate causal occurrence") else Ok (action :: values))
+      (Ok []) rows |> Result.map List.rev
+    | Some _ | None -> Error (Expected_object {field="async_actions"}) in
+  Ok { result_deliveries; action_observations }
 ;;
 
 let of_projection_yojson json =

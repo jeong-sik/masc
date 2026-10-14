@@ -7899,6 +7899,8 @@ let test_skill_evidence_joins_activation_and_composition () =
               ; ( "activation"
                 , Lib.Keeper_skill_activation_ledger.activation_to_yojson
                     activation )
+              ; "async_result_deliveries", `List []
+              ; "async_actions", `List []
               ] )
         ]
     in
@@ -7916,7 +7918,7 @@ let test_skill_evidence_joins_activation_and_composition () =
       ~activation_owner_gap_count:0
   in
   let open Yojson.Safe.Util in
-  check string "evidence schema" "masc.skill-evidence/v5"
+  check string "evidence schema" "masc.skill-evidence/v6"
     (json |> member "schema" |> to_string);
   check string "observed status" "observed" (json |> member "status" |> to_string);
   check string "activation keeper" "delta"

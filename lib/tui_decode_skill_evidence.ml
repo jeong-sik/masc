@@ -33,6 +33,7 @@ type skill_evidence_activation_item =
   ; sea_owner_claims : skill_evidence_owner_claim list
   ; sea_owner_gap_count : int
   ; sea_activation : Yojson.Safe.t
+  ; sea_async_evidence : Keeper_skill_activation_ledger.async_evidence
   }
 
 type skill_evidence_activation =
@@ -203,7 +204,10 @@ let skill_evidence_activation_gap = function
 ;;
 
 let decode_skill_evidence_activation_item reference = function
-  | `Assoc _ as evidence ->
+  | `Assoc fields as evidence ->
+    let* () = if skill_evidence_exact_fields
+      ["trace_id"; "owner"; "activation"; "async_result_deliveries"; "async_actions"] fields
+      then Ok () else Error "Skill activation evidence fields are invalid" in
     let* trace_id, sea_trace_id =
       match member "trace_id" evidence with
       | `String value ->
@@ -266,7 +270,7 @@ let decode_skill_evidence_activation_item reference = function
         else Error "Skill activation owner status disagrees with claims or gaps"
       | _ -> Error "Skill activation owner must be an object"
     in
-    let* sea_activation =
+    let* sea_activation, observed =
       match member "activation" evidence with
       | `Assoc _ as activation ->
         (match
@@ -281,10 +285,18 @@ let decode_skill_evidence_activation_item reference = function
                ~content_revision:observed.content_revision
            in
            if Skill_reference.equal reference observed_reference
-           then Ok activation
+           then Ok (activation, observed)
            else Error "Skill activation reference disagrees with envelope"
          | Error _ -> Error "Skill activation payload is invalid")
       | _ -> Error "Skill activation payload must be an object"
+    in
+    let* sea_async_evidence =
+      Keeper_skill_activation_ledger.async_evidence_of_yojson
+        ~expected_trace_id:trace_id ~activation:observed
+        (`Assoc [ "async_result_deliveries", member "async_result_deliveries" evidence
+                ; "async_actions", member "async_actions" evidence ])
+      |> Result.map_error (fun error -> "Skill activation async evidence is invalid: "
+        ^ Keeper_skill_activation_ledger.decode_error_code error)
     in
     Ok
       { sea_trace_id
@@ -292,6 +304,7 @@ let decode_skill_evidence_activation_item reference = function
       ; sea_owner_claims
       ; sea_owner_gap_count
       ; sea_activation
+      ; sea_async_evidence
       }
   | _ -> Error "Skill activation evidence must be an object"
 ;;
@@ -349,7 +362,7 @@ let decode_skill_evidence_activation reference json =
 ;;
 
 let decode_skill_evidence json =
-  if member "schema" json <> `String "masc.skill-evidence/v5"
+  if member "schema" json <> `String "masc.skill-evidence/v6"
   then Error "Skill evidence schema is unsupported"
   else
     let* reference =

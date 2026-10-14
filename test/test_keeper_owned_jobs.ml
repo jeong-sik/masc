@@ -3197,6 +3197,44 @@ pointer = "/content"
   handoff reference_observation;
   execute_action ~turn:24 ~id:"reference-is-not-body-authority" success_tool |> ignore;
   check int "reference-only handoff has no body action authority" 8 (action_count ());
+  let reference = Skill_reference.make ~identity:original_activation.identity
+    ~content_revision:original_activation.content_revision in
+  let detail_started = Mtime_clock.counter () in
+  let discovery = Masc.Keeper_skill_activation_discovery.discover config reference in
+  (match discovery.latest with
+   | Masc.Keeper_skill_activation_discovery.Most_recent_observed evidence ->
+     check bool "fresh retained discovery preserves original Task admission" true
+       (evidence.activation = original_activation);
+     check int "fresh retained discovery keeps every physical handoff" 11
+       (List.length evidence.async_evidence.result_deliveries);
+     check int "fresh retained discovery keeps SDK and native action links" 8
+       (List.length evidence.async_evidence.action_observations)
+   | Masc.Keeper_skill_activation_discovery.Not_observed
+   | Masc.Keeper_skill_activation_discovery.Most_recent_observed_timestamp_tie _ -> fail "fresh retained async Skill detail is missing");
+  let detail = Server_skill_evidence.project ~config reference in
+  let evidence = detail |> member "activation" |> member "evidence" in
+  check string "detail uses required async evidence contract" "masc.skill-evidence/v6"
+    (detail |> member "schema" |> to_string);
+  check_json "detail returns the original Task and admission frame"
+    (Ledger.activation_to_yojson original_activation) (evidence |> member "activation");
+  check int "detail exposes exact selected physical handoffs" 11
+    (evidence |> member "async_result_deliveries" |> to_list |> List.length);
+  check int "detail exposes actual selected causal action links" 8
+    (evidence |> member "async_actions" |> to_list |> List.length);
+  let decoded_detail = Ledger.async_evidence_of_yojson ~expected_trace_id:fixture.meta.runtime.trace_id
+    ~activation:original_activation (`Assoc
+      ["async_result_deliveries", member "async_result_deliveries" evidence;
+       "async_actions", member "async_actions" evidence]) |> require "detail strict selected evidence decoder" in
+  check int "detail can be consumed without rewriting original admission" 8
+    (List.length decoded_detail.action_observations);
+  let detail_ms = Mtime.Span.to_float_ns (Mtime_clock.count detail_started) /. 1_000_000. in
+  Printf.printf "OWNED_RETAINED_ASYNC_SKILL_DETAIL %s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["scope", `String "synthetic public owned async flow, fresh retained discovery and actual detail projection";
+     "retained_discovery_and_detail_projection_ms", `Float detail_ms;
+     "original_activation_turn", `Int 41; "physical_receiving_turn", `Int 73;
+     "selected_physical_handoffs", `Int 11; "selected_action_link_facts", `Int 8;
+     "original_activation_unchanged", `Bool true;
+     "backend_calls_after_result_ready", `Int (List.length (calls fixture)-ready_backend)]));
   Printf.printf "OWNED_ASYNC_CAUSAL_ACTIONS %s\n%!" (Yojson.Safe.to_string (`Assoc
     ["scope",`String "synthetic owned continuation, actual SDK dispatcher results and official native start callback";
      "original_activation_turn",`Int 41;"physical_receiving_turn",`Int 73;

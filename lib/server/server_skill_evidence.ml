@@ -127,6 +127,10 @@ let activation_evidence_to_yojson ~config
       ; ( "activation"
         , Keeper_skill_activation_ledger.activation_to_yojson
             evidence.activation )
+      ; "async_result_deliveries", `List (List.map Keeper_skill_async_delivery.to_json
+          evidence.async_evidence.result_deliveries)
+      ; "async_actions", `List (List.map Keeper_skill_async_action.to_json
+          evidence.async_evidence.action_observations)
       ]
   , List.length owner.gaps )
 ;;
@@ -251,7 +255,7 @@ let to_yojson
       ~activation_owner_gap_count =
   let observed = Option.is_some activation || Option.is_some composition in
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v5"
+    [ "schema", `String "masc.skill-evidence/v6"
     ; ( "status"
       , `String
           (if observed then "observed" else "not_observed_in_retained_coverage") )

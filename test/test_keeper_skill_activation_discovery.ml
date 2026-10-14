@@ -364,11 +364,65 @@ let test_trace_root_replacement_is_not_complete () =
   | _ -> fail "evidence from a replaced trace root was exposed"
 ;;
 
+let test_retained_async_evidence_preserves_selection_and_gaps () =
+  with_workspace @@ fun _root config ->
+  let fixture = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in
+  let canonical = match Ledger.of_projection_yojson fixture with
+    | Ok ledger -> ledger | Error error -> fail (Ledger.decode_error_code error) in
+  let trace = Ledger.session_id canonical in
+  create_session config trace;
+  let original = List.hd (Ledger.activations canonical) in
+  record config trace original;
+  List.iter (fun delivery -> match Ledger.observe_async_result_delivery ~config ~trace_id:trace
+      ~expected_activations:[original] delivery with
+    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
+    (Ledger.async_result_deliveries canonical);
+  List.iter (fun action ->
+    let json = Keeper_skill_async_action.to_json action in
+    let late = match json with
+      | `Assoc fields -> `Assoc (("observed_at", `String "2026-10-15T12:00:00Z") :: List.remove_assoc "observed_at" fields)
+      | _ -> fail "action fixture must be an object" in
+    let late = match Keeper_skill_async_action.of_json late with Ok value -> value | Error detail -> fail detail in
+    match Ledger.observe_async_action ~config ~trace_id:trace late with
+    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
+    (Ledger.async_actions canonical);
+  let reference = Skill_reference.make ~identity:original.identity ~content_revision:original.content_revision in
+  (match (Discovery.discover config reference).latest with
+   | Discovery.Most_recent_observed evidence ->
+     check bool "retained exact admission frame" true (evidence.activation = original);
+     check int "retained physical deliveries" 2 (List.length evidence.async_evidence.result_deliveries);
+     check int "retained actual typed result links" 3 (List.length evidence.async_evidence.action_observations)
+   | Discovery.Not_observed | Discovery.Most_recent_observed_timestamp_tie _ -> fail "original async detail missing");
+  let newer = activation ~trace ~tool_use_id:"newer-instruction"
+    ~activated_at:"2026-09-01T00:00:00Z" reference in
+  record config trace newer;
+  (match (Discovery.discover config reference).latest with
+   | Discovery.Most_recent_observed evidence ->
+     check string "late follow-on clock cannot replace latest original activation" "newer-instruction" evidence.activation.skill_tool_use_id;
+     check int "another original child's delivery is not inherited" 0 (List.length evidence.async_evidence.result_deliveries);
+     check int "another original child's actions are not inherited" 0 (List.length evidence.async_evidence.action_observations)
+   | Discovery.Not_observed | Discovery.Most_recent_observed_timestamp_tie _ -> fail "newer admission selection missing");
+  let path = Filename.concat (Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string trace))
+    "skill-activation-events.jsonl" in
+  Fs_compat.save_file path "corrupt canonical evidence\n";
+  let unreadable = Discovery.discover config reference in
+  (match unreadable.scope with
+   | Discovery.Incomplete_retained_trace_snapshot -> ()
+   | Discovery.Complete_retained_trace_snapshot | Discovery.Trace_store_unavailable -> fail "corruption lost typed incomplete coverage");
+  check int "unreadable ledger is not counted as loaded" 0 unreadable.ledgers_loaded;
+  check bool "unreadable ledger retains its gap" true (ledger_gap_details unreadable.gaps <> []);
+  match unreadable.latest with
+  | Discovery.Not_observed -> ()
+  | Discovery.Most_recent_observed _ | Discovery.Most_recent_observed_timestamp_tie _ -> fail "corruption fabricated observed zero detail"
+;;
+
 let () =
   run
     "keeper Skill activation discovery"
     [ ( "retained trace authority"
-      , [ test_case "missing store stays absent" `Quick
+      , [ test_case "retained async detail preserves selection and unreadable coverage" `Quick
+            test_retained_async_evidence_preserves_selection_and_gaps
+        ; test_case "missing store stays absent" `Quick
             test_missing_store_is_empty_and_read_only
         ; test_case "historical exact reference is discovered" `Quick
             test_discovers_historical_trace_and_filters_exact_reference

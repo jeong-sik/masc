@@ -9,6 +9,8 @@ import { parseStrictRfc3339, type Rfc3339Instant } from '../lib/rfc3339'
 import { nestedCompositionScopeIsValid } from './skill-activation-scope'
 import { validate as isUuid, version as uuidVersion } from 'uuid'
 import { ApiRequestError, get, post, postControlPlane, type GetOptions } from './core'
+import { decodeSkillActivationAsyncEvidence, type DashboardSkillAsyncAction,
+  type DashboardSkillAsyncResultDelivery } from './dashboard-tools-prompts'
 
 export interface SkillIdentity {
   source_id: string
@@ -205,6 +207,8 @@ export interface SkillActivationEvidence {
   trace_id: string
   owner: SkillActivationOwner
   activation: Record<string, unknown>
+  async_result_deliveries: readonly DashboardSkillAsyncResultDelivery[]
+  async_actions: readonly DashboardSkillAsyncAction[]
 }
 
 export type SkillActivationSelection =
@@ -231,7 +235,7 @@ export interface SkillCompositionEvidence {
 }
 
 export interface SkillEvidenceResponse {
-  schema: 'masc.skill-evidence/v5'
+  schema: 'masc.skill-evidence/v6'
   status: 'observed' | 'not_observed_in_retained_coverage'
   reference: SkillReference
   activation: SkillActivationSelection | null
@@ -574,7 +578,7 @@ const SkillActivationPayloadSchema = Schema.Struct({
 })
 
 const SkillEvidenceResponseSchema = Schema.Struct({
-  schema: Schema.Literal('masc.skill-evidence/v5'),
+  schema: Schema.Literal('masc.skill-evidence/v6'),
   status: Schema.Literal('observed', 'not_observed_in_retained_coverage'),
   reference: SkillReferenceSchema,
   activation: Schema.NullOr(Schema.Union(
@@ -597,6 +601,8 @@ const SkillEvidenceResponseSchema = Schema.Struct({
           gaps: Schema.Array(UnknownRecordSchema),
         }),
         activation: SkillActivationPayloadSchema,
+        async_result_deliveries: Schema.Array(UnknownRecordSchema),
+        async_actions: Schema.Array(UnknownRecordSchema),
       }),
     }),
     Schema.Struct({
@@ -618,6 +624,8 @@ const SkillEvidenceResponseSchema = Schema.Struct({
           gaps: Schema.Array(UnknownRecordSchema),
         }),
         activation: SkillActivationPayloadSchema,
+        async_result_deliveries: Schema.Array(UnknownRecordSchema),
+        async_actions: Schema.Array(UnknownRecordSchema),
       })),
     }),
   )),
@@ -1346,6 +1354,7 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
     contractError('invalid_response', 'activation timestamp tie requires at least two traces')
   }
   let ownerGapCount = 0
+  const normalizedEvidence: SkillActivationEvidence[] = []
   for (const evidence of activationEvidence) {
     const { status, claims, gaps } = evidence.owner
     const ownerAgrees = status === 'known'
@@ -1372,6 +1381,11 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
     }
     if (!activationPayloadIsValid(activation, evidence.trace_id)) {
       contractError('invalid_response', 'activation payload violates typed occurrence invariants')
+    }
+    try {
+      normalizedEvidence.push({...evidence, ...decodeSkillActivationAsyncEvidence(activation, evidence)})
+    } catch (error) {
+      contractError('invalid_response', error instanceof Error ? error.message : 'invalid async evidence')
     }
     ownerGapCount += gaps.length
   }
@@ -1444,7 +1458,14 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
   if (!activationCoverageAgrees) {
     contractError('invalid_response', 'activation coverage disagrees with retained snapshot')
   }
-  return decoded
+  const selected = decoded.activation
+  if (selected === null) return {...decoded, activation: null}
+  if (selected.selection === 'most_recent_observed_timestamp_tie') {
+    return {...decoded, activation: {...selected, evidence: normalizedEvidence}}
+  }
+  const evidence = normalizedEvidence[0]
+  if (evidence === undefined) contractError('invalid_response', 'selected activation is absent')
+  return {...decoded, activation: {...selected, evidence}}
 }
 
 export async function fetchSkillEvidence(reference: SkillReference): Promise<SkillEvidenceResponse> {

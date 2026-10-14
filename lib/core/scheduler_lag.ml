@@ -19,6 +19,8 @@ type t =
 
 let default_interval_s = 0.1
 let default_window = 600
+let over_50ms_threshold_s = 0.050
+let over_200ms_threshold_s = 0.200
 let stall_threshold_s = 1.0
 
 let create ?(interval_s = default_interval_s) ?(window = default_window) () =
@@ -33,14 +35,22 @@ let create ?(interval_s = default_interval_s) ?(window = default_window) () =
 ;;
 
 let global = create ()
+let milliseconds_per_second = 1000.0
+let nanoseconds_per_second = 1e9
+
 let record t ~lag_s =
   let n = Atomic.get t.cursor in
   Atomic.set t.slots.(n mod Array.length t.slots) lag_s;
   Atomic.incr t.cursor
 ;;
 
+let record_lag_ms t lag_ms =
+  record t ~lag_s:(Float.max 0.0 lag_ms /. milliseconds_per_second)
+;;
+
 module For_testing = struct
   let record = record
+  let record_lag_ms = record_lag_ms
 end
 
 let samples t =
@@ -125,11 +135,7 @@ let select xs lo hi k =
   select_within xs lo hi k ~rounds:(rounds_per_halving * halvings_to_one (hi - lo + 1))
 ;;
 
-let milliseconds_per_second = 1000.0
-let nanoseconds_per_second = 1e9
-
-let summarize t =
-  let xs = samples t in
+let summarize_samples xs =
   let n = Array.length xs in
   if n = 0
   then None
@@ -172,6 +178,78 @@ let summarize t =
   end
 ;;
 
+let summarize t = summarize_samples (samples t)
+
+type lag_percentiles =
+  { samples : int
+  ; p50_ms : float
+  ; p95_ms : float
+  ; p99_ms : float
+  ; max_ms : float
+  ; mean_ms : float
+  ; stalls : int
+  ; over_50ms_count : int
+  ; over_200ms_count : int
+  }
+
+let compute_lag_percentiles t =
+  (* [summarize_samples] reorders [xs] in place via [select]; threshold counts
+     only inspect element values, and are computed first on the fresh copy. *)
+  let xs = samples t in
+  let over_50ms_count =
+    Array.fold_left
+      (fun acc s -> if s > over_50ms_threshold_s then acc + 1 else acc)
+      0
+      xs
+  in
+  let over_200ms_count =
+    Array.fold_left
+      (fun acc s -> if s > over_200ms_threshold_s then acc + 1 else acc)
+      0
+      xs
+  in
+  match summarize_samples xs with
+  | None ->
+    { samples = 0
+    ; p50_ms = 0.0
+    ; p95_ms = 0.0
+    ; p99_ms = 0.0
+    ; max_ms = 0.0
+    ; mean_ms = 0.0
+    ; stalls = 0
+    ; over_50ms_count = 0
+    ; over_200ms_count = 0
+    }
+  | Some s ->
+    { samples = s.samples
+    ; p50_ms = s.p50_ms
+    ; p95_ms = s.p95_ms
+    ; p99_ms = s.p99_ms
+    ; max_ms = s.max_ms
+    ; mean_ms = s.mean_ms
+    ; stalls = s.stalls
+    ; over_50ms_count
+    ; over_200ms_count
+    }
+;;
+
+let lag_percentiles_to_yojson (lag : lag_percentiles) : Yojson.Safe.t =
+  if lag.samples = 0
+  then `Assoc [ "samples", `Int 0 ]
+  else
+    `Assoc
+      [ "samples", `Int lag.samples
+      ; "p50_ms", `Float lag.p50_ms
+      ; "p95_ms", `Float lag.p95_ms
+      ; "p99_ms", `Float lag.p99_ms
+      ; "max_ms", `Float lag.max_ms
+      ; "mean_ms", `Float lag.mean_ms
+      ; "stalls", `Int lag.stalls
+      ; "over_50ms_count", `Int lag.over_50ms_count
+      ; "over_200ms_count", `Int lag.over_200ms_count
+      ]
+;;
+
 let to_fields t : (string * Yojson.Safe.t) list =
   let probe =
     match Atomic.get t.state with
@@ -187,20 +265,8 @@ let to_fields t : (string * Yojson.Safe.t) list =
     ; "stall_threshold_ms", `Float (stall_threshold_s *. milliseconds_per_second)
     ]
   in
-  let stats =
-    match summarize t with
-    | None -> [ "samples", `Int 0 ]
-    | Some s ->
-      [ "samples", `Int s.samples
-      ; "p50_ms", `Float s.p50_ms
-      ; "p95_ms", `Float s.p95_ms
-      ; "p99_ms", `Float s.p99_ms
-      ; "max_ms", `Float s.max_ms
-      ; "mean_ms", `Float s.mean_ms
-      ; "stalls", `Int s.stalls
-      ]
-  in
-  probe @ shape @ stats
+  let lag = compute_lag_percentiles t in
+  probe @ shape @ [ "lag", lag_percentiles_to_yojson lag ]
 ;;
 
 let start ~sw ~(mono_clock : _ Eio.Time.Mono.t) t =

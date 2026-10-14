@@ -191,11 +191,13 @@ let test_scheduler_sample_availability () =
         `Assoc
           [ ("status", `String "ok")
           ; ("scheduler", `Assoc
-              [ ("samples", `Int samples)
-              ; ("probe", `String probe)
+              [ ("probe", `String probe)
               ; ("pool_domains", `Int 3)
-              ; ("p95_ms", `Float 512.125)
-              ; ("stalls", `Int 7)
+              ; ("lag", `Assoc
+                  [ ("samples", `Int samples)
+                  ; ("p95_ms", `Float 512.125)
+                  ; ("stalls", `Int 7)
+                  ])
               ])
           ]
       in

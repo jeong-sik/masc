@@ -174,9 +174,14 @@ let test_a_smooth_rise_and_fall_costs_about_one_sort () =
 let test_empty_ring_has_no_percentiles () =
   let t = Scheduler_lag.create () in
   let fields = Scheduler_lag.to_fields t in
-  check bool "samples 0" true (has_field fields "samples" (`Int 0));
-  check bool "no p50" false (List.mem_assoc "p50_ms" fields);
-  check bool "not started" true (has_field fields "probe" (`String "not_started"))
+  check bool "not started" true (has_field fields "probe" (`String "not_started"));
+  check bool "no top-level p50" false (List.mem_assoc "p50_ms" fields);
+  check bool "no top-level samples" false (List.mem_assoc "samples" fields);
+  match List.assoc_opt "lag" fields with
+  | Some (`Assoc lag_fields) ->
+    check bool "lag.samples 0" true (has_field lag_fields "samples" (`Int 0));
+    check bool "no lag.p50 when empty" false (List.mem_assoc "p50_ms" lag_fields)
+  | _ -> fail "expected lag object in to_fields"
 ;;
 
 let test_invalid_shape_is_refused () =
@@ -233,6 +238,33 @@ let test_live_probe_records_then_reports_cancelled () =
     (has_field (Scheduler_lag.to_fields t) "probe" (`String "cancelled"))
 ;;
 
+let test_lag_percentiles_and_to_fields () =
+  let t = Scheduler_lag.create ~interval_s:0.020 ~window:16 () in
+  List.iter
+    (Scheduler_lag.For_testing.record_lag_ms t)
+    [ 1.0; 2.0; 5.0; 10.0; 20.0; 55.0; 120.0; 250.0 ];
+  let lag = Scheduler_lag.compute_lag_percentiles t in
+  check int "samples" 8 lag.samples;
+  check (float 1e-6) "p50_ms" 10.0 lag.p50_ms;
+  check (float 1e-6) "p95_ms" 250.0 lag.p95_ms;
+  check (float 1e-6) "p99_ms" 250.0 lag.p99_ms;
+  check (float 1e-6) "max_ms" 250.0 lag.max_ms;
+  check int "over_50ms_count" 3 lag.over_50ms_count;
+  check int "over_200ms_count" 1 lag.over_200ms_count;
+  let fields = Scheduler_lag.to_fields t in
+  check bool "no duplicate gc in scheduler fields" false
+    (List.mem_assoc "gc" fields);
+  (match List.assoc_opt "lag" fields with
+   | Some (`Assoc lag_fields) ->
+     check bool "json lag.samples = 8" true
+       (has_field lag_fields "samples" (`Int 8));
+     check bool "json lag.over_50ms_count = 3" true
+       (has_field lag_fields "over_50ms_count" (`Int 3));
+     check bool "json lag.over_200ms_count = 1" true
+       (has_field lag_fields "over_200ms_count" (`Int 1))
+   | _ -> fail "expected lag object in to_fields")
+;;
+
 let () =
   run
     "scheduler_lag"
@@ -248,6 +280,9 @@ let () =
         ; test_case "shape" `Quick test_invalid_shape_is_refused
         ] )
     ; ( "probe"
-      , [ test_case "live" `Quick test_live_probe_records_then_reports_cancelled ] )
+      , [ test_case "live" `Quick test_live_probe_records_then_reports_cancelled
+        ; test_case "lag percentiles and to_fields" `Quick
+            test_lag_percentiles_and_to_fields
+        ] )
     ]
 ;;

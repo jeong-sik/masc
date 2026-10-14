@@ -9316,14 +9316,17 @@ let test_decode_server_identity_reads_telemetry () =
       ; ( "scheduler"
         , `Assoc
             [ ("probe", `String "running")
-            ; ("samples", `Int 600)
-            ; ("p50_ms", `Float 0.85)
-            ; ("p95_ms", `Float 1.42)
-            ; ("p99_ms", `Float 2.10)
-            ; ("max_ms", `Float 3.65)
-            ; ("mean_ms", `Float 0.92)
-            ; ("stalls", `Int 0)
             ; ("pool_domains", `Int 15)
+            ; ( "lag"
+              , `Assoc
+                  [ ("samples", `Int 600)
+                  ; ("p50_ms", `Float 0.85)
+                  ; ("p95_ms", `Float 1.42)
+                  ; ("p99_ms", `Float 2.10)
+                  ; ("max_ms", `Float 3.65)
+                  ; ("mean_ms", `Float 0.92)
+                  ; ("stalls", `Int 0)
+                  ] )
             ] )
       ]
   in

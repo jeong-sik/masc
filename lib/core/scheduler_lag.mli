@@ -43,6 +43,24 @@ val summarize : t -> summary option
 (** Percentiles (nearest rank) over the samples currently in the ring, or
     [None] when nothing has been recorded. *)
 
+type lag_percentiles =
+  { samples : int
+  ; p50_ms : float
+  ; p95_ms : float
+  ; p99_ms : float
+  ; max_ms : float
+  ; mean_ms : float
+  ; stalls : int
+  ; over_50ms_count : int
+  ; over_200ms_count : int
+  }
+
+val compute_lag_percentiles : t -> lag_percentiles
+(** Compute nearest-rank p50/p95/p99, max, mean, stalls, and 50ms/200ms
+    threshold counts over a single snapshot of the ring's current samples. *)
+
+val lag_percentiles_to_yojson : lag_percentiles -> Yojson.Safe.t
+
 type probe_state =
   | Not_started
   | Running
@@ -50,10 +68,9 @@ type probe_state =
   | Cancelled  (** the switch that owned the probe was cancelled *)
 
 val to_fields : t -> (string * Yojson.Safe.t) list
-(** Wire shape used by [/health]. Always carries [probe] ("not_started",
-    "running", "stopped" with [stopped_reason], or "cancelled"),
-    [interval_ms], [window_s], [stall_threshold_ms] and [samples]; the
-    percentile fields are present only when [samples > 0]. *)
+(** Wire shape used by [/health]. Carries [probe] ("not_started", "running",
+    "stopped" with [stopped_reason], or "cancelled"), [interval_ms],
+    [window_s], [stall_threshold_ms], and [lag]. *)
 
 val start : sw:Eio.Switch.t -> mono_clock:_ Eio.Time.Mono.t -> t -> unit
 (** Fork the probe fiber under [sw] on the calling domain; [probe_state] is
@@ -68,4 +85,8 @@ val start : sw:Eio.Switch.t -> mono_clock:_ Eio.Time.Mono.t -> t -> unit
 module For_testing : sig
   val record : t -> lag_s:float -> unit
   (** Store one sample in seconds into a ring no probe has started. *)
+
+  val record_lag_ms : t -> float -> unit
+  (** Store one sample in milliseconds (clamped at [0.0]) into a ring no probe
+      has started. *)
 end

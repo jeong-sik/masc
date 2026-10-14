@@ -74,8 +74,9 @@ Eio main domain event loop may be experiencing scheduler delays:
    ```bash
    curl -s http://127.0.0.1:8935/health | jq '{scheduler: .scheduler, gc: .gc}'
    ```
-   Check `.scheduler.stalls` (count of stalls >= 1s) and the percentiles
-   (`p50_ms`, `p95_ms`, `p99_ms`, `max_ms`). These are the last minute's ring
+   Check `.scheduler.lag.stalls` (count of stalls >= 1s) and the `.scheduler.lag`
+   percentiles (`p50_ms`, `p95_ms`, `p99_ms`, `max_ms`, `mean_ms`,
+   `over_50ms_count`, `over_200ms_count`). These are the last minute's ring
    measurements; elevated values mean the main domain could not run a ready
    fiber on time (a fiber computing without yielding, a stop-the-world GC
    section, a blocking call on the scheduler thread).

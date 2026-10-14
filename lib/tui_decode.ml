@@ -4715,15 +4715,20 @@ let decode_server_identity json =
     match sched_obj with
     | None -> None
     | Some _ ->
+        let lag_obj =
+          match Option.map (member "lag") sched_obj with
+          | Some (`Assoc _ as lag) -> Some lag
+          | _ -> None
+        in
         Some
           { ssch_probe = string_in sched_obj "probe"
-          ; ssch_samples = int_in sched_obj "samples" 0
-          ; ssch_p50_ms = float_in sched_obj "p50_ms" 0.0
-          ; ssch_p95_ms = float_in sched_obj "p95_ms" 0.0
-          ; ssch_p99_ms = float_in sched_obj "p99_ms" 0.0
-          ; ssch_max_ms = float_in sched_obj "max_ms" 0.0
-          ; ssch_mean_ms = float_in sched_obj "mean_ms" 0.0
-          ; ssch_stalls = int_in sched_obj "stalls" 0
+          ; ssch_samples = int_in lag_obj "samples" 0
+          ; ssch_p50_ms = float_in lag_obj "p50_ms" 0.0
+          ; ssch_p95_ms = float_in lag_obj "p95_ms" 0.0
+          ; ssch_p99_ms = float_in lag_obj "p99_ms" 0.0
+          ; ssch_max_ms = float_in lag_obj "max_ms" 0.0
+          ; ssch_mean_ms = float_in lag_obj "mean_ms" 0.0
+          ; ssch_stalls = int_in lag_obj "stalls" 0
           ; ssch_pool_domains = opt_int_in sched_obj "pool_domains"
           }
   in

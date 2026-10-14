@@ -1132,6 +1132,15 @@ let named_result_owner journal binding = filesystem (fun () ->
   let* () = validate_prior state.prior_owners in
   let* owner = match state.owner with Some owner -> Ok owner | None -> Error Ownership_changed in
   let* entry = canonical_entry journal owner.request_id in
+  let* () = match entry.status with
+    | Queued | Running | Cancelling _ -> Ok ()
+    | Waiting_for_dependencies _ | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
+      let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
+          ~caller:journal.immutable_source.keeper_name owner.request_id
+        |> Result.map_error (fun error -> Prior_owner_not_terminal
+            {request_id=owner.request_id;reason=Async.canonical_terminal_error_to_string error}) in
+      if Async.same_entry_record entry (Async.durable_terminal_entry proof)
+      then Ok () else Error Ownership_changed in
   let* current = strict_read ~root:journal.root journal.path in
   let* () = check_source journal current in
   if same_owner current.owner state.owner && current.prior_owners = state.prior_owners && current.nodes = state.nodes

@@ -1713,7 +1713,7 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
     | Journal.Prepared -> Draft.run_tool_name,None
     | Journal.Named {tool_name;skill_reference;activation=_} -> tool_name,Some skill_reference in
   let start_time = Tool_timing.start () in
-  let refuse_journal error = Tool_result.make_err ~tool_name:Draft.run_tool_name
+  let refuse_journal error = Tool_result.make_err ~tool_name
       ~class_:(Journal.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
       ~start_time ~data:(Journal.error_to_json error) (Journal.error_to_string error) in
   if meta.name <> source.keeper_name
@@ -1730,20 +1730,20 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
           | Instruction -> false) in
   if not producer_admitted then refuse_journal Journal.Source_conflict else
   match Draft.load_continuation ~base_path:config.base_path ~capability_surface continuation with
-  | Error error -> Tool_result.make_err ~tool_name:Draft.run_tool_name
+  | Error error -> Tool_result.make_err ~tool_name
       ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
       ~start_time ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error))
   | Ok draft ->
     let nested_activation = Keeper_composition_draft.load_nested_activation ~base_path:config.base_path source in
     (match nested_activation with
-    | Error error -> Tool_result.make_err ~tool_name:Draft.run_tool_name
+    | Error error -> Tool_result.make_err ~tool_name
         ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
         ~start_time ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error))
     | Ok nested_activation ->
     match Journal.continuation_readiness ~read_composition_result:Keeper_composition_dependency_result.readiness continuation with
     | Error error -> refuse_journal error
     | Ok Journal.Waiting_for_results ->
-      Tool_result.make_deferred ~tool_name:Draft.run_tool_name ~start_time
+      Tool_result.make_deferred ~tool_name ~start_time
         ~data:(`Assoc ["kind",`String "waiting_for_original_results";
           "composition_run_id",`String (Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id);
           "dependencies",`List (List.map Keeper_composition_dependency.to_json
@@ -1767,7 +1767,7 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
             Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
         (match Keeper_composition_nested_run.check_original_admissions original_nested
           ~child_history:(fun ~node_ids -> Ok (Journal.continuation_child_admission continuation ~node_ids)) with
-         | Error rejection -> Tool_result.make_err ~tool_name:Draft.run_tool_name ~start_time
+         | Error rejection -> Tool_result.make_err ~tool_name ~start_time
              ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
              ~data:rejection.data rejection.detail
          | Ok () -> async_submission_result ?skill_reference ~journal ~continuation

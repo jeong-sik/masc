@@ -753,6 +753,7 @@ let async_submission_result
       ?composition_run_id
       ?journal
       ?continuation
+      ?refusal
       ~plan
       ~tool_name
       ~tool_kind
@@ -870,6 +871,18 @@ let async_submission_result
                ~effect_disposition:Tool_result.Proven_pre_effect
                "prepared composition worker has no accepted journal binding")
            | (None | Some _), worker ->
+           match refusal with
+           | Some error ->
+             (* A permanently refused producer (e.g. its named Skill left the
+                catalog) still settles the accepted successor durably: pulse
+                must retire the continuation marker and the parent dependency
+                must observe a terminal failure instead of a repeated refusal. *)
+             Keeper_msg_async.worker_finished
+               (Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
+                  ~class_:(Journal.failure_class error)
+                  ~effect_disposition:Tool_result.Proven_pre_effect
+                  ~data:(Journal.error_to_json error) (Journal.error_to_string error))
+           | None ->
            async_worker_result
              ~composition_execution:Catalog.Async
              ~tool_kind
@@ -1739,7 +1752,37 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
           match skill.surface with
           | Composition entry -> entry.execution = Catalog.Async && String.equal (Catalog.tool_name entry) tool_name
           | Instruction -> false) in
-  if not producer_admitted then refuse_journal Journal.Source_conflict else
+  if not producer_admitted then
+    (* A producer Skill that left the catalog or changed its execution
+       identity is a permanent refusal: re-trying this continuation can never
+       change the outcome. Settle the run as a durable terminal failure so
+       pulse retires its marker and the parent dependency ends; unavailable
+       run evidence still refuses without durable effects. *)
+    (match Draft.load_continuation ~base_path:config.base_path ~capability_surface continuation with
+     | Error error -> Tool_result.make_err ~tool_name
+         ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
+         ~start_time ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error))
+     | Ok draft ->
+       match Journal.load ~base_path:config.base_path ~keeper_name:source.keeper_name
+           ~composition_run_id:source.composition_run_id with
+       | Error error -> refuse_journal error
+       | Ok journal ->
+         let parent_invocation = Agent_core.Tool_contract.Invocation.create
+             ~tool_use_id:source.parent_tool_use_id ~turn:source.source_turn
+             ~schedule:(Agent_core.Tool_contract.Invocation.schedule invocation)
+             ~completion:Agent_core.Tool_contract.Continue_after_success in
+         let turn_context = Some {turn_context with task_id=source.source_task_id} in
+         async_submission_result ?skill_reference ~journal ~continuation
+           ~refusal:Journal.Source_conflict
+           ~draft_reference:source.draft_reference ~run_reference:source.run_reference
+           ~composition_run_id:source.composition_run_id ~plan:(Draft.plan draft)
+           ~tool_name ~tool_kind:Keeper_tool_descriptor.Async_composition_tool
+           ~parent_invocation ~config ~meta
+           ~capability_authority:(Keeper_tool_runtime.Frozen_surface capability_surface)
+           ~publication_recovery ~ctx_snapshot ~turn_context ?clock ()
+         |> bind_prepared_result ~composition_run_id:source.composition_run_id
+             ~run_reference:source.run_reference ~draft_reference:source.draft_reference)
+  else
   match Draft.load_continuation ~base_path:config.base_path ~capability_surface continuation with
   | Error error -> Tool_result.make_err ~tool_name
       ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect

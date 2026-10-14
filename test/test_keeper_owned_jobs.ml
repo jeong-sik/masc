@@ -35,8 +35,13 @@ let rec remove_tree path =
 (* The protocol peer builds inspect receipts from the production create argv.
    It never constructs a Store record or calls a job helper on the test's
    behalf. State remains external to the OCaml process-local transport state. *)
-let docker_peer = {|import csv, hashlib, json, pathlib, sys, time
+let docker_peer = {|import atexit, csv, hashlib, json, pathlib, sys, time
 root = pathlib.Path(__file__).parent
+def transport_event(kind):
+    with (root / "transport-events.jsonl").open("a") as output:
+        output.write(json.dumps({"event": kind, "argv": sys.argv[1:]}) + "\n")
+transport_event("entered")
+atexit.register(transport_event, "exiting")
 state_path = root / "daemon.json"
 control_path = root / "control.json"
 state = json.loads(state_path.read_text()) if state_path.exists() else {"calls": [], "container": None}
@@ -324,6 +329,8 @@ let result_document ~base_path content =
   | Tool_output.Not_artifact_manifest ->
       (match json |> member "structured_content" with `Null -> json | structured -> structured)
 
+let stage label = Printf.eprintf "OWNED_JOB_STAGE %s\n%!" label
+
 let invoke_raw bundle ~tool_use_id ~turn name input =
   let tool = List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) bundle.Masc.Keeper_tools_agent_core.tools
     |> function Some tool -> tool | None -> failf "public job tool unavailable: %s" name in
@@ -335,7 +342,10 @@ let invoke_raw bundle ~tool_use_id ~turn name input =
   let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn
       ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode}
       ~completion:Agent_core.Tool_contract.Continue_after_success in
-  Agent_core.Tool.execute ~invocation tool input
+  stage (name ^ " execute entered");
+  let result = Agent_core.Tool.execute ~invocation tool input in
+  stage (name ^ " execute returned");
+  result
 
 let validate_job_output ~name ~input data =
   match Tool_schemas_owned_job.find_definition name with
@@ -356,19 +366,30 @@ let validate_job_output ~name ~input data =
 let invoke fixture bundle ~tool_use_id ~turn name input =
   match invoke_raw bundle ~tool_use_id ~turn name input with
   | Ok output ->
+    stage (name ^ " result decode entered");
     let data = result_document ~base_path:fixture.base_path output.content in
+    stage (name ^ " result decode returned; schema validation entered");
     validate_job_output ~name ~input data;
+    stage (name ^ " schema validation returned");
     data
   | Error error -> failf "public job handler failed: %s" error.Agent_core.Types.message
 
 let job_id json = json |> member "job_id" |> to_string
 let argument id = `Assoc ["job_id", `String id]
 let load fixture id =
-  Store.Job_id.of_string id |> require "typed job id"
-  |> Store.load ~base_path:fixture.base_path ~keeper_name:keeper |> store_value "canonical durable job"
+  stage "canonical job load entered";
+  let record = Store.Job_id.of_string id |> require "typed job id"
+    |> Store.load ~base_path:fixture.base_path ~keeper_name:keeper |> store_value "canonical durable job" in
+  stage "canonical job load returned";
+  record
 let with_bundle fixture f =
+  stage "bundle construction entered";
   let bundle = fixture.make_bundle () in
-  Fun.protect ~finally:bundle.cleanup (fun () -> f bundle)
+  stage "bundle construction returned";
+  Fun.protect ~finally:(fun () ->
+      stage "bundle cleanup entered";
+      bundle.cleanup ();
+      stage "bundle cleanup returned") (fun () -> f bundle)
 
 let start fixture bundle ?(inputs=[]) argv =
   invoke fixture bundle ~tool_use_id:"start-original" ~turn:41 "keeper_job_start"
@@ -623,38 +644,56 @@ let test_cancelled_unconfirmed_launch_treats_late_container_as_orphan () = with_
    | _ -> fail "orphan replaced the cancelled launch phase")
 
 let test_cancel_in_flight_retains_exact_intent () = with_fixture @@ fun env _initialize fixture ->
-  set_source fixture ~task_id:"task-A" ~turn:41;
-  let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
-  let id = job_id started in
-  let before = load fixture id in
-  set_source fixture ~task_id:"task-B" ~turn:52;
-  control fixture (`Assoc ["mode", `String "kill_blocked"]);
+  (* Observe only fixture-local synthetic argv. The watchdog emits transport
+     evidence before cancelling work, even if child cleanup itself stalls. *)
+  Exec_tap.enable ~writer:(fun line -> Printf.eprintf "OWNED_JOB_EXEC %s%!" line);
+  Fun.protect ~finally:Exec_tap.disable @@ fun () ->
   let clock = Eio.Stdenv.clock env in
-  (* Fixture deadlock guard only: production jobs have no test timer or TTL. *)
-  let interrupted = with_bundle fixture (fun bundle -> Eio.Time.with_timeout_exn clock 15. (fun () ->
-      Eio.Fiber.first
-        (fun () -> ignore (invoke fixture bundle ~tool_use_id:"cancel-later" ~turn:52
-            "keeper_job_cancel" (argument id)); false)
-        (fun () ->
-          let rec wait () = if Sys.file_exists fixture.kill_marker then ()
-            else (Eio.Time.sleep clock 0.01; wait ()) in
-          wait ();
-          let pending = load fixture id in
-          check bool "cancel intent persisted before blocked effect" true pending.cancel_requested;
-          check int "cancel committed one exact transition" (before.sequence + 1) pending.sequence;
-          true))) in
-  check bool "foreground cancel invocation was interrupted" true interrupted;
-  let pending = load fixture id in
-  check bool "interruption retains cancellation intent" true pending.cancel_requested;
-  check_json "interruption cannot change source ownership" (Store.source_to_json before.source) (Store.source_to_json pending.source);
-  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 137]);
-  let completed = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-cancelled" ~turn:52
-      "keeper_job_status" (argument id)) in
-  check bool "terminal receipt retains requested cancellation" true (completed |> member "cancel_requested" |> to_bool);
-  check string "exact cancelled container terminal observed" "exited" (completed |> member "phase" |> to_string);
-  check int "verified terminal avoids another kill" 1 (effect_count fixture "kill");
-  check int "cancel never relaunches" 1 (effect_count fixture "start");
-  check_original_source fixture completed
+  Eio.Fiber.first
+    (fun () ->
+        set_source fixture ~task_id:"task-A" ~turn:41;
+        let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+        let id = job_id started in
+        let before = load fixture id in
+        set_source fixture ~task_id:"task-B" ~turn:52;
+        control fixture (`Assoc ["mode", `String "kill_blocked"]);
+        let interrupted = with_bundle fixture (fun bundle ->
+            Eio.Fiber.first
+              (fun () -> ignore (invoke fixture bundle ~tool_use_id:"cancel-later" ~turn:52
+                  "keeper_job_cancel" (argument id)); false)
+              (fun () ->
+                let rec wait () = if Sys.file_exists fixture.kill_marker then ()
+                  else (Eio.Time.sleep clock 0.01; wait ()) in
+                wait ();
+                let pending = load fixture id in
+                check bool "cancel intent persisted before blocked effect" true pending.cancel_requested;
+                check int "cancel committed one exact transition" (before.sequence + 1) pending.sequence;
+                true)) in
+        check bool "foreground cancel invocation was interrupted" true interrupted;
+        let pending = load fixture id in
+        check bool "interruption retains cancellation intent" true pending.cancel_requested;
+        check_json "interruption cannot change source ownership" (Store.source_to_json before.source) (Store.source_to_json pending.source);
+        control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 137]);
+        let completed = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-cancelled" ~turn:52
+            "keeper_job_status" (argument id)) in
+        check bool "terminal receipt retains requested cancellation" true (completed |> member "cancel_requested" |> to_bool);
+        check string "exact cancelled container terminal observed" "exited" (completed |> member "phase" |> to_string);
+        check int "verified terminal avoids another kill" 1 (effect_count fixture "kill");
+        check int "cancel never relaunches" 1 (effect_count fixture "start");
+        check_original_source fixture completed)
+    (fun () ->
+      (* The existing fixture-only 15s guard now covers start, canonical load,
+         cancellation and recovery. Production job lifetime is unaffected. *)
+      Eio.Time.sleep clock 15.;
+      stage "cancellation scenario watchdog expired";
+      List.iter (fun path ->
+          match Sys.file_exists path with
+          | false -> Printf.eprintf "OWNED_JOB_EVIDENCE missing=%s\n%!" (Filename.basename path)
+          | true -> Printf.eprintf "OWNED_JOB_EVIDENCE file=%s bytes=%s\n%!"
+              (Filename.basename path) (read path))
+        [fixture.daemon_path; fixture.control_path;
+         Filename.concat fixture.base_path "transport-events.jsonl"];
+      fail "public cancellation scenario did not finish; see stage and transport evidence")
 
 let test_changed_mount_cannot_authorize_cancel () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;

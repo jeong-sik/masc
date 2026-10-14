@@ -40,7 +40,10 @@ val record_status : t ->
 (** Called only by the typed status producer, after manifest persistence.
     Done prepared runs restore authority with strict read-only reads. Named
     runs, nonterminal states and prepared runs without children add no binding.
-    Missing or inconsistent original authority never creates a replacement.
+    Original authority includes actual current or prior journal membership.
+    The full SDK invocation identifies an occurrence. A later occurrence may
+    reuse an ID and replace its slot. A failed or ineligible lookup evicts the
+    old slot; the same occurrence cannot bind a different canonical result.
     A successful lookup by itself is not a delivery observation. *)
 
 val clear_pending : t -> unit
@@ -49,7 +52,10 @@ val clear_pending : t -> unit
 
 val stage_provider : t -> runtime_id:string -> agent_core_turn:int ->
   tool_results:(string * string) list -> unit
-(** Stage actual trailing ToolResult IDs and unmodified wire content. *)
+(** Stage actual trailing ToolResult IDs and unmodified wire content, capturing
+    the current producer occurrence. Later ID reuse or slot eviction cannot
+    retarget an already staged result. Historical transcript occurrences that
+    were not staged are outside this observer's scope. *)
 
 val commit_provider_response : t -> agent_core_turn:int ->
   observe:(observation -> unit) -> on_error:(error -> unit) -> unit
@@ -60,5 +66,6 @@ val commit_provider_response : t -> agent_core_turn:int ->
 val observe_official_result : t -> runtime_id:string ->
   invocation:Agent_core.Tool_contract.Invocation.t -> content:string ->
   observe:(observation -> unit) -> on_error:(error -> unit) -> unit
-(** Consume the actual official-client result-content callback. No activation,
+(** Consume the actual official-client result-content callback only when its
+    full SDK invocation equals the current producer occurrence. No activation,
     delivery ledger or action record is mutated by this module. *)

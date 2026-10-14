@@ -89,9 +89,9 @@ val load
 val source : t -> source
 
 val validate_request : t -> Keeper_msg_async.entry -> (unit, error) result
-(** Read-only comparison of the canonical request with every immutable source
-    coordinate, including the original Task, invocation and both artifacts.
-    This does not bind a worker or grant continuation. *)
+(** Read-only proof of actual durable current/prior request ownership and every
+    immutable source coordinate, including Task, invocation and both artifacts.
+    A copied context cannot create membership. No worker or continuation binds. *)
 
 val waiting_continuation : t -> (continuation option, error) result
 (** Read only canonical current-owner terminal proof and exact journal state.

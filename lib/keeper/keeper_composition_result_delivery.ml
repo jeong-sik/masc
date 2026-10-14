@@ -40,7 +40,7 @@ type observation =
 type pending =
   { runtime_id : string
   ; agent_core_turn : int
-  ; tool_results : (string * string) list
+  ; results : (binding * string * presentation) list
   }
 
 type t =
@@ -55,6 +55,11 @@ let original_recorder binding = binding.activation
 let request_id binding = binding.entry.request_id
 let status_invocation binding = binding.invocation
 let sha256 content = Digestif.SHA256.(digest_string content |> to_hex)
+let equal_invocation left right =
+  String.equal (Invocation.tool_use_id left) (Invocation.tool_use_id right)
+  && Invocation.turn left = Invocation.turn right
+  && Invocation.schedule left = Invocation.schedule right
+  && Invocation.completion left = Invocation.completion right
 
 let error_to_string = function
   | Invalid_context detail -> "invalid prepared result context: " ^ detail
@@ -156,24 +161,29 @@ let resolve ~base_path ~entry ~invocation ~result =
           inline_bytes=String.length inline;inline_sha256=sha256 inline})
 
 let record_status state ~entry ~invocation ~result =
+  let id = Invocation.tool_use_id invocation in
+  let previous = List.find_opt (fun known -> String.equal id (Invocation.tool_use_id known.invocation)) state.bindings in
+  (* The typed producer owns a new occurrence even when the provider reuses
+     its ID. An ineligible or failed new lookup cannot inherit an older seal.
+     There is no tombstone: a later valid occurrence may bind the same ID. *)
+  state.bindings <- List.filter (fun known -> not (String.equal id (Invocation.tool_use_id known.invocation))) state.bindings;
   let* binding = resolve ~base_path:state.base_path ~entry ~invocation ~result in
   match binding with
   | None -> Ok ()
   | Some binding ->
-    let id = Invocation.tool_use_id invocation in
-    match List.find_opt (fun known -> String.equal id (Invocation.tool_use_id known.invocation)) state.bindings with
-    | None -> state.bindings <- binding :: state.bindings; Ok ()
-    | Some known when Async.same_entry_record known.entry binding.entry
-        && Invocation.turn known.invocation = Invocation.turn invocation
-        && known.source = binding.source && known.manifest = binding.manifest
-        && known.inline_bytes = binding.inline_bytes
-        && String.equal known.inline_sha256 binding.inline_sha256 -> Ok ()
-    | Some _ -> Error (Invocation_collision id)
+    let* () = match previous with
+      | Some known when equal_invocation known.invocation invocation ->
+        if Async.same_entry_record known.entry binding.entry
+           && known.source = binding.source && known.manifest = binding.manifest
+           && known.inline_bytes = binding.inline_bytes
+           && String.equal known.inline_sha256 binding.inline_sha256
+        then Ok () else Error (Invocation_collision id)
+      | Some _ | None -> Ok () in
+    state.bindings <- binding :: List.filter (fun known ->
+      not (String.equal id (Invocation.tool_use_id known.invocation))) state.bindings;
+    Ok ()
 
 let clear_pending state = state.pending <- None
-let stage_provider state ~runtime_id ~agent_core_turn ~tool_results =
-  state.pending <- Some {runtime_id;agent_core_turn;tool_results}
-
 let presentation binding content =
   if String.length content = binding.inline_bytes && String.equal (sha256 content) binding.inline_sha256
   then Some Inline_result
@@ -183,48 +193,58 @@ let presentation binding content =
       Some Manifest_reference
     | Decoded _ | Not_marker | Invalid_marker _ -> None
 
-let observe_result state ~runtime_id ~boundary ~tool_use_id ~content ~observe ~on_error =
-  match List.find_opt (fun binding -> String.equal (Invocation.tool_use_id binding.invocation) tool_use_id) state.bindings with
-  | None -> ()
-  | Some binding ->
-    match presentation binding content with
-    | None -> ()
-    | Some presentation ->
-      let valid =
-        let* () = match boundary with
-          | Ledger.Model_response {agent_core_turn}
-            when agent_core_turn > Invocation.turn binding.invocation -> Ok ()
-          | Official_client_result_handoff {agent_core_turn}
-            when agent_core_turn >= Invocation.turn binding.invocation -> Ok ()
-          | Model_response _ | Official_client_result_handoff _ ->
-            Error (Invalid_result "physical delivery precedes its status invocation") in
-        let* () = if String.trim runtime_id <> "" then Ok ()
-          else Error (Invalid_result "physical delivery has no runtime identity") in
-        let* () = canonical_entry ~base_path:state.base_path binding.entry in
-        let* journal = Journal.load ~base_path:state.base_path ~keeper_name:binding.source.keeper_name
-            ~composition_run_id:binding.source.composition_run_id
-          |> Result.map_error (fun error -> Journal_failed error) in
-        let* () = Journal.validate_request journal binding.entry
-          |> Result.map_error (fun error -> Journal_failed error) in
-        if Journal.source journal = binding.source then Ok () else Error Request_changed in
-      match valid with
-      | Error error -> on_error error
-      | Ok () -> observe {binding;physical_turn_ref=state.physical_turn_ref;runtime_id;boundary;
-          transport_receipt=Ledger.{tool_use_id;content_bytes=String.length content;content_sha256=sha256 content};presentation}
+let stage_provider state ~runtime_id ~agent_core_turn ~tool_results =
+  let results = List.filter_map (fun (id,content) ->
+    match List.find_opt (fun binding -> String.equal id (Invocation.tool_use_id binding.invocation)) state.bindings with
+    | None -> None
+    | Some binding -> Option.map (fun presentation -> binding,content,presentation) (presentation binding content)) tool_results in
+  state.pending <- Some {runtime_id;agent_core_turn;results}
+
+let observe_result state ~binding ~runtime_id ~boundary ~content ~presentation ~observe ~on_error =
+  let tool_use_id = Invocation.tool_use_id binding.invocation in
+  let valid =
+    let* () = match boundary with
+      | Ledger.Model_response {agent_core_turn}
+        when agent_core_turn > Invocation.turn binding.invocation -> Ok ()
+      | Official_client_result_handoff {agent_core_turn}
+        when agent_core_turn >= Invocation.turn binding.invocation -> Ok ()
+      | Model_response _ | Official_client_result_handoff _ ->
+        Error (Invalid_result "physical delivery precedes its status invocation") in
+    let* () = if String.trim runtime_id <> "" then Ok ()
+      else Error (Invalid_result "physical delivery has no runtime identity") in
+    let* () = canonical_entry ~base_path:state.base_path binding.entry in
+    let* journal = Journal.load ~base_path:state.base_path ~keeper_name:binding.source.keeper_name
+        ~composition_run_id:binding.source.composition_run_id
+      |> Result.map_error (fun error -> Journal_failed error) in
+    let* () = Journal.validate_request journal binding.entry
+      |> Result.map_error (fun error -> Journal_failed error) in
+    if Journal.source journal = binding.source then Ok () else Error Request_changed in
+  match valid with
+  | Error error -> on_error error
+  | Ok () -> observe {binding;physical_turn_ref=state.physical_turn_ref;runtime_id;boundary;
+      transport_receipt=Ledger.{tool_use_id;content_bytes=String.length content;content_sha256=sha256 content};presentation}
 
 let commit_provider_response state ~agent_core_turn ~observe ~on_error =
   match state.pending with
   | None -> ()
   | Some pending when pending.agent_core_turn = agent_core_turn ->
     clear_pending state;
-    List.iter (fun (tool_use_id,content) -> observe_result state ~runtime_id:pending.runtime_id
-      ~boundary:(Ledger.Model_response {agent_core_turn}) ~tool_use_id ~content ~observe ~on_error) pending.tool_results
+    List.iter (fun (binding,content,presentation) -> observe_result state ~binding ~runtime_id:pending.runtime_id
+      ~boundary:(Ledger.Model_response {agent_core_turn}) ~content ~presentation ~observe ~on_error) pending.results
   | Some _ -> ()
 
 let observe_official_result state ~runtime_id ~invocation ~content ~observe ~on_error =
-  observe_result state ~runtime_id
-    ~boundary:(Ledger.Official_client_result_handoff {agent_core_turn=Invocation.turn invocation})
-    ~tool_use_id:(Invocation.tool_use_id invocation) ~content ~observe ~on_error
+  match List.find_opt (fun binding -> String.equal (Invocation.tool_use_id binding.invocation)
+      (Invocation.tool_use_id invocation)) state.bindings with
+  | None -> ()
+  | Some binding when not (equal_invocation binding.invocation invocation) ->
+    on_error (Invocation_collision (Invocation.tool_use_id invocation))
+  | Some binding ->
+    match presentation binding content with
+    | None -> ()
+    | Some presentation -> observe_result state ~binding ~runtime_id
+      ~boundary:(Ledger.Official_client_result_handoff {agent_core_turn=Invocation.turn invocation})
+      ~content ~presentation ~observe ~on_error
 
 let observation_to_json observation =
   let binding = observation.binding and source = observation.binding.source in

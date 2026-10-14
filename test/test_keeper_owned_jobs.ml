@@ -347,16 +347,18 @@ let result_document ~base_path content =
       (match json |> member "structured_content" with `Null -> json | structured -> structured)
 
 
-let invoke_raw bundle ~tool_use_id ~turn name input =
+let invoke_raw ?(planned_index=0) bundle ~tool_use_id ~turn name input =
   let tool = List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) bundle.Masc.Keeper_tools_agent_core.tools
     |> function Some tool -> tool | None -> failf "public job tool unavailable: %s" name in
-  let execution_mode = match Tool_schemas_owned_job.find_definition name with
-    | Some {read_only=true;_} -> Agent_core.Tool_contract.Concurrent
-    | Some {read_only=false;_} | None -> Agent_core.Tool_contract.Serial in
-  check bool "public tool uses its canonical execution mode" true
-    (Agent_core.Tool.execution_mode tool ~input = execution_mode);
+  let execution_mode = Agent_core.Tool.execution_mode tool ~input in
+  (match Tool_schemas_owned_job.find_definition name with
+   | Some {read_only;_} ->
+     let expected = if read_only then Agent_core.Tool_contract.Concurrent
+       else Agent_core.Tool_contract.Serial in
+     check bool "public job tool uses its canonical execution mode" true (execution_mode = expected)
+   | None -> ());
   let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn
-      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode}
+      ~schedule:{planned_index;batch_index=0;batch_size=1;execution_mode}
       ~completion:Agent_core.Tool_contract.Continue_after_success in
   stage (name ^ " execute entered");
   let result = Agent_core.Tool.execute ~invocation tool input in
@@ -2767,9 +2769,9 @@ pointer = "/content"
   check int "nested program creates once" 1 (effect_count fixture "create");
   check int "nested program starts once" 1 (effect_count fixture "start");
   let transport_started = Mtime_clock.counter () in
-  let lookup tool_use_id = with_bundle fixture (fun bundle ->
-    match invoke_raw bundle ~tool_use_id ~turn:1 "keeper_composition_status"
-        (`Assoc ["request_id",`String entry.request_id]) with
+  let lookup ?(turn=1) ?(planned_index=0) ?(request_id=entry.request_id) tool_use_id = with_bundle fixture (fun bundle ->
+    match invoke_raw ~planned_index bundle ~tool_use_id ~turn "keeper_composition_status"
+        (`Assoc ["request_id",`String request_id]) with
     | Ok output -> output.Agent_core.Types.content
     | Error error -> failf "actual async status transport failed: %s" error.Agent_core.Types.message) in
   let status_id = "status-original-result-in-new-turn" in
@@ -2777,12 +2779,12 @@ pointer = "/content"
   let observed = ref [] and errors = ref [] in
   let observe observation = observed := observation :: !observed
   and on_error error = errors := error :: !errors in
-  let stage_response ?(id=status_id) ?(content=wire) () =
+  let stage_response ?(id=status_id) ?(content=wire) ?(turn=2) () =
     let messages = [{Agent_core.Types.role=Tool;
       content=[Agent_core.Types.ToolResult {tool_use_id=id;content;
         outcome=Agent_core.Llm_provider.Types.Tool_succeeded;json=None;content_blocks=None}];
       name=None;tool_call_id=None;metadata=[]}] in
-    Delivery.stage_provider delivery ~runtime_id:"later.provider.runtime" ~agent_core_turn:2
+    Delivery.stage_provider delivery ~runtime_id:"later.provider.runtime" ~agent_core_turn:turn
       ~tool_results:(Masc.Keeper_run_tools_hooks.trailing_tool_result_contents messages) in
   let commit turn = Delivery.commit_provider_response delivery ~agent_core_turn:turn ~observe ~on_error in
   stage_response (); Delivery.clear_pending delivery; commit 2;
@@ -2809,8 +2811,8 @@ pointer = "/content"
   stage_response ~id:"unbound-status-result" (); commit 2;
   stage_response ~content:(wire ^ " ") (); commit 2;
   check int "unbound and changed wire payloads grant no receipt" 1 (List.length !observed);
-  let invocation tool_use_id = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:1
-    ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Concurrent}
+  let invocation ?(turn=1) ?(planned_index=0) tool_use_id = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn
+    ~schedule:{planned_index;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Concurrent}
     ~completion:Agent_core.Tool_contract.Continue_after_success in
   Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
     ~invocation:(invocation status_id) ~content:wire ~observe ~on_error;
@@ -2846,6 +2848,58 @@ pointer = "/content"
     check int "missing original authority stays an explicit observation failure" 1 (List.length !errors));
   stage_response (); commit 2;
   check int "restored original authority correlates without new work" 5 (List.length !observed);
+  let reused_wire = lookup ~turn:3 status_id in
+  stage_response ~content:reused_wire ~turn:4 ();
+  let later_wire = lookup ~turn:5 status_id in
+  commit 4;
+  check int "later ID reuse preserves the already staged provider handoff" 6 (List.length !observed);
+  check int "staged provider result keeps its original SDK occurrence" 3
+    (Agent_core.Tool_contract.Invocation.turn (Delivery.status_invocation (List.hd !observed).binding));
+  let errors_before_reuse = List.length !errors in
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation ~turn:3 status_id) ~content:reused_wire ~observe ~on_error;
+  check int "stale official callback cannot borrow a later occurrence" 6 (List.length !observed);
+  check int "stale official callback reports the invocation mismatch" (errors_before_reuse+1) (List.length !errors);
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation ~turn:5 status_id) ~content:later_wire ~observe ~on_error;
+  check int "reused ID supports the fresh occurrence's first handoff" 7 (List.length !observed);
+  let replanned_wire = lookup ~turn:5 ~planned_index:7 status_id in
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation ~turn:5 status_id) ~content:later_wire ~observe ~on_error;
+  check int "same SDK turn with another planned occurrence cannot borrow authority" 7 (List.length !observed);
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation ~turn:5 ~planned_index:7 status_id) ~content:replanned_wire ~observe ~on_error;
+  check int "fresh planned occurrence supports its first official handoff" 8 (List.length !observed);
+  (* A canonical generic worker can copy every source field and output without
+     being admitted by the prepared run. Canonical existence is not membership. *)
+  let copied = Async.submit_worker_with_request_id ?request_context:entry.request_context
+      ~background_sw:context.sw ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~f:(fun ~request_id:_ _ -> Async.worker_finished
+        (Tool_result.make_ok ~tool_name:"copied-context-worker" ~start_time:(Tool_timing.start ()) ~data:completed ())) ()
+    |> require "actual generic worker with copied prepared context" in
+  let copied_ok,_,copied_entry = await_composition env fixture (`Assoc ["request_id",`String copied.request_id]) in
+  check bool "copied context worker is a real canonical terminal request" true copied_ok;
+  (match Journal.validate_request journal copied_entry with
+   | Error (Journal.Invalid_source _) -> ()
+   | Ok () | Error _ -> fail "unadmitted canonical request borrowed prepared run membership");
+  Journal.validate_request journal entry |> require "original completed request retains admitted membership";
+  Journal.validate_request journal waiting_entry |> require "actual historical predecessor retains admitted membership";
+  stage_response ~content:replanned_wire ~turn:6 ();
+  let copied_wire = lookup ~turn:6 ~request_id:copied.request_id status_id in
+  check_json "public status still returns the generic worker's canonical result" (`String copied.request_id)
+    (result_document ~base_path:fixture.base_path copied_wire |> member "request_id");
+  commit 6;
+  check int "rejected new lookup preserves the previously staged original result" 9 (List.length !observed);
+  check string "copied request cannot retarget a staged original handoff" entry.request_id
+    (Delivery.request_id (List.hd !observed).binding);
+  stage_response ~content:replanned_wire ~turn:7 (); commit 7;
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation ~turn:5 ~planned_index:7 status_id) ~content:replanned_wire ~observe ~on_error;
+  check int "rejected lookup evicts the old slot for future provider and official delivery" 9 (List.length !observed);
+  let restored_wire = lookup ~turn:7 status_id in
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation ~turn:7 status_id) ~content:restored_wire ~observe ~on_error;
+  check int "valid later occurrence can bind again without a permanent ID tombstone" 10 (List.length !observed);
   check int "all result correlation performs zero backend operations" ready_backend (List.length (calls fixture));
   check int "result correlation creates no program" 1 (effect_count fixture "create");
   check int "result correlation starts no program" 1 (effect_count fixture "start");

@@ -40,9 +40,17 @@ let at delta event = varlen delta ^ event
 
 let tempo microseconds = meta 0x51 (u24 microseconds)
 
+(* The SMF byte stores the denominator as a power of two: 4/4 is written
+   04 02. The helper takes the human values and encodes. *)
 let time_signature numerator denominator =
+  let rec power_of_two exponent value =
+    if value = denominator then exponent
+    else if value > denominator then invalid_arg "not a power of two"
+    else power_of_two (exponent + 1) (value * 2)
+  in
   meta 0x58
-    (String.init 4 (fun i -> Char.chr [| numerator; denominator; 24; 8 |].(i)))
+    (String.init 4 (fun i ->
+         Char.chr [| numerator; power_of_two 0 1; 24; 8 |].(i)))
 
 let track_name name = meta 0x03 name
 let eot = at 0 (meta 0x2F "")
@@ -85,6 +93,20 @@ let test_minimal_type0 () =
     info.tempo_changes;
   Alcotest.(check (list (triple int int int))) "the time signatures"
     [ (0, 4, 4) ] info.time_signatures;
+  (* The wire stores the denominator as a power of two: a 6/8 file writes
+     dd = 3, and the reader gives the human denominator back. *)
+  let six_eight =
+    read_info
+      (smf 0 480
+         [ at 0 (tempo 500000)
+           ^ at 0 (time_signature 6 8)
+           ^ note_on 0 60 100
+           ^ note_on 480 60 0
+           ^ eot
+         ])
+  in
+  Alcotest.(check (list (triple int int int))) "6/8 decodes its denominator"
+    [ (0, 6, 8) ] six_eight.time_signatures;
   Alcotest.(check (option (float 0.0001))) "duration" (Some 0.5)
     info.duration_sec;
   Alcotest.(check (list (option string))) "no track names" [ None ]
@@ -107,6 +129,20 @@ let test_tempo_change_mid_song () =
     [ (0, 120); (480, 240) ] info.tempo_changes;
   Alcotest.(check (option (float 0.0001))) "duration follows the map"
     (Some 0.75) info.duration_sec
+
+let test_fractional_bpm_duration_keeps_microseconds () =
+  let track =
+    at 0 (tempo 478469)
+    ^ note_on 0 60 100
+    ^ note_on 480 60 0
+    ^ eot
+  in
+  let info = read_info (smf 0 480 [ track ]) in
+  Alcotest.(check (option int)) "display bpm rounds down to integer" (Some 125)
+    info.initial_bpm;
+  Alcotest.(check (option (float 0.00001)))
+    "duration uses exact microseconds (0.478469s, not 0.48s from 125 BPM)"
+    (Some 0.478469) info.duration_sec
 
 (* The 0x90 applies to the bytes after it until another status byte: the
    second tempo's tick says whether the stream was counted right. *)
@@ -155,6 +191,8 @@ let test_track_names () =
 
 let test_smpte_division_fails () =
   check_failure "SMPTE time is not PPQ" (smf 0 0xE250 [ eot ])
+    Unsupported_division;
+  check_failure "zero division is not PPQ" (smf 0 0 [ eot ])
     Unsupported_division
 
 let test_format_3_fails () =
@@ -170,6 +208,8 @@ let () =
       , [ Alcotest.test_case "a minimal type 0 file" `Quick test_minimal_type0
         ; Alcotest.test_case "a tempo change mid song" `Quick
             test_tempo_change_mid_song
+        ; Alcotest.test_case "fractional bpm duration keeps microseconds" `Quick
+            test_fractional_bpm_duration_keeps_microseconds
         ; Alcotest.test_case "running status keeps the count" `Quick
             test_running_status_keeps_the_count
         ; Alcotest.test_case "a program change is one data byte" `Quick

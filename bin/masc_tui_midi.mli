@@ -15,7 +15,7 @@ type info = {
   track_count : int;
   track_names : string option list;  (** 트랙 순서의 [0x03] 이름 *)
   division_ppq : int;  (** 틱/4분음표 *)
-  initial_bpm : int option;  (** 가장 빠른 템포 이벤트; 없으면 [None] *)
+  initial_bpm : int option;  (** 가장 이른 tick의 템포 이벤트; 없으면 [None] *)
   tempo_changes : (int * int) list;  (** [(tick, bpm)] 오름차순 *)
   time_signatures : (int * int * int) list;  (** [(tick, 분자, 분모)] *)
   duration_sec : float option;  (** 템포 맵으로 환산한 재생 길이; 템포 이벤트가 없으면 [None] *)
@@ -26,7 +26,7 @@ type failure =
   | Not_midi  (** [MThd]로 시작하지 않음 *)
   | Truncated  (** 구조 도중 바이트가 끝남 *)
   | Bad_varlen  (** 가변 길이 값이 4바이트를 넘음 *)
-  | Unsupported_division  (** SMPTE 시간 표기; PPQ만 지원 *)
+  | Unsupported_division  (** 0 또는 SMPTE 시간 표기; 양수 PPQ만 지원 *)
   | Unsupported_format of int  (** 0~2 바깥의 포맷 번호 *)
   | Running_status_without_status  (** 상태 바이트 없이 데이터 바이트 *)
   | Bad_status of int  (** 트랙 이벤트가 아닌 상태 바이트 *)

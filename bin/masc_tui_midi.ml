@@ -27,7 +27,8 @@ let failure_text = function
   | Not_midi -> "not a Standard MIDI file (no MThd header)"
   | Truncated -> "the file ends in the middle of a structure"
   | Bad_varlen -> "a delta time runs past four bytes"
-  | Unsupported_division -> "SMPTE time division is not supported (PPQ only)"
+  | Unsupported_division ->
+      "0 or SMPTE time division is not supported (positive PPQ only)"
   | Unsupported_format format ->
       Printf.sprintf "MIDI format %d is not supported (0 to 2 are)" format
   | Running_status_without_status ->
@@ -53,7 +54,13 @@ let take cursor count =
     Ok piece
   end
 
-let u8 cursor = Result.map (fun piece -> Char.code piece.[0]) (take cursor 1)
+let u8 cursor =
+  if remaining cursor < 1 then Error Truncated
+  else begin
+    let byte = Char.code cursor.source.[cursor.pos] in
+    cursor.pos <- cursor.pos + 1;
+    Ok byte
+  end
 
 let be16 cursor =
   Result.map
@@ -85,8 +92,9 @@ let varlen cursor =
 
    One [MTrk] chunk's bytes, read event by event. Channel events cost their
    status byte's data length; a data byte where a status belongs re-uses the
-   running status. Meta and SysEx keep it: only a new channel status
-   replaces it. *)
+   running status. The SMF specification cancels running status on Meta and
+   SysEx, but real-world files often omit the status byte after them, so we
+   permissively keep it until a new channel status replaces it. *)
 
 let channel_data_bytes status =
   match status lsr 4 with
@@ -97,9 +105,11 @@ let channel_data_bytes status =
 type events = {
   name : string option;
   end_tick : int;
-  tempos : (int * int) list;  (* ascending *)
+  tempos : (int * int) list;  (* (tick, micros_per_quarter), ascending *)
   signatures : (int * int * int) list;  (* ascending *)
 }
+
+let bpm_of_micros micros = 60_000_000 / micros
 
 let parse_events body =
   let ( let* ) = Result.bind in
@@ -130,10 +140,14 @@ let parse_events body =
                    lor Char.code data.[2]
                  in
                  if micros > 0 then
-                   tempos := (!tick, 60_000_000 / micros) :: !tempos
+                   tempos := (!tick, micros) :: !tempos
              | 0x58 when length = 4 ->
-                 signatures :=
-                   (!tick, Char.code data.[0], Char.code data.[1]) :: !signatures
+                 (* The wire keeps the denominator as a power of two
+                    (4/4 is 04 02); the score speaks the human value. *)
+                 let exponent = Char.code data.[1] in
+                 if exponent <= 30 then
+                   signatures :=
+                     (!tick, Char.code data.[0], 1 lsl exponent) :: !signatures
              | _ -> ());
             loop ()
       end
@@ -181,19 +195,19 @@ let parse_events body =
 let merge_tempos tracks =
   tracks
   |> List.concat_map (fun (events : events) -> events.tempos)
-  |> List.sort (fun (a, _) (b, _) -> Int.compare a b)
+  |> List.stable_sort (fun (a, _) (b, _) -> Int.compare a b)
   |> List.fold_left
-       (fun merged (tick, bpm) ->
+       (fun merged (tick, micros) ->
           match merged with
-          | (seen, _) :: rest when seen = tick -> (tick, bpm) :: rest
-          | _ -> (tick, bpm) :: merged)
+          | (seen, _) :: rest when seen = tick -> (tick, micros) :: rest
+          | _ -> (tick, micros) :: merged)
        []
   |> List.rev
 
 let merge_signatures tracks =
   tracks
   |> List.concat_map (fun (events : events) -> events.signatures)
-  |> List.sort (fun (a, _, _) (b, _, _) -> Int.compare a b)
+  |> List.stable_sort (fun (a, _, _) (b, _, _) -> Int.compare a b)
   |> List.fold_left
        (fun merged (tick, top, bottom) ->
           match merged with
@@ -206,14 +220,14 @@ let track_duration division tempos end_tick =
   match tempos with
   | [] -> None
   | (first_tick, _) :: _ when first_tick > 0 -> None
-  | (first_tick, first_bpm) :: rest ->
+  | (first_tick, first_micros) :: rest ->
       let boundaries =
         List.filter (fun (tick, _) -> tick < end_tick) rest
         @ [ (end_tick, 0) ]
       in
       let rec walk prev_tick prev_micros seconds = function
         | [] -> Some seconds
-        | (tick, bpm) :: more ->
+        | (tick, micros) :: more ->
             let segment =
               float_of_int (tick - prev_tick)
               *. (float_of_int prev_micros /. 1_000_000.)
@@ -222,9 +236,9 @@ let track_duration division tempos end_tick =
             let seconds = seconds +. segment in
             (match more with
              | [] -> Some seconds
-             | _ -> walk tick (60_000_000 / bpm) seconds more)
+             | _ -> walk tick micros seconds more)
       in
-      walk first_tick (60_000_000 / first_bpm) 0.0 boundaries
+      walk first_tick first_micros 0.0 boundaries
 
 let duration division tracks tempos =
   let rec longest = function
@@ -255,7 +269,8 @@ let read source =
       let* division = be16 cursor in
       let* _rest = take cursor (header_length - 6) in
       if format < 0 || format > 2 then Error (Unsupported_format format)
-      else if division land 0x8000 <> 0 then Error Unsupported_division
+      else if division <= 0 || division land 0x8000 <> 0 then
+        Error Unsupported_division
       else begin
         let rec collect remaining_tracks acc =
           if remaining_tracks = 0 then Ok (List.rev acc)
@@ -275,7 +290,10 @@ let read source =
               collect remaining_tracks acc
         in
         let* tracks = collect track_total [] in
-        let tempos = merge_tempos tracks in
+        let tempo_micros = merge_tempos tracks in
+        let tempos =
+          List.map (fun (tick, micros) -> (tick, bpm_of_micros micros)) tempo_micros
+        in
         let signatures = merge_signatures tracks in
         Ok
           { format
@@ -285,7 +303,7 @@ let read source =
           ; initial_bpm = (match tempos with (_, bpm) :: _ -> Some bpm | [] -> None)
           ; tempo_changes = tempos
           ; time_signatures = signatures
-          ; duration_sec = duration division tracks tempos
+          ; duration_sec = duration division tracks tempo_micros
           }
       end
     end
@@ -293,7 +311,8 @@ let read source =
 (* {1 Summary} *)
 
 let duration_text seconds =
-  let total = int_of_float (seconds +. 0.5) in
+  let clamped = if Float.is_finite seconds && seconds >= 0.0 then seconds else 0.0 in
+  let total = int_of_float (clamped +. 0.5) in
   Printf.sprintf "%d:%02d" (total / 60) (total mod 60)
 
 let summary info =

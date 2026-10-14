@@ -1037,13 +1037,25 @@ let test_response_cache_tracks_reasoning_source_projection () =
   let source = Reasoning_dialect.reasoning_source_for_provider_config config |> Result.get_ok in
   let foreign = Reasoning_dialect.reasoning_source_for_provider_config
       { config with model_id = "foreign-model" } |> Result.get_ok in
+  let prior_content =
+    [ Types.Thinking { signature = Some "opaque-signed-history"; content = "prior reasoning" }
+    ; Types.Text "prior answer" ] in
+  (* The producing request had no earlier history, so the digest the record
+     side stamps is the one over an empty message list. The foreign case keeps
+     it, so only the reasoning source differs between the two histories. *)
+  let prefix_metadata =
+    match
+      Backend_anthropic.transmitted_reasoning_prefix
+        ~config ~messages:[] ~tools:[] ~response_content:prior_content ()
+    with
+    | Some prefix -> Types.Reasoning_prefix.metadata prefix
+    | None -> fail "the producing request records no reasoning prefix"
+  in
   let history metadata : Types.message list =
-    [ { (Types.assistant_msg "prior answer") with metadata
-      ; content = [ Thinking { signature = Some "opaque-signed-history"; content = "prior reasoning" }
-                  ; Text "prior answer" ] }
+    [ { (Types.assistant_msg "prior answer") with metadata; content = prior_content }
     ; Types.user_msg "continue" ] in
-  let matching = history (Types.Reasoning_source.metadata source) in
-  let mismatching = history (Types.Reasoning_source.metadata foreign) in
+  let matching = history (Types.Reasoning_source.metadata source @ prefix_metadata) in
+  let mismatching = history (Types.Reasoning_source.metadata foreign @ prefix_metadata) in
   check bool "canonical content alone cannot distinguish source" true
     (List.map Api_common.message_to_json matching = List.map Api_common.message_to_json mismatching);
   let run messages = Complete.complete ~sw ~net ~config ~messages ~cache () |> require_cached_response in

@@ -372,7 +372,22 @@ let persist_delta_unlocked
            (* The log is not what memory believes; memory is the authority,
               so rewrite both. *)
            compact ()
-         | (Error (Fs_compat.Invalid_transaction_suffix | (Fs_compat.Stable_lock_contended _ | (Fs_compat.Unexpected_stable_lock_permissions _ | (Fs_compat.Invalid_stable_lock_state _ | (Fs_compat.Unexpected_transaction_file_kind _ | (Fs_compat.Ambiguous_transaction_file_identity _ | (Fs_compat.Transaction_path_binding_changed _ | (Fs_compat.Incomplete_transaction_tail _ | (Fs_compat.Private_jsonl_operation_failed _ | (Fs_compat.Rewrite_stage_failed _ | (Fs_compat.Rewrite_published_durability_unknown _ | (Fs_compat.Transaction_settlement_failed _ | Fs_compat.Transaction_append_failed _)))))))))))) | Ok _) as appended -> (match Fs_compat.private_jsonl_cursor_success_receipt appended with
+         | (Error
+              ( Fs_compat.Invalid_transaction_suffix
+              | Fs_compat.Stable_lock_contended _
+              | Fs_compat.Unexpected_stable_lock_permissions _
+              | Fs_compat.Invalid_stable_lock_state _
+              | Fs_compat.Unexpected_transaction_file_kind _
+              | Fs_compat.Ambiguous_transaction_file_identity _
+              | Fs_compat.Transaction_path_binding_changed _
+              | Fs_compat.Incomplete_transaction_tail _
+              | Fs_compat.Private_jsonl_operation_failed _
+              | Fs_compat.Rewrite_stage_failed _
+              | Fs_compat.Rewrite_published_durability_unknown _
+              | Fs_compat.Transaction_settlement_failed _
+              | Fs_compat.Transaction_append_failed _ )
+           | Ok _) as appended ->
+           (match Fs_compat.private_jsonl_cursor_success_receipt appended with
             | Error error -> Error (private_jsonl_error ~path error)
             | Ok { Fs_compat.value = cursor; settlement_error } ->
               set_durable_state
@@ -528,49 +543,14 @@ let read_pending_log_unlocked
       |> Fs_compat.private_jsonl_snapshot_success_receipt
     with
     | Ok receipt -> Ok (receipt, false)
-    | Error (Fs_compat.Incomplete_transaction_tail _)
-    | Error
-        (Fs_compat.Transaction_settlement_failed
-          { primary = Fs_compat.Transaction_failed (Fs_compat.Incomplete_transaction_tail _); _ }) ->
+    | Error error when Fs_compat.private_jsonl_transaction_error_is_incomplete_tail error ->
       (match
          Fs_compat.recover_private_jsonl_durable_locked_result path
          |> Fs_compat.private_jsonl_snapshot_success_receipt
        with
        | Ok receipt -> Ok (receipt, true)
        | Error error -> Error error)
-    | Error
-        (( Fs_compat.Stable_lock_contended _
-         | Fs_compat.Unexpected_stable_lock_permissions _
-         | Fs_compat.Invalid_stable_lock_state _
-         | Fs_compat.Cursor_mismatch _
-         | Fs_compat.Unexpected_transaction_file_kind _
-         | Fs_compat.Ambiguous_transaction_file_identity _
-         | Fs_compat.Transaction_path_binding_changed _
-         | Fs_compat.Invalid_transaction_suffix
-         | Fs_compat.Private_jsonl_operation_failed _
-         | Fs_compat.Rewrite_stage_failed _
-         | Fs_compat.Rewrite_published_durability_unknown _
-         | Fs_compat.Transaction_settlement_failed
-             { primary = Fs_compat.Transaction_succeeded _; _ }
-         | Fs_compat.Transaction_settlement_failed
-             { primary =
-                 Fs_compat.Transaction_failed
-                   ( Fs_compat.Stable_lock_contended _
-                   | Fs_compat.Unexpected_stable_lock_permissions _
-                   | Fs_compat.Invalid_stable_lock_state _
-                   | Fs_compat.Cursor_mismatch _
-                   | Fs_compat.Unexpected_transaction_file_kind _
-                   | Fs_compat.Ambiguous_transaction_file_identity _
-                   | Fs_compat.Transaction_path_binding_changed _
-                   | Fs_compat.Invalid_transaction_suffix
-                   | Fs_compat.Private_jsonl_operation_failed _
-                   | Fs_compat.Rewrite_stage_failed _
-                   | Fs_compat.Rewrite_published_durability_unknown _
-                   | Fs_compat.Transaction_settlement_failed _
-                   | Fs_compat.Transaction_append_failed _ )
-             ; _
-             }
-         | Fs_compat.Transaction_append_failed _ ) as error) -> Error error
+    | Error error -> Error error
   in
   match log_result with
   | Error error -> Error (private_jsonl_error ~path error)
@@ -1563,10 +1543,25 @@ let mark_summary_attempt_identity_unbound
        | Summary_pending, Exact_unbound,
          Summary_attempt_identity_unbound ->
          Some entry
-       | (Summary_pending, Exact_unbound, Summary_attempt_pre_worker_unavailable { reason_code = (Summary_pre_worker_auto_judge_unavailable | Summary_pre_worker_mode_state_invalid);_})
-       | (Summary_pending, Exact_unbound, (Summary_attempt_in_flight | (Summary_attempt_persistence_uncertain | Summary_attempt_settled)))
+       | ( Summary_pending
+         , Exact_unbound
+         , Summary_attempt_pre_worker_unavailable
+             { reason_code =
+                 ( Summary_pre_worker_auto_judge_unavailable
+                 | Summary_pre_worker_mode_state_invalid )
+             ; _
+             } )
+       | ( Summary_pending
+         , Exact_unbound
+         , ( Summary_attempt_in_flight
+           | Summary_attempt_persistence_uncertain
+           | Summary_attempt_settled ) )
        | (Summary_pending, Exact_bound _, _)
-       | ((Summary_not_requested | (Summary_available _ | Summary_failed _)), _, _) -> None)
+       | ( ( Summary_not_requested
+           | Summary_available _
+           | Summary_failed _ )
+         , _
+         , _ ) -> None)
 ;;
 
 let mark_summary_attempt_persistence_uncertain
@@ -1683,8 +1678,21 @@ let release_orphaned_start_reservation ~base_path ~id ~input_hash ~sequence =
          Summary_attempt_pre_worker_unavailable
            { reason_code = Summary_pre_worker_start_reserved; _ } ->
          Some { entry with summary_attempt_disposition = Summary_attempt_ready }
-       | ((Summary_not_requested | Summary_pending), Exact_unbound, Summary_attempt_pre_worker_unavailable { reason_code = (Summary_pre_worker_auto_judge_unavailable | Summary_pre_worker_mode_state_invalid);_})
-       | ((Summary_not_requested | Summary_pending), Exact_unbound, (Summary_attempt_ready | (Summary_attempt_in_flight | (Summary_attempt_identity_unbound | (Summary_attempt_persistence_uncertain | Summary_attempt_settled)))))
+       | ( (Summary_not_requested | Summary_pending)
+         , Exact_unbound
+         , Summary_attempt_pre_worker_unavailable
+             { reason_code =
+                 ( Summary_pre_worker_auto_judge_unavailable
+                 | Summary_pre_worker_mode_state_invalid )
+             ; _
+             } )
+       | ( (Summary_not_requested | Summary_pending)
+         , Exact_unbound
+         , ( Summary_attempt_ready
+           | Summary_attempt_in_flight
+           | Summary_attempt_identity_unbound
+           | Summary_attempt_persistence_uncertain
+           | Summary_attempt_settled ) )
        | ((Summary_not_requested | Summary_pending), Exact_bound _, _)
        | ((Summary_available _ | Summary_failed _), _, _) -> None)
 ;;
@@ -1771,15 +1779,52 @@ let reserve_summary_attempt_retry
                ; summary_status = Summary_pending
                ; summary_attempt_disposition = reserved
                }
-           | (Summary_attempt_persistence_uncertain, Exact_bound { status = Exact_released_recovery_required;_}, (Summary_not_requested | (Summary_available _ | Summary_failed _)))
-           | (Summary_attempt_persistence_uncertain, Exact_bound { status = (Exact_dispatch_uncertain | (Exact_released_before_dispatch | (Exact_restart_quarantined | (Exact_completed | Exact_quarantined _))));_}, _)
-           | (Summary_attempt_persistence_uncertain, Exact_unbound, (Summary_not_requested | (Summary_available _ | Summary_failed _)))
-           | (Summary_attempt_pre_worker_unavailable { reason_code = (Summary_pre_worker_auto_judge_unavailable | Summary_pre_worker_mode_state_invalid);_}, Exact_unbound, (Summary_available _ | Summary_failed _))
-           | (Summary_attempt_pre_worker_unavailable { reason_code = (Summary_pre_worker_auto_judge_unavailable | Summary_pre_worker_mode_state_invalid);_}, Exact_bound _, _)
-           | (Summary_attempt_pre_worker_unavailable { reason_code = Summary_pre_worker_start_reserved;_}, _, _)
-           | (Summary_attempt_identity_unbound, Exact_unbound, (Summary_not_requested | (Summary_available _ | Summary_failed _)))
+           | ( Summary_attempt_persistence_uncertain
+             , Exact_bound { status = Exact_released_recovery_required; _ }
+             , (Summary_not_requested | Summary_available _ | Summary_failed _) )
+           | ( Summary_attempt_persistence_uncertain
+             , Exact_bound
+                 { status =
+                     ( Exact_dispatch_uncertain
+                     | Exact_released_before_dispatch
+                     | Exact_restart_quarantined
+                     | Exact_completed
+                     | Exact_quarantined _ )
+                 ; _
+                 }
+             , _ )
+           | ( Summary_attempt_persistence_uncertain
+             , Exact_unbound
+             , (Summary_not_requested | Summary_available _ | Summary_failed _) )
+           | ( Summary_attempt_pre_worker_unavailable
+                 { reason_code =
+                     ( Summary_pre_worker_auto_judge_unavailable
+                     | Summary_pre_worker_mode_state_invalid )
+                 ; _
+                 }
+             , Exact_unbound
+             , (Summary_available _ | Summary_failed _) )
+           | ( Summary_attempt_pre_worker_unavailable
+                 { reason_code =
+                     ( Summary_pre_worker_auto_judge_unavailable
+                     | Summary_pre_worker_mode_state_invalid )
+                 ; _
+                 }
+             , Exact_bound _
+             , _ )
+           | ( Summary_attempt_pre_worker_unavailable
+                 { reason_code = Summary_pre_worker_start_reserved; _ }
+             , _
+             , _ )
+           | ( Summary_attempt_identity_unbound
+             , Exact_unbound
+             , (Summary_not_requested | Summary_available _ | Summary_failed _) )
            | (Summary_attempt_identity_unbound, Exact_bound _, _)
-           | ((Summary_attempt_ready | (Summary_attempt_in_flight | Summary_attempt_settled)), _, _) -> None)
+           | ( ( Summary_attempt_ready
+               | Summary_attempt_in_flight
+               | Summary_attempt_settled )
+             , _
+             , _ ) -> None)
 ;;
 
 let record_resolution_delivery_failure ~keeper_name ~approval_id reason =

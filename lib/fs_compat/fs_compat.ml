@@ -2866,6 +2866,32 @@ let rec private_jsonl_transaction_error_to_string = function
     durable_append_error_to_string append_error
 ;;
 
+(* [wrapped] is true once one [Transaction_settlement_failed] has been
+   entered. A settlement failure nested inside another one is not followed. *)
+let rec private_jsonl_transaction_error_is_incomplete_tail_at ~wrapped = function
+  | Incomplete_transaction_tail _ -> true
+  | Transaction_settlement_failed { primary = Transaction_failed inner; _ } ->
+    (not wrapped)
+    && private_jsonl_transaction_error_is_incomplete_tail_at ~wrapped:true inner
+  | Transaction_settlement_failed { primary = Transaction_succeeded _; _ } -> false
+  | Stable_lock_contended _
+  | Unexpected_stable_lock_permissions _
+  | Invalid_stable_lock_state _
+  | Cursor_mismatch _
+  | Unexpected_transaction_file_kind _
+  | Ambiguous_transaction_file_identity _
+  | Transaction_path_binding_changed _
+  | Invalid_transaction_suffix
+  | Private_jsonl_operation_failed _
+  | Rewrite_stage_failed _
+  | Rewrite_published_durability_unknown _
+  | Transaction_append_failed _ -> false
+;;
+
+let private_jsonl_transaction_error_is_incomplete_tail =
+  private_jsonl_transaction_error_is_incomplete_tail_at ~wrapped:false
+;;
+
 let private_jsonl_failure operation exception_ =
   { operation; exception_; backtrace = Printexc.get_raw_backtrace () }
 ;;

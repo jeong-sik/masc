@@ -13621,6 +13621,7 @@ let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_comment_scroll <- 0;
   state.board_comment_landing <- None;
   state.board_comments_focused <- false;
+  state.board_attachment_status <- None;
   Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
     ~port:state.port ~post_id:post.bp_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
 
@@ -13663,6 +13664,68 @@ let step_board_read state ~mailbox ~delta =
           (open_board_post state ~mailbox ~focus:state.board_focus)
           (List.nth_opt state.board_posts next)
       end
+
+(* The MIDI soundfont read at boot from [tui].midi_soundfont (the same load
+   that applies the theme and the saved sort). The numbered attachment keys
+   answer from this snapshot instead of re-reading runtime.toml per press. *)
+let boot_midi_soundfont : string option ref = ref None
+
+let board_attachment_digit_of_key = function
+  | "1" -> Some 1
+  | "2" -> Some 2
+  | "3" -> Some 3
+  | "4" -> Some 4
+  | "5" -> Some 5
+  | "6" -> Some 6
+  | "7" -> Some 7
+  | "8" -> Some 8
+  | "9" -> Some 9
+  | _ -> None
+
+(* The numbered attachment keys: the pane names each entry [1..9] (broken
+   entries included), and this resolves the same number to the same entry,
+   then lets the action module save/play/open it. What happened, or why it
+   could not, lands on the read pane's status line. *)
+let open_board_attachment state ~digit ~host ~port =
+  match state.board_mode with
+  | Board_list | Board_compose -> ()
+  | Board_read post_id ->
+      let post =
+        match Board_detail.view_for state.board_detail ~post_id with
+        | Board_detail.Ready (detail_post, _, _) -> Some detail_post
+        | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
+            List.find_opt
+              (fun (candidate : board_post) -> String.equal candidate.bp_id post_id)
+              state.board_posts
+      in
+      (match post with
+       | None -> ()
+       | Some post ->
+           (match Masc_tui_board_attachments.attachment_at_index post.bp_attachments digit with
+            | None -> ()
+            | Some (Error reason) ->
+                state.board_attachment_status <- Some ("깨진 첨부: " ^ reason)
+            | Some (Ok attachment) ->
+                let fetch ~sha256 =
+                  match
+                    Masc_tui_http.http_get_with_body_limit
+                      ~max_body_bytes:(Some Masc_tui_board_upload.max_attachment_bytes)
+                      ~host ~port
+                      ~path:("/api/v1/artifact-bytes/" ^ sha256)
+                  with
+                  | Error reason -> Error reason
+                  | Ok (status_code, body)
+                    when Masc.Tui_decode.is_success_http_status status_code ->
+                      Ok body
+                  | Ok (status_code, body) ->
+                      Error (Masc_tui_http.refusal ~status_code ~body)
+                in
+                let outcome =
+                  Masc_tui_attachment_action.run ~fetch attachment
+                    ~midi_soundfont:!boot_midi_soundfont
+                in
+                state.board_attachment_status <-
+                  Some (Masc_tui_attachment_action.describe_outcome outcome)))
 
 let apply_approval_decision_result state approval decision approvals result =
   (match state.home_decision_inflight with
@@ -19625,6 +19688,7 @@ let main
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
   let tui_settings = Masc_tui_config.load ~base_path in
+  boot_midi_soundfont := tui_settings.midi_soundfont;
   (match tui_settings.last_chat_keeper with
    | Ok None -> ()
    | Ok (Some keeper) -> state.home_last_chat <- Recorded_chat keeper
@@ -26975,6 +27039,18 @@ and is loaded on demand through keeper_skill.
                    | Some _ | None ->
                        Masc_tui_code_requests.launch_history_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
                 end)
+       | Some key
+         when state.view = Board
+              && (match state.board_mode with
+                  | Board_read _ -> true
+                  | Board_list | Board_compose -> false)
+              && not state.board_comments_focused
+              && Option.is_some (board_attachment_digit_of_key key) ->
+           (* The ATTACHMENTS block numbers entries [1..9]; the number opens
+              the same entry, whatever its kind wants done with it. *)
+           Option.iter
+             (fun digit -> open_board_attachment state ~digit ~host ~port)
+             (board_attachment_digit_of_key key)
        | Some "o" when state.view = Board ->
            (match state.board_mode with
             | Board_read post_id

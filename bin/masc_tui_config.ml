@@ -21,6 +21,7 @@ type t = {
   coalesce_queued_input : bool option;
   send_on_stop : bool option;
   user_input_priority_next : bool option;
+  midi_soundfont : string option;
 }
 
 let runtime_toml_path ~base_path =
@@ -263,6 +264,9 @@ let load ~base_path =
     coalesce_queued_input = read coalesce_queued_input_of_doc;
     send_on_stop = Option.bind text send_on_stop_of_text;
     user_input_priority_next = read user_input_priority_next_of_doc;
+    midi_soundfont =
+      read (fun doc ->
+          Keeper_toml_loader.toml_string_opt doc (tui_table ^ ".midi_soundfont"));
   }
 
 let set_tui_string ~base_path ~key value =

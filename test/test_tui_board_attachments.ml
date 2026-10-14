@@ -472,6 +472,39 @@ let test_a_comment_leaves_the_staged_files () =
     [ "for-the-next-post" ] (staged_names state)
 ;;
 
+(* The read pane numbers the attachments 1..9 for the open key; the index
+   counts every entry, a broken one included, so the number on screen and
+   the key resolve to the same entry. *)
+let test_attachment_at_index_picks_the_nth () =
+  let entries =
+    decode
+      (attachments
+         (`List
+           [ url_entry "audio" "https://example.com/a.mp3"
+           ; `String "broken"
+           ; artifact_entry ~name:"riff.gp5" "score" sha256
+           ]))
+  in
+  let at nth = Masc_tui_board_attachments.attachment_at_index entries nth in
+  (match at 1 with
+   | Some (Ok { ba_kind = Ak_audio; _ }) -> ()
+   | _ -> Alcotest.fail "index 1 is the audio");
+  (match at 2 with
+   | Some (Error _) -> ()
+   | _ -> Alcotest.fail "index 2 is the broken entry, its reason carried");
+  (match at 3 with
+   | Some (Ok { ba_kind = Ak_score; _ }) -> ()
+   | _ -> Alcotest.fail "index 3 is the score");
+  Alcotest.(check bool) "index 0 is nothing" true (Option.is_none (at 0));
+  Alcotest.(check bool) "past the end is nothing" true
+    (Option.is_none (at 4))
+;;
+
+let test_attachment_at_index_empty () =
+  Alcotest.(check bool) "an empty list has no nth" true
+    (Option.is_none (Masc_tui_board_attachments.attachment_at_index [] 1))
+;;
+
 let () =
   Alcotest.run "tui_board_attachments"
     [ ( "decode"
@@ -487,6 +520,10 @@ let () =
             test_non_list_attachments_is_one_broken_entry
         ; Alcotest.test_case "only the handler's wrapper is an artifact" `Quick
             test_only_the_handlers_wrapper_is_an_artifact
+        ; Alcotest.test_case "the nth index picks the nth entry" `Quick
+            test_attachment_at_index_picks_the_nth
+        ; Alcotest.test_case "an empty list has no nth" `Quick
+            test_attachment_at_index_empty
         ] )
     ; ( "label"
       , [ Alcotest.test_case "the name and the size" `Quick

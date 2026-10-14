@@ -7255,6 +7255,10 @@ type state = {
      the same draft twice, and the completion knows it owns the clear. *)
   mutable board_post_inflight: bool;
   mutable board_post_error: string option;
+  (* The last attachment action's one line (played/opened/saved/failed and
+     why): set by the numbered attachment keys, cleared when another post
+     is opened. *)
+  mutable board_attachment_status: string option;
   (* A vote armed for a second keypress: which post, and up or down. The
      cursor can move between the two presses, so the post id is captured at
      arm time and a press on a different row re-arms for that row. *)
@@ -11203,6 +11207,7 @@ let create_state
   board_compose_attach_input = None;
   board_post_inflight = false;
   board_post_error = None;
+  board_attachment_status = None;
   board_vote_armed = None;
   planning = None;
   planning_baseline = None;

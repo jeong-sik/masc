@@ -134,8 +134,18 @@ let draw_measure ~strings (measure : Score.measure) =
   rows
 
 (* The header ahead of the tab: what the directives said, and nothing when
-   none of them did. The title is the author's text, shown the way failure
-   sentences show words, quotes included. *)
+   none of them did. The title is the author's text, shown as written
+   between quotes -- %S is not used because it escapes every non-ASCII byte
+   into decimal numbers, and these titles are not ASCII. *)
+let quoted_title title =
+  let escaped = Buffer.create (String.length title) in
+  String.iter
+    (fun char ->
+       if char = '"' || char = '\\' then Buffer.add_char escaped '\\';
+       Buffer.add_char escaped char)
+    title;
+  "\"" ^ Buffer.contents escaped ^ "\""
+
 let header_line (score : Score.t) =
   let pieces =
     (match score.tempo with
@@ -145,7 +155,7 @@ let header_line (score : Score.t) =
        | Some (top, bottom) -> [ Printf.sprintf "%d/%d" top bottom ]
        | None -> [])
     @ (match score.title with
-       | Some title -> [ Printf.sprintf "%S" title ]
+       | Some title -> [ quoted_title title ]
        | None -> [])
   in
   match pieces with

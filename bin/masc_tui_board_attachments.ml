@@ -55,3 +55,10 @@ let label (entry : board_attachment_entry) =
           same line. *)
        | Ak_unknown kind -> labelled ("미지원 kind: " ^ kind))
 ;;
+
+(* The open key's resolution: the number a reader sees is 1-based and counts
+   every entry, a broken one included, so [attachment_at_index entries n]
+   is the entry the [n] on the pane names. *)
+let attachment_at_index (entries : board_attachment_entry list) nth =
+  if nth < 1 then None else List.nth_opt entries (nth - 1)
+;;

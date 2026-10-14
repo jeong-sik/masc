@@ -280,13 +280,6 @@ let snapshots () =
   with_pool_lock (fun () ->
     List.map runtime_to_snapshot (Atomic.get pool).runtimes)
 
-module For_testing = struct
-  let install_pool runtimes =
-    let fingerprint = current_fingerprint () in
-    with_pool_lock (fun () ->
-      Atomic.set pool { runtimes; fingerprint })
-end
-
 (* [acquire] / [release] / [model_label_of_assignment] removed 2026-05-05 —
    zero production callers; see [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
    §7.1. If leasing semantics return, design at the AGENT_CORE runtime layer per RFC-0026. *)

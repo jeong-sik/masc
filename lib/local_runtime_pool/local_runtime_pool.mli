@@ -82,11 +82,6 @@ val reset : unit -> unit
 (** Reinstalls the empty state under the pool lock.  Used by
     tests to clear state between cases. *)
 
-module For_testing : sig
-  val install_pool : runtime list -> unit
-  (** Install a deterministic runtime snapshot under the pool lock. *)
-end
-
 val runtime_id_of_base_url : string -> string
 (** Derives a stable runtime id from a [base_url] (e.g.
     ["http://127.0.0.1:8081"] →

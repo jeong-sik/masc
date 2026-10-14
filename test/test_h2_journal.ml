@@ -113,7 +113,7 @@ let prepare ?plan base_path =
     { keeper_name = keeper; composition_run_id; draft_reference = Draft.reference draft; run_reference
     ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation
     ; source_turn = Agent_core.Tool_contract.Invocation.turn invocation
-    ; source_task_id = Some "original-source-task" } in
+    ; source_task_id = Some "original-source-task"; producer=Journal.Prepared } in
   {draft; source; journal = Journal.prepare ~base_path source |> journal_value "prepare journal"}
 let context (source : Journal.source) =
   ["composition_tool", `String composition_tool;
@@ -393,7 +393,7 @@ let test_owned_transport_and_race () = with_workspace (fun env sw base_path ->
   let first = submit ~before_execute:(fun _ -> Eio.Promise.resolve enter (); Eio.Promise.await release)
       base_path sw prepared (initial_dispatch base_path Tool_result.Proven_pre_effect) |> accepted in
   Eio.Promise.await entered;
-  let discovery = Journal.pending_continuations ~base_path |> journal_value "pre-dispatch discovery" in
+  let discovery = Journal.pending_continuations ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path |> journal_value "pre-dispatch discovery" in
   check int "run is discoverable before its first node effect" 1 discovery.inspected;
   check int "active owner does not grant another worker" 0 (List.length discovery.ready);
   check int "active owner remains pending" 1 discovery.waiting;
@@ -751,7 +751,7 @@ let test_pending_marker_retirement_rejects_replacement () =
          Unix.rename staged path
        | `Same_inode_same_length -> write path replacement_bytes);
       replacement := Some (replacement_bytes, (Unix.lstat path).st_ino) in
-    let report = Journal.For_testing.pending_continuations ~base_path ~before_retire:hook
+    let report = Journal.For_testing.pending_continuations ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path ~before_retire:hook
         |> journal_value "guarded retirement discovery" in
     let path, bytes = !original |> Option.get in
     let replacement_bytes, inode = !replacement |> Option.get in
@@ -759,20 +759,20 @@ let test_pending_marker_retirement_rejects_replacement () =
     check bool "changed marker is reported" true (report.failures <> []);
     check string "actual replacement bytes retained" replacement_bytes (read path);
     check int "actual replacement inode retained" inode (Unix.lstat path).st_ino;
-    let denied = Journal.pending_continuations ~base_path |> journal_value "changed authority remains visible" in
+    let denied = Journal.pending_continuations ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path |> journal_value "changed authority remains visible" in
     check int "malformed or foreign authority remains unretired" 0 denied.retired;
     check bool "malformed or foreign authority remains refused" true (denied.failures <> []);
     write path bytes;
-    let settled = Journal.pending_continuations ~base_path |> journal_value "restored exact authority retirement" in
+    let settled = Journal.pending_continuations ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path |> journal_value "restored exact authority retirement" in
     check int "fresh validated terminal proof retires restored marker" 1 settled.retired;
     check int "normal retirement has no failure" 0 (List.length settled.failures);
-    let empty = Journal.pending_continuations ~base_path |> journal_value "retained infrastructure discovery" in
+    let empty = Journal.pending_continuations ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path |> journal_value "retained infrastructure discovery" in
     check int "retired marker is not a pending marker" 0 empty.inspected;
     check int "retired marker discovery has no failure" 0 (List.length empty.failures);
     let lock_path = Fs_compat.private_jsonl_lock_path path in
     check bool "retirement leaves the lock sibling" true (Sys.file_exists lock_path);
     Unix.chmod lock_path 0o000;
-    let skipped = Journal.pending_continuations ~base_path |> journal_value "orphaned lock discovery" in
+    let skipped = Journal.pending_continuations ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path |> journal_value "orphaned lock discovery" in
     check int "orphaned lock is not a pending marker" 0 skipped.inspected;
     check int "orphaned lock is skipped without validation" 0 (List.length skipped.failures);
     Unix.chmod lock_path 0o600))
@@ -815,13 +815,13 @@ let test_pending_marker_retirement_settlement () =
          {operation=Fs_compat.Sync_removal_parent;_}) -> ()
      | `Parent_sync, _ -> fail "parent durability failure was not returned");
     check bool "unlink actually occurred" false (Sys.file_exists path);
-    let report = Journal.pending_continuations ~base_path |> journal_value "post-settlement discovery" in
+    let report = Journal.pending_continuations ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path |> journal_value "post-settlement discovery" in
     check int "settled marker is not synthesized by lock validation" 0 report.inspected;
     check int "settled marker discovery has no failure" 0 (List.length report.failures);
     let lock_path = Fs_compat.private_jsonl_lock_path path in
     check bool "settlement leaves the lock sibling" true (Sys.file_exists lock_path);
     Unix.chmod lock_path 0o000;
-    let skipped = Journal.pending_continuations ~base_path |> journal_value "orphaned lock discovery" in
+    let skipped = Journal.pending_continuations ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path |> journal_value "orphaned lock discovery" in
     check int "orphaned lock is not synthesized by lock validation" 0 skipped.inspected;
     check int "orphaned lock is skipped without validation" 0 (List.length skipped.failures);
     Unix.chmod lock_path 0o600))

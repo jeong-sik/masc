@@ -8,6 +8,14 @@ module Nodes = Map.Make (String)
 
 let ( let* ) = Result.bind
 
+type producer =
+  | Prepared
+  | Named of
+      { tool_name : string
+      ; skill_reference : Skill_reference.t
+      ; activation : Keeper_skill_activation_recorder.bound_context option
+      }
+
 type source =
   { keeper_name : string
   ; composition_run_id : Plan.Composition_run_id.t
@@ -16,6 +24,7 @@ type source =
   ; parent_tool_use_id : string
   ; source_turn : int
   ; source_task_id : string option
+  ; producer : producer
   }
 
 type completed =
@@ -143,6 +152,30 @@ let reference_of_json json =
   | Ok reference -> reference
   | Error error -> refuse (Tool_output.make_error_to_string error)
 
+let producer_json = function
+  | Prepared -> `Assoc ["kind",`String "prepared"]
+  | Named {tool_name;skill_reference;activation} -> `Assoc
+      ["kind",`String "named";"tool_name",`String tool_name;
+       "skill_reference",Skill_reference.to_yojson skill_reference;
+       "activation",option_json Keeper_skill_activation_recorder.bound_context_to_yojson activation]
+
+let producer_of_json json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "prepared") -> ignore (object_fields ["kind"] json); Prepared
+     | Some (`String "named") ->
+       let fields = object_fields ["kind";"tool_name";"skill_reference";"activation"] json in
+       let skill_reference = match Skill_reference.of_yojson (field "skill_reference" fields) with
+         | Ok reference -> reference | Error _ -> refuse "invalid exact named Skill reference" in
+       let activation = optional (fun json ->
+         match Keeper_skill_activation_recorder.bound_context_of_yojson json with
+         | Ok context -> context | Error error -> refuse (Keeper_skill_activation_recorder.error_to_string error))
+           (field "activation" fields) in
+       Named {tool_name=string (field "tool_name" fields);skill_reference;activation}
+     | _ -> refuse "unknown composition producer")
+  | _ -> refuse "composition producer is not an object"
+
 let source_json (source : source) =
   `Assoc ["keeper_name", `String source.keeper_name;
     "composition_run_id", `String (Plan.Composition_run_id.to_string source.composition_run_id);
@@ -150,19 +183,29 @@ let source_json (source : source) =
     "run_reference", reference_json source.run_reference;
     "parent_tool_use_id", `String source.parent_tool_use_id;
     "source_turn", `Int source.source_turn;
-    "source_task_id", option_json (fun value -> `String value) source.source_task_id]
+    "source_task_id", option_json (fun value -> `String value) source.source_task_id;
+    "producer",producer_json source.producer]
+
+let same_source left right = canonical_equal (source_json left) (source_json right)
 
 let validate_source source =
   require (exact_name source.keeper_name) "invalid keeper name";
   require (exact_name source.parent_tool_use_id) "invalid parent tool-use identity";
   require (source.source_turn >= 0) "negative source turn";
   Option.iter (fun task -> require (exact_name task) "invalid source task identity") source.source_task_id;
+  (match source.producer with
+   | Prepared -> ()
+   | Named {tool_name;skill_reference=_;activation} ->
+     require (exact_name tool_name) "invalid named producer tool";
+     Option.iter (fun bound -> require
+       (Ids.Turn_ref.absolute_turn (Keeper_skill_activation_recorder.bound_turn_ref bound) = source.source_turn)
+       "named activation belongs to another original turn") activation);
   match Plan.Composition_run_id.of_string (Plan.Composition_run_id.to_string source.composition_run_id) with
   | Ok _ -> ()
   | Error _ -> refuse "invalid UUIDv7 composition run identity"
 
 let source_of_json json =
-  let fields = object_fields ["keeper_name"; "composition_run_id"; "draft_reference"; "run_reference"; "parent_tool_use_id"; "source_turn"; "source_task_id"] json in
+  let fields = object_fields ["keeper_name"; "composition_run_id"; "draft_reference"; "run_reference"; "parent_tool_use_id"; "source_turn"; "source_task_id"; "producer"] json in
   let composition_run_id = match Plan.Composition_run_id.of_string (string (field "composition_run_id" fields)) with
     | Ok id -> id | Error _ -> refuse "invalid UUIDv7 composition run identity" in
   let source = {keeper_name = string (field "keeper_name" fields); composition_run_id;
@@ -170,7 +213,8 @@ let source_of_json json =
     run_reference = reference_of_json (field "run_reference" fields);
     parent_tool_use_id = string (field "parent_tool_use_id" fields);
     source_turn = nonnegative (field "source_turn" fields);
-    source_task_id = optional string (field "source_task_id" fields)} in
+    source_task_id = optional string (field "source_task_id" fields);
+    producer=producer_of_json (field "producer" fields)} in
   validate_source source; source
 
 (* Checkpoint's strict codec owns content variants and failure provenance. Its
@@ -342,7 +386,7 @@ let completed_of_json json =
   require (canonical_equal (completed_json completed) json) "noncanonical completed payload";
   completed
 
-let event kind source_sha fields = `Assoc (["schema", `Int 2; "kind", `String kind; "source_sha", `String source_sha] @ fields)
+let event kind source_sha fields = `Assoc (["schema", `Int 3; "kind", `String kind; "source_sha", `String source_sha] @ fields)
 let row json = Yojson.Safe.to_string json ^ "\n"
 let source_event source = event "source" (json_sha (source_json source)) ["source", source_json source]
 let attempt_event source_sha occurrence = event "attempting" source_sha ["occurrence", occurrence_json occurrence]
@@ -430,7 +474,7 @@ let decode_state bytes = decode (fun () ->
     let json = Yojson.Safe.from_string line in valid_json json; json) lines in
   let header, events = match jsons with header :: events -> header, events | [] -> refuse "missing source header" in
   let fields = object_fields ["schema"; "kind"; "source_sha"; "source"] header in
-  require (field "schema" fields = `Int 2 && field "kind" fields = `String "source") "invalid source header schema";
+  require (field "schema" fields = `Int 3 && field "kind" fields = `String "source") "invalid source header schema";
   let source = source_of_json (field "source" fields) in
   let source_sha = string (field "source_sha" fields) in
   require (String.equal source_sha (json_sha (source_json source))) "source fingerprint mismatch";
@@ -442,7 +486,7 @@ let decode_state bytes = decode (fun () ->
       | "settled" -> ["occurrence"; "completed"; "failure_effect_disposition"; "dependency_wait"]
       | _ -> refuse "unknown journal event" in
     let fields = object_fields (["schema"; "kind"; "source_sha"] @ extras) json in
-    require (field "schema" fields = `Int 2 && field "source_sha" fields = `String source_sha) "event source/schema mismatch";
+    require (field "schema" fields = `Int 3 && field "source_sha" fields = `String source_sha) "event source/schema mismatch";
     match kind with
     | "binding" ->
       let expected = optional binding_of_json (field "expected_owner" fields) in
@@ -659,6 +703,13 @@ let entry_matches_source source (entry : Async.entry) = decode (fun () ->
     | Tool_output.Invalid_normalized_artifact_ref {detail} -> refuse detail
     | Tool_output.Not_normalized_artifact_ref -> refuse ("invalid context reference " ^ name) in
   reference "draft_reference" source.draft_reference; reference "run_artifact" source.run_reference;
+  (match source.producer with
+   | Prepared -> require (unique "composition_tool" = `String Keeper_tool_composition_catalog.run_tool_name)
+       "prepared producer tool mismatch"
+   | Named {tool_name;skill_reference;activation=_} ->
+     require (unique "composition_tool" = `String tool_name
+       && canonical_equal (unique "skill_reference") (Skill_reference.to_yojson skill_reference))
+       "named producer identity mismatch");
   require (unique "parent_tool_use_id" = `String source.parent_tool_use_id && unique "source_turn" = `Int source.source_turn) "original invocation mismatch";
   let task_fields = List.filter_map (fun (name, value) -> if name = "source_task_id" then Some value else None) fields in
   require (task_fields = (match source.source_task_id with None -> [] | Some task -> [`String task])) "source task identity mismatch")
@@ -781,7 +832,11 @@ let bind_request journal ~request_id =
   let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
   let* () = canonical_queued journal request_id in
   let* expected = update_existing journal (fun state -> None, Ok state.owner) in
-  bind_expected_owner journal ~request_id ~expected ~expected_terminal:None ~expected_nodes:None
+  match journal.immutable_source.producer,expected with
+  | Named _,Some owner when not (String.equal owner.request_id request_id) ->
+    Error (Invalid_source "named successor requires its sealed original continuation")
+  | (Prepared | Named _),(None | Some _) ->
+    bind_expected_owner journal ~request_id ~expected ~expected_terminal:None ~expected_nodes:None
 
 let validate_predecessor_terminals (continuation : continuation) =
   let journal = continuation.journal in
@@ -971,7 +1026,10 @@ let waiting_continuation journal = filesystem (fun () ->
       | Queued | Running | Cancelling _ | Cancelled _
       | Persistence_failed _ | Done _ -> Ok None)
 
-let continuation_readiness (continuation : continuation) = filesystem (fun () ->
+type read_composition_result =
+  base_path:string -> keeper_name:string -> Dependency.composition -> (Dependency.readiness,string) result
+
+let continuation_readiness ~read_composition_result (continuation : continuation) = filesystem (fun () ->
   let journal = continuation.journal in
   let* state = strict_read ~root:journal.root journal.path in
   let* () = check_source journal state in
@@ -994,15 +1052,90 @@ let continuation_readiness (continuation : continuation) = filesystem (fun () ->
           |> Result.map_error (fun error -> Invalid_result (Keeper_owned_job_store.error_to_string error)) in
         Ok (Keeper_owned_job_store.result_ready record)
       | Dependency.Composition_result binding ->
-        let* result = Keeper_composition_dependency_result.readiness ~base_path:journal.base_path
+        let* result = read_composition_result ~base_path:journal.base_path
             ~keeper_name:journal.immutable_source.keeper_name binding
           |> Result.map_error (fun detail -> Invalid_result detail) in
-        Ok (result = Keeper_composition_dependency_result.Ready) in
+        Ok (result = Dependency.Ready) in
     match readiness, ready with
     | Results_ready, true -> Ok Results_ready
     | (Waiting_for_results | Results_ready), false
     | Waiting_for_results, true -> Ok Waiting_for_results)
       (Ok Results_ready) continuation.dependencies)
+
+let canonical_entry journal request_id =
+  let* entry = match Async.load_canonical_request ~base_path:journal.base_path
+      ~caller:journal.immutable_source.keeper_name request_id with
+    | Found entry -> Ok entry
+    | Absent -> Error (Invalid_result "named journal owner request is absent")
+    | Unreadable detail -> Error (Invalid_result detail)
+    | Rejected rejection -> Error (Invalid_result (Yojson.Safe.to_string (Async.access_rejection_to_json rejection))) in
+  let* () = entry_matches_source journal.immutable_source entry
+    |> Result.map_error (fun detail -> Invalid_source detail) in
+  Ok entry
+
+let original_named_binding journal state =
+  let* () = match journal.immutable_source.producer with
+    | Named _ -> Ok () | Prepared -> Error (Invalid_source "prepared run has no named result binding") in
+  let* owner = match List.rev state.prior_owners,state.owner with
+    | (owner,_)::_,_ | [],Some owner -> Ok owner
+    | [],None -> Error (Invalid_source "named run has no admitted original owner") in
+  let* entry = canonical_entry journal owner.request_id in
+  let* binding = match entry.request_context with
+    | None -> Error (Invalid_source "named original source is missing")
+    | Some fields -> Dependency.composition_of_request_context ~request_id:owner.request_id fields
+        |> Result.map_error (fun detail -> Invalid_source detail) in
+  let* () = Keeper_composition_named_run.validate ~base_path:journal.base_path
+      ~keeper_name:journal.immutable_source.keeper_name binding
+    |> Result.map_error (fun detail -> Invalid_source detail) in
+  Ok binding
+
+let named_binding journal = filesystem (fun () ->
+  let* state = strict_read ~root:journal.root journal.path in
+  let* () = check_source journal state in
+  original_named_binding journal state)
+
+let named_result_owner journal binding = filesystem (fun () ->
+  let* state = strict_read ~root:journal.root journal.path in
+  let* () = check_source journal state in
+  let* original = original_named_binding journal state in
+  let* () = if canonical_equal (Dependency.composition_to_json original) (Dependency.composition_to_json binding)
+    then Ok () else Error (Invalid_source "result binding is not the original named owner") in
+  let rec validate_prior = function
+  | [] -> Ok ()
+  | ((owner : binding),nodes)::older ->
+    let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
+        ~caller:journal.immutable_source.keeper_name owner.request_id
+      |> Result.map_error (fun error -> Prior_owner_not_terminal
+          {request_id=owner.request_id;reason=Async.canonical_terminal_error_to_string error}) in
+    let entry = Async.durable_terminal_entry proof in
+    let* () = entry_matches_source journal.immutable_source entry
+      |> Result.map_error (fun detail -> Invalid_source detail) in
+    let* () = match entry.status with
+    | Waiting_for_dependencies {dependencies;_} ->
+      (match exact_waiting_dependencies ~expected_owner:owner nodes dependencies with
+       | Ok _ -> Ok ()
+       | Error error ->
+         (* A successor that stops before dispatch can carry an unchanged
+            predecessor's wait; its binding and canonical status stay explicit. *)
+         match older with
+         | (_,prior_nodes)::_ when nodes = prior_nodes ->
+           let* inherited = prior_result_wait journal older in
+           (match inherited with
+            | Some (original,_) when original = normalize_dependencies dependencies ->
+              recoverable_lost_nodes nodes original
+            | Some _ | None -> Error error)
+         | _ -> Error error)
+    | Lost _ -> Ok ()
+    | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _ | Done _ ->
+      Error (Invalid_result "named successor has no resumable canonical predecessor") in
+    validate_prior older in
+  let* () = validate_prior state.prior_owners in
+  let* owner = match state.owner with Some owner -> Ok owner | None -> Error Ownership_changed in
+  let* entry = canonical_entry journal owner.request_id in
+  let* current = strict_read ~root:journal.root journal.path in
+  let* () = check_source journal current in
+  if same_owner current.owner state.owner && current.prior_owners = state.prior_owners && current.nodes = state.nodes
+  then Ok entry else Error Ownership_changed)
 
 type pending_continuations =
   { inspected : int; ready : continuation list; waiting : int; retired : int
@@ -1020,7 +1153,7 @@ let continuation_lock_data_name name =
   let data_name = String.sub name 0 (String.length name - String.length suffix) in
   if continuation_data_name data_name then Some data_name else None
 
-let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
+let pending_continuations_with ~before_retire ~read_composition_result ~base_path = filesystem (fun () ->
   let base_path = Fs_compat.realpath base_path in
   let root = Common.masc_dir_from_base_path ~base_path in
   let directory = continuation_directory ~base_path in
@@ -1095,7 +1228,7 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
                | None -> Error Ownership_changed
                | Some continuation when continuation_request_id continuation <> marker.request_id -> Error Ownership_changed
                | Some continuation ->
-                 let* readiness = continuation_readiness continuation in
+                 let* readiness = continuation_readiness ~read_composition_result continuation in
                  match readiness with
                  | Waiting_for_results -> Ok Still_waiting
                  | Results_ready -> Ok (Ready continuation))
@@ -1122,8 +1255,8 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
       {report with failures=(name,error) :: report.failures}) empty names in
   Ok {report with ready=List.rev report.ready;failures=List.rev report.failures})
 
-let pending_continuations ~base_path =
-  pending_continuations_with ~before_retire:(fun _ -> ()) ~base_path
+let pending_continuations ~read_composition_result ~base_path =
+  pending_continuations_with ~before_retire:(fun _ -> ()) ~read_composition_result ~base_path
 
 module For_testing = struct
   let pending_continuations = pending_continuations_with

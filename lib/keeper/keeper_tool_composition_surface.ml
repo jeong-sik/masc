@@ -818,9 +818,12 @@ let async_submission_result
                 ~keeper_name:meta.name ~request_id ~composition_tool:tool_name
               |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
              (fun () ->
-                let* () = match skill_reference with
-                  | None -> Ok ()
-                  | Some _ ->
+                let* () = match skill_reference,continuation,journal with
+                  | None,_,_ -> Ok ()
+                  | Some _,Some _,Some journal ->
+                    Journal.named_binding journal |> Result.map (fun _ -> ())
+                    |> Result.map_error Journal.error_to_string
+                  | Some _,(None | Some _),(None | Some _) ->
                     let* binding = Keeper_composition_dependency.composition_of_request_context
                         ~request_id request_context_fields in
                     Keeper_composition_named_run.admit ~base_path:config.base_path
@@ -929,9 +932,11 @@ let async_submission_result
               ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
               ])
        in
-       let binding = match skill_reference with
-         | None -> Ok None
-         | Some _ ->
+       let binding = match skill_reference,continuation,journal with
+         | None,_,_ -> Ok None
+         | Some _,Some _,Some journal ->
+           Journal.named_binding journal |> Result.map Option.some |> Result.map_error Journal.error_to_string
+         | Some _,(None | Some _),(None | Some _) ->
            Keeper_composition_dependency.composition_of_request_context
              ~request_id request_context_fields |> Result.map Option.some in
        (match binding with
@@ -1654,11 +1659,59 @@ let bind_prepared_result ~composition_run_id ~run_reference ~draft_reference res
     (run_reference :: draft_reference :: Tool_result.retained_artifacts result) result
 ;;
 
+let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
+    ~parent_invocation ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
+    ~capability_authority ~publication_recovery ~ctx_snapshot ~turn_context
+    ?activation_context ?clock () =
+  let module Draft = Keeper_composition_draft in
+  let start_time = Tool_timing.start () in
+  match capability_authority with
+  | Keeper_tool_runtime.Compatibility_meta ->
+    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      "named async execution requires its frozen turn capability surface"
+  | Keeper_tool_runtime.Frozen_surface capability_surface ->
+    let prepared =
+      let* activation = match activation_context with
+        | None -> Ok None
+        | Some context -> Keeper_skill_activation_recorder.bind_async context
+            |> Result.map Option.some |> Result.map_error Keeper_skill_activation_recorder.error_to_string in
+      let* draft = Draft.prepare_named ~base_path:config.base_path ~capability_surface
+          ~keeper_name:meta.name ~plan
+        |> Result.map_error (fun error -> Yojson.Safe.to_string (Draft.error_to_json error)) in
+      let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
+      let* run_reference = Draft.record_invocation ~base_path:config.base_path ~composition_run_id
+          ~invocation:parent_invocation draft
+        |> Result.map_error (fun error -> Yojson.Safe.to_string (Draft.error_to_json error)) in
+      let source : Journal.source =
+        {keeper_name=meta.name;composition_run_id;draft_reference=Draft.reference draft;run_reference;
+         parent_tool_use_id=Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation;
+         source_turn=Agent_core.Tool_contract.Invocation.turn parent_invocation;
+         source_task_id=Option.bind turn_context (fun context -> context.Keeper_tool_call_log_context.task_id);
+         producer=Journal.Named {tool_name;skill_reference;activation}} in
+      let* journal = Journal.prepare ~base_path:config.base_path source
+        |> Result.map_error Journal.error_to_string in
+      Ok (draft,source,journal) in
+    match prepared with
+    | Error detail -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Proven_pre_effect detail
+    | Ok (draft,source,journal) ->
+      async_submission_result ~skill_reference ~journal ~plan:(Draft.plan draft)
+        ~draft_reference:source.draft_reference ~run_reference:source.run_reference
+        ~composition_run_id:source.composition_run_id ~tool_name ~tool_kind ~parent_invocation
+        ~config ~meta ~capability_authority ~publication_recovery ~ctx_snapshot ~turn_context ?clock ()
+      |> bind_prepared_result ~composition_run_id:source.composition_run_id
+          ~run_reference:source.run_reference ~draft_reference:source.draft_reference
+;;
+
 let resume_continuation ~capability_surface ~continuation ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) ~publication_recovery ~ctx_snapshot
     ~(turn_context : Keeper_tool_call_log_context.turn_context) ~invocation ?clock () =
   let module Draft = Keeper_composition_draft in
   let source = Journal.continuation_source continuation in
+  let tool_name,skill_reference = match source.producer with
+    | Journal.Prepared -> Draft.run_tool_name,None
+    | Journal.Named {tool_name;skill_reference;activation=_} -> tool_name,Some skill_reference in
   let start_time = Tool_timing.start () in
   let refuse_journal error = Tool_result.make_err ~tool_name:Draft.run_tool_name
       ~class_:(Journal.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
@@ -1666,6 +1719,16 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
   if meta.name <> source.keeper_name
       || publication_recovery.Keeper_publication_recovery_availability.keeper_name <> source.keeper_name
   then refuse_journal Journal.Source_conflict else
+  let producer_admitted = match skill_reference with
+    | None -> true
+    | Some reference -> Keeper_skill_catalog.skills
+        (Keeper_capability_surface.skill_projection capability_surface).catalog
+        |> List.exists (fun (skill : Keeper_skill_catalog.skill) ->
+          Option.exists (Skill_reference.equal reference) skill.reference &&
+          match skill.surface with
+          | Composition entry -> entry.execution = Catalog.Async && String.equal (Catalog.tool_name entry) tool_name
+          | Instruction -> false) in
+  if not producer_admitted then refuse_journal Journal.Source_conflict else
   match Draft.load_continuation ~base_path:config.base_path ~capability_surface continuation with
   | Error error -> Tool_result.make_err ~tool_name:Draft.run_tool_name
       ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
@@ -1677,7 +1740,7 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
         ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
         ~start_time ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error))
     | Ok nested_activation ->
-    match Journal.continuation_readiness continuation with
+    match Journal.continuation_readiness ~read_composition_result:Keeper_composition_dependency_result.readiness continuation with
     | Error error -> refuse_journal error
     | Ok Journal.Waiting_for_results ->
       Tool_result.make_deferred ~tool_name:Draft.run_tool_name ~start_time
@@ -1698,7 +1761,7 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
         let original_nested = Keeper_composition_nested_run.create ~calls:(Draft.nested_calls draft)
             ~composition_run_id:source.composition_run_id ~parent_invocation
             ~delivery_parent_tool_use_id:(Keeper_composition_nested_run.async_result_parent source.composition_run_id)
-            ~tool_name:Draft.run_tool_name ~record_activation:None () in
+            ~tool_name ~record_activation:None () in
         Option.iter (fun bound -> Keeper_composition_nested_run.restore_admissions original_nested
           ~find_activation:(fun ~invocation ~tool_name ~scope ~reference ->
             Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
@@ -1707,11 +1770,11 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
          | Error rejection -> Tool_result.make_err ~tool_name:Draft.run_tool_name ~start_time
              ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
              ~data:rejection.data rejection.detail
-         | Ok () -> async_submission_result ~journal ~continuation
+         | Ok () -> async_submission_result ?skill_reference ~journal ~continuation
           ~nested_calls:(Draft.nested_calls draft) ?nested_activation
           ~draft_reference:source.draft_reference ~run_reference:source.run_reference
           ~composition_run_id:source.composition_run_id ~plan:(Draft.plan draft)
-          ~tool_name:Draft.run_tool_name ~tool_kind:Keeper_tool_descriptor.Async_composition_tool
+          ~tool_name ~tool_kind:Keeper_tool_descriptor.Async_composition_tool
           ~parent_invocation ~config ~meta
           ~capability_authority:(Keeper_tool_runtime.Frozen_surface capability_surface)
           ~publication_recovery ~ctx_snapshot ~turn_context ?clock ()
@@ -1929,7 +1992,8 @@ let make_tools_with_authority
                        | Ok
                            ( Activation_ledger.Recorded _
                            | Activation_ledger.Already_recorded _ ) ->
-                         async_submission_result
+                         named_async_submission_result
+                           ?activation_context:nested_activation_context
                            ~skill_reference:skill.reference
                            ~plan
                            ~tool_name
@@ -1944,8 +2008,9 @@ let make_tools_with_authority
                            ?clock
                            ())
                     | None ->
-                      async_submission_result
-                        ~skill_reference:skill.reference
+                      named_async_submission_result
+                        ?activation_context:nested_activation_context
+                           ~skill_reference:skill.reference
                         ~plan
                         ~tool_name
                         ~tool_kind:(Catalog.tool_kind entry)
@@ -2335,7 +2400,9 @@ let make_tools_with_authority
                    | Error error -> journal_rejection ~start_time error
                    | Ok journal ->
                      let source = Journal.source journal in
-                     if not (Yojson.Safe.equal
+                     if (match source.producer with Journal.Named _ -> true | Prepared -> false) then
+                       journal_rejection ~start_time Journal.Source_conflict
+                     else if not (Yojson.Safe.equal
                        (Tool_output.normalized_artifact_ref_to_json source.draft_reference)
                        (Tool_output.normalized_artifact_ref_to_json (Draft.reference draft))) then
                        journal_rejection ~start_time Journal.Source_conflict
@@ -2400,7 +2467,7 @@ let make_tools_with_authority
                       ; draft_reference = Draft.reference draft; run_reference
                       ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation
                       ; source_turn = Agent_core.Tool_contract.Invocation.turn parent_invocation
-                      ; source_task_id = Option.bind turn_context (fun context -> context.Keeper_tool_call_log_context.task_id) } in
+                      ; source_task_id = Option.bind turn_context (fun context -> context.Keeper_tool_call_log_context.task_id); producer=Journal.Prepared } in
                     match Journal.prepare ~base_path:config.base_path source with
                     | Error error -> bind_result ~composition_run_id ~run_reference (journal_rejection ~start_time error)
                     | Ok journal -> execute_run ~journal ~nested_activation ~composition_run_id ~run_reference ~parent_invocation ~turn_context ()))

@@ -54,6 +54,12 @@ val compile :
     characters in IDs cannot collide. Child policy disagreement and async
     children are explicit refusals, rather than silent semantic changes. *)
 
+val compile_named_plan :
+  capability_surface:Keeper_capability_surface.t -> Yojson.Safe.t -> (t, error) result
+(** Freeze an already instantiated named Skill's ordinary plan using its admitted
+    descriptors and fixed input contracts. Named Skills retain their existing
+    write-tool authority; this API does not expand child calls or grant replay. *)
+
 val plan : t -> Keeper_tool_plan.t
 val calls : t -> call list
 val call_to_json : call -> Yojson.Safe.t

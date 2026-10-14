@@ -49,6 +49,12 @@ val prepare
    validated SKILL.md using an ordinary parameter-free plan. No publication
    occurs. A task-only draft need not carry reusable Skill metadata. *)
 
+val prepare_named :
+  base_path:string -> capability_surface:Keeper_capability_surface.t -> keeper_name:string ->
+  plan:Keeper_tool_plan.t -> (t, error) result
+(** Persist the bound ordinary plan of an admitted async named Skill. Preserve
+    existing write-node contracts; durable replay remains the journal's decision. *)
+
 val load
   :  base_path:string
   -> capability_surface:Keeper_capability_surface.t

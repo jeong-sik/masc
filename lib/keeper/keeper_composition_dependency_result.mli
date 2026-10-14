@@ -1,5 +1,5 @@
 (** Canonical named-composition result reads, without submission or collection. *)
-type readiness = Waiting | Ready
+type readiness = Keeper_composition_dependency.readiness = Waiting | Ready
 val readiness :
   base_path:string -> keeper_name:string -> Keeper_composition_dependency.composition ->
   (readiness, string) result

@@ -2,7 +2,7 @@ module Async = Keeper_msg_async
 module Dependency = Keeper_composition_dependency
 open Result.Syntax
 
-type readiness = Waiting | Ready
+type readiness = Dependency.readiness = Waiting | Ready
 type observed = Pending | Terminal of Async.entry
 
 let original_matches binding (entry : Async.entry) =
@@ -24,14 +24,28 @@ let observe ~base_path ~keeper_name binding =
   let* () = if String.equal entry.keeper_name keeper_name then Ok ()
     else Error "composition result belongs to a different Keeper lane" in
   let* () = original_matches binding entry in
+  let* journal = Keeper_tool_execution_journal.load ~base_path ~keeper_name
+      ~composition_run_id:binding.composition_run_id
+    |> Result.map_error Keeper_tool_execution_journal.error_to_string in
+  let* entry = Keeper_tool_execution_journal.named_result_owner journal binding
+    |> Result.map_error Keeper_tool_execution_journal.error_to_string in
   match entry.status with
   | Queued | Running | Cancelling _ -> Ok Pending
   | Waiting_for_dependencies _ -> Ok Pending
-  | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
-    let* proof = Async.load_canonical_durable_terminal ~base_path ~caller:keeper_name binding.request_id
+  | Lost _ ->
+    let* continuation = Keeper_tool_execution_journal.waiting_continuation journal
+      |> Result.map_error Keeper_tool_execution_journal.error_to_string in
+    (match continuation with
+     | Some continuation when String.equal
+         (Keeper_tool_execution_journal.continuation_request_id continuation) entry.request_id -> Ok Pending
+     | Some _ -> Error "named result ownership changed during recovery observation"
+     | None -> Ok (Terminal entry))
+  | Done _ | Cancelled _ | Persistence_failed _ ->
+    let* proof = Async.load_canonical_durable_terminal ~base_path ~caller:keeper_name entry.request_id
       |> Result.map_error Async.canonical_terminal_error_to_string in
     let terminal = Async.durable_terminal_entry proof in
-    let* () = original_matches binding terminal in
+    let* () = if Async.same_entry_record entry terminal then Ok ()
+      else Error "named result owner changed during terminal observation" in
     (* Re-read membership after the canonical terminal proof. The initial
        membership read alone cannot validate the result observed afterward. *)
     let* () = Keeper_composition_named_run.validate ~base_path ~keeper_name binding in

@@ -21,6 +21,8 @@ type t =
   | Owned_job of Keeper_owned_job_identity.Job_id.t
   | Composition_result of composition
 
+type readiness = Waiting | Ready
+
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val normalize : t list -> t list

@@ -273,6 +273,19 @@ let prepare ~base_path ~capability_surface ~keeper_name ~execution json =
   Ok { plan; compiled; execution; reference; authored_source }
 ;;
 
+let prepare_named ~base_path ~capability_surface ~keeper_name ~plan =
+  let* canonical = encode_plan plan in
+  let* compiled = Nested.compile_named_plan ~capability_surface canonical
+    |> Result.map_error (fun error -> Nested_rejected error) in
+  let plan = Nested.plan compiled in
+  let document = `Assoc
+    ["keeper",`String keeper_name;"execution",`String "async";
+     "recipe",canonical;"plan",canonical;"nested_calls",Nested.calls_to_json compiled;
+     "contracts",contracts ~capability_surface plan;"skill",`Null] in
+  let* reference = put_document ~base_path document in
+  Ok {plan;compiled;execution=Catalog.Async;reference;authored_source=None}
+;;
+
 let draft_fields = function
   | `Assoc fields ->
     let names = List.map fst fields in
@@ -290,7 +303,7 @@ let required_string fields name =
   | Some _ | None -> Error (Malformed_draft ("expected string " ^ name))
 ;;
 
-type admission_check = Exact_surface | Sealed_continuation
+type admission_check = Exact_surface | Sealed_continuation of Keeper_tool_execution_journal.producer
 
 let load_with ~admission_check ~base_path ~capability_surface ~keeper_name ~sha256 =
   let* bytes = Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256
@@ -317,12 +330,16 @@ let load_with ~admission_check ~base_path ~capability_surface ~keeper_name ~sha2
     | Exact_surface ->
       if String.equal recorded_surface (Keeper_capability_surface.digest capability_surface)
       then Ok () else Error Capability_changed
-    | Sealed_continuation ->
+    | Sealed_continuation _ ->
       if String.length recorded_surface = 64
           && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) recorded_surface
       then Ok () else Error Capability_changed in
   let* compiled = match List.assoc_opt "recipe" fields with
-    | Some json -> validate_plan ~capability_surface json
+    | Some json ->
+      (match admission_check with
+       | Exact_surface | Sealed_continuation Prepared -> validate_plan ~capability_surface json
+       | Sealed_continuation (Named _) -> Nested.compile_named_plan ~capability_surface json
+           |> Result.map_error (fun error -> Nested_rejected error))
     | None -> Error (Malformed_draft "missing recipe") in
   let plan = Nested.plan compiled in
   let* canonical = encode_plan plan in
@@ -365,7 +382,7 @@ let load_continuation ~base_path ~capability_surface continuation =
   let* () = if String.equal canonical_base (Keeper_tool_execution_journal.continuation_base_path continuation)
     then Ok () else Error (Malformed_draft "continuation belongs to another workspace") in
   let source = Keeper_tool_execution_journal.continuation_source continuation in
-  let* draft = load_with ~admission_check:Sealed_continuation ~base_path ~capability_surface
+  let* draft = load_with ~admission_check:(Sealed_continuation source.producer) ~base_path ~capability_surface
       ~keeper_name:source.keeper_name ~sha256:source.draft_reference.sha256 in
   match draft.execution with
   | Catalog.Async -> Ok draft

@@ -27,7 +27,6 @@ The Collab hub is built into `masc-tui` and accessed directly from the terminal 
 - `bin/masc_tui_keys.ml`: Navigation key bindings (`&`, `F5`, `F4`, `Tab`).
 - `bin/masc_tui_types.ml`: `Collab_focus` (`Spectator` | `Conversation` | `PlayInvites`).
 - `bin/masc_tui_play_pending.ml`: Journaling durable invite intents before dispatch (`.masc/tui-play-pending.jsonl`).
-- PR references: #41612 (`e10a8627`), #41668 (`1cee575b`), #41671 (`42307059`), RFC-0439.
 
 ---
 
@@ -50,7 +49,7 @@ The Collab hub is built into `masc-tui` and accessed directly from the terminal 
 ### 1. Launching MASC TUI
 ```bash
 # Build the TUI binary from source
-dune build bin/masc_tui.exe
+dune build --root . bin/masc_tui.exe
 
 # Start the TUI pointing to your workspace and server port
 ./_build/default/bin/masc_tui.exe --base-path ~/masc --port 8935
@@ -73,7 +72,6 @@ dune build bin/masc_tui.exe
 - **Release Control**: Press `F5` in the MSX view to return immediately to `Observation` mode.
 - **Exit View**: Press `Esc` to leave the active machine screen and return to Collab; press `q` or `Esc` in Collab to return to the primary TUI surface.
 - **Revoke Invite**: Highlight the invite in Collab and press `x`, or execute `/play revoke <name>` from the TUI command bar.
-- **Revert Code Changes**: Revert commits for PRs #41612, #41668, and #41671.
 
 ---
 

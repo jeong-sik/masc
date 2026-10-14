@@ -27,7 +27,7 @@ port = 9222                                                 # Optional, default 
 ```
 
 ### 2. CLI Setup Tool (`masc browser-lane-setup`)
-Alternatively, configure the table and install host wrappers automatically using the CLI setup command (PR #42941 / #42942 stack):
+Alternatively, configure the table and install host wrappers automatically using the CLI setup command:
 
 ```bash
 masc browser-lane-setup --mode bidi \
@@ -42,7 +42,6 @@ masc browser-lane-setup --mode bidi \
 - `lib/browser_host/browser_host.ml`: BiDi host launcher and process lock management.
 - `lib/browser_bidi_peer.ml`: WebDriver BiDi peer connection and profile verification.
 - `lib/browser_bidi_host_status.ml`: `bidiHost` status reporting (`masc_starts`, `lane_off`, `not_configured`, `not_known`).
-- PR references: #42125, #42151 (`e77017b9`), #42235 (`9fe523cf`), #42250 (`383bd3a7`), #42941 (`d0bf327d`).
 
 ---
 
@@ -73,15 +72,15 @@ masc browser-lane-setup --mode bidi \
 # Create an isolated Firefox profile directory
 mkdir -p "$HOME/.masc/browser-lane/firefox-profile"
 
-# Append configuration to runtime.toml
-cat << 'EOF' >> .masc/config/runtime.toml
+# Append configuration to runtime.toml (expands $HOME to match the directory above)
+cat << EOF >> .masc/config/runtime.toml
 
 [browser.live]
 enabled = true
 
 [browser.live.bidi]
 firefox = "/Applications/Firefox.app/Contents/MacOS/firefox"
-profile = "/Users/dancer/me/.masc/browser-lane/firefox-profile"
+profile = "$HOME/.masc/browser-lane/firefox-profile"
 port = 9222
 EOF
 ```
@@ -89,10 +88,10 @@ EOF
 ### 2. Launch Server and Verify
 ```bash
 # Start MASC server
-dune exec bin/masc.exe -- run
+dune exec --root . masc -- start --port 8935
 
 # In another terminal, inspect diagnostics
-dune exec bin/masc.exe -- doctor
+dune exec --root . masc -- doctor
 
 # Inspect start audit receipt
 cat .masc/browser-lane/keeper-firefox-start.json
@@ -119,6 +118,5 @@ tail -n 20 .masc/browser-lane/bidi-host.log
 ## (e) Experimental Status & Known Limitations / 실험 표시 및 알려진 한계
 
 - **Status**: Introduced in v0.52.0. Requires Firefox 157.0.1+ with Remote Agent support.
-- **Dedicated Profile Invariant**: You **must** supply a dedicated profile path. Using your everyday default profile will fail if your personal browser is already running (`--firefox-profile` guard, PR #42151).
+- **Dedicated Profile Invariant**: You **must** supply a dedicated profile path. Using your everyday default profile will fail if your personal browser is already running (`--firefox-profile` guard).
 - **Loopback Enforcement**: The WebSocket BiDi URL is strictly constrained to loopback (`127.0.0.1`); remote non-local hosts are rejected for security.
-- **Host Selector Clock Semantics**: Heartbeat monitoring relies on monotonic time. During system sleep/suspend, wall-clock jumps do not disrupt connection tracking, but wake-from-sleep may require a brief reconnection cycle if Firefox drops the socket.

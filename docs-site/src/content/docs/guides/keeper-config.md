@@ -5,7 +5,7 @@ description: User guide for tool_approval_timeout_sec, keeper_memory_select, and
 
 ## (a) Overview / 한 줄 요약
 
-This guide details configuration settings for tuning human-in-the-loop (HITL) tool approval timeouts, enabling the purpose-driven `keeper_memory_select` tool, and observing workspace memory briefing and claim growth through Prometheus metrics gauges.
+This guide details configuration settings for tuning human-in-the-loop (HITL) tool approval timeouts, enabling the purpose-driven `keeper_memory_select` tool, and observing workspace memory briefing and claim growth through OpenTelemetry (OTLP) metrics gauges.
 
 Keeper 런타임의 인간 개입(HITL) 도구 승인 대기 시간 조절, 목적 기반 장기 기억 선별 도구(`keeper_memory_select`) 활성화, 워크스페이스 메모리 관측 게이지 메트릭을 설정하고 제어하는 가이드입니다.
 
@@ -13,7 +13,7 @@ Keeper 런타임의 인간 개입(HITL) 도구 승인 대기 시간 조절, 목�
 
 ## (b1) Enabling: Settings & Environment Variables / 켜는 법: 설정 이름
 
-### 1. Tool Approval Timeout (`tool_approval_timeout_sec`, #41768)
+### 1. Tool Approval Timeout (`tool_approval_timeout_sec`)
 Controls the duration the runtime waits for an operator's approval when a Keeper invokes a sensitive tool protected by the Gate.
 
 - **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
@@ -26,7 +26,7 @@ Controls the duration the runtime waits for an operator's approval when a Keeper
   export MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC=300
   ```
 
-### 2. Purpose-Driven Memory Selection (`keeper_memory_select`, #42075)
+### 2. Purpose-Driven Memory Selection (`keeper_memory_select`)
 Enables the `keeper_memory_select` tool, allowing Keepers to retrieve verified current ordinary and source-bound memory facts relevant to an explicit decision context.
 
 - **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
@@ -36,7 +36,7 @@ Enables the `keeper_memory_select` tool, allowing Keepers to retrieve verified c
   # excluded_keepers = ["some-keeper"]       # Optional exclusion list
   ```
 
-### 3. Workspace Memory Observation Gauges (`gauge`, #42276, #42298)
+### 3. Workspace Memory Observation Gauges (`gauge`)
 Tracks briefing size and classified ledger claim count to prevent unbounded memory growth.
 
 - **Metric Names**:
@@ -45,11 +45,10 @@ Tracks briefing size and classified ledger claim count to prevent unbounded memo
 - **Activation**: Automatically collected at the `Workspace_memory_ledger.observe` boundary during both direct owner turns and unified wake turns. No configuration needed.
 
 ### Key Code & Module Coordinates
-- `lib/keeper/keeper_config.ml:129-140` and `lib/keeper/keeper_config.mli:79-86`: HITL configuration parser and validation clamping (`tool_approval_timeout_sec`).
-- `lib/typesafeai/typesafeai_config.ml:140` & `lib/runtime/runtime_schema.ml:478`: `workspace_memory_selection_enabled` flag.
-- `lib/keeper/keeper_workspace_memory_observation_metrics.ml:1-26`: Unlabeled gauge series definitions and update logic (`record`).
+- `lib/keeper/keeper_config.ml` and `lib/keeper/keeper_config.mli`: HITL configuration parser and validation clamping (`tool_approval_timeout_sec`).
+- `lib/typesafeai/typesafeai_config.ml` & `lib/runtime/runtime_schema.ml`: `workspace_memory_selection_enabled` flag.
+- `lib/keeper/keeper_workspace_memory_observation_metrics.ml`: Unlabeled gauge series definitions and update logic (`record`).
 - `lib/keeper/keeper_turn.ml` & `lib/keeper/keeper_unified_turn.ml`: Turn observation hook boundaries.
-- PR references: #41768 (`36db387f`), #42075 (`917cc096`), #42276 (`bfbb23bc`), #42298 (`c0ed3b7b`).
 
 ---
 
@@ -64,12 +63,12 @@ Tracks briefing size and classified ledger claim count to prevent unbounded memo
   - Revalidates underlying source-bound file bytes before returning claims.
 - **Metrics Gauges**:
   - Emitted whenever a Keeper turn completes an observation pass.
-  - Unlabeled single series: Both metrics publish exactly one global series for the workspace rather than proliferating per-Keeper copies (#42298).
+  - Unlabeled single series: Both metrics publish exactly one global series for the workspace rather than proliferating per-Keeper copies.
 
 ### Failure Symptoms & Diagnostics
 - **Approval Timeout Expiry**: When the timeout expires before operator decision, the tool call fails with a `timed_out` rejection. If the operator approves later, the response is routed to the late-approval journal rather than resurrecting the expired turn.
 - **Memory Select Rejection**: If `workspace_memory_selection_enabled = false`, calling `keeper_memory_select` fails immediately with `workflow_rejection`.
-- **Missing Briefing Gauge Retention**: If the shared briefing is temporarily missing or unreadable, the gauge retains its last measured size rather than erroneously dropping to 0 bytes (#42298).
+- **Missing Briefing Gauge Retention**: If the shared briefing is temporarily missing or unreadable, the gauge retains its last measured size rather than erroneously dropping to 0 bytes.
 
 ---
 
@@ -92,21 +91,20 @@ workspace_memory_selection_enabled = true
 ```bash
 # Launch server with custom approval timeout
 export MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC=600
-dune exec bin/masc.exe -- run
+dune exec --root . masc -- start --port 8935
 ```
 
-### 3. Inspecting Memory Metrics via Curl
+### 3. Exporting Memory Gauges via OpenTelemetry (OTLP)
+The gauges are stored in `Otel_metric_store` and pushed via OpenTelemetry OTLP on each collector tick (`lib/otel_metrics/otel_metrics.mli`, `lib/otel_spans/otel_config.mli`; the legacy `/metrics` scrape route was retired in RFC-0217 S4-2):
 ```bash
-# Query the local Prometheus metrics endpoint
-curl -s http://127.0.0.1:8935/metrics | grep masc_keeper_workspace_memory
+# Enable OTel export to a local OTLP HTTP collector (defaults to http://127.0.0.1:4318)
+export MASC_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
+dune exec --root . masc -- start --port 8935
 
-# Example output:
-# # HELP masc_keeper_workspace_memory_briefing_bytes Byte size of the published workspace briefing body
-# # TYPE masc_keeper_workspace_memory_briefing_bytes gauge
-# masc_keeper_workspace_memory_briefing_bytes 1814
-# # HELP masc_keeper_workspace_memory_ledger_claims Count of classified memory claims in the shared ledger
-# # TYPE masc_keeper_workspace_memory_ledger_claims gauge
-# masc_keeper_workspace_memory_ledger_claims 422
+# Exported gauge series names in OTLP metric batches:
+# - masc_keeper_workspace_memory_briefing_bytes (Gauge, unlabeled)
+# - masc_keeper_workspace_memory_ledger_claims (Gauge, unlabeled)
 ```
 
 ---

@@ -97,10 +97,11 @@ let keeper_trust_json ?(include_receipt = false)
           `Null );
     ]
 
-let degraded_keeper_trust_json ~site ~attention_reason =
+let degraded_keeper_trust_json ~error =
+  let module Core = Keeper_runtime_trust_snapshot_core in
   Keeper_runtime_trust_snapshot.unread_keeper_json
     ~disposition:Keeper_trust_disposition.Degraded
-    ~disposition_reason:site
-    ~attention_reason
+    ~disposition_reason:Core.Keeper_dashboard_worker_exception
+    ~attention_reason:(Core.Dashboard_worker_error error)
     ~next_human_action:"inspect_keeper_dashboard_worker"
 ;;

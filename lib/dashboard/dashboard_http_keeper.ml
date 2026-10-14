@@ -49,12 +49,10 @@ let non_empty_trimmed_string_opt value =
   if trimmed = "" then None else Some trimmed
 
 let degraded_keeper_dashboard_row
-      ?error
-      ~(site : string)
+      ~(error : string)
       (m : Keeper_meta_contract.keeper_meta)
   =
-  let attention_reason = Option.value ~default:site error in
-  let runtime_trust = Trust.degraded_keeper_trust_json ~site ~attention_reason in
+  let runtime_trust = Trust.degraded_keeper_trust_json ~error in
   let fd_observation = `Assoc (Keeper_fd_pressure.projection_fields ()) in
   let runtime_id =
     Keeper_meta_contract.runtime_id_of_meta m |> non_empty_trimmed_string_opt
@@ -63,8 +61,11 @@ let degraded_keeper_dashboard_row
   let diagnostic =
     `Assoc
       ([ ("status", `String "degraded")
-       ; ("reason", `String site)
-       ; ("error", Json_util.string_opt_to_json error)
+       ; ( "reason"
+         , `String
+             Keeper_runtime_trust_snapshot_core.(
+               disposition_reason_to_wire Keeper_dashboard_worker_exception) )
+       ; ("error", `String error)
        ; ("fd_observation", fd_observation)
        ])
   in
@@ -906,9 +907,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              match Keeper_meta_store.read_meta config name with
              | Ok (Some meta) ->
                  Some
-                   (degraded_keeper_dashboard_row
-                      ~site:"keeper_dashboard_worker_exception"
-                      ~error
+                   (degraded_keeper_dashboard_row ~error
                       meta)
              | Error _ | Ok None -> None
            with
@@ -1063,9 +1062,7 @@ let execution_trust_keeper_rows (config : Workspace.config) =
                 match Keeper_meta_store.read_meta config name with
                 | Ok (Some meta) ->
                   Some
-                    (degraded_keeper_dashboard_row
-                       ~site:"keeper_dashboard_worker_exception"
-                       ~error
+                    (degraded_keeper_dashboard_row ~error
                        meta
                      |> execution_trust_row_of_dashboard_row)
                 | Error _ | Ok None -> None

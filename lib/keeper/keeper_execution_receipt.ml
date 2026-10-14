@@ -90,6 +90,7 @@ type operator_disposition_reason =
   | Reason_accept_rejected
   | Reason_terminal_effect_failed
   | Reason_unmapped_runtime_state
+[@@deriving enumerate]
 
 let operator_disposition_reason_to_string = function
   | Reason_healthy -> "healthy"
@@ -113,6 +114,12 @@ let operator_disposition_reason_to_string = function
   | Reason_accept_rejected -> Keeper_internal_error.accept_rejected_kind
   | Reason_terminal_effect_failed -> Keeper_internal_error.terminal_effect_failed_kind
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
+;;
+
+let operator_disposition_reason_of_string value =
+  List.find_opt
+    (fun reason -> String.equal (operator_disposition_reason_to_string reason) value)
+    all_of_operator_disposition_reason
 ;;
 
 let operator_disposition (receipt : t)

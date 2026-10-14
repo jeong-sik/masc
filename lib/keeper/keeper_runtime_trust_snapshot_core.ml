@@ -6,32 +6,68 @@ type raw =
   { approval_queue : approval_queue
   ; runtime_blocker_class : Keeper_status_bridge_blocker.runtime_blocker_class option
   ; receipt_operator_disposition :
-      (Keeper_execution_receipt.operator_disposition_kind * string) option
+      (Keeper_execution_receipt.operator_disposition_kind
+      * Keeper_execution_receipt.operator_disposition_reason)
+        option
   ; status_attention : Keeper_attention_reason.t option
   ; terminal_next_human_action : string option
   }
 
+type disposition_reason =
+  | Healthy
+  | Approval_queue_unreadable
+  | Pending_operator_decision
+  | Runtime_exhausted
+  | Critical_block
+  | Unknown_runtime_blocker
+  | Keeper_dashboard_worker_exception
+  | Receipt_reason of Keeper_execution_receipt.operator_disposition_reason
+
+let disposition_reason_to_wire = function
+  | Healthy -> "healthy"
+  | Approval_queue_unreadable -> "approval_queue_unavailable"
+  | Pending_operator_decision -> "pending_operator_decision"
+  | Runtime_exhausted -> "runtime_exhausted"
+  | Critical_block -> "critical_block"
+  | Unknown_runtime_blocker -> "unknown_runtime_blocker"
+  | Keeper_dashboard_worker_exception -> "keeper_dashboard_worker_exception"
+  | Receipt_reason reason -> Keeper_execution_receipt.operator_disposition_reason_to_string reason
+;;
+
+type attention_reason =
+  | Status_attention of Keeper_attention_reason.t
+  | Disposition_attention of disposition_reason
+  | Dashboard_worker_error of string
+
+let attention_reason_to_wire = function
+  | Status_attention reason -> Keeper_attention_reason.to_wire reason
+  | Disposition_attention reason -> disposition_reason_to_wire reason
+  | Dashboard_worker_error message -> message
+;;
+
 type t =
   { disposition : Keeper_trust_disposition.t
-  ; disposition_reason : string
+  ; disposition_reason : disposition_reason
   ; receipt_operator_disposition :
-      (Keeper_execution_receipt.operator_disposition_kind * string) option
+      (Keeper_execution_receipt.operator_disposition_kind
+      * Keeper_execution_receipt.operator_disposition_reason)
+        option
   ; needs_attention : bool
-  ; attention_reason : string option
+  ; attention_reason : attention_reason option
   ; next_human_action : string option
   }
 
 let fallback_disposition raw =
   match raw.approval_queue with
-  | Approval_queue_unavailable -> Keeper_trust_disposition.Alert, "approval_queue_unavailable"
+  | Approval_queue_unavailable -> Keeper_trust_disposition.Alert, Approval_queue_unreadable
   | Approval_queue_available pending_approval_count when pending_approval_count > 0 ->
-    Keeper_trust_disposition.Alert, "pending_operator_decision"
+    Keeper_trust_disposition.Alert, Pending_operator_decision
   | Approval_queue_available _ ->
     (match raw.runtime_blocker_class with
      | Some Keeper_status_bridge_blocker.Blocked_by_runtime_exhaustion ->
-       Keeper_trust_disposition.Alert, "runtime_exhausted"
+       Keeper_trust_disposition.Alert, Runtime_exhausted
      | Some Keeper_status_bridge_blocker.Blocked_by_unresolved_fiber ->
-       Keeper_trust_disposition.Alert, "critical_block"
+       Keeper_trust_disposition.Alert, Critical_block
      (* These seven show as unknown_runtime_blocker. Which reason each should
         show is a display decision of its own (#43018). *)
      | Some
@@ -42,8 +78,26 @@ let fallback_disposition raw =
          | Keeper_status_bridge_blocker.Blocked_by_turn_configuration_error
          | Keeper_status_bridge_blocker.Blocked_by_exception
          | Keeper_status_bridge_blocker.Blocked_by_operator_interrupt ) ->
-       Keeper_trust_disposition.Alert, "unknown_runtime_blocker"
-     | None -> Keeper_trust_disposition.Pass, "healthy")
+       Keeper_trust_disposition.Alert, Unknown_runtime_blocker
+     | None -> Keeper_trust_disposition.Pass, Healthy)
+;;
+
+(* The verdict a shown receipt stands for. A passing receipt reads as healthy
+   whatever its reason (it may say the turn waits for input); every other kind
+   shows the receipt's own reason. *)
+let receipt_disposition kind reason =
+  let module R = Keeper_execution_receipt in
+  match kind with
+  | R.Disp_pass -> Keeper_trust_disposition.Pass, Healthy
+  | R.Disp_skipped | R.Disp_pass_next_model | R.Disp_fail_open_next_runtime
+  | R.Disp_retry_later ->
+    Keeper_trust_disposition.Pass, Receipt_reason reason
+  | R.Disp_operator_action_required | R.Disp_user_cancelled ->
+    Keeper_trust_disposition.Blocked, Receipt_reason reason
+  (* Not "Blocked": the Keeper keeps running. What the turn may have done
+     outside still needs a person, so it stays an alert. *)
+  | R.Disp_effect_review_required -> Keeper_trust_disposition.Alert, Receipt_reason reason
+  | R.Disp_unknown -> Keeper_trust_disposition.Alert, Receipt_reason reason
 ;;
 
 (* Only a shown receipt has an operator disposition to relay. The snapshot's
@@ -57,9 +111,7 @@ let effective_disposition raw ~fallback_disposition ~fallback_reason =
     , (Some (operator_disposition, operator_reason) as receipt_operator_disposition) )
     ->
     let disposition, disposition_reason =
-      Keeper_operator_disposition_display.of_kind
-        ~operator_disposition_reason:operator_reason
-        operator_disposition
+      receipt_disposition operator_disposition operator_reason
     in
     disposition, disposition_reason, receipt_operator_disposition
   | Approval_queue_unavailable, _
@@ -77,8 +129,8 @@ let decide raw =
   in
   let attention_reason =
     match raw.status_attention with
-    | Some reason -> Some (Keeper_attention_reason.to_wire reason)
-    | None when needs_attention -> Some disposition_reason
+    | Some reason -> Some (Status_attention reason)
+    | None when needs_attention -> Some (Disposition_attention disposition_reason)
     | None -> None
   in
   let next_human_action =

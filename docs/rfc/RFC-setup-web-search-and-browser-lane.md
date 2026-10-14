@@ -37,6 +37,13 @@ host 를 직접 띄우는 BiDi 경로다(RFC browser-keeper-firefox, 10/09). 브
 웹 도구 지원 의존성(geckodriver, Firefox, SearXNG, Stagehand)은 기존 설치 카탈로그에
 더하고 운영자가 목록에서 고른다(§4.5).
 
+2026-10-14 개정. 목록은 미리 체크된 채로 시작한다(§4.3). 처음 설치한 imp 가 브라우저도
+GitHub 도 못 쓰는 상태를 기본으로 두지 않기 위해서다. 미리 체크하는 것은 비밀도 사람
+손도 필요 없는 automation 레인, 웹 검색 점검, imp 의 GitHub 로그인이고, 인증 없는
+포트를 여는 BiDi 와 사람이 매번 불러야 하는 확장은 해제로 시작한다. `gh` 는 샌드박스
+이미지에 이미 있어서 카탈로그에 넣지 않는다(§4.5). 이 결정이 `--mode automation` 을
+요구한다(§7).
+
 ## 1. 지금 일어나는 일
 
 ### 1.1 웹 검색
@@ -333,6 +340,11 @@ README 가 당부하는 것이 유일한 안전장치다.
    한 번 로그인한다. 포트에 인증이 없다는 것과 그것을 전용 프로필로 줄인다는 것을
    같이 적는다.
 
+**`--mode host`**(구현하면서 더했다, #42976): 공통 부분만 한다. host 와 launcher 와
+토큰만 쓰고 확장, manifest, `runtime.toml` 은 쓰지도 요구하지도 않는다. 브라우저를 손으로
+붙이는 운영자와, 설치된 레인의 host 를 지금 빌드로 맞추는 쪽(`install-local-build.sh`)이
+쓴다.
+
 **두 길 공통, 마지막에:** `Browser_lane_launcher.observe` 의 판정과 `masc doctor`
 의 `browser_bidi_host` 줄이 말하는 것을 그대로 낸다. RFC
 browser-live-one-connection 이 "설정 명령의 확인 단계"로 남겨 둔 일이 이것이다.
@@ -360,8 +372,11 @@ browser-live-one-connection 이 "설정 명령의 확인 단계"로 남겨 둔 �
 음성처럼 선택 단계이므로 여기서 실패해도 설치를 끝내지 않는다. `select_local_voice`
 가 그 이유를 적어두었다. 선택인 단계는 자기가 선택인 대상을 무너뜨릴 수 없다.
 
-빠른 설치 경로에서는 둘 다 건너뛰고 명령 이름을 알린다. 음성이 지금 그렇게 한다.
-"imp stays text only. Run masc voice-local-setup to give it a voice later."
+빠른 설치 경로(대화형이 아닌 설치)에서는 체크된 항목을 실행하지 않는다. 목록과 항목마다
+명령 한 줄을 출력하고 끝낸다. 음성이 지금 그렇게 한다. "imp stays text only. Run masc
+voice-local-setup to give it a voice later." 실행하려면 `--yes` 같은 명시 플래그를
+준다(이름은 구현 때 정한다). 설치 파이프에는 고르는 사람이 없으므로 아무도 고르지 않은
+설치를 만들지 않는다.
 
 브라우저 단계는 설치된 브라우저에 맞춰 보여준다.
 
@@ -373,8 +388,24 @@ browser-live-one-connection 이 "설정 명령의 확인 단계"로 남겨 둔 �
 - 둘 다 없으면 아예 묻지 않는다. 브라우저 설치부터 권하는 것은 설치 마법사가 할
   일이 아니다.
 
-마법사는 기본값을 대신 고르지 않는다. 어느 길이 맞는지는 그 사람이 일상 브라우저를
-쓰게 할지, 전용 브라우저를 둘지에 달려 있다. 건너뛰기도 고를 수 있어야 한다.
+기본값은 "한다"로 둔다(운영자 결정, 2026-10-14). 처음 설치한 imp 는 브라우저도 GitHub
+도 못 써서 할 수 있는 일이 거의 없다. 그 상태를 기본으로 두면 설치를 끝낸 사람이 다시
+설정 명령을 찾아 나서야 한다. 그래서 목록은 미리 체크된 채로 시작하고 사람이 빼는
+쪽이다. 고르는 방식은 그대로다. 아무것도 자동으로 깔리지 않고, 사람이 목록을 보고
+확정해야 실행된다.
+
+미리 체크하는 것은 비밀도 사람 손도 필요 없는 것으로 한정한다.
+
+| 항목 | 기본 | 이유 |
+|---|---|---|
+| automation 레인(`Geckodriver`, `Firefox`, `[browser.automation]` 쓰기) | 체크 | 로그인도 포트도 필요 없다. imp 가 공개 페이지를 읽는 일은 이것만으로 된다 |
+| 웹 검색 점검(`masc web-search-setup`) | 체크 | 키가 없을 때 어느 공급자도 안 되는 이유를 보여준다. 키는 만들어 주지 않는다 |
+| imp 의 GitHub 로그인(`masc keeper-github login imp`) | 체크 | 사람이 브라우저에서 코드를 승인해야 끝난다. 승인하지 않으면 아무것도 남지 않는다 |
+| BiDi 길 | 해제 | 인증 없는 디버깅 포트를 연다. 그 Firefox 에 사람이 한 번 로그인해야 쓸모가 있다 |
+| 확장 길 | 해제 | 브라우저를 켤 때마다 사람이 `about:debugging` 에서 불러야 한다 |
+
+GitHub 로그인은 사람이 코드를 승인해야 하므로 `--yes` 로도 건너뛰고 명령 이름만
+알린다.
 
 BiDi 길의 로그인은 마법사가 못 한다. 서버를 띄우기 전에는 그 Firefox 가 없기
 때문이다. 마법사는 끝에 "서버가 뜨면 이 Firefox 에서 한 번 로그인하세요" 를 적는다.
@@ -388,7 +419,8 @@ BiDi 길의 로그인은 마법사가 못 한다. 서버를 띄우기 전에는 
 ### 4.5 도구 지원 의존성을 카탈로그에 더한다
 
 운영자 결정(2026-10-13): 설치는 목록에서 고른다. 자동으로 깔지 않는다. 범위는 가능한
-한 넓게 가고 Stagehand 까지 넣는다.
+한 넓게 가고 Stagehand 까지 넣는다. 운영자 결정(2026-10-14): 목록은 미리 체크된 채로
+시작한다. 어느 항목을 체크해 두는지는 §4.3 의 표가 정한다.
 
 새 틀은 만들지 않는다. `Sandbox_prerequisites` 가 이미 그 틀이다. 의존성이 닫힌
 variant 이고, 동작은 운영자가 고르며, 쉘 문자열이 아니라 argv 로만 실행하고, 권한을
@@ -414,13 +446,23 @@ Homebrew 의 `geckodriver` formula 와 `firefox`·`chromium` cask 가 있는 것
 마법사는 이 카탈로그를 한 번에 감지해서 체크 목록으로 보여준다.
 
 - 한 줄에 이름, 켜주는 기능, 지금 상태, 실행될 명령 한 줄, 관리자 권한이 필요한지를
-  적는다. 기본은 모두 미선택이다.
+  적는다. 체크 여부는 §4.3 의 표를 따른다. 그 표에 없는 항목(`Searxng`, `Chromium`,
+  `Stagehand_extension`)은 해제로 시작한다. Docker 컨테이너를 띄우거나, 아직 잰 적
+  없는 것이기 때문이다.
 - 고른 것만 실행하고, 실행 뒤에 감지를 다시 한다(`Commands_completed_recheck_required`).
   실행한 동작이 성공했다고 켜졌다고 말하지 않는다.
 - Homebrew 가 없으면 그 사실을 맨 앞에 적는다. Homebrew 를 설치하는 동작은 만들지
   않는다. 지금 카탈로그가 그렇게 정했다.
 - API 키가 필요한 검색 공급자는 설치 대상이 아니다. 같은 목록에 "키 필요" 줄로
   보여주고 `masc web-search-setup` 을 가리킨다.
+
+`gh` 는 이 카탈로그에 넣지 않는다(2026-10-14 확인). Keeper 샌드박스의 `base` 이미지
+(`sandbox-images/base/Dockerfile`)가 이미 `gh` 를 담고 있고, MASC 가 Keeper 의 GitHub
+CLI 설정을 게스트에 마운트한 뒤 거기서 `gh auth status` 를 확인한다. 이미지 주석은
+"자격증명만 싣고 그것을 읽는 프로그램을 싣지 않아서 커밋은 되는데 PR 을 못 여는
+Keeper" 를 만든 적이 있다고 적는다. 부족한 것은 프로그램이 아니라 Keeper 의 로그인이다.
+로그인은 `masc keeper-github login <keeper>`(기기 코드 승인)나 `set-token` 이 한다.
+호스트에 `gh` 를 깔아도 imp 의 샌드박스 안에서는 바뀌는 것이 없다.
 
 알려진 어려움 둘:
 
@@ -499,18 +541,18 @@ BiDi 길과 두 길 선택을 더한다.
   이 경우에 닿지 않는다. 지금도 같은 상태이고, 이 RFC 가 나쁘게 만들지도 낫게
   만들지도 않는다.
 
-- 마법사에서 두 길을 고를 때 기본값을 어느 쪽에 둘지는 정하지 않았다. 지금 안은
-  기본값 없이 묻는 것이다. 한 번 설정하고 잊는 쪽을 원하면 BiDi, 일상 브라우저를
-  그대로 쓰고 싶으면 확장이다. 운영자가 정한다.
+- 마법사의 기본 선택은 §4.3 의 표로 정했다(2026-10-14). 남은 것은 BiDi 를 기본으로
+  켤지인데, 인증 없는 포트를 여는 일이라 운영자가 요청할 때만 바꾼다.
 - 두 길을 같이 쓰면 연결을 지정하지 않은 요청이 거절된다. 명령은 그 사실을 알리고,
   어느 쪽을 기본으로 삼을지는 Keeper 의 연결 선택 규칙(RFC
   browser-live-one-connection)에 맡긴다.
 - BiDi 길의 로그인은 사람이 한다. 서버가 뜬 뒤라야 그 Firefox 가 생기므로 설치
   마법사 안에서는 끝낼 수 없다.
-- 이 명령이 automation 도 설정할지(`--mode automation`)는 정하지 않았다.
-  automation 은 geckodriver 경로 하나만 요구하고 로그인이 필요 없는 조사를 한다.
-  live 는 로그인된 사이트를 쓴다. 둘은 대체 관계가 아니다. §4.5 의 체크 목록은 길을
-  하나로 좁히지 않으므로, 남는 것은 표시 순서와 이 모드를 둘지다.
+- `--mode automation` 은 만든다(2026-10-14 결정). 카탈로그가 geckodriver 와 Firefox 를
+  깔아도 서버는 `runtime.toml` 의 `[browser.automation]` 을 읽을 때만 쓰므로(§1.4),
+  기본으로 체크된 automation 항목은 그 표를 써야 끝난다. 쓰는 키는 `geckodriver` 절대
+  경로이고 `binary` 는 운영자가 이름을 줄 때만 쓴다. BiDi 와 같이 표가 이미 있으면
+  값을 바꾸지 않고(§4.2), 쓰기 전에 로더로 다시 읽는다.
 - §4.5 의 `Stagehand_extension` 은 Node.js 를 요구한다. 설치기가 Node.js 없이도
   Stagehand 확장을 놓을 방법(확장을 릴리스에 넣을 수 있는지, 그 라이선스)은 확인하지
   않았다.
@@ -524,13 +566,16 @@ BiDi 길과 두 길 선택을 더한다.
 2. 카탈로그에 의존성을 더한다(§4.5). 감지와 동작만 더하고 마법사는 건드리지 않는다.
    `masc prerequisite-actions` 로 확인한다. 둘로 나눈다.
    - 2a. `Geckodriver`, `Firefox`: 명령 한 줄이거나 공식 페이지 열기뿐이라 기존 동작
-     종류(`Run_commands`, `Open_official_installer`)로 된다. 구현은 별도 PR.
+     종류(`Run_commands`, `Open_official_installer`)로 된다. 구현됨(#42843).
    - 2b. `Searxng`: 설정 파일을 쓰고 컨테이너를 띄워야 한다. 새 동작 종류와 Docker
      준비 확인이 필요해서 따로 한다.
 3. `Browser_lane_setup` 공통 부분과 `--mode extension`: host 설치를 바이너리로 옮기고
    확장 파일을 내장하고 `install-host.sh` 를 지운다. 부르는 쪽(`install-local-build.sh`,
-   launcher 문장, README)도 같이 바꾼다.
-4. `--mode bidi`: `[browser.live.bidi]` 를 쓴다. Firefox 탐색과 프로필 기본값.
-5. 마법사 단계: 카탈로그 체크 목록(§4.5)과 두 명령을 부른다. 브라우저는 설치된 것에
-   맞춰 길을 보여준다.
+   launcher 문장, README)도 같이 바꾼다. 구현됨(#42866, #42867).
+4. `--mode bidi`: `[browser.live.bidi]` 를 쓴다. Firefox 탐색과 프로필 기본값. 구현됨
+   (#42941). 같은 스택에서 `--mode host` 를 더했다(#42976).
+4b. `--mode automation`: `[browser.automation]` 에 geckodriver 경로를 쓴다(§7).
+5. 마법사 단계: 미리 체크된 목록(§4.3), 카탈로그의 항목들(§4.5), 세 명령
+   (`web-search-setup`, `browser-lane-setup`, `keeper-github login`)을 부른다. 브라우저는
+   설치된 것에 맞춰 길을 보여준다.
 6. `Chromium`, `Stagehand_extension`: 값이 측정되지 않았으므로 마지막에 한다.

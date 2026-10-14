@@ -81,8 +81,13 @@ val lookup
   -> (replay, error) result
 (** Completed results are reusable. A producer-owned job-result wait permits
     only rechecking that exact read-only leaf, preserving its occurrence IDs.
-    A producer-proven pre-effect failure or a previous statically read-only
-    Attempting record may dispatch again. Other deferred and unproven effect
+    A proven pre-effect failure of the same canonical read-only job-result leaf
+    also rechecks with its original IDs, even when the failure carries no wait
+    marker. An owned read-only job-result Attempting record from a terminal
+    prior worker preserves those IDs when rechecking after cancellation or
+    interruption.
+    Other producer-proven pre-effect failures and previous statically read-only
+    Attempting records may dispatch again. Other deferred and unproven effect
     outcomes reject replay. *)
 
 val begin_attempt

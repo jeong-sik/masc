@@ -339,7 +339,10 @@ let replay_for binding node_id = function
   | Some (Settled (occurrence, completed, phase, Some job_id))
       when valid_job_wait occurrence completed.result phase job_id ->
       Ok (Recheck_job_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
-  | Some (Settled (_, {result = Tool_result.Failed _; _}, Some Tool_result.Proven_pre_effect, _)) -> Ok Dispatch
+  | Some (Settled (occurrence, {result = Tool_result.Failed _; _}, Some Tool_result.Proven_pre_effect, _)) ->
+      (match result_read_job occurrence with
+       | Some _ -> Ok (Recheck_job_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+       | None -> Ok Dispatch)
   | Some (Attempting occurrence) when occurrence.readonly && not (same_binding occurrence.owner binding) ->
       (match result_read_job occurrence with
        | Some _ -> Ok (Recheck_job_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})

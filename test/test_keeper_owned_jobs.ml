@@ -315,7 +315,7 @@ let result_document ~base_path content =
 let invoke_raw bundle ~tool_use_id ~turn name input =
   let tool = List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) bundle.Masc.Keeper_tools_agent_core.tools
     |> function Some tool -> tool | None -> failf "public job tool unavailable: %s" name in
-  let execution_mode = match Masc.Tool_schemas_owned_job.find_definition name with
+  let execution_mode = match Tool_schemas_owned_job.find_definition name with
     | Some {read_only=true;_} -> Agent_core.Tool_contract.Concurrent
     | Some {read_only=false;_} | None -> Agent_core.Tool_contract.Serial in
   check bool "public tool uses its canonical execution mode" true
@@ -888,6 +888,20 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       (`Assoc ["sha256", `String sha256; "resume_run_id", `String run_id])) in
   set_source fixture ~task_id:"task-B" ~turn:52;
   Process_eio.reset_for_testing (); initialize ();
+  let owner_record = load fixture id in
+  let owner_path = Filename.concat (Store.paths ~base_path:fixture.base_path owner_record.job_id).job_dir "owner.jsonl" in
+  let owner_bytes = read owner_path in
+  let before_refusal = List.length (calls fixture) in
+  let refused_data = Fun.protect ~finally:(fun () -> write owner_path owner_bytes) (fun () ->
+      write owner_path "{temporarily-invalid-owner\n";
+      let refused = resume () in
+      let ok, data, _ = await_composition env fixture refused in
+      check bool "unreadable original owner refuses result rechecking" false ok;
+      data) in
+  check int "transient result refusal cannot call the backend" before_refusal (List.length (calls fixture));
+  let refused_node = composition_nodes fixture refused_data |> composition_node "await" in
+  List.iter (fun field -> check_json ("refusal preserves original occurrence " ^ field)
+      (awaiting |> member field) (refused_node |> member field)) ["execution_id";"tool_use_id"];
   control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-unavailable" ~turn:52 "keeper_job_status" (argument id)));

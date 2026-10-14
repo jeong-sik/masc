@@ -674,6 +674,7 @@ let check_delivery ~base_path ~freshness expected =
   let direct = Masc.Keeper_turn.For_testing.direct_turn_dynamic_context
     ~lane_updates:(Ok (`List [])) ~workspace_memory:observation
     ~workspace_memory_access:(Some access)
+    ~wiki_contents:Masc.Keeper_wiki_contents.Off
     ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
     ~approval_authority_text:"" ~recent_direct_conversation_text:""
     ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" in

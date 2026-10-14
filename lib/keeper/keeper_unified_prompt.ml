@@ -1167,6 +1167,28 @@ let format_workspace_memory_observation ?access = function
         "briefing_status", briefing_status;
         "retrieval_route", render_fragment route [] ] ^ "\n\n")
 
+(* The wiki table of contents (RFC keepers-see-the-wiki-table-of-contents).
+   Keepers did not read the wiki because nothing in a turn said it existed:
+   on 2026-10-13 a Keeper answered "I do not know" to a question whose answer
+   sat in a wiki page. The whole list rides every turn; choosing pages by the
+   current task is a later stage the RFC leaves to measurement. *)
+let format_wiki_observation ?access = function
+  | Keeper_wiki_contents.Off | Keeper_wiki_contents.Listed [] -> None
+  | Keeper_wiki_contents.Unlisted _ ->
+    Some (render_fragment Prompt_names.keeper_context_wiki_unavailable [] ^ "\n\n")
+  | Keeper_wiki_contents.Listed (_ :: _ as entries) ->
+    let route = match access with
+      | None -> Prompt_names.keeper_context_wiki_retrieval_preview
+      | Some access ->
+        match Keeper_request_tool_access.route access ~name:"keeper_wiki_read" with
+        | Direct -> Prompt_names.keeper_context_wiki_retrieval_direct
+        | Discoverable -> Prompt_names.keeper_context_wiki_retrieval_discoverable
+        | Unavailable -> Prompt_names.keeper_context_wiki_retrieval_unavailable in
+    Some (render_fragment Prompt_names.keeper_context_wiki_available
+      [ "page_count", string_of_int (List.length entries);
+        "index", String.concat "\n" (List.map Wiki_journal.render_entry entries);
+        "retrieval_route", render_fragment route [] ] ^ "\n\n")
+
 let format_recent_work = function
   | Keeper_recent_work.Absent -> None
   | Evidence evidence ->
@@ -1190,6 +1212,7 @@ let build_prompt_internal
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?workspace_memory_access
+    ?(wiki_contents = Keeper_wiki_contents.Off)
     ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ?(recent_work = Keeper_recent_work.Absent)
     ~(observation : Keeper_world_observation.world_observation)
@@ -1581,6 +1604,8 @@ let build_prompt_internal
     | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates
     | Keeper_context_layers.Workspace_memory ->
       format_workspace_memory_observation ?access:workspace_memory_access workspace_memory
+    | Keeper_context_layers.Wiki ->
+      format_wiki_observation ?access:workspace_memory_access wiki_contents
     | Keeper_context_layers.Repository_freshness ->
       (match repository_freshness with
        | [] -> None
@@ -1897,6 +1922,7 @@ let build_prompt
       ?active_goal_summaries
       ?workspace_memory
       ?workspace_memory_access
+      ?wiki_contents
       ?lane_updates
       ?repository_freshness
       ?recent_work
@@ -1911,6 +1937,7 @@ let build_prompt
     ?active_goal_summaries
     ?workspace_memory
     ?workspace_memory_access
+    ?wiki_contents
     ?lane_updates
     ?repository_freshness
     ?recent_work
@@ -1924,6 +1951,7 @@ let build_prompt_preview
       ?active_goal_summaries
       ?workspace_memory
       ?workspace_memory_access
+      ?wiki_contents
       ?lane_updates
       ?repository_freshness
       ?recent_work
@@ -1937,6 +1965,7 @@ let build_prompt_preview
     ?active_goal_summaries
     ?workspace_memory
     ?workspace_memory_access
+    ?wiki_contents
     ?lane_updates
     ?repository_freshness
     ?recent_work

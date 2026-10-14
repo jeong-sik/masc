@@ -875,6 +875,12 @@ let run_keeper_cycle
                   Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
                 | Missing | Available _ -> ());
                Keeper_workspace_memory_observation_metrics.record workspace_memory;
+               let wiki_contents = Domain_pool_ref.submit_io_or_inline (fun () ->
+                 Keeper_wiki_contents.observe ~base_path:config.base_path) in
+               (match wiki_contents with
+                | Keeper_wiki_contents.Unlisted detail ->
+                  Log.Keeper.warn "wiki listing unavailable keeper=%s: %s" meta.name detail
+                | Off | Listed _ -> ());
                (* Repository freshness projection (context only, never a
                   gate): where each playground checkout stands against its
                   upstream default branch. A failed scan is logged and the
@@ -910,6 +916,7 @@ let run_keeper_cycle
                      ~active_goal_summaries
                      ~workspace_memory
                      ?workspace_memory_access
+                     ~wiki_contents
                      ~lane_updates
                      ~repository_freshness
                      ~recent_work

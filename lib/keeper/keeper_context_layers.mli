@@ -19,6 +19,7 @@ type layer_id =
   | Connected_surfaces
   | Namespace_state
   | Workspace_memory
+  | Wiki
   | Lane_updates
   | Repository_freshness
       (** Where each playground checkout stands against its upstream default

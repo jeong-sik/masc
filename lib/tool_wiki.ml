@@ -98,6 +98,11 @@ let index_entries ~base_path =
            (Wiki_journal.Unreadable
               { file; reason = frontmatter_error_to_string error })))
 
+let read_index_entries ~base_path =
+  match index_entries ~base_path with
+  | entries -> Ok entries
+  | exception Sys_error detail -> Error detail
+
 (* RFC-0189 PR-1b.7 — handlers in this module return typed
    [Tool_result.result]. Boundary back to [Tool_result.result option] in
    [dispatch] below via [lift]. Two input-rejection helpers

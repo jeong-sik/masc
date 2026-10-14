@@ -125,6 +125,13 @@ val list_pages : base_path:string -> string list
     order; [[]] when the directory does not exist. No file is skipped by
     name. *)
 
+val read_index_entries :
+  base_path:string -> (Wiki_journal.entry list, string) result
+(** What [masc_wiki_list] lists, built from the pages on this call, not read
+    from [index.md]: one entry per file in name order. [Ok []] when the wiki
+    has no page or no directory. [Error] carries why the wiki directory could
+    not be listed. *)
+
 (** {1 Context} *)
 
 type context = {

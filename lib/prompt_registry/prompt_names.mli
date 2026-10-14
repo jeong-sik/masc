@@ -438,6 +438,12 @@ val keeper_context_workspace_memory_briefing_current : string
 val keeper_context_workspace_memory_briefing_stale : string
 val keeper_context_workspace_memory_briefing_pending : string
 val keeper_context_workspace_memory_briefing_unavailable : string
+val keeper_context_wiki_available : string
+val keeper_context_wiki_retrieval_direct : string
+val keeper_context_wiki_retrieval_discoverable : string
+val keeper_context_wiki_retrieval_unavailable : string
+val keeper_context_wiki_retrieval_preview : string
+val keeper_context_wiki_unavailable : string
 
 val candle_appraiser_grade : string
 

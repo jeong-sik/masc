@@ -81,6 +81,7 @@ let parse_action = function
       Ok { client_id; machine; operation }
   | _ -> Error (Invalid_request "room request must be an object")
 
+let storage_error ~operation:_ ~detail = Unavailable ("game room storage: " ^ detail)
 let sql_error db rc = Unavailable ("game room storage: " ^ Sqlite3.Rc.to_string rc ^ ": " ^ Sqlite3.errmsg db)
 let exec db sql =
   let rc = Sqlite3.exec db sql in
@@ -95,13 +96,12 @@ let with_stmt db sql values fn =
         if Sqlite3.Rc.is_success rc then bind (index + 1) rest else Error (sql_error db rc) in
     bind 1 values)
 let update db sql values = with_stmt db sql values (fun stmt ->
-  let rc = Sqlite3.step stmt in
-  if rc = Sqlite3.Rc.DONE then Ok () else Error (sql_error db rc))
+  Keeper_sqlite_observation_io.done_ ~error:storage_error db stmt ~operation:"update")
 let rows db sql values decode = with_stmt db sql values (fun stmt ->
-  let rec loop acc = match Sqlite3.step stmt with
-    | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-    | ROW -> let* row = decode stmt in loop (row :: acc)
-    | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sql_error db rc) in
+  let rec loop acc = match Keeper_sqlite_observation_io.step stmt with
+    | Done -> Ok (List.rev acc)
+    | Row -> let* row = decode stmt in loop (row :: acc)
+    | Failed rc -> Error (sql_error db rc) in
   loop [])
 let schema = {|
 CREATE TABLE IF NOT EXISTS messages (

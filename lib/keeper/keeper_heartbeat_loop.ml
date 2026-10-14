@@ -84,9 +84,7 @@ let should_run_turn_after_event_intake
   match event_queue_intake_error with
   | None | Some (Stimulus_intake.Connector_read_failed _)
   | Some (Stimulus_intake.Connector_item_missing _)
-  | Some (Stimulus_intake.Ask_read_failed _)
-  | Some (Stimulus_intake.Ask_item_missing _)
-  | Some (Stimulus_intake.Ask_not_answered _) -> true
+  | Some (Stimulus_intake.Ask_read_failed _) -> true
   | Some (Stimulus_intake.Pending_selection_failed _) -> false
 ;;
 

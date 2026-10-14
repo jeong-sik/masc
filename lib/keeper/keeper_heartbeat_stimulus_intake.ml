@@ -37,8 +37,6 @@ type event_queue_intake_error =
   | Connector_read_failed of Keeper_external_attention.read_error
   | Connector_item_missing of string
   | Ask_read_failed of Keeper_ask_store.read_error
-  | Ask_item_missing of string
-  | Ask_not_answered of string
 
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
@@ -49,8 +47,6 @@ let event_queue_intake_error_to_string = function
     "connector attention item missing: " ^ event_id
   | Ask_read_failed error ->
     "ask answer intake retry: " ^ Keeper_ask_store.read_error_to_string error
-  | Ask_item_missing ask_id -> "ask answer source missing: " ^ ask_id
-  | Ask_not_answered ask_id -> "ask source has no recorded answer: " ^ ask_id
 ;;
 
 let event_queue_intake_error_reason_label = function
@@ -58,14 +54,12 @@ let event_queue_intake_error_reason_label = function
   | Connector_read_failed _ -> "event_queue_connector_read_failed"
   | Connector_item_missing _ -> "event_queue_connector_item_missing"
   | Ask_read_failed _ -> "event_queue_ask_read_failed"
-  | Ask_item_missing _ -> "event_queue_ask_item_missing"
-  | Ask_not_answered _ -> "event_queue_ask_not_answered"
 ;;
 
 let event_queue_intake_error_counts_as_cycle_failure = function
   | Pending_selection_failed _ -> true
   | Connector_read_failed _ | Connector_item_missing _
-  | Ask_read_failed _ | Ask_item_missing _ | Ask_not_answered _ -> false
+  | Ask_read_failed _ -> false
 ;;
 
 let classify_pending_board_event_result = function
@@ -941,6 +935,40 @@ let heartbeat_event_intake
              in
              loop remaining observations_rev selections_rev first_withdrawn rest
            in
+           let ack_terminal_ask detail =
+             (* The canonical Ask log is append-only, so a missing log, an
+                absent ask id, and an Open or Withdrawn resolution can never
+                gain the answer this pointer names: unlike a read failure,
+                no later state resolves them. Retaining such a source
+                reselects the same poison on every snapshot and reports an
+                intake error every heartbeat. Withdraw it with the same
+                typed terminal ACK as a Board source with no remaining
+                observation; answer recovery re-enqueues a fresh pointer if
+                a later answer is recorded. *)
+             (match
+                Keeper_registry_event_queue.ack_pending_result
+                  ~base_path
+                  keeper_name
+                  ~selection
+              with
+              | Ok () ->
+                Log.Keeper.info
+                  "turn entry: acknowledged terminal ask answer keeper=%s: %s"
+                  keeper_name
+                  detail;
+                loop remaining observations_rev selections_rev first_withdrawn rest
+              | Error message ->
+                let failure_detail =
+                  "failed to acknowledge terminal ask answer source ("
+                  ^ detail
+                  ^ "): "
+                  ^ message
+                in
+                ( List.rev observations_rev
+                , List.rev selections_rev
+                , first_withdrawn
+                , Some (selection, Pending_selection_failed failure_detail) ))
+           in
            let ask_rows = match selection.source.payload with
              | Keeper_event_queue.Ask_answered _ ->
                let snapshot = match !ask_snapshot with
@@ -990,8 +1018,10 @@ let heartbeat_event_intake
                 Option.is_none (connector_attention_event_id selection.source)) rest in
               loop remaining observations_rev selections_rev first_withdrawn rest
             | Stimulus_ask_retry_later error -> retain_ask (Ask_read_failed error)
-            | Stimulus_ask_missing ask_id -> retain_ask (Ask_item_missing ask_id)
-            | Stimulus_ask_not_answered ask_id -> retain_ask (Ask_not_answered ask_id)
+            | Stimulus_ask_missing ask_id ->
+              ack_terminal_ask ("ask answer source missing: " ^ ask_id)
+            | Stimulus_ask_not_answered ask_id ->
+              ack_terminal_ask ("ask source has no recorded answer: " ^ ask_id)
             | Stimulus_consumed [] when is_board_source selection ->
               (* Permanent Board absence is terminal before dispatch. It is the
                  one safe empty-source ACK: the post id cannot become readable

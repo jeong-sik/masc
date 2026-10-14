@@ -25,8 +25,11 @@ val pending_board_event_of_stimulus
     Connector store cannot become an empty successful rendering: it retains the
     exact pending queue selection for a later heartbeat. A missing referenced
     Connector item retains only its own selection, allowing readable siblings.
-    An unread, missing or not-yet-answered canonical Ask source also retains
-    its exact selection without admitting delivery evidence.
+    An unread canonical Ask store retains its exact selection without
+    admitting delivery evidence. A missing Ask log, an absent Ask id, or an
+    Open/Withdrawn resolution is terminal — the Ask store is append-only, so
+    no later state can resolve the pointer — and the heartbeat loop
+    acknowledges the exact pending selection instead of retaining it.
     A Board read that answered no row is consumed as an empty event. *)
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
@@ -56,8 +59,6 @@ type event_queue_intake_error =
   | Connector_read_failed of Keeper_external_attention.read_error
   | Connector_item_missing of string (** Missing event ID, not a whole-store failure. *)
   | Ask_read_failed of Keeper_ask_store.read_error
-  | Ask_item_missing of string
-  | Ask_not_answered of string
 
 (** Map one durable event-queue payload to its typed turn trigger. A payload
     with no dedicated trigger returns [None]; completion-authority rejection
@@ -69,10 +70,12 @@ val event_queue_intake_error_to_string : event_queue_intake_error -> string
 val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 
 (** Only durable selection corruption/read failures count as a crashed cycle.
-    Connector and Ask source reads are retry conditions: they retain the exact source
-    without advancing Keeper failure state. A Board read that answers no row is
-    not: the source is consumed. Other admitted sources may still dispatch in
-    the same turn. *)
+    Connector and unread-Ask source reads are retry conditions: they retain
+    the exact source without advancing Keeper failure state. A missing or
+    unanswered Ask source is not a retry: the heartbeat loop acknowledges it
+    as terminal, so it never surfaces here. A Board read that answers no row
+    is not: the source is consumed. Other admitted sources may still dispatch
+    in the same turn. *)
 val event_queue_intake_error_counts_as_cycle_failure :
   event_queue_intake_error -> bool
 
@@ -209,7 +212,13 @@ val reconcile_spent_selection
     left the pending map, while later ready stimuli can still be selected.
     A Connector read that fails keeps that exact source pending and sets
     [event_queue_intake_error]. It does not prevent other selections in the
-    same snapshot from being admitted and dispatched. *)
+    same snapshot from being admitted and dispatched. An unread Ask store
+    behaves the same way. A missing Ask log, an absent Ask id, or an
+    Open/Withdrawn resolution is terminal under the append-only Ask store:
+    the exact pending selection is acknowledged (like a Board source with no
+    remaining observation), sets no intake error, and does not spend an
+    admission slot. A later recorded answer reaches the Keeper through answer
+    recovery, which enqueues a fresh pointer. *)
 val heartbeat_event_intake
   :  ctx:'a context
   -> meta_after_triage:keeper_meta

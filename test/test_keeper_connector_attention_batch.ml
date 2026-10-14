@@ -507,12 +507,18 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
         | Error error -> fail (Keeper_ask_store.withdraw_failure_to_string error)));
     let intake () = Intake.heartbeat_event_intake ~ctx ~meta_after_triage:meta
         ~pending_board_events:[] in
+    (* A store read/decode failure is transient: the same log can read on a
+       later heartbeat. A missing log or row and an Open/Withdrawn resolution
+       are terminal — the append-only Ask store can never gain the answer this
+       pointer names — so intake acknowledges the exact selection instead of
+       retaining it. *)
+    let terminal = match failure with
+      | `Missing_file | `Missing_rows | `Open | `Withdrawn -> true
+      | `Unreadable | `Malformed -> false in
     let assert_retry intake =
       let error = match intake.Intake.event_queue_intake_error, failure with
         | Some (Intake.Ask_read_failed (Keeper_ask_store.Log_read_failed _) as error), `Unreadable
-        | Some (Intake.Ask_read_failed (Keeper_ask_store.Log_decode_failed _) as error), `Malformed
-        | Some (Intake.Ask_item_missing _ as error), (`Missing_file | `Missing_rows)
-        | Some (Intake.Ask_not_answered _ as error), (`Open | `Withdrawn) -> error
+        | Some (Intake.Ask_read_failed (Keeper_ask_store.Log_decode_failed _) as error), `Malformed -> error
         | _ -> fail "unavailable Ask was admitted or misclassified" in
       check bool "unavailable Ask is retry, not crashed cycle" false
         (Intake.event_queue_intake_error_counts_as_cycle_failure error);
@@ -524,7 +530,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
            ~event_queue_intake_error:intake.event_queue_intake_error) in
     let assert_no_delivery () =
       (match Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-          ~base_path ~keeper_name ~post_id:stimulus.post_id
+          ~base_path ~keeper_name ~since:0. ~post_id:stimulus.post_id
           ~stimulus_kind:Keeper_reaction_ledger.Ask_answered with
        | Ok seen -> check bool "failed canonical source has no positive delivery proof" false seen
        | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error));
@@ -538,6 +544,19 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
     let pending_ids () = match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
       | Ok queue -> Q.to_list queue |> List.map (fun (source : Q.stimulus) -> source.post_id)
       | Error detail -> fail detail in
+    let assert_terminal_ack intake =
+      check bool "terminal ask source is not an intake error" true
+        (Option.is_none intake.Intake.event_queue_intake_error);
+      check int "terminal ask source contributes no admitted source" 0
+        (Keeper_heartbeat_source_batch.count intake.source_batch);
+      check int "terminal ask source contributes no observation" 0
+        (List.length intake.pending_board_events);
+      check bool "terminal ask source contributes no trigger" true
+        (intake.event_queue_triggers = []);
+      check bool "terminal ack keeps no diagnostic selection" true
+        (intake.diagnostic_selection = None);
+      check (list string) "terminal ask source leaves the queue" []
+        (pending_ids ()) in
     let complete batch =
       Keeper_heartbeat_loop.For_testing.record_replay_owned_turn_started_reactions
         ~ctx ~keeper_name (Keeper_heartbeat_source_batch.stimuli batch);
@@ -554,13 +573,16 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
           (Keeper_heartbeat_source_batch.selections batch)
       | _ -> fail "completed turn did not use normal source settlement" in
     let first = intake () in
-    assert_retry first;
-    check int "unavailable Ask contributes no admitted source" 0
-      (Keeper_heartbeat_source_batch.count first.source_batch);
-    check int "unavailable Ask contributes no observation" 0 (List.length first.pending_board_events);
-    check bool "unavailable Ask contributes no trigger" true (first.event_queue_triggers = []);
-    check bool "diagnostic keeps the exact original selection" true
-      (first.diagnostic_selection = Some original_selection);
+    if terminal then assert_terminal_ack first
+    else begin
+      assert_retry first;
+      check int "unavailable Ask contributes no admitted source" 0
+        (Keeper_heartbeat_source_batch.count first.source_batch);
+      check int "unavailable Ask contributes no observation" 0 (List.length first.pending_board_events);
+      check bool "unavailable Ask contributes no trigger" true (first.event_queue_triggers = []);
+      check bool "diagnostic keeps the exact original selection" true
+        (first.diagnostic_selection = Some original_selection)
+    end;
     assert_no_delivery ();
     let sibling : Q.stimulus =
       { post_id = "readable-ask-sibling"; urgency = Q.Low; arrived_at = 202.; payload = Q.Bootstrap } in
@@ -583,7 +605,10 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
         [source]
       | `Unreadable | `Malformed | `Missing_file -> [] in
     let mixed = intake () in
-    assert_retry mixed;
+    if terminal then
+      check bool "terminal ask source stays settled while siblings dispatch" true
+        (Option.is_none mixed.Intake.event_queue_intake_error)
+    else assert_retry mixed;
     check (list string) "only readable siblings enter source batch"
       (List.map (fun (source : Q.stimulus) -> source.post_id) (readable_ask_sources @ [sibling]))
       (Keeper_heartbeat_source_batch.stimuli mixed.source_batch
@@ -593,33 +618,83 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
       (List.map (fun (event : Keeper_world_observation.pending_board_event) -> event.post_id)
          mixed.pending_board_events);
     complete mixed.source_batch;
-    check (list string) "other completion leaves exact Ask pending" [stimulus.post_id] (pending_ids ());
+    check (list string) "other completion leaves exact Ask pending"
+      (if terminal then [] else [stimulus.post_id]) (pending_ids ());
     assert_no_delivery ();
     (match failure with
      | `Unreadable -> Unix.rmdir path; Sys.rename backup path
      | `Missing_file -> Sys.rename backup path
      | `Malformed | `Missing_rows | `Open | `Withdrawn -> Fs_compat.save_file path original);
-    let restored = intake () in
-    check bool "restored canonical read has no retry error" true
-      (Option.is_none restored.event_queue_intake_error);
-    check (list string) "restored source has exact Ask identity" [stimulus.post_id]
-      (Keeper_heartbeat_source_batch.stimuli restored.source_batch
-       |> List.map (fun (source : Q.stimulus) -> source.post_id));
-    (match restored.pending_board_events with
-     | [event] ->
-       check string "canonical answer reaches model observation" "notes: original canonical answer" event.preview;
-       check string "observation stays bound to the original Ask" stimulus.post_id event.post_id
-     | _ -> fail "restored canonical answer produced no single observation");
-    assert_no_delivery ();
-    complete restored.source_batch;
-    check (list string) "only restored delivery acknowledges the Ask" [] (pending_ids ());
-    match Keeper_reaction_ledger.event_queue_reaction_evidence_result ~base_path
-        ~keeper_name ~stimulus_id with
-    | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
-      check bool "restored delivery records Turn_started" true evidence.turn_started_seen;
-      check bool "restored delivery records exact ACK" true evidence.event_queue_ack_seen
-    | Ok (Keeper_reaction_ledger.Evidence_quarantined _) -> fail "restored fixture ledger is quarantined"
-    | Error error -> fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error))
+    if terminal then begin
+      let restored = intake () in
+      check bool "restored canonical read has no intake error" true
+        (Option.is_none restored.Intake.event_queue_intake_error);
+      check (list string) "terminal ack does not resurrect the queue entry" []
+        (pending_ids ());
+      assert_no_delivery ();
+      (* The canonical answer was never lost: answer recovery enqueues a fresh
+         pointer for the restored answer, and intake delivers it. *)
+      let report = match Keeper_ask_answer_wake.reconcile ~base_path with
+        | Ok report -> report
+        | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
+      check int "answer recovery re-enqueues the restored answer" 1 report.enqueued;
+      check (list string) "fresh recovery pointer is pending" [stimulus.post_id]
+        (pending_ids ());
+      let recovered = intake () in
+      (match recovered.pending_board_events with
+       | [event] ->
+         check string "recovered canonical answer reaches model observation"
+           "notes: original canonical answer" event.preview;
+         check string "recovered observation stays bound to the original Ask"
+           stimulus.post_id event.post_id
+       | _ -> fail "recovered canonical answer produced no single observation");
+      (* Recovery enqueued a fresh pointer whose arrived_at is the canonical
+         answer time, so its durable identity differs from the withdrawn
+         original's; evidence is checked on the fresh identity. *)
+      let fresh_stimulus_id =
+        match
+          List.find_opt
+            (fun (source : Q.stimulus) -> String.equal source.post_id stimulus.post_id)
+            (Keeper_heartbeat_source_batch.stimuli recovered.source_batch)
+        with
+        | Some source -> Keeper_reaction_ledger.stimulus_id_of_event_queue source
+        | None -> fail "fresh recovery pointer was not admitted" in
+      assert_no_delivery ();
+      complete recovered.source_batch;
+      check (list string) "recovered delivery acknowledges the fresh pointer" []
+        (pending_ids ());
+      match Keeper_reaction_ledger.event_queue_reaction_evidence_result ~base_path
+          ~keeper_name ~stimulus_id:fresh_stimulus_id with
+      | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+        check bool "recovered delivery records Turn_started" true evidence.turn_started_seen;
+        check bool "recovered delivery records exact ACK" true evidence.event_queue_ack_seen
+      | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+        fail "recovered fixture ledger is quarantined"
+      | Error error ->
+        fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+    end else begin
+      let restored = intake () in
+      check bool "restored canonical read has no retry error" true
+        (Option.is_none restored.event_queue_intake_error);
+      check (list string) "restored source has exact Ask identity" [stimulus.post_id]
+        (Keeper_heartbeat_source_batch.stimuli restored.source_batch
+         |> List.map (fun (source : Q.stimulus) -> source.post_id));
+      (match restored.pending_board_events with
+       | [event] ->
+         check string "canonical answer reaches model observation" "notes: original canonical answer" event.preview;
+         check string "observation stays bound to the original Ask" stimulus.post_id event.post_id
+       | _ -> fail "restored canonical answer produced no single observation");
+      assert_no_delivery ();
+      complete restored.source_batch;
+      check (list string) "only restored delivery acknowledges the Ask" [] (pending_ids ());
+      match Keeper_reaction_ledger.event_queue_reaction_evidence_result ~base_path
+          ~keeper_name ~stimulus_id with
+      | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+        check bool "restored delivery records Turn_started" true evidence.turn_started_seen;
+        check bool "restored delivery records exact ACK" true evidence.event_queue_ack_seen
+      | Ok (Keeper_reaction_ledger.Evidence_quarantined _) -> fail "restored fixture ledger is quarantined"
+      | Error error -> fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+    end)
 ;;
 
 let test_missing_prefix_does_not_starve_readable_connector ~cross_conversation () =
@@ -1686,13 +1761,13 @@ let () =
             (test_unavailable_ask_survives_other_completed_work ~failure:`Unreadable)
         ; test_case "malformed Ask stays pending through sibling completion and canonical restoration" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Malformed)
-        ; test_case "missing Ask log stays pending through sibling completion and canonical restoration" `Quick
+        ; test_case "missing Ask log is terminally acknowledged and canonically recoverable" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Missing_file)
-        ; test_case "missing Ask row stays pending through sibling completion and canonical restoration" `Quick
+        ; test_case "missing Ask row is terminally acknowledged and canonically recoverable" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Missing_rows)
-        ; test_case "open Ask stays pending through sibling completion and canonical restoration" `Quick
+        ; test_case "open Ask is terminally acknowledged and canonically recoverable" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Open)
-        ; test_case "withdrawn Ask stays pending through sibling completion and canonical restoration" `Quick
+        ; test_case "withdrawn Ask is terminally acknowledged and canonically recoverable" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Withdrawn)
         ; test_case
             "admits a channel's whole backlog in arrival order, leaves other \

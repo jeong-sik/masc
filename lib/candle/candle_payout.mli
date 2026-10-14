@@ -66,6 +66,11 @@ type candidates =
 val candidates_of : waiting -> Candle_event.t list -> candidates option
 (** What the [Candidates] row written for the payout's request and verifier run decided. *)
 
+val validate_durable_candidates : waiting -> Candle_event.t list -> (unit, string) result
+(** Validate the durable [Snapshot] and [Candidates] invariants for [waiting]
+    (exact linked-task coverage, eligible subset equality, and per-task Keeper
+    eligibility consistency) before spending model calls in appraisal. *)
+
 val validate_settlement : waiting -> Candle_event.t list -> Candle_event.body -> (unit, string) result
 (** Cross-record admission: exact confirmed run, Snapshot-linked completed Task
     eligibility within the confirmed window, durable candidate Task coverage,

@@ -37,7 +37,16 @@ let delivery_contributions ~async_result_deliveries (activation : activation) =
       then contributions else contributions @ [delivery.boundary, delivery.runtime_id])
     original async_result_deliveries
 
-let summarize ~activations ~async_result_deliveries ~transition_rejections =
+let action_contributions ~async_result_deliveries ~async_actions (activation : activation) =
+  let delivery_ids = List.filter_map (fun (delivery : Keeper_skill_async_delivery.t) ->
+    if List.exists (fun (child : Keeper_skill_async_delivery.child_activation) ->
+        String.equal child.skill_tool_use_id activation.skill_tool_use_id) delivery.child_activations
+    then Some (Keeper_skill_async_delivery.identity delivery) else None) async_result_deliveries in
+  List.filter (fun (action : Keeper_skill_async_action.t) -> List.mem action.delivery_sha256 delivery_ids) async_actions
+  |> List.sort_uniq (fun left right -> String.compare (Keeper_skill_async_action.occurrence_identity left)
+      (Keeper_skill_async_action.occurrence_identity right))
+
+let summarize ~activations ~async_result_deliveries ~async_actions ~transition_rejections =
   List.fold_left
     (fun summary activation ->
        let provider_delivered, official_client_handoff =
@@ -46,7 +55,7 @@ let summarize ~activations ~async_result_deliveries ~transition_rejections =
            | Official_client_result_handoff _, _ -> provider, 1)
            (0, 0) (delivery_contributions ~async_result_deliveries activation)
        in
-       let actions = List.length activation.actions in
+       let actions = List.length activation.actions + List.length (action_contributions ~async_result_deliveries ~async_actions activation) in
        match activation.invocation with
        | Instruction_invocation { served_content; _ } ->
          let skill_bodies_served, skill_resources_served =
@@ -137,7 +146,7 @@ let runtime_counts runtime_ids =
     runtime_ids
 ;;
 
-let summarize_by_scope ~activations:all_activations ~async_result_deliveries ~transition_rejections:all_rejections =
+let summarize_by_scope ~activations:all_activations ~async_result_deliveries ~async_actions ~transition_rejections:all_rejections =
   let scopes =
     List.fold_left
       (fun scopes activation ->
@@ -184,11 +193,13 @@ let summarize_by_scope ~activations:all_activations ~async_result_deliveries ~tr
        let action_runtime_counts =
          activations
          |> List.concat_map (fun activation ->
-              List.map (fun (action : action) -> action.runtime_id) activation.actions)
+              (List.map (fun (action : action) -> action.runtime_id) activation.actions)
+              @ (List.map (fun (action : Keeper_skill_async_action.t) -> action.runtime_id)
+                  (action_contributions ~async_result_deliveries ~async_actions activation)))
          |> runtime_counts
        in
        { scope
-       ; summary = summarize ~activations ~async_result_deliveries ~transition_rejections
+       ; summary = summarize ~activations ~async_result_deliveries ~async_actions ~transition_rejections
        ; provider_delivery_runtime_counts
        ; official_client_handoff_runtime_counts
        ; action_runtime_counts

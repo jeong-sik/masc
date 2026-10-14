@@ -3021,6 +3021,188 @@ pointer = "/content"
     | Ok _ | Error _ -> fail "corrupt original ledger acquired a durable child receipt");
   Delivery.persist ~config repeated_observation |> require "original child receipt recovers without dispatch" |> ignore;
   check int "ledger recovery creates no second handoff" 11 (List.length (Ledger.async_result_deliveries (ledger ())));
+  let module Action = Masc.Keeper_skill_async_action in
+  let module Action_observer = Masc.Keeper_skill_async_action_observer in
+  let physical_runtime = ref observation.runtime_id in
+  let physical_selection = Masc.Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:"task-B" []
+    |> require "receiving Task has independent Skill selection" in
+  let receiving_recorder = Recorder.make ~trace_id:fixture.meta.runtime.trace_id ~turn_ref:physical_turn_ref
+    ~runtime_id:(fun () -> Some !physical_runtime) ~snapshot_revision:(Surface.skill_snapshot_revision surface)
+    ~task_selection:physical_selection |> require "physical receiving recorder" in
+  let action_observer = Action_observer.create ~config ~context:receiving_recorder in
+  let action_errors = ref [] in
+  let action_hook = Action_observer.sdk_hook action_observer ~on_error:(fun error -> action_errors := error :: !action_errors) in
+  let action_hooks = {Agent_core.Hooks.empty with pre_tool_use=Some action_hook;
+    post_tool_use=Some action_hook;post_tool_use_failure=Some action_hook} in
+  let handoff observation =
+    Action_observer.begin_handoff action_observer;
+    Action_observer.record_delivery action_observer observation |> require "actual original result action authority" |> ignore in
+  let action_count () = List.length (Ledger.async_actions (ledger ())) in
+  let result = Ok {Agent_core.Types.content="follow-on-result";content_blocks=None;_meta=None} in
+  let success_tool = Agent_core.Tool.create ~name:"fixture_follow_on" ~description:"Consume the original child result"
+    ~parameters:[] (fun _ -> result) in
+  let failed_tool = Agent_core.Tool.create ~name:"fixture_follow_on_error" ~description:"Return an actual typed handler failure"
+    ~parameters:[] (fun _ -> Error {Agent_core.Types.message="actual-handler-error";recoverable=false;error_class=Some Deterministic}) in
+  let execute_action ?(input=`Assoc []) ~turn ~id tool =
+    Agent_core.Agent_tools.execute_tools ~context:(Agent_core.Context.create ()) ~tools:[tool] ~hooks:action_hooks
+      ~event_bus:None ~tracer:Agent_core.Tracing.null ~agent_name:keeper ~turn_count:turn
+      ~usage:Agent_core.Types.empty_usage [Agent_core.Types.ToolUse {id;name=tool.Agent_core.Tool.schema.name;input}]
+    |> require "real SDK follow-on execution" in
+  handoff observation;
+  let before_actions = action_count () in
+  let intent = invocation ~turn:2 "intent-without-execution" in
+  ignore (action_hook (Agent_core.Hooks.PreToolUse {invocation=intent;tool_name="fixture_follow_on";input=`Assoc [];accumulated_cost_usd=0.}));
+  check int "pre-dispatch intent is not an executed action fact" before_actions (action_count ());
+  let actual = execute_action ~turn:2 ~id:"follow-on-reused-id" success_tool in
+  check int "real SDK handler result attaches to original child" (before_actions+1) (action_count ());
+  check int "one actual handler result returned" 1 (List.length actual.completed_results);
+  let first_action = List.hd (Ledger.async_actions (ledger ())) in
+  (match first_action.occurrence with
+   | Action.Sdk_result {invocation;result=Handler_returned {bytes;_}} ->
+     check string "actual SDK action retains its exact call id" "follow-on-reused-id"
+       (Agent_core.Tool_contract.Invocation.tool_use_id invocation);
+     check int "result bytes are actual handler text" (String.length "follow-on-result") bytes
+   | Sdk_result {result=Handler_errored _;_} | Native_started _ -> fail "success handler result was misclassified");
+  execute_action ~turn:3 ~id:"follow-on-reused-id" success_tool |> ignore;
+  check int "a later occurrence can reuse the same SDK ID" (before_actions+2) (action_count ());
+  execute_action ~turn:3 ~id:"failed-follow-on" failed_tool |> ignore;
+  check int "typed handler error is one executed result, not a second failure callback fact" (before_actions+3) (action_count ());
+  let validating_schema = Agent_core.Types.tool_schema_of_input_schema ~name:"fixture_validated_follow_on"
+    ~description:"Require an actual result reference before execution"
+    ~input_schema:(`Assoc ["type",`String "object";"required",`List [`String "reference"];
+      "properties",`Assoc ["reference",`Assoc ["type",`String "string"]]]) () |> require "actual SDK validation schema" in
+  let validation_effects = ref 0 in
+  let validating = Agent_core.Tool.of_schema validating_schema
+    (Agent_core.Tool.ignoring_execution_env (fun _ -> incr validation_effects; result)) in
+  execute_action ~turn:3 ~id:"invalid-follow-on" validating |> ignore;
+  check int "schema refusal never enters the handler" 0 !validation_effects;
+  check int "schema refusal is not executed action evidence" (before_actions+3) (action_count ());
+  let repeated = Ledger.observe_async_action ~config ~trace_id:fixture.meta.runtime.trace_id first_action
+    |> require "idempotent actual action replay" |> snd in
+  check_json "re-observation preserves the first actual result clock" (Action.to_json first_action) (Action.to_json repeated);
+  let changed = Action.make ~delivery_sha256:first_action.delivery_sha256 ~physical_turn_ref
+    ~runtime_id:first_action.runtime_id ~tool_name:first_action.tool_name
+    ~occurrence:(match first_action.occurrence with Sdk_result {invocation;_} ->
+      Sdk_result {invocation;result=Action.sdk_result (Ok {Agent_core.Types.content="changed";content_blocks=None;_meta=None})}
+      | Native_started _ -> fail "expected actual SDK occurrence") ~observed_at:first_action.observed_at
+    |> require "changed actual result candidate" in
+  (match Ledger.observe_async_action ~config ~trace_id:fixture.meta.runtime.trace_id changed with
+   | Error (Ledger.Decode_failed (Ledger.Invalid_async_action_evidence _)) -> ()
+   | Ok _ | Error _ -> fail "same occurrence accepted a different actual result");
+  Action_observer.clear action_observer;
+  ignore (action_hook (Agent_core.Hooks.PostToolUse {invocation=intent;tool_name="fixture_follow_on";input=`Assoc [];
+    output=result;result_bytes=16;duration_ms=0.}));
+  check int "late old-attempt post-hook cannot borrow new causal authority" (before_actions+3) (action_count ());
+  let official_observation = List.find (fun (value : Delivery.observation) ->
+    value.runtime_id="later.official.runtime" && value.presentation=Delivery.Inline_result) !observed in
+  physical_runtime := official_observation.runtime_id;
+  handoff official_observation;
+  let native = {Masc.Runtime_native_tools.identity=Some (Call_id "native-follow-on");tool_name=Some "native-read";origin=Built_in} in
+  let native_observe ~official_turn ~identity ~tool_name =
+    Action_observer.native_started action_observer ~runtime_id:!physical_runtime ~official_turn ~identity ~tool_name
+    |> require "actual official native start callback" |> ignore in
+  Masc.Runtime_native_tools.observe_exact_action ~official_turn:0 ~observe:native_observe native;
+  Masc.Runtime_native_tools.observe_exact_action ~official_turn:0 ~observe:native_observe native;
+  check int "native starts are observed once independently of SDK turn 41" (before_actions+4) (action_count ());
+  (match Action_observer.native_started action_observer ~runtime_id:!physical_runtime ~official_turn:0
+      ~identity:(Call_id "native-follow-on") ~tool_name:"contradictory-native-name" with
+   | Error (Action_observer.Ledger_failed (Ledger.Decode_failed (Ledger.Invalid_async_action_evidence _))) -> ()
+   | Ok _ | Error _ -> fail "same native occurrence accepted a different tool name");
+  check int "contradictory native name is refused without inflating action count" (before_actions+4) (action_count ());
+  handoff official_observation;
+  let action_events = read events in
+  Fun.protect ~finally:(fun () -> write events action_events) (fun () ->
+    write events "corrupt-original-action-ledger\n";
+    execute_action ~turn:20 ~id:"refused-original-authority" success_tool |> ignore);
+  check int "corrupt original ledger reports one evidence refusal" 1 (List.length !action_errors);
+  execute_action ~turn:21 ~id:"no-stale-authority-after-refusal" success_tool |> ignore;
+  check int "ledger refusal clears active authority" (before_actions+4) (action_count ());
+  handoff official_observation;
+  execute_action ~turn:22 ~id:"recovered-original-authority" success_tool |> ignore;
+  check int "restored authority recovers without dispatching original child" (before_actions+5) (action_count ());
+  check bool "follow-on actions never rewrite original Task or activation clock" true
+    (Ledger.activations (ledger ()) = [original_activation]);
+  check int "summary counts actual SDK results and separately typed native start observations" 5
+    (Ledger.summarize (ledger ())).composition_actions_observed;
+  let action_projection = Ledger.to_yojson (ledger ()) |> Ledger.of_projection_yojson
+    |> require "actual action canonical projection" in
+  check int "canonical projection retains actual follow-on facts" 5 (List.length (Ledger.async_actions action_projection));
+  let sibling_observation = List.find (fun (value : Delivery.observation) ->
+    value.runtime_id=official_observation.runtime_id && value.presentation=Delivery.Inline_result
+    && value.transport_receipt.tool_use_id <> official_observation.transport_receipt.tool_use_id) !observed in
+  handoff official_observation;
+  Action_observer.record_delivery action_observer sibling_observation
+    |> require "sibling official result preserves earlier active receipt" |> ignore;
+  execute_action ~turn:23 ~id:"action-after-sibling-results" success_tool |> ignore;
+  check int "one actual SDK occurrence links both delivered receipts" 7 (action_count ());
+  check int "two receipt links count the same physical occurrence once per child" 6
+    (Ledger.summarize (ledger ())).composition_actions_observed;
+  let linked_actions = Ledger.async_actions (ledger ()) in
+  let linked = List.find (fun (value : Action.t) -> match value.occurrence with
+    | Sdk_result {invocation;_} -> Agent_core.Tool_contract.Invocation.tool_use_id invocation = "action-after-sibling-results"
+    | Native_started _ -> false) linked_actions in
+  let conflicting_link = Action.make ~delivery_sha256:linked.delivery_sha256 ~physical_turn_ref
+    ~runtime_id:linked.runtime_id ~tool_name:"different-tool-for-same-sibling-occurrence"
+    ~occurrence:linked.occurrence ~observed_at:linked.observed_at |> require "contradictory sibling link candidate" in
+  (match Ledger.observe_async_action ~config ~trace_id:fixture.meta.runtime.trace_id conflicting_link with
+   | Error (Ledger.Decode_failed (Ledger.Invalid_async_action_evidence _)) -> ()
+   | Ok _ | Error _ -> fail "same physical sibling occurrence accepted contradictory tool facts");
+  let linked_events = read events in
+  let tampered_events = String.split_on_char '\n' linked_events |> List.map (fun row ->
+    if String.equal row "" then row else
+    let json = Yojson.Safe.from_string row in
+    match json with
+    | `Assoc fields when List.assoc_opt "kind" fields = Some (`String "async_action_observed") ->
+      (match List.assoc_opt "action" fields with
+       | Some (`Assoc action) when List.assoc_opt "delivery_sha256" action = Some (`String linked.delivery_sha256)
+           && List.assoc_opt "tool_name" action = Some (`String "fixture_follow_on") ->
+         `Assoc (List.map (function "action", `Assoc action -> "action", `Assoc
+           (List.map (fun (key,value) -> key, if key="tool_name" then `String "contradictory-replayed-name" else value) action)
+           | field -> field) fields) |> Yojson.Safe.to_string
+       | Some _ | None -> row)
+    | _ -> row) |> String.concat "\n" in
+  Fun.protect ~finally:(fun () -> write events linked_events) (fun () ->
+    write events tampered_events;
+    match Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id with
+    | Error (Ledger.Decode_failed (Ledger.Invalid_async_action_evidence _)) -> ()
+    | Ok _ | Error _ -> fail "canonical replay hid contradictory sibling occurrence facts");
+  physical_runtime := observation.runtime_id;
+  Action_observer.clear action_observer;
+  let sibling_provider = List.find (fun (value : Delivery.observation) ->
+    value.runtime_id=observation.runtime_id && value.presentation=Delivery.Inline_result
+    && value.transport_receipt.tool_use_id <> observation.transport_receipt.tool_use_id) !observed in
+  Eio.Switch.run (fun io_sw ->
+    let started,notify_started = Eio.Promise.create () in
+    let finished,notify_finished = Eio.Promise.create () in
+    let session_dir = Masc.Keeper_fs.keeper_session_dir config
+      (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) in
+    Masc.Keeper_checkpoint_store.with_session_lock ~session_dir (fun _ ->
+      Eio.Fiber.fork ~sw:io_sw (fun () ->
+        Eio.Promise.resolve notify_started ();
+        Eio.Promise.resolve notify_finished (Action_observer.record_delivery action_observer observation));
+      Eio.Promise.await started;
+      (* The real durable write cannot finish while this canonical lock is
+         held. A fresh attempt may select the same runtime id. *)
+      Action_observer.clear action_observer)
+    |> require "actual canonical lock at an in-flight handoff reset";
+    Eio.Promise.await finished |> require "old handoff finishes its original durable observation" |> ignore);
+  Action_observer.record_delivery action_observer sibling_provider
+    |> require "new attempt receives its own result after the old write" |> ignore;
+  execute_action ~turn:25 ~id:"fresh-attempt-after-io-reset" success_tool |> ignore;
+  check int "late old handoff never reactivates after actual I/O reset with same runtime id" 8 (action_count ());
+  check int "fresh attempt links only its own received result" 7 (Ledger.summarize (ledger ())).composition_actions_observed;
+  let reference_observation = List.find (fun (value : Delivery.observation) ->
+    value.presentation=Delivery.Manifest_reference) !observed in
+  physical_runtime := reference_observation.runtime_id;
+  handoff reference_observation;
+  execute_action ~turn:24 ~id:"reference-is-not-body-authority" success_tool |> ignore;
+  check int "reference-only handoff has no body action authority" 8 (action_count ());
+  Printf.printf "OWNED_ASYNC_CAUSAL_ACTIONS %s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["scope",`String "synthetic owned continuation, actual SDK dispatcher results and official native start callback";
+     "original_activation_turn",`Int 41;"physical_receiving_turn",`Int 73;
+     "sdk_result_facts",`Int 7;"native_starts",`Int 1;"unique_child_actions_observed",`Int 7;"actual_io_attempt_resets",`Int 1;"validation_handler_calls",`Int !validation_effects;
+     "evidence_write_refusals",`Int (List.length !action_errors);
+     "original_activation_unchanged",`Bool true;"backend_calls_after_result_ready",`Int (List.length (calls fixture)-ready_backend)]));
   check int "all result correlation performs zero backend operations" ready_backend (List.length (calls fixture));
   check int "result correlation creates no program" 1 (effect_count fixture "create");
   check int "result correlation starts no program" 1 (effect_count fixture "start");

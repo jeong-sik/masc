@@ -16,6 +16,7 @@ type t =
   ; activations : activation list
   ; transition_rejections : transition_rejection list
   ; async_result_deliveries : Keeper_skill_async_delivery.t list
+  ; async_actions : Keeper_skill_async_action.t list
   ; mutable revision_memo : ledger_revision option
   }
 
@@ -82,6 +83,7 @@ type decode_error =
   | Action_target_not_delivered of string
   | Unterminated_header_row
   | Invalid_async_result_evidence of string
+  | Invalid_async_action_evidence of string
 
 type store_error =
   | Lock_failed of string
@@ -160,6 +162,7 @@ let decode_error_code = function
   | Action_target_not_delivered _ -> "action_target_not_delivered"
   | Unterminated_header_row -> "unterminated_header_row"
   | Invalid_async_result_evidence _ -> "invalid_async_result_evidence"
+  | Invalid_async_action_evidence _ -> "invalid_async_action_evidence"
 ;;
 
 let store_error_code = function
@@ -216,10 +219,11 @@ let store_error_to_string = function
     "event log failed: " ^ Fs_compat.private_jsonl_transaction_error_to_string error
 ;;
 
-let schema = "masc.skill-activations/v6"
+let schema = "masc.skill-activations/v7"
 let activations ledger = ledger.activations
 let transition_rejections ledger = ledger.transition_rejections
 let async_result_deliveries ledger = ledger.async_result_deliveries
+let async_actions ledger = ledger.async_actions
 let ledger_revision_to_string revision = revision
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
@@ -247,6 +251,7 @@ let summarize ledger =
   Keeper_skill_activation_summary.summarize
     ~activations:ledger.activations
     ~async_result_deliveries:ledger.async_result_deliveries
+    ~async_actions:ledger.async_actions
     ~transition_rejections:ledger.transition_rejections
 ;;
 
@@ -254,6 +259,7 @@ let summarize_by_scope ledger =
   Keeper_skill_activation_summary.summarize_by_scope
     ~activations:ledger.activations
     ~async_result_deliveries:ledger.async_result_deliveries
+    ~async_actions:ledger.async_actions
     ~transition_rejections:ledger.transition_rejections
 ;;
 
@@ -607,7 +613,7 @@ let workspace_key_of_root root =
   Digestif.SHA256.(digest_string root |> to_hex)
 ;;
 
-let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejections ~async_result_deliveries =
+let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejections ~async_result_deliveries ~async_actions =
   let canonical =
     `Assoc
       [ "workspace_key", `String workspace_key
@@ -616,13 +622,14 @@ let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejec
       ; ( "transition_rejections"
         , `List (List.map transition_rejection_to_yojson transition_rejections) )
       ; "async_result_deliveries", `List (List.map Keeper_skill_async_delivery.to_json async_result_deliveries)
+      ; "async_actions", `List (List.map Keeper_skill_async_action.to_json async_actions)
       ]
   in
   Digestif.SHA256.(digest_string (Yojson.Safe.to_string canonical) |> to_hex)
 ;;
 
-let make ~workspace_key ~session_id ~activations ~transition_rejections ~async_result_deliveries =
-  { workspace_key; session_id; activations; transition_rejections; async_result_deliveries; revision_memo = None }
+let make ~workspace_key ~session_id ~activations ~transition_rejections ~async_result_deliveries ~async_actions =
+  { workspace_key; session_id; activations; transition_rejections; async_result_deliveries; async_actions; revision_memo = None }
 ;;
 
 let revision ledger =
@@ -636,6 +643,7 @@ let revision ledger =
         ~activations:ledger.activations
         ~transition_rejections:ledger.transition_rejections
         ~async_result_deliveries:ledger.async_result_deliveries
+    ~async_actions:ledger.async_actions
     in
     ledger.revision_memo <- Some revision;
     revision
@@ -663,6 +671,7 @@ let empty ~workspace_root ~trace_id =
     ~activations:[]
     ~transition_rejections:[]
     ~async_result_deliveries:[]
+    ~async_actions:[]
 ;;
 
 let to_yojson ledger =
@@ -676,6 +685,7 @@ let to_yojson ledger =
       , `List
           (List.map transition_rejection_to_yojson ledger.transition_rejections) )
     ; "async_result_deliveries", `List (List.map Keeper_skill_async_delivery.to_json ledger.async_result_deliveries)
+    ; "async_actions", `List (List.map Keeper_skill_async_action.to_json ledger.async_actions)
     ]
 ;;
 
@@ -1332,6 +1342,21 @@ let validate_async_result ~expected_trace_id ~activations (delivery : Keeper_ski
           invalid "handoff does not belong to the original admitted child run") (Ok ()) delivery.child_activations
 ;;
 
+let validate_async_action ~expected_trace_id ~activations ~async_result_deliveries ~async_actions action =
+  let invalid detail = Invalid_async_action_evidence detail in
+  match List.find_opt (fun delivery -> String.equal (Keeper_skill_async_delivery.identity delivery)
+      action.Keeper_skill_async_action.delivery_sha256) async_result_deliveries with
+  | None -> Error (invalid "unknown causal delivery")
+  | Some delivery ->
+    let* () = validate_async_result ~expected_trace_id ~activations delivery in
+    let* () = Keeper_skill_async_action.validate_delivery delivery action |> Result.map_error invalid in
+    match List.find_opt (fun known -> String.equal (Keeper_skill_async_action.occurrence_identity known)
+        (Keeper_skill_async_action.occurrence_identity action)) async_actions with
+    | None -> Ok ()
+    | Some known when Keeper_skill_async_action.same_occurrence_fact known action -> Ok ()
+    | Some _ -> Error (invalid "physical occurrence differs across causal links")
+;;
+
 let of_projection_yojson json =
   let* fields = object_field "ledger" json in
   let* () =
@@ -1345,6 +1370,7 @@ let of_projection_yojson json =
         ; "activations"
         ; "transition_rejections"
         ; "async_result_deliveries"
+        ; "async_actions"
         ]
       fields
   in
@@ -1443,6 +1469,17 @@ let of_projection_yojson json =
         then Error (Invalid_async_result_evidence "duplicate physical handoff") else Ok (value::values))
         (Ok []) rows |> Result.map List.rev
     | Some _ | None -> Error (Expected_object {field="async_result_deliveries"}) in
+  let* async_actions = match List.assoc_opt "async_actions" fields with
+    | Some (`List rows) -> List.fold_left (fun result json ->
+        let* values = result in
+        let* value = Keeper_skill_async_action.of_json json
+          |> Result.map_error (fun detail -> Invalid_async_action_evidence detail) in
+        let* () = validate_async_action ~expected_trace_id:session_id ~activations ~async_result_deliveries ~async_actions:values value in
+        if List.exists (fun known -> String.equal (Keeper_skill_async_action.identity known)
+            (Keeper_skill_async_action.identity value)) values
+        then Error (Invalid_async_action_evidence "duplicate causal occurrence") else Ok (value::values))
+        (Ok []) rows |> Result.map List.rev
+    | Some _ | None -> Error (Expected_object {field="async_actions"}) in
   let ledger =
     make
       ~workspace_key
@@ -1450,6 +1487,7 @@ let of_projection_yojson json =
       ~activations
       ~transition_rejections
       ~async_result_deliveries
+      ~async_actions
   in
   if String.equal (revision ledger) declared_revision
   then Ok ledger
@@ -1487,6 +1525,7 @@ type event =
       }
   | Transition_rejected of transition_rejection
   | Async_result_delivered of Keeper_skill_async_delivery.t
+  | Async_action_observed of Keeper_skill_async_action.t
 
 let header_to_yojson ~workspace_key ~session_id =
   `Assoc
@@ -1523,6 +1562,8 @@ let event_to_yojson = function
         , `List (List.map (fun id -> `String id) skill_tool_use_ids) )
       ; "action", action_to_yojson action
       ]
+  | Async_action_observed action ->
+    `Assoc ["kind",`String "async_action_observed";"action",Keeper_skill_async_action.to_json action]
   | Async_result_delivered delivery ->
     `Assoc ["kind",`String "async_result_delivered";"delivery",Keeper_skill_async_delivery.to_json delivery]
   | Transition_rejected rejection ->
@@ -1637,6 +1678,12 @@ let decode_event ~expected_trace_id json =
     let* action = required_field ~field:"action" fields in
     let* action = decode_action action in
     Ok (Action_observed { skill_tool_use_ids; action })
+  | "async_action_observed" ->
+    let* () = exact_fields ~object_name:"event" ~allowed:["kind";"action"] fields in
+    let* json = required_field ~field:"action" fields in
+    let* action = Keeper_skill_async_action.of_json json
+      |> Result.map_error (fun detail -> Invalid_async_action_evidence detail) in
+    Ok (Async_action_observed action)
   | "async_result_delivered" ->
     let* () = exact_fields ~object_name:"event" ~allowed:["kind";"delivery"] fields in
     let* json = required_field ~field:"delivery" fields in
@@ -1664,6 +1711,7 @@ type builder =
   ; mutable cells_newest_first : activation ref list
   ; mutable rejections_newest_first : transition_rejection list
   ; mutable async_deliveries_newest_first : Keeper_skill_async_delivery.t list
+  ; mutable async_actions_newest_first : Keeper_skill_async_action.t list
   }
 
 let builder_of_ledger (ledger : t) =
@@ -1683,6 +1731,7 @@ let builder_of_ledger (ledger : t) =
   ; cells_newest_first
   ; rejections_newest_first = List.rev ledger.transition_rejections
   ; async_deliveries_newest_first = List.rev ledger.async_result_deliveries
+  ; async_actions_newest_first = List.rev ledger.async_actions
   }
 ;;
 
@@ -1693,6 +1742,7 @@ let ledger_of_builder builder =
     ~activations:(List.rev_map (fun cell -> !cell) builder.cells_newest_first)
     ~transition_rejections:(List.rev builder.rejections_newest_first)
     ~async_result_deliveries:(List.rev builder.async_deliveries_newest_first)
+    ~async_actions:(List.rev builder.async_actions_newest_first)
 ;;
 
 let update_cell builder skill_tool_use_id update =
@@ -1769,6 +1819,14 @@ let apply_event builder = function
                   else Ok { activation with actions = activation.actions @ [ action ] }
             ))
          skill_tool_use_ids)
+  | Async_action_observed action ->
+    let activations = List.map (fun cell -> !cell) builder.cells_newest_first in
+    let* () = validate_async_action ~expected_trace_id:builder.builder_session_id ~activations
+      ~async_result_deliveries:builder.async_deliveries_newest_first ~async_actions:builder.async_actions_newest_first action in
+    if List.exists (fun known -> String.equal (Keeper_skill_async_action.identity known)
+        (Keeper_skill_async_action.identity action)) builder.async_actions_newest_first
+    then Error (Invalid_async_action_evidence "duplicate causal occurrence")
+    else (builder.async_actions_newest_first <- action :: builder.async_actions_newest_first; Ok ())
   | Async_result_delivered delivery ->
     let activations = List.map (fun cell -> !cell) builder.cells_newest_first in
     let* () = validate_async_result ~expected_trace_id:builder.builder_session_id ~activations delivery in
@@ -2322,6 +2380,21 @@ let observe_async_result_delivery ~config ~trace_id ~expected_activations (deliv
     | Some known -> Ok (current,known)
     | None -> commit_event_locked session_dir log (Async_result_delivered delivery)
       |> Result.map (fun ledger -> ledger,delivery))
+;;
+
+let observe_async_action ~config ~trace_id action =
+  with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
+    let* log = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
+    let current = log.ledger in
+    let* () = validate_async_action ~expected_trace_id:trace_id ~activations:current.activations
+      ~async_result_deliveries:current.async_result_deliveries ~async_actions:current.async_actions action
+      |> Result.map_error (fun error -> Decode_failed error) in
+    match List.find_opt (fun known -> String.equal (Keeper_skill_async_action.identity known)
+        (Keeper_skill_async_action.identity action)) current.async_actions with
+    | Some known when Keeper_skill_async_action.same_fact known action -> Ok (current,known)
+    | Some _ -> Error (Decode_failed (Invalid_async_action_evidence "causal occurrence result differs"))
+    | None -> commit_event_locked session_dir log (Async_action_observed action)
+      |> Result.map (fun ledger -> ledger,action))
 ;;
 
 let observe_action

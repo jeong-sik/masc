@@ -1,8 +1,8 @@
 {
-  "schema": "masc.skill-activations/v6",
+  "schema": "masc.skill-activations/v7",
   "workspace_key": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "session_id": "trace-one",
-  "revision": "824c69afbb3ef2fa2439e1babd358b2b875ead99f2b3702ebd20bdde64d57a75",
+  "revision": "cacdd31ce460a86c4b657344f8f54bd446b871c3d645247cdf80c52f0b706f9b",
   "activations": [
     {
       "identity": {
@@ -114,5 +114,6 @@
       ],
       "observed_at": "2026-10-14T12:00:00Z"
     }
-  ]
+  ],
+  "async_actions": []
 }

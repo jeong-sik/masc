@@ -222,6 +222,7 @@ type decode_error =
   | Action_target_not_delivered of string
   | Unterminated_header_row
   | Invalid_async_result_evidence of string
+  | Invalid_async_action_evidence of string
 
 type store_error =
   | Lock_failed of string
@@ -265,6 +266,9 @@ val transition_rejections : t -> transition_rejection list
 val async_result_deliveries : t -> Keeper_skill_async_delivery.t list
 (** Exact physical handoffs, including reference-only delivery, associated with
     immutable original activations. These do not overwrite same-turn evidence. *)
+val async_actions : t -> Keeper_skill_async_action.t list
+(** Typed handler results and native start observations joined to those
+    handoffs, without treating a native start as completion. *)
 val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
 val receipt_projection_revision : t -> skill_tool_use_id:string -> string
@@ -379,6 +383,13 @@ val observe_async_result_delivery :
     the sealed recorder's expected frame, then append the physical handoff.
     Identical re-observation retains the first durable clock. A reference
     handoff never becomes a full-body receipt. *)
+
+val observe_async_action :
+  config:Workspace.config -> trace_id:Keeper_id.Trace_id.t ->
+  Keeper_skill_async_action.t -> (t * Keeper_skill_async_action.t, store_error) result
+(** Revalidate the exact stored delivery and original activation frame under
+    the canonical transaction. Repeated facts preserve their first clock;
+    altered results for an existing occurrence are refused. *)
 
 val observe_action :
   config:Workspace.config ->

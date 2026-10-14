@@ -25,6 +25,11 @@ let invocation_to_json invocation =
       "batch_index",`Int schedule.batch_index;"batch_size",`Int schedule.batch_size;
       "execution_mode",Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode];
     "completion",Agent_core.Tool_contract.completion_to_yojson (Invocation.completion invocation)]
+let equal_invocation left right =
+  String.equal (Invocation.tool_use_id left) (Invocation.tool_use_id right)
+  && Invocation.turn left = Invocation.turn right
+  && Invocation.schedule left = Invocation.schedule right
+  && Invocation.completion left = Invocation.completion right
 let boundary_to_json = function
   | Types.Model_response {agent_core_turn} -> `Assoc ["kind",`String "model_response";"agent_core_turn",`Int agent_core_turn]
   | Official_client_result_handoff {agent_core_turn} -> `Assoc ["kind",`String "official_client_result_handoff";"agent_core_turn",`Int agent_core_turn]
@@ -42,6 +47,11 @@ let fields value =
 let to_json value = `Assoc (fields value @ ["observed_at",`String value.observed_at])
 let identity value = Digestif.SHA256.(digest_string (Yojson.Safe.to_string (`Assoc (fields value))) |> to_hex)
 let nonblank name value = if String.trim value <> "" then Ok () else Error (name ^ " is blank")
+let validate_invocation invocation =
+  let* () = nonblank "SDK invocation" (Invocation.tool_use_id invocation) in
+  let schedule = Invocation.schedule invocation in
+  if Invocation.turn invocation >= 0 && schedule.planned_index >= 0
+      && schedule.batch_index >= 0 && schedule.batch_size > 0 then Ok () else Error "invalid SDK occurrence"
 let make ~original_turn_ref ~composition_run_id ~logical_parent_tool_use_id ~request_id
     ~physical_turn_ref ~runtime_id ~status_invocation ~boundary ~receipt ~presentation
     ~child_activations ~observed_at =
@@ -52,10 +62,7 @@ let make ~original_turn_ref ~composition_run_id ~logical_parent_tool_use_id ~req
   let* () = nonblank "logical parent" logical_parent_tool_use_id in
   let* () = nonblank "canonical request" request_id in
   let* () = nonblank "runtime" runtime_id in
-  let* () = nonblank "status invocation" (Invocation.tool_use_id status_invocation) in
-  let schedule = Invocation.schedule status_invocation in
-  let* () = if Invocation.turn status_invocation >= 0 && schedule.planned_index >= 0
-      && schedule.batch_index >= 0 && schedule.batch_size > 0 then Ok () else Error "invalid SDK occurrence" in
+  let* () = validate_invocation status_invocation in
   let* () = if String.equal receipt.Types.tool_use_id (Invocation.tool_use_id status_invocation)
       && receipt.content_bytes >= 0 then Ok () else Error "receipt differs from actual status invocation" in
   let* () = Skill_reference.validate_revision_string receipt.content_sha256

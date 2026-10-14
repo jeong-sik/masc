@@ -2,6 +2,8 @@
 
 type t
 type bound_context
+val physical_turn_ref : t -> Ids.Turn_ref.t
+val current_runtime_id : t -> string option
 type result_child =
   { alias : string
   ; skill_reference : Skill_reference.t

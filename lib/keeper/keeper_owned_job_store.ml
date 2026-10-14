@@ -21,11 +21,14 @@ type phase =
   | Cancelled_unconfirmed_launch
 type input = { path : string; artifact : Tool_output.artifact_ref }
 type paths = { job_dir : string; workspace : string; cli_config_dir : string }
+type outputs =
+  | Outputs_complete of Tool_output.artifact_ref * Tool_output.artifact_ref
+  | Outputs_unavailable of { evidence : string }
 type record =
   { job_id : Job_id.t; base_path : string; keeper_name : string; source : source
   ; preparation : Backend.preparation; inputs : input list; sequence : int
   ; phase : phase; cancel_requested : bool
-  ; outputs : (Tool_output.artifact_ref * Tool_output.artifact_ref) option
+  ; outputs : outputs option
   ; detail : string option
   ; completion_channel : Keeper_continuation_channel.t
   ; completion_delivered : bool }
@@ -92,9 +95,10 @@ let input_to_json input =
 
 let outputs_to_json = function
   | None -> `Null
-  | Some (stdout, stderr) -> `Assoc
+  | Some (Outputs_complete (stdout, stderr)) -> `Assoc
       [ "stdout", Tool_output.normalized_artifact_ref_to_json stdout
       ; "stderr", Tool_output.normalized_artifact_ref_to_json stderr ]
+  | Some (Outputs_unavailable {evidence}) -> `Assoc ["unavailable", `String evidence]
 
 let record_to_json record =
   `Assoc
@@ -133,6 +137,20 @@ let artifact value = match Tool_output.normalized_artifact_ref_of_json value wit
   | Tool_output.Decoded_normalized_artifact_ref reference -> Ok reference
   | Tool_output.Invalid_normalized_artifact_ref { detail } -> Error (Corrupt detail)
   | Tool_output.Not_normalized_artifact_ref -> Error (Corrupt "expected normalized artifact")
+
+let outputs_of_json = function
+  | `Null -> Ok None
+  | `Assoc fields when List.mem_assoc "unavailable" fields ->
+      (match fields with
+       | ["unavailable", `String evidence] -> Ok (Some (Outputs_unavailable {evidence}))
+       | ["unavailable", _] -> Error (Corrupt "invalid outputs evidence")
+       | _ -> Error (Corrupt "unknown outputs field"))
+  | `Assoc _ as value ->
+      let* fields = exact_object ["stdout";"stderr"] value in
+      let* stdout = decode_field fields "stdout" artifact in
+      let* stderr = decode_field fields "stderr" artifact in
+      Ok (Some (Outputs_complete (stdout, stderr)))
+  | _ -> Error (Corrupt "expected outputs object")
 
 let source_of_json value =
   Keeper_owned_job_identity.source_of_json value |> Result.map_error (fun detail -> Corrupt detail)
@@ -218,10 +236,7 @@ let record_of_json value =
       | _ -> Error (Corrupt "inputs must be an array") in
     let* phase = decode_field fields "phase" phase_of_json in
     let* cancel_requested = decode_field fields "cancel_requested" boolean in
-    let outputs value = let* fields = exact_object ["stdout";"stderr"] value in
-      let* stdout = decode_field fields "stdout" artifact in
-      let* stderr = decode_field fields "stderr" artifact in Ok (stdout,stderr) in
-    let* outputs = decode_field fields "outputs" (nullable outputs) in
+    let* outputs = decode_field fields "outputs" outputs_of_json in
     let* detail = decode_field fields "detail" (nullable string) in
     let* completion_channel = decode_field fields "completion_channel"
         (fun json -> Keeper_continuation_channel.of_yojson json
@@ -546,7 +561,9 @@ let result_json record =
     | Running _ -> "running", None
     | Exited {exit_code;_} -> "exited", Some exit_code
     | Cancelled_before_start _ | Cancelled_unconfirmed_launch -> "cancelled", None in
-  let artifacts = match record.outputs with None -> [] | Some (stdout,stderr) -> [stdout;stderr] in
+  let artifacts = match record.outputs with
+    | Some (Outputs_complete (stdout, stderr)) -> [stdout; stderr]
+    | Some (Outputs_unavailable _) | None -> [] in
   `Assoc ["job_id", `String (Job_id.to_string record.job_id); "status", `String status;
       "source", source_to_json record.source; "phase", `String (phase_to_string record.phase);
       "cancel_requested", `Bool record.cancel_requested;

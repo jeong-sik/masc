@@ -1204,6 +1204,51 @@ let test_completion_retains_unknown_launch_and_owner () = with_fixture @@ fun _e
   check int "restored owner still cannot authorize an absent start" 0 (effect_count fixture "start")
 
 
+let test_finished_without_outputs_absent_inventory_notified_once () = with_fixture @@ fun _env initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  let id = job_id started in
+  (* Confirmed exit first; output capture fails while the container exists. *)
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-exited" ~turn:42
+      "keeper_job_status" (argument id)));
+  check bool "exit without outputs is not yet a result" false (Store.result_ready (load fixture id));
+  check int "output capture attempted once" 1 (effect_count fixture "logs");
+  (* The exact owned container is then removed externally. *)
+  let state = daemon fixture |> to_assoc in
+  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
+      (List.map (fun (name, value) -> name, (if name = "container" then `Null else value)) state)));
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
+  let delivered = recover_completions fixture in
+  check int "absent inventory closes the finished job exactly once" 1 delivered.delivered;
+  check int "closed job leaves the waiting set" 0 delivered.waiting;
+  let record = load fixture id in
+  check bool "closed terminal is a ready result" true (Store.result_ready record);
+  (match record.outputs with
+   | Some (Store.Outputs_unavailable {evidence}) ->
+       check bool "closure carries exact absence evidence" true (String.length evidence > 0)
+   | _ -> fail "finished job without outputs was not closed as unavailable");
+  check bool "canonical owner acknowledged the one delivery" true record.completion_delivered;
+  let discovery = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "retired discovery" in
+  check int "delivery marker is retired by the one notification" 0 (List.length discovery.entries);
+  check int "absence closure collects no further output commands" 1 (effect_count fixture "logs");
+  let selection = only_selection fixture in
+  let completion = completion_payload selection in
+  check string "the one completion names the original job" id (Store.Job_id.to_string completion.oj_job_id);
+  (* A later pulse sees no pending marker, so nothing is reinspected or redelivered. *)
+  Process_eio.reset_for_testing (); initialize ();
+  let again = recover_completions fixture in
+  check int "retired job is not reinspected" 0 again.inspected;
+  check int "completion is not duplicated" 1 (List.length (pending_completions fixture));
+  Event_registry.ack_pending_result ~base_path:fixture.base_path keeper ~selection
+    |> require "actual completion queue consumption";
+  let after_ack = recover_completions fixture in
+  check int "acknowledged closure stays retired" 0 after_ack.inspected;
+  check_no_completion fixture;
+  check int "closed job never relaunches" 1 (effect_count fixture "create");
+  check int "closed job never restarts" 1 (effect_count fixture "start")
+
+
 let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let running = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
@@ -1309,5 +1354,6 @@ let () =
       ; test_case "completion enqueue failure recovers original result after restart" `Quick test_completion_delivery_failure_and_restart
       ; test_case "consumed notification survives missing producer ACK" `Quick test_completion_consumed_before_producer_ack
       ; test_case "completion recovery retains unknown launch and corrupt owner" `Quick test_completion_retains_unknown_launch_and_owner
+      ; test_case "finished without outputs and absent inventory is notified once and leaves waiting" `Quick test_finished_without_outputs_absent_inventory_notified_once
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

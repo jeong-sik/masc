@@ -50,6 +50,10 @@ let recover ~base_path (marker : Store.pending_delivery) =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Store.Io_failed (Printexc.to_string exn))
 
+(* One fiber per pending job is capped like the dashboard enrichment pools, so
+   a large Waiting set cannot fan out that many backend CLI calls at once. *)
+let recovery_max_fibers = 8
+
 let reconcile ~config =
   let base_path = config.Workspace.base_path in
   let* pending = Store.pending_deliveries ~base_path in
@@ -57,7 +61,8 @@ let reconcile ~config =
   let one (marker : Store.pending_delivery) = marker.job_id,recover ~base_path marker in
   let outcomes = match Fs_compat.execution_context () with
     | Fs_compat.Non_eio -> List.map one pending.entries
-    | Fs_compat.Eio_fiber -> Eio.Fiber.List.map one pending.entries in
+    | Fs_compat.Eio_fiber ->
+      Eio.Fiber.List.map ~max_fibers:recovery_max_fibers one pending.entries in
   let report = List.fold_left (fun report (job_id,outcome) ->
     let report = {report with inspected=report.inspected+1} in
     match outcome with

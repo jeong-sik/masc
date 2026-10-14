@@ -22,6 +22,12 @@ type phase =
 
 type input = { path : string; artifact : Tool_output.artifact_ref }
 type paths = { job_dir : string; workspace : string; cli_config_dir : string }
+type outputs =
+  | Outputs_complete of Tool_output.artifact_ref * Tool_output.artifact_ref
+  | Outputs_unavailable of { evidence : string }
+(** [Outputs_unavailable] closes a finished job's result when the exact backend
+    inventory proves the original container is absent, so its outputs can never
+    be collected. [None] on the record still means "not collected yet". *)
 type record = private
   { job_id : Job_id.t
   ; base_path : string
@@ -32,7 +38,7 @@ type record = private
   ; sequence : int
   ; phase : phase
   ; cancel_requested : bool
-  ; outputs : (Tool_output.artifact_ref * Tool_output.artifact_ref) option
+  ; outputs : outputs option
   ; detail : string option
   ; completion_channel : Keeper_continuation_channel.t
   ; completion_delivered : bool
@@ -65,7 +71,7 @@ val recover : base_path:string -> keeper_name:string -> Job_id.t -> (record, err
     created. Read-only tools continue to use strict [load]. *)
 val transition :
   record -> phase:phase -> cancel_requested:bool ->
-  outputs:(Tool_output.artifact_ref * Tool_output.artifact_ref) option ->
+  outputs:outputs option ->
   detail:string option -> (record, error) result
 (** Cross-process compare-and-append against the entire exact previous record.
     Cleanup failure is unconfirmed, never authorization for the pending effect. *)
@@ -75,7 +81,8 @@ val source_of_json : Yojson.Safe.t -> (source, error) result
 val result_json : record -> Yojson.Safe.t
 
 val result_ready : record -> bool
-(** True only for confirmed exit with both full outputs, or before-start cancellation. *)
+(** True for a confirmed exit with complete outputs or closed
+    outputs-unavailable evidence, and for before-start cancellation. *)
 val acknowledge_completion : record -> (record, error) result
 (** CAS the canonical owner only after a durable completion enqueue. *)
 type pending_delivery = { job_id : Job_id.t; keeper_name : string }

@@ -20,6 +20,8 @@ let observe (record : Store.record) observation =
   let preserve detail = Result.map (fun record -> Unconfirmed record) (note record detail) in
   let settle phase = save record ~phase ~cancel_requested:record.cancel_requested
       ~outputs:record.outputs ~detail:None |> Result.map (fun record -> Confirmed record) in
+  let absent_outputs_evidence =
+    "exact owned container absent after confirmed exit; original outputs unrecoverable" in
   match record.phase, observation with
   | Store.Create_requested, Backend.Created id -> settle (Store.Created id)
   | Store.Start_requested expected, Backend.Running id when id = expected ->
@@ -36,6 +38,18 @@ let observe (record : Store.record) observation =
   | Store.Cancelled_unconfirmed_launch, Backend.Absent -> Ok (Confirmed record)
   | Store.Cancelled_unconfirmed_launch, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
       preserve "same-label container after a cancelled launch is an orphan; cancellation evidence is retained"
+  | Store.Exited _, Backend.Absent ->
+      (match record.outputs with
+       | Some _ ->
+           preserve "saved backend job is absent; launch intent is retained, no relaunch"
+       | None ->
+           (* Exact inventory absence after a confirmed exit: the original
+              container is gone, so its outputs can never be collected.
+              Close the result as unavailable instead of Waiting forever. *)
+           Result.map (fun record -> Confirmed record)
+             (save record ~phase:record.phase ~cancel_requested:record.cancel_requested
+                ~outputs:(Some (Store.Outputs_unavailable {evidence=absent_outputs_evidence}))
+                ~detail:(Some absent_outputs_evidence)))
   | _, Backend.Unconfirmed detail -> preserve detail
   | _, Backend.Absent -> preserve "saved backend job is absent; launch intent is retained, no relaunch"
   | _, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
@@ -53,7 +67,7 @@ let collect (record : Store.record) =
        | Error error -> note record (Backend.error_to_string error)
        | Ok logs ->
            save record ~phase:record.phase ~cancel_requested:record.cancel_requested
-             ~outputs:(Some (logs.stdout,logs.stderr)) ~detail:None)
+             ~outputs:(Some (Store.Outputs_complete (logs.stdout, logs.stderr))) ~detail:None)
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
     | Store.Running _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), _
   | Store.Exited _, Some _ -> Ok record
@@ -152,8 +166,8 @@ let failure ?job_id ~effect_disposition class_ message =
 let finish ~tool_name ~start_time ~job_id = function
   | Ok (record : Store.record) ->
       let retained_artifacts = match record.outputs with
-        | None -> []
-        | Some (stdout, stderr) -> [stdout; stderr] in
+        | Some (Store.Outputs_complete (stdout, stderr)) -> [stdout; stderr]
+        | Some (Store.Outputs_unavailable _) | None -> [] in
       let result = Tool_result.make_ok ~tool_name ~start_time
           ~data:(Store.result_json record) ()
         |> Tool_result.with_retained_artifacts retained_artifacts in

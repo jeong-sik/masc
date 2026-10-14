@@ -8487,7 +8487,7 @@ let test_async_composition_binds_params_into_durable_status () =
        in
        replay ();
        let intent_directory = Filename.concat
-           (Filename.concat (Masc.Common.masc_dir_from_base_path ~base_path:config.base_path) "keeper_msg_requests")
+           (Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "keeper_msg_requests")
            "named_submissions" in
        let intent_path =
          Array.to_list (Sys.readdir intent_directory)

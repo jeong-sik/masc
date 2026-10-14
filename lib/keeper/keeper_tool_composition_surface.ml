@@ -1776,7 +1776,7 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
             ~data:(`Assoc (["composition_tool",`String tool_name;
               "execution",`String "async";"request_id",`String binding.request_id;
               "result_wait",Keeper_composition_dependency.composition_to_json binding;
-              "current_request",Keeper_msg_async.entry_to_json owner] @ tool_kind_field tool_kind)) ())) in
+              "current_request",Keeper_msg_async.entry_to_json owner] @ [tool_kind_field tool_kind])) ())) in
       let permit = Atomic.make None in
       let before_submit () =
         match recover () with

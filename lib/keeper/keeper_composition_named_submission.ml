@@ -162,7 +162,8 @@ let valid_transition before after = match before,after with
         | None,(None | Some _) -> true
         | Some left,Some right -> String.equal left right
         | Some _,None -> false)
-  | Prepared,Prepared | Submitting {request_id=Some _;_},Prepared -> false
+  | Prepared,Prepared | Prepared,Submitting {request_id=Some _;_}
+  | Submitting {request_id=Some _;_},Prepared -> false
 
 let decode request bytes =
   try

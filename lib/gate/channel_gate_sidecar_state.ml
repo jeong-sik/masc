@@ -210,72 +210,50 @@ module Make (Config : Config) = struct
     Option.value ~default:`Null
       (Option.map (fun value -> `Bool value) status.gate_healthy)
 
+  (* The fields both views share, written once so a field added to one view
+     is in the other too. *)
+  let status_fields status =
+    [
+      ("available", `Bool status.available);
+      ("connected", `Bool status.connected);
+      ("stale", `Bool status.stale);
+      ("stale_after_sec", `Int (stale_after_sec ()));
+      ("status", `String (status_label status));
+      ("error", `String status.error);
+      ("status_path", `String status.status_path);
+      ("binding_store_path", `String status.binding_store_path);
+      ("binding_store_read_ok", `Bool status.binding_store_read_ok);
+      ("binding_store_error", `String status.binding_store_error);
+      ("audit_path", `String status.audit_path);
+      ("updated_at", `String status.updated_at);
+      ("last_message_at", `String status.last_message_at);
+      ("messages_processed", `Int status.messages_processed);
+      ("messages_failed", `Int status.messages_failed);
+      ("poll_interval_sec", `Float status.poll_interval_sec);
+      ("gate_base_url", `String status.gate_base_url);
+      ("gate_healthy", gate_healthy_json status);
+      ("gate_health_checked_at", `String status.gate_health_checked_at);
+      ("pid", `Int status.pid);
+      ("binding_source", `String status.binding_source);
+      ("runtime_bindings_count", `Int status.runtime_bindings_count);
+      ( "configured_bindings",
+        `List (List.map binding_json status.configured_bindings) );
+      ("recent_audit", `List status.recent_audit);
+    ]
+
   let status_json ?(audit_limit = 10) () =
-    let status = read_status ~audit_limit in
     `Assoc
-      [
-        ("channel", `String channel);
-        ("available", `Bool status.available);
-        ("connected", `Bool status.connected);
-        ("stale", `Bool status.stale);
-        ("stale_after_sec", `Int (stale_after_sec ()));
-        ("status", `String (status_label status));
-        ("error", `String status.error);
-        ("status_path", `String status.status_path);
-        ("binding_store_path", `String status.binding_store_path);
-        ("binding_store_read_ok", `Bool status.binding_store_read_ok);
-        ("binding_store_error", `String status.binding_store_error);
-        ("audit_path", `String status.audit_path);
-        ("updated_at", `String status.updated_at);
-        ("last_message_at", `String status.last_message_at);
-        ("messages_processed", `Int status.messages_processed);
-        ("messages_failed", `Int status.messages_failed);
-        ("poll_interval_sec", `Float status.poll_interval_sec);
-        ("gate_base_url", `String status.gate_base_url);
-        ("gate_healthy", gate_healthy_json status);
-        ("gate_health_checked_at", `String status.gate_health_checked_at);
-        ("pid", `Int status.pid);
-        ("binding_source", `String status.binding_source);
-        ("runtime_bindings_count", `Int status.runtime_bindings_count);
-        ( "configured_bindings",
-          `List (List.map binding_json status.configured_bindings) );
-        ("recent_audit", `List status.recent_audit);
-      ]
+      (("channel", `String channel) :: status_fields (read_status ~audit_limit))
 
   let connector_json ?(audit_limit = 10) () =
-    let status = read_status ~audit_limit in
     `Assoc
-      [
-        ("connector_id", `String connector_id);
-        ("display_name", `String display_name);
-        ("channel", `String channel);
-        ("capabilities", Channel_gate_connector_capability.all_json);
-        ("status", `String (status_label status));
-        ("available", `Bool status.available);
-        ("connected", `Bool status.connected);
-        ("stale", `Bool status.stale);
-        ("stale_after_sec", `Int (stale_after_sec ()));
-        ("error", `String status.error);
-        ("status_path", `String status.status_path);
-        ("binding_store_path", `String status.binding_store_path);
-        ("binding_store_read_ok", `Bool status.binding_store_read_ok);
-        ("binding_store_error", `String status.binding_store_error);
-        ("audit_path", `String status.audit_path);
-        ("updated_at", `String status.updated_at);
-        ("last_message_at", `String status.last_message_at);
-        ("messages_processed", `Int status.messages_processed);
-        ("messages_failed", `Int status.messages_failed);
-        ("poll_interval_sec", `Float status.poll_interval_sec);
-        ("gate_base_url", `String status.gate_base_url);
-        ("gate_healthy", gate_healthy_json status);
-        ("gate_health_checked_at", `String status.gate_health_checked_at);
-        ("binding_source", `String status.binding_source);
-        ("runtime_bindings_count", `Int status.runtime_bindings_count);
-        ("pid", `Int status.pid);
-        ( "configured_bindings",
-          `List (List.map binding_json status.configured_bindings) );
-        ("recent_audit", `List status.recent_audit);
-      ]
+      ([
+         ("connector_id", `String connector_id);
+         ("display_name", `String display_name);
+         ("channel", `String channel);
+         ("capabilities", Channel_gate_connector_capability.all_json);
+       ]
+      @ status_fields (read_status ~audit_limit))
 
   let bind ~channel_id ~keeper_name ~actor_name =
     let channel_id = String.trim channel_id in

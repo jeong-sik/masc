@@ -101,7 +101,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
     (I.official_client_recovery_summary expected) terminal.summary;
   (match Route.route_of_error ~boundary:Route.Masc_execution error with
    | Route.Exhausted_visible_alive
-       { terminal = Route.Session_claim_refused; _ }
+       { terminal = Route.Session_claim_refused }
        as route ->
      Alcotest.(check string)
        "local claim refusal has its own route label"
@@ -376,7 +376,7 @@ let check_remote_fence () =
     (I.classify_masc_internal_error error = Some cause);
   match Route.route_of_error ~boundary:Route.Masc_execution error with
   | Route.Exhausted_visible_alive
-      { terminal = Route.Provider_attempt_effect_fenced Route.Fenced_effect_attempted; _ } -> ()
+      { terminal = Route.Provider_attempt_effect_fenced Route.Fenced_effect_attempted } -> ()
   | _ -> Alcotest.fail "remote attempt fence was conflated with local claim refusal"
 
 let () =

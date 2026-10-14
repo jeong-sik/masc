@@ -5420,9 +5420,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              (match exact_route with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
-                     Keeper_runtime_failure_route.Terminal_effect_runtime_failure
-                 ; _
-                 } ->
+                     Keeper_runtime_failure_route.Terminal_effect_runtime_failure } ->
                ()
              | _ -> fail "typed terminal failure did not reach its exact route");
             let transient_terminal_error =
@@ -5444,9 +5442,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
-                     Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable
-                 ; _
-                 } ->
+                     Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable } ->
                ()
              | Keeper_runtime_failure_route.Retry_after_observed _ ->
                fail "unknown transient terminal effect was requeued"

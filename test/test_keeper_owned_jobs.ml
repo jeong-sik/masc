@@ -898,7 +898,8 @@ let await_composition env fixture accepted =
           (match entry.status with
            | Async.Done {ok;data=Some data;_} -> ok, data, entry
            | Async.Waiting_for_dependencies {data=Some data;_} -> false, data, entry
-           | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+           | Async.Cancelled _ -> false, Async.entry_to_json entry, entry
+           | Queued | Running | Cancelling _ | Lost _
            | Persistence_failed _ | Done {data=None;_}
            | Waiting_for_dependencies {data=None;_} -> fail "composition did not settle a result")
       | Error (Async.Canonical_terminal_absent | Canonical_terminal_runtime_active _) ->
@@ -923,7 +924,7 @@ let composition_nodes fixture data =
 
 let composition_node name nodes = List.find (fun row -> row |> member "node_id" |> to_string = name) nodes
 
-let test_named_async_result_parent ?(child_waits=false) ~child_fails () = with_fixture @@ fun env initialize fixture ->
+let test_named_async_result_parent ?(child_waits=false) ?(child_cancelled=false) ~child_fails () = with_fixture @@ fun env initialize fixture ->
   let module Async = Masc.Keeper_msg_async in
   let module Surface = Masc.Keeper_capability_surface in
   let module Recorder = Masc.Keeper_skill_activation_recorder in
@@ -940,6 +941,8 @@ let test_named_async_result_parent ?(child_waits=false) ~child_fails () = with_f
   let owner_bytes = read owner in
   Fun.protect ~finally:(fun () -> write owner owner_bytes) @@ fun () ->
   let config = Workspace.default_config fixture.base_path in
+  let child_independent = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path)
+      ~bytes:"completed child independent branch\n" ~mime:"text/plain" in
   let skill_dir = Filename.concat fixture.base_path ".agents/skills/named-result-child" in
   Fs_compat.mkdir_p skill_dir;
   write (Filename.concat skill_dir "SKILL.md") (Printf.sprintf {|---
@@ -964,12 +967,12 @@ node = "observe"
 pointer = "/artifacts/0/_blob/sha256"
 ```
 |} (if child_waits then Printf.sprintf {|[[compositions.nodes]]
-id = "collect"
-tool = "keeper_job_status"
+id = "child-independent"
+tool = "keeper_artifact_read"
 [compositions.nodes.input]
 kind = "literal"
-value = { job_id = %S }
-|} id else "") (if child_waits then "\"collect\"" else "") id);
+value = { sha256 = %S }
+|} child_independent.sha256 else "") (if child_waits then "\"child-independent\"" else "") id);
   let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
   write runtime_path "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n";
   let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
@@ -1089,6 +1092,11 @@ value = { job_id = %S }
    | Ok Journal.Waiting_for_results -> () | Ok Results_ready | Error _ -> fail "active child result appeared ready");
   set_source fixture ~task_id:"task-B" ~turn:52;
   if child_fails then write owner "corrupt-original-child-owner\n";
+  if child_cancelled then (
+    match Async.cancel ~base_path:fixture.base_path ~caller:keeper binding.request_id with
+    | Async.Cancellation_requested _ -> ()
+    | other -> failf "actual named cancellation refused: %s"
+        (Yojson.Safe.to_string (Async.cancel_result_to_json ~request_id:binding.request_id other)));
   release ();
   (match Eio.Promise.await released with
    | Fs_compat.Private_file_succeeded (Some ()) -> ()
@@ -1147,21 +1155,33 @@ value = { job_id = %S }
     let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"fresh-named-continuation" ~turn:52
         ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
         ~completion:Agent_core.Tool_contract.Continue_after_success in
-    let successor = Masc.Keeper_tool_composition_surface.resume_continuation ~capability_surface:surface
-        ~continuation:child_continuation ~config ~meta:fixture.meta ~publication_recovery
-        ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"fresh named continuation")
-        ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ()) ~invocation
-        ~clock:(Eio.Stdenv.clock env) () |> Tool_result.data in
-    check_json "named successor retains the first public result binding" binding_json (successor |> member "result_wait");
-    check bool "named successor uses a new physical request" true
-      (successor |> member "request_id" |> to_string <> binding.request_id);
-    let outcome,completed,entry = await_composition env fixture successor in
+    let settled = ref None in
+    let raced_read = Masc.Keeper_composition_dependency_result.For_testing.handle
+        ~after_owner_read:(fun (observed : Async.entry) ->
+          if String.equal observed.request_id lost_id then (
+            let successor = Masc.Keeper_tool_composition_surface.resume_continuation ~capability_surface:surface
+                ~continuation:child_continuation ~config ~meta:fixture.meta ~publication_recovery
+                ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"fresh named continuation")
+                ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ()) ~invocation
+                ~clock:(Eio.Stdenv.clock env) () |> Tool_result.data in
+            check_json "named successor retains the first public result binding" binding_json (successor |> member "result_wait");
+            check bool "named successor uses a new physical request" true
+              (successor |> member "request_id" |> to_string <> binding.request_id);
+            settled := Some (await_composition env fixture successor)))
+        ~config ~meta:fixture.meta ~args:(`Assoc ["binding",binding_json]) in
+    let outcome,completed,entry = match !settled with
+      | Some settled -> settled | None -> fail "actual successor did not interleave the Lost result observation" in
+    check bool "owner transition never publishes stale physical Lost as final failure" true
+      (match raced_read.disposition with Tool_result.Completed () -> true | Deferred () | Failed _ -> false);
+    (match raced_read.data with
+     | Some data -> check_json "racing read selects the current successful logical result" completed (data |> member "result")
+     | None -> fail "racing read lost the canonical structured result");
     check int "named continuation reads no backend after canonical job completion" before (List.length (calls fixture));
     List.iter (fun field -> check_json ("named result recheck retains original " ^ field)
       (composition_node "observe" original_child_nodes |> member field)
       (composition_node "observe" (composition_nodes fixture completed) |> member field)) ["execution_id";"tool_use_id"];
-    check_json "named continuation reuses its completed write-node result" (`String "retained_completion")
-      (composition_node "collect" (composition_nodes fixture completed) |> member "execution_origin");
+    check_json "named continuation reuses its completed independent node" (`String "retained_completion")
+      (composition_node "child-independent" (composition_nodes fixture completed) |> member "execution_origin");
     (match entry.request_context with
      | Some fields -> check_json "named successor retains original Task" (`String "task-A") (List.assoc "source_task_id" fields)
      | None -> fail "named successor source missing");
@@ -1172,7 +1192,13 @@ value = { job_id = %S }
         ~clock:(Eio.Stdenv.clock env) () in
     check bool "completed named successor rejects stale sealed owner" false (Tool_result.is_success competing);
     outcome,completed,entry) in
-  check bool "canonical named child preserves its actual success or failure" (not child_fails) child_ok;
+  check bool "canonical named child preserves its actual success or failure" (not (child_fails || child_cancelled)) child_ok;
+  if child_cancelled then (
+    (match child_entry.status with Async.Cancelled _ -> () | _ -> fail "named cancellation did not remain Cancelled");
+    let child_journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+        ~composition_run_id:binding.composition_run_id |> require "cancelled named journal" in
+    match Journal.waiting_continuation child_journal with
+    | Ok None -> () | Ok (Some _) | Error _ -> fail "named cancellation granted successor authority");
   write owner owner_bytes;
   Process_eio.reset_for_testing (); initialize ();
   assert_wrong_binding ();
@@ -1206,7 +1232,7 @@ value = { job_id = %S }
   let resumed = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"resume-child-parent"
       ~turn:52 "keeper_composition_run" (`Assoc ["sha256",`String sha256;"resume_run_id",`String run_id])) in
   let parent_ok,completed,completed_entry = await_composition env fixture resumed in
-  check bool "parent preserves original child outcome" (not child_fails) parent_ok;
+  check bool "parent preserves original child outcome" (not (child_fails || child_cancelled)) parent_ok;
   check int "parent resumption never re-executes the original child backend" backend_before_resume (List.length (calls fixture));
   let completed_nodes = composition_nodes fixture completed in
   List.iter (fun name -> List.iter (fun field -> check_json (name ^ " retains original " ^ field)
@@ -1214,9 +1240,11 @@ value = { job_id = %S }
       ["execution_id";"tool_use_id"]) ["await";"await-also";"sibling"];
   check_json "independent completed branch is reused" (`String "retained_completion")
     (composition_node "sibling" completed_nodes |> member "execution_origin");
-  if child_fails then (
+  if child_fails || child_cancelled then (
     let failure = composition_node "await" completed_nodes |> member "result" in
-    check_json "failed child keeps its canonical structured diagnostic" child_result
+    if child_cancelled then check_json "cancelled child keeps its exact actor and reason" (Async.entry_to_json child_entry)
+      (failure |> member "data" |> member "request")
+    else check_json "failed child keeps its canonical structured diagnostic" child_result
       (failure |> member "data" |> member "request" |> member "result");
     check bool "child failure supplies no successful downstream stdout" true
       (completed |> member "exports" |> member "child_result" |> member "available" = `Bool false))
@@ -1237,7 +1265,7 @@ value = { job_id = %S }
   check int "named child never restarts the original program" 1 (effect_count fixture "start");
   Printf.printf "composition_named_result_measurement=%s\n%!" (Yojson.Safe.to_string
     (`Assoc ["scope",`String "public named readonly producer held by original owner transaction; fresh-turn parent resume; synthetic CLI";
-      "child_failed",`Bool child_fails;"child_released_worker",`Bool child_waits;"prepare_to_wait_ms",`Float prepare_to_wait_ms;
+      "child_failed",`Bool child_fails;"child_cancelled",`Bool child_cancelled;"child_released_worker",`Bool child_waits;"prepare_to_wait_ms",`Float prepare_to_wait_ms;
       "resume_to_terminal_ms",`Float (Mtime.Span.to_float_ns (Mtime_clock.count resumed_started) /. 1_000_000.);
       "resume_backend_calls",`Int (List.length (calls fixture)-backend_before_resume)]))
 
@@ -3707,6 +3735,8 @@ let () =
       ; test_case "public Composition waits and resumes the original job result" `Quick test_public_composition_wait_and_resume
       ; test_case "public named async result parks and resumes its original parent" `Quick
           (test_named_async_result_parent ~child_fails:false)
+      ; test_case "actual named cancellation remains failed to its original parent" `Quick
+          (test_named_async_result_parent ~child_cancelled:true ~child_fails:false)
       ; test_case "named producer releases and resumes before its original parent" `Quick
           (test_named_async_result_parent ~child_waits:true ~child_fails:false)
       ; test_case "canonical named child failure remains failed on fresh parent resume" `Quick

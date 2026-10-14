@@ -1676,8 +1676,11 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
         | None -> Ok None
         | Some context -> Keeper_skill_activation_recorder.bind_async context
             |> Result.map Option.some |> Result.map_error Keeper_skill_activation_recorder.error_to_string in
-      let* draft = Draft.prepare_named ~base_path:config.base_path ~capability_surface
-          ~keeper_name:meta.name ~plan
+      let* recipe = Keeper_tool_plan_request.to_yojson plan
+        |> Result.map_error (fun (Keeper_tool_plan_request.Unsubstituted_param {name}) ->
+          "named async plan retains unbound parameter " ^ name) in
+      let* draft = Draft.prepare ~base_path:config.base_path ~capability_surface
+          ~keeper_name:meta.name ~execution:Catalog.Async recipe
         |> Result.map_error (fun error -> Yojson.Safe.to_string (Draft.error_to_json error)) in
       let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
       let* run_reference = Draft.record_invocation ~base_path:config.base_path ~composition_run_id

@@ -235,9 +235,9 @@ read verifies durable producer membership as well as the canonical request sourc
 A generic worker that copied the context has no named-run membership.
 
 Named async execution freezes its instantiated ordinary plan before acceptance
-and journals its original Skill, invocation, Task and recorder selection. Its
-existing admitted write Tools may still run. A completed write node is reused;
-a pending owned result rechecks only its original read occurrence. Maintenance
+and journals its original Skill, invocation, Task and recorder selection. Named async Skills retain their existing static read-only admission. Completed
+independent nodes are reused; a pending owned result rechecks only its original
+read occurrence. Maintenance
 uses the existing continuation pulse and current capability admission to resume
 that logical run. The first public binding remains unchanged when a successor
 worker takes ownership. Reads validate every predecessor and the current journal
@@ -269,10 +269,13 @@ conversion or deletion occurs.
 turn. Success reads the original full result artifact and stdout; original-owner read failure keeps its diagnostic. Both scenarios reject changed bindings and a copied
 generic request, preserve occurrence IDs, and measure zero extra child backend
 calls during parent resume. A further public scenario parks the named child
-itself on a running owned job after a completed write node, causes a real
+itself on a running owned job after a completed independent node, causes a real
 post-binding worker-fork loss, resumes the child under its original binding,
 and then resumes the parent. It checks original Task and occurrence IDs, retained
-write completion, stale-owner refusal, and zero extra backend calls in either
-resume. Authored scenarios are not execution evidence until
+independent completion, stale-owner refusal, and zero extra backend calls in either
+resume. A handler effects-boundary interleave replaces a just-read Lost owner
+with a real successful successor; the read selects the current logical result
+instead of publishing stale Lost failure. An actual broker cancellation retains its exact actor/reason and grants
+no child continuation. Authored scenarios are not execution evidence until
 the selected head's run completes, and their component intervals do not measure
 whole-task preparation improvement or installed runtime/UI behavior.

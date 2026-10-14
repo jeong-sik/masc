@@ -290,14 +290,6 @@ let compile ~capability_surface json =
   Ok { plan; calls }
 ;;
 
-let compile_named_plan ~capability_surface json =
-  let* plan = Request.plan_of_json ~descriptors:(Surface.descriptors capability_surface) json
-    |> Result.map_error (fun error -> Request_rejected error) in
-  let* () = Plan.prepare_inputs plan |> Result.map (fun _ -> ())
-    |> Result.map_error (fun (id,error) -> Inputs_rejected (id,error)) in
-  Ok {plan;calls=[]}
-;;
-
 let call_to_json (call : call) = `Assoc
     [ "alias", id_json call.alias
     ; "reference", Skill_reference.to_yojson call.reference

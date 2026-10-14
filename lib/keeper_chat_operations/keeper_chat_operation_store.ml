@@ -1380,11 +1380,10 @@ let claim_next ?batch store ~now =
                let* current = match batch with
                  | None -> operation_or_unknown store.db current.operation_id
                  | Some select -> freeze_batch_with_db store.db ~select current in
-               let* transition =
+               let* expected =
                  Reducer.apply current (Start { started_at = now })
                  |> Result.map_error (reducer_error current.operation_id)
                in
-               let expected = transition.operation in
                let* () =
                  with_statement
                    store.db
@@ -1484,7 +1483,6 @@ let edit_queued store ~operation_id ~input =
     let* operation = operation_or_unknown store.db operation_id in
     current := Some operation;
     Reducer.apply operation (Edit_queued { input; execution_digest })
-    |> Result.map (fun transition -> transition.Reducer.operation)
     |> Result.map_error (reducer_error operation_id)
   in
   ignore current;
@@ -1518,7 +1516,7 @@ let move_queued_to_end store ~operation_id =
           Error (Not_queued operation_id)
       in
         let* sequence = next_sequence store.db in
-        let* transition =
+        let* moved =
           Reducer.apply operation (Move_queued { sequence })
           |> Result.map_error (reducer_error operation_id)
         in
@@ -1533,7 +1531,7 @@ let move_queued_to_end store ~operation_id =
                let* () = expect_done store.db stmt ~operation:"move queued operation" in
                if Sqlite3.changes store.db = 1 then Ok () else Error (Not_queued operation_id))
         in
-        expected := Some transition.operation;
+        expected := Some moved;
         Ok ())
   in
   match transaction with
@@ -1826,7 +1824,7 @@ let direct_runtime_retry store ~operation_id =
 ;;
 
 let requeue_continuation_with_db db operation =
-  let* transition = Reducer.apply operation Reducer.Requeue_continuation
+  let* requeued = Reducer.apply operation Reducer.Requeue_continuation
     |> Result.map_error (reducer_error operation.Operation.operation_id) in
   let* () = with_statement db ~operation:"requeue checkpointed direct operation"
     "UPDATE operations SET state = 'queued', started_at = NULL WHERE operation_id = ? AND state = 'running'"
@@ -1834,7 +1832,7 @@ let requeue_continuation_with_db db operation =
       let* () = bind_text db statement ~operation:"bind continuation operation" 1 (Id.to_string operation.operation_id) in
       let* () = expect_done db statement ~operation:"requeue checkpointed direct operation" in
       if Sqlite3.changes db = 1 then Ok () else Error (Not_running operation.operation_id)) in
-  Ok transition.operation
+  Ok requeued
 ;;
 
 let semantic_error_to_store_error = function
@@ -2339,10 +2337,9 @@ let settle_batch_members_with_db db ~execution_id =
 
 let persist_terminal store current command sql bind_terminal =
   let operation_id = current.Operation.operation_id in
-  let* transition =
+  let* expected =
     Reducer.apply current command |> Result.map_error (reducer_error operation_id)
   in
-  let expected = transition.operation in
   persist_and_readback store expected (fun () ->
     let* () = settle_direct_semantic_with_db store.db current command in
     let* () = with_statement store.db ~operation:"terminalize operation" sql (fun stmt ->

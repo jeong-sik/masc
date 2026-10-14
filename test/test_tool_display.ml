@@ -11,6 +11,14 @@ let tests =
     ("single word", `Quick, check "single" ~input:"Execute" ~expected:"Execute");
     ("empty segments", `Quick, check "empty" ~input:"a__b" ~expected:"AB");
     ("empty string", `Quick, check "empty-string" ~input:"" ~expected:"");
+    (* task-2327: the label pipeline itself is byte-faithful on non-ASCII
+       input (bytes >= 0x80 pass through, like capitalize_ascii); the ASCII
+       assumption lives at the registry boundary, not inside label. The JS
+       port keeps the same behavior by lifting only [a-z] as the first
+       letter, so both sides render "über_agent" as "überAgent". *)
+    ( "non-ascii passes through"
+    , `Quick
+    , check "non-ascii" ~input:"über_agent" ~expected:"überAgent" );
   ]
 
 (* task-2245: the tools list mixes wire tool names with skill slugs. A slug
@@ -107,18 +115,19 @@ let registry_names_are_ascii () =
     in
     check 0
   in
-  let bad = ref [] in
-  List.iter
-    (fun (d : Descriptor.t) ->
-      if not_ascii d.Descriptor.public_name then
-        bad := ("public_name", d.Descriptor.public_name) :: !bad;
-      if not_ascii d.Descriptor.internal_name then
-        bad := ("internal_name", d.Descriptor.internal_name) :: !bad)
-    (Descriptor.all_descriptors ());
-  match !bad with
+  let registered_names () =
+    Descriptor.all_descriptors ()
+    |> List.concat_map (fun (d : Descriptor.t) ->
+           [ d.Descriptor.public_name; d.Descriptor.internal_name ])
+  in
+  let bad =
+    registered_names () |> List.filter (fun name -> not_ascii name)
+    |> List.map (fun name -> name)
+  in
+  match bad with
   | [] -> ()
   | xs ->
-      let show (kind, name) = Printf.sprintf "%s %S contains non-ASCII bytes" kind name in
+      let show name = Printf.sprintf "%S contains non-ASCII bytes" name in
       Alcotest.fail
         ( "tool names must stay ASCII for the JS port mirror "
         ^ "(dashboard/src/lib/tool-display-label.ts): "

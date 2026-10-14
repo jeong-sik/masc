@@ -1,7 +1,7 @@
 # masc Roadmap
 
-> Current package version: v0.55.0
-> Latest changelog entry: v0.55.0 (2026-10-14)
+> Current package version: v0.56.0
+> Latest changelog entry: v0.56.0 (2026-10-14)
 > Latest published GitHub release: v0.51.0 (2026-10-11)
 > Updated: 2026-10-14
 

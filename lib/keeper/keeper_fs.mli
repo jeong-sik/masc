@@ -229,4 +229,4 @@ val session_store_path_for_runtime_root : string -> string
 
 val session_store_path_for_base_path : string -> string
 (** Pure path to the retained trace-session store for an already resolved
-    runtime base path. This follows the producer's cluster and trace-store rules. *)
+    runtime base path. This follows the producer's trace-store rules. *)

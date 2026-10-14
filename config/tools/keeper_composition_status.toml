@@ -8,8 +8,9 @@ does not require another status read. Submission and cancellation requests are
 distinct from completed and cancelled states.
 Check status and ok to determine the actual composition outcome.
 
-waiting_for_owned_jobs names the original job_ids and retained execution result.
-Wait for their completion notification, then resume the same prepared draft and
+waiting_for_dependencies names original typed dependencies (owned_job or
+composition_result) and the retained execution result. Wait for the original
+completion, then resume the same prepared draft and
 composition_run_id. The released attempt is waiting and has not failed."""
 additional_properties = false
 

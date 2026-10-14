@@ -151,7 +151,7 @@ let manifest_matches ~base_path ~expected result =
 let resolve ~base_path ~entry ~invocation ~(result : Tool_result.result) =
   match entry.Async.status with
   | Async.Queued | Running | Cancelling _ | Lost _ | Cancelled _
-  | Persistence_failed _ | Waiting_for_owned_jobs _ -> Ok None
+  | Persistence_failed _ | Waiting_for_dependencies _ -> Ok None
   | Done _ ->
     let* run_id = prepared_run_id entry in
     match run_id with
@@ -304,7 +304,7 @@ let persist ~(config : Workspace.config) (observation : observation) =
   let* result = match binding.entry.status with
     | Async.Done {data=Some data;_} -> Ok data
     | Done {data=None;_} | Queued | Running | Cancelling _ | Lost _ | Cancelled _
-    | Persistence_failed _ | Waiting_for_owned_jobs _ -> Error (Invalid_result "completed child result is unavailable") in
+    | Persistence_failed _ | Waiting_for_dependencies _ -> Error (Invalid_result "completed child result is unavailable") in
   let* restored = Draft.load_nested_result_children ~base_path:config.base_path binding.source ~result
     |> Result.map_error (fun error -> Activation_failed error) in
   let* restored,children = match restored with

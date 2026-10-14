@@ -22,21 +22,18 @@ open Keeper_msg_async_record
 type worker_outcome =
   | Worker_finished of tool_result
   | Worker_waiting of
-      { job_ids : Keeper_owned_job_identity.Job_id.t list
+      { dependencies : Keeper_composition_dependency.t list
       ; result : tool_result }
 
 let worker_finished result = Worker_finished result
 
-let worker_waiting_for_owned_jobs ~job_ids result =
-  let job_ids = List.sort_uniq
-      (fun left right -> String.compare
-        (Keeper_owned_job_identity.Job_id.to_string left)
-        (Keeper_owned_job_identity.Job_id.to_string right)) job_ids in
-  match result, job_ids with
-  | Tool_result.Deferred _, _ :: _ -> Ok (Worker_waiting {job_ids;result})
-  | Tool_result.Deferred _, [] -> Error "owned job waiting requires an original job identity"
+let worker_waiting_for_dependencies ~dependencies result =
+  let dependencies = Keeper_composition_dependency.normalize dependencies in
+  match result, dependencies with
+  | Tool_result.Deferred _, _ :: _ -> Ok (Worker_waiting {dependencies;result})
+  | Tool_result.Deferred _, [] -> Error "result waiting requires an original dependency"
   | (Tool_result.Completed _ | Tool_result.Failed _), _ ->
-      Error "owned job waiting requires a typed deferred result"
+      Error "result waiting requires a typed deferred result"
 ;;
 
 type durable_queued_proof = { queued_entry : entry }
@@ -874,7 +871,7 @@ let read_active_inventory_record ~base_path ~dir name =
               ({ status = (Queued | Running | Cancelling _); _ } as entry) ->
             Ok entry
           | Record_file_found
-              ({ status = (Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ | Done _); _ }
+              ({ status = (Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ | Done _); _ }
                as entry) ->
             Error
               (active_inventory_record_error
@@ -983,7 +980,7 @@ let rollback_rejected_record_file_unlocked ~ops ~ownership_root path =
 let status_after_worker_absence ~reason = function
   | Cancelling {reason;cancelled_by} -> Cancelled {reason;cancelled_by}
   | Queued | Running -> Lost {reason}
-  | (Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ | Done _) as terminal -> terminal
+  | (Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ | Done _) as terminal -> terminal
 
 let settle_unowned_record_after_recovery ?source_path (entry : entry) =
   let reason =
@@ -1201,7 +1198,7 @@ let recover_record_path ~base_path ~request_id path report =
          match settle_unowned_record_after_recovery ~source_path:path entry with
          | Ok settled ->
            (match settled.status with
-            | Cancelled _ | Done _ | Persistence_failed _ | Waiting_for_owned_jobs _ ->
+            | Cancelled _ | Done _ | Persistence_failed _ | Waiting_for_dependencies _ ->
               { report with finalized = report.finalized + 1 }
             | Lost _ -> { report with lost = report.lost + 1 }
             | Queued | Running | Cancelling _ ->
@@ -1625,7 +1622,7 @@ let set_status ~ops ?(preserve_terminal = false) key status =
                | Lost _
                | Cancelled _
                | Persistence_failed _
-               | Waiting_for_owned_jobs _
+               | Waiting_for_dependencies _
                | Done _ )
            ; _
            } as entry) ->
@@ -1636,17 +1633,17 @@ let set_status ~ops ?(preserve_terminal = false) key status =
         let status = match entry.status with
           | Cancelling {reason;cancelled_by} ->
             (match status with
-             | Lost _ | Cancelled _ | Waiting_for_owned_jobs _ | Done _ -> Cancelled {reason;cancelled_by}
+             | Lost _ | Cancelled _ | Waiting_for_dependencies _ | Done _ -> Cancelled {reason;cancelled_by}
              | Queued | Running | Cancelling _ | Persistence_failed _ -> status)
           | Queued | Running | Lost _ | Cancelled _ | Persistence_failed _
-          | Waiting_for_owned_jobs _ | Done _ ->
+          | Waiting_for_dependencies _ | Done _ ->
             (match status with
              | Lost {reason} -> status_after_worker_absence ~reason entry.status
              | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
-             | Waiting_for_owned_jobs _ | Done _ -> status) in
+             | Waiting_for_dependencies _ | Done _ -> status) in
         let completed_at =
           match status with
-          | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ ->
+          | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ ->
             (* NDT-OK: completed_at is observational wall-clock metadata for
                terminal request records; state transitions are status-derived. *)
             Some (Time_compat.now ())
@@ -1976,7 +1973,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
               | Some { status = Cancelling _; _ } -> `Operator_cancelled
               | Some
                   ({ status =
-                       (Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _)
+                       (Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _)
                    ; _
                    } as entry) ->
                 `Already_settled entry
@@ -1998,8 +1995,8 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
           match outcome with
           | Worker_finished _ ->
               Done {ok=tool_result_success result;body=tool_result_body result;data}
-          | Worker_waiting {job_ids;_} ->
-              Waiting_for_owned_jobs {job_ids;body=tool_result_body result;data})
+          | Worker_waiting {dependencies;_} ->
+              Waiting_for_dependencies {dependencies;body=tool_result_body result;data})
       with
       | CancelledByOperator ->
         Fun.protect
@@ -2147,10 +2144,26 @@ let poll ~base_path ~caller request_id : load_result =
                     this worker. Only the exclusive startup recovery boundary
                     may convert disk-only non-terminal state to [Lost]. *)
                  Found entry
-               | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ -> Found entry))
+               | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ -> Found entry))
          | Located_absent -> Absent
          | Located_unreadable reason -> Unreadable reason
          | Located_rejected rejection -> Rejected rejection))
+;;
+
+let load_canonical_request ~base_path ~caller request_id =
+  match resolve_access_identity ~base_path ~caller with
+  | Error rejection -> Rejected rejection
+  | Ok (base_path, caller) ->
+    if not (is_safe_request_id request_id) then Rejected Invalid_request_id
+    else with_store_transition_lock ~base_path ~request_id (fun () ->
+      match load_record_canonical_located ~base_path ~request_id with
+      | Located_absent -> Absent
+      | Located_unreadable reason -> Unreadable reason
+      | Located_rejected rejection -> Rejected rejection
+      | Located (entry, _) ->
+        match owner_rejection ~caller entry with
+        | Some rejection -> Rejected rejection
+        | None -> Found entry)
 ;;
 
 let with_canonical_durable_terminal ~base_path ~caller request_id ~f =
@@ -2199,7 +2212,7 @@ let queued_proof_of_record ~caller ~location ~local (entry : entry) =
   | Some rejection -> Error (Canonical_queued_access_rejected rejection)
   | None ->
     match entry.status with
-    | Running | Cancelling _ | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ ->
+    | Running | Cancelling _ | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ ->
       Error (Canonical_queued_not_queued entry.status)
     | Queued ->
       match location with
@@ -2210,7 +2223,7 @@ let queued_proof_of_record ~caller ~location ~local (entry : entry) =
         | Some local ->
           match local.status with
           | Running | Cancelling _ -> Error (Canonical_queued_runtime_nonqueued local.status)
-          | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ ->
+          | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ ->
             Error (Canonical_queued_publication_ambiguous local.status)
           | Queued ->
             if same_entry_record local entry then Ok { queued_entry = entry }
@@ -2350,7 +2363,7 @@ let list_for_keeper ~base_path ~caller ?keeper_name () :
            then acc
            else
              match entry.status, keeper_name with
-             | (Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _), _ -> acc
+             | (Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _), _ -> acc
              | (Queued | Running | Cancelling _), Some name
                when not (String.equal entry.keeper_name name) -> acc
              | (Queued | Running | Cancelling _), (Some _ | None) -> entry :: acc)
@@ -2491,7 +2504,7 @@ let cancel_with_ops ops ~base_path ~caller request_id : cancel_result =
                                   }))))
                  in
                  (match entry.status with
-                  | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ ->
+                  | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ ->
                     `Result (Cancel_already_terminal entry.status)
                   | Cancelling _ ->
                     (* The operator's next explicit cancel call is the retry

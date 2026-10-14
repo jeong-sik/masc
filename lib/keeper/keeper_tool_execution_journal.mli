@@ -19,7 +19,7 @@ type attempt
 type continuation
 (** Exact suspended owner captured from its canonical terminal record and
     matching journal nodes. A Lost successor additionally requires its exact
-    prior owned-job wait and replay-proven read-only nodes. It grants no
+    prior result dependency wait and replay-proven read-only nodes. It grants no
     execution authority by itself. *)
 
 type completed =
@@ -50,7 +50,7 @@ type recheck_launch =
 type replay =
   | Dispatch
   | Reuse_completed of completed
-  | Recheck_job_result of recheck
+  | Recheck_result of recheck
   | Recheck_launch of recheck_launch
 
 type error =
@@ -96,7 +96,7 @@ val validate_request : t -> Keeper_msg_async.entry -> (unit, error) result
 val waiting_continuation : t -> (continuation option, error) result
 (** Read only canonical current-owner terminal proof and exact journal state.
     [None] means no bound request, an active worker, or a settled worker that
-    has no original owned-job wait. A current [Lost] owner may recover that
+    has no original result dependency wait. A current [Lost] owner may recover that
     wait through the journal's exact predecessor bindings and canonical
     terminal records, including repeated Lost successors. Unfinished nodes
     must prove replay: read-only nodes by the read-only replay rules, and an
@@ -106,7 +106,7 @@ val waiting_continuation : t -> (continuation option, error) result
     is [Error]. A later owner change makes the captured value stale. A successor
     that stops before dispatch may retain its predecessor's exact wait only
     when every journal node is unchanged at the binding and the canonical
-    waiting job IDs match. Original occurrence identities and owners remain
+    waiting dependencies match. Original occurrence identities and owners remain
     intact. *)
 
 val continuation_base_path : continuation -> string
@@ -114,7 +114,7 @@ val continuation_base_path : continuation -> string
     This path is filesystem authority, never a provider-facing identity. *)
 val continuation_source : continuation -> source
 val continuation_request_id : continuation -> string
-val continuation_job_ids : continuation -> Keeper_owned_job_identity.Job_id.t list
+val continuation_dependencies : continuation -> Keeper_composition_dependency.t list
 
 type child_admission_history = Untouched_child | Admitted_child | Admission_unconfirmed
 val continuation_child_admission : continuation ->
@@ -126,7 +126,7 @@ val continuation_child_admission : continuation ->
 val child_admission : t -> node_ids:Keeper_tool_plan.Node_id.t list ->
   (child_admission_history, error) result
 (** Strict current journal history for every public resume, including completed
-    runs with no owned-job continuation. Does not bind a new worker. *)
+    runs with no result continuation. Does not bind a new worker. *)
 
 val worker_child_admission : worker -> node_ids:Keeper_tool_plan.Node_id.t list ->
   (child_admission_history, error) result
@@ -148,7 +148,7 @@ type pending_continuations =
 
 val pending_continuations : base_path:string -> (pending_continuations, error) result
 (** Discover only per-request pending markers published before journal
-    ownership and worker effects. Canonical journal/request/job records decide
+    ownership and worker effects. Canonical journal/request/dependency records decide
     readiness. Completed or superseded markers retire only after exact terminal
     proof bound to the exact marker snapshot under its retained stable lock;
     unavailable, unbound or corrupt authority stays visible. Directory listing
@@ -188,11 +188,11 @@ val lookup
   -> tool_name:string
   -> input:Yojson.Safe.t
   -> (replay, error) result
-(** Completed results are reusable. A producer-owned job-result wait permits
+(** Completed results are reusable. A producer-owned result wait permits
     only rechecking that exact read-only leaf, preserving its occurrence IDs.
-    A proven pre-effect failure of the same canonical read-only job-result leaf
+    A proven pre-effect failure of the same canonical read-only result leaf
     also rechecks with its original IDs, even when the failure carries no wait
-    marker. An owned read-only job-result Attempting record from a terminal
+    marker. An owned read-only result Attempting record from a terminal
     prior worker preserves those IDs when rechecking after cancellation or
     interruption.
     An owned launch leaf ({!Keeper_tool_descriptor.Owned_job_launch_leaf})

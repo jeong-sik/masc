@@ -1,0 +1,91 @@
+name = "keeper_composition_result"
+description = """
+Read the final structured result and selected exports of the original named async Skill composition.
+Pass the exact result_wait binding returned by its submission. Pending work
+returns a typed result dependency; an async prepared parent can release its
+worker and resume that same read after the canonical child result is ready.
+This tool never submits, restarts, collects or cancels work. Only a successful
+canonical result supplies result and a complete durable result_artifact. In a
+prepared DAG bind /result_artifact/_blob/sha256 into keeper_artifact_read. The
+full result preserves declared exports and their available/value or error fields.
+Child failure or cancellation stays a failure; absent exports are not manufactured.
+Original Task, invocation, Skill revision and run identity remain bound."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "binding"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params]]
+name = "request_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.params]]
+name = "composition_run_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.params]]
+name = "composition_tool"
+type = "string"
+required = true
+min_length = 1
+
+[[params.params]]
+name = "parent_tool_use_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.params]]
+name = "source_turn"
+type = "integer"
+required = true
+minimum = 0
+
+[[params.params]]
+name = "source_task_id"
+type = "string"
+min_length = 1
+
+[[params.params]]
+name = "skill_reference"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params.params]]
+name = "content_revision"
+type = "string"
+required = true
+min_length = 1
+
+[[params.params.params]]
+name = "identity"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params.params.params]]
+name = "source_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.params.params.params]]
+name = "package_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.params.params.params]]
+name = "name"
+type = "string"
+required = true
+min_length = 1

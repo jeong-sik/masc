@@ -138,7 +138,7 @@ let terminal_of_status : Keeper_msg_async.request_status -> Keeper_event_queue.c
   | Keeper_msg_async.Queued
   | Keeper_msg_async.Running
   | Keeper_msg_async.Cancelling _ -> None
-  | Keeper_msg_async.Waiting_for_owned_jobs _ -> None
+  | Keeper_msg_async.Waiting_for_dependencies _ -> None
 ;;
 
 let on_worker_settled ~base_path ~composition_tool settlement =
@@ -148,7 +148,7 @@ let on_worker_settled ~base_path ~composition_tool settlement =
     (match terminal_of_status entry.Keeper_msg_async.status with
      | None ->
        (match entry.status with
-        | Keeper_msg_async.Waiting_for_owned_jobs _ ->
+        | Keeper_msg_async.Waiting_for_dependencies _ ->
           (* The released attempt has no composition terminal to announce.
              Its job wait and original occurrence remain in the run journal. *)
           (match Keeper_composition_completion_outbox.acknowledge_waiting

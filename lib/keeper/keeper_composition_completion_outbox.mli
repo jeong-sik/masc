@@ -24,7 +24,7 @@ val acknowledge_waiting :
   base_path:string -> keeper_name:string -> request_id:string -> composition_tool:string ->
   (unit, error) result
 (** Retire a notification obligation only after exact canonical proof of a
-    released owned-job waiting attempt and its immutable producer identity.
+    released result waiting attempt and its immutable producer identity.
     The canonical re-read and obligation removal share the request's store
     transition lock, so a concurrent refusal cannot lose its new obligation.
     It emits no composition terminal and grants no job replay permission. *)
@@ -32,7 +32,7 @@ val acknowledge_waiting :
 val prepare_terminal :
   proof:Keeper_msg_async.durable_terminal_proof -> (unit, error) result
 (** Record a delivery obligation for an exact canonical
-    [Waiting_for_owned_jobs] terminal owned by its canonical Keeper before a
+    [Waiting_for_dependencies] terminal owned by its canonical Keeper before a
     permanent refusal supersedes it with a failure terminal. While the record
     remains waiting, [flush] retires the obligation without delivering; once
     the canonical record settles, [flush] delivers the typed failure through
@@ -54,7 +54,7 @@ val flush :
 (** Reconcile only this pending partition. Read exact canonical terminal
     proof before delivery; never execute or restart a request worker. Active
     requests keep their obligation. Malformed/unreadable records stay visible
-    in [failures] and remain on disk. Canonically released owned-job waiting
+    in [failures] and remain on disk. Canonically released result waiting
     attempts retire their attempt notification without calling [deliver]. *)
 
 module For_testing : sig

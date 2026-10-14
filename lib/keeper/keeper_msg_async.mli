@@ -26,8 +26,8 @@ type request_status =
       { attempted_status : string
       ; reason : string
       }
-  | Waiting_for_owned_jobs of
-      { job_ids : Keeper_owned_job_identity.Job_id.t list
+  | Waiting_for_dependencies of
+      { dependencies : Keeper_composition_dependency.t list
       ; body : string
       ; data : Yojson.Safe.t option
       }
@@ -151,7 +151,7 @@ val canonical_queued_error_to_string : canonical_queued_error -> string
 val durable_queued_entry : durable_queued_proof -> entry
 (** The original immutable entry, whose status is exactly [Queued]. *)
 
-(** Recovery observations for canonical v3 storage only. [finalized] counts
+(** Recovery observations for canonical v5 storage only. [finalized] counts
     terminal states moved from the active partition after a crash; [cleaned]
     counts duplicate active sources removed after terminal durability was
     established. Staging counters cover only the current dedicated atomic
@@ -295,7 +295,7 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     explicitly supplied server-lifetime [background_sw].  The per-request
     worker switch passed to [f] is distinct: cancellation fails that switch,
     never the server root. Returns the fresh [request_id] synchronously after
-    the owner-bearing v3 request record is durably accepted. If an atomic
+    the owner-bearing v5 request record is durably accepted. If an atomic
     rename publishes the record but its directory fsync and the compensating
     rollback both fail, [Reconciliation_required] preserves the request id so
     the caller can poll instead of creating an unreachable orphan. The async
@@ -361,10 +361,10 @@ val submit
 type worker_outcome
 
 val worker_finished : Keeper_types_profile.tool_result -> worker_outcome
-val worker_waiting_for_owned_jobs :
-  job_ids:Keeper_owned_job_identity.Job_id.t list ->
+val worker_waiting_for_dependencies :
+  dependencies:Keeper_composition_dependency.t list ->
   Keeper_types_profile.tool_result -> (worker_outcome, string) result
-(** Requires a typed Deferred result and at least one original job identity.
+(** Requires a typed Deferred result and at least one original result dependency.
     Repeated identities are represented once. No body/JSON classification. *)
 
 val submit_worker_with_request_id
@@ -406,6 +406,11 @@ val submit_with_request_id
     recovery boundary may settle such records: [Queued]/[Running] become
     [Lost], while an existing [Cancelling] intent becomes exact [Cancelled]. *)
 val poll : base_path:string -> caller:string -> string -> load_result
+
+val load_canonical_request : base_path:string -> caller:string -> string -> load_result
+(** Read the accepted source without reconciling workers or changing records.
+    A terminal status here is not proof of canonical terminal publication;
+    use [load_canonical_durable_terminal] before consuming a final result. *)
 
 (** Read the canonical durable active partition without consulting process
     memory. Every regular [*.json] record uses the strict

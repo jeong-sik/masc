@@ -7,6 +7,7 @@ type deferred_kind =
   | Generic_deferred
   | External_effect_deferred of { approval_id : string option }
   | Owned_job_result_wait of Keeper_owned_job_store.Job_id.t
+  | Composition_result_wait of Keeper_composition_dependency.composition
 
 val deferred_kind_to_string : deferred_kind -> string
 (** Stable producer-owned wire label for deferred settlement evidence. *)
@@ -57,6 +58,11 @@ val deferred_data :
     This permits only another result read, never a launch/status/cancel replay. *)
 val deferred_owned_job_result :
   job_id:Keeper_owned_job_store.Job_id.t -> Yojson.Safe.t -> t
+
+val deferred_composition_result :
+  binding:Keeper_composition_dependency.composition -> Yojson.Safe.t -> t
+(** Read the same original request again after its canonical result is ready;
+    this does not authorize submission, cancellation or a replacement child. *)
 
 (** Typed deferral for an external effect whose durable resolution resumes the
     Keeper later. *)

@@ -3,6 +3,7 @@
    full typed results retain their artifact roots independently of transcripts. *)
 module Plan = Keeper_tool_plan
 module Async = Keeper_msg_async
+module Dependency = Keeper_composition_dependency
 module Nodes = Map.Make (String)
 
 let ( let* ) = Result.bind
@@ -35,7 +36,7 @@ type recheck_launch =
 type replay =
   | Dispatch
   | Reuse_completed of completed
-  | Recheck_job_result of recheck
+  | Recheck_result of recheck
   | Recheck_launch of recheck_launch
 
 type error =
@@ -271,7 +272,7 @@ type occurrence =
 type node_record =
   | Attempting of occurrence
   | Settled of occurrence * completed * Tool_result.failure_effect_disposition option
-      * Keeper_owned_job_store.Job_id.t option
+      * Dependency.t option
 type state =
   { source : source; source_sha : string; owner : binding option
   ; prior_owners : (binding * node_record Nodes.t) list; nodes : node_record Nodes.t }
@@ -283,7 +284,7 @@ type continuation =
   ; terminal_entry : Async.entry
   ; predecessor_terminals : Async.entry list
   ; suspended_nodes : node_record Nodes.t
-  ; job_ids : Keeper_owned_job_identity.Job_id.t list }
+  ; dependencies : Dependency.t list }
 type readiness = Waiting_for_results | Results_ready
 
 let binding_json binding = `Assoc ["request_id", `String binding.request_id; "generation", `Int binding.generation]
@@ -341,28 +342,40 @@ let completed_of_json json =
   require (canonical_equal (completed_json completed) json) "noncanonical completed payload";
   completed
 
-let event kind source_sha fields = `Assoc (["schema", `Int 1; "kind", `String kind; "source_sha", `String source_sha] @ fields)
+let event kind source_sha fields = `Assoc (["schema", `Int 2; "kind", `String kind; "source_sha", `String source_sha] @ fields)
 let row json = Yojson.Safe.to_string json ^ "\n"
 let source_event source = event "source" (json_sha (source_json source)) ["source", source_json source]
 let attempt_event source_sha occurrence = event "attempting" source_sha ["occurrence", occurrence_json occurrence]
 
-let job_wait_json = option_json (fun job_id -> `String (Keeper_owned_job_store.Job_id.to_string job_id))
-let job_wait_of_json = optional (fun json ->
-  match Keeper_owned_job_store.Job_id.of_string (string json) with
-  | Ok job_id -> job_id | Error detail -> refuse detail)
+let dependency_wait_json = option_json Dependency.to_json
+let dependency_wait_of_json = optional (fun json ->
+  match Dependency.of_json json with
+  | Ok dependency -> dependency | Error detail -> refuse detail)
 
-let result_read_job (occurrence : occurrence) =
-  let readonly_action = match Tool_schemas_owned_job.find_definition occurrence.tool_name with
-    | Some {action=Tool_schemas_owned_job.Read_result;read_only;_} -> read_only
-    | Some {action=(Start | Status | Cancel);_} | None -> false in
-  if not (occurrence.readonly && readonly_action) then None
-  else match occurrence.input with
-    | `Assoc ["job_id", `String id] ->
-        (match Keeper_owned_job_store.Job_id.of_string id with Ok job_id -> Some job_id | Error _ -> None)
-    | _ -> None
+let result_read_dependency (occurrence : occurrence) =
+  if not occurrence.readonly then None
+  else if String.equal occurrence.tool_name Tool_schemas_composition_control.result_schema.name then
+    match Agent_core.Execution_json.object_fields ~context:"composition result journal input"
+        ~required:["binding"] ~optional:[] occurrence.input with
+    | Error _ -> None
+    | Ok fields ->
+      (match Dependency.composition_of_json (List.assoc "binding" fields) with
+       | Ok binding when binding.request_id <> occurrence.owner.request_id ->
+         Some (Dependency.Composition_result binding)
+       | Ok _ | Error _ -> None)
+  else
+    let readonly_action = match Tool_schemas_owned_job.find_definition occurrence.tool_name with
+      | Some {action=Tool_schemas_owned_job.Read_result;read_only;_} -> read_only
+      | Some {action=(Start | Status | Cancel);_} | None -> false in
+    if not readonly_action then None
+    else match occurrence.input with
+      | `Assoc ["job_id", `String id] ->
+        (match Keeper_owned_job_store.Job_id.of_string id with
+         | Ok job_id -> Some (Dependency.Owned_job job_id) | Error _ -> None)
+      | _ -> None
 
-let valid_job_wait occurrence result phase job_id =
-  result_read_job occurrence = Some job_id
+let valid_dependency_wait occurrence result phase dependency =
+  result_read_dependency occurrence = Some dependency
   && phase = Some Tool_result.Proven_pre_effect
   && (match result with Tool_result.Deferred _ -> true | Completed _ | Failed _ -> false)
 
@@ -383,15 +396,15 @@ let replay_for binding node_id = function
   | None -> Ok Dispatch
   | Some (Settled (_, ({result = Tool_result.Completed _; _} as completed), _, _)) -> Ok (Reuse_completed completed)
   | Some (Settled (occurrence, completed, phase, Some job_id))
-      when valid_job_wait occurrence completed.result phase job_id ->
-      Ok (Recheck_job_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+      when valid_dependency_wait occurrence completed.result phase job_id ->
+      Ok (Recheck_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
   | Some (Settled (occurrence, {result = Tool_result.Failed _; _}, Some Tool_result.Proven_pre_effect, _)) ->
-      (match result_read_job occurrence with
-       | Some _ -> Ok (Recheck_job_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+      (match result_read_dependency occurrence with
+       | Some _ -> Ok (Recheck_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
        | None -> Ok Dispatch)
   | Some (Attempting occurrence) when occurrence.readonly && not (same_binding occurrence.owner binding) ->
-      (match result_read_job occurrence with
-       | Some _ -> Ok (Recheck_job_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+      (match result_read_dependency occurrence with
+       | Some _ -> Ok (Recheck_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
        | None -> Ok Dispatch)
   | Some (Attempting occurrence) when owned_job_launch occurrence ->
       (match recheck_launch_for occurrence with
@@ -417,7 +430,7 @@ let decode_state bytes = decode (fun () ->
     let json = Yojson.Safe.from_string line in valid_json json; json) lines in
   let header, events = match jsons with header :: events -> header, events | [] -> refuse "missing source header" in
   let fields = object_fields ["schema"; "kind"; "source_sha"; "source"] header in
-  require (field "schema" fields = `Int 1 && field "kind" fields = `String "source") "invalid source header schema";
+  require (field "schema" fields = `Int 2 && field "kind" fields = `String "source") "invalid source header schema";
   let source = source_of_json (field "source" fields) in
   let source_sha = string (field "source_sha" fields) in
   require (String.equal source_sha (json_sha (source_json source))) "source fingerprint mismatch";
@@ -426,10 +439,10 @@ let decode_state bytes = decode (fun () ->
     let extras = match kind with
       | "binding" -> ["expected_owner"; "owner"]
       | "attempting" -> ["occurrence"]
-      | "settled" -> ["occurrence"; "completed"; "failure_effect_disposition"; "owned_job_wait"]
+      | "settled" -> ["occurrence"; "completed"; "failure_effect_disposition"; "dependency_wait"]
       | _ -> refuse "unknown journal event" in
     let fields = object_fields (["schema"; "kind"; "source_sha"] @ extras) json in
-    require (field "schema" fields = `Int 1 && field "source_sha" fields = `String source_sha) "event source/schema mismatch";
+    require (field "schema" fields = `Int 2 && field "source_sha" fields = `String source_sha) "event source/schema mismatch";
     match kind with
     | "binding" ->
       let expected = optional binding_of_json (field "expected_owner" fields) in
@@ -451,7 +464,7 @@ let decode_state bytes = decode (fun () ->
         require (occurrence.sequence = (match prior with None -> 1 | Some record -> (occurrence_of_record record).sequence + 1)) "attempt sequence mismatch";
         require (match replay_for occurrence.owner occurrence.node_id prior with
           | Ok Dispatch -> true
-          | Ok (Recheck_job_result stored) -> occurrence.readonly
+          | Ok (Recheck_result stored) -> occurrence.readonly
               && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
               && occurrence.tool_use_id = stored.tool_use_id
           | Ok (Recheck_launch stored) -> owned_job_launch occurrence
@@ -467,10 +480,10 @@ let decode_state bytes = decode (fun () ->
         require (Ids.Execution_id.equal completed.execution_id occurrence.execution_id && completed.tool_use_id = occurrence.tool_use_id
           && String.equal (Tool_result.tool_name completed.result) occurrence.tool_name) "settlement identity mismatch";
         let phase = optional effect_of_json (field "failure_effect_disposition" fields) in
-        let job_wait = job_wait_of_json (field "owned_job_wait" fields) in
-        Option.iter (fun job_id -> require (valid_job_wait occurrence completed.result phase job_id)
-          "owned job wait does not match the exact read-only result leaf") job_wait;
-        Settled (occurrence, completed, phase, job_wait)) in
+        let dependency_wait = dependency_wait_of_json (field "dependency_wait" fields) in
+        Option.iter (fun job_id -> require (valid_dependency_wait occurrence completed.result phase job_id)
+          "dependency wait does not match the exact read-only result leaf") dependency_wait;
+        Settled (occurrence, completed, phase, dependency_wait)) in
       {state with nodes = Nodes.add key record state.nodes}
     | _ -> refuse "unknown journal event")
     {source; source_sha; owner = None; prior_owners = []; nodes = Nodes.empty} events)
@@ -793,7 +806,7 @@ let bind_continuation (continuation : continuation) ~request_id =
 let continuation_base_path (continuation : continuation) = continuation.journal.base_path
 let continuation_source (continuation : continuation) = source continuation.journal
 let continuation_request_id (continuation : continuation) = continuation.expected_owner.request_id
-let continuation_job_ids (continuation : continuation) = continuation.job_ids
+let continuation_dependencies (continuation : continuation) = continuation.dependencies
 
 type child_admission_history = Untouched_child | Admitted_child | Admission_unconfirmed
 
@@ -820,27 +833,33 @@ let continuation_child_admission continuation ~node_ids =
 let child_admission journal ~node_ids =
   update_existing journal (fun state -> None, Ok (nodes_child_admission state.nodes ~node_ids))
 
-let normalize_job_ids = List.sort_uniq (fun left right ->
-  String.compare (Keeper_owned_job_identity.Job_id.to_string left)
-    (Keeper_owned_job_identity.Job_id.to_string right))
+let normalize_dependencies = Dependency.normalize
 
-let exact_waiting_jobs ~expected_owner nodes job_ids =
+let exact_waiting_dependencies ~expected_owner nodes dependencies =
   let* recorded = Nodes.fold (fun _ record prior ->
     let* ids = prior in
     match record with
-    | Settled (_, {result=Tool_result.Completed _;_}, _, None) -> Ok ids
-    | Settled (occurrence, completed, phase, Some job_id)
-        when same_binding occurrence.owner expected_owner
-          && valid_job_wait occurrence completed.result phase job_id -> Ok (job_id :: ids)
-    | Attempting _
-    | Settled (_, {result=(Tool_result.Completed _ | Tool_result.Deferred _ | Tool_result.Failed _);_}, _, _) ->
-      Error (Invalid_result "waiting owner has an unsettled or non-job-wait journal node")) nodes (Ok []) in
-  let recorded = normalize_job_ids recorded in
-  if recorded = [] || recorded <> normalize_job_ids job_ids
-  then Error (Invalid_result "canonical waiting jobs differ from the current journal occurrences")
+    | Attempting _ ->
+      Error (Invalid_result "waiting owner has an unsettled or non-result-wait journal node")
+    | Settled (occurrence, completed, phase, job) ->
+      let refuse () =
+        Error (Invalid_result "waiting owner has an unsettled or non-result-wait journal node")
+      in
+      (match completed.result with
+       | Tool_result.Completed _ ->
+         (match job with None -> Ok ids | Some _ -> refuse ())
+       | Tool_result.Failed _ -> refuse ()
+       | Tool_result.Deferred _ ->
+         (match job with
+          | Some job_id when same_binding occurrence.owner expected_owner
+              && valid_dependency_wait occurrence completed.result phase job_id -> Ok (job_id :: ids)
+          | None | Some _ -> refuse ()))) nodes (Ok []) in
+  let recorded = normalize_dependencies recorded in
+  if recorded = [] || recorded <> normalize_dependencies dependencies
+  then Error (Invalid_result "canonical waiting dependencies differ from the current journal occurrences")
   else Ok recorded
 
-let prior_owned_job_wait journal prior_owners =
+let prior_result_wait journal prior_owners =
   let rec read terminals = function
     | [] -> Ok None
     | ((prior : binding), nodes) :: rest ->
@@ -853,9 +872,9 @@ let prior_owned_job_wait journal prior_owners =
         |> Result.map_error (fun reason -> Prior_owner_not_terminal
             {request_id=prior.request_id;reason}) in
       match entry.status with
-      | Async.Waiting_for_owned_jobs {job_ids;_} ->
-        (match exact_waiting_jobs ~expected_owner:prior nodes job_ids with
-         | Ok job_ids -> Ok (Some (job_ids,List.rev (entry :: terminals)))
+      | Async.Waiting_for_dependencies {dependencies;_} ->
+        (match exact_waiting_dependencies ~expected_owner:prior nodes dependencies with
+         | Ok dependencies -> Ok (Some (dependencies,List.rev (entry :: terminals)))
          | Error error ->
            (* A no-dispatch successor may stop with the exact predecessor wait.
               Binding snapshots prove that it changed no node ownership or
@@ -864,7 +883,7 @@ let prior_owned_job_wait journal prior_owners =
            | (_,predecessor_nodes)::_ when nodes = predecessor_nodes ->
              let* original = read (entry :: terminals) rest in
              (match original with
-              | Some (original_jobs,_) when original_jobs = normalize_job_ids job_ids -> Ok original
+              | Some (original_jobs,_) when original_jobs = normalize_dependencies dependencies -> Ok original
               | Some _ | None -> Error error)
            | _ -> Error error)
       | Lost _ -> read (entry :: terminals) rest
@@ -877,15 +896,15 @@ let prior_owned_job_wait journal prior_owners =
 let launch_replay_proven occurrence =
   owned_job_launch occurrence && Option.is_some occurrence.launch_invocation
 
-let recoverable_lost_nodes nodes job_ids =
+let recoverable_lost_nodes nodes dependencies =
   let* recorded_jobs = Nodes.fold (fun _ record prior ->
     let* jobs = prior in
     let occurrence = occurrence_of_record record in
-    let job = result_read_job occurrence in
+    let job = result_read_dependency occurrence in
     let replay_proven = match record with
       | Settled (_, {result=Tool_result.Completed _;_}, _, None) -> true
       | Settled (occurrence, completed, phase, Some job_id) ->
-        valid_job_wait occurrence completed.result phase job_id
+        valid_dependency_wait occurrence completed.result phase job_id
       | Attempting occurrence ->
         occurrence.readonly || launch_replay_proven occurrence
       | Settled (occurrence, {result=Tool_result.Failed _;_},
@@ -900,9 +919,9 @@ let recoverable_lost_nodes nodes job_ids =
     if not replay_proven then Error (Invalid_result
         "lost continuation has a deferred or unproven node that cannot replay")
     else Ok (Option.to_list job @ jobs)) nodes (Ok []) in
-  let recorded_jobs = normalize_job_ids recorded_jobs in
-  if List.for_all (fun job_id -> List.mem job_id recorded_jobs) job_ids then Ok ()
-  else Error (Invalid_result "original waiting jobs are absent from the lost journal")
+  let recorded_jobs = normalize_dependencies recorded_jobs in
+  if List.for_all (fun job_id -> List.mem job_id recorded_jobs) dependencies then Ok ()
+  else Error (Invalid_result "original waiting dependencies are absent from the lost journal")
 
 let waiting_continuation journal = filesystem (fun () ->
   let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
@@ -925,30 +944,30 @@ let waiting_continuation journal = filesystem (fun () ->
       let* () = entry_matches_source journal.immutable_source entry
         |> Result.map_error (fun reason -> Prior_owner_not_terminal {request_id=expected_owner.request_id;reason}) in
       match entry.status with
-      | Async.Waiting_for_owned_jobs {job_ids;_} ->
-        let* job_ids,predecessor_terminals =
-          match exact_waiting_jobs ~expected_owner state.nodes job_ids with
+      | Async.Waiting_for_dependencies {dependencies;_} ->
+        let* dependencies,predecessor_terminals =
+          match exact_waiting_dependencies ~expected_owner state.nodes dependencies with
           | Ok jobs -> Ok (jobs,[])
           | Error error ->
             (match state.prior_owners with
              | (_,predecessor_nodes)::_ when state.nodes = predecessor_nodes ->
-               let* original = prior_owned_job_wait journal state.prior_owners in
+               let* original = prior_result_wait journal state.prior_owners in
                (match original with
-                | Some (jobs,proofs) when jobs = normalize_job_ids job_ids ->
+                | Some (jobs,proofs) when jobs = normalize_dependencies dependencies ->
                   let* () = recoverable_lost_nodes state.nodes jobs in
                   Ok (jobs,proofs)
                 | Some _ | None -> Error error)
              | _ -> Error error) in
         Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals;
-          suspended_nodes=state.nodes;job_ids})
+          suspended_nodes=state.nodes;dependencies})
       | Lost _ ->
-        let* original_wait = prior_owned_job_wait journal state.prior_owners in
+        let* original_wait = prior_result_wait journal state.prior_owners in
         (match original_wait with
          | None -> Ok None
-         | Some (job_ids,predecessor_terminals) ->
-           let* () = recoverable_lost_nodes state.nodes job_ids in
+         | Some (dependencies,predecessor_terminals) ->
+           let* () = recoverable_lost_nodes state.nodes dependencies in
            Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals;
-             suspended_nodes=state.nodes;job_ids}))
+             suspended_nodes=state.nodes;dependencies}))
       | Queued | Running | Cancelling _ | Cancelled _
       | Persistence_failed _ | Done _ -> Ok None)
 
@@ -966,16 +985,24 @@ let continuation_readiness (continuation : continuation) = filesystem (fun () ->
         {request_id=continuation.expected_owner.request_id;reason=Async.canonical_terminal_error_to_string error}) in
   if not (Async.same_entry_record continuation.terminal_entry (Async.durable_terminal_entry proof))
   then Error Ownership_changed
-  else List.fold_left (fun prior job_id ->
+  else List.fold_left (fun prior dependency ->
     let* readiness = prior in
-    let* record = Keeper_owned_job_store.load ~base_path:journal.base_path
-        ~keeper_name:journal.immutable_source.keeper_name job_id
-      |> Result.map_error (fun error -> Invalid_result (Keeper_owned_job_store.error_to_string error)) in
-    match readiness, Keeper_owned_job_store.result_ready record with
+    let* ready = match dependency with
+      | Dependency.Owned_job job_id ->
+        let* record = Keeper_owned_job_store.load ~base_path:journal.base_path
+            ~keeper_name:journal.immutable_source.keeper_name job_id
+          |> Result.map_error (fun error -> Invalid_result (Keeper_owned_job_store.error_to_string error)) in
+        Ok (Keeper_owned_job_store.result_ready record)
+      | Dependency.Composition_result binding ->
+        let* result = Keeper_composition_dependency_result.readiness ~base_path:journal.base_path
+            ~keeper_name:journal.immutable_source.keeper_name binding
+          |> Result.map_error (fun detail -> Invalid_result detail) in
+        Ok (result = Keeper_composition_dependency_result.Ready) in
+    match readiness, ready with
     | Results_ready, true -> Ok Results_ready
     | (Waiting_for_results | Results_ready), false
     | Waiting_for_results, true -> Ok Waiting_for_results)
-      (Ok Results_ready) continuation.job_ids)
+      (Ok Results_ready) continuation.dependencies)
 
 type pending_continuations =
   { inspected : int; ready : continuation list; waiting : int; retired : int
@@ -1058,12 +1085,13 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
           | Some current when current.request_id <> marker.request_id -> retire ()
           | Some _ ->
             match entry.status with
-            | Async.Waiting_for_owned_jobs _ | Lost _ ->
+            | Async.Waiting_for_dependencies _ | Lost _ ->
               let* candidate = waiting_continuation journal in
               (match candidate with
-               | None when (match entry.status with Async.Lost _ -> true
-                            | Queued | Running | Cancelling _ | Cancelled _
-                            | Persistence_failed _ | Waiting_for_owned_jobs _ | Done _ -> false) -> retire ()
+               | None when (match entry.status with
+                   | Async.Lost _ -> true
+                   | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
+                   | Waiting_for_dependencies _ | Done _ -> false) -> retire ()
                | None -> Error Ownership_changed
                | Some continuation when continuation_request_id continuation <> marker.request_id -> Error Ownership_changed
                | Some continuation ->
@@ -1131,16 +1159,16 @@ let begin_attempt (worker : worker) ~node_id ~tool_name ~input ~execution_id ~to
       let* replay = replay_for worker.binding node_id record in
       match replay with
       | Reuse_completed _ -> Error (Attempt_conflict node_id)
-      | Dispatch | Recheck_job_result _ | Recheck_launch _ ->
+      | Dispatch | Recheck_result _ | Recheck_launch _ ->
         let* () = match replay with
-          | Recheck_job_result stored when not readonly
+          | Recheck_result stored when not readonly
               || not (Ids.Execution_id.equal execution_id stored.execution_id)
               || tool_use_id <> stored.tool_use_id -> Error (Attempt_conflict node_id)
           | Recheck_launch stored when readonly
               || not (Ids.Execution_id.equal execution_id stored.execution_id)
               || tool_use_id <> stored.tool_use_id
               || launch_invocation <> Some stored.invocation -> Error (Attempt_conflict node_id)
-          | Dispatch | Reuse_completed _ | Recheck_job_result _ | Recheck_launch _ -> Ok () in
+          | Dispatch | Reuse_completed _ | Recheck_result _ | Recheck_launch _ -> Ok () in
         if not (exact_name tool_use_id && exact_name (Ids.Execution_id.to_string execution_id)) then Error (Invalid_result "invalid execution occurrence") else
         let sequence = match record with None -> 1 | Some record -> (occurrence_of_record record).sequence + 1 in
         Ok {node_id; tool_name; input; input_sha = json_sha input; owner = worker.binding; sequence; execution_id; tool_use_id; readonly; launch_invocation} in
@@ -1154,12 +1182,13 @@ let settle_attempt ?failure_effect_disposition ?deferred_kind attempt ~result ~r
     | Some phase, _ -> Some phase
     | None, Tool_result.Failed failure -> Some failure.effect_disposition
     | None, (Tool_result.Completed _ | Deferred _) -> None in
-  let job_wait = match deferred_kind with
-    | Some (Keeper_tool_execution.Owned_job_result_wait job_id) -> Some job_id
+  let dependency_wait = match deferred_kind with
+    | Some (Keeper_tool_execution.Owned_job_result_wait job_id) -> Some (Dependency.Owned_job job_id)
+    | Some (Keeper_tool_execution.Composition_result_wait binding) -> Some (Dependency.Composition_result binding)
     | None | Some (Generic_deferred | External_effect_deferred _) -> None in
   let* encoded = Result.map_error (fun detail -> Invalid_result detail) (decode (fun () ->
-    Option.iter (fun job_id -> require (valid_job_wait attempt.occurrence result phase job_id)
-      "owned job wait does not match the exact read-only result leaf") job_wait;
+    Option.iter (fun job_id -> require (valid_dependency_wait attempt.occurrence result phase job_id)
+      "dependency wait does not match the exact read-only result leaf") dependency_wait;
     require (result_bytes >= 0 && Option.fold ~none:true ~some:(fun value -> value >= 0) truncated_to) "negative result size";
     require (String.equal (Tool_result.tool_name result) attempt.occurrence.tool_name) "result tool mismatch";
     let encoded = completed_json completed in valid_json encoded;
@@ -1174,8 +1203,8 @@ let settle_attempt ?failure_effect_disposition ?deferred_kind attempt ~result ~r
       match record with
       | Some (Attempting current) when same_occurrence current attempt.occurrence ->
         let json = event "settled" state.source_sha ["occurrence", occurrence_json current; "completed", encoded;
-          "failure_effect_disposition", option_json effect_json phase; "owned_job_wait", job_wait_json job_wait] in
+          "failure_effect_disposition", option_json effect_json phase; "dependency_wait", dependency_wait_json dependency_wait] in
         Some (row json), Ok ()
       | Some (Settled (current, prior, prior_phase, prior_wait)) when same_occurrence current attempt.occurrence
-          && completed_json prior = encoded && prior_phase = phase && prior_wait = job_wait -> None, Ok ()
+          && completed_json prior = encoded && prior_phase = phase && prior_wait = dependency_wait -> None, Ok ()
       | Some (Attempting _ | Settled _) | None -> None, Error (Attempt_conflict attempt.occurrence.node_id))

@@ -190,12 +190,18 @@ type approval_queue_attention =
   | Approval_queue_ready of int
   | Approval_queue_unavailable of Keeper_approval_queue_result.storage_error
 
-let attention_fields_json_with_approval_queue
+type attention =
+  { needs_attention : bool
+  ; attention_reason : string option
+  ; next_human_action : string option
+  }
+
+let attention_of_surface
       (config : Workspace_utils.config)
       (meta : keeper_meta)
+      (runtime_blocker : runtime_blocker_surface option)
       approval_queue
   =
-  let runtime_blocker = runtime_blocker_surface_opt config meta in
   let needs_attention, attention_reason, next_human_action =
     match approval_queue with
     | Approval_queue_unavailable _ ->
@@ -240,6 +246,14 @@ let attention_fields_json_with_approval_queue
         true, Some "keepalive_stopped", Some "inspect_latest_error"
       | None -> false, None, None
   in
+  { needs_attention; attention_reason; next_human_action }
+;;
+
+let attention_fields_json_of
+      (meta : keeper_meta)
+      approval_queue
+      { needs_attention; attention_reason; next_human_action }
+  =
   let approval_queue_state, pending_approval_count =
     match approval_queue with
     | Approval_queue_ready count ->
@@ -275,7 +289,8 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
     | Ok count -> Approval_queue_ready count
     | Error error -> Approval_queue_unavailable error
   in
-  attention_fields_json_with_approval_queue config meta approval_queue
+  attention_of_surface config meta (runtime_blocker_surface_opt config meta) approval_queue
+  |> attention_fields_json_of meta approval_queue
 ;;
 
 let json_string_opt_member = Json_util.get_string_nonempty

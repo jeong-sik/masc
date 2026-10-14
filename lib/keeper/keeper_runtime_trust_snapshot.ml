@@ -261,7 +261,8 @@ let approval_queue_state_of_projection
 
 let trust_model_of_observations ~pending_approval_projection
     ~(runtime_blocker : Keeper_status_bridge.runtime_blocker_surface option)
-    ~latest_receipt ~latest_next_action ~attention_fields =
+    ~latest_receipt ~latest_next_action
+    ~(attention : Keeper_status_bridge.attention) =
   Trust_core.decide
     { approval_queue =
         approval_queue_state_of_projection pending_approval_projection
@@ -272,11 +273,9 @@ let trust_model_of_observations ~pending_approval_projection
           runtime_blocker
     ; receipt_operator_disposition =
         Option.bind latest_receipt receipt_operator_disposition
-    ; attention_needs_attention =
-        assoc_bool_default "needs_attention" ~default:false attention_fields
-    ; attention_reason = assoc_string_opt "attention_reason" attention_fields
-    ; attention_next_human_action =
-        assoc_string_opt "next_human_action" attention_fields
+    ; attention_needs_attention = attention.needs_attention
+    ; attention_reason = attention.attention_reason
+    ; attention_next_human_action = attention.next_human_action
     ; terminal_next_human_action = latest_next_action
     }
 ;;
@@ -638,7 +637,7 @@ type raw_observations =
   ; latest_approval_audit : Yojson.Safe.t option
   ; pending_approval_projection : pending_approval_projection
   ; runtime_blocker : Keeper_status_bridge.runtime_blocker_surface option
-  ; attention_fields : (string * Yojson.Safe.t) list
+  ; attention : Keeper_status_bridge.attention
   ; observed_at_unix : float
   }
 
@@ -675,10 +674,11 @@ let collect_raw_observations_with_pending_reader
       ~base_path:config.base_path ~keeper_name:meta.name
   in
   let runtime_blocker = Keeper_status_bridge.runtime_blocker_surface_opt config meta in
-  let attention_fields =
-    Keeper_status_bridge.attention_fields_json_with_approval_queue
+  let attention =
+    Keeper_status_bridge.attention_of_surface
       config
       meta
+      runtime_blocker
       (approval_queue_attention_of_projection
          ~base_path:config.base_path
          pending_approval_projection)
@@ -690,7 +690,7 @@ let collect_raw_observations_with_pending_reader
     ; latest_approval_audit
     ; pending_approval_projection
     ; runtime_blocker
-    ; attention_fields
+    ; attention
     ; observed_at_unix
     }
   , recent_approval_audit_rows )
@@ -727,7 +727,7 @@ let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
       ~pending_approval_projection:raw.pending_approval_projection
       ~runtime_blocker:raw.runtime_blocker
       ~latest_receipt:latest_receipt_for_runtime_state
-      ~latest_next_action ~attention_fields:raw.attention_fields
+      ~latest_next_action ~attention:raw.attention
   in
   let execution_summary =
     execution_summary_json ~meta ~latest_receipt:raw.latest_receipt
@@ -923,7 +923,7 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
       ~pending_approval_projection:observations.pending_approval_projection
       ~runtime_blocker:observations.runtime_blocker
       ~latest_receipt:latest_receipt_for_runtime_state ~latest_next_action
-      ~attention_fields:observations.attention_fields
+      ~attention:observations.attention
   in
   let approval_state =
     approval_state_json

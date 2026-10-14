@@ -765,6 +765,17 @@
   masc_tui_keeper_chat_transcript))
 
 (library
+ (name masc_tui_keys_doc)
+ (wrapped false)
+ (modules masc_tui_keys_doc)
+ (libraries masc_tui_keys))
+
+(executable
+ (name masc_tui_keys_doc_cli)
+ (modules masc_tui_keys_doc_cli)
+ (libraries masc_tui_keys_doc))
+
+(library
  (name masc_tui_esc_interrupt)
  (wrapped false)
  (modules masc_tui_esc_interrupt)

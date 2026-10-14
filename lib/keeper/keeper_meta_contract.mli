@@ -107,11 +107,6 @@ val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator
     dashboards parse these for keeper supervisor alerting. *)
 
-val runtime_exhaustion_summary :
-  runtime_exhaustion_reason -> string
-(** Human-readable one-sentence summary per reason variant.
-    Used in keeper supervisor logs + dashboard tooltips. *)
-
 val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
 (** Total typed retryability per reason variant. Transient/connectivity
     reasons and candidate/capacity exhaustion are retryable;

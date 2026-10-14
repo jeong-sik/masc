@@ -36,7 +36,6 @@ let declared_lane_failure_of_error err =
   | Some (Provider_request_body_refusal _)
   | None -> Declared_runtime_lane_exhausted
 
-
 let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
   match before_dispatch_authority () with
   | Error reason ->

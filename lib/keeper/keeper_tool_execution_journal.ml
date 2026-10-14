@@ -694,14 +694,14 @@ let continuation_readiness (continuation : continuation) = filesystem (fun () ->
 
 let check_worker (worker : worker) (state : state) = if same_owner state.owner (Some worker.binding) then Ok () else Error Ownership_changed
 
-let validate_plan worker ~plan =
+let validate_plan (worker : worker) ~plan =
   let* recorded = frozen_plan ~base_path:worker.journal.base_path worker.journal.immutable_source in
   let* actual = Keeper_tool_plan_request.to_yojson plan
     |> Result.map_error (fun _ -> Plan_identity_conflict) in
   if not (canonical_equal recorded actual) then Error Plan_identity_conflict
   else update_existing worker.journal (fun state -> None, check_worker worker state)
 
-let checked_node worker state ~node_id ~tool_name ~input =
+let checked_node (worker : worker) state ~node_id ~tool_name ~input =
   let* () = check_worker worker state in
   let* () = Result.map_error (fun detail -> Invalid_result detail) (decode (fun () -> valid_json input; require (exact_name tool_name) "invalid tool name")) in
   let record = Nodes.find_opt (Plan.Node_id.to_string node_id) state.nodes in
@@ -709,11 +709,11 @@ let checked_node worker state ~node_id ~tool_name ~input =
   | Some record when not (same_node_identity (occurrence_of_record record) ~node_id ~tool_name ~input) -> Error (Node_identity_conflict node_id)
   | _ -> Ok record
 
-let lookup worker ~node_id ~tool_name ~input =
+let lookup (worker : worker) ~node_id ~tool_name ~input =
   update_existing worker.journal (fun state -> None,
     let* record = checked_node worker state ~node_id ~tool_name ~input in replay_for worker.binding node_id record)
 
-let begin_attempt worker ~node_id ~tool_name ~input ~execution_id ~tool_use_id ~readonly =
+let begin_attempt (worker : worker) ~node_id ~tool_name ~input ~execution_id ~tool_use_id ~readonly =
   update_existing worker.journal (fun state ->
     let decision =
       let* record = checked_node worker state ~node_id ~tool_name ~input in

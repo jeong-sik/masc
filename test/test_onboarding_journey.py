@@ -5,6 +5,7 @@ import io
 import json
 import os
 import pty
+import re
 from pathlib import Path
 import select
 import signal
@@ -1381,6 +1382,9 @@ class HostGithubLoginProbe(unittest.TestCase):
                  'refused token': gh_status(gh_account('', state='error', source='GH_TOKEN')),
                  'inactive': gh_status(gh_account('octo', active=False)),
                  'no account name': gh_status(gh_account('')),
+                 # A name next to an error: GitHub named the account and then
+                 # refused the call, so the token is not known to work.
+                 'an error beside a name': gh_status(gh_account('octo', state='error')),
                  'another state': gh_status(gh_account('octo', state='timeout'))}
         for name, output in cases.items():
             with self.subTest(name):
@@ -1426,7 +1430,30 @@ class ImpGithubLogin(unittest.TestCase):
             self.assertIn(sentence, row.notice)
         self.assertEqual(row.command, "gh auth token --hostname github.com | masc keeper-github set-token "
                                       "--keeper imp --hostname github.com --base-path '/work space'")
+        # Building the row only reads the account. The token is read at the
+        # moment it is handed over, so nothing token-shaped can be in the text.
         self.assertNotIn(GH_TOKEN_FIXTURE, row.label + row.notice + row.command)
+        self.assertIsNone(re.search(r'gh[a-z]_|github_pat_', row.label + row.notice + row.command))
+
+    def test_building_the_row_runs_nothing(self):
+        with patch.object(SETUP.subprocess, 'run') as run:
+            self.row(SETUP.HostGithubLogin('octo', "'repo'", 'keyring'))
+            self.row(None)
+        run.assert_not_called()
+
+    def test_the_notice_is_shown_before_the_checklist_asks(self):
+        # The mark is the reader's consent to hand imp a copy of the token, so
+        # what that means has to be on the screen when the question is asked.
+        shown = []
+        login = SETUP.HostGithubLogin('octo', "'repo', 'workflow'", 'keyring')
+        with patch.object(SETUP, 'host_github_login', return_value=login), \
+                patch.object(SETUP, 'automation_row', side_effect=SETUP.SetupError('no browser tools')), \
+                patch.object(SETUP, 'pick', side_effect=lambda *a, **k: shown.append(sys.stderr.getvalue()) or [1]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.choose_imp_tools('/bin/masc', '/workspace')
+        self.assertEqual(len(shown), 1)
+        self.assertIn('copy of the token', shown[0])
+        self.assertIn('account octo on github.com', shown[0])
 
     def test_without_a_login_the_row_is_the_one_time_code(self):
         row = self.row(None)

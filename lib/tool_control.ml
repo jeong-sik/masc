@@ -34,31 +34,17 @@ let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
 ;;
 
 let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
-  let keeper_pause =
-    if not (Workspace.is_initialized ctx.config)
-    then
-      Ok (`Assoc
-        [
-          ("paused", `Null);
-          ("paused_count", `Null);
-          ("paused_names", `List []);
-          ("read_errors", `List []);
-        ])
-    else Pause_status_backend.keeper_pause_status_json ctx.config
-  in
-  match keeper_pause with
+  match Pause_status_backend.keeper_pause_status ctx.config with
   | Error detail ->
     Tool_result.error ~failure_class:Tool_result.Runtime_failure
       ~tool_name ~start_time detail
-  | Ok keeper_pause ->
+  | Ok keeper_pause_status ->
   let keeper_paused =
-    match keeper_pause with
-    | `Assoc fields -> (
-      match List.assoc_opt "paused" fields with
-      | Some (`Bool value) -> value
-      | _ -> false)
-    | _ -> false
+    match keeper_pause_status with
+    | Pause_status_backend.Census { paused_names; _ } -> paused_names <> []
+    | Pause_status_backend.Workspace_not_initialized -> false
   in
+  let keeper_pause = Pause_status_backend.keeper_pause_status_to_json keeper_pause_status in
   let pause_state =
     if not (Workspace.is_initialized ctx.config) then `Initializing
     else

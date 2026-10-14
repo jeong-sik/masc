@@ -430,26 +430,28 @@ let test_provider_error_without_reason_stays_provider_error () =
    string is retyped here: the error value is built from constructors, the
    detail is the same preview the failure path applies, and the expected
    sentence is the product wording this test pins. *)
-let empty_turn_fence ~scope =
+let empty_turn_cause ~scope =
+  Keeper_internal_error.Fenced_masc
+    (Keeper_internal_error.Accept_rejected
+       { scope
+       ; model = None
+       ; reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+       ; response_shape = Some Keeper_internal_error.Accept_response_empty
+       ; stop_reason = None
+       ; reason = "empty assistant turn"
+       })
+;;
+
+let empty_turn_fence
+    ?(effect_disposition = Keeper_provider_attempt_effect_core.No_effect_observed)
+    ~scope () =
   Keeper_internal_error.Provider_attempt_effect_fenced
-    { runtime_id = scope
-    ; effect_disposition = Keeper_provider_attempt_effect_core.No_effect_observed
-    ; cause =
-        Keeper_internal_error.Fenced_masc
-          (Keeper_internal_error.Accept_rejected
-             { scope
-             ; model = None
-             ; reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
-             ; response_shape = Some Keeper_internal_error.Accept_response_empty
-             ; stop_reason = None
-             ; reason = "empty assistant turn"
-             })
-    }
+    { runtime_id = scope; effect_disposition; cause = empty_turn_cause ~scope }
 ;;
 
 let test_fenced_empty_turn_is_recorded_with_its_marker () =
   let scope = "openrouter" in
-  let fence = empty_turn_fence ~scope in
+  let fence = empty_turn_fence ~scope () in
   let err = Keeper_internal_error.core_error_of_masc_internal_error fence in
   let raw_error = Agent_core.Error.to_string err in
   let terminal = Keeper_turn_terminal.of_failure ~raw_error err in
@@ -534,6 +536,61 @@ let test_fenced_non_empty_turn_keeps_no_marker () =
        "a non-empty fence is never marked"
        None record.fenced_empty_turn_runtime
    | Some _ | None -> ())
+;;
+
+(* The empty-turn sentence says the attempt made no progress and invites a
+   retry. When a tool may have run ([Effect_attempted]) or the runtime lost
+   sight of effects ([Observation_unavailable]), that would invite a repeat,
+   so the same empty cause must keep the fallback reading: no marker and no
+   replacement signature. Both fenced constructors share the rule. *)
+let test_fenced_empty_turn_with_a_possible_effect_keeps_no_marker () =
+  let scope = "openrouter" in
+  let label = function
+    | Keeper_provider_attempt_effect_core.No_effect_observed -> "no_effect_observed"
+    | Keeper_provider_attempt_effect_core.Effect_attempted -> "effect_attempted"
+    | Keeper_provider_attempt_effect_core.Observation_unavailable -> "observation_unavailable"
+  in
+  let correction_lost effect_disposition =
+    Keeper_internal_error.Tool_correction_lost
+      { runtime_id = scope
+      ; effect_disposition
+      ; reject_count = 1
+      ; cause = empty_turn_cause ~scope
+      }
+  in
+  List.iter
+    (fun (kind, effect_disposition, fence) ->
+      let name = kind ^ " " ^ label effect_disposition in
+      let err = Keeper_internal_error.core_error_of_masc_internal_error fence in
+      let raw_error = Agent_core.Error.to_string err in
+      let terminal = Keeper_turn_terminal.of_failure ~raw_error err in
+      match
+        Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+          ~core_error:err terminal ~raw_error
+      with
+      | Some (Keeper_registry.Provider_runtime_error record as reason) ->
+        Alcotest.(check (option string))
+          (name ^ ": no empty-turn marker") None record.fenced_empty_turn_runtime;
+        (match
+           Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+             ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)
+             reason
+         with
+         | Some surface ->
+           Alcotest.(check (option string))
+             (name ^ ": the wire is not replaced") None
+             surface.Keeper_status_bridge.signature
+         | None -> ())
+      | Some _ | None -> ())
+    [ ( "fenced", Keeper_provider_attempt_effect_core.Effect_attempted
+      , empty_turn_fence ~effect_disposition:Keeper_provider_attempt_effect_core.Effect_attempted ~scope () )
+    ; ( "fenced", Keeper_provider_attempt_effect_core.Observation_unavailable
+      , empty_turn_fence ~effect_disposition:Keeper_provider_attempt_effect_core.Observation_unavailable ~scope () )
+    ; ( "correction_lost", Keeper_provider_attempt_effect_core.Effect_attempted
+      , correction_lost Keeper_provider_attempt_effect_core.Effect_attempted )
+    ; ( "correction_lost", Keeper_provider_attempt_effect_core.Observation_unavailable
+      , correction_lost Keeper_provider_attempt_effect_core.Observation_unavailable )
+    ]
 ;;
 
 (* A turn_failures blocker is a count; the registry rebuilds it from the
@@ -760,6 +817,10 @@ let () =
           "a non-empty fence keeps no marker"
           `Quick
           test_fenced_non_empty_turn_keeps_no_marker
+      ; Alcotest.test_case
+          "an empty turn that may have had an effect keeps no marker"
+          `Quick
+          test_fenced_empty_turn_with_a_possible_effect_keeps_no_marker
       ] );
     ]
 ;;

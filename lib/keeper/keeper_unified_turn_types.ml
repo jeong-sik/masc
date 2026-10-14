@@ -203,14 +203,16 @@ let registry_failure_reason_of_internal_error ~detail = function
      preview written for logs), so the write path marks it while the typed
      error is still in hand. [detail] stays the log-facing preview; the
      marker decides the human sentence and [code ^ ": " ^ detail] the
-     signature the row keeps for log search. A fenced failure whose cause
-     is not an empty turn maps to [None] like before — the marker vouches
-     for emptiness it cannot see. *)
-  | (Keeper_internal_error.Provider_attempt_effect_fenced _
-    | Keeper_internal_error.Tool_correction_lost _) as err ->
-    (match Keeper_internal_error.fenced_cause_of_masc_internal_error err with
-     | Some cause
-       when Keeper_internal_error.fenced_cause_empty_no_progress cause = Some true ->
+     signature the row keeps for log search. The sentence says the attempt
+     made no progress and invites a retry, so only an attempt that observed
+     no effect may earn the marker: with [Effect_attempted] or
+     [Observation_unavailable] a tool may have run, and a retry could repeat
+     it. Those, and a fenced failure whose cause is not an empty turn, map to
+     [None] like before and keep the fallback wire reading. *)
+  | (Keeper_internal_error.Provider_attempt_effect_fenced { effect_disposition; cause; _ }
+    | Keeper_internal_error.Tool_correction_lost { effect_disposition; cause; _ }) as err ->
+    (match effect_disposition, Keeper_internal_error.fenced_cause_empty_no_progress cause with
+     | Keeper_provider_attempt_effect_core.No_effect_observed, Some true ->
        Some
          (Keeper_registry.Provider_runtime_error
             { code = Keeper_internal_error.kind_of_masc_internal_error err
@@ -223,7 +225,10 @@ let registry_failure_reason_of_internal_error ~detail = function
             ; fenced_empty_turn_runtime =
                 Some (Keeper_internal_error.runtime_id_of_masc_internal_error err)
             })
-     | _ -> None)
+     | ( Keeper_provider_attempt_effect_core.No_effect_observed
+       | Keeper_provider_attempt_effect_core.Effect_attempted
+       | Keeper_provider_attempt_effect_core.Observation_unavailable ),
+       (Some true | Some false | None) -> None)
   | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
       (* Typed [Internal_*] variants are not runtime-exhaustion reasons; they

@@ -830,12 +830,19 @@ let await_composition env fixture accepted =
       | Error error -> fail (Async.canonical_terminal_error_to_string error)
     in read_terminal ())
 
+let composition_reference label json =
+  match Tool_output.normalized_artifact_ref_of_json json with
+  | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+  | Tool_output.Not_normalized_artifact_ref ->
+      failf "%s is not a canonical artifact reference: %s" label (Yojson.Safe.to_string json)
+  | Tool_output.Invalid_normalized_artifact_ref {detail} ->
+      failf "%s is invalid: %s; value=%s" label detail (Yojson.Safe.to_string json)
+
 let composition_nodes fixture data =
-  let reference = data |> member "execution_artifact" in
-  let sha256 = reference |> member "sha256" |> to_string in
-  let bytes = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.base_path) ~sha256 with
+  let reference = data |> member "execution_artifact" |> composition_reference "execution artifact" in
+  let bytes = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.base_path) ~sha256:reference.sha256 with
     | Ok (Some bytes) -> bytes | Ok None | Error _ -> fail "complete execution artifact unavailable" in
-  check int "execution artifact retains exact bytes" (reference |> member "bytes" |> to_int) (String.length bytes);
+  check int "execution artifact retains exact bytes" reference.bytes (String.length bytes);
   result_document ~base_path:fixture.base_path bytes |> member "nodes" |> to_list
 
 let composition_node name nodes = List.find (fun row -> row |> member "node_id" |> to_string = name) nodes
@@ -868,7 +875,8 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       "exports", `List [`Assoc ["name", `String "job"; "node", `String "await"; "pointer", `String "/job_id"]]] in
   let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"prepare-wait" ~turn:41 "keeper_composition_prepare" recipe) in
-  let sha256 = prepared |> member "draft" |> member "sha256" |> to_string in
+  let draft_reference = prepared |> member "draft" |> composition_reference "prepared draft" in
+  let sha256 = draft_reference.sha256 in
   let calls_before = List.length (calls fixture) in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-wait" ~turn:41 "keeper_composition_run" (`Assoc ["sha256", `String sha256])) in

@@ -43,6 +43,58 @@ val summarize : t -> summary option
 (** Percentiles (nearest rank) over the samples currently in the ring, or
     [None] when nothing has been recorded. *)
 
+type gc_snapshot =
+  { minor_collections : int
+  ; major_collections : int
+  ; compactions : int
+  ; forced_major_collections : int
+  ; heap_words : int
+  ; top_heap_words : int
+  ; minor_words : float
+  ; major_words : float
+  ; promoted_words : float
+  }
+
+type lag_percentiles =
+  { sample_count : int
+  ; p50_ms : float
+  ; p95_ms : float
+  ; p99_ms : float
+  ; max_ms : float
+  ; over_50ms_count : int
+  ; over_200ms_count : int
+  }
+
+type snapshot =
+  { lag : lag_percentiles
+  ; gc : gc_snapshot
+  }
+
+val record_lag_ms : t -> float -> unit
+(** Record one wake-up lag sample in milliseconds (clamped at [0.0]). *)
+
+val capture_gc : unit -> gc_snapshot
+(** Read cumulative GC counters via [Gc.quick_stat ()]. *)
+
+val compute_lag_percentiles : t -> lag_percentiles
+(** Compute nearest-rank p50/p95/p99, max, and 50ms/200ms threshold counts
+    over the ring's current samples. *)
+
+val snapshot : t -> snapshot
+(** Capture both {!compute_lag_percentiles} and {!capture_gc}. *)
+
+val gc_snapshot_to_yojson : gc_snapshot -> Yojson.Safe.t
+val lag_percentiles_to_yojson : lag_percentiles -> Yojson.Safe.t
+val snapshot_to_yojson : snapshot -> Yojson.Safe.t
+
+val run_probe_loop
+  :  clock:_ Eio.Time.clock
+  -> ?interval_s:float
+  -> t
+  -> unit
+(** Cooperative fiber loop that sleeps [interval_s] (default [0.020] = 20ms)
+    and records [max 0.0 ((t1 -. t0 -. interval_s) *. 1000.0)]. *)
+
 type probe_state =
   | Not_started
   | Running
@@ -52,8 +104,8 @@ type probe_state =
 val to_fields : t -> (string * Yojson.Safe.t) list
 (** Wire shape used by [/health]. Always carries [probe] ("not_started",
     "running", "stopped" with [stopped_reason], or "cancelled"),
-    [interval_ms], [window_s], [stall_threshold_ms] and [samples]; the
-    percentile fields are present only when [samples > 0]. *)
+    [interval_ms], [window_s], [stall_threshold_ms], [samples], [lag], and
+    [gc]; the top-level percentile fields are present when [samples > 0]. *)
 
 val start : sw:Eio.Switch.t -> mono_clock:_ Eio.Time.Mono.t -> t -> unit
 (** Fork the probe fiber under [sw] on the calling domain; [probe_state] is

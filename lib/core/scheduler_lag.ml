@@ -172,6 +172,134 @@ let summarize t =
   end
 ;;
 
+type gc_snapshot =
+  { minor_collections : int
+  ; major_collections : int
+  ; compactions : int
+  ; forced_major_collections : int
+  ; heap_words : int
+  ; top_heap_words : int
+  ; minor_words : float
+  ; major_words : float
+  ; promoted_words : float
+  }
+
+type lag_percentiles =
+  { sample_count : int
+  ; p50_ms : float
+  ; p95_ms : float
+  ; p99_ms : float
+  ; max_ms : float
+  ; over_50ms_count : int
+  ; over_200ms_count : int
+  }
+
+type snapshot =
+  { lag : lag_percentiles
+  ; gc : gc_snapshot
+  }
+
+let record_lag_ms t lag_ms =
+  record t ~lag_s:(Float.max 0.0 lag_ms /. milliseconds_per_second)
+;;
+
+let capture_gc () =
+  let s = Gc.quick_stat () in
+  { minor_collections = s.minor_collections
+  ; major_collections = s.major_collections
+  ; compactions = s.compactions
+  ; forced_major_collections = s.forced_major_collections
+  ; heap_words = s.heap_words
+  ; top_heap_words = s.top_heap_words
+  ; minor_words = s.minor_words
+  ; major_words = s.major_words
+  ; promoted_words = s.promoted_words
+  }
+;;
+
+let compute_lag_percentiles t =
+  let xs = samples t in
+  let n = Array.length xs in
+  let over_50ms_count =
+    Array.fold_left (fun acc s -> if s *. milliseconds_per_second > 50.0 then acc + 1 else acc) 0 xs
+  in
+  let over_200ms_count =
+    Array.fold_left (fun acc s -> if s *. milliseconds_per_second > 200.0 then acc + 1 else acc) 0 xs
+  in
+  match summarize t with
+  | None ->
+    { sample_count = 0
+    ; p50_ms = 0.0
+    ; p95_ms = 0.0
+    ; p99_ms = 0.0
+    ; max_ms = 0.0
+    ; over_50ms_count = 0
+    ; over_200ms_count = 0
+    }
+  | Some s ->
+    { sample_count = n
+    ; p50_ms = s.p50_ms
+    ; p95_ms = s.p95_ms
+    ; p99_ms = s.p99_ms
+    ; max_ms = s.max_ms
+    ; over_50ms_count
+    ; over_200ms_count
+    }
+;;
+
+let snapshot t =
+  { lag = compute_lag_percentiles t
+  ; gc = capture_gc ()
+  }
+;;
+
+let gc_snapshot_to_yojson (gc : gc_snapshot) : Yojson.Safe.t =
+  `Assoc
+    [ "minor_collections", `Int gc.minor_collections
+    ; "major_collections", `Int gc.major_collections
+    ; "compactions", `Int gc.compactions
+    ; "forced_major_collections", `Int gc.forced_major_collections
+    ; "heap_words", `Int gc.heap_words
+    ; "top_heap_words", `Int gc.top_heap_words
+    ; "minor_words", `Float gc.minor_words
+    ; "major_words", `Float gc.major_words
+    ; "promoted_words", `Float gc.promoted_words
+    ]
+;;
+
+let lag_percentiles_to_yojson (lag : lag_percentiles) : Yojson.Safe.t =
+  `Assoc
+    [ "sample_count", `Int lag.sample_count
+    ; "p50_ms", `Float lag.p50_ms
+    ; "p95_ms", `Float lag.p95_ms
+    ; "p99_ms", `Float lag.p99_ms
+    ; "max_ms", `Float lag.max_ms
+    ; "over_50ms_count", `Int lag.over_50ms_count
+    ; "over_200ms_count", `Int lag.over_200ms_count
+    ]
+;;
+
+let snapshot_to_yojson (s : snapshot) : Yojson.Safe.t =
+  `Assoc
+    [ "lag", lag_percentiles_to_yojson s.lag
+    ; "gc", gc_snapshot_to_yojson s.gc
+    ]
+;;
+
+let run_probe_loop ~clock ?(interval_s = 0.020) t =
+  let interval_s = if interval_s <= 0.0 then 0.020 else interval_s in
+  Atomic.set t.state Running;
+  let rec loop () =
+    let t0 = Eio.Time.now clock in
+    Eio.Time.sleep clock interval_s;
+    let t1 = Eio.Time.now clock in
+    let lag_ms = Float.max 0.0 ((t1 -. t0 -. interval_s) *. milliseconds_per_second) in
+    record_lag_ms t lag_ms;
+    loop ()
+  in
+  loop ()
+;;
+
 let to_fields t : (string * Yojson.Safe.t) list =
   let probe =
     match Atomic.get t.state with
@@ -200,7 +328,13 @@ let to_fields t : (string * Yojson.Safe.t) list =
       ; "stalls", `Int s.stalls
       ]
   in
-  probe @ shape @ stats
+  let snap = snapshot t in
+  let snapshot_fields =
+    [ "lag", lag_percentiles_to_yojson snap.lag
+    ; "gc", gc_snapshot_to_yojson snap.gc
+    ]
+  in
+  probe @ shape @ stats @ snapshot_fields
 ;;
 
 let start ~sw ~(mono_clock : _ Eio.Time.Mono.t) t =

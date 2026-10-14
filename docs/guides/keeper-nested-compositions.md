@@ -70,8 +70,9 @@ arguments and source-to-expanded leaf mapping for later durable evidence.
 Async children are refused as `async_child_requires_suspension`. An async request
 receipt is not a child result. Connecting that child requires durable suspension,
 completion correlation and resumption, rather than flattening a worker as a normal
-inline leaf. Expanded leaves currently require static read-only ordinary Tool
-contracts; resource-aware effect admission remains a separate implementation unit.
+inline leaf. Expanded leaves admit static read-only ordinary Tool contracts and
+the isolated owned-job launch producer with its Serial durable ownership.
+General resource-aware effect admission remains a separate implementation unit.
 
 The focused `test_keeper_composition_nested` scenarios check repeated child
 references, escaped IDs and export names, parameter contracts, unavailable exact

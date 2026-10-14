@@ -47,6 +47,11 @@ type tool_kind =
   | Composition_tool
   | Async_composition_tool
 
+type prepared_leaf_admission =
+  | Read_only_ordinary_leaf
+  | Owned_job_launch_leaf
+  | Direct_only
+
 let tool_kind_to_string = function
   | Atomic_tool -> "atomic"
   | Composition_tool -> "composition"
@@ -3348,6 +3353,22 @@ let descriptors_for_internal internal_name =
 
 let readonly_static_hint d = d.policy.readonly_hint
 let readonly_for_input d ~input = d.policy.readonly_of_input input
+
+let prepared_leaf_admission descriptor =
+  match descriptor.execution with
+  | Terminal -> Direct_only
+  | Ordinary _ ->
+    (match readonly_static_hint descriptor with
+     | Some true -> Read_only_ordinary_leaf
+     | None | Some false ->
+       (match descriptor.runtime_handler with
+        | Tool_keeper_job_dispatch ->
+          (match Tool_schemas_owned_job.find_definition descriptor.internal_name with
+           | Some {action=Tool_schemas_owned_job.Start;_} -> Owned_job_launch_leaf
+           | Some {action=(Tool_schemas_owned_job.Status | Cancel | Read_result);_}
+           | None -> Direct_only)
+        | _ -> Direct_only))
+;;
 
 let readonly_internal_names () =
   all_descriptors ()

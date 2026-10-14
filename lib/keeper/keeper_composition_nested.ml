@@ -247,9 +247,9 @@ let validate_leaves plan =
   let* () = List.fold_left (fun acc (node : Plan.node) ->
       let* () = acc in
       match Plan.descriptor plan node.id with
-      | Some descriptor -> (match descriptor.Keeper_tool_descriptor.execution, Keeper_tool_descriptor.readonly_static_hint descriptor with
-          | Keeper_tool_descriptor.Ordinary _, Some true -> Ok ()
-          | Keeper_tool_descriptor.Terminal, _ | Keeper_tool_descriptor.Ordinary _, (None | Some false) ->
+      | Some descriptor -> (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
+          | Read_only_ordinary_leaf | Owned_job_launch_leaf -> Ok ()
+          | Direct_only ->
             Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name }))
       | None -> Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name })) (Ok ()) (Plan.nodes plan) in
   Plan.prepare_inputs plan |> Result.map (fun _ -> ()) |> Result.map_error (fun (id, error) -> Inputs_rejected (id, error))

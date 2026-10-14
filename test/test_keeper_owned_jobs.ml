@@ -2053,33 +2053,57 @@ let test_running_absent_inventory_notified_once () = with_fixture @@ fun _env in
   check int "closed running job never restarts" 1 (effect_count fixture "start")
 
 
-let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _initialize fixture ->
+let test_prepared_job_launch_and_continuation () = with_fixture @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   let module Wake = Masc.Keeper_composition_continuation_wake in
   let module Async = Masc.Keeper_msg_async in
   set_source fixture ~task_id:"task-A" ~turn:41;
   Call_log.init ~base_path:fixture.base_path ();
-  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
   let recipe = `Assoc ["execution",`String "async";"nodes",`List
-      [`Assoc ["id",`String "await";"tool",`String "keeper_job_result";
-         "input",`Assoc ["kind",`String "literal";"value",argument id]];
+      [`Assoc ["id",`String "launch";"tool",`String "keeper_job_start";
+         "input",`Assoc ["kind",`String "literal";"value",`Assoc
+           ["argv",`List [`String "fixture-program"]]]];
+       `Assoc ["id",`String "await";"tool",`String "keeper_job_result";
+         "input",`Assoc ["kind",`String "object";"fields",`List
+           [`Assoc ["name",`String "job_id";"value",`Assoc
+             ["kind",`String "output";"node",`String "launch";"pointer",`String "/job_id"]]]]];
        `Assoc ["id",`String "consume";"tool",`String "keeper_artifact_read";
          "after",`List [`String "await"];
          "input",`Assoc ["kind",`String "object";"fields",`List
            [`Assoc ["name",`String "sha256";"value",`Assoc
              ["kind",`String "output";"node",`String "await";
               "pointer",`String "/artifacts/0/_blob/sha256"]]]]]]] in
+  let denied_job_id = Store.Job_id.fresh () |> Store.Job_id.to_string in
+  List.iter (fun tool ->
+    let unsupported = `Assoc ["execution",`String "async";"nodes",`List
+      [`Assoc ["id",`String "unsupported";"tool",`String tool;
+        "input",`Assoc ["kind",`String "literal";"value",argument denied_job_id]]]] in
+    with_bundle fixture (fun bundle ->
+      match invoke_raw bundle ~tool_use_id:("unsupported-" ^ tool) ~turn:41 "keeper_composition_prepare" unsupported with
+      | Error _ -> () | Ok _ -> failf "prepared launch admission also admitted %s" tool))
+    ["keeper_job_status";"keeper_job_cancel"];
+  check bool "refused status/cancel preparation performs no backend operation" false (Sys.file_exists fixture.daemon_path);
+  let prepare_started = Mtime_clock.counter () in
   let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"prepare-hint" ~turn:41 "keeper_composition_prepare" recipe) in
+  check bool "preparing a launch plan performs no backend operation" false (Sys.file_exists fixture.daemon_path);
   let reference = prepared |> member "draft" |> composition_reference "actual completion hint draft" in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-hint" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String reference.sha256])) in
   let ok,waiting,waiting_entry = await_composition env fixture accepted in
+  let prepare_to_wait_ms = Mtime.Span.to_float_ns (Mtime_clock.count prepare_started) /. 1_000_000. in
   check bool "original DAG is suspended before completion" false ok;
-  (match waiting_entry.status with
-   | Async.Waiting_for_owned_jobs {job_ids;_} ->
-     check (list string) "completion hint has the original job wait" [id] (List.map Store.Job_id.to_string job_ids)
-   | _ -> fail "original DAG was not canonically waiting for the job");
+  let id = match waiting_entry.status with
+    | Async.Waiting_for_owned_jobs {job_ids=[id];_} -> Store.Job_id.to_string id
+    | _ -> fail "prepared launch did not produce one canonical original job wait" in
+  let waiting_nodes = waiting |> member "settled" |> to_list in
+  let original_launch = composition_node "launch" waiting_nodes in
+  check string "prepared launch result is the exact awaited job" id
+    (original_launch |> member "result" |> member "data" |> member "job_id" |> to_string);
+  let original_job = load fixture id in
+  check (option string) "prepared launch belongs to the original Task" (Some "task-A") original_job.source.task_id;
+  check (option string) "durable launch belongs to its exact node occurrence"
+    (Some (original_launch |> member "tool_use_id" |> to_string)) original_job.source.tool_use_id;
   let config = Workspace.default_config fixture.base_path in
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
   Fs_compat.mkdir_p (Filename.dirname declaration);
@@ -2139,12 +2163,16 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
   check int "continuation does not query the backend after complete output" backend_at_ready (List.length (calls fixture));
   check string "completion keeps the original run" (accepted |> member "composition_run_id" |> to_string)
     (resumed |> member "composition_run_id" |> to_string);
-  let waiting_nodes = waiting |> member "settled" |> to_list
-  and completed_nodes = completed |> member "actions" |> to_list in
+  let completed_nodes = completed |> member "actions" |> to_list in
   let waiting_node = composition_node "await" waiting_nodes
   and completed_node = composition_node "await" completed_nodes in
   List.iter (fun field -> check_json ("completion hint keeps original occurrence " ^ field)
       (waiting_node |> member field) (completed_node |> member field)) ["execution_id";"tool_use_id"];
+  let retained_launch = composition_node "launch" completed_nodes in
+  List.iter (fun field -> check_json ("completed launch retains original " ^ field)
+      (original_launch |> member field) (retained_launch |> member field)) ["execution_id";"tool_use_id";"result"];
+  check_json "completed effectful launch is reused without dispatch" (`String "retained_completion")
+    (retained_launch |> member "execution_origin");
   check_json "hint consumer receives complete original stdout" (`String stdout_bytes)
     (composition_node "consume" completed_nodes |> member "result"
      |> member "data" |> member "content");
@@ -2153,8 +2181,9 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
   check_json "hint completion belongs to original Task" (`String "task-A") (request_context |> member "source_task_id");
   check int "completion never recreates the original program" 1 (effect_count fixture "create");
   check int "completion never restarts the original program" 1 (effect_count fixture "start");
-  Printf.printf "OWNED_COMPLETION_HINT_CONTINUATION %s\n%!" (Yojson.Safe.to_string (`Assoc
-    ["scope",`String "synthetic CLI public start/prepare/run and actual durable completion supervisor hint";
+  Printf.printf "OWNED_PREPARED_JOB_LAUNCH_CONTINUATION %s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["scope",`String "synthetic CLI public prepare/run launching an owned job within the original DAG";
+     "prepare_and_launch_to_saved_job_wait_ms",`Float prepare_to_wait_ms;
      "completion_pulse_to_original_dag_completion_ms",`Float completion_ms;
      "backend_calls_to_complete_original_job",`Int (backend_at_ready-backend_before);
      "backend_calls_after_result_ready",`Int (List.length (calls fixture)-backend_at_ready);
@@ -2280,6 +2309,6 @@ let () =
       ; test_case "completion recovery retains unknown launch and corrupt owner" `Quick test_completion_retains_unknown_launch_and_owner
       ; test_case "finished without outputs and absent inventory is notified once and leaves waiting" `Quick test_finished_without_outputs_absent_inventory_notified_once
       ; test_case "running with absent inventory is notified once and leaves waiting" `Quick test_running_absent_inventory_notified_once
-      ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag
+      ; test_case "prepared DAG launches an owned job and resumes its original result" `Quick test_prepared_job_launch_and_continuation
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

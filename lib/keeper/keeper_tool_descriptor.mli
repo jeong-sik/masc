@@ -66,6 +66,14 @@ type tool_kind =
   | Composition_tool
   | Async_composition_tool
 
+type prepared_leaf_admission =
+  | Read_only_ordinary_leaf
+  | Owned_job_launch_leaf
+  | Direct_only
+(** Prepared ordinary leaves carry either a static read-only contract or the
+    isolated owned-job producer's durable launch ownership. Job launch retains
+    its Serial effectful execution contract. *)
+
 (** Descriptor-owned output contract for typed composition. [Opaque_output]
     cannot be referenced by another plan node. [Json_output] carries a schema
     in the closed composable-output subset checked by [Keeper_tool_plan.create]:
@@ -283,6 +291,9 @@ val descriptors_for_internal : string -> t list
 
 val readonly_static_hint : t -> bool option
 val readonly_for_input : t -> input:Yojson.Safe.t -> bool option
+val prepared_leaf_admission : t -> prepared_leaf_admission
+(** Resolve the exact descriptor route and canonical owned-job action. Terminal
+    calls and other effectful tools retain their direct admission. *)
 val translate_input_for_descriptor : t -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** Descriptor-owned read-only projection. The returned names are internal

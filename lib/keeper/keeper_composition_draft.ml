@@ -73,7 +73,7 @@ let error_to_json = function
     `Assoc [ "kind", `String "unsupported_node"
            ; "node_id", `String (Plan.Node_id.to_string node_id)
            ; "tool_name", `String tool_name
-           ; "detail", `String "Transient compositions currently require static read-only ordinary nodes; use the direct tool for this action." ]
+           ; "detail", `String "Prepared compositions admit static read-only ordinary tools and durable owned-job launch; use the direct tool for other effects." ]
   | Storage_failed detail -> `Assoc [ "kind", `String "storage_failed"; "detail", `String detail ]
   | Draft_read_failed error -> `Assoc [ "kind", `String "draft_read_failed"; "detail", `String (Tool_blob_store.fetch_error_to_string error) ]
   | Draft_not_found -> `Assoc [ "kind", `String "draft_not_found" ]

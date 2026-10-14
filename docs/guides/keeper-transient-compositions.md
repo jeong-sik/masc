@@ -1,6 +1,6 @@
 # Prepare and run a task-specific composition
 
-Use `keeper_composition_prepare` to check a read-only plan before executing it.
+Use `keeper_composition_prepare` to check a task-specific plan before executing it.
 The draft is local to the preparing Keeper; it does not publish a shared Skill.
 The tools are discoverable through the Keeper tool search surface.
 
@@ -84,18 +84,26 @@ failed node with producer-proven pre-effect evidence, can dispatch again.
 Deferred results and failed nodes with unknown or post-effect evidence cannot.
 Missing, corrupt, foreign or conflicting run evidence remains a typed refusal;
 the tool never converts it into a fresh run. This continuation applies to
-prepared async ordinary read-only drafts. Owned external-job suspension and
-effectful resource admission remain separate work in issue #42799.
+prepared async ordinary drafts. An original owned-job result wait uses its
+sealed canonical continuation; completed launch nodes retain their full result
+without recreating the job. Unknown launch effects remain retained rather than
+granting replay. General effect resource admission remains work in issue #42799.
 
-The initial transient execution contract admits static read-only ordinary nodes.
-Writes, builds and terminal actions use their direct tools until their resource
-and durable continuation contracts are implemented. The restriction is checked
-again on load; an artifact reference is not a new execution permission.
+Prepared plans admit static read-only ordinary nodes and the isolated owned-job
+launch action. The descriptor and canonical action classify admission; a job
+launch keeps its existing Serial effectful contract. Other writes, builds,
+status/cancel effects and terminal actions use their direct tools until their
+resource and durable continuation contracts are implemented. Admission is
+checked again on load; an artifact reference is not a new execution permission.
 
 [Isolated jobs](keeper-owned-jobs.md) provide direct durable start/status/cancel
 handles for programs operating in private Docker workspaces. Their producer
-records create/start intent before effects. Admission into effectful composed
-plans and automatic suspended-run continuation remain separate contracts.
+records create/start intent before effects. A prepared async recipe can launch
+with `keeper_job_start`, bind `/job_id` into `keeper_job_result`, and continue
+dependent artifact consumers when the original result is complete. Startup,
+existing maintenance and durable completion hints use the same original-run
+continuation; current denial, unavailable authority and unknown effects retain
+the original run.
 
 [Output exports](keeper-composition-exports.md) select final fields while retaining
 original results and failure evidence. Publish a reusable Skill separately with

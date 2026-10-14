@@ -880,7 +880,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                   Server_runtime_startup_maintenance. *)
                Server_runtime_startup_maintenance.prune_jsonl_at_resolved_window
                  ~base_path:config.base_path
-                 ~masc_root:(Workspace.masc_dir config)
              in
              List.iter
                (fun diagnostic ->

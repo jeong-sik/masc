@@ -2287,7 +2287,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
               miss can be explained (writes nothing for other shapes). *)
            Keeper_wire_capture.capture_rejected_reasoning
              ~base_path:ctx.base_path
-             ~masc_root:(Common.masc_dir_from_base_path ~base_path:ctx.base_path)
              ~keeper_name:ctx.keeper_name
              ?turn_id:
                (Option.bind ctx.runtime_manifest_context

@@ -126,7 +126,6 @@ let select_telemetry_summary_json
          Telemetry_unified.summary_json
            ~keeper_keepalive_interval_s
            ~keeper_metric_producer_active
-           ~base_path
            ~masc_root
            ())
 ;;

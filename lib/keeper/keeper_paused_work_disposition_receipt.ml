@@ -151,10 +151,8 @@ let receipt_path config ~keeper_name ~operator_operation_id =
 (* #38527: the event-queue projection retention predicate only needs "can a
    standing asker still re-ask this transition", and a receipt on disk is
    that answer. Existence only -- no decode, no lock: the file's writer
-   committed it before the queue transition it asks about. The masc root is
-   the same one the queue and reaction-ledger layers derive from their
-   base_path (default cluster); a named-cluster install would need the
-   config-built root instead. *)
+   committed it before the queue transition it asks about. [masc_root] is
+   [<base>/.masc], the root {!receipt_path} builds from the config. *)
 let durable_receipt_exists ~masc_root ~keeper_name ~operator_operation_id =
   Sys.file_exists
     (receipt_path_of_masc_root ~masc_root ~keeper_name ~operator_operation_id)

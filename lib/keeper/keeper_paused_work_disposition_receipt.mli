@@ -85,6 +85,4 @@ val durable_receipt_exists :
     projection retention predicate -- a receipt nobody can re-ask is dropped
     from the queue's projected dispositions, one that a standing paused-work
     receipt can still re-ask stays). Existence only: no decode, no lock.
-    The [masc_root] is the default-cluster root the queue and reaction-ledger
-    layers derive from their base_path; a named-cluster install needs the
-    config-built root instead. *)
+    [masc_root] is [<base>/.masc]. *)

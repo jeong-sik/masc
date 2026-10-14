@@ -73,7 +73,6 @@ val read_limit_of_int : int -> read_limit
 val read_limit_to_int : read_limit -> int
 
 val read_unified :
-  base_path:string ->
   masc_root:string ->
   ?sources:source list ->
   ?keeper_name:string ->
@@ -86,7 +85,7 @@ val read_unified :
   ?offset:int ->
   unit ->
   Yojson.Safe.t list
-(** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
+(** [read_unified ~masc_root ?sources ?keeper_name ?session_id
       ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ()]
     reads entries from [sources] (default: all sources), optionally filtered
     by [keeper_name], generic correlation keys, and an optional unix-second
@@ -99,13 +98,11 @@ val read_unified :
     [truncated = true] rather than a full-store scan (RFC-0372).
 
     [masc_root] is the workspace's .masc directory (use
-    [Workspace.masc_dir config] to obtain it).  [base_path] is the
-    project root, used only for [data/] paths.
+    [Workspace.masc_dir config] to obtain it).
 
     Each entry is a JSON object with an added ["source"] field. *)
 
 val read_unified_result :
-  base_path:string ->
   masc_root:string ->
   ?sources:source list ->
   ?keeper_name:string ->
@@ -124,11 +121,10 @@ val read_unified_result :
 val summary_json :
   ?keeper_keepalive_interval_s:float ->
   ?keeper_metric_producer_active:bool ->
-  base_path:string ->
   masc_root:string ->
   unit ->
   Yojson.Safe.t
-(** [summary_json ~base_path ~masc_root ()] returns a JSON overview of
+(** [summary_json ~masc_root ()] returns a JSON overview of
     each source: path, entry count, whether the store directory exists,
     and freshness metadata ([latest_ts_unix], [latest_ts_iso],
     [latest_age_s]). A live Keeper metrics producer suppresses only

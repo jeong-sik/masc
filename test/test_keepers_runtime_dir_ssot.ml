@@ -3,7 +3,7 @@
     The runtime-keeper directory resolves through a single constant,
     [Common.keepers_runtime_dirname], shared by the two SSOT functions:
     [Common.keepers_runtime_dir_of_base] (base_path-only / cycle-bound callers)
-    and [Workspace.keepers_runtime_dir] (cluster-aware callers). These pin the
+    and [Workspace.keepers_runtime_dir] (callers holding a config). These pin the
     CURRENT pre-relocation path. The input/output relocation flips
     [keepers_runtime_dirname] in ONE place; the expected values here update once,
     mirroring that single-line source change. *)
@@ -15,9 +15,9 @@ let test_dirname_constant () =
   check string "keeper OUTPUT dir segment" "keepers"
     Common.keepers_runtime_dirname
 
-(* base_path variant resolves to <base>/.masc/keepers (default cluster). *)
+(* base_path variant resolves to <base>/.masc/keepers. *)
 let test_of_base_resolves_under_masc () =
-  check string "default-cluster keeper OUTPUT dir" "/tmp/base/.masc/keepers"
+  check string "keeper OUTPUT dir under .masc" "/tmp/base/.masc/keepers"
     (Common.keepers_runtime_dir_of_base ~base_path:"/tmp/base")
 
 (* The base variant must equal masc_dir + the shared dirname constant — i.e. it

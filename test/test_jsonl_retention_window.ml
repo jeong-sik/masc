@@ -180,7 +180,7 @@ let with_workspace ~toml f =
   let ten_days_old = write_day_file audit ~age_days:10 in
   let three_days_old = write_day_file audit ~age_days:3 in
   Eio_main.run @@ fun _env ->
-  f (Prune.prune_jsonl_at_resolved_window ~base_path ~masc_root) ~ten_days_old ~three_days_old
+  f (Prune.prune_jsonl_at_resolved_window ~base_path) ~ten_days_old ~three_days_old
 
 let test_the_shared_pass_prunes_at_the_workspace_toml_window () =
   with_env None @@ fun () ->

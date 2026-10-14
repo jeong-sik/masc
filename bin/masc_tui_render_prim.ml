@@ -546,23 +546,14 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)
-  (* The same seam names the sheet while the keys are visible. The item is
-     stamped only where [?] answers: a text field holding printable keys
-     takes [?] as a character, and a modal that swallows [?] owns its own
-     row -- the overlays that answer [?] in their dispatch arms (answering,
-     link modal, keeper navigation) keep the stamped door. The chat composer
-     owns its footer outright: its rows carry the item exactly while the
-     draft is empty, which is when the key answers there.
-     [compact_viewport] is false because a footer row on screen is itself
-     the frame's word that it had room. *)
-  let help_key_answers =
-    state.view <> Keepers Keeper_message
-    && Option.is_none (text_input_target state ~compact_viewport:false)
-    && not (modal_owns_keys state)
-  in
+  (* The same seam names the sheet while the keys are visible, and asks the
+     one named question for where [?] answers -- the rule and its reasons
+     live with [Masc_tui_types.help_key_answers], beside the predicates it
+     is made of. *)
+  let door_answers = help_key_answers ~compact_viewport:false state in
   let hints =
-    if not state.hints_visible then "?:help"
-    else if help_key_answers then Masc_tui_footer.ensure_help_item hints
+    if not state.hints_visible then Masc_tui_footer.help_hint_item
+    else if door_answers then Masc_tui_footer.ensure_help_item hints
     else hints
   in
   (* Search status is literal text, not key hints: runs of spaces belong

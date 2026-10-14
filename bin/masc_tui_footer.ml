@@ -781,8 +781,10 @@ let fit_minimal_hints ~max_cells hints =
 
 let minimal_chat_hints ~max_cells ~enter_hint ~escape_hint =
   fit_minimal_hints ~max_cells
-    ["/:commands"; "?:help"; enter_hint; escape_hint; "Ctrl-J:newline"]
+    [ "/:commands"; help_hint_item; enter_hint; escape_hint
+    ; "Ctrl-J:newline" ]
 
 let minimal_context_chat_hints ~max_cells ~context_hints ~escape_hint =
   fit_minimal_hints ~max_cells
-    (context_hints @ ["/:commands"; "?:help"; escape_hint; "Ctrl-J:newline"])
+    (context_hints
+     @ [ "/:commands"; help_hint_item; escape_hint; "Ctrl-J:newline" ])

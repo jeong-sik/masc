@@ -35,6 +35,29 @@ let test_each_key_owning_overlay_owns_the_keys () =
   check int "the agenda too" 0 state.Types.agenda_scroll;
   check int "and the inspector" 0 state.Types.context_inspector_scroll
 
+(* The help door's named rule. [view_is_chat] is the one question the
+   footer's door, [composer_claimed] and [message_mode] ask; a screen added
+   to [surface] has to decide it here as surely as in the predicate itself.
+   [help_key_answers] reads as the footer stamps: true on a plain surface,
+   false once a field holds the printable keys or a modal owns the row. *)
+let test_the_help_door_rule_names_the_chat_screen () =
+  check bool "the chat is the chat" true
+    (Types.view_is_chat (Types.Keepers Types.Keeper_message));
+  check bool "the roster is not the chat" false
+    (Types.view_is_chat (Types.Keepers Types.Keeper_list));
+  List.iter
+    (fun view ->
+      check bool "a plain surface is not the chat" false (Types.view_is_chat view))
+    [ Types.Overview; Types.Board; Types.Tools ];
+  let state = fresh () in
+  check bool "nothing else open, the door answers" true
+    (Types.help_key_answers ~compact_viewport:false state);
+  state.Types.view <- Types.Config;
+  state.Types.config_pane <- Types.Config_presets;
+  state.Types.preset_save_draft <- Some "name";
+  check bool "a field holding the keys takes the ? as a character" false
+    (Types.help_key_answers ~compact_viewport:false state)
+
 let card_named name =
   match
     Masc_tui_play_card.make ~project:(fun _ -> None) ~name
@@ -211,6 +234,8 @@ let () =
     [ ( "overlays"
       , [ test_case "each key-owning overlay owns the keys" `Quick
             test_each_key_owning_overlay_owns_the_keys
+        ; test_case "the help door rule names the chat screen" `Quick
+            test_the_help_door_rule_names_the_chat_screen
         ; test_case "the palette is not one of them" `Quick
             test_the_palette_is_not_one_of_them
         ; test_case "the invite card owns the keys only while shown" `Quick

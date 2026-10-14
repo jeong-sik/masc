@@ -588,9 +588,11 @@ let test_missing_origin_and_referer_names_masc_login () =
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason = Missing_token; message })) ->
     check
       bool
-      "401 message guides operator to masc login"
+      "401 message guides operator to masc login with required --client-env"
       true
-      (String_util.contains_substring message "masc login")
+      (String_util.contains_substring
+         message
+         "masc login --base-path <dir> --client-env MASC_TOKEN")
   | Error error ->
     fail ("unexpected error variant: " ^ Masc_domain.masc_error_to_string error)
 ;;

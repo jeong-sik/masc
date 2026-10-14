@@ -209,7 +209,8 @@ let decode_ask_answer_receipt ~expected_ask_id ~status_code json =
                Error "ask answer: canonical answer time is not finite"
              else Ok (Ask_answer_already_recorded
                { aar_delivery = delivery; aar_answered_at = answered_at })
-         | _ -> Error "ask answer: HTTP status contradicts recording or delivery evidence")
+         | _, _, (Ask_wake_stored | Ask_wake_pending _) ->
+             Error "ask answer: HTTP status contradicts recording or delivery evidence")
   | `Bool false | `Null ->
       if status_code >= 400 && status_code < 500 then
         (match member "state" json with

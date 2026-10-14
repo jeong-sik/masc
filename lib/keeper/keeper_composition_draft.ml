@@ -44,7 +44,12 @@ let authored_source draft = draft.authored_source
 
 let failure_class = function
   | Draft_read_failed (Tool_blob_store.Invalid_sha256 _) -> Tool_result.Policy_rejection
-  | Storage_failed _ | Draft_read_failed _ -> Tool_result.Runtime_failure
+  | Storage_failed _
+  | Draft_read_failed
+      ( Tool_blob_store.Owned_read_failed _
+      | Tool_blob_store.Too_large _
+      | Tool_blob_store.Invalid_max_bytes _
+      | Tool_blob_store.Integrity_mismatch _ ) -> Tool_result.Runtime_failure
   | Plan_rejected _ | Inputs_rejected _ | Unsupported_node _ | Draft_not_found
   | Malformed_draft _ | Different_keeper | Capability_changed | Publication_rejected _
   | Skill_not_prepared | Different_package | Nested_rejected _
@@ -149,7 +154,13 @@ let validate_plan ~capability_surface json =
     | Nested.Request_rejected error -> Plan_rejected error
     | Nested.Unsupported_leaf { node_id; tool_name } -> Unsupported_node { node_id; tool_name }
     | Nested.Inputs_rejected (node_id, error) -> Inputs_rejected (node_id, error)
-    | error -> Nested_rejected error)
+    | ( Nested.Invalid_call_field _ | Nested.Invalid_reference _
+      | Nested.Reference_unavailable _ | Nested.Instruction_reference _
+      | Nested.Async_child_requires_suspension _ | Nested.Child_policy_mismatch _
+      | Nested.Arguments_rejected _ | Nested.Binding_rejected _
+      | Nested.Duplicate_alias _ | Nested.Unknown_alias _
+      | Nested.Child_output_requires_export _ | Nested.Unknown_child_export _
+      | Nested.Expanded_plan_rejected _ ) as error -> Nested_rejected error)
 ;;
 
 let contracts ~capability_surface plan =

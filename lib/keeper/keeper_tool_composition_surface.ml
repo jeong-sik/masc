@@ -697,6 +697,7 @@ let async_submission_result
       ?run_reference
       ?composition_run_id
       ?journal
+      ?continuation
       ~plan
       ~tool_name
       ~tool_kind
@@ -764,7 +765,10 @@ let async_submission_result
              (fun () -> match journal with
                 | None -> Ok ()
                 | Some journal ->
-                  match Journal.bind_request journal ~request_id with
+                  let binding = match continuation with
+                    | None -> Journal.bind_request journal ~request_id
+                    | Some continuation -> Journal.bind_continuation continuation ~request_id in
+                  match binding with
                   | Error error -> Error (Journal.error_to_string error)
                   | Ok worker -> Atomic.set journal_worker (Some worker); Ok ()))
          ~background_sw
@@ -2093,10 +2097,10 @@ let make_tools_with_authority
                 Tool_result.with_retained_artifacts
                   (run_reference :: Draft.reference draft :: Tool_result.retained_artifacts result) result
               in
-              let execute_run ?journal ~composition_run_id ~run_reference ~parent_invocation ~turn_context () =
+              let execute_run ?journal ?continuation ~composition_run_id ~run_reference ~parent_invocation ~turn_context () =
                 let result = match Draft.execution draft with
                   | Catalog.Async ->
-                    async_submission_result ?journal ~draft_reference:(Draft.reference draft) ~run_reference ~composition_run_id
+                    async_submission_result ?journal ?continuation ~draft_reference:(Draft.reference draft) ~run_reference ~composition_run_id
                       ~plan ~tool_name:Draft.run_tool_name ~tool_kind:Keeper_tool_descriptor.Async_composition_tool
                       ~parent_invocation ~config ~meta ~capability_authority ~publication_recovery
                       ~ctx_snapshot ~turn_context ?clock ()
@@ -2167,8 +2171,11 @@ let make_tools_with_authority
                          | None -> Keeper_tool_call_log_context.get_turn_context_record
                              ~cell:(Keeper_tool_call_log_context.create_cell ()) () in
                        let turn_context = Some { context with task_id = source.source_task_id } in
-                       execute_run ~journal ~composition_run_id ~run_reference:source.run_reference
-                         ~parent_invocation ~turn_context ())
+                       match Journal.waiting_continuation journal with
+                       | Error error -> journal_rejection ~start_time error
+                       | Ok continuation ->
+                         execute_run ~journal ?continuation ~composition_run_id ~run_reference:source.run_reference
+                           ~parent_invocation ~turn_context ())
               | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _), Catalog.Async ->
                 rejection ~tool_name:Draft.run_tool_name ~start_time
                   (Draft.Malformed_draft "resume_run_id must be a string")

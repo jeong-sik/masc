@@ -16,6 +16,9 @@ type source =
 type t
 type worker
 type attempt
+type continuation
+(** Exact suspended owner captured from its canonical Waiting record and
+    matching journal nodes. It grants no execution authority by itself. *)
 
 type completed =
   { execution_id : Ids.Execution_id.t
@@ -61,6 +64,26 @@ val load
 (** Strict read-only load. Missing/corrupt authority never creates a run. *)
 
 val source : t -> source
+
+val waiting_continuation : t -> (continuation option, error) result
+(** Read only canonical current-owner terminal proof and exact journal state.
+    [None] means no bound request, an active worker, or a settled worker that
+    is not waiting for owned jobs. Unavailable or inconsistent evidence is
+    [Error]. A later owner change makes the captured value stale. *)
+
+val continuation_source : continuation -> source
+val continuation_request_id : continuation -> string
+val continuation_job_ids : continuation -> Keeper_owned_job_identity.Job_id.t list
+
+type readiness = Waiting_for_results | Results_ready
+val continuation_readiness : continuation -> (readiness, error) result
+(** Strict owner reads only. No collection, backend call, launch or Task
+    inference. The read does not reserve execution or replace admission. *)
+
+val bind_continuation : continuation -> request_id:string -> (worker, error) result
+(** Async [on_accepted] admission pinned to the captured exact owner and
+    generation. A competing or completed successor makes the candidate stale;
+    it cannot silently capture the successor and dispatch another worker. *)
 
 val bind_request : t -> request_id:string -> (worker, error) result
 (** Called from Async [on_accepted], before the worker starts. The canonical

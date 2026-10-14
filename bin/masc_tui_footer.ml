@@ -387,15 +387,19 @@ let key_atoms key =
   |> List.concat_map (String.split_on_char ' ')
   |> List.filter (fun atom -> not (String.equal atom ""))
 
-let item_is_pinned item =
-  (* Items are [key:label]; the key is what the projection built the item
-     from, and the first colon is where it ends. A label may hold colons of
-     its own -- "Enter:edit / use" -- so only the first one splits. *)
+(* An item is [key:label]; the key is what the projection built the item
+   from, and the first colon is where it ends. A label may hold colons of
+   its own -- "Enter:edit / use" -- so only the first one splits. *)
+let item_key item =
   let plain = Masc_tui_theme.strip_sgr item in
   match String.index_opt plain ':' with
+  | None -> None
+  | Some i -> Some (String.trim (String.sub plain 0 i))
+
+let item_is_pinned item =
+  match item_key item with
   | None -> false
-  | Some i ->
-    let key = String.trim (String.sub plain 0 i) in
+  | Some key ->
     let atoms = key_atoms key in
     (* The fixed rules already say whether they match an atom or a whole
        key. Only the rendered key needs splitting; fitting a narrow footer
@@ -405,6 +409,27 @@ let item_is_pinned item =
         | Whole_key pinned -> String.equal key pinned
         | Key_atom pinned -> List.exists (String.equal pinned) atoms)
       never_dropped_keys
+
+(* The help item every key row names. An operator reading a footer in
+   2026-10 could not learn the sheet existed: only the composer's rows said
+   "?:help", every other surface named keys the sheet explains and never the
+   sheet itself, and the narrow-row cut marker pointed at a key the wide row
+   never showed. [ensure_help_item] is the door stamped on at the one seam
+   every footer row passes through. The item is deliberately not pinned: a
+   row too full for it drops it first and ends in the same marker, so the
+   narrow spelling of this door is the cut marker the fitter already draws,
+   and a wide row is the one that spells it out. *)
+let help_hint_item = "?:help"
+
+let ensure_help_item hints =
+  let already_names_help =
+    split_on_double_space hints
+    |> List.exists (fun item ->
+        match item_key item with
+        | Some key -> List.mem "?" (key_atoms key)
+        | None -> false)
+  in
+  if already_names_help then hints else hints ^ "  " ^ help_hint_item
 
 type hint_item =
   { hint_text : string

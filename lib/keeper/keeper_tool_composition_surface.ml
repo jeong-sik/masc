@@ -1538,7 +1538,10 @@ let make_tools_with_authority
         match Keeper_tool_plan.descriptor entry.plan node.id with
         | Some { Keeper_tool_descriptor.execution =
                    Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent; _ } -> true
-        | Some _ | None -> false) (Keeper_tool_plan.nodes entry.plan)
+        | Some { Keeper_tool_descriptor.execution =
+                   ( Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
+                   | Keeper_tool_descriptor.Terminal ); _ }
+        | None -> false) (Keeper_tool_plan.nodes entry.plan)
     in
     let call_effect _ =
       match entry.execution with
@@ -1938,7 +1941,11 @@ let make_tools_with_authority
       let rejection ~tool_name ~start_time error =
         let class_ = match error with
           | Draft.Draft_read_failed (Tool_blob_store.Invalid_sha256 _) -> Tool_result.Policy_rejection
-          | Draft.Storage_failed _ | Draft.Draft_read_failed _ -> Tool_result.Runtime_failure
+          | Draft.Storage_failed _
+          | Draft.Draft_read_failed
+              ( Tool_blob_store.Owned_read_failed _ | Tool_blob_store.Too_large _
+              | Tool_blob_store.Invalid_max_bytes _ | Tool_blob_store.Integrity_mismatch _ ) ->
+            Tool_result.Runtime_failure
           | Draft.Plan_rejected _ | Draft.Inputs_rejected _ | Draft.Unsupported_node _
           | Draft.Draft_not_found | Draft.Malformed_draft _ | Draft.Different_keeper
           | Draft.Capability_changed -> Tool_result.Policy_rejection in

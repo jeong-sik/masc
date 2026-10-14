@@ -22,12 +22,12 @@ The command palette is `:`.
 | `@` | answering: who is mid-turn or just finished; Enter opens their chat |
 | `?` | this help |
 | `&` | Collab: watch MSX/DOS and manage play links (also `:` go Collab) |
-| `Ctrl-B` | the roster starts hidden; this choice persists across navigation and resizing |
-| `Ctrl-L` | the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat; /activity order turns the order of its calls, /activity scroll moves it |
-| `Ctrl-W` | a cursor lands on its first row; j/k walk the rows a press acts on and scroll past the last, Enter opens or closes the call under it, Esc or Ctrl-W gives the keys back; the chat keeps Ctrl-W for its draft until the draft is empty |
+| `Ctrl-B` | show or hide the Keeper roster; it starts hidden and the choice persists across navigation and resizing |
+| `Ctrl-L` | cycle the Activity pane narrow, wide or hidden; the wheel over the pane scrolls the full list; a press picks a keeper, a second press opens its chat; /activity order turns the order of its calls, /activity scroll moves the pane |
+| `Ctrl-W` | focus the Activity pane: a cursor lands on its first row, j/k walk the rows a press acts on and scroll past the last, Enter opens or closes the call under it, Esc or Ctrl-W gives the keys back; the chat keeps Ctrl-W for its draft until the draft is empty |
 | `Ctrl-^` | show or hide Browser Lane; retain tab and scroll |
 | `Ctrl-T` | release the mouse so you can drag-select and copy |
-| `Ctrl-]` | and Esc on the surface it opens comes back here |
+| `Ctrl-]` | follow the reference under the cursor; Esc on the surface it opens comes back here |
 | `q` | quit |
 
 ## Dashboard

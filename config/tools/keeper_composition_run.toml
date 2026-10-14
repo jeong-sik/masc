@@ -13,8 +13,9 @@ other useful work is available. To continue a prepared async run after its previ
 request has canonically settled, supply its original composition_run_id as \
 resume_run_id together with the same draft sha256. Completed nodes reuse their \
 recorded result and occurrence. A producer-owned keeper_job_result wait rechecks \
-the same job after status has committed complete outputs; this does not launch \
-the original program or arrange an automatic job-completion wake. Unavailable evidence or unproven effects do not \
+the same job after its producer has committed complete outputs. Server maintenance \
+and the durable job-completion hint continue the original ready DAG. A completed \
+job-start node retains its original result and occurrence. Unavailable evidence or unproven effects do not \
 authorize replay. Shared Skill publication is optional and separate."""
 additional_properties = false
 defer_loading = true

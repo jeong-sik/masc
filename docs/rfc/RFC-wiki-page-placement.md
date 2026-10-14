@@ -15,6 +15,7 @@ related: ["library-becomes-a-wiki", "wiki-lint-and-page-contracts", "keepers-see
 - 상태: 초안. 날짜는 한국 시간(KST)이다.
 - 운영자 요청 (2026-10-14): "Wiki 정리는 누가 하는 거임", "옮기고 하위에 두고 뭐 그렇게 해야 하는 거 아니냐", "폴더로 잘 관리하는 녀석이어야 하는데".
 - 근거: §2 의 숫자는 2026-10-14 라이브 `~/me/.masc/wiki` 를 읽기만 해서 셌다. 코드는 `origin/main` `8186da64804` 에서 직접 읽었다.
+- 논의 기록: Board `p-304b7eadab5c441debefd729e2931c17` (2026-10-14, 운영자 지시로 올림). 답이 달리면 이 문서에 옮긴다.
 - 읽지 않은 것: 라이브 Keeper 들의 위키 도구 접근 설정, Board 의 Keeper 의견. 이 RFC 는 의견 수렴 전 초안이다.
 
 ## 0. 요약

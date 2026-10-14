@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import select
+import shlex
 import shutil
 import stat
 import sys
@@ -22,6 +23,7 @@ import tempfile
 import termios
 import time
 import tty
+from typing import Optional
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
@@ -549,8 +551,15 @@ def ask_text(label):
     return answer.strip()
 
 
-def pick(title, labels, multiple=False, defaults=()):
-    """TTY arrows/Space picker with type-to-filter; numbered input for accessible/scripted terminals."""
+def pick(title, labels, multiple=False, defaults=(), allow_empty=False):
+    """TTY arrows/Space picker with type-to-filter; numbered input for accessible/scripted terminals.
+
+    A multiple pick returns the row under the cursor when nothing is marked,
+    because a caller that cannot act on "nothing" would otherwise get no
+    answer. A caller that can asks for allow_empty: Enter then returns the
+    marks as they are on the screen, none included, and the numbered input
+    shows the marks and takes 0 for "none".
+    """
     if not labels:
         raise SetupError('there are no options to select')
     selected = set(defaults)
@@ -559,15 +568,22 @@ def pick(title, labels, multiple=False, defaults=()):
     if not interactive:
         print('\n' + paint(terminal_text(title), 'title'), file=sys.stderr)
         for index, label in enumerate(labels, 1):
-            print('  {}) {}'.format(index, terminal_text(label)), file=sys.stderr)
+            mark = ('[x] ' if index - 1 in selected else '[ ] ') if allow_empty else ''
+            print('  {}) {}{}'.format(index, mark, terminal_text(label)), file=sys.stderr)
         while True:
-            answer = ask_text('Numbers separated by commas; Enter selects marked choices or option 1; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
+            if allow_empty:
+                prompt = 'Numbers separated by commas; Enter keeps the marked rows; 0 skips all; q cancels'
+            else:
+                prompt = 'Numbers separated by commas; Enter selects marked choices or option 1; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1)
+            answer = ask_text(prompt)
             if not answer:
                 if not multiple:
                     return [current]
-                if selected:
+                if selected or allow_empty:
                     return sorted(selected)
                 return [current]
+            elif allow_empty and answer == '0':
+                return []
             else:
                 parts = answer.split(',')
                 if all(part.strip().isascii() and part.strip().isdigit() for part in parts):
@@ -671,7 +687,7 @@ def pick(title, labels, multiple=False, defaults=()):
                     continue
                 if not multiple:
                     return [current]
-                if selected:
+                if selected or allow_empty:
                     return sorted(selected)
                 return [current]
             elif key == b'\x7f':
@@ -997,12 +1013,13 @@ def docker_account_action(binary, base_path, port, action):
     return True
 
 
-# The wire spells PDF tool readiness with exactly these two words. Naming them
-# once is what keeps five call sites from each carrying their own copy of the
-# literal, where a renamed or added word would change what the installer does
-# without anything here failing.
-PDF_TOOLS_AVAILABLE = 'tools_available'
-PDF_TOOLS_UNAVAILABLE = 'unavailable'
+# The wire spells tool readiness with exactly these two words, for PDF tools,
+# presentation tools and the browser programs (geckodriver, Firefox) alike.
+# Naming them once is what keeps the call sites from each carrying their own
+# copy of the literal, where a renamed or added word would change what the
+# installer does without anything here failing.
+TOOLS_AVAILABLE = 'tools_available'
+TOOLS_UNAVAILABLE = 'unavailable'
 
 
 # slots=True is absent on purpose: this script targets Python 3.8 (see the
@@ -1024,7 +1041,7 @@ class PdfToolsReadiness:
 
 def decode_pdf_tools_readiness(value):
     if (not isinstance(value, dict) or value.get('schema') != 'masc.pdf_tools_readiness.v1'
-            or value.get('status') not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE)
+            or value.get('status') not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)
             or value.get('pdf_inspection') != 'not_run'
             or value.get('scope') != 'current_process_environment'):
         raise SetupError('MASC returned unreadable PDF tool readiness')
@@ -1035,7 +1052,7 @@ def decode_pdf_tools_readiness(value):
             or {row.get('command') for row in checks} != {'pdftotext', 'pdftoppm'}):
         raise SetupError('MASC did not check both PDF inspection tools')
     started = all(row['status'] == 'started' for row in checks)
-    if started != (value['status'] == PDF_TOOLS_AVAILABLE):
+    if started != (value['status'] == TOOLS_AVAILABLE):
         raise SetupError('MASC returned inconsistent PDF tool readiness')
     return PdfToolsReadiness(
         available=started,
@@ -1126,6 +1143,42 @@ def show_presentation_readiness(readiness):
             print(terminal_text(detail), file=sys.stderr)
 
 
+# The programs the automation lane starts, in the order they are checked. The
+# names are the ones `masc prerequisite-actions` takes.
+BROWSER_TOOLS = ('geckodriver', 'firefox')
+BROWSER_TOOL_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox'}
+
+
+@dataclass(frozen=True)
+class BrowserToolReadiness:
+    """MASC's answer about one program a browser lane starts, already read.
+    [path] is where the program that answered lives, and only then."""
+    program: str
+    available: bool
+    path: Optional[str]
+
+
+def decode_browser_tools_readiness(value, program):
+    if (not isinstance(value, dict) or value.get('schema') != 'masc.browser_tools_readiness.v1'
+            or value.get('program') != program
+            or value.get('status') not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)
+            or value.get('scope') != 'current_process_environment'
+            or value.get('lane') != 'not_checked'):
+        raise SetupError('MASC returned unreadable ' + BROWSER_TOOL_NAMES.get(program, program) + ' readiness')
+    checks = value.get('checks')
+    if (not isinstance(checks, list) or len(checks) != 1 or not isinstance(checks[0], dict)
+            or checks[0].get('status') not in ('missing', 'started', 'failed')):
+        raise SetupError('MASC did not check ' + BROWSER_TOOL_NAMES[program])
+    row = checks[0]
+    started = row['status'] == 'started'
+    if started != (value['status'] == TOOLS_AVAILABLE):
+        raise SetupError('MASC returned inconsistent ' + BROWSER_TOOL_NAMES[program] + ' readiness')
+    path = row.get('path')
+    if started and not (isinstance(path, str) and os.path.isabs(path)):
+        raise SetupError('MASC did not say where ' + BROWSER_TOOL_NAMES[program] + ' runs')
+    return BrowserToolReadiness(program=program, available=started, path=path if started else None)
+
+
 def prerequisite_catalog(binary, dependency, workspace_args=()):
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency] + list(workspace_args),
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1199,22 +1252,31 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
             raise ValueError('invalid result')
         state = receipt['status']
         readiness = receipt.get('readiness')
-        if dependency == 'pdf-tools' and readiness in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE):
+        if dependency == 'pdf-tools' and readiness in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE):
             pdf = decode_pdf_tools_readiness(receipt.get('dependency_readiness'))
-            if (readiness == PDF_TOOLS_AVAILABLE) != pdf.available:
+            if (readiness == TOOLS_AVAILABLE) != pdf.available:
                 raise ValueError('inconsistent PDF recheck')
             if state == 'commands_completed' and not pdf.available:
                 raise ValueError('PDF tools were not available after installation')
+        elif dependency in BROWSER_TOOLS and readiness in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE):
+            browser = decode_browser_tools_readiness(receipt.get('dependency_readiness'), dependency)
+            if (readiness == TOOLS_AVAILABLE) != browser.available:
+                raise ValueError('inconsistent browser tool recheck')
+            if state == 'commands_completed' and not browser.available:
+                raise ValueError('browser tool was not available after installation')
         elif dependency == 'presentation-tools':
             presentation = decode_presentation_tools_readiness(receipt.get('dependency_readiness'), base_path)
-            if readiness not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE) or (readiness == PDF_TOOLS_AVAILABLE) != presentation.available:
+            if readiness not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE) or (readiness == TOOLS_AVAILABLE) != presentation.available:
                 raise ValueError('inconsistent presentation recheck')
             if state == 'commands_completed' and not presentation.available:
                 raise ValueError('presentation installation was not ready')
         elif readiness != 'not_checked':
             raise ValueError('invalid readiness')
-        if dependency == 'pdf-tools' and state == 'commands_completed' and readiness != PDF_TOOLS_AVAILABLE:
+        if dependency == 'pdf-tools' and state == 'commands_completed' and readiness != TOOLS_AVAILABLE:
             raise ValueError('PDF installation was not rechecked')
+        if (dependency in BROWSER_TOOLS and state == 'commands_completed'
+                and readiness not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)):
+            raise ValueError('browser installation was not rechecked')
     except (KeyError, TypeError, ValueError):
         raise SetupError('Installation action did not return a readable result; recheck the prerequisite')
     if dependency == 'presentation-tools':
@@ -1232,6 +1294,8 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
         print('The selected presentation component is ready. Install the remaining component shown above, then refresh detection.', file=sys.stderr)
     elif dependency == 'pdf-tools' and state == 'commands_completed':
         print('PDF tools installed and both commands started successfully. Original PDF inspection runs when a document is read.', file=sys.stderr)
+    elif dependency in BROWSER_TOOLS and state == 'commands_completed':
+        print(BROWSER_TOOL_NAMES[dependency] + ' is installed and starts.', file=sys.stderr)
     elif state == 'external_step_pending':
         print('Complete the vendor installation window, then choose Refresh detection.', file=sys.stderr)
     elif state == 'commands_completed_recheck_required':
@@ -2434,6 +2498,348 @@ def quick_sandbox(binary, base_path, backend):
             return None
 
 
+# What imp can use once setup ends, offered as one checklist that starts marked
+# (RFC setup-web-search-and-browser-lane section 4.3). Nothing is installed or
+# written until the reader confirms the list, and a quick setup only prints it.
+AUTOMATION_TOOL = 'automation'
+GITHUB_TOOL = 'github'
+IMP_KEEPER = 'imp'
+GITHUB_HOST = 'github.com'
+# `gh auth status` asks GitHub whether the token works, so it answers as slowly
+# as the network does. A login that cannot be confirmed in this time is not
+# offered, and imp signs in with a code instead.
+GH_PROBE_TIMEOUT_SECONDS = 20
+
+
+@dataclass(frozen=True)
+class HostGithubLogin:
+    """The login `gh` holds on this computer, as `gh auth status` describes it.
+    The token is not part of it: it is read only at the moment it is handed over."""
+    login: str
+    scopes: str
+    source: str
+
+
+@dataclass(frozen=True)
+class ToolRow:
+    """One line of the checklist: what it gives imp, and the command a quick
+    setup prints instead of running it. Every row starts marked. [notice] is
+    what the reader is told before marking it. [host_login] is set on the
+    GitHub row when the login on this computer is the one offered."""
+    key: str
+    label: str
+    command: str
+    notice: str = ''
+    host_login: Optional[HostGithubLogin] = None
+
+
+def token_comes_from_environment(source):
+    """`gh` names an environment variable (GH_TOKEN, GITHUB_TOKEN, ...) as the token's source.
+
+    `gh auth token --user` finds only a stored login, so an environment token
+    has to be read without it. That token cannot change while the wizard runs:
+    it is the wizard's own environment, so there is no account to switch.
+    """
+    return re.fullmatch(r'[A-Z][A-Z0-9_]*_TOKEN', source) is not None
+
+
+def token_argv(login):
+    argv = ['gh', 'auth', 'token', '--hostname', GITHUB_HOST]
+    if not token_comes_from_environment(login.source):
+        argv += ['--user', login.login]
+    return argv
+
+
+def automation_command(base):
+    return 'masc browser-lane-setup --mode automation --base-path ' + shlex.quote(str(base))
+
+
+def github_command(base, login):
+    """The command that gives imp its login: the host's token for [login], or a one-time code."""
+    options = ' '.join(['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', shlex.quote(str(base))])
+    if login is None:
+        return 'masc keeper-github login ' + options
+    return '{} | masc keeper-github set-token {}'.format(' '.join(shlex.quote(word) for word in token_argv(login)), options)
+
+
+def browser_tool(binary, program):
+    """What MASC found for one program, and the actions it offers on this host."""
+    catalog = prerequisite_catalog(binary, program)
+    return decode_browser_tools_readiness(catalog.get('dependency_readiness'), program), catalog['actions']
+
+
+def install_action(actions):
+    """The first action MASC offers for a missing program, or None when it offers none."""
+    if not actions:
+        return None
+    action = actions[0]
+    # The fields `prerequisite_menu` reads when the reader chooses it: a catalog
+    # that drops one is refused here, with the row, instead of after the mark.
+    if not (isinstance(action, dict) and all(isinstance(action.get(key), str) for key in ('id', 'label', 'detail', 'source_url'))
+            and isinstance(action.get('requires_admin'), bool)):
+        raise SetupError('MASC returned an unreadable install action')
+    return action
+
+
+def action_command(action):
+    """The command line an action runs, for a person to read and copy, or None
+    when the action opens a page instead. It is printed, never handed to a shell."""
+    effect = action.get('effect')
+    if isinstance(effect, dict) and effect.get('kind') == 'run_commands':
+        steps = effect.get('argv_steps')
+        if isinstance(steps, list) and steps and all(isinstance(step, list) and step for step in steps):
+            return ' && '.join(' '.join(shlex.quote(str(part)) for part in step) for step in steps)
+    return None
+
+
+def automation_row(binary, base):
+    found = {program: browser_tool(binary, program) for program in BROWSER_TOOLS}
+    missing = [program for program in BROWSER_TOOLS if not found[program][0].available]
+    head = "Web pages in imp's own Firefox"
+    if not missing:
+        return ToolRow(AUTOMATION_TOOL, head + ' · geckodriver and Firefox found', automation_command(base))
+    names = ', '.join(BROWSER_TOOL_NAMES[program] for program in missing)
+    offered = [action for action in (install_action(found[program][1]) for program in missing) if action is not None]
+    runnable, described = [], []
+    for action in offered:
+        command = action_command(action)
+        if command:
+            runnable.append(command)
+            described.append(command)
+        else:
+            described.append('official page ' + terminal_text(action.get('source_url', '')))
+    label = head + ' · ' + names + ' not found' + (' · ' + '; '.join(described) if described else '')
+    if any(action['requires_admin'] for action in offered):
+        label += ' · administrator permission'
+    return ToolRow(AUTOMATION_TOOL, label, ' && '.join(runnable + [automation_command(base)]))
+
+
+def host_github_login():
+    """The github.com login `gh` holds on this computer, or None when there is none to offer.
+
+    `gh auth status --json` names the account, its scopes and where the token
+    lives, and never prints the token. Only an active account that GitHub
+    accepts is offered: a token GitHub refuses reads as `state: error` with no
+    account name, and handing imp a token that does not work helps nobody.
+    """
+    if shutil.which('gh') is None:
+        return None
+    try:
+        result = subprocess.run(['gh', 'auth', 'status', '--hostname', GITHUB_HOST, '--json', 'hosts'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                timeout=GH_PROBE_TIMEOUT_SECONDS)
+        hosts = json.loads(result.stdout)['hosts']
+        accounts = hosts.get(GITHUB_HOST, [])
+    except subprocess.TimeoutExpired:
+        print('gh did not answer in time, so imp signs in with a one-time code instead.', file=sys.stderr)
+        return None
+    except OSError:
+        print('gh could not be started, so imp signs in with a one-time code instead.', file=sys.stderr)
+        return None
+    except (ValueError, KeyError, TypeError, AttributeError):
+        print("Could not read gh's login (gh auth status --json), so imp signs in with a one-time code instead.",
+              file=sys.stderr)
+        return None
+    for account in accounts if isinstance(accounts, list) else []:
+        if (isinstance(account, dict) and account.get('active') is True and account.get('state') == 'success'
+                and isinstance(account.get('login'), str) and account['login']):
+            return HostGithubLogin(login=account['login'], scopes=str(account.get('scopes', '')),
+                                   source=str(account.get('tokenSource', '')))
+    return None
+
+
+def github_row(base):
+    login = host_github_login()
+    if login is None:
+        return ToolRow(GITHUB_TOOL, 'Sign imp into GitHub with a one-time code you approve in the browser',
+                       github_command(base, None))
+    notice = ("\nimp can use the GitHub login on this computer: account {} on {}, token from {}, scopes {}.\n"
+              'imp then pushes and opens pull requests as {}. With the workflow scope it can change workflow files too.\n'
+              'imp gets a copy of the token, so revoking or refreshing it on this computer disconnects imp.\n'
+              'Only imp gets it: other keepers are not given this token.').format(
+                  terminal_text(login.login), GITHUB_HOST, terminal_text(login.source), terminal_text(login.scopes),
+                  terminal_text(login.login))
+    return ToolRow(GITHUB_TOOL, 'Let imp use the GitHub login on this computer · account ' + terminal_text(login.login),
+                   github_command(base, login), notice=notice, host_login=login)
+
+
+def imp_tool_rows(binary, base):
+    """The checklist's rows. Each is looked up on its own: a binary that cannot
+    inspect the browser tools still offers the GitHub login."""
+    rows = []
+    try:
+        rows.append(automation_row(binary, base))
+    except (SetupError, OSError) as error:
+        print(terminal_text(str(error)) + '\nRun ' + automation_command(base) + ' to give imp a browser later.',
+              file=sys.stderr)
+    rows.append(github_row(base))
+    return rows
+
+
+SETUP_SERVER_PROBE_TIMEOUT_SECONDS = 20
+
+
+def note_running_server(binary, base, port):
+    """Say that a server which is already running keeps the old browser setting.
+
+    The server reads the browser table when it starts, and `masc setup` starts
+    one only when none answers. A reader who chose "Continue with this running
+    workspace" would otherwise be told nothing and find the lane off. An
+    observation this cannot read gets the conditional sentence: it does not
+    know there is no server.
+    """
+    try:
+        response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base), '--port', str(port)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                  timeout=SETUP_SERVER_PROBE_TIMEOUT_SECONDS)
+        status = json.loads(response.stdout).get('status')
+    except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+        status = None
+    if status in ('free', 'other_workspace', 'unknown_server'):
+        return
+    print(('A workspace server is already running. It' if status == 'same_workspace'
+           else 'If a workspace server is already running, it')
+          + " reads the browser setting only when it starts, so restart it for imp's browser to turn on.",
+          file=sys.stderr)
+
+
+def prepare_browser_automation(binary, base, port=None):
+    """Bring geckodriver and Firefox up, then write the lane's geckodriver.
+
+    The command is not told which geckodriver to use. It finds it the way the
+    catalog did (the first one on PATH that answers), and it keeps a value the
+    operator already wrote in runtime.toml, which a named path would replace.
+    """
+    for program in BROWSER_TOOLS:
+        name = BROWSER_TOOL_NAMES[program]
+        readiness, _ = browser_tool(binary, program)
+        while not readiness.available:
+            print(name + ' was not found on this computer.', file=sys.stderr)
+            if not prerequisite_menu(binary, program, base_path=base):
+                print("imp's browser is not set up: " + name + ' is missing. Run ' + automation_command(base)
+                      + ' once it is installed.', file=sys.stderr)
+                return
+            readiness, _ = browser_tool(binary, program)
+    result = subprocess.run([str(binary), 'browser-lane-setup', '--mode', 'automation', '--base-path', str(base)],
+                            stdout=sys.stderr)
+    if result.returncode != 0:
+        # The writer already said why. The browser is optional, so this does not end setup.
+        print("imp's browser was not saved. Everything else is. Run " + automation_command(base) + ' to try again.',
+              file=sys.stderr)
+        return
+    if port is not None:
+        note_running_server(binary, base, port)
+
+
+def choose_imp_tools(binary, base):
+    """The rows the reader leaves marked. Nothing runs here."""
+    rows = imp_tool_rows(binary, base)
+    for row in rows:
+        if row.notice:
+            print(row.notice, file=sys.stderr)
+    print('\nEvery row starts marked. To skip this step, unmark all of them (type 0 on a numbered list).',
+          file=sys.stderr)
+    # allow_empty: with every mark removed, Enter must confirm nothing. The
+    # default would confirm the row under the cursor, which for the GitHub row
+    # is a copy of the reader's token after they had said no.
+    chosen = pick('5 · Give imp tools (optional)', [row.label for row in rows], multiple=True,
+                  defaults=list(range(len(rows))), allow_empty=True)
+    return tuple(rows[index] for index in chosen)
+
+
+def read_host_github_token(login):
+    """The token `gh` holds for [login] on github.com, read at the moment it is handed over.
+
+    The account is named because the hand-over happens after `masc setup`,
+    which can take minutes, and `gh auth switch` in another terminal in the
+    meantime would otherwise give imp another account's token than the one
+    the reader agreed to.
+    """
+    result = subprocess.run(token_argv(login),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            timeout=GH_PROBE_TIMEOUT_SECONDS)
+    token = result.stdout.strip()
+    if result.returncode != 0 or not token:
+        raise SetupError('gh did not give the GitHub token of ' + terminal_text(login.login))
+    return token
+
+
+def connect_imp_github(binary, base, row):
+    """Give imp its GitHub login, once imp exists.
+
+    imp is created by `masc setup`, and `keeper-github` refuses a keeper that
+    does not exist yet, so this runs after it. The token goes to the command on
+    its standard input, never in an argument another process could read, and is
+    not printed.
+    """
+    options = ['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', str(base)]
+    if row.host_login is None:
+        result = subprocess.run([str(binary), 'keeper-github', 'login'] + options, stdout=sys.stderr)
+    else:
+        result = subprocess.run([str(binary), 'keeper-github', 'set-token'] + options,
+                                input=read_host_github_token(row.host_login), text=True, stdout=sys.stderr)
+    if result.returncode != 0:
+        # The command already said why. GitHub is optional, so this does not end setup.
+        print("imp's GitHub login was not saved. Everything else is. Run " + github_command(base, None)
+              + ' to sign in with a one-time code.', file=sys.stderr)
+
+
+def finish_imp_tools(binary, base, confirmed):
+    """What the reader confirmed that needs imp to exist. Never ends the journey."""
+    for row in confirmed:
+        if row.key == GITHUB_TOOL:
+            try:
+                connect_imp_github(binary, base, row)
+            except (SetupError, OSError, subprocess.SubprocessError) as error:
+                print(terminal_text(str(error)) + "\nimp's GitHub login was not saved. Run "
+                      + github_command(base, None) + ' to sign in with a one-time code.', file=sys.stderr)
+
+
+def remind_imp_tools(confirmed):
+    """For a reader who leaves before imp exists: the GitHub login they confirmed is still to do."""
+    for row in confirmed:
+        if row.key == GITHUB_TOOL:
+            print("imp's GitHub login is not set up yet. Once imp is running, run: " + terminal_text(row.command),
+                  file=sys.stderr)
+
+
+def select_imp_tools(binary, base, port=None):
+    """Ask what imp may use, and never take the journey down with it.
+
+    The same rule as the voice question: the workspace and the model are saved
+    and the first conversation is still ahead, so a cancel or a failure here
+    means "not this", not "abandon setup". The browser is prepared on its own
+    footing, so a failure there cannot take the confirmed GitHub login with it.
+    """
+    try:
+        confirmed = choose_imp_tools(binary, base)
+    except SetupError as error:
+        print(terminal_text(str(error)) + '\nContinuing without them. Later: ' + automation_command(base)
+              + ' gives imp a browser, and ' + github_command(base, None) + ' signs it into GitHub.', file=sys.stderr)
+        return ()
+    if any(row.key == AUTOMATION_TOOL for row in confirmed):
+        try:
+            prepare_browser_automation(binary, base, port)
+        except (SetupError, OSError, subprocess.SubprocessError) as error:
+            print(terminal_text(str(error)) + "\nimp's browser was not set up. Run " + automation_command(base)
+                  + ' once the problem is resolved.', file=sys.stderr)
+    return confirmed
+
+
+def show_imp_tools(binary, base):
+    """What a quick setup leaves for later: each line with the command that does it.
+
+    Quick setup has no screen where the reader marks anything, so nothing here
+    is installed or written. It only looks: MASC runs `--version` of the
+    browser programs and `gh auth status` asks GitHub about the token.
+    """
+    rows = imp_tool_rows(binary, base)
+    print("\n5 · imp's tools (quick setup leaves them for later; each line is followed by its command)",
+          file=sys.stderr)
+    for row in rows:
+        print('  ' + terminal_text(row.label) + '\n      ' + terminal_text(row.command), file=sys.stderr)
+
+
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
     # `invalid` is not one condition. Saving a selection repairs some of them —
@@ -2507,10 +2913,10 @@ def journey(binary, base_path, port, timeout, resume=False):
         print('imp stays text only. Run masc voice-local-setup to give it a voice later.', file=sys.stderr)
     else:
         select_local_voice(binary, base)
-    return sandbox_journey(binary, base, port, quick_backend=plan['sandbox'] if quick else None)
+    return sandbox_journey(binary, base, port, quick_backend=plan['sandbox'] if quick else None, quick=quick)
 
 
-def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None):
+def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None, quick=False):
     if port is None:
         port = workspace_port(binary, base)
     if refresh_owner:
@@ -2529,17 +2935,28 @@ def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None)
     if sandbox_args is None:
         print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
         return 0
-    print('\n5 · Open your first conversation', file=sys.stderr)
+    # After the sandbox and before the first conversation: the server reads the
+    # browser table when it starts, and `masc setup` below starts one when none
+    # is running (select_imp_tools says so when one already is).
+    confirmed = ()
+    if quick:
+        show_imp_tools(binary, base)
+    else:
+        confirmed = select_imp_tools(binary, base, port)
+    print('\n6 · Open your first conversation', file=sys.stderr)
     while True:
         # Native setup owns staging, image preparation, server/operator login,
         # and imp boot. --no-tui avoids re-entering this interactive journey.
         code = subprocess.run([str(binary), 'setup', '--base-path', base, '--port', str(port),
                                '--no-tui'] + sandbox_args, stdout=sys.stderr).returncode
         if code == 0:
+            # imp exists now, which the GitHub login needs.
+            finish_imp_tools(binary, base, confirmed)
             return open_workspace(binary, base, port)
         action = pick('imp is not running yet. Keep your workspace and continue when ready.',
                       ['Retry preparation', 'Finish later'])[0]
         if action == 1:
+            remind_imp_tools(confirmed)
             return code
 
 

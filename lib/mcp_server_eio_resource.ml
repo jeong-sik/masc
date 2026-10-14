@@ -402,26 +402,33 @@ let handle_read_resource_eio state id params =
                   ("application/json", Some (Yojson.Safe.to_string json))
                 end else if is_json then begin
                   match wiki_page_path topic with
-                  | Some path -> begin
-                    let raw = Fs_compat.load_file path in
-                    let described =
-                      match Tool_wiki.parse_frontmatter raw with
-                      | Ok fm -> metadata_fields fm
-                      | Error error -> unreadable_fields error
-                    in
-                    let json =
-                      `Assoc
-                        ((("topic", `String topic) :: described)
-                         @ [ ("content", `String (strip_frontmatter raw)) ])
-                    in
-                    ("application/json", Some (Yojson.Safe.to_string json))
-                  end
+                  | Some path ->
+                    (* A page can be listed and then become unreadable before
+                       this read: deleted, or its permissions changed. Answer
+                       with an error envelope rather than letting [Sys_error]
+                       escape the handler, as the index and log branches
+                       already do (the [.mli] promises [Never raises]). *)
+                    (match Fs_compat.load_file path with
+                     | exception Sys_error _ -> ("application/json", None)
+                     | raw ->
+                       let described =
+                         match Tool_wiki.parse_frontmatter raw with
+                         | Ok fm -> metadata_fields fm
+                         | Error error -> unreadable_fields error
+                       in
+                       let json =
+                         `Assoc
+                           ((("topic", `String topic) :: described)
+                            @ [ ("content", `String (strip_frontmatter raw)) ])
+                       in
+                       ("application/json", Some (Yojson.Safe.to_string json)))
                   | None -> ("application/json", None)
                 end else begin
                   match wiki_page_path topic with
                   | Some path ->
-                    let content = Fs_compat.load_file path in
-                    ("text/markdown", Some content)
+                    (match Fs_compat.load_file path with
+                     | content -> ("text/markdown", Some content)
+                     | exception Sys_error _ -> ("text/markdown", None))
                   | None when String.equal topic wiki_log_topic ->
                     (* The log is not a page, so the listing above has no
                        entry for it. The path is the constant file name, never

@@ -731,10 +731,315 @@ max-context = 200000
       (Runtime_quota_window.is_exhausted ~scope:account ~now:(Time_compat.now ())))
 ;;
 
+let refusal_testable =
+  Alcotest.testable Runtime.pp_refusal Runtime.equal_refusal
+;;
+
+let sample_schema : Yojson.Safe.t =
+  `Assoc [ "type", `String "object" ]
+;;
+
+let base_lane : Runtime.lane_requirement =
+  { window = Runtime.Known_at_least { min_tokens = 32_768 }
+  ; overflow = Runtime.Reject_before_truncation
+  ; verdict = Runtime.Json_syntax { schema = sample_schema }
+  ; tool_free = true
+  ; fresh_invocation = true
+  }
+;;
+
+let base_runtime : Runtime.runtime_capability =
+  { context_window = Runtime.Window_known { max_input_tokens = 200_000 }
+  ; overflow = Runtime.Rejects_oversize_input
+  ; structured_output = Runtime.Flag_json_schema
+  ; supports_tool_free = true
+  ; supports_fresh_invocation = true
+  }
+;;
+
+let test_admits_exhaustive_branches () =
+  check
+    (result unit refusal_testable)
+    "capable runtime admitted"
+    (Ok ())
+    (Runtime.admits ~lane:base_lane ~runtime:base_runtime);
+  check
+    (result unit refusal_testable)
+    "unbounded window lane accepts unknown runtime window"
+    (Ok ())
+    (Runtime.admits
+       ~lane:{ base_lane with window = Runtime.Unbounded_or_unknown }
+       ~runtime:{ base_runtime with context_window = Runtime.Window_unknown });
+  check
+    (result unit refusal_testable)
+    "unknown window refused for bounded lane"
+    (Error Runtime.Window_unknown_for_bounded_lane)
+    (Runtime.admits
+       ~lane:base_lane
+       ~runtime:{ base_runtime with context_window = Runtime.Window_unknown });
+  check
+    (result unit refusal_testable)
+    "window too small refused with required and actual"
+    (Error (Runtime.Window_too_small { required = 32_768; actual = 16_384 }))
+    (Runtime.admits
+       ~lane:base_lane
+       ~runtime:
+         { base_runtime with
+           context_window = Runtime.Window_known { max_input_tokens = 16_384 }
+         });
+  check
+    (result unit refusal_testable)
+    "silent truncation refused when lane requires reject before truncation"
+    (Error Runtime.Silent_truncation_on_overflow)
+    (Runtime.admits
+       ~lane:base_lane
+       ~runtime:{ base_runtime with overflow = Runtime.Truncates_silently });
+  check
+    (result unit refusal_testable)
+    "caller-bounded overflow satisfies reject before truncation when window fits"
+    (Ok ())
+    (Runtime.admits
+       ~lane:base_lane
+       ~runtime:
+         { base_runtime with
+           overflow = Runtime.Caller_bounded { max_input_tokens = 64_000 }
+         });
+  check
+    (result unit refusal_testable)
+    "caller-bounded overflow too small refused"
+    (Error (Runtime.Window_too_small { required = 32_768; actual = 8_192 }))
+    (Runtime.admits
+       ~lane:base_lane
+       ~runtime:
+         { base_runtime with
+           overflow = Runtime.Caller_bounded { max_input_tokens = 8_192 }
+         });
+  check
+    (result unit refusal_testable)
+    "text-only refused for Json_syntax lane"
+    (Error
+       (Runtime.Structured_output_unsupported
+          { required = `Json_syntax; actual = Runtime.Text_only }))
+    (Runtime.admits
+       ~lane:base_lane
+       ~runtime:{ base_runtime with structured_output = Runtime.Text_only });
+  check
+    (result unit refusal_testable)
+    "prompted JSON admitted for Json_syntax lane (Muse serve)"
+    (Ok ())
+    (Runtime.admits
+       ~lane:base_lane
+       ~runtime:{ base_runtime with structured_output = Runtime.Prompted_json });
+  let strict_lane =
+    { base_lane with
+      verdict =
+        Runtime.Provider_enforced_json_schema
+          { name = "strict_verdict"; schema = sample_schema }
+    }
+  in
+  check
+    (result unit refusal_testable)
+    "prompted JSON refused for Provider_enforced_json_schema lane"
+    (Error
+       (Runtime.Structured_output_unsupported
+          { required = `Provider_enforced_json_schema
+          ; actual = Runtime.Prompted_json
+          }))
+    (Runtime.admits
+       ~lane:strict_lane
+       ~runtime:{ base_runtime with structured_output = Runtime.Prompted_json });
+  check
+    (result unit refusal_testable)
+    "flag json schema admitted for Provider_enforced_json_schema lane"
+    (Ok ())
+    (Runtime.admits
+       ~lane:strict_lane
+       ~runtime:{ base_runtime with structured_output = Runtime.Flag_json_schema });
+  check
+    (result unit refusal_testable)
+    "http response_format json_schema admitted for Provider_enforced_json_schema lane"
+    (Ok ())
+    (Runtime.admits
+       ~lane:strict_lane
+       ~runtime:
+         { base_runtime with
+           structured_output = Runtime.Http_response_format_json_schema
+         });
+  check
+    (result unit refusal_testable)
+    "tool_free unsupported refused"
+    (Error Runtime.Tool_free_unsupported)
+    (Runtime.admits
+       ~lane:base_lane
+       ~runtime:{ base_runtime with supports_tool_free = false });
+  check
+    (result unit refusal_testable)
+    "fresh_invocation unsupported refused"
+    (Error Runtime.Fresh_invocation_unsupported)
+    (Runtime.admits
+       ~lane:base_lane
+       ~runtime:{ base_runtime with supports_fresh_invocation = false })
+;;
+
+let test_partition_cli_slots_preserves_refused_slots_and_muse_output_schema () =
+  let capabilities =
+    [ "claude_code.sonnet", base_runtime
+    ; ( "muse.local"
+      , { base_runtime with structured_output = Runtime.Prompted_json } )
+    ; ( "ollama.tiny"
+      , { base_runtime with
+          context_window = Runtime.Window_known { max_input_tokens = 4_096 }
+        ; overflow = Runtime.Caller_bounded { max_input_tokens = 4_096 }
+        ; structured_output = Runtime.Http_response_format_json_schema
+        } )
+    ]
+  in
+  let capability_of id = List.assoc_opt id capabilities in
+  let json_syntax_partition =
+    Cli_oneshot.partition_cli_slots
+      ~lane:base_lane
+      ~capability_of
+      [ "claude_code.sonnet"; "muse.local"; "ollama.tiny" ]
+  in
+  check
+    (list string)
+    "Json_syntax lane admits claude_code and muse.local"
+    [ "claude_code.sonnet"; "muse.local" ]
+    json_syntax_partition.cli_slots;
+  (match json_syntax_partition.refused_cli_slots with
+   | [ { slot = "ollama.tiny"; refusal } ] ->
+     check
+       refusal_testable
+       "tiny slot refused for window size"
+       (Runtime.Window_too_small { required = 32_768; actual = 4_096 })
+       refusal
+   | _ -> fail "expected exactly ollama.tiny in refused_cli_slots");
+  let strict_lane =
+    { base_lane with
+      verdict =
+        Runtime.Provider_enforced_json_schema
+          { name = "strict"; schema = sample_schema }
+    }
+  in
+  let strict_partition =
+    Cli_oneshot.partition_cli_slots
+      ~lane:strict_lane
+      ~capability_of
+      [ "claude_code.sonnet"; "muse.local" ]
+  in
+  check
+    (list string)
+    "Provider_enforced_json_schema lane admits only claude_code"
+    [ "claude_code.sonnet" ]
+    strict_partition.cli_slots;
+  (match strict_partition.refused_cli_slots with
+   | [ { slot = "muse.local"; refusal } ] ->
+     check
+       refusal_testable
+       "muse.local refused with Structured_output_unsupported"
+       (Runtime.Structured_output_unsupported
+          { required = `Provider_enforced_json_schema
+          ; actual = Runtime.Prompted_json
+          })
+       refusal
+   | _ -> fail "expected muse.local in refused_cli_slots");
+  check
+    (option string)
+    "Muse_serve_runtime omits ?output_schema channel"
+    None
+    (Cli_oneshot.output_schema_for_api_format
+       Runtime_schema.Muse_serve_runtime
+       sample_schema
+     |> Option.map Yojson.Safe.to_string);
+  check
+    (option string)
+    "Claude_code_runtime passes ?output_schema channel"
+    (Some (Yojson.Safe.to_string sample_schema))
+    (Cli_oneshot.output_schema_for_api_format
+       Runtime_schema.Claude_code_runtime
+       sample_schema
+     |> Option.map Yojson.Safe.to_string)
+;;
+
+let test_input_size_guard_and_refusal_classification () =
+  (match
+     Cli_oneshot.check_input_size
+       ~estimated_tokens:50_000
+       ~overflow:(Runtime.Caller_bounded { max_input_tokens = 32_768 })
+   with
+   | Error
+       (Cli_oneshot.Context_window_exceeded
+          { estimated_tokens = 50_000; limit_tokens = 32_768 }) -> ()
+   | Ok () | Error _ -> fail "oversize caller-bounded input must be refused");
+  (match
+     Cli_oneshot.check_input_size
+       ~estimated_tokens:16_000
+       ~overflow:(Runtime.Caller_bounded { max_input_tokens = 32_768 })
+   with
+   | Ok () -> ()
+   | Error _ -> fail "in-bounds caller-bounded input must be accepted");
+  let claude_ctx_failure =
+    Cli_oneshot.Execution_failed
+      { runtime_id = "claude_code.sonnet"
+      ; cause =
+          Masc.Fusion_official_client.Claude_failure
+            (Runtime_claude_code.Context_window_exceeded
+               { message = "prompt too long"
+               ; tool_effect_attempted = false
+               ; response_emitted = false
+               })
+      }
+  in
+  let codex_ctx_failure =
+    Cli_oneshot.Execution_failed
+      { runtime_id = "codex.gpt-5.4"
+      ; cause =
+          Masc.Fusion_official_client.Codex_failure
+            (Runtime_codex_app_server.Context_window_exceeded
+               { message = "context window exceeded"
+               ; tool_effect_attempted = false
+               })
+      }
+  in
+  let non_size_failure =
+    Cli_oneshot.Invalid_json_output
+      { runtime_id = "claude_code.sonnet"; detail = "bad json" }
+  in
+  check
+    bool
+    "Claude Context_window_exceeded is refused_for_input_size"
+    true
+    (Cli_oneshot.refused_for_input_size claude_ctx_failure);
+  check
+    bool
+    "Codex Context_window_exceeded is refused_for_input_size"
+    true
+    (Cli_oneshot.refused_for_input_size codex_ctx_failure);
+  check
+    bool
+    "Invalid_json_output is not refused_for_input_size"
+    false
+    (Cli_oneshot.refused_for_input_size non_size_failure)
+;;
+
 let () =
   Alcotest.run
     "keeper_lane_cli_oneshot"
-    [ ( "quota across real adapters",
+    [ ( "typed capability admission (Track 2A)"
+      , [ test_case
+            "Runtime.admits exhaustive branches"
+            `Quick
+            test_admits_exhaustive_branches
+        ; test_case
+            "partition_cli_slots preserves refused_cli_slots and Muse schema channel"
+            `Quick
+            test_partition_cli_slots_preserves_refused_slots_and_muse_output_schema
+        ; test_case
+            "input-size guard and refusal classification"
+            `Quick
+            test_input_size_guard_and_refusal_classification
+        ] )
+    ; ( "quota across real adapters",
         [ test_case "new and prior rejection order account siblings" `Quick test_real_quota_reorders_siblings_and_next_walk
         ; test_case "absolute reset and transport success before JSON parsing" `Quick test_provider_reset_and_success_before_json_validation
         ; test_case "Codex usage limit is read by the next walk" `Quick test_codex_usage_limit_is_read_by_the_next_walk

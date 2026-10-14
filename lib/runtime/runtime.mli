@@ -1164,3 +1164,91 @@ val with_manifest_config_lock :
 (** Manifest-only mutations use the same manifest-then-runtime lock order as
     composite Keeper configuration writes. The action must not reacquire either
     lock. Both locks cover the authoritative read and mutation. *)
+
+(** {1 Typed Lane Requirement x Runtime Capability Admission}
+
+    RFC-any-runtime-serves-an-exact-lane: each lane declares its requirement as
+    a closed value, each runtime derives its capability from its launch/provider
+    profile, and {!admits} decides admission by exhaustive pattern matching
+    without wildcards on any capability or requirement variant. *)
+
+type window_requirement =
+  | Unbounded_or_unknown
+  | Known_at_least of { min_tokens : int }
+
+type overflow_requirement =
+  | Truncation_acceptable
+  | Reject_before_truncation
+
+type verdict_requirement =
+  | Free_text
+  | Json_syntax of { schema : Yojson.Safe.t }
+  | Provider_enforced_json_schema of
+      { name : string
+      ; schema : Yojson.Safe.t
+      }
+
+type lane_requirement =
+  { window : window_requirement
+  ; overflow : overflow_requirement
+  ; verdict : verdict_requirement
+  ; tool_free : bool
+  ; fresh_invocation : bool
+  }
+
+type context_window_capability =
+  | Window_unknown
+  | Window_known of { max_input_tokens : int }
+
+type overflow_behavior =
+  | Truncates_silently
+  | Rejects_oversize_input
+  | Caller_bounded of { max_input_tokens : int }
+
+type structured_output_capability =
+  | Text_only
+  | Prompted_json
+  | Flag_json_schema
+  | Http_response_format_json_schema
+
+type runtime_capability =
+  { context_window : context_window_capability
+  ; overflow : overflow_behavior
+  ; structured_output : structured_output_capability
+  ; supports_tool_free : bool
+  ; supports_fresh_invocation : bool
+  }
+
+type refusal =
+  | Window_unknown_for_bounded_lane
+  | Window_too_small of
+      { required : int
+      ; actual : int
+      }
+  | Silent_truncation_on_overflow
+  | Structured_output_unsupported of
+      { required : [ `Json_syntax | `Provider_enforced_json_schema ]
+      ; actual : structured_output_capability
+      }
+  | Tool_free_unsupported
+  | Fresh_invocation_unsupported
+
+val structured_output_capability_to_string : structured_output_capability -> string
+val equal_refusal : refusal -> refusal -> bool
+val refusal_to_string : refusal -> string
+val pp_refusal : Format.formatter -> refusal -> unit
+
+val admits :
+  lane:lane_requirement ->
+  runtime:runtime_capability ->
+  (unit, refusal) result
+
+val capability_of_runtime : t -> runtime_capability
+val capability_of_runtime_id : string -> runtime_capability option
+
+val requirement_of_exact_lane :
+  ?schema:Yojson.Safe.t ->
+  ?min_window_tokens:int ->
+  exact_lane ->
+  lane_requirement
+

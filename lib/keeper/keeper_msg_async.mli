@@ -26,6 +26,11 @@ type request_status =
       { attempted_status : string
       ; reason : string
       }
+  | Waiting_for_owned_jobs of
+      { job_ids : Keeper_owned_job_identity.Job_id.t list
+      ; body : string
+      ; data : Yojson.Safe.t option
+      }
   | Done of
       { ok : bool
       ; body : string
@@ -346,6 +351,32 @@ val submit
     Use this when a producer's durable artifacts must share that identity;
     callers needing only fire-and-forget execution should keep using
     {!submit}. *)
+type worker_outcome
+
+val worker_finished : Keeper_types_profile.tool_result -> worker_outcome
+val worker_waiting_for_owned_jobs :
+  job_ids:Keeper_owned_job_identity.Job_id.t list ->
+  Keeper_types_profile.tool_result -> (worker_outcome, string) result
+(** Requires a typed Deferred result and at least one original job identity.
+    Repeated identities are represented once. No body/JSON classification. *)
+
+val submit_worker_with_request_id
+  :  ?request_context:(string * Yojson.Safe.t) list
+  -> ?on_accepted:(string -> (unit, string) result)
+  -> ?on_worker_aborted:(worker_abort_reason -> (unit, string) result)
+  -> ?on_worker_settled:(worker_settlement -> unit)
+  -> background_sw:Eio.Switch.t
+  -> base_path:string
+  -> caller:string
+  -> f:(request_id:string -> Eio.Switch.t -> worker_outcome)
+  -> keeper_name:string
+  -> unit
+  -> (submit_outcome, submit_error) result
+(** The worker scope releases before its canonical outcome is published.
+    Waiting is a terminal worker attempt in the terminal partition, while the
+    prepared composition run remains resumable through its original journal.
+    It is not composition failure or permission to replay a job launch. *)
+
 val submit_with_request_id
   :  ?request_context:(string * Yojson.Safe.t) list
   -> ?on_accepted:(string -> (unit, string) result)

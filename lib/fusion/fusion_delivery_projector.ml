@@ -73,6 +73,7 @@ let failure_of_status : Keeper_msg_async.request_status -> Fusion_sink.delivery_
   | Keeper_msg_async.Persistence_failed { attempted_status; reason } ->
     Some (Fusion_sink.Persistence_failed { attempted_status; reason })
   | Keeper_msg_async.Done { ok = true; _ }
+  | Keeper_msg_async.Waiting_for_owned_jobs _
   | Keeper_msg_async.Queued
   | Keeper_msg_async.Running
   | Keeper_msg_async.Cancelling _ -> None

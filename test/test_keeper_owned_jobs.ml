@@ -829,8 +829,10 @@ let await_composition env fixture accepted =
           let entry = Async.durable_terminal_entry proof in
           (match entry.status with
            | Async.Done {ok;data=Some data;_} -> ok, data, entry
+           | Async.Waiting_for_owned_jobs {data=Some data;_} -> false, data, entry
            | Queued | Running | Cancelling _ | Lost _ | Cancelled _
-           | Persistence_failed _ | Done {data=None;_} -> fail "composition did not settle a result")
+           | Persistence_failed _ | Done {data=None;_}
+           | Waiting_for_owned_jobs {data=None;_} -> fail "composition did not settle a result")
       | Error (Async.Canonical_terminal_absent | Canonical_terminal_runtime_active _) ->
           Eio.Fiber.yield (); read_terminal ()
       | Error error -> fail (Async.canonical_terminal_error_to_string error)
@@ -908,6 +910,46 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       ~tool_use_id:"run-wait" ~turn:41 "keeper_composition_run" (`Assoc ["sha256", `String sha256])) in
   let ok, first, first_entry = await_composition env fixture accepted in
   check bool "pending job suspends this worker attempt" false ok;
+  (match first_entry.status with
+   | Masc.Keeper_msg_async.Waiting_for_owned_jobs {job_ids;_} ->
+     check (list string) "broker retains typed original job identities" [id]
+       (List.map Store.Job_id.to_string job_ids)
+   | _ -> fail "owned job wait was flattened into terminal composition failure");
+  let module Async = Masc.Keeper_msg_async in
+  let module Record = Masc.Keeper_msg_async_record in
+  let module Types = Masc.Keeper_msg_async_types in
+  let module Queue = Masc.Keeper_registry_event_queue in
+  let terminal_path = match Async.For_testing.terminal_record_path
+      ~base_path:fixture.base_path ~request_id:first_entry.request_id with
+    | Some path -> path | None -> fail "original waiting request has no canonical path" in
+  let wire = read terminal_path |> Yojson.Safe.from_string in
+  (match Record.entry_of_record_json ~base_path:fixture.base_path
+      ~request_id:first_entry.request_id wire with
+   | Ok {status=Types.Waiting_for_owned_jobs {job_ids;_};_} ->
+     check (list string) "strict record roundtrip keeps the original wait" [id]
+       (List.map Store.Job_id.to_string job_ids)
+   | Ok _ | Error _ -> fail "durable waiting outcome cannot roundtrip");
+  let invalid_wait ids = match wire with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        key, if key="job_ids" then `List ids else value) fields)
+    | _ -> fail "waiting record is not an object" in
+  List.iter (fun ids ->
+    match Record.entry_of_record_json ~base_path:fixture.base_path
+        ~request_id:first_entry.request_id (invalid_wait ids) with
+    | Error _ -> () | Ok _ -> fail "strict wait decoder accepted missing/duplicate/invalid identity")
+    [[];[`String id;`String id];[`String "unknown-job"]];
+  let first_job = Store.Job_id.of_string id |> require "original job identity" in
+  (match Async.worker_waiting_for_owned_jobs ~job_ids:[first_job]
+      (Tool_result.make_ok ~tool_name:"fixture" ~start_time:(Tool_timing.start ()) ()) with
+   | Error _ -> () | Ok _ -> fail "a completed result claimed owned-job suspension");
+  let reconcile = Masc.Keeper_composition_completion_wake.reconcile
+      ~base_path:fixture.base_path |> require "waiting attempt outbox recovery" in
+  check int "waiting attempt emits no failed completion" 0 reconcile.delivered;
+  let sources = Queue.pending_selections_result ~base_path:fixture.base_path keeper
+    |> require "waiting attempt queue" in
+  check int "waiting attempt has no false composition terminal notification" 0
+    (List.length (List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      match selection.source.payload with Composition_completed _ -> true | _ -> false) sources));
   check int "waiting for result performs no backend operation" calls_before (List.length (calls fixture));
   let first_nodes = composition_nodes fixture first in
   let awaiting = composition_node "await" first_nodes in

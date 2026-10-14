@@ -127,6 +127,21 @@ let acknowledge ~base_path ~keeper_name ~request_id =
   | Some _ -> Error (Invalid_obligation "completion acknowledgement changed request/recipient identity")
 ;;
 
+let acknowledge_waiting ~base_path ~keeper_name ~request_id ~composition_tool:tool =
+  let* proof = Async.load_canonical_durable_terminal ~base_path ~caller:keeper_name request_id
+      |> Result.map_error (fun error -> Canonical_result_unavailable error) in
+  let entry = Async.durable_terminal_entry proof in
+  let* producer = composition_tool entry in
+  if not (String.equal entry.keeper_name keeper_name && String.equal producer tool)
+  then Error (Invalid_obligation "canonical waiting request changed its producer")
+  else match entry.status with
+    | Async.Waiting_for_owned_jobs _ -> acknowledge
+        ~base_path:entry.base_path ~keeper_name ~request_id
+    | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+    | Persistence_failed _ | Done _ ->
+      Error (Invalid_obligation "canonical request is not an owned-job waiting attempt")
+;;
+
 let flush ~base_path ~deliver =
   protect_io @@ fun () ->
   let base_path = Fs_compat.realpath base_path in
@@ -162,6 +177,13 @@ let flush ~base_path ~deliver =
           then Error (Invalid_obligation "canonical result changed completion owner")
           else
             let* tool = composition_tool entry in
+            match entry.status with
+            | Async.Waiting_for_owned_jobs _ ->
+              let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name
+                  ~request_id:entry.request_id in
+              Ok Retired
+            | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+            | Persistence_failed _ | Done _ ->
             let* () = deliver ~composition_tool:tool entry |> Result.map_error (fun detail -> Storage_failed detail) in
             let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name ~request_id:obligation.request_id in
             Ok Delivered)

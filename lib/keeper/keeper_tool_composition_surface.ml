@@ -1528,7 +1528,7 @@ let rec async_worker_result
   in
   let interrupted = match execution with
     | Error failure ->
-      (match failure.Executor.cause with
+      List.find_map (function
        | Executor.Tool_did_not_complete node ->
          (match node.execution_origin with
           | Executor.Dispatch_refused -> Some (Tool_result.message node.result)
@@ -1548,6 +1548,7 @@ let rec async_worker_result
        | Run_journal_rejected error -> Some (Journal.error_to_string error)
        | Node_observation_failed {detail;_} -> Some detail
        | Plan_execution_failed _ | Outer_completion_mismatch _ -> None)
+        (Executor.failure_causes failure)
     | Ok _ -> None in
   match interrupted,waiting_dependencies with
   | Some reason,_ -> Keeper_msg_async.worker_interrupted ~reason

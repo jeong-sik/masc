@@ -459,6 +459,11 @@ let child_link_json (link : child_link) = `Assoc
    "child_source",source_json link.child_source;
    "accepted",option_json Dependency.composition_to_json link.accepted]
 
+let same_children left right =
+  (* Sealed contexts reconstruct runtime closures; their persisted immutable
+     coordinates, not OCaml function identity, are the ownership authority. *)
+  Nodes.equal (fun left right -> canonical_equal (child_link_json left) (child_link_json right)) left right
+
 let child_binding_matches (link : child_link) (binding : Dependency.composition) =
   let source = link.child_source in
   Plan.Composition_run_id.equal source.composition_run_id binding.Dependency.composition_run_id
@@ -1114,7 +1119,7 @@ let bind_expected_owner journal ~request_id ~(expected : binding option) ~expect
   update_existing journal (fun state ->
     if not (same_owner state.owner expected)
         || Option.fold ~none:false ~some:(fun nodes -> nodes <> state.nodes) expected_nodes
-        || Option.fold ~none:false ~some:(fun children -> children <> state.children) expected_children
+        || Option.fold ~none:false ~some:(fun children -> not (same_children children state.children)) expected_children
     then None, Error Ownership_changed
     else match state.owner with
       | Some binding when binding.request_id = request_id -> None, Ok {journal; binding}
@@ -1380,7 +1385,7 @@ let continuation_readiness ~read_composition_result (continuation : continuation
   let* () = check_source journal state in
   if not (same_owner state.owner (Some continuation.expected_owner))
       || state.nodes <> continuation.suspended_nodes
-      || state.children <> continuation.suspended_children then Error Ownership_changed
+      || not (same_children state.children continuation.suspended_children) then Error Ownership_changed
   else
   let* () = validate_nested_producer journal in
   let* () = validate_child_links journal state.children state.nodes in

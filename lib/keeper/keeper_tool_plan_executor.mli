@@ -86,8 +86,15 @@ type cause =
 type failure = private
   { settled : node_result list
   ; cause : cause
+  ; additional_causes : cause list
   ; effect_disposition : Tool_result.failure_effect_disposition
   }
+
+val failure_causes : failure -> cause list
+(** All actual causes in planned order, with [cause] as the first display
+    cause and [additional_causes] as its disjoint tail. Completion decisions
+    must retain sibling journal/observation failures even when an earlier
+    node is merely waiting. *)
 
 type dispatch =
   ?launch_replay:Keeper_tool_execution_journal.recheck_launch

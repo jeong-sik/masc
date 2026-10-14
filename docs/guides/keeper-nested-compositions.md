@@ -95,6 +95,12 @@ before projecting its acknowledgement, so an acknowledgement-manifest failure
 does not erase the first parent's accepted child. Separate real store faults
 exercise acknowledgement and successful child-result publication, while a
 canonical failed-child scenario verifies that actual failure remains terminal.
+The executor retains every actual node cause in planned order. Its first cause
+still controls the displayed error; physical interruption examines the complete
+cause set. A lower pending sibling therefore cannot hide a higher publication or
+settlement failure. The process-loss fixture includes an independently pending
+lower node alongside the original native child, including faults after a higher
+node's tool completed but before its observation committed.
 
 Call `keeper_composition_prepare` with `execution: "inline"` or `"async"`, the ordinary outer
 `nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of

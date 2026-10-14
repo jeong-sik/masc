@@ -3124,7 +3124,8 @@ let test_interrupted_prepared_launch_resumes_the_same_job () = with_fixture @@ f
   Printf.printf "OWNED_INTERRUPTED_LAUNCH_RESUME job=%s phase=%s\n%!" id
     (match job.phase with Store.Running _ -> "running" | _ -> "other")
 
-let with_nested_job_skill ?fixture_base_path ?(wait_only=false) ~execution operation =
+let with_nested_job_skill ?fixture_base_path ?(wait_only=false)
+    ?(branch_failure_policy=Masc.Keeper_tool_plan.default_branch_failure_policy) ~execution operation =
   with_fixture ?fixture_base_path @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   let module Async = Masc.Keeper_msg_async in
@@ -3150,6 +3151,7 @@ description: Launch one owned job and consume its original complete stdout.
 [[compositions]]
 name = "nested-owned-job"
 execution = "%s"
+branch_failure_policy = %S
 [[compositions.nodes]]
 id = "launch"
 tool = "keeper_job_start"
@@ -3183,7 +3185,8 @@ name = "stdout"
 node = "consume"
 pointer = "/content"
 ```
-|} (match execution with Masc.Keeper_tool_composition_catalog.Inline -> "inline" | Async -> "async") in
+|} (match execution with Masc.Keeper_tool_composition_catalog.Inline -> "inline" | Async -> "async")
+    (Masc.Keeper_tool_plan.branch_failure_policy_to_string branch_failure_policy) in
   let source = match original_job with None -> launch_source | Some id -> Printf.sprintf {|---
 name: nested-owned-job
 description: Wait for the original owned job and read its complete stdout.
@@ -3193,6 +3196,7 @@ description: Wait for the original owned job and read its complete stdout.
 [[compositions]]
 name = "nested-owned-job"
 execution = "async"
+branch_failure_policy = %S
 [[compositions.nodes]]
 id = "await"
 tool = "keeper_job_result"
@@ -3215,7 +3219,7 @@ name = "stdout"
 node = "consume"
 pointer = "/content"
 ```
-|} id in
+|} (Masc.Keeper_tool_plan.branch_failure_policy_to_string branch_failure_policy) id in
   write (Filename.concat skill_dir "SKILL.md") source;
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
   Fs_compat.mkdir_p (Filename.dirname declaration);
@@ -3397,6 +3401,7 @@ let test_fixed_async_skill_child ?(child_failure=false) () =
 
 let lose_native_parent_after_child_acceptance base_path draft_sha run_id =
   with_nested_job_skill ~fixture_base_path:base_path ~wait_only:true
+    ~branch_failure_policy:Masc.Keeper_tool_plan.Continue_independent
     ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference:_ ~runtime:_ ~runtime_reads
       ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder ~snapshot:_ ->
@@ -3453,14 +3458,19 @@ let lose_native_parent_after_child_acceptance base_path draft_sha run_id =
 
 let test_native_child_acceptance_survives_physical_parent_loss () =
   with_nested_job_skill ~wait_only:true ~execution:Masc.Keeper_tool_composition_catalog.Async
+    ~branch_failure_policy:Masc.Keeper_tool_plan.Continue_independent
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
       ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot:_ ->
   let module Async = Masc.Keeper_msg_async in
   let module Plan = Masc.Keeper_tool_plan in
   let sibling = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path)
       ~bytes:"parent work after original acceptance\n" ~mime:"text/plain" in
-  let recipe = `Assoc ["execution",`String "async";"nodes",`List
-    [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"args",`Assoc []];
+  let original_job = read (Filename.concat fixture.base_path "physical-original-job") in
+  let recipe = `Assoc ["execution",`String "async";"branch_failure_policy",`String "continue_independent";
+    "nodes",`List
+    [`Assoc ["id",`String "earlier-wait";"tool",`String "keeper_job_result";
+       "input",`Assoc ["kind",`String "literal";"value",argument original_job]];
+     `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"args",`Assoc []];
      `Assoc ["id",`String "sibling";"tool",`String "keeper_artifact_read";
        "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String sibling.sha256]]]];
     "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
@@ -3629,9 +3639,16 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
   let ok,pending,entry = await_composition env fixture (Tool_result.data resumed) in
   check bool "recovered acknowledgement is not mistaken for child completion" false ok;
   (match entry.status with
-   | Waiting_for_dependencies {dependencies=[Dependency.Composition_result original];_} ->
-     check_json "first real result wait retains original accepted child" binding_json (Dependency.composition_to_json original)
-   | _ -> fail "parent did not park on original accepted child");
+   | Waiting_for_dependencies {dependencies;_} ->
+     check int "both independently pending producers are retained" 2 (List.length dependencies);
+     check bool "first real result wait retains original accepted child" true
+       (List.exists (function Dependency.Composition_result original ->
+          Yojson.Safe.equal binding_json (Dependency.composition_to_json original)
+         | Owned_job _ -> false) dependencies);
+     check bool "lower planned owned-job wait is not lost behind child admission" true
+       (List.exists (function Dependency.Owned_job id -> Store.Job_id.to_string id = original_job
+         | Composition_result _ -> false) dependencies)
+   | _ -> fail "parent did not park on both original producers");
   check_json "independent parent work proceeds before child completion" (`String "completed")
     (composition_node "[\"sibling\"]" (composition_nodes fixture pending) |> member "result" |> member "disposition");
   let child_journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper

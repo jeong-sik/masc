@@ -15,6 +15,11 @@ type t = private {
   coalesce_queued_input : bool option;
   send_on_stop : bool option;
   user_input_priority_next : bool option;
+  midi_soundfont : string option;
+  (** [tui].midi_soundfont: the SoundFont file fluidsynth plays MIDI
+      attachments with. [None] where the file, the table or the key is
+      absent — MIDI playback then hands the file to the local app and says
+      the setting is missing. *)
 }
 
 val opening_keeper_of_doc :

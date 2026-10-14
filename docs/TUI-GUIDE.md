@@ -1606,6 +1606,17 @@ tablature box instead of plain code - what renders, what the fallback box
 means, and how to turn it off are in the
 [alphaTex tab guide](guides/alphatex-tab.md).
 
+A post's attachments are listed at the end of its body under `ATTACHMENTS`,
+each with a `[N]` number. On the read pane, pressing the number opens that
+attachment: audio plays locally (afplay or the next player on the chain),
+MIDI plays through fluidsynth (set `[tui] midi_soundfont` in runtime.toml;
+without it the file is handed to the local app with a note saying why), and
+everything else - Guitar Pro files included - is saved to the local cache
+and opened with the default app. A MIDI that parses reports what it is on
+the status line (tracks, BPM, time signature, length). What each key did,
+or why it could not, stays on the pane's bottom line until the next post
+opens.
+
 ### Work / Goals
 
 Planning is one workspace holding two different subjects, which is why its

@@ -852,20 +852,22 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
       (* The post's own attachments, ahead of the derived references: what
          the author attached is content, what the body points at is relation.
          [Board_attachments.label] owns the one-line wording; this only
-         fits it to the column. Appended like the sections above so the
-         surface's own scroll carries it. *)
+         fits it to the column. Each line carries the number the open key
+         answers to ([Board_attachments.attachment_at_index] counts the same
+         order, a broken entry included). Appended like the sections above
+         so the surface's own scroll carries it. *)
       let attachment_lines =
         match post.bp_attachments with
         | [] -> []
         | attachments ->
           (Ansi.dim ^ "" ^ Ansi.reset)
           :: (Ansi.bold ^ "  ATTACHMENTS" ^ Ansi.reset)
-          :: List.map
-               (fun (entry : board_attachment_entry) ->
-                 Printf.sprintf "  %s%s%s" Ansi.reset
+          :: List.mapi
+               (fun index (entry : board_attachment_entry) ->
+                 Printf.sprintf "  [%d] %s%s%s" (index + 1) Ansi.reset
                    (fit_width
                       (Terminal_text.single_line (Board_attachments.label entry))
-                      (max 8 (body_wrap_cols - 8)))
+                      (max 8 (body_wrap_cols - 12)))
                    Ansi.reset)
                attachments
       in
@@ -1064,6 +1066,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                 ~scroll:scroll.comment_offset ~height:comment_lines_drawn
                 detail_line_count
           else ""));
+  (* What the numbered attachment keys last did, or why one could not.
+     Recede-styled like the readings above; replaced by the next action and
+     cleared when another post is opened. *)
+  (match state.board_attachment_status with
+   | Some status ->
+       box_line_styled buf cols ~style:(Theme.recede ())
+         (Printf.sprintf "  %s" (fit_width status (framed_inner_width cols - 2)))
+   | None -> ());
   box_bottom buf cols;
   Masc_tui_frame_timing.finish_stage ~name:"board.frame_rows" rows_started;
   scroll.body_offset, scroll.comment_offset
@@ -1117,7 +1127,8 @@ let render_board_read (state : state) (list_post : board_post) =
            ~focus_posts:(state.board_focus = Left_pane)
            ~focus_comments:state.board_comments_focused
            ~full_history:(state.board_history_post_id = Some list_post.bp_id)
-           ~layout)
+           ~layout
+           ~has_attachments:(List.length list_post.bp_attachments > 0))
   in
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with

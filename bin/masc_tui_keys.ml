@@ -1491,7 +1491,7 @@ let cancels_two_press ~input_seen ~key ~second_press =
    matches them under [Fusion_detail]); the footer left them out, and a body
    row said "K Keeper · B Board" in its own notation instead. *)
 let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
-    ~(layout : board_read_layout) =
+    ~(layout : board_read_layout) ~has_attachments =
   let pane_keys =
     match layout with
     | Board_read_split -> [ b Navigate "h/l" "pane"; b Navigate "Ctrl-W" "switch" ]
@@ -1522,6 +1522,10 @@ let footer_hints_board_read ~focus_posts ~focus_comments ~full_history
         z:wide, to "o:all comments". Placed here it is the Navigate hint
         dropped first, and up to 134 cells the row is the one drawn before
         [o] existed. *)
+     (* A post with attachments numbers them for the open key; the hint
+        rides ahead of [o] so a narrow footer gives it up before the
+        comment reader, which the fitter drops last on this row. *)
+     @ (if has_attachments then [ b Navigate "1-9" "attachment" ] else [])
      @ [ b Navigate "o" (if full_history then "newest 20" else "all comments") ]
      @ [ board_vote_key
        ; board_reply_key

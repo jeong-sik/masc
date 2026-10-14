@@ -13621,6 +13621,7 @@ let open_board_post state ~mailbox ~focus (post : board_post) =
   state.board_comment_scroll <- 0;
   state.board_comment_landing <- None;
   state.board_comments_focused <- false;
+  state.board_attachment_status <- None;
   Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
     ~port:state.port ~post_id:post.bp_id ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
 
@@ -13663,6 +13664,51 @@ let step_board_read state ~mailbox ~delta =
           (open_board_post state ~mailbox ~focus:state.board_focus)
           (List.nth_opt state.board_posts next)
       end
+
+(* The numbered attachment keys: the pane names each entry [1..9] (broken
+   entries included), and this resolves the same number to the same entry,
+   then lets the action module save/play/open it. What happened, or why it
+   could not, lands on the read pane's status line. *)
+let open_board_attachment state ~base_path ~digit ~host ~port =
+  match state.board_mode with
+  | Board_list | Board_compose -> ()
+  | Board_read post_id ->
+      let post =
+        match Board_detail.view_for state.board_detail ~post_id with
+        | Board_detail.Ready (detail_post, _, _) -> Some detail_post
+        | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
+            List.find_opt
+              (fun (candidate : board_post) -> String.equal candidate.bp_id post_id)
+              state.board_posts
+      in
+      (match post with
+       | None -> ()
+       | Some post ->
+           (match Masc_tui_board_attachments.attachment_at_index post.bp_attachments digit with
+            | None -> ()
+            | Some (Error reason) ->
+                state.board_attachment_status <- Some ("깨진 첨부: " ^ reason)
+            | Some (Ok attachment) ->
+                let fetch ~sha256 =
+                  match
+                    Masc_tui_http.http_get ~host ~port
+                      ~path:("/api/v1/artifact-bytes/" ^ sha256)
+                  with
+                  | Error reason -> Error reason
+                  | Ok (status_code, body)
+                    when Masc.Tui_decode.is_success_http_status status_code ->
+                      Ok body
+                  | Ok (status_code, body) ->
+                      Error (Masc_tui_http.refusal ~status_code ~body)
+                in
+                let midi_soundfont =
+                  (Masc_tui_config.load ~base_path).midi_soundfont
+                in
+                let outcome =
+                  Masc_tui_attachment_action.run ~fetch attachment ~midi_soundfont
+                in
+                state.board_attachment_status <-
+                  Some (Masc_tui_attachment_action.describe_outcome outcome)))
 
 let apply_approval_decision_result state approval decision approvals result =
   (match state.home_decision_inflight with
@@ -26932,6 +26978,17 @@ and is loaded on demand through keeper_skill.
                    | Some _ | None ->
                        Masc_tui_code_requests.launch_history_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
                 end)
+       | Some digit
+         when state.view = Board
+              && state.board_mode <> Board_compose
+              && not state.board_comments_focused
+              && String.length digit = 1
+              && digit >= "1"
+              && digit <= "9" ->
+           (* The ATTACHMENTS block numbers entries [1..9]; the number opens
+              the same entry, whatever its kind wants done with it. *)
+           open_board_attachment state ~base_path ~digit:(int_of_string digit)
+             ~host ~port
        | Some "o" when state.view = Board ->
            (match state.board_mode with
             | Board_read post_id

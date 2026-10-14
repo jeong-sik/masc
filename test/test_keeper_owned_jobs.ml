@@ -332,9 +332,28 @@ let invoke_raw bundle ~tool_use_id ~turn name input =
       ~completion:Agent_core.Tool_contract.Continue_after_success in
   Agent_core.Tool.execute ~invocation tool input
 
+let validate_job_output ~name ~input data =
+  match Tool_schemas_owned_job.find_definition name with
+  | None -> ()
+  | Some _ ->
+    let module Plan = Masc.Keeper_tool_plan in
+    let node_id = Plan.Node_id.make "public-job-producer" |> require "output producer identity" in
+    let node = Plan.node ~id:node_id ~tool_name:name
+        ~input:(Plan.Json_template.literal input) () in
+    let plan = match Plan.create ~descriptors:(Descriptor.all_descriptors ()) [node] with
+      | Ok plan -> plan
+      | Error error -> failf "%s output contract is invalid: %s" name (Plan.error_to_string error) in
+    match Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id data with
+    | Ok _ -> ()
+    | Error _ -> failf "%s public producer output violates its declared schema: %s"
+        name (Yojson.Safe.to_string data)
+
 let invoke fixture bundle ~tool_use_id ~turn name input =
   match invoke_raw bundle ~tool_use_id ~turn name input with
-  | Ok output -> result_document ~base_path:fixture.base_path output.content
+  | Ok output ->
+    let data = result_document ~base_path:fixture.base_path output.content in
+    validate_job_output ~name ~input data;
+    data
   | Error error -> failf "public job handler failed: %s" error.Agent_core.Types.message
 
 let job_id json = json |> member "job_id" |> to_string

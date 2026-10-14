@@ -338,28 +338,47 @@ let parse_json raw =
   | Yojson.Json_error err -> fail ("invalid json: " ^ err)
 
 let structured_tool_output_exn ~base_path content =
-  match Tool_output.decode_from_agent_core content with
-  | Tool_output.Not_marker ->
-    (* An [Inline_with_reference] presentation (#43137) is plain JSON, not a
-       stored marker: the typed result envelope carries the structured
-       content beside the manifest reference. Unwrap it; any other JSON is
-       taken as the structured content itself. *)
-    (match parse_json content with
-     | `Assoc fields ->
-       (match List.assoc_opt "structured_content" fields with
-        | Some structured_content -> structured_content
-        | None -> `Assoc fields)
-     | structured_content -> structured_content)
-  | Tool_output.Invalid_marker { detail } -> fail detail
-  | Tool_output.Decoded reference ->
+  let read_manifest (reference : Tool_output.artifact_ref) =
     if not (String.equal reference.mime Tool_output.artifact_manifest_mime)
-    then fail "tool output marker is not a typed result manifest";
-    let payload = fetch_artifact_exn ~base_path reference |> parse_json in
+    then fail "tool output reference is not a typed result manifest";
+    let bytes = fetch_artifact_exn ~base_path reference in
+    check int "typed result manifest retains exact bytes" reference.bytes (String.length bytes);
+    let payload =
+      try Yojson.Safe.from_string bytes with
+      | Yojson.Json_error detail -> fail ("invalid durable result manifest: " ^ detail)
+    in
     (match Tool_output.artifact_manifest_of_json payload with
      | Tool_output.Decoded_artifact_manifest { structured_content; _ } ->
        structured_content
      | Tool_output.Not_artifact_manifest -> fail "typed result manifest is absent"
      | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
+  in
+  match Tool_output.decode_from_agent_core content with
+  | Tool_output.Not_marker ->
+    (match parse_json content with
+     | `Assoc fields when List.mem_assoc "artifact_manifest" fields ->
+       let names = List.map fst fields |> List.sort String.compare in
+       if names <> [ "artifact_manifest"; "structured_content" ]
+          && names <> [ "artifact_manifest"; "content"; "structured_content" ]
+       then fail "inline result envelope has missing, duplicate or unknown fields";
+       (match List.assoc_opt "structured_content" fields,
+              List.assoc_opt "artifact_manifest" fields,
+              List.assoc_opt "content" fields with
+        | Some inline, Some manifest, (None | Some (`String _)) ->
+          let reference = match Tool_output.normalized_artifact_ref_of_json manifest with
+            | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+            | Tool_output.Not_normalized_artifact_ref ->
+              fail "inline result envelope has no canonical manifest reference"
+            | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail in
+          let canonical = read_manifest reference in
+          check bool "inline structured result matches its durable manifest" true
+            (Yojson.Safe.equal (Yojson.Safe.sort inline) (Yojson.Safe.sort canonical));
+          canonical
+        | Some _, Some _, Some _ | Some _, None, _ | None, _, _ ->
+          fail "inline result envelope has invalid fields")
+     | payload -> payload)
+  | Tool_output.Invalid_marker { detail } -> fail detail
+  | Tool_output.Decoded reference -> read_manifest reference
 
 let outcome_label = function
   | Tool_result.Completed () -> "success"
@@ -8691,14 +8710,6 @@ module Plan = Masc.Keeper_tool_plan
 let _links_workspace_dispatch_registration =
   Masc.Mcp_server_eio_execute.resolve_bind_state
 
-let composable_model_names () =
-  KTD.all_descriptors ()
-  |> List.concat_map (fun descriptor ->
-    match descriptor.KTD.composable_output with
-    | KTD.Opaque_output -> []
-    | KTD.Json_output _ -> KTD.keeper_model_names descriptor)
-  |> List.sort_uniq String.compare
-
 (* Arguments a keeper would actually send, not the smallest shape that passes:
    the probe exists to observe what the producer emits, so it has to reach the
    producer. [prepare] returns the arguments so a tool that needs durable
@@ -8876,29 +8887,6 @@ let composable_output_probes =
          ; "new_string", `String "composable output probe (edited)"
          ])
   ]
-
-let test_every_composable_tool_has_an_output_probe () =
-  let declared = composable_model_names () in
-  let probed =
-    List.map (fun probe -> probe.tool_name) composable_output_probes
-    |> List.sort_uniq String.compare
-  in
-  let only_in left right =
-    List.filter (fun name -> not (List.mem name right)) left
-  in
-  (match only_in declared probed with
-   | [] -> ()
-   | missing ->
-     failf
-       "these tools declare a composable output and no probe runs their \
-        producer against it: %s"
-       (String.concat ", " missing));
-  match only_in probed declared with
-  | [] -> ()
-  | stale ->
-    failf
-      "these probes name tools that no longer declare a composable output: %s"
-      (String.concat ", " stale)
 
 let schema_value_error_to_string = function
   | Plan.Unsupported_schema_type json ->
@@ -10333,8 +10321,6 @@ let () =
     ("composable_output_contract", [
       test_case "lane observations remain composable without a guest" `Quick
         test_lane_status_observations_remain_composable;
-      test_case "every composable tool has an output probe" `Quick
-        test_every_composable_tool_has_an_output_probe;
       test_case "real producer output satisfies its declared schema" `Quick
         test_composable_outputs_satisfy_declared_schema;
     ]);

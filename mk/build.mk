@@ -19,9 +19,9 @@ dev-dashboard:
 # Build everything: main masc + Preact dashboard.
 build-all: build
 
-# Install local build into ~/.local/bin (or PREFIX)
+# Build and install local binaries into ~/.local/bin (or PREFIX) and refresh registered browser-lane native hosts
 install:
-	bash scripts/install-local-build.sh
+	bash scripts/install-local-build.sh $(if $(PREFIX),--prefix "$(PREFIX)")
 
 # Generate documentation
 doc:

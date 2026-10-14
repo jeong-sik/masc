@@ -1438,21 +1438,21 @@ let test_held_excerpt_reflows_badge_to_current_width () = at_sizes (fun origin -
     List.fold_left max 0
       (List.filter_map first_token_column narrowed) in
   check bool "narrowed pane still draws the held excerpt" true (widest > 0);
-  (* Measured at this fixture: the frame's five-cell prefix plus the
-     refitted inline margin (clock column and ten-cell badge) puts the body
-     token at column 26. The badge kept from the wide pane drew it at 36 --
-     the reported fold. The two checks together accept only the refitted
-     drawing and reject the carried one: the first fails before the fix, the
-     second fails after it, so the assertions pin the refit from both sides. *)
+  (* Measured at this fixture in the 0-based frame columns that
+     first_token_column returns: after the refit the widest first-token
+     column across the narrowed frame is 25, so the first check below fails
+     only for the carried drawing. Before the fix the carried badge kept
+     the widest token at 35 -- the reported fold. The second check is a
+     floor, not a discriminator: it passes at both 35 (before the fix) and
+     25 (after it) and only rejects over-shrinking the margin to 23 or
+     less. *)
   check bool "held excerpt margin refits the narrowed pane" true (widest <= 25);
   check bool "red control: the carried badge would draw past column 25" false
     (widest <= 23);
-  (* Evidence capture for task-2292 keeps the two frames side by side; the
-     assertion texts above are the boundaries an evidence run is cut at. *)
-  print_string "narrowed pane still draws the held excerpt: BEGIN\n";
-  List.iter (fun line -> print_string "|"; print_string line; print_newline ()) wide;
-  List.iter (fun line -> print_string "|"; print_string line; print_newline ()) narrowed;
-  print_string "red control: the carried badge would draw past column 25: END\n";
+  (* Frame dumps for task-2292 live in evidence/task-2292/, not in every
+     CI log. Keep painting the wide frame so the exercise order (and the
+     measured 25) is unchanged. *)
+  ignore wide;
   check bool "held excerpt keeps the line the reader was on" true
     (List.exists (Astring.String.is_infix ~affix:observed) narrowed))
 

@@ -2533,6 +2533,23 @@ class ToolRow:
     host_login: Optional[HostGithubLogin] = None
 
 
+def token_comes_from_environment(source):
+    """`gh` names an environment variable (GH_TOKEN, GITHUB_TOKEN, ...) as the token's source.
+
+    `gh auth token --user` finds only a stored login, so an environment token
+    has to be read without it. That token cannot change while the wizard runs:
+    it is the wizard's own environment, so there is no account to switch.
+    """
+    return re.fullmatch(r'[A-Z][A-Z0-9_]*_TOKEN', source) is not None
+
+
+def token_argv(login):
+    argv = ['gh', 'auth', 'token', '--hostname', GITHUB_HOST]
+    if not token_comes_from_environment(login.source):
+        argv += ['--user', login.login]
+    return argv
+
+
 def automation_command(base):
     return 'masc browser-lane-setup --mode automation --base-path ' + shlex.quote(str(base))
 
@@ -2542,8 +2559,7 @@ def github_command(base, login):
     options = ' '.join(['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', shlex.quote(str(base))])
     if login is None:
         return 'masc keeper-github login ' + options
-    return 'gh auth token --hostname {} --user {} | masc keeper-github set-token {}'.format(
-        GITHUB_HOST, shlex.quote(login.login), options)
+    return '{} | masc keeper-github set-token {}'.format(' '.join(shlex.quote(word) for word in token_argv(login)), options)
 
 
 def browser_tool(binary, program):
@@ -2557,7 +2573,9 @@ def install_action(actions):
     if not actions:
         return None
     action = actions[0]
-    if not (isinstance(action, dict) and isinstance(action.get('label'), str)
+    # The fields `prerequisite_menu` reads when the reader chooses it: a catalog
+    # that drops one is refused here, with the row, instead of after the mark.
+    if not (isinstance(action, dict) and all(isinstance(action.get(key), str) for key in ('id', 'label', 'detail', 'source_url'))
             and isinstance(action.get('requires_admin'), bool)):
         raise SetupError('MASC returned an unreadable install action')
     return action
@@ -2658,23 +2676,30 @@ def imp_tool_rows(binary, base):
     return rows
 
 
+SETUP_SERVER_PROBE_TIMEOUT_SECONDS = 20
+
+
 def note_running_server(binary, base, port):
     """Say that a server which is already running keeps the old browser setting.
 
     The server reads the browser table when it starts, and `masc setup` starts
     one only when none answers. A reader who chose "Continue with this running
-    workspace" would otherwise be told nothing and find the lane off.
+    workspace" would otherwise be told nothing and find the lane off. An
+    observation this cannot read gets the conditional sentence: it does not
+    know there is no server.
     """
     try:
         response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base), '--port', str(port)],
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        running = json.loads(response.stdout).get('status') == 'same_workspace'
-    except (OSError, ValueError, AttributeError):
-        running = None
-    if running is False:
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                  timeout=SETUP_SERVER_PROBE_TIMEOUT_SECONDS)
+        status = json.loads(response.stdout).get('status')
+    except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+        status = None
+    if status in ('free', 'other_workspace', 'unknown_server'):
         return
-    print(('A workspace server is already running.' if running else 'If a workspace server is already running,')
-          + ' It reads the browser setting only when it starts, so restart it for imp\'s browser to turn on.',
+    print(('A workspace server is already running. It' if status == 'same_workspace'
+           else 'If a workspace server is already running, it')
+          + " reads the browser setting only when it starts, so restart it for imp's browser to turn on.",
           file=sys.stderr)
 
 
@@ -2712,7 +2737,8 @@ def choose_imp_tools(binary, base):
     for row in rows:
         if row.notice:
             print(row.notice, file=sys.stderr)
-    print('\nEvery row starts marked. Unmark all of them to skip this step.', file=sys.stderr)
+    print('\nEvery row starts marked. To skip this step, unmark all of them (type 0 on a numbered list).',
+          file=sys.stderr)
     # allow_empty: with every mark removed, Enter must confirm nothing. The
     # default would confirm the row under the cursor, which for the GitHub row
     # is a copy of the reader's token after they had said no.
@@ -2729,12 +2755,12 @@ def read_host_github_token(login):
     meantime would otherwise give imp another account's token than the one
     the reader agreed to.
     """
-    result = subprocess.run(['gh', 'auth', 'token', '--hostname', GITHUB_HOST, '--user', login],
+    result = subprocess.run(token_argv(login),
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             timeout=GH_PROBE_TIMEOUT_SECONDS)
     token = result.stdout.strip()
     if result.returncode != 0 or not token:
-        raise SetupError('gh did not give the GitHub token of ' + terminal_text(login))
+        raise SetupError('gh did not give the GitHub token of ' + terminal_text(login.login))
     return token
 
 
@@ -2751,7 +2777,7 @@ def connect_imp_github(binary, base, row):
         result = subprocess.run([str(binary), 'keeper-github', 'login'] + options, stdout=sys.stderr)
     else:
         result = subprocess.run([str(binary), 'keeper-github', 'set-token'] + options,
-                                input=read_host_github_token(row.host_login.login), text=True, stdout=sys.stderr)
+                                input=read_host_github_token(row.host_login), text=True, stdout=sys.stderr)
     if result.returncode != 0:
         # The command already said why. GitHub is optional, so this does not end setup.
         print("imp's GitHub login was not saved. Everything else is. Run " + github_command(base, None)
@@ -2788,8 +2814,8 @@ def select_imp_tools(binary, base, port=None):
     try:
         confirmed = choose_imp_tools(binary, base)
     except SetupError as error:
-        print(terminal_text(str(error)) + '\nContinuing without them. Run ' + automation_command(base)
-              + ' to give imp a browser later.', file=sys.stderr)
+        print(terminal_text(str(error)) + '\nContinuing without them. Later: ' + automation_command(base)
+              + ' gives imp a browser, and ' + github_command(base, None) + ' signs it into GitHub.', file=sys.stderr)
         return ()
     if any(row.key == AUTOMATION_TOOL for row in confirmed):
         try:
@@ -2910,7 +2936,8 @@ def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None,
         print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
         return 0
     # After the sandbox and before the first conversation: the server reads the
-    # browser table when it starts, and `masc setup` below is what starts it.
+    # browser table when it starts, and `masc setup` below starts one when none
+    # is running (select_imp_tools says so when one already is).
     confirmed = ()
     if quick:
         show_imp_tools(binary, base)

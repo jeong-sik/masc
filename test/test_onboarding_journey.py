@@ -1277,14 +1277,18 @@ class ImpTools(unittest.TestCase):
         self.assertEqual(row.command, 'masc browser-lane-setup --mode automation --base-path /workspace')
 
     def test_an_install_action_in_a_shape_that_drifted_leaves_the_github_row(self):
-        broken = json.loads(browser_catalog('geckodriver', ready=False))
-        del broken['actions'][0]['requires_admin']
-        replies = [completed(json.dumps(broken)), completed(browser_catalog('firefox'))]
-        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
-                contextlib.redirect_stderr(io.StringIO()) as printed:
-            rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
-        self.assertEqual([row.key for row in rows], ['github'])
-        self.assertIn('unreadable install action', printed.getvalue())
+        # Every field the install menu reads, so a catalog that drops one is
+        # refused with the row and not after the reader has marked it.
+        for field in ('id', 'label', 'detail', 'source_url', 'requires_admin'):
+            with self.subTest(field=field):
+                broken = json.loads(browser_catalog('geckodriver', ready=False))
+                del broken['actions'][0][field]
+                replies = [completed(json.dumps(broken)), completed(browser_catalog('firefox'))]
+                with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                        contextlib.redirect_stderr(io.StringIO()) as printed:
+                    rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
+                self.assertEqual([row.key for row in rows], ['github'])
+                self.assertIn('unreadable install action', printed.getvalue())
 
     def test_a_catalog_the_binary_cannot_answer_is_not_read_as_missing_and_leaves_the_github_row(self):
         with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1)]), \
@@ -1330,6 +1334,7 @@ class ImpTools(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             self.assertEqual(SETUP.select_imp_tools('/bin/masc', '/workspace'), ())
         self.assertIn('Continuing without them', printed.getvalue())
+        self.assertIn('masc keeper-github login --keeper imp', printed.getvalue())
         self.assertNotIn('browser-lane-setup', [call.args[0][1] for call in run.call_args_list])
 
     def test_a_browser_step_that_raises_keeps_the_github_login_the_reader_confirmed(self):
@@ -1394,14 +1399,28 @@ class ImpTools(unittest.TestCase):
         # reads the browser table when it starts.
         run, printed = self.note(completed(json.dumps(dict(status='same_workspace'))))
         self.assertEqual(run.call_args.args[0], ['/bin/masc', 'setup-server', '--base-path', '/workspace', '--port', '8945'])
-        self.assertIn('A workspace server is already running.', printed)
+        self.assertIn('A workspace server is already running. It reads the browser setting only when it starts', printed)
         self.assertIn('restart it', printed)
+        self.assertEqual(run.call_args.kwargs['timeout'], SETUP.SETUP_SERVER_PROBE_TIMEOUT_SECONDS)
 
-    def test_no_running_server_means_no_note(self):
-        self.assertEqual(self.note(completed(json.dumps(dict(status='free'))))[1], '')
+    def test_no_running_server_of_this_workspace_means_no_note(self):
+        # Another workspace's server, or a stranger on the port, is not the
+        # server `masc setup` would reuse.
+        for status in ('free', 'other_workspace', 'unknown_server'):
+            with self.subTest(status=status):
+                self.assertEqual(self.note(completed(json.dumps(dict(status=status))))[1], '')
 
-    def test_a_server_observation_that_cannot_be_read_gives_the_note_in_its_conditional_form(self):
-        self.assertIn('If a workspace server is already running,', self.note(completed('', 1))[1])
+    def test_an_observation_that_cannot_be_read_gives_the_note_in_its_conditional_form(self):
+        # It does not know there is no server, so it does not say there is none.
+        replies = [completed('', 1), completed('{}'), completed('null'), completed('[]'),
+                   completed(json.dumps(dict(status='surprise'))),
+                   completed(json.dumps(dict(schema='masc.setup_server_error.v1', error='x')), 1),
+                   SETUP.subprocess.TimeoutExpired('masc', 20), FileNotFoundError('masc')]
+        for reply in replies:
+            with self.subTest(reply=repr(reply)[:40]):
+                printed = self.note(reply)[1]
+                self.assertIn('If a workspace server is already running, it reads the browser setting', printed)
+                self.assertNotIn('A workspace server is already running.', printed)
 
     def test_the_note_follows_a_successful_write(self):
         replies = self.catalogs('geckodriver', 'firefox') + [completed(), completed(json.dumps(dict(status='same_workspace')))]
@@ -1664,6 +1683,25 @@ class ImpGithubLogin(unittest.TestCase):
             self.assertNotIn(GH_TOKEN_FIXTURE, ' '.join(call.args[0]))
         self.assertNotIn(GH_TOKEN_FIXTURE, printed)
 
+    def test_a_token_from_the_environment_is_read_without_naming_an_account(self):
+        # `gh auth token --user` finds only a stored login. For GH_TOKEN it
+        # would exit 1 after the reader had agreed and `masc setup` had run.
+        for source in ('GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN'):
+            with self.subTest(source=source):
+                row = self.row(SETUP.HostGithubLogin('octo', 'repo', source))
+                run, _ = self.hand_over(row, [completed(GH_TOKEN_FIXTURE), completed()])
+                self.assertEqual(run.call_args_list[0].args[0], ['gh', 'auth', 'token', '--hostname', 'github.com'])
+                self.assertNotIn('--user', row.command)
+
+    def test_a_stored_login_is_read_for_its_account(self):
+        for source in ('keyring', 'oauth_token', 'hosts.yml'):
+            with self.subTest(source=source):
+                row = self.row(SETUP.HostGithubLogin('octo', 'repo', source))
+                run, _ = self.hand_over(row, [completed(GH_TOKEN_FIXTURE), completed()])
+                self.assertEqual(run.call_args_list[0].args[0],
+                                 ['gh', 'auth', 'token', '--hostname', 'github.com', '--user', 'octo'])
+                self.assertIn('--user octo', row.command)
+
     def test_the_token_is_not_printed_to_standard_output_either(self):
         row = self.row(SETUP.HostGithubLogin('octo', 'repo', 'keyring'))
         with patch.object(SETUP.subprocess, 'run', side_effect=[completed(GH_TOKEN_FIXTURE), completed()]), \
@@ -1865,6 +1903,11 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
                         with patch.object(SETUP, 'host_github_login', return_value=offered):
                             SETUP.finish_imp_tools(BINARY, str(base), (SETUP.github_row(str(base)),))
             finally:
+                # Python buffers what it prints: without this a token printed by
+                # the wizard itself would reach the real descriptor after the
+                # capture was already read.
+                sys.stdout.flush()
+                sys.stderr.flush()
                 os.dup2(saved, 2)
                 os.dup2(saved_output, 1)
                 os.dup2(saved_input, 0)

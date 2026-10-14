@@ -1315,8 +1315,10 @@ let test_receipt_projection_revision_binds_full_unicode_id () =
   let ledger =
     Ledger.empty ~workspace_root:"/workspace" ~trace_id:(trace_id "trace-one")
   in
-  check string "shared OCaml/Python golden"
-    "7bd059bf9278f8f8959786c9c6c54e280a7821cc389a1990a2b09d452b06ef8a"
+  (* The v7 empty ledger hashes the required async_actions array as well.
+     The receipt identifier below occupies 15 UTF-8 bytes. *)
+  check string "v7 receipt UTF-8 golden"
+    "006625c4a4ac38162139eb142a0929eda08121f37fcb5018357b2bb260560651"
     (Ledger.receipt_projection_revision ledger ~skill_tool_use_id:"call-한한한A");
   let shared = "call-" ^ String.concat "" (List.init 200 (fun _ -> "한")) in
   let left = Ledger.receipt_projection_revision ledger ~skill_tool_use_id:(shared ^ "A") in

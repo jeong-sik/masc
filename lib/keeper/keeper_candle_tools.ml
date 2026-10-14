@@ -171,8 +171,8 @@ let run ~operation ~base_path ~keeper_name ~keeper_names ~args =
     in
     let* receipt =
       shop
-        (Candle_shop.purchase
-           ?expected_price_milli
+        (Candle_shop.purchase_with_expected_price
+           ~expected_price_milli
            ~now:Time_compat.now
            ~base_path
            ~keeper

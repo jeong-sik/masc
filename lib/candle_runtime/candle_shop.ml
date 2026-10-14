@@ -139,7 +139,7 @@ let catalog ~now ~base_path =
     Ok (catalog_for_balance view.policy view.balance)
 ;;
 
-let purchase ?expected_price_milli ~now ~base_path ~keeper ~item =
+let purchase_with_expected_price ~expected_price_milli ~now ~base_path ~keeper ~item =
   let* (_ : Candle_config.policy) = policy ~base_path in
   let keeper = Keeper_id.Keeper_name.to_string keeper in
   Candle_ledger.update ~base_path (fun view ->
@@ -188,4 +188,8 @@ let purchase ?expected_price_milli ~now ~base_path ~keeper ~item =
       | Candle_ledger.Write_failed _
       | Candle_ledger.Write_locked _ ) as error ->
       Ledger_unavailable (Candle_ledger.update_error_to_string error_to_string error))
+;;
+
+let purchase ~now ~base_path ~keeper ~item =
+  purchase_with_expected_price ~expected_price_milli:None ~now ~base_path ~keeper ~item
 ;;

@@ -69,11 +69,19 @@ val catalog : now:(unit -> float) -> base_path:string -> (catalog_entry list, er
     A competing append reruns that decision with the new ledger. The price
     recorded is the explicit policy re-read within each cursor attempt; an
     item that becomes unpriced is refused before any debit. When
-    [expected_price_milli] is given and the effective price at the purchase
-    instant exceeds it, the purchase is refused with [Price_changed]. *)
-val purchase
-  :  ?expected_price_milli:int
+    [expected_price_milli] is [Some expected] and the effective price at the
+    purchase instant exceeds [expected], the purchase is refused with
+    [Price_changed]. *)
+val purchase_with_expected_price
+  :  expected_price_milli:int option
   -> now:(unit -> float)
+  -> base_path:string
+  -> keeper:Keeper_id.Keeper_name.t
+  -> item:Keeper_portrait_item.t
+  -> (receipt, error) result
+
+val purchase
+  :  now:(unit -> float)
   -> base_path:string
   -> keeper:Keeper_id.Keeper_name.t
   -> item:Keeper_portrait_item.t

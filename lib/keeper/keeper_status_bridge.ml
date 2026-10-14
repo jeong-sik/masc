@@ -279,16 +279,18 @@ let attention_fields_json_of
   ]
 ;;
 
+let approval_queue_attention (config : Workspace_utils.config) (meta : keeper_meta) =
+  match
+    Keeper_approval_queue.pending_count_for_keeper_in_workspace
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
+  with
+  | Ok count -> Approval_queue_ready count
+  | Error error -> Approval_queue_unavailable error
+;;
+
 let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
-  let approval_queue =
-    match
-      Keeper_approval_queue.pending_count_for_keeper_in_workspace
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
-    with
-    | Ok count -> Approval_queue_ready count
-    | Error error -> Approval_queue_unavailable error
-  in
+  let approval_queue = approval_queue_attention config meta in
   attention_of_surface config meta (runtime_blocker_surface_opt config meta) approval_queue
   |> attention_fields_json_of meta approval_queue
 ;;

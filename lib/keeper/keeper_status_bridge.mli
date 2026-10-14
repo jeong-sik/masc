@@ -98,6 +98,19 @@ val attention_of_surface :
     {!runtime_blocker_surface_opt}, so a caller that also shows the blocker
     reads it once. *)
 
+val approval_queue_attention :
+  Workspace_utils.config -> keeper_meta -> approval_queue_attention
+(** The Keeper's pending approval count from the workspace queue, or why it
+    could not be read. *)
+
+val attention_fields_json_of :
+  keeper_meta ->
+  approval_queue_attention ->
+  attention ->
+  (string * Yojson.Safe.t) list
+(** The status JSON fields of an attention already decided, with the
+    approval queue it was decided from. *)
+
 val attention_fields_json :
   Workspace_utils.config -> keeper_meta -> (string * Yojson.Safe.t) list
 

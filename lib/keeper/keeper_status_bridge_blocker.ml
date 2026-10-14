@@ -22,6 +22,7 @@ type runtime_blocker_class =
   | Blocked_by_unresolved_fiber
   | Blocked_by_exception
   | Blocked_by_operator_interrupt
+[@@deriving enumerate]
 
 let runtime_blocker_class_to_string = function
   | Blocked_by_heartbeat_failures -> "heartbeat_failures"

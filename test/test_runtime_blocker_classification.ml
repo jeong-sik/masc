@@ -1,6 +1,7 @@
 (** Runtime-blocker classification: a provider runtime record reaches the
     bridge class its typed reason names, its summary is the record itself,
-    and every agent error follows its decision. *)
+    every agent error follows its decision, and the dashboard's label fixture
+    holds every class. *)
 
 open Alcotest
 module Kmc = Masc.Keeper_meta_contract
@@ -224,11 +225,41 @@ let test_agent_errors_follow_their_decision () =
     one_of_each_agent_error
 ;;
 
+(* ── Labels the dashboard reads ───────────────────────────────── *)
+
+(* The dashboard narrows [runtime_blocker_class] to its own closed list. Its
+   vitest suite checks that list against this fixture, and this test checks
+   the fixture against every class here, so a label added, renamed or removed
+   on one side fails until both sides and the fixture agree. *)
+let test_dashboard_fixture_holds_every_label () =
+  let fixture =
+    In_channel.with_open_text
+      "../dashboard/src/api/fixtures/runtime-blocker-classes.json"
+      In_channel.input_all
+    |> Yojson.Safe.from_string
+  in
+  let labels =
+    match fixture with
+    | `List items ->
+      List.mapi
+        (fun index -> function
+           | `String label -> label
+           | other ->
+             failf "fixture item %d is not a string: %s" index
+               (Yojson.Safe.to_string other))
+        items
+    | other -> failf "fixture is not a list: %s" (Yojson.Safe.to_string other)
+  in
+  check (list string) "fixture holds one label per class, in declaration order"
+    (List.map KSB.runtime_blocker_class_to_string KSB.all_of_runtime_blocker_class)
+    labels
+;;
+
 (* ── Runner ────────────────────────────────────────────────────── *)
 
 let () =
   Alcotest.run
-    "blocker_class_exhaustiveness"
+    "runtime_blocker_classification"
     [ ( "provider_runtime_record"
       , [ test_case "typed reason reaches runtime_exhausted" `Quick
             test_typed_provider_reason_reaches_runtime_exhausted
@@ -248,6 +279,10 @@ let () =
     ; ( "agent_error_decision"
       , [ test_case "every agent_error follows its decision" `Quick
             test_agent_errors_follow_their_decision
+        ] )
+    ; ( "dashboard_labels"
+      , [ test_case "the dashboard fixture holds every class" `Quick
+            test_dashboard_fixture_holds_every_label
         ] )
     ]
 ;;

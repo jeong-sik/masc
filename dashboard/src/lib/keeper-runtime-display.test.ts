@@ -213,11 +213,9 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('official_client_recovery_required')).toBe('공식 클라이언트 세션 복구 필요')
   })
 
-  it('labels the active agent-core blocker variants', () => {
-    expect(keeperRuntimeBlockerLabel('agent_core_context_window_exceeded')).toBe('Agent Core 컨텍스트 윈도 초과')
-    expect(keeperRuntimeBlockerLabel('agent_core_unrecognized_stop_reason')).toBe('Agent Core 미식별 정지 사유')
-    expect(keeperRuntimeBlockerLabel('agent_core_guardrail_violation')).toBe('Agent Core 가드레일 위반')
-    expect(keeperRuntimeBlockerLabel('agent_core_tripwire_violation')).toBe('Agent Core Tripwire 위반')
+  it('labels a configuration error and an operator stop', () => {
+    expect(keeperRuntimeBlockerLabel('turn_configuration_error')).toBe('실행 설정 오류')
+    expect(keeperRuntimeBlockerLabel('operator_interrupt')).toBe('운영자가 턴을 멈춤')
   })
 
   it('SSOT regression guard — every literal in KEEPER_RUNTIME_BLOCKER_CLASSES has a non-null label', () => {

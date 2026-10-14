@@ -8355,7 +8355,7 @@ let test_async_composition_binds_params_into_durable_status () =
          with
          | Error error -> fail error.Agent_core.Types.message
          | Ok output ->
-           let payload = parse_json output.content in
+           let payload = structured_tool_output_exn ~base_path:config.base_path output.content in
            check string
              "async acceptance mode"
              "async"
@@ -8429,7 +8429,7 @@ let test_async_composition_binds_params_into_durable_status () =
        with
        | Error error -> fail error.Agent_core.Types.message
        | Ok output ->
-         let payload = parse_json output.content in
+         let payload = structured_tool_output_exn ~base_path:config.base_path output.content in
          check string
            "durable terminal status"
            "done"

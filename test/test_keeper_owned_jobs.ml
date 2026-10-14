@@ -856,7 +856,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let node name tool input after = `Assoc ["id", `String name; "tool", `String tool;
       "input", input; "after", `List (List.map (fun name -> `String name) after)] in
   let output = `Assoc ["kind", `String "output"; "node", `String "await";
-      "pointer", `String "/artifacts/0/sha256"] in
+      "pointer", `String "/artifacts/0/_blob/sha256"] in
   let recipe = `Assoc ["execution", `String "async";
       "branch_failure_policy", `String "continue_independent";
       "nodes", `List

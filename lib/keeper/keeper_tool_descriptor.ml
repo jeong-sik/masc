@@ -2280,8 +2280,11 @@ let keeper_spawn_descriptor (definition : Tool_schemas_spawn.definition) =
   | Tool_schemas_spawn.Read | Tool_schemas_spawn.Wait | Tool_schemas_spawn.Stop -> descriptor
 ;;
 
-(* All three actions return the same durable handle shape. Status may persist
-   reconciled terminal evidence, so it shares the Serial effectful policy. *)
+(* All owned-job actions use Keeper_owned_job_store.result_json. Composition
+   schemas describe its field structure; enum refinements are unsupported.
+   Phase/status values come from the store's closed phase codec and projection,
+   while artifacts retain the canonical normalized _blob wrapper. Status may
+   persist terminal evidence, so it shares the Serial effectful policy. *)
 let owned_job_output_schema =
   let nullable_string =
     `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
@@ -2305,11 +2308,7 @@ let owned_job_output_schema =
       [ "job_id", `Assoc [ "type", `String "string" ]
       ; "status", `Assoc [ "type", `String "string" ]
       ; "source", source_schema
-      ; "phase", `Assoc
-          [ "type", `String "string"
-          ; "enum", `List (List.map (fun phase -> `String phase)
-              [ "prepared"; "create_requested"; "created"; "start_requested"
-              ; "running"; "exited"; "cancelled_before_start" ]) ]
+      ; "phase", `Assoc [ "type", `String "string" ]
       ; "cancel_requested", `Assoc [ "type", `String "boolean" ]
       ; "artifacts", `Assoc
           [ "type", `String "array"; "items", normalized_artifact_ref_schema ]
@@ -2317,7 +2316,8 @@ let owned_job_output_schema =
       ; "container_id", nullable_string
       ; "exit_code", nullable_integer
       ]
-    ~required:[ "job_id"; "status"; "source"; "phase"; "cancel_requested"; "artifacts"; "detail" ]
+    ~required:[ "job_id"; "status"; "source"; "phase"; "cancel_requested";
+                "artifacts"; "detail"; "container_id"; "exit_code" ]
 ;;
 
 let keeper_owned_job_descriptor (definition : Tool_schemas_owned_job.definition) =

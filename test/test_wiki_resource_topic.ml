@@ -267,6 +267,41 @@ let test_unreadable_page_is_listed_by_file_with_reason () =
       check string "described by the reason" beta_reason resource.description)
 ;;
 
+(* A page's body can be far larger than its header. The listing names it from
+   the header and reports the whole file's size, which it takes from a stat
+   rather than from reading the body (task-2309). *)
+let test_large_page_is_listed_from_header_and_stat () =
+  let header =
+    "---\ntitle: Big Doc\nsummary: A body far larger than the header bound\n\
+     source: research\nauthor: codex\ncreated: 2026-10-13\nrevision: 1\ntags: []\n---\n"
+  in
+  let body = "\n" ^ String.make 40000 'x' in
+  with_wiki ~documents:[ "big.md", header ^ body ] (fun state ->
+    match find_listed "masc://wiki/big" (listed state) with
+    | None -> fail "expected masc://wiki/big to be listed"
+    | Some resource ->
+      check (option string) "title comes from the header" (Some "Big Doc") resource.title;
+      check (option int) "size is the whole file, from a stat"
+        (Some (String.length header + String.length body)) resource.size)
+;;
+
+(* A header longer than the read bound still parses: the listing falls back to
+   the whole file rather than reporting the header unreadable. The summary
+   alone is longer than the bound. *)
+let test_header_longer_than_the_bound_still_parses () =
+  let long_summary = String.make 9000 's' in
+  let header =
+    "---\ntitle: Long Doc\nsummary: " ^ long_summary
+    ^ "\nsource: research\nauthor: codex\ncreated: 2026-10-13\nrevision: 1\ntags: []\n---\n"
+  in
+  with_wiki ~documents:[ "long.md", header ^ "body\n" ] (fun state ->
+    match find_listed "masc://wiki/long" (listed state) with
+    | None -> fail "expected masc://wiki/long to be listed"
+    | Some resource ->
+      check (option string) "title comes from the whole header" (Some "Long Doc")
+        resource.title)
+;;
+
 (* A file whose name is not a valid page topic would resolve to a different
    page or to nothing, so it must not become a listing row: every listed page
    URI reads back as the file it was made from. *)
@@ -378,6 +413,14 @@ let () =
             "an unreadable page is listed by file with the reason"
             `Quick
             test_unreadable_page_is_listed_by_file_with_reason
+        ; test_case
+            "a large page is listed from its header and a stat"
+            `Quick
+            test_large_page_is_listed_from_header_and_stat
+        ; test_case
+            "a header longer than the read bound still parses"
+            `Quick
+            test_header_longer_than_the_bound_still_parses
         ; test_case
             "only round-trippable pages are listed"
             `Quick

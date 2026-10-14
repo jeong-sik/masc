@@ -223,6 +223,8 @@ let capture_gc () =
 ;;
 
 let compute_lag_percentiles t =
+  (* [summarize_samples] reorders [xs] in place via [select]; threshold counts
+     only inspect element values, and are computed first on the fresh copy. *)
   let xs = samples t in
   let over_50ms_count =
     Array.fold_left
@@ -282,17 +284,20 @@ let gc_snapshot_to_yojson (gc : gc_snapshot) : Yojson.Safe.t =
 ;;
 
 let lag_percentiles_to_yojson (lag : lag_percentiles) : Yojson.Safe.t =
-  `Assoc
-    [ "samples", `Int lag.samples
-    ; "p50_ms", `Float lag.p50_ms
-    ; "p95_ms", `Float lag.p95_ms
-    ; "p99_ms", `Float lag.p99_ms
-    ; "max_ms", `Float lag.max_ms
-    ; "mean_ms", `Float lag.mean_ms
-    ; "stalls", `Int lag.stalls
-    ; "over_50ms_count", `Int lag.over_50ms_count
-    ; "over_200ms_count", `Int lag.over_200ms_count
-    ]
+  if lag.samples = 0
+  then `Assoc [ "samples", `Int 0 ]
+  else
+    `Assoc
+      [ "samples", `Int lag.samples
+      ; "p50_ms", `Float lag.p50_ms
+      ; "p95_ms", `Float lag.p95_ms
+      ; "p99_ms", `Float lag.p99_ms
+      ; "max_ms", `Float lag.max_ms
+      ; "mean_ms", `Float lag.mean_ms
+      ; "stalls", `Int lag.stalls
+      ; "over_50ms_count", `Int lag.over_50ms_count
+      ; "over_200ms_count", `Int lag.over_200ms_count
+      ]
 ;;
 
 let snapshot_to_yojson (s : snapshot) : Yojson.Safe.t =

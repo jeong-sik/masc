@@ -179,7 +179,8 @@ let test_empty_ring_has_no_percentiles () =
   check bool "no top-level samples" false (List.mem_assoc "samples" fields);
   match List.assoc_opt "lag" fields with
   | Some (`Assoc lag_fields) ->
-    check bool "lag.samples 0" true (has_field lag_fields "samples" (`Int 0))
+    check bool "lag.samples 0" true (has_field lag_fields "samples" (`Int 0));
+    check bool "no lag.p50 when empty" false (List.mem_assoc "p50_ms" lag_fields)
   | _ -> fail "expected lag object in to_fields"
 ;;
 

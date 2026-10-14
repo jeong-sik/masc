@@ -78,8 +78,10 @@ s = b.get("scheduler")
 if s is None:
     print("   scheduler: field absent from a 2xx /health (server predates the probe)")
 else:
-    keys = ["probe", "pool_domains", "samples", "p50_ms", "p95_ms", "p99_ms", "max_ms", "mean_ms", "stalls", "stopped_reason"]
-    print("   scheduler: " + " ".join(f"{k}={s[k]}" for k in keys if k in s))
+    lag = s.get("lag") if isinstance(s.get("lag"), dict) else {}
+    merged = {**s, **lag}
+    keys = ["probe", "pool_domains", "samples", "p50_ms", "p95_ms", "p99_ms", "max_ms", "mean_ms", "stalls", "over_50ms_count", "over_200ms_count", "stopped_reason"]
+    print("   scheduler: " + " ".join(f"{k}={merged[k]}" for k in keys if k in merged))
 ga, gb = a.get("gc", {}), b.get("gc", {})
 words = 8
 def delta(k): return float(gb.get(k, 0)) - float(ga.get(k, 0))

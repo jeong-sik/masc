@@ -71,8 +71,9 @@ TUI에 `reconnecting...` 배너가 반복되거나 서버 지연이 튀는 경�
    ```bash
    curl -s http://127.0.0.1:8935/health | jq '{scheduler: .scheduler, gc: .gc}'
    ```
-   `.scheduler.stalls`(1초 이상 스톨 횟수)와 백분위(`p50_ms`, `p95_ms`, `p99_ms`,
-   `max_ms`)를 보세요. 이 값들은 최근 1분 링의 실측이고, 높다는 건 메인 도메인이
+   `.scheduler.lag.stalls`(1초 이상 스톨 횟수)와 `.scheduler.lag` 백분위(`p50_ms`,
+   `p95_ms`, `p99_ms`, `max_ms`, `mean_ms`, `over_50ms_count`, `over_200ms_count`)를
+   보세요. 이 값들은 최근 1분 링의 실측이고, 높다는 건 메인 도메인이
    준비된 파이버를 제때 못 돌렸다는 뜻입니다(yield 없이 계산한 파이버, stop-the-world
    GC, 스케줄러 스레드의 블로킹 호출 등).
 

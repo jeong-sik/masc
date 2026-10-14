@@ -119,6 +119,7 @@ let rec reap_group t owner set_exit_status =
         let rec wait () =
           try owner.waitpid t.pid with
           | Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
+        let wait_error = ref None in
         let settle () =
           match Eio_unix.run_in_systhread wait with
           | reaped, status ->
@@ -126,16 +127,20 @@ let rec reap_group t owner set_exit_status =
             locked t (fun () -> Promise.resolve_ok set_exit_status status)
           | exception exn ->
             (* Preserve the failure for a concurrent cleanup waiter as well. *)
+            let bt = Printexc.get_raw_backtrace () in
             locked t (fun () -> Promise.resolve_error set_exit_status exn);
-            raise exn
+            wait_error := Some (exn,bt)
         in
         (* Claiming [Reaping] commits us to resolving the owner promise.
            A diagnostic writer may propagate cancellation, but cannot skip
            the actual wait or leave cleanup awaiting an unresolved promise. *)
         Fun.protect ~finally:settle (fun () ->
           Exec_tap.record_lifecycle ~pid:t.pid ~stage:Waitpid_started ());
-        Exec_tap.record_lifecycle ~pid:t.pid ~stage:Waitpid_returned ();
-        Exec_tap.record_lifecycle ~pid:t.pid ~stage:Exit_published ())
+        match !wait_error with
+        | Some (exn,bt) -> Printexc.raise_with_backtrace exn bt
+        | None ->
+          Exec_tap.record_lifecycle ~pid:t.pid ~stage:Waitpid_returned ();
+          Exec_tap.record_lifecycle ~pid:t.pid ~stage:Exit_published ())
 
 ;;
 

@@ -273,6 +273,28 @@ Missing or corrupt source authority stays unresolved. These producer receipts
 precede compiler support for async child Skill nodes; they do not enable that
 syntax or change named Skills' static read-only admission.
 
+Broker entry is fail-closed by decision. `begin_submit` writes the durable
+`Submitting {request_id = None}` phase before the broker records admission, and
+the entry permit itself lives only in process memory. If the process dies in
+that window, every replay of the same occurrence returns
+`Submission_in_progress`: replay cannot prove the request never reached the
+broker, so it issues no replacement permit and cannot return the phase to
+`Prepared` (only the lost permit could). The Keeper logs one warning naming the
+intent record whenever it holds this state, and the tool result stays
+`Effect_outcome_unknown`. Operator resolution is deliberate and offline: stop
+the Keeper, confirm the journal has no admitted request for the original run,
+then restore the intent record at
+`.masc/keeper_msg_requests/named_submissions/<sha256>.json` to a `prepared`
+header with no phase-event tail (keep the source header line intact). The next
+replay of the exact original invocation re-enters the broker with a fresh
+permit. Deleting the record is not a reset: the sealed activation ledger still
+proves the invocation was recorded, so a fresh prepare fails with
+`Missing_intent` and the occurrence stays closed the same way. The sibling
+window — a crash after the activity record but before the intent write — has no
+intent record at all and replays to the same refusal; it likewise has no
+automatic repair and stays closed until an operator restores the record from
+retained evidence or retires the occurrence.
+
 Pending reads return a typed dependency. An enclosing prepared async DAG releases
 its worker, retains completed independent nodes, and rechecks the same occurrences
 after canonical completion. The result includes the full original structured

@@ -294,6 +294,7 @@ let prepare ~base_path request ~make_source = protect (fun () ->
 
 let source intent = Journal.source intent.journal
 let journal intent = intent.journal
+let path intent = intent.path
 
 let current intent =
   let* bytes = read ~root:intent.root intent.path in

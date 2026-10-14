@@ -1,6 +1,21 @@
 (** One producer-owned named submission for an original SDK invocation.
     The original source is durable before broker entry. An acceptance response
-    may be lost without creating a replacement run or request on replay. *)
+    may be lost without creating a replacement run or request on replay.
+
+    Broker entry is fail-closed by decision: the entry permit lives only in
+    process memory. If the process dies after the durable
+    [Submitting {request_id = None}] phase but before the broker records
+    admission, every replay of the same occurrence returns
+    [Submission_in_progress]; no replacement permit is issued and no
+    automatic transition back to [Prepared] exists, because the only
+    [Submitting {request_id = None}] -> [Prepared] path requires the lost
+    permit. The operator reset is deliberate and offline (Keeper stopped,
+    journal admission verified absent): restore the intent record at
+    [path] to a [prepared] header with no phase-event tail. Deleting the
+    record is not a reset — the sealed activation ledger still proves the
+    invocation was recorded, so a fresh prepare fails with [Missing_intent];
+    an intent never written after its activity record fails the same way and
+    has no automatic repair. See docs/guides/keeper-owned-jobs.md. *)
 
 type request
 type t
@@ -15,6 +30,10 @@ type error =
   | Source_conflict
   | Journal_rejected of Keeper_tool_execution_journal.error
   | Submission_in_progress
+      (** A durable broker-entry phase exists without admission and the
+          in-memory permit is gone. Held fail-closed on every replay until
+          the operator resets the intent record; never a replacement
+          permit (docs/guides/keeper-owned-jobs.md). *)
   | Stale_permit
   | Persistence_failed of string
 
@@ -45,6 +64,10 @@ val load : base_path:string -> request -> (t option, error) result
 
 val source : t -> Keeper_tool_execution_journal.source
 val journal : t -> Keeper_tool_execution_journal.t
+val path : t -> string
+(** Durable intent record, keyed by the exact original identity JSON. This
+    is the operator reset target documented in
+    docs/guides/keeper-owned-jobs.md. *)
 val accepted : t ->
   (Keeper_composition_dependency.composition option, error) result
 (** Read only the canonical first named admission. This can recover acceptance
@@ -56,7 +79,14 @@ val unconfirmed_request_id : t -> (string option, error) result
 
 val begin_submit : t -> (permit, error) result
 (** Commit a unique broker-entry permit before any submission effects. A
-    competing or interrupted entry cannot issue a replacement permit. *)
+    competing or interrupted entry cannot issue a replacement permit.
+
+    Fail-closed by decision: a crash after this durable phase write but
+    before broker admission leaves [Submission_in_progress] on every later
+    replay of the same occurrence. The permit is process memory only, so
+    no replayed transition back to [Prepared] is possible; the operator
+    reset path is documented in the module header and
+    docs/guides/keeper-owned-jobs.md. *)
 
 val observe_submit_error : permit -> Keeper_msg_async.submit_error ->
   (unit, error) result

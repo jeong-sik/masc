@@ -8582,6 +8582,222 @@ let test_async_composition_binds_params_into_durable_status () =
          | _ -> fail "durable async result lost its single worker action")
 ;;
 
+let test_named_submission_crash_before_broker_entry_stays_fail_closed () =
+  (* begin_submit writes the durable Submitting phase before any broker
+     effect. A process crash in that window destroys the in-memory permit,
+     so replay of the exact same occurrence must hold fail-closed instead
+     of minting a replacement permit; only the documented operator reset
+     (drop the phase-event tail) reopens the occurrence. *)
+  let module Submission = Masc.Keeper_composition_named_submission in
+  with_exec_fixture
+    ~bind_eio_context:true
+    "composition-named-crash-before-broker"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       ignore publication_recovery;
+       ignore ctx_work;
+       let snapshot, skill_catalog =
+         skill_catalog_with_snapshot_of_composition
+           ~name:"memory-background"
+           async_param_memory_composition
+       in
+       let capability_surface = Masc.Keeper_capability_surface.create
+           ~tool_deny:[] ~sandbox_profile:meta.sandbox_profile ~skill_names:None
+           ~global_skill_catalog:skill_catalog
+           ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)
+           ~task_skills:[] in
+       let skill_reference, tool_name =
+         let projection = Masc.Keeper_capability_surface.skill_projection capability_surface in
+         match
+           Masc.Keeper_skill_catalog.skills projection.Masc.Keeper_skill_catalog.catalog
+           |> List.find_map (fun (skill : Masc.Keeper_skill_catalog.skill) ->
+             match skill.surface with
+             | Masc.Keeper_skill_catalog.Composition entry
+               when entry.Masc.Keeper_tool_composition_catalog.execution
+                    = Masc.Keeper_tool_composition_catalog.Async ->
+               Option.map
+                 (fun reference ->
+                    reference, Masc.Keeper_tool_composition_catalog.tool_name entry)
+                 skill.reference
+             | Masc.Keeper_skill_catalog.Composition _ -> None
+             | Masc.Keeper_skill_catalog.Instruction -> None)
+         with
+         | Some pair -> pair
+         | None -> fail "async composition skill was not projected"
+       in
+       let task_selection =
+         match Masc.Keeper_task_skill_turn.resolve ~snapshot [] with
+         | Ok selection -> selection
+         | Error error -> fail (Masc.Keeper_task_skill_turn.error_to_string error)
+       in
+       let make_activation_context ~absolute_turn =
+         match Masc.Keeper_skill_activation_recorder.make
+             ~trace_id:meta.runtime.trace_id
+             ~turn_ref:(Ids.Turn_ref.make
+               ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+               ~absolute_turn)
+             ~runtime_id:(fun () -> Some "composition-crash.fixture")
+             ~snapshot_revision:(Masc.Keeper_capability_surface.skill_snapshot_revision capability_surface)
+             ~task_selection with
+         | Ok context -> context
+         | Error error -> fail (Masc.Keeper_skill_activation_recorder.error_to_string error)
+       in
+       let skill_activation_context = make_activation_context ~absolute_turn:1 in
+       let parent_invocation =
+         composition_invocation_at ~turn:0
+           ~completion:Agent_core.Tool_contract.Continue_after_success
+       in
+       let node =
+         Masc.Keeper_tool_plan.node
+           ~id:(composition_node_id "search")
+           ~tool_name:"keeper_memory_search"
+           ~input:(Masc.Keeper_tool_plan.Json_template.literal
+             (`Assoc ["query", `String "crash-window-marker"]))
+           ()
+       in
+       let plan =
+         match Masc.Keeper_tool_plan.create
+             ~descriptors:[composition_descriptor "keeper_memory_search"] [node] with
+         | Ok plan -> plan
+         | Error _ -> fail "crash-window composition plan was rejected"
+       in
+       let make_source () =
+         let ( let* ) = Result.bind in
+         let* activation =
+           Masc.Keeper_skill_activation_recorder.bind_async skill_activation_context
+           |> Result.map_error (fun error ->
+             Submission.Invalid_request (Masc.Keeper_skill_activation_recorder.error_to_string error))
+         in
+         let* recorded =
+           Masc.Keeper_skill_activation_recorder.record_bound_composition
+             ~config activation ~invocation:parent_invocation ~tool_name skill_reference
+           |> Result.map_error (fun error ->
+             Submission.Invalid_request (Masc.Keeper_skill_activation_recorder.error_to_string error))
+         in
+         let* () = match recorded with
+           | Masc.Keeper_skill_activation_ledger.Recorded _ -> Ok ()
+           | Masc.Keeper_skill_activation_ledger.Already_recorded _ ->
+             Error Submission.Missing_intent
+         in
+         let* recipe =
+           Masc.Keeper_tool_plan_request.to_yojson plan
+           |> Result.map_error (fun (Masc.Keeper_tool_plan_request.Unsubstituted_param {name}) ->
+             Submission.Invalid_request ("unbound named parameter " ^ name))
+         in
+         let* draft =
+           Masc.Keeper_composition_draft.prepare ~base_path:config.base_path
+             ~capability_surface ~keeper_name:meta.name
+             ~execution:Masc.Keeper_tool_composition_catalog.Async recipe
+           |> Result.map_error (fun error ->
+             Submission.Persistence_failed
+               (Yojson.Safe.to_string (Masc.Keeper_composition_draft.error_to_json error)))
+         in
+         let composition_run_id = Masc.Keeper_tool_plan.Composition_run_id.fresh () in
+         let* run_reference =
+           Masc.Keeper_composition_draft.record_invocation ~base_path:config.base_path
+             ~composition_run_id ~invocation:parent_invocation draft
+           |> Result.map_error (fun error ->
+             Submission.Persistence_failed
+               (Yojson.Safe.to_string (Masc.Keeper_composition_draft.error_to_json error)))
+         in
+         let source : Masc.Keeper_tool_execution_journal.source =
+           { keeper_name = meta.name
+           ; composition_run_id
+           ; draft_reference = Masc.Keeper_composition_draft.reference draft
+           ; run_reference
+           ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation
+           ; source_turn = Agent_core.Tool_contract.Invocation.turn parent_invocation
+           ; source_task_id = None
+           ; producer = Masc.Keeper_tool_execution_journal.Named
+               { tool_name; skill_reference; activation = Some activation }
+           }
+         in
+         Masc.Keeper_tool_execution_journal.prepare ~base_path:config.base_path source
+         |> Result.map_error (fun error -> Submission.Journal_rejected error)
+       in
+       let request =
+         match
+           Submission.request ~keeper_name:meta.name ~trace_id:meta.runtime.trace_id
+             ~physical_turn_ref:(Masc.Keeper_skill_activation_recorder.physical_turn_ref skill_activation_context)
+             ~invocation:parent_invocation ~source_task_id:None
+             ~skill_reference ~tool_name ~plan
+         with
+         | Ok request -> request
+         | Error error -> fail (Submission.error_to_string error)
+       in
+       let intent =
+         match Submission.prepare ~base_path:config.base_path request ~make_source with
+         | Ok intent -> intent
+         | Error error -> fail (Submission.error_to_string error)
+       in
+       let intent_path = Submission.path intent in
+       (match Submission.begin_submit intent with
+        | Ok _ -> ()
+        | Error error -> fail (Submission.error_to_string error));
+       (* The process dies here: the permit is process memory and is gone,
+        while the durable record still holds Submitting {request_id = None}. *)
+       let replay () =
+         match Submission.load ~base_path:config.base_path request with
+         | Ok (Some intent) -> intent
+         | Ok None -> fail "original named intent disappeared"
+         | Error error -> fail (Submission.error_to_string error)
+       in
+       let replayed = replay () in
+       check string "replayed occurrence addresses the same intent record" intent_path
+         (Submission.path replayed);
+       let rec hold_closed attempts =
+         if attempts > 0 then begin
+           (match Submission.begin_submit replayed with
+            | Error Submission.Submission_in_progress -> ()
+            | Error error ->
+              fail ("unexpected replay error: " ^ Submission.error_to_string error)
+            | Ok _ -> fail "replay issued a replacement broker-entry permit");
+           hold_closed (attempts - 1)
+         end
+       in
+       hold_closed 3;
+       (match Submission.accepted replayed with
+        | Ok None -> ()
+        | Ok (Some _) -> fail "broker admission appeared without a submission"
+        | Error error -> fail (Submission.error_to_string error));
+       (match Submission.unconfirmed_request_id replayed with
+        | Ok None -> ()
+        | Ok (Some _) -> fail "unconfirmed broker request ID appeared without a submission"
+        | Error error -> fail (Submission.error_to_string error));
+       let lines =
+         In_channel.with_open_text intent_path In_channel.input_all
+         |> String.split_on_char '\n'
+         |> List.filter (fun line -> line <> "")
+       in
+       check int "crash leaves the prepared header and one phase event" 2 (List.length lines);
+       (* Operator reset (docs/guides/keeper-owned-jobs.md): drop the
+          phase-event tail so the record is the prepared header alone. *)
+       Out_channel.with_open_text intent_path (fun channel ->
+         output_string channel (List.hd lines ^ "\n"));
+       let reset = replay () in
+       let fresh_permit =
+         match Submission.begin_submit reset with
+         | Ok permit -> permit
+         | Error error -> fail (Submission.error_to_string error)
+       in
+       (match
+          Submission.observe_submit_error fresh_permit
+            (Masc.Keeper_msg_async.Submit_rejected Masc.Keeper_msg_async.Caller_mismatch)
+        with
+        | Ok () -> ()
+        | Error error -> fail (Submission.error_to_string error));
+       (match Submission.begin_submit reset with
+        | Ok _ -> ()
+        | Error error -> fail (Submission.error_to_string error));
+       (* Deleting the record is not a reset: the sealed activation ledger
+          still proves the invocation was recorded. *)
+       Unix.rename intent_path (intent_path ^ ".retained-original");
+       (match Submission.prepare ~base_path:config.base_path request ~make_source with
+        | Error Submission.Missing_intent -> ()
+        | Error error ->
+          fail ("unexpected prepare error: " ^ Submission.error_to_string error)
+        | Ok _ -> fail "deleted intent was silently recreated"))
+;;
+
 let test_async_composition_status_preserves_artifact_manifest () =
   with_exec_fixture
     ~bind_eio_context:true
@@ -10472,6 +10688,8 @@ let () =
         test_write_then_unchanged_read_completes;
       test_case "async composition binds params into durable status" `Quick
         test_async_composition_binds_params_into_durable_status;
+      test_case "named submission crash before broker entry stays fail-closed" `Quick
+        test_named_submission_crash_before_broker_entry_stays_fail_closed;
       test_case "async composition status preserves artifact manifest" `Quick
         test_async_composition_status_preserves_artifact_manifest;
       test_case "terminal composition requires terminal outer invocation" `Quick

@@ -1794,7 +1794,18 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
              | Error error ->
                match recover () with
                | Ok (Some result) -> Error result
-               | Ok None -> Error (unresolved error)
+               | Ok None ->
+                 (match error with
+                  | Submission.Submission_in_progress ->
+                    Log.Keeper.warn
+                      "named submission %s: broker-entry phase is durable but admission is absent and its in-memory permit died with the original process; this occurrence stays fail-closed (Submission_in_progress) until the operator resets the intent record (docs/guides/keeper-owned-jobs.md)"
+                      (Submission.path intent)
+                  | Submission.Invalid_request _ | Submission.Identity_conflict
+                  | Submission.Missing_intent | Submission.Unreadable_intent _
+                  | Submission.Corrupt_intent _ | Submission.Source_conflict
+                  | Submission.Journal_rejected _ | Submission.Stale_permit
+                  | Submission.Persistence_failed _ -> ());
+                 Error (unresolved error)
                | Error detail -> Error (unresolved detail)) in
       let observe_submission outcome =
         match Atomic.get permit with

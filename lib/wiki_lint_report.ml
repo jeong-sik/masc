@@ -54,6 +54,8 @@ let finding_to_json (finding : Wiki_lint.finding) : Yojson.Safe.t =
       ; "log_revision", `Int log_revision
       ; "page_revision", `Int page_revision
       ]
+  | Wiki_lint.Revision_log_hole { page; missing } ->
+    `Assoc [ "kind", kind; "page", `String page; "missing", `Int missing ]
   | Wiki_lint.Unreadable_page { file; reason } ->
     `Assoc [ "kind", kind; "file", `String file; "reason", `String reason ]
 ;;

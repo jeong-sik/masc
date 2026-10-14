@@ -19,6 +19,7 @@ lock and calls no model. The design is
 | `hearsay_only` | Its sources are only `said:` lines. |
 | `unreadable_page` | Its header does not read, or the file exists but cannot be opened; `reason` says why. |
 | `revision_log_gap` | `log.md` records an `r<N>` this page never reached. `log_revision` is the highest `N` the log records for the page and `page_revision` is the revision the file carries. The other direction is not a finding: a read takes no lock, so it can see the page of a write in flight before that write's log line. |
+| `revision_log_hole` | The log skips an `r<N>` below the highest one it records for this page; `missing` is the skipped `N`. A page's lines are `r1`, `r2`, … with no skips, so the missing value is a line that reached the page and never reached the log — what an `append_log` that failed leaves. A write in flight only leaves the top of the column empty, never a hole, so this needs no lock. |
 
 Links inside code fences, code spans and images are not counted.
 
@@ -66,7 +67,10 @@ parser cannot read is counted rather than raised, so "the log is fine" and "the
 log could not be read" stay different answers. A wiki with no `log.md` yet
 reports zero, not an error; a `log.md` that exists but cannot be read makes the
 call fail instead of reporting zero. A last line the writer had not finished —
-the file does not end in a newline — is not a line and is not counted.
+the file does not end in a newline — is not a line and is not counted; note
+that if the writer then appends to that unfinished piece, the join becomes one
+line the parser cannot read, so `log_unreadable_line` can stay at 1 or more
+until the line is fixed.
 
 The tool reads `log.md` before it reads the pages, which is the order the
 writers work in (the page lands first, the log line second). A write that
@@ -96,6 +100,6 @@ no configuration switch.
 
 ## Status
 
-Stable. The eight finding kinds in the table above and the response fields are
+Stable. The nine finding kinds in the table above and the response fields are
 stable. A later step of the RFC may still add a kind, so read the table above
 for the current set.

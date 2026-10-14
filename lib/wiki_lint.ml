@@ -23,6 +23,10 @@ type finding =
       ; log_revision : int
       ; page_revision : int
       }
+  | Revision_log_hole of
+      { page : string
+      ; missing : int
+      }
 
 let kind = function
   | Broken_link _ -> "broken_link"
@@ -33,6 +37,7 @@ let kind = function
   | Hearsay_only _ -> "hearsay_only"
   | Unreadable_page _ -> "unreadable_page"
   | Revision_log_gap _ -> "revision_log_gap"
+  | Revision_log_hole _ -> "revision_log_hole"
 ;;
 
 let all_kinds =
@@ -44,6 +49,7 @@ let all_kinds =
   ; "hearsay_only"
   ; "unreadable_page"
   ; "revision_log_gap"
+  ; "revision_log_hole"
   ]
 ;;
 
@@ -54,7 +60,8 @@ let subject = function
   | Orphan_unconfirmed { page }
   | Missing_sources { page }
   | Hearsay_only { page }
-  | Revision_log_gap { page; _ } -> page
+  | Revision_log_gap { page; _ }
+  | Revision_log_hole { page; _ } -> page
   | Unreadable_page { file; _ } -> file
 ;;
 
@@ -65,6 +72,7 @@ let line_of = function
   | Missing_sources _
   | Hearsay_only _
   | Revision_log_gap _
+  | Revision_log_hole _
   | Unreadable_page _ -> 0
 ;;
 
@@ -137,6 +145,32 @@ let log_gap_findings graph (log : Wiki_log.t) =
     []
 ;;
 
+(* A page's log lines are r1, r2, ... with no skips: the create writes r1 and
+   every update writes one more. So a value missing below the highest one the
+   log records for the page is a line that was written to the page and never
+   made it to the log (an [append_log] that failed leaves exactly this). A
+   write in flight only leaves the top of the column empty, never a hole, so
+   this check needs no lock. *)
+let log_hole_findings graph (log : Wiki_log.t) =
+  let seen = Hashtbl.create 16 in
+  List.iter
+    (fun (line : Wiki_log.line) ->
+       let revisions = Option.value (Hashtbl.find_opt seen line.page) ~default:[] in
+       Hashtbl.replace seen line.page (line.revision :: revisions))
+    log.lines;
+  Hashtbl.fold
+    (fun page revisions acc ->
+       let highest = List.fold_left max 0 revisions in
+       let rec first_missing k =
+         if k >= highest then None else if List.mem k revisions then first_missing (k + 1) else Some k
+       in
+       match (Wiki_graph.revision_of graph page, first_missing 1) with
+       | Some _, Some missing -> Revision_log_hole { page; missing } :: acc
+       | Some _, None | None, _ -> acc)
+    seen
+    []
+;;
+
 let run graph ~log =
   let unreadable = Wiki_graph.unreadable_files graph in
   let has_unreadable = unreadable <> [] in
@@ -146,7 +180,9 @@ let run graph ~log =
   let from_files =
     List.map (fun (file, reason) -> Unreadable_page { file; reason }) unreadable
   in
-  List.sort compare_findings (from_pages @ from_files @ log_gap_findings graph log)
+  List.sort
+    compare_findings
+    (from_pages @ from_files @ log_gap_findings graph log @ log_hole_findings graph log)
 ;;
 
 let counts findings =

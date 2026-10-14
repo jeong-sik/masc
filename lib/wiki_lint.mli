@@ -38,11 +38,20 @@ type finding =
           direction -- a page ahead of the log -- is not a finding: a read
           takes no lock, so it sees the page of a write in flight before the
           log line of that write (§4.5). *)
+  | Revision_log_hole of
+      { page : string
+      ; missing : int  (** The lowest [r<N>] the log skips below its highest. *)
+      }
+      (** The log skips a revision below the highest one it records for this
+          page. A page's lines are [r1], [r2], ... with no skips, so the missing
+          value is a line that reached the page and never reached the log --
+          what an [append_log] that failed leaves. A write in flight only
+          leaves the top of the column empty, so this is not that. *)
 
 val kind : finding -> string
 (** The wire name: ["broken_link"], ["unsupported_link"], ["orphan"],
     ["orphan_unconfirmed"], ["missing_sources"], ["hearsay_only"],
-    ["unreadable_page"], ["revision_log_gap"]. *)
+    ["unreadable_page"], ["revision_log_gap"], ["revision_log_hole"]. *)
 
 val all_kinds : string list
 (** Every {!kind}, in the order a report lists them. *)

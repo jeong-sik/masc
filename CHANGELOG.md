@@ -326,8 +326,10 @@ promoted in a later release once a live run on that path is recorded.
 - Three suites of the full regression run on the release candidate head were
   failing when this version was cut: `wiki_lint` case 6 (a test fixture that
   creates `log.md` twice, #43153); `Keeper_tool_dispatch_runtime` case 95 (the
-  status reply of an asynchronous composition carries `status: null`, #43137
-  is the suspected change); and `keeper_skill_catalog` case 23 (the expected
+  test reads the status reply of an asynchronous composition at its top level;
+  since #43137 the reply is an envelope with `structured_content` and
+  `artifact_manifest`, so the test is stale and the product reply is as
+  documented); and `keeper_skill_catalog` case 23 (the expected
   model tool names always include the transient draft controls since #43156).
   All three are tracked for the next release.
 

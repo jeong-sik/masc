@@ -88,12 +88,16 @@ type binding_inventory = {
 }
 val binding_inventory : root:string -> binding_inventory
 (** Read metadata without constructing a store, reconciling observation
-    sequences, rewriting records or creating directories. After capturing the
-    records/absence, sync the containing directory (or its first existing
-    ancestor) to reestablish publication durability after an uncertain rename
-    or unlink by a previous process. Read/sync failures preserve readable
-    siblings but make [complete] false. Offload filesystem I/O. These observed
-    bytes do not authorize mutations. *)
+    sequences, rewriting records or creating directories. A record whose read
+    collides with this process's own rename/unlink publication retries once
+    and accepts a confirmed absence, so a successful concurrent write does not
+    read as a damaged store; only a failure that persists across the retry
+    makes [complete] false. After capturing the records/absence, sync the
+    containing directory (or its first existing ancestor) to reestablish
+    publication durability after an uncertain rename or unlink by a previous
+    process. Read/sync failures preserve readable siblings but make [complete]
+    false. Offload filesystem I/O. These observed bytes do not authorize
+    mutations. *)
 type observation_write_error =
   | Observation_rejected of string
   | Publication_failed of { failure : Fs_compat.atomic_replace_failure;

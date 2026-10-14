@@ -130,6 +130,9 @@ let test_errno_of_unix_error_named () =
     ; Unix.ENOENT, S.Enoent
     ; Unix.ECONNREFUSED, S.Econnrefused
     ; Unix.ETIMEDOUT, S.Etimedout
+    ; Unix.EPIPE, S.Epipe
+    ; Unix.EADDRINUSE, S.Eaddrinuse
+    ; Unix.EADDRNOTAVAIL, S.Eaddrnotavail
     ]
 
 (* Every other constructor, including the payload-carrying EUNKNOWNERR, keeps

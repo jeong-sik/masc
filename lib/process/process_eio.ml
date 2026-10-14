@@ -149,10 +149,6 @@ let default_env = function
   | Some env -> env
   | None -> Unix.environment ()
 
-(* [@@warning "-4"]: scrutinee is [exn] (extensible) — a wildcard arm is
-   mandatory because new exception constructors can never be enumerated.
-   RFC-0071 §3.4.1 sanctioned open-variant exemption, not a lazy
-   catch-all over a closed sum. *)
 (* timeout(1)'s convention. Everything that used to write this literal, here
    and in the three modules that had started reading it, goes through the two
    names below. *)
@@ -173,12 +169,14 @@ let exit_reason_of_status = function
 ;;
 
 let rec should_retry_unix_fallback = function
-  | Unix.Unix_error
-      ((Unix.EADDRINUSE | Unix.EADDRNOTAVAIL | Unix.EACCES | Unix.EPERM), "bind", _) ->
-      true
+  | Unix.Unix_error (code, "bind", _) ->
+      (match System_error_class.errno_of_unix_error code with
+       | System_error_class.(Eaddrinuse | Eaddrnotavail | Eacces | Eperm) -> true
+       | System_error_class.(
+           Emfile | Enfile | Enospc | Enoent | Econnrefused | Etimedout | Epipe
+           | Other_errno _) -> false)
   | Eio.Cancel.Cancelled exn -> should_retry_unix_fallback exn
   | _ -> false
-[@@warning "-4"]
 
 let close_quietly fd =
   try Unix.close fd with

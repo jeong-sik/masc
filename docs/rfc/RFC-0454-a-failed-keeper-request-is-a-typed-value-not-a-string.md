@@ -60,7 +60,7 @@ TUI `bin/masc_tui_keeper_chat_history.ml` `interruption_of_failure` 는 row 의 
 
 첫 문장은 `lib/runtime/runtime_codex_app_server.ml` 의 typed 값 `Runtime_shutting_down` 을 문자열로 바꾼 것이다. `stdout closed` 도 런타임의 `Process_exited` 계열 값에서 나온다. typed 값을 문자열로 만들고, 화면이 그 문자열을 다시 typed 값으로 되돌리려 한다. 런타임이 문구를 한 글자만 바꿔도 화면 판정이 조용히 틀린다.
 
-`keeper_internal_error.ml` 의 `classify_masc_internal_error_of_string`·`has_masc_agent_core_error_prefix` 도 같은 모양이다. carrier 가 없는 경로(persisted 문자열)에서 접두어를 찾아 JSON 을 다시 파싱한다.
+`keeper_internal_error.ml` 의 `classify_masc_internal_error_of_string` 도 같은 모양이다. carrier 가 없는 경로(persisted 문자열)에서 접두어를 찾아 JSON 을 다시 파싱한다.
 
 ### 1.4 규모 (운영 workspace `.masc/keeper_chat/*.jsonl`, 2026-09-15 측정)
 
@@ -120,7 +120,6 @@ and masc_internal_error =
 - `masc_internal_error_to_json` 은 `detail`(P1a)·`cause`(P1b)를 JSON 객체로 쓴다. `parse_masc_internal_error_json` 도 같이 바꾼다.
 - `keeper_turn_driver.ml` fence 분기는 `Agent_core.Error.to_string error` 대신, carrier 가 있으면 `Fenced_masc`, 없으면 §2.2 투영으로 `Fenced_core` 를 만든다(P1b).
 - `Keeper_terminal_effect_detail.Boundary_observation_failed` 도 `message : string` 이 `Agent_core.Error.to_string` 이었다(`keeper_official_client_host.ml` 1136). 같은 이유로 `cause : Keeper_request_failure_core.t` 로 바꾼다(P1b). `Keeper_request_failure_core.t` 는 masc 에러를 실을 수 없으므로, 호스트는 넣기 전에 `classify_masc_internal_error` 로 걸러 carrier 로 온 masc 에러는 한 줄 요약(없으면 kind)만 남긴다. 안 그러면 접두어 붙은 JSON 이 다시 `message` 안으로 들어간다.
-- `cap_blocker_detail` 의 2000자 상한은 이제 어떤 variant 도 통째로 담는다고 말할 수 없다. terminal effect 실패가 composition 실패 객체를, fence 가 그걸 담은 cause 를 싣기 때문이다. 상한 자체는 blob 천장으로 남기고, composition 객체를 생산자에서 자르는 일은 P2 다.
 - `fenced_cause` 는 별도 모듈이 아니라 `keeper_internal_error.ml` 안에서 `masc_internal_error` 와 `and` 로 같이 선언한다. fence 가 terminal effect 실패를 실을 수 있어 재귀가 실재하고, OCaml 은 recursive module 없이는 모듈 사이의 재귀를 표현하지 못한다. `Keeper_request_failure_core` 는 반대로 masc 에러를 전혀 싣지 않아서 별도 모듈로 둘 수 있고, 그래야 아래 층인 `Keeper_terminal_effect_detail` 이 순환 없이 쓴다.
 
 ### 2.2 D2 — `Keeper_request_failure.t`
@@ -328,6 +327,6 @@ P1a 와 P1b 는 각각 혼자 들어갈 수 있다. 단 P1b 는 fenced `diagnost
 ## 8. 건드리지 않는 것
 
 - `Transport_failure` row 가 watermark 를 올리지 않는 규칙.
-- `Internal_carried` carrier 설계와 `[masc_agent_core_error]` 로그 문구. `cap_blocker_detail` 의 2000자 절단도 그대로 둔다.
+- `Internal_carried` carrier 설계와 `[masc_agent_core_error]` 로그 문구.
 - `lib/keeper_runtime/dune` 는 모듈을 나열하므로 새 모듈을 거기에 추가한다(작업 항목이지 설계는 아니다).
 - #36665 가 고친 MSX 거절 disposition, #36662 의 composition 실패 경계 정책.

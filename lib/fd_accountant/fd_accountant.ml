@@ -46,7 +46,8 @@ let resource_error_of_exn exn =
   | Some System_error_class.Enospc -> Some Storage_space_exhausted
   | Some
       System_error_class.(
-        Eacces | Eperm | Enoent | Econnrefused | Etimedout | Other_errno _)
+        Eacces | Eperm | Enoent | Econnrefused | Etimedout | Epipe | Eaddrinuse
+        | Eaddrnotavail | Other_errno _)
   | None -> None
 ;;
 

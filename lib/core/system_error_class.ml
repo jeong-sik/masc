@@ -66,6 +66,9 @@ type errno =
   | Enoent
   | Econnrefused
   | Etimedout
+  | Epipe
+  | Eaddrinuse
+  | Eaddrnotavail
   | Other_errno of Unix.error
 
 (* The only match in the tree that lists every [Unix.error] constructor.  It
@@ -81,17 +84,20 @@ let errno_of_unix_error (code : Unix.error) =
   | Unix.ENOENT -> Enoent
   | Unix.ECONNREFUSED -> Econnrefused
   | Unix.ETIMEDOUT -> Etimedout
+  | Unix.EPIPE -> Epipe
+  | Unix.EADDRINUSE -> Eaddrinuse
+  | Unix.EADDRNOTAVAIL -> Eaddrnotavail
   | ( Unix.E2BIG | Unix.EAGAIN | Unix.EBADF | Unix.EBUSY | Unix.ECHILD
     | Unix.EDEADLK | Unix.EDOM | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG
     | Unix.EINTR | Unix.EINVAL | Unix.EIO | Unix.EISDIR | Unix.EMLINK
     | Unix.ENAMETOOLONG | Unix.ENODEV | Unix.ENOEXEC | Unix.ENOLCK
     | Unix.ENOMEM | Unix.ENOSYS | Unix.ENOTDIR | Unix.ENOTEMPTY | Unix.ENOTTY
-    | Unix.ENXIO | Unix.EPIPE | Unix.ERANGE | Unix.EROFS | Unix.ESPIPE
+    | Unix.ENXIO | Unix.ERANGE | Unix.EROFS | Unix.ESPIPE
     | Unix.ESRCH | Unix.EXDEV | Unix.EWOULDBLOCK | Unix.EINPROGRESS
     | Unix.EALREADY | Unix.ENOTSOCK | Unix.EDESTADDRREQ | Unix.EMSGSIZE
     | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT
     | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT
-    | Unix.EAFNOSUPPORT | Unix.EADDRINUSE | Unix.EADDRNOTAVAIL
+    | Unix.EAFNOSUPPORT
     | Unix.ENETDOWN | Unix.ENETUNREACH | Unix.ENETRESET | Unix.ECONNABORTED
     | Unix.ECONNRESET | Unix.ENOBUFS | Unix.EISCONN | Unix.ENOTCONN
     | Unix.ESHUTDOWN | Unix.ETOOMANYREFS | Unix.EHOSTDOWN | Unix.EHOSTUNREACH
@@ -109,7 +115,7 @@ let classify_exn exn =
   | Some (Eacces | Eperm) -> Permission_denied
   | Some Econnrefused -> Connection_refused
   | Some Etimedout -> Timeout
-  | Some (Enoent | Other_errno _) | None -> classify_string (Printexc.to_string exn)
+  | Some (Enoent | Epipe | Eaddrinuse | Eaddrnotavail | Other_errno _) | None -> classify_string (Printexc.to_string exn)
 
 let to_short_tag = function
   | Fd_exhaustion -> "fd_exhaustion"

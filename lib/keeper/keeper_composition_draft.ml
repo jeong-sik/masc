@@ -171,10 +171,17 @@ let contracts ~capability_surface plan =
       let output_schema = match descriptor.Keeper_tool_descriptor.composable_output with
         | Keeper_tool_descriptor.Opaque_output -> `Null
         | Keeper_tool_descriptor.Json_output { schema } -> schema in
+      let contract = `Assoc
+          [ "route", Keeper_tool_descriptor.route_evidence_json descriptor
+          ; "input_schema", descriptor.input_schema
+          ; "output_schema", output_schema ] in
+      (* These are definitions, not artifact-bearing execution values. A
+         schema property named [_blob] must not become a manifest reference.
+         Keep the whole immutable contract as canonical literal JSON text;
+         recipe/plan input references still use the strict manifest codec. *)
       `Assoc [ "node_id", `String (Plan.Node_id.to_string node.id)
-             ; "route", Keeper_tool_descriptor.route_evidence_json descriptor
-             ; "input_schema", descriptor.input_schema
-             ; "output_schema", output_schema ]) (Plan.nodes plan) in
+             ; "contract_json", `String
+                 (Yojson.Safe.to_string (Yojson.Safe.sort contract)) ]) (Plan.nodes plan) in
   `Assoc [ "surface_digest", `String (Keeper_capability_surface.digest capability_surface)
          ; "tools", `List tools ]
 ;;

@@ -877,6 +877,25 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       ~tool_use_id:"prepare-wait" ~turn:41 "keeper_composition_prepare" recipe) in
   let draft_reference = prepared |> member "draft" |> composition_reference "prepared draft" in
   let sha256 = draft_reference.sha256 in
+  let draft_bytes = Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.base_path) ~sha256
+    |> require "actual prepared draft bytes" |> function
+    | Some bytes -> bytes | None -> fail "prepared draft artifact is missing" in
+  let draft_manifest = Yojson.Safe.from_string draft_bytes in
+  (match Tool_output.artifact_manifest_of_json draft_manifest with
+   | Tool_output.Decoded_artifact_manifest _ -> ()
+   | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ ->
+     fail "schema definitions poisoned the prepared artifact manifest");
+  let contract_rows = draft_manifest |> member "structured_content" |> member "contracts"
+    |> member "tools" |> to_list in
+  let await_contract = contract_rows |> List.find (fun row ->
+      row |> member "node_id" |> to_string = "await") in
+  let frozen_contract = await_contract |> member "contract_json" |> to_string
+    |> Yojson.Safe.from_string in
+  check_json "literal contract keeps the declared normalized wrapper schema"
+    (`String "object")
+    (frozen_contract |> member "output_schema" |> member "properties"
+     |> member "artifacts" |> member "items" |> member "properties"
+     |> member "_blob" |> member "type");
   let calls_before = List.length (calls fixture) in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-wait" ~turn:41 "keeper_composition_run" (`Assoc ["sha256", `String sha256])) in

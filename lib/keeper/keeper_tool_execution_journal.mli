@@ -46,6 +46,7 @@ type error =
   | Plan_identity_conflict
   | Draft_unavailable of string
   | Invalid_result of string
+  | Invalid_continuation_marker of string
   | Persistence_failed of string
 
 val error_to_string : error -> string
@@ -79,6 +80,21 @@ type readiness = Waiting_for_results | Results_ready
 val continuation_readiness : continuation -> (readiness, error) result
 (** Strict owner reads only. No collection, backend call, launch or Task
     inference. The read does not reserve execution or replace admission. *)
+
+type pending_continuations =
+  { inspected : int
+  ; ready : continuation list
+  ; waiting : int
+  ; retired : int
+  ; failures : (string * error) list
+  }
+
+val pending_continuations : base_path:string -> (pending_continuations, error) result
+(** Discover only per-request pending markers published before journal
+    ownership and worker effects. Canonical journal/request/job records decide
+    readiness. Completed or superseded markers retire only after exact terminal
+    proof; unavailable, unbound or corrupt authority stays visible. No worker
+    dispatch, historical terminal scan, backend operation or automatic resume. *)
 
 val bind_continuation : continuation -> request_id:string -> (worker, error) result
 (** Async [on_accepted] admission pinned to the captured exact owner and

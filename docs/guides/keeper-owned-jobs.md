@@ -86,6 +86,13 @@ that captured candidate stale, including when the competing worker has already
 finished. One job may supply several waiting nodes; each keeps its own occurrence
 identity while the waiting job IDs form a set. These reads and admission do not
 automatically start a continuation on job completion.
+Each prepared worker admission records a separate pending discovery marker
+before it can own the journal or execute a node. Recovery reads this pending
+partition and the exact original journal, request and job records; it can find
+a ready result without another completion event. A marker grants no execution
+permission. Completed attempts and superseded markers retire after canonical
+terminal proof, while unavailable original authority remains reported and
+retained. This discovery boundary does not dispatch continuation workers yet.
 The journal retains the exact producer-owned job wait separately from the
 provider-facing body. Only this exact read-only leaf may be rechecked; it keeps
 its original execution ID and tool-use ID. Completed siblings reuse their full

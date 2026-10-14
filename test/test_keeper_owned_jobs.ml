@@ -947,6 +947,12 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     | Ok None -> fail "original run is not canonically waiting"
     | Error error -> fail (Journal.error_to_string error) in
   let original_continuation = continuation () in
+  let pending () = Journal.pending_continuations ~base_path:fixture.base_path
+      |> require "pending continuation discovery" in
+  let discovery = pending () in
+  check int "saved wait remains discoverable" 1 discovery.waiting;
+  check int "running job never dispatches from discovery" 0 (List.length discovery.ready);
+  check int "saved wait has valid original authority" 0 (List.length discovery.failures);
   check (list string) "two waiting nodes capture one original job" [id]
     (List.map Store.Job_id.to_string (Journal.continuation_job_ids original_continuation));
   check string "continuation captures original worker" first_entry.request_id
@@ -1017,6 +1023,9 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let before_refusal = List.length (calls fixture) in
   let refused_data = Fun.protect ~finally:(fun () -> write owner_path owner_bytes) (fun () ->
       write owner_path "{temporarily-invalid-owner\n";
+      let unreadable = pending () in
+      check int "corrupt job authority leaves no ready continuation" 0 (List.length unreadable.ready);
+      check int "corrupt job authority is reported and retained" 1 (List.length unreadable.failures);
       (match Journal.continuation_readiness original_continuation with
        | Error (Journal.Invalid_result _) -> ()
        | Ok _ | Error _ -> fail "corrupt original job owner became a ready continuation");
@@ -1044,6 +1053,18 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"collect-complete" ~turn:52 "keeper_job_status" (argument id)));
   let before_completed_resume = List.length (calls fixture) in
+  let discovered = pending () in
+  check int "completed result is discovered without another event" 1 (List.length discovered.ready);
+  check int "completed result has readable original authority" 0 (List.length discovered.failures);
+  let discovered = List.hd discovered.ready in
+  check string "discovery keeps the same waiting owner"
+    (Journal.continuation_request_id ready_continuation)
+    (Journal.continuation_request_id discovered);
+  check (option string) "discovery keeps original Task after current Task changed"
+    (Some "task-A") (Journal.continuation_source discovered).source_task_id;
+  Process_eio.reset_for_testing (); initialize ();
+  let restarted_discovery = pending () in
+  check int "same ready wait survives transport reinitialization" 1 (List.length restarted_discovery.ready);
   (match Journal.continuation_readiness ready_continuation with
    | Ok Journal.Results_ready -> ()
    | Ok Waiting_for_results | Error _ -> fail "complete original outputs are not ready");
@@ -1097,6 +1118,11 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
    | Error (Async.Acceptance_persistence_failed _),Some Journal.Ownership_changed -> ()
    | _ -> fail "stale continuation rebound after the competing worker completed");
   check int "a stale continuation never starts its worker" 0 !stale_worker_calls;
+  let retired = pending () in
+  check int "completed requests leave no ready continuation" 0 (List.length retired.ready);
+  check int "completed request discovery has no unavailable authority" 0 (List.length retired.failures);
+  let stable = pending () in
+  check int "retirement leaves no historical scan work" 0 stable.inspected;
   check int "composition never recreates original program" 1 (effect_count fixture "create");
   check int "composition never restarts original program" 1 (effect_count fixture "start")
 

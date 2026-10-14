@@ -393,6 +393,11 @@ let test_owned_transport_and_race () = with_workspace (fun env sw base_path ->
   let first = submit ~before_execute:(fun _ -> Eio.Promise.resolve enter (); Eio.Promise.await release)
       base_path sw prepared (initial_dispatch base_path Tool_result.Proven_pre_effect) |> accepted in
   Eio.Promise.await entered;
+  let discovery = Journal.pending_continuations ~base_path |> journal_value "pre-dispatch discovery" in
+  check int "run is discoverable before its first node effect" 1 discovery.inspected;
+  check int "active owner does not grant another worker" 0 (List.length discovery.ready);
+  check int "active owner remains pending" 1 discovery.waiting;
+  check int "active original authority is readable" 0 (List.length discovery.failures);
   let refused_calls = ref 0 in
   submit base_path sw prepared (no_dispatch refused_calls)
   |> expect_admission_error (function Journal.Prior_owner_not_terminal _ -> true | _ -> false);

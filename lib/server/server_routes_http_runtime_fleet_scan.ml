@@ -409,53 +409,18 @@ type keeper_phase_counts =
 let empty_keeper_phase_counts =
   { running = 0; failing = 0; recovering = 0 }
 
-type keeper_phase_detail =
-  { phase : string
-  ; last_failure_reason : string option
-  ; last_error : string option
-  ; restart_count : int
-  ; latest_crash_at : float option
-  ; latest_crash_reason : string option
-  }
-
 type keeper_phase_snapshot =
   { counts : keeper_phase_counts
   ; running_names : string list
   ; recovering_names : string list
   ; configuration_blocked_names : string list
   ; official_client_recovery_required_names : string list
-  ; phase_values : (string * Keeper_state_machine.phase) list
-  ; phase_details : (string * keeper_phase_detail) list
-  }
-
-let keeper_phase_detail_of_entry (entry : Keeper_registry.registry_entry) =
-  let latest_crash_at, latest_crash_reason =
-    match entry.crash_log with
-    | (ts, reason) :: _ -> (Some ts, Some reason)
-    | [] -> (None, None)
-  in
-  {
-    phase = Keeper_state_machine.phase_to_string entry.phase;
-    last_failure_reason =
-      Option.map Keeper_registry.failure_reason_to_string entry.last_failure_reason;
-    last_error = entry.last_error;
-    restart_count = entry.restart_count;
-    latest_crash_at;
-    latest_crash_reason;
   }
 
 let keeper_phase_snapshot ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.fold_left
        (fun acc (entry : Keeper_registry.registry_entry) ->
-         let acc =
-            {
-              acc with
-              phase_values = (entry.name, entry.phase) :: acc.phase_values;
-              phase_details =
-                (entry.name, keeper_phase_detail_of_entry entry) :: acc.phase_details;
-            }
-          in
           let counts = acc.counts in
           let capacity_eligible = not entry.meta.paused in
           let is_configuration_blocked =
@@ -550,8 +515,6 @@ let keeper_phase_snapshot ?base_path () =
          recovering_names = [];
          configuration_blocked_names = [];
          official_client_recovery_required_names = [];
-         phase_values = [];
-         phase_details = [];
        }
   |> fun snapshot ->
   {
@@ -562,10 +525,6 @@ let keeper_phase_snapshot ?base_path () =
       sorted_unique_strings snapshot.configuration_blocked_names;
     official_client_recovery_required_names =
       sorted_unique_strings snapshot.official_client_recovery_required_names;
-    phase_values =
-      List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_values;
-    phase_details =
-      List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_details;
   }
 
 let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts

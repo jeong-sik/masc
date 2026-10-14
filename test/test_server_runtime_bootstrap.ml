@@ -2047,8 +2047,6 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
             recovering_names = [];
             configuration_blocked_names = [];
             official_client_recovery_required_names = [];
-            phase_values = [];
-            phase_details = [];
           }
         in
         let execution_snapshot :
@@ -2386,8 +2384,6 @@ let test_health_json_owner_rows_answer_from_each_keepers_own_reads () =
             recovering_names = [];
             configuration_blocked_names = [];
             official_client_recovery_required_names = [];
-            phase_values = [];
-            phase_details = [];
           }
         in
         let execution_snapshot :
@@ -2467,8 +2463,6 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             recovering_names = [];
             configuration_blocked_names = [];
             official_client_recovery_required_names = [];
-            phase_values = [];
-            phase_details = [];
           }
         in
         let execution_snapshot :
@@ -2726,8 +2720,6 @@ let test_health_json_capacity_uses_execution_snapshot () =
         ; recovering_names
         ; configuration_blocked_names = []
         ; official_client_recovery_required_names = []
-        ; phase_values = []
-        ; phase_details = []
         }
       in
       let execution_snapshot :
@@ -3268,8 +3260,6 @@ let test_health_json_blocks_terminal_configuration_failures () =
     ; recovering_names = []
     ; configuration_blocked_names = [ keeper_name ]
     ; official_client_recovery_required_names = []
-    ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
-    ; phase_details = []
     }
   in
   let execution_snapshot :
@@ -3326,10 +3316,6 @@ let test_health_json_blocks_terminal_configuration_failures () =
     { phase_snapshot with
       counts = partial_phase_counts
     ; running_names = [ healthy_name ]
-    ; phase_values =
-        [ keeper_name, Keeper_state_machine.Failing
-        ; healthy_name, Keeper_state_machine.Running
-        ]
     }
   in
   let partial =
@@ -3365,11 +3351,6 @@ let test_health_json_blocks_all_target_operator_recovery () =
       ; recovering_names = []
       ; configuration_blocked_names = configuration_names
       ; official_client_recovery_required_names = recovery_names
-      ; phase_values =
-          List.map
-            (fun name -> name, Keeper_state_machine.Failing)
-            target_names
-      ; phase_details = []
       }
     in
     Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -3419,8 +3400,6 @@ let test_health_json_counts_configuration_blocker_outside_autoboot () =
     ; recovering_names = []
     ; configuration_blocked_names = [ keeper_name ]
     ; official_client_recovery_required_names = []
-    ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
-    ; phase_details = []
     }
   in
   let fleet_safety =

@@ -644,7 +644,24 @@ let subscription_stderr_excerpt stderr_buf =
   else if String.length mapped <= subscription_stderr_limit then Some mapped
   else Some (String.sub mapped 0 (utf8_cut mapped subscription_stderr_limit) ^ "…")
 
-let read_subscription ~mgr ~cwd config =
+(* A document the CLI stopped in the middle names no reason by itself. The
+   byte count tells a cut at the very start from one near the end. *)
+let invalid_json_prefix = "invalid JSON: "
+
+let is_invalid_json_detail detail = String.starts_with ~prefix:invalid_json_prefix detail
+
+let note_cut_document ~bytes = function
+  | Error (Protocol_error { stage; detail }) when is_invalid_json_detail detail ->
+      Error (Protocol_error { stage; detail = Printf.sprintf "%s (stdout %d bytes)" detail bytes })
+  | ( Ok _
+    | Error
+        ( Protocol_error _ | Invalid_config _ | Spawn_failed _ | Subscription_required _
+        | Unsupported_control_request _ | Turn_transport_interrupted _
+        | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Unhandled_exception _ | Timeout _ ) ) as result -> result
+
+let probe_subscription ~mgr ~cwd config =
   let stderr_buf = Buffer.create 256 in
   let enrich ~excerpt result =
     match result, excerpt with
@@ -681,6 +698,7 @@ let read_subscription ~mgr ~cwd config =
       |> String.trim
       |> parse_json ~stage:"auth status"
       |> fun result -> Result.bind result parse_subscription
+      |> note_cut_document ~bytes:(String.length stdout)
       |> enrich ~excerpt
     in
     (* Stderr that the detail does not carry still reaches the debug log:
@@ -701,6 +719,26 @@ let read_subscription ~mgr ~cwd config =
       (match subscription_stderr_excerpt stderr_buf with
        | None -> Error (Spawn_failed detail)
        | Some text -> Error (Spawn_failed (detail ^ "; stderr: " ^ text)))
+;;
+
+(* [auth status] only reads. A CLI that exits cleanly with a cut document is
+   usually a transient failure (two probes racing on one account home, or the
+   process dying mid-write), so one more probe is cheaper than failing the
+   Keeper request. A second cut document is reported as the failure it is. *)
+let read_subscription ~mgr ~cwd config =
+  match probe_subscription ~mgr ~cwd config with
+  | Error (Protocol_error { stage = "auth status"; detail })
+    when is_invalid_json_detail detail ->
+      Log.Runtime_agent.warn "auth probe returned a cut document, retrying once: %s" detail;
+      (match probe_subscription ~mgr ~cwd config with
+       | (Ok _ | Error _) as second -> second)
+  | ( Ok _
+    | Error
+        ( Protocol_error _ | Invalid_config _ | Spawn_failed _ | Subscription_required _
+        | Unsupported_control_request _ | Turn_transport_interrupted _
+        | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Unhandled_exception _ | Timeout _ ) ) as result -> result
 ;;
 
 (* Claude Code reads two keys from a tools/list entry's [_meta]

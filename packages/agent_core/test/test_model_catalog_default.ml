@@ -46,6 +46,18 @@ let subscription_model_rows =
   ; "gpt-6-astra", "gpt-6-astra"
   ; "gpt-6-luna", "gpt-6-luna"
   ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
+  ; "claude-opus-5-5-high", "claude-opus-5-5"
+  ; "claude-opus-5-5-medium", "claude-opus-5-5"
+  ; "claude-opus-5-5-low", "claude-opus-5-5"
+  ; "claude-sonnet-5-5-high", "claude-sonnet-5-5"
+  ; "claude-sonnet-5-5-medium", "claude-sonnet-5-5"
+  ; "claude-sonnet-5-5-low", "claude-sonnet-5-5"
+  ; "gemini-4-argon-high", "gemini-4-argon"
+  ; "gemini-4-argon-medium", "gemini-4-argon"
+  ; "gemini-4-argon-low", "gemini-4-argon"
+  ; "gemini-3.8-flash-high", "gemini-3.8-flash"
+  ; "gemini-3.8-flash-medium", "gemini-3.8-flash"
+  ; "gemini-3.8-flash-low", "gemini-3.8-flash"
   ; "gemini-3.7-flash-high", "gemini-3.7-flash"
   ; "gemini-3.7-flash-medium", "gemini-3.7-flash"
   ; "gemini-3.7-flash-low", "gemini-3.7-flash"
@@ -356,6 +368,8 @@ let subscription_model_efforts =
   ; None, "gpt-6.1-sol", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gemini-4-argon-high", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.8-flash-high", [ "low"; "medium"; "high" ]
   ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
   ; None, "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
   ]

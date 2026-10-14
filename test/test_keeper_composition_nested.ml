@@ -370,7 +370,8 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
       match Tool_output.decode_from_agent_core content with
       | Tool_output.Decoded reference -> read_document ~base_path reference
       | Tool_output.Not_marker ->
-        Yojson.Safe.from_string content |> Yojson.Safe.Util.member "structured_content"
+        let json = Yojson.Safe.from_string content in
+        Yojson.Safe.Util.member (if success then "structured_content" else "data") json
       | Tool_output.Invalid_marker { detail } -> fail detail
     in
     if structured = `Null then fail ("public result lacks structured content: " ^ content);

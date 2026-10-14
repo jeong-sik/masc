@@ -4839,9 +4839,12 @@ let test_cut_auth_probe_is_retried_once () =
        with_fixture ~auth_first_body:"{\"loggedIn\":true," [] (fun cli_path ->
          match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
          | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail }))
-           when String.starts_with ~prefix:"auth status: invalid JSON: " detail ->
+           when Astring.String.is_infix ~affix:"auth status" detail ->
              fail ("cut probe was not retried: " ^ detail)
-         | Error _ | Ok _ -> ()))
+         | Error _ | Ok _ ->
+             (* The fixture leaves this marker on its first, cut answer. *)
+             check bool "the cut first probe ran" true
+               (Sys.file_exists (cli_path ^ ".auth-first"))))
 ;;
 
 let test_cut_auth_probe_reports_stdout_bytes () =

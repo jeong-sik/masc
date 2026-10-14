@@ -528,12 +528,6 @@ let parse_json_value ~stage text =
   | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
 ;;
 
-let parse_json ~stage text =
-  let* json = parse_json_value ~stage text in
-  let* () = validate_unique_object_keys ~stage ~path:"$" json in
-  Ok json
-;;
-
 let optional_int stage name fields =
   match List.assoc_opt name fields with
   | None | Some `Null -> Ok None
@@ -645,23 +639,23 @@ let subscription_stderr_excerpt stderr_buf =
   else Some (String.sub mapped 0 (utf8_cut mapped subscription_stderr_limit) ^ "…")
 
 (* A document the CLI stopped in the middle names no reason by itself. The
-   byte count tells a cut at the very start from one near the end. *)
-let invalid_json_prefix = "invalid JSON: "
-
-let is_invalid_json_detail detail = String.starts_with ~prefix:invalid_json_prefix detail
-
+   byte count tells a cut at the very start from one near the end. The probe
+   decides "cut" where the text fails to parse, not from the error's wording,
+   so this only annotates a failure it was already told is a cut document. *)
 let note_cut_document ~bytes = function
-  | Error (Protocol_error { stage; detail }) when is_invalid_json_detail detail ->
+  | Error (Protocol_error { stage; detail }) ->
       Error (Protocol_error { stage; detail = Printf.sprintf "%s (stdout %d bytes)" detail bytes })
   | ( Ok _
     | Error
-        ( Protocol_error _ | Invalid_config _ | Spawn_failed _ | Subscription_required _
+        ( Invalid_config _ | Spawn_failed _ | Subscription_required _
         | Unsupported_control_request _ | Turn_transport_interrupted _
         | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
         | Stopped_by_host _ | Quota_blocked _ | Process_exited _
         | Unhandled_exception _ | Timeout _ ) ) as result -> result
 
-let probe_subscription ~mgr ~cwd config =
+(* The boolean is true when the CLI exited cleanly but its stdout was not a
+   complete JSON document. *)
+let probe_auth_status ~mgr ~cwd config =
   let stderr_buf = Buffer.create 256 in
   let enrich ~excerpt result =
     match result, excerpt with
@@ -693,32 +687,35 @@ let probe_subscription ~mgr ~cwd config =
     (* parse_out joins its stderr copier before it returns, so the buffer is
        drained here. *)
     let excerpt = subscription_stderr_excerpt stderr_buf in
-    let attached, result =
-      stdout
-      |> String.trim
-      |> parse_json ~stage:"auth status"
-      |> fun result -> Result.bind result parse_subscription
-      |> note_cut_document ~bytes:(String.length stdout)
-      |> enrich ~excerpt
+    let parsed = parse_json_value ~stage:"auth status" (String.trim stdout) in
+    let cut_document = Result.is_error parsed in
+    let result =
+      let* json = parsed in
+      let* () = validate_unique_object_keys ~stage:"auth status" ~path:"$" json in
+      parse_subscription json
     in
+    let result =
+      if cut_document then note_cut_document ~bytes:(String.length stdout) result else result
+    in
+    let attached, result = enrich ~excerpt result in
     (* Stderr that the detail does not carry still reaches the debug log:
        success-path warnings were inherited by the server log before this
        probe captured its stderr. *)
     if not attached then Option.iter (Log.Runtime_agent.debug "auth probe stderr: %s") excerpt;
-    result
+    result, cut_document
   with
   | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Exn.Io
       (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
-    Error (Invalid_config (Printf.sprintf "executable %S was not found" executable))
+    Error (Invalid_config (Printf.sprintf "executable %S was not found" executable)), false
   | exn ->
       (* A crashed probe may still have told its stderr why: keep what the
          copier had drained, best-effort past this point. *)
       let detail = Printexc.to_string exn in
       (match subscription_stderr_excerpt stderr_buf with
-       | None -> Error (Spawn_failed detail)
-       | Some text -> Error (Spawn_failed (detail ^ "; stderr: " ^ text)))
+       | None -> Error (Spawn_failed detail), false
+       | Some text -> Error (Spawn_failed (detail ^ "; stderr: " ^ text)), false)
 ;;
 
 (* [auth status] only reads. A CLI that exits cleanly with a cut document is
@@ -726,19 +723,11 @@ let probe_subscription ~mgr ~cwd config =
    process dying mid-write), so one more probe is cheaper than failing the
    Keeper request. A second cut document is reported as the failure it is. *)
 let read_subscription ~mgr ~cwd config =
-  match probe_subscription ~mgr ~cwd config with
-  | Error (Protocol_error { stage = "auth status"; detail })
-    when is_invalid_json_detail detail ->
+  match probe_auth_status ~mgr ~cwd config with
+  | Error (Protocol_error { detail; _ }), true ->
       Log.Runtime_agent.warn "auth probe returned a cut document, retrying once: %s" detail;
-      (match probe_subscription ~mgr ~cwd config with
-       | (Ok _ | Error _) as second -> second)
-  | ( Ok _
-    | Error
-        ( Protocol_error _ | Invalid_config _ | Spawn_failed _ | Subscription_required _
-        | Unsupported_control_request _ | Turn_transport_interrupted _
-        | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
-        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
-        | Unhandled_exception _ | Timeout _ ) ) as result -> result
+      fst (probe_auth_status ~mgr ~cwd config)
+  | result, (true | false) -> result
 ;;
 
 (* Claude Code reads two keys from a tools/list entry's [_meta]

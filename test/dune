@@ -5327,6 +5327,11 @@
  (libraries alcotest digestif yojson masc))
 
 (test
+ (name test_workspace_memory_log_reader)
+ (modules test_workspace_memory_log_reader)
+ (libraries alcotest digestif yojson masc masc.fs_compat unix))
+
+(test
  (name test_keeper_direct_runtime_resume)
  (modules test_keeper_direct_runtime_resume)
  (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref eio_main unix))

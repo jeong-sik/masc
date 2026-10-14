@@ -13,3 +13,17 @@ val append_text : text:string -> t list -> string
 val newest_image : t list -> Masc_tui_image_preview.preview option
 (** The last image output in producer order. Unsupported sources remain an
     explicit unavailable preview rather than exposing a local filesystem path. *)
+
+type playable = {
+  name : string;
+  kind : [ `Audio | `Midi ];
+  source : [ `Data of string  (** base64, optionally data-URI wrapped *)
+           | `Server_path of string  (** fetched from the MASC peer, e.g. [/api/v1/media/…] *)
+           | `Local_path of string  (** read from this machine *) ];
+}
+(** What /listen can play: an [Attach] with an audio or MIDI extension whose
+    bytes are at hand, or a [Voice] block, which is audio by definition. *)
+
+val newest_playable : t list -> playable option
+(** The last playable block in producer order — the same newest-wins rule as
+    {!newest_image}. External http(s) sources are not playable here. *)

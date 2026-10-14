@@ -9884,6 +9884,80 @@ let open_named_image state ~mailbox =
   | Masc_tui_image_preview.No_image ->
       notice ~kind:Notice_reply "Ctrl-O: no image in this conversation or the composer"
 
+(* The MIDI soundfont read at boot from [tui].midi_soundfont (the same load
+   that applies the theme and the saved sort). The numbered attachment keys
+   and /listen answer from this snapshot instead of re-reading runtime.toml
+   per request. *)
+let boot_midi_soundfont : string option ref = ref None
+
+(* /listen: play the newest playable attachment in this conversation — the
+   same newest-wins rule Ctrl-O uses for images, extended to audio and MIDI.
+   Bytes come from the block itself, our own media store, or a local file;
+   playback is the attachment action's job, so a MIDI reports what it is and
+   the one-player-at-a-time rule holds here too. *)
+let conversation_media state =
+  image_session_rows state
+  |> List.concat_map (fun (entry : msg_entry) -> entry.me_media)
+
+let listen_newest_media state =
+  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  match Masc_tui_chat_media.newest_playable (conversation_media state) with
+  | None ->
+      notice ~kind:Notice_reply
+        "/listen: no audio or MIDI attachment in this conversation"
+  | Some { name; kind; source } ->
+      let bytes_result =
+        match source with
+        | `Data payload -> Masc_tui_image_preview.decode_payload payload
+        | `Server_path path -> (
+            match
+              Masc_tui_http.http_get ~host:server_peer_host ~port:state.port
+                ~path
+            with
+            | Error reason -> Error reason
+            | Ok (status_code, body)
+              when Masc.Tui_decode.is_success_http_status status_code ->
+                Ok body
+            | Ok (status_code, body) ->
+                Error (Masc_tui_http.refusal ~status_code ~body))
+        | `Local_path path -> (
+            match Unix.stat path with
+            | exception Unix.Unix_error (code, _, _) ->
+                Error (Unix.error_message code)
+            | stats
+              when stats.Unix.st_size > Masc_tui_board_upload.max_attachment_bytes ->
+                Error "file is larger than the attachment limit"
+            | stats -> (
+                try
+                  let channel = open_in_bin path in
+                  Fun.protect
+                    ~finally:(fun () -> close_in_noerr channel)
+                    (fun () -> Ok (really_input_string channel stats.Unix.st_size))
+                with Sys_error message -> Error message))
+      in
+      let outcome =
+        match bytes_result with
+        | Error reason ->
+            { Masc_tui_attachment_action.name
+            ; result = Masc_tui_attachment_action.Failed reason
+            ; midi_summary = None
+            }
+        | Ok bytes ->
+            let sha256 = Digestif.SHA256.(to_hex (digest_string bytes)) in
+            let ba_kind = match kind with `Audio -> Ak_audio | `Midi -> Ak_midi in
+            let attachment : board_attachment =
+              { ba_kind
+              ; ba_source = As_artifact { sha256; bytes = String.length bytes }
+              ; ba_name = Some name
+              }
+            in
+            Masc_tui_attachment_action.run
+              ~fetch:(fun ~sha256:_ -> Ok bytes)
+              attachment ~midi_soundfont:!boot_midi_soundfont
+      in
+      notice ~kind:Notice_reply
+        ("/listen: " ^ Masc_tui_attachment_action.describe_outcome outcome)
+
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
@@ -10269,7 +10343,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Attach_image _ | Attach_image_missing_path | Attach_image_ref _
       | Attach_image_ref_missing_value | Preset_list | Preset_save _ | Preset_save_missing_name
       | Preset_restore _ | Preset_restore_missing_name | Preset_show _ | Preset_show_missing_name
-      | Preset_delete _ | Preset_delete_missing_name | Unknown _ -> true
+      | Preset_delete _ | Preset_delete_missing_name | Listen | Unknown _ -> true
   then
     notice ~kind:Notice_failure
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
@@ -10573,6 +10647,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       state.runtime_param_edit <- None;
       state.runtime_params_notice <- None;
       goto_surface state ~mailbox Config
+  | Masc_tui_command.Listen ->
+      Masc_tui_message_input.clear state.msg_input;
+      listen_newest_media state
   | Masc_tui_command.Switch_keeper_missing_name ->
       notice ~kind:Notice_failure "/keeper needs a name on the same line"
   | Masc_tui_command.Switch_keeper name -> (
@@ -13665,11 +13742,6 @@ let step_board_read state ~mailbox ~delta =
           (List.nth_opt state.board_posts next)
       end
 
-(* The MIDI soundfont read at boot from [tui].midi_soundfont (the same load
-   that applies the theme and the saved sort). The numbered attachment keys
-   answer from this snapshot instead of re-reading runtime.toml per press. *)
-let boot_midi_soundfont : string option ref = ref None
-
 let board_attachment_digit_of_key = function
   | "1" -> Some 1
   | "2" -> Some 2
@@ -15163,6 +15235,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Play_invites | Masc_tui_command.Play_link _
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
+       | Masc_tui_command.Listen
        | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
        | Masc_tui_command.Preset_save_missing_name
        | Masc_tui_command.Preset_restore _

@@ -144,7 +144,7 @@ let manifest_matches ~base_path ~expected result =
     | Invalid_artifact_manifest {detail} -> Error (Invalid_manifest detail) in
   Ok manifest
 
-let resolve ~base_path ~entry ~invocation ~result =
+let resolve ~base_path ~entry ~invocation ~(result : Tool_result.result) =
   match entry.Async.status with
   | Async.Queued | Running | Cancelling _ | Lost _ | Cancelled _
   | Persistence_failed _ | Waiting_for_owned_jobs _ -> Ok None

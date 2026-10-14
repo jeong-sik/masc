@@ -58,19 +58,7 @@ val composite_live_turn_last_progress_epoch : Yojson.Safe.t -> float option
 val composite_execution_current_for_runtime_state :
   snapshot:Yojson.Safe.t -> execution:Yojson.Safe.t -> bool
 type composite_runtime_attention =
-  Server_dashboard_http_composite_claims.composite_runtime_attention = {
-  cra_is_live : bool;
-  cra_fiber_stop_requested : bool;
-  cra_idle_attention : bool;
-  cra_blocked : bool;
-  cra_execution_current : bool;
-  cra_stale_execution_receipt : bool;
-  cra_live_turn_started_at : float option;
-  cra_live_turn_last_progress_at : float option;
-  cra_needs_attention : bool;
-  cra_reason : string option;
-  cra_state : Server_dashboard_http_composite_claims.runtime_attention_state;
-}
+  Server_dashboard_http_composite_claims.composite_runtime_attention
 val composite_runtime_attention :
   snapshot:Yojson.Safe.t ->
   execution:Yojson.Safe.t -> composite_runtime_attention

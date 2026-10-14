@@ -31,9 +31,13 @@ val failure_text : tab_failure -> string
 
 val render_tab :
   ?rhythm:bool -> max_width:int -> string -> (string list, tab_failure) result
-(** [render_tab ~max_width source] is the score's tablature, one line per
-    string, highest string first, system after system -- or why the fence
-    should show the source instead.
+(** [render_tab ~max_width source] is the score's tablature, system after
+    system -- or why the fence should show the source instead. Each system
+    is a row of measure numbers above the strings, then one line per string,
+    highest string first; a blank line sits between systems. Ahead of the
+    first system, one header line names what the directives said
+    ([♩=96 · 4/4 · "Riff"]); a score whose directives said none draws no
+    header line.
 
     [~rhythm:true] adds one more line under the lowest string, naming each
     beat's length at its first cell: [w h q e s] for the whole, half,

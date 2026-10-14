@@ -1280,6 +1280,7 @@ let rec async_worker_result
       ?nested_activation
       ?continuation
       ?after_child_submission
+      ?before_child_dispatch
       ~plan
       ?journal
       ~tool_name
@@ -1338,6 +1339,7 @@ let rec async_worker_result
     match target with
     | Plan.Descriptor_target _ -> refuse "ordinary tools do not enter the native child producer"
     | Plan.Child_submission child ->
+      Option.iter (fun before -> before ()) before_child_dispatch;
       let original =
         let* context = match nested_activation with
           | Some context -> Ok context
@@ -1502,9 +1504,22 @@ let rec async_worker_result
        | Executor.Run_journal_rejected _ | Plan_execution_failed _
        | Node_observation_failed _ | Outer_completion_mismatch _ -> None)
   in
-  match waiting_dependencies with
-  | None -> Keeper_msg_async.worker_finished result
-  | Some dependencies ->
+  let interrupted = match continuation,execution with
+    | Some _,Error failure ->
+      (match failure.Executor.cause with
+       | Executor.Tool_did_not_complete node ->
+         (match Plan.contract plan node.node_id,node.result with
+          | Some {target=Plan.Child_submission _;_},Tool_result.Failed _
+          | Some {target=Plan.Child_result _;_},Tool_result.Failed {class_=Workflow_rejection;_} ->
+            Some (Tool_result.message node.result)
+          | (None | Some {target=(Descriptor_target _ | Child_submission _ | Child_result _);_}),_ -> None)
+       | Run_journal_rejected _ | Node_observation_failed _ | Plan_execution_failed _
+       | Outer_completion_mismatch _ -> None)
+    | (None | Some _),(Ok _ | Error _) -> None in
+  match interrupted,waiting_dependencies with
+  | Some reason,_ -> Keeper_msg_async.worker_interrupted ~reason
+  | None,None -> Keeper_msg_async.worker_finished result
+  | None,Some dependencies ->
     (match Keeper_msg_async.worker_waiting_for_dependencies ~dependencies result with
      | Ok outcome -> outcome
      | Error _ -> Keeper_msg_async.worker_finished result)

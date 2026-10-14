@@ -228,6 +228,7 @@ module For_testing : sig
     ?nested_activation:Keeper_skill_activation_recorder.bound_context ->
     ?continuation:Keeper_tool_execution_journal.continuation ->
     ?after_child_submission:(Tool_result.result -> unit) ->
+    ?before_child_dispatch:(unit -> unit) ->
     plan:Keeper_tool_plan.t ->
     ?journal:Keeper_tool_execution_journal.worker ->
     tool_name:string -> request_id:string ->

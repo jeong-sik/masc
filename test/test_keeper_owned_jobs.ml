@@ -3487,7 +3487,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
         ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
         ~completion:Agent_core.Tool_contract.Continue_after_success)
       ~clock:(Eio.Stdenv.clock env) () in
-  let continuation =
+  let continuation = List.fold_left (fun continuation late_fault ->
     let module Draft = Masc.Keeper_composition_draft in
     let source = Journal.continuation_source continuation in
     let draft = Draft.load_continuation ~base_path:fixture.base_path ~capability_surface:surface continuation
@@ -3512,7 +3512,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
               |> Result.map_error Masc.Keeper_composition_completion_outbox.error_to_string in
             Journal.bind_continuation continuation ~request_id
             |> Result.map (fun admitted -> Atomic.set worker (Some admitted);
-              write events "invalid-original-activation-after-ACK-ready-acceptance\n")
+              if not late_fault then write events "invalid-original-activation-after-ACK-ready-acceptance\n")
             |> Result.map_error Journal.error_to_string)
           ~on_worker_settled:(fun settlement ->
             Masc.Keeper_composition_completion_wake.on_worker_settled ~base_path:fixture.base_path
@@ -3523,6 +3523,8 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
             Masc.Keeper_tool_composition_surface.For_testing.async_worker_result
               ~composition_execution:Masc.Keeper_tool_composition_catalog.Async ~tool_kind:Descriptor.Async_composition_tool
               ~nested_calls:(Draft.nested_calls draft) ~nested_activation:bound ~continuation
+              ?before_child_dispatch:(if late_fault then Some (fun () ->
+                write events "invalid-original-activation-after-restore-before-native-proof\n") else None)
               ~plan:(Draft.plan draft) ~journal:worker ~tool_name:Draft.run_tool_name
               ~request_id ~composition_run_id:run_id ~request_sw ~config ~meta:fixture.meta
               ~source_invocation:(Agent_core.Tool_contract.Invocation.create ~tool_use_id:source.parent_tool_use_id
@@ -3550,7 +3552,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
     check string "transient authority fault keeps the accepted physical owner recoverable" fault_request
       (Journal.continuation_request_id retained);
     check int "authority fault does not invent a dependency wait" 0 (List.length (Journal.continuation_dependencies retained));
-    retained in
+    retained) continuation [false;true] in
   let resumed = resume continuation "recover-physical-parent-ack" in
   check bool "fresh parent recovers actual acknowledgement" true (Tool_result.is_success resumed);
   let ok,pending,entry = await_composition env fixture (Tool_result.data resumed) in

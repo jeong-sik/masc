@@ -2221,9 +2221,11 @@ let browser_lane_setup_cmd =
           ~doc:
             "How to connect Firefox: extension installs the native host and writes the \
              MASC extension for Firefox to load; bidi installs the host and writes the \
-             [browser.live.bidi] table so the MASC server starts a Firefox of its own. \
-             Give it twice for both. Without a mode nothing is written and the current \
-             state is printed.")
+             [browser.live.bidi] table so the MASC server starts a Firefox of its own; \
+             host installs the host and its launcher only, for a browser you attach \
+             yourself or to bring an installed lane's host up to date. Give it twice \
+             for two. Without a mode nothing is written and the current state is \
+             printed.")
   in
   let binary =
     Arg.(
@@ -2313,10 +2315,11 @@ let browser_lane_setup_cmd =
        ~man:
          [ `S Manpage.s_description
          ; `P
-             "Installs the browser lane host the MASC extension talks to, and writes the \
-              extension itself, so no source checkout is needed. It starts no browser: \
-              Firefox loads a temporary add-on only from about:debugging, and the last \
-              thing this prints is what to do there."
+             "Installs the browser lane host and its launcher, and with --mode extension \
+              the MASC extension itself (so no source checkout is needed) and the manifest \
+              Firefox starts the host through. It starts no browser: Firefox loads a \
+              temporary add-on only from about:debugging, and the last thing --mode \
+              extension prints is what to do there."
          ; `P
              "Installing again replaces the host, launcher, manifest and extension files \
               and keeps the workspace's lane token."

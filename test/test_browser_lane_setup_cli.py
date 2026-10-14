@@ -140,6 +140,63 @@ class BrowserLaneSetupCommand(unittest.TestCase):
                 self.assertFalse(base.exists(), "nothing was written to the workspace")
                 self.assertFalse(manifests.exists(), "nothing was registered")
 
+    # --mode host: the host and the launcher, for a browser attached by hand and
+    # for bringing an installed lane's host up to date.
+    def test_host_installs_the_host_and_the_launcher_and_nothing_else(self):
+        root = self.scratch()
+        base = root / "workspace"
+        result = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((lane(base) / "host/masc-browser-host").read_bytes(), HOST.read_bytes())
+        self.assertTrue((lane(base) / "host/launch.json").is_file())
+        self.assertEqual(os.stat(lane(base) / "token").st_mode & 0o777, 0o600)
+        self.assertFalse((lane(base) / "extension").exists(), "no extension is written")
+        for directory in ("Library", ".mozilla"):
+            self.assertFalse((root / "home" / directory).exists(), "no manifest is registered")
+        self.assertFalse(runtime_toml(base).exists(), "no runtime.toml is needed or written")
+        self.assertIn("connects no browser", result.stdout)
+        # What the lane says is left to do follows, as for the extension route.
+        self.assertIn("follows the workspace connection port", result.stdout)
+
+    def test_host_takes_a_provisioned_token_like_the_other_modes(self):
+        root = self.scratch()
+        base = root / "workspace"
+        token = root / "provisioned-token"
+        token.write_text("provisioned-browser-lane-test-token\n")
+        result = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base),
+                      "--token-file", str(token))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((lane(base) / "token").read_text(), token.read_text())
+
+    def test_the_host_mode_beside_another_route_does_not_say_two_browsers_are_connected(self):
+        root = self.scratch()
+        firefox = fake_firefox(root)
+        for label, extra in (("extension", ("--manifest-dir", str(root / "manifests"))),
+                             ("bidi", ("--firefox", str(firefox), "--profile", str(root / "profile")))):
+            with self.subTest(label):
+                base = workspace(root, name="workspace " + label)
+                result = masc(root, "--mode", "host", "--mode", label, "--binary", str(HOST),
+                              "--base-path", str(base), *extra)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("ambiguous_browser_clients", result.stdout)
+
+    def test_host_refreshes_the_copy_and_leaves_the_runtime_table_as_it_is(self):
+        root = self.scratch()
+        base = workspace(root)
+        firefox, profile = fake_firefox(root), root / "keeper profile"
+        first = masc(root, "--mode", "bidi", "--binary", str(HOST), "--base-path", str(base),
+                     "--firefox", str(firefox), "--profile", str(profile))
+        self.assertEqual(first.returncode, 0, first.stderr)
+        with_table = runtime_toml(base).read_text()
+        copy = lane(base) / "host/masc-browser-host"
+        copy.write_bytes(b"an older build")
+        token = (lane(base) / "token").read_text()
+        again = masc(root, "--mode", "host", "--binary", str(HOST), "--base-path", str(base))
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(copy.read_bytes(), HOST.read_bytes())
+        self.assertEqual(runtime_toml(base).read_text(), with_table)
+        self.assertEqual((lane(base) / "token").read_text(), token)
+
     def test_a_mode_that_does_not_exist_is_refused(self):
         root = self.scratch()
         result = masc(root, "--mode", "automation", "--base-path", str(root / "workspace"))
@@ -215,6 +272,9 @@ class BrowserLaneSetupCommand(unittest.TestCase):
                           ("--mode", "extension", "--firefox", str(fake_firefox(root))),
                           ("--mode", "extension", "--profile", str(root / "profile")),
                           ("--mode", "extension", "--port", "9333"),
+                          ("--mode", "host", "--manifest-dir", str(root / "manifests")),
+                          ("--mode", "host", "--firefox", str(fake_firefox(root))),
+                          ("--mode", "host", "--port", "9333"),
                           ("--binary", str(HOST))):
             with self.subTest(arguments):
                 result = masc(root, "--base-path", str(base), *arguments)

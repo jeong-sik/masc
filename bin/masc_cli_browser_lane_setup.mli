@@ -1,12 +1,15 @@
-(** [masc browser-lane-setup]: connect this workspace's browser lane to
-    Firefox, by either route or both.
+(** [masc browser-lane-setup]: install this workspace's browser lane host, and
+    connect it to Firefox by the extension, by a Firefox MASC starts, or by
+    neither (a browser attached by hand).
 
     Without a mode it writes nothing and says what is installed. [--mode
     extension] installs the native host, its launcher and manifest, and writes
     the extension for Firefox to load. [--mode bidi] installs the host and its
     launcher and writes the [\[browser.live.bidi\]] table of runtime.toml, so
-    the MASC server starts a Firefox of its own. It starts no browser and loads
-    no extension.
+    the MASC server starts a Firefox of its own. [--mode host] installs the host
+    and its launcher and nothing else: no browser is connected, and no
+    runtime.toml is needed or written. It starts no browser and loads no
+    extension.
 
     An option that the chosen modes do not use is refused, not ignored. *)
 

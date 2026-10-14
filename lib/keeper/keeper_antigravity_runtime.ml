@@ -859,6 +859,9 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
         ?on_tool_boundary:on_official_client_tool_boundary
         ~on_result_handoff:on_official_client_result_handoff
         ()
+      |> Result.map_error (fun error ->
+        Host.finish_raw_error ~keeper_name raw_trace_run error;
+        error)
     in
     let dynamic_tools =
       List.map (antigravity_dynamic_tool ~observe_effect_attempted) dynamic_tools

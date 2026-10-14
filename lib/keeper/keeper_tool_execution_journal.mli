@@ -93,8 +93,19 @@ val pending_continuations : base_path:string -> (pending_continuations, error) r
 (** Discover only per-request pending markers published before journal
     ownership and worker effects. Canonical journal/request/job records decide
     readiness. Completed or superseded markers retire only after exact terminal
-    proof; unavailable, unbound or corrupt authority stays visible. No worker
+    proof bound to the exact marker snapshot under its retained stable lock;
+    unavailable, unbound or corrupt authority stays visible. Directory listing
+    still includes retained lock metadata, which is validated and excluded from
+    [inspected]. No worker
     dispatch, historical terminal scan, backend operation or automatic resume. *)
+
+module For_testing : sig
+  (** The hook runs after canonical terminal proof and before the guarded
+      marker retirement transaction, enabling physical replacement scenarios. *)
+  val pending_continuations :
+    before_retire:(string -> unit) -> base_path:string ->
+    (pending_continuations, error) result
+end
 
 val bind_continuation : continuation -> request_id:string -> (worker, error) result
 (** Async [on_accepted] admission pinned to the captured exact owner and

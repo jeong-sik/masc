@@ -2562,6 +2562,8 @@ module Private_jsonl_cursor = struct
     | Missing, Present _ | Present _, Missing -> false
   ;;
 
+  let is_missing = function Missing -> true | Present _ -> false
+
   let to_string = function
     | Missing -> "missing"
     | Present { device; inode; end_offset } ->
@@ -2672,6 +2674,7 @@ and private_jsonl_transaction_error =
       ; link_count : int
       }
   | Transaction_path_binding_changed of { path : string }
+  | Transaction_content_changed of { path : string }
   | Incomplete_transaction_tail of { end_offset : int }
   | Invalid_transaction_suffix
   | Private_jsonl_operation_failed of private_jsonl_operation_failure
@@ -2706,6 +2709,7 @@ let private_jsonl_settlement_success = function
   | Unexpected_transaction_file_kind _
   | Ambiguous_transaction_file_identity _
   | Transaction_path_binding_changed _
+  | Transaction_content_changed _
   | Incomplete_transaction_tail _
   | Invalid_transaction_suffix
   | Private_jsonl_operation_failed _
@@ -2815,6 +2819,8 @@ let rec private_jsonl_transaction_error_to_string = function
     Printf.sprintf
       "private JSONL transaction path binding changed during operation: %s"
       path
+  | Transaction_content_changed { path } ->
+    Printf.sprintf "private JSONL transaction content changed since its snapshot: %s" path
   | Incomplete_transaction_tail { end_offset } ->
     Printf.sprintf
       "private JSONL transaction target has an incomplete tail at end %d"
@@ -2953,6 +2959,7 @@ let private_jsonl_add_cleanup_failure error cleanup_failure =
     | Unexpected_transaction_file_kind _
     | Ambiguous_transaction_file_identity _
     | Transaction_path_binding_changed _
+    | Transaction_content_changed _
     | Incomplete_transaction_tail _
     | Invalid_transaction_suffix
     | Private_jsonl_operation_failed _
@@ -3349,6 +3356,50 @@ let private_jsonl_read_exact fd ~from ~end_offset =
   |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
 ;;
 
+(* Every participant must retain and use the same stable sibling lock. The
+   snapshot binds both a physical replacement and a same-inode payload edit;
+   POSIX unlink itself is not an atomic compare-and-unlink against rogue actors
+   that bypass this process-owned-directory protocol. *)
+let purge_private_jsonl_durable_locked_at_snapshot_with_io ~io path
+    ~(expected : private_jsonl_snapshot) =
+  let success cursor = Cursor_succeeded cursor in
+  with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir ~path ->
+  let ( let* ) = Result.bind in
+  let capture operation f = private_jsonl_capture operation f
+    |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure) in
+  let sync_removed () =
+    let* () = capture Sync_removal_parent (fun () ->
+      io.before_sync_parent dir; fsync_parent_directory dir) in
+    Ok Private_jsonl_cursor.Missing in
+  let* opened = private_jsonl_open_existing ~close_fd:io.close_fd path
+      [Unix.O_RDONLY; Unix.O_NONBLOCK] in
+  match opened with
+  | None -> sync_removed ()
+  | Some fd ->
+    private_jsonl_with_fd ~close_operation:Close_transaction_data
+      ~close_fd:io.close_fd ~success fd (fun () ->
+        let* stats = capture Inspect_transaction_data (fun () -> Unix.fstat fd) in
+        let* actual = private_jsonl_cursor_of_stats stats in
+        let* () = if Private_jsonl_cursor.equal expected.cursor actual then Ok ()
+          else Error (Cursor_mismatch {expected=expected.cursor;actual}) in
+        let* bytes = private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size in
+        let* () = if String.equal expected.bytes bytes then Ok ()
+          else Error (Transaction_content_changed {path}) in
+        let* () = private_jsonl_validate_open_binding
+            ~operation:Inspect_transaction_path ~path fd in
+        let* () = capture Remove_transaction_data (fun () -> Unix.unlink path) in
+        sync_removed ())
+;;
+
+let purge_private_jsonl_durable_locked_at_snapshot_result path ~expected =
+  purge_private_jsonl_durable_locked_at_snapshot_with_io
+    ~io:private_jsonl_transaction_unix_io path ~expected
+;;
+
+let purge_private_jsonl_durable_locked_at_snapshot_with_io_for_testing =
+  purge_private_jsonl_durable_locked_at_snapshot_with_io
+;;
+
 let read_private_jsonl_durable_locked_with_io ~io path ~after =
   let success snapshot = Snapshot_succeeded snapshot in
   with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir:_ ~path ->
@@ -3451,6 +3502,7 @@ let private_jsonl_recover_snapshot fd =
       | Unexpected_transaction_file_kind _
       | Ambiguous_transaction_file_identity _
       | Transaction_path_binding_changed _
+      | Transaction_content_changed _
       | Invalid_transaction_suffix
       | Private_jsonl_operation_failed _
       | Rewrite_stage_failed _
@@ -3659,6 +3711,7 @@ let append_private_jsonl_durable_stable_with_io ?(observe=ignore) ~io path ~expe
                  | Unexpected_transaction_file_kind _
                  | Ambiguous_transaction_file_identity _
                  | Transaction_path_binding_changed _
+                 | Transaction_content_changed _
                  | Invalid_transaction_suffix
                  | Private_jsonl_operation_failed _
                  | Rewrite_stage_failed _
@@ -4059,7 +4112,8 @@ let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?
         | Error ((Stable_lock_contended _ | Unexpected_stable_lock_permissions _
             | Invalid_stable_lock_state _ | Cursor_mismatch _
             | Unexpected_transaction_file_kind _ | Ambiguous_transaction_file_identity _
-            | Transaction_path_binding_changed _ | Incomplete_transaction_tail _
+            | Transaction_path_binding_changed _
+            | Transaction_content_changed _ | Incomplete_transaction_tail _
             | Invalid_transaction_suffix | Rewrite_stage_failed _
             | Rewrite_published_durability_unknown _ | Transaction_settlement_failed _
             | Transaction_append_failed _) as error) ->

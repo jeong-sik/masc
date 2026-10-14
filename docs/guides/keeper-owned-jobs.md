@@ -91,8 +91,16 @@ before it can own the journal or execute a node. Recovery reads this pending
 partition and the exact original journal, request and job records; it can find
 a ready result without another completion event. A marker grants no execution
 permission. Completed attempts and superseded markers retire after canonical
-terminal proof, while unavailable original authority remains reported and
-retained. This discovery boundary does not dispatch continuation workers yet.
+terminal proof bound to the exact marker inode, end offset and bytes under
+its retained stable sibling lock. Publishing and retirement share that lock;
+a physical replacement or same-inode content change during proof reads is
+refused and retained. This is the owned-directory transaction protocol, not an
+atomic POSIX compare-unlink against a writer bypassing its lock.
+Unavailable original authority remains reported and retained. Discovery
+validates retained lock siblings and excludes them from pending marker counts;
+the directory listing still includes historical lock metadata. It does not
+scan historical terminal records. This discovery boundary does not dispatch
+continuation workers yet.
 The journal retains the exact producer-owned job wait separately from the
 provider-facing body. Only this exact read-only leaf may be rechecked; it keeps
 its original execution ID and tool-use ID. Completed siblings reuse their full

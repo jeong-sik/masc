@@ -29,8 +29,6 @@ val latest_task_claim_row :
 val composite_claim_attempt_json :
   claim_window:claim_window ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
-val find_override_field_source :
-  string -> Yojson.Safe.t -> Yojson.Safe.t option
 val composite_config_drift_json :
   config:Workspace.config ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]

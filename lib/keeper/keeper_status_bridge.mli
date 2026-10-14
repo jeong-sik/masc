@@ -96,3 +96,16 @@ val runtime_surface_json :
 
 val source_provenance_json :
   Workspace_utils.config -> keeper_meta -> Yojson.Safe.t
+
+type source_provenance =
+  { overrides : Keeper_status_bridge_override.t list
+  ; active_config_root : string
+  ; active_config_root_source : string
+  ; default_manifest_path : string option
+  }
+(** The parts of {!source_provenance_json} a caller decides on: the fields
+    whose live value differs from the declared default, and where the
+    declared config came from. *)
+
+val source_provenance :
+  Workspace_utils.config -> keeper_meta -> source_provenance

@@ -1,30 +1,22 @@
-(** Default vs live override-field detail builder + typed matchers
-    for keeper status surfaces. *)
+(** A Keeper field whose live value differs from its declared default. The
+    status surfaces list these as [override_fields] and
+    [override_field_sources]. *)
 
-type override_field_detail =
-  { field : string
-  ; default_value : Yojson.Safe.t
-  ; live_value : Yojson.Safe.t
-  }
+type t =
+  | Instructions of { default : string; live : string }
+  | Mention_targets of { default : string list; live : string list }
+  | Board_interests of { default : string list; live : string list }
+  | Runtime_id of { default : string; live : string }
+  | Activation_mode of
+      { default : Keeper_activation_mode.t
+      ; live : Keeper_activation_mode.t
+      }
 
-val override_field
-  : string
-  -> default_value:Yojson.Safe.t
-  -> live_value:Yojson.Safe.t
-  -> override_field_detail
+val field_name : t -> string
+(** The dotted name the status JSON carries, such as ["model.runtime_id"]. *)
 
-val maybe_string_override
-  : string
-  -> ?normalize:(string -> string)
-  -> string option
-  -> string
-  -> override_field_detail list
-  -> override_field_detail list
+val default_value_json : t -> Yojson.Safe.t
+val live_value_json : t -> Yojson.Safe.t
 
-val nonempty_string_list_override
-  : string
-  -> string list
-  -> string list
-  -> override_field_detail list
-  -> override_field_detail list
-
+val runtime_id : t list -> (string * string) option
+(** The declared and live runtime ids when the runtime is overridden. *)

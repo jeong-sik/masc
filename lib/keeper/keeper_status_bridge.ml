@@ -28,19 +28,8 @@ let effective_declarative_runtime_id
   runtime_id_of_meta meta
 ;;
 
-type override_field_detail =
-  Keeper_status_bridge_override.override_field_detail =
-  { field : string
-  ; default_value : Yojson.Safe.t
-  ; live_value : Yojson.Safe.t
-  }
-
-let override_field = Keeper_status_bridge_override.override_field
-let maybe_string_override = Keeper_status_bridge_override.maybe_string_override
-let nonempty_string_list_override =
-  Keeper_status_bridge_override.nonempty_string_list_override
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
-  : override_field_detail list
+  : Keeper_status_bridge_override.t list
   =
   let default_string default live =
     match default with
@@ -52,41 +41,51 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
     | values, [] when values <> [] -> values
     | _, values -> values
   in
-  let effective_runtime_id = effective_declarative_runtime_id defaults meta in
-  []
-  |> maybe_string_override
-       "prompt.instructions"
-       defaults.instructions
-       (default_string defaults.instructions meta.instructions)
-  |> nonempty_string_list_override
-       "workspace.mention_targets"
-       defaults.mention_targets
-       (default_nonempty_string_list defaults.mention_targets meta.mention_targets)
-  |> nonempty_string_list_override
-       "workspace.board_interests"
-       defaults.board_interests
-       (default_nonempty_string_list defaults.board_interests meta.board_interests)
-  |> (fun acc ->
-  let runtime_id = runtime_id_of_meta meta in
-  if effective_runtime_id <> runtime_id
-  then
-    override_field
-      "model.runtime_id"
-      ~default_value:(`String effective_runtime_id)
-      ~live_value:(`String runtime_id)
-    :: acc
-  else acc)
-  |> maybe_string_override
-       "activation_mode"
-       (Option.map Keeper_activation_mode.to_string defaults.activation_mode)
-       (Keeper_activation_mode.to_string meta.activation_mode)
-  |> List.rev
+  (* A list default of [] declares no preference, so it is never overridden. *)
+  let differs_from_list_default default live = default <> [] && default <> live in
+  let instructions =
+    let live = default_string defaults.instructions meta.instructions in
+    match defaults.instructions with
+    | Some default when default <> live ->
+      [ Keeper_status_bridge_override.Instructions { default; live } ]
+    | Some _ | None -> []
+  in
+  let mention_targets =
+    let default = defaults.mention_targets in
+    let live = default_nonempty_string_list default meta.mention_targets in
+    if differs_from_list_default default live
+    then [ Keeper_status_bridge_override.Mention_targets { default; live } ]
+    else []
+  in
+  let board_interests =
+    let default = defaults.board_interests in
+    let live = default_nonempty_string_list default meta.board_interests in
+    if differs_from_list_default default live
+    then [ Keeper_status_bridge_override.Board_interests { default; live } ]
+    else []
+  in
+  let runtime_id =
+    let default = effective_declarative_runtime_id defaults meta in
+    let live = runtime_id_of_meta meta in
+    if default <> live
+    then [ Keeper_status_bridge_override.Runtime_id { default; live } ]
+    else []
+  in
+  let activation_mode =
+    let live = meta.activation_mode in
+    match defaults.activation_mode with
+    | Some default when default <> live ->
+      [ Keeper_status_bridge_override.Activation_mode { default; live } ]
+    | Some _ | None -> []
+  in
+  List.concat
+    [ instructions; mention_targets; board_interests; runtime_id; activation_mode ]
 ;;
 
 let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : string list
   =
-  live_override_details meta defaults |> List.map (fun detail -> detail.field)
+  live_override_details meta defaults |> List.map Keeper_status_bridge_override.field_name
 ;;
 
 let runtime_registry_entry (config : Workspace_utils.config) name =
@@ -420,9 +419,10 @@ let optional_existing_path_json ?source = function
    dropped from the status payload because there is no runtime JSON
    sibling to point at. Source identity is now fully described by the
    TOML path + the single-arm [source_kind]. *)
-let override_field_source_json ~default_source_kind ~default_manifest_path detail =
+let override_field_source_json ~default_source_kind ~default_manifest_path override =
+  let default_value = Keeper_status_bridge_override.default_value_json override in
   let default_missing =
-    match detail.default_value with
+    match default_value with
     | `Null -> true
     | _ -> false
   in
@@ -432,7 +432,7 @@ let override_field_source_json ~default_source_kind ~default_manifest_path detai
     | None -> false
   in
   `Assoc
-    [ "field", `String detail.field
+    [ "field", `String (Keeper_status_bridge_override.field_name override)
     ; "source", `String "live_meta"
     ; "live_source", `String "runtime_overlay"
     ; "default_source", Json_util.string_opt_to_json default_source_kind
@@ -440,9 +440,31 @@ let override_field_source_json ~default_source_kind ~default_manifest_path detai
     ; "default_manifest_path", Json_util.string_opt_to_json default_manifest_path
     ; "default_manifest_exists", `Bool default_manifest_exists
     ; "default_missing", `Bool default_missing
-    ; "default_value", detail.default_value
-    ; "live_value", detail.live_value
+    ; "default_value", default_value
+    ; "live_value", Keeper_status_bridge_override.live_value_json override
     ]
+;;
+
+type source_provenance =
+  { overrides : Keeper_status_bridge_override.t list
+  ; active_config_root : string
+  ; active_config_root_source : string
+  ; default_manifest_path : string option
+  }
+
+let source_provenance config (meta : keeper_meta) =
+  let snapshot =
+    keeper_default_source_snapshot ~base_path:config.Workspace.base_path meta.name
+  in
+  let resolution =
+    Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path
+  in
+  { overrides = live_override_details meta snapshot.defaults
+  ; active_config_root = resolution.config_root.path
+  ; active_config_root_source =
+      Config_dir_resolver.source_to_string resolution.config_root.source
+  ; default_manifest_path = snapshot.defaults.manifest_path
+  }
 ;;
 
 let source_provenance_json config (meta : keeper_meta) =
@@ -450,7 +472,9 @@ let source_provenance_json config (meta : keeper_meta) =
     keeper_default_source_snapshot ~base_path:config.Workspace.base_path meta.name
   in
   let override_details = live_override_details meta snapshot.defaults in
-  let override_fields = List.map (fun detail -> detail.field) override_details in
+  let override_fields =
+    List.map Keeper_status_bridge_override.field_name override_details
+  in
   let resolution =
     Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path
   in

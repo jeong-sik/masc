@@ -84,8 +84,20 @@ let diagnostics state =
   match state.inventory with
   | None -> []
   | Some inventory ->
-      let coverage = match inventory.coverage with Read.Unavailable ->
-        ["persistence failure history unavailable; provider completeness and liveness unknown"] in
+      (* [coverage] has a single constructor ([Read.Unavailable]): persistence
+         failure history, provider completeness and liveness are always
+         reported as unknown. A line that is always shown reads as an alarm and
+         hides the real ones, so the caveat is attached only when a real failure
+         is visible, which is when it is useful. The wire fields and
+         docs/design/child-content-http-read.md still carry the notice. When
+         [coverage] gains a second constructor, match on it here. *)
+      let caveat = match inventory.coverage with
+        | Read.Unavailable ->
+            "failure history is kept only for the collector lifetime; provider completeness and liveness unknown" in
+      let real_error = List.exists (function
+        | Persistence _ | Receiver_read _ | Service _ -> true
+        | Transport _ | Http_refused _ | Invalid_json _ | Invalid_response _
+        | History_rewritten _ -> false) (errors state) in
       let retained = List.filter_map (fun (store:store) ->
         if List.exists (fun (receiver,status) -> receiver=store.receiver &&
           match status with Ok cursor -> cursor.Read.store_id=store.store_id | Error _ -> true)
@@ -93,8 +105,10 @@ let diagnostics state =
         then None else Some "retained Child history absent from latest inventory; current redaction unknown") state.stores in
       let cleanup = inventory.cleanup_failures @ List.concat_map
           (fun (store:store) -> store.cleanup_failures) state.stores in
-      List.sort_uniq String.compare (coverage @ retained @
-        List.map (fun operation -> "cleanup failed: " ^ operation) cleanup)
+      let failures = retained @
+        List.map (fun operation -> "cleanup failed: " ^ operation) cleanup in
+      List.sort_uniq String.compare
+        (if failures <> [] || real_error then caveat :: failures else failures)
 let decode ~fetch path =
   let* status,body=fetch path |> Result.map_error (fun detail -> Transport detail) in
   let parsed=match Yojson.Safe.from_string body with

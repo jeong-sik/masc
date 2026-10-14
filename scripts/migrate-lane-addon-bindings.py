@@ -27,11 +27,12 @@ Modes:
   (default)          Classify only. Prints counts and one line per record.
                      Changes nothing.
   --write-out DIR    Additionally handles the records that are safe to move
-                     without any operator decision: every detached legacy
-                     record is copied to DIR/<name>.json.legacy (byte
-                     identical, verified by hash) and its source file is
-                     renamed to <name>.json.migrated so the container stops
-                     reading it. Nothing else is copied, rewritten or moved.
+                     without any operator decision (run with the server
+                     stopped): every detached legacy record is copied to
+                     DIR/<name>.json.legacy (byte identical, verified by hash)
+                     and its source file is renamed to <name>.json.migrated so
+                     the container stops reading it. Nothing else is copied,
+                     rewritten or moved.
 
 A "legacy" record has neither authority field. A record with one or two
 authority fields was written by a newer version; the tool only reports it
@@ -340,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         "--write-out",
         default=None,
         metavar="DIR",
-        help="move detached legacy records out of the read path after archiving them to DIR",
+        help="move detached legacy records out of the read path after archiving them to DIR (run with the server stopped)",
     )
     args = parser.parse_args(argv)
     store_root = (

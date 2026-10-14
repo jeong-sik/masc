@@ -395,7 +395,7 @@ let execute_one
              | Keeper_tool_execution_journal.Recheck_launch stored ->
                  Some stored.invocation, Some stored
              | Keeper_tool_execution_journal.Dispatch
-             | Keeper_tool_execution_journal.Recheck_job_result _
+             | Keeper_tool_execution_journal.Recheck_result _
              | Keeper_tool_execution_journal.Reuse_completed _ ->
                  if launch_leaf then
                    (match launch_invocation_of with

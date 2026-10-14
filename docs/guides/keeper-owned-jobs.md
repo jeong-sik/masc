@@ -98,7 +98,11 @@ its retained stable sibling lock. Publishing and retirement share that lock;
 a physical replacement or same-inode content change during proof reads is
 refused and retained. This is the owned-directory transaction protocol, not an
 atomic POSIX compare-unlink against a writer bypassing its lock.
-Unavailable original authority remains reported and retained. Discovery
+Unavailable original authority remains reported and retained. Permanent
+`Invalid_result` failures also remain visible on later maintenance passes;
+there is no automatic expiry or typed operator resolution yet. The owner-bound
+resolution follow-up is tracked in [#42799](https://github.com/jeong-sik/masc/issues/42799#issuecomment-6175534613).
+Discovery
 excludes retained lock siblings from pending marker counts; a lock whose
 marker data file was already retired is skipped by an existence-only check
 and is never re-acquired or validated, so each pass stays proportional to

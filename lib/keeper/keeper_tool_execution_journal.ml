@@ -1114,6 +1114,9 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
     | Ok Retired ->
       let report = {report with inspected=report.inspected+1} in
       {report with retired=report.retired+1}
+    (* Permanent Invalid_result also retains its marker. Explicit owner-bound
+       resolution is pending: #42799, issuecomment-6175534613. Missing
+       authority must not become retirement or replacement dispatch. *)
     | Error error ->
       let report = {report with inspected=report.inspected+1} in
       {report with failures=(name,error) :: report.failures}) empty names in

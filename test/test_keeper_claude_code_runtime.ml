@@ -163,7 +163,7 @@ type fixture_step =
   | Close_transport
 
 let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
-    ?(auth_body = auth_subscription) ?(auth_exit = 0) ?auth_stderr
+    ?(auth_body = auth_subscription) ?(auth_exit = 0) ?auth_stderr ?auth_first_body
     lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
   let output = open_out_bin path in
@@ -176,6 +176,10 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
      the turn body instead, which answers it with turn output and reports
      nothing. *)
   output_string output "case \" $* \" in *\" auth status \"*)\n";
+  Option.iter (fun first ->
+    output_string output
+      ("  marker=\"$0.auth-first\"\n  if [ ! -e \"$marker\" ]; then\n    : > \"$marker\"\n    printf '%s\\n' "
+       ^ shell_quote first ^ "\n    exit 0\n  fi\n")) auth_first_body;
   output_string output ("  printf '%s\\n' " ^ shell_quote auth_body ^ "\n");
   Option.iter (fun text ->
     output_string output ("  printf '%s\\n' " ^ shell_quote text ^ " >&2\n")) auth_stderr;
@@ -234,13 +238,16 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
 ;;
 
 let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?auth_body ?auth_exit
-    ?auth_stderr lines f =
+    ?auth_stderr ?auth_first_body lines f =
   let path =
     fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?auth_body ?auth_exit
-      ?auth_stderr lines
+      ?auth_stderr ?auth_first_body lines
   in
   Fun.protect
-    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    ~finally:(fun () ->
+      let marker = path ^ ".auth-first" in
+      if Sys.file_exists marker then Sys.remove marker;
+      if Sys.file_exists path then Sys.remove path)
     (fun () -> f path)
 ;;
 
@@ -4824,6 +4831,33 @@ let test_truncated_auth_probe_keeps_cli_stderr () =
             | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
 ;;
 
+let test_cut_auth_probe_is_retried_once () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_first_body:"{\"loggedIn\":true," [] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail }))
+           when String.starts_with ~prefix:"auth status: invalid JSON: " detail ->
+             fail ("cut probe was not retried: " ^ detail)
+         | Error _ | Ok _ -> ()))
+;;
+
+let test_cut_auth_probe_reports_stdout_bytes () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+             check bool "persistent cut names the byte count" true
+               (Astring.String.is_infix ~affix:"(stdout 18 bytes)" detail)
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "cut auth probe completed the Keeper turn"))
+;;
+
 let test_truncated_auth_probe_without_stderr_keeps_detail () =
   let base_path = temp_workspace () in
   Fun.protect
@@ -6051,6 +6085,14 @@ let () =
             "truncated auth probe keeps cli stderr"
             `Quick
             test_truncated_auth_probe_keeps_cli_stderr
+        ; test_case
+            "cut auth probe is retried once"
+            `Quick
+            test_cut_auth_probe_is_retried_once
+        ; test_case
+            "cut auth probe reports stdout bytes"
+            `Quick
+            test_cut_auth_probe_reports_stdout_bytes
         ; test_case
             "truncated auth probe without stderr keeps detail"
             `Quick

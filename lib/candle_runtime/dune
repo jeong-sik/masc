@@ -31,4 +31,5 @@
   yojson
   time_compat
   eio
-  ptime))
+  ptime
+  zarith))

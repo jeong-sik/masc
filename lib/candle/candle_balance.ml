@@ -28,6 +28,7 @@ module Gifts = Set.Make (Gift_key)
 
 type t =
   { balances : int Names.t
+  ; decayed : Z.t Names.t
   ; last_at : Candle_time.t Names.t
   ; half_life : Candle_decay.half_life option
   ; through_at : Candle_time.t option
@@ -98,7 +99,8 @@ let error_to_string = function
       required_milli
 ;;
 
-let empty = { balances = Names.empty; last_at = Names.empty; half_life = None; through_at = None;
+let empty = { balances = Names.empty; decayed = Names.empty; last_at = Names.empty;
+  half_life = None; through_at = None;
   issued = Z.zero; burned = Z.zero; paid_goals = Goals.empty; grants = Grants.empty;
   gifts = Gifts.empty; owned = Names.empty; selections = Names.empty }
 
@@ -120,6 +122,34 @@ let balance state ~keeper =
   match Names.find_opt keeper state.balances with
   | Some amount -> amount
   | None -> 0
+;;
+
+let decayed_milli state ~keeper =
+  match Names.find_opt keeper state.decayed with
+  | Some amount -> amount
+  | None -> Z.zero
+;;
+
+let last_event_at state ~keeper =
+  Names.find_opt keeper state.last_at
+;;
+
+type supply_summary =
+  { total_supply_milli : Z.t
+  ; active_keepers : int
+  }
+
+let supply_summary state =
+  Names.fold
+    (fun _ amount acc ->
+       if amount > 0
+       then
+         { total_supply_milli = Z.add acc.total_supply_milli (Z.of_int amount)
+         ; active_keepers = acc.active_keepers + 1
+         }
+       else acc)
+    state.balances
+    { total_supply_milli = Z.zero; active_keepers = 0 }
 ;;
 
 let owned state ~keeper =
@@ -149,16 +179,29 @@ let advance_keeper state ~at ~keeper =
     let previous = balance state ~keeper in
     let* remaining = Candle_decay.remaining ~half_life ~since ~at ~amount_milli:previous
       |> Result.map_error (fun error -> Decay_failed {keeper;error}) in
+    let loss = Z.of_int (previous - remaining) in
+    let decayed =
+      if Z.equal loss Z.zero && not (Names.mem keeper state.decayed)
+      then state.decayed
+      else Names.add keeper (Z.add (decayed_milli state ~keeper) loss) state.decayed
+    in
     Ok {state with
       balances = Names.add keeper remaining state.balances;
+      decayed;
       last_at = Names.add keeper at state.last_at;
-      burned = Z.add state.burned (Z.of_int (previous - remaining))}
+      burned = Z.add state.burned loss}
 ;;
 
 let advance_all state ~at =
   Names.fold (fun keeper _ result ->
     let* state = result in
     advance_keeper state ~at ~keeper) state.balances (Ok state)
+;;
+
+let supply_summary_at state ~now =
+  let* state = stamp state ~at:now in
+  let* state = advance_all state ~at:now in
+  Ok (supply_summary state)
 ;;
 
 let set_half_life state ~at half_life =

@@ -74,10 +74,23 @@ type failure =
   | Equip_failed of Candle_equipment.error
   | Gift_failed of Candle_gift.error
 
+let half_life_json = function
+  | Candle_decay.Off -> `String "off"
+  | Candle_decay.Hours hours -> `Int hours
+;;
+
+let last_event_at_json = function
+  | None -> `Null
+  | Some at -> Candle_time.to_yojson at
+;;
+
 let account_json (account : Candle_shop.account) =
   `Assoc
     [ "keeper", `String account.keeper
     ; "balance_milli", `String (string_of_int account.balance_milli)
+    ; "decayed_milli", `String (Z.to_string account.decayed_milli)
+    ; "half_life", half_life_json account.half_life
+    ; "last_event_at", last_event_at_json account.last_event_at
     ; ( "owned_items"
       , `List (List.map (fun item -> `String (Item.id item)) account.owned_items) )
     ]
@@ -126,7 +139,7 @@ let run ~operation ~base_path ~keeper_name ~keeper_names ~args =
     Ok (account_json account)
   | Catalog ->
     let* () = input (Candle_json.finish ~context fields) in
-    let* catalog = shop (Candle_shop.catalog ~base_path) in
+    let* catalog = shop (Candle_shop.catalog ~now:Time_compat.now ~base_path) in
     Ok (`Assoc [ "items", `List (List.map Candle_shop.catalog_entry_to_yojson catalog) ])
   | Equip ->
     let* slot_id, fields = input (Candle_json.field ~context "slot" Candle_json.as_string fields) in

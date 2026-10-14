@@ -1,6 +1,7 @@
 type share_rounding = Largest_remainder | Down
 type tie_break = Name_ascending | Name_descending
 type deduction_rounding = Floor | Ceil
+type rounding = deduction_rounding = Floor | Ceil
 type distribution = {
   share_rounding : share_rounding;
   tie_break : tie_break;
@@ -72,6 +73,13 @@ let scaled ~a ~b ~c =
   if Z.fits_int quotient
   then Ok (Z.to_int quotient, remainder)
   else Error Overflow
+;;
+
+let round_div ~rounding numerator denominator =
+  let quotient, remainder = Z.div_rem numerator denominator in
+  match rounding with
+  | Floor -> quotient
+  | Ceil -> if Z.equal remainder Z.zero then quotient else Z.succ quotient
 ;;
 
 let rec first_duplicate seen = function

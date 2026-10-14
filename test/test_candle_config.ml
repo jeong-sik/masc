@@ -229,11 +229,78 @@ let test_a_file_that_is_not_a_regular_file_disables_without_being_opened () =
           (contains ~affix:"not a regular file" reason)))
 ;;
 
+let test_shop_pricing_policy () =
+  (match enabled with
+   | Candle_config.Enabled policy ->
+     Alcotest.(check bool) "omitted [shop.pricing] defaults to Fixed" true
+       (Candle_config.pricing policy = Candle_config.Fixed)
+   | Off | Disabled _ -> Alcotest.fail "valid_text must be Enabled");
+  (match Candle_config.of_toml_string (valid_text ^ "[shop.pricing]\nmode = \"fixed\"\n") with
+   | Candle_config.Enabled policy ->
+     Alcotest.(check bool) "explicit mode = fixed parses to Fixed" true
+       (Candle_config.pricing policy = Candle_config.Fixed)
+   | Off | Disabled _ -> Alcotest.fail "explicit fixed pricing rejected");
+  let supply_scaled_toml =
+    valid_text
+    ^ {|[shop.prices_milli]
+glasses = 400
+crown = 1000
+[shop.pricing]
+mode = "supply_scaled"
+target_per_keeper_milli = 1000
+min_permille = 250
+max_permille = 2000
+rounding = "down"
+|}
+  in
+  (match Candle_config.of_toml_string supply_scaled_toml with
+   | Candle_config.Enabled policy ->
+     Alcotest.(check bool) "explicit supply_scaled parses all parameters" true
+       (Candle_config.pricing policy
+        = Candle_config.Supply_scaled
+            { target_per_keeper_milli = 1000
+            ; min_permille = 250
+            ; max_permille = 2000
+            ; rounding = Candle_math.Floor
+            });
+     let glasses = Option.get (Keeper_portrait_item.of_id "glasses") in
+     (* Deflation: 1 active keeper with 100 milli-Candles (100 permille < min 250 permille) -> clamped to 250 permille -> 400 * 250 / 1000 = 100 *)
+     Alcotest.(check bool) "deflation clamps to min_permille" true
+       (Candle_config.effective_price policy ~total_supply_milli:(Z.of_int 100) ~active_keepers:1 glasses
+        = Candle_config.Priced 100);
+     (* Target supply: 2 active keepers with 2000 total (1000 permille) -> 400 *)
+     Alcotest.(check bool) "target supply preserves base price" true
+       (Candle_config.effective_price policy ~total_supply_milli:(Z.of_int 2000) ~active_keepers:2 glasses
+        = Candle_config.Priced 400);
+     (* Inflation: 1 active keeper with 5000 milli-Candles (5000 permille > max 2000 permille) -> clamped to 2000 permille -> 400 * 2000 / 1000 = 800 *)
+     Alcotest.(check bool) "inflation clamps to max_permille" true
+       (Candle_config.effective_price policy ~total_supply_milli:(Z.of_int 5000) ~active_keepers:1 glasses
+        = Candle_config.Priced 800);
+     (* Zero active keepers falls back to base_price_milli *)
+     Alcotest.(check bool) "zero active keepers uses base price" true
+       (Candle_config.effective_price policy ~total_supply_milli:Z.zero ~active_keepers:0 glasses
+        = Candle_config.Priced 400)
+   | Off | Disabled _ -> Alcotest.fail "valid supply_scaled config rejected");
+  List.iter
+    (fun bad_pricing ->
+       ignore (disabled_reason (Candle_config.of_toml_string (valid_text ^ bad_pricing))))
+    [ "[shop.pricing]\n"
+    ; "[shop.pricing]\nmode = \"unknown\"\n"
+    ; "[shop.pricing]\nmode = \"fixed\"\nextra = 1\n"
+    ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 0\nmin_permille = 250\nmax_permille = 2000\n"
+    ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 1000\nmin_permille = 0\nmax_permille = 2000\n"
+    ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 1000\nmin_permille = 1500\nmax_permille = 1000\n"
+    ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 1000\nmin_permille = 250\nmax_permille = 2000\nrounding = \"nearest\"\n"
+    ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 1000\nmin_permille = 250\nmax_permille = 2000\nunknown_key = 1\n"
+    ]
+;;
+
 let () =
   Alcotest.run
     "candle_config"
     [ ( "content"
       , [ Alcotest.test_case "optional shop prices preserve payouts" `Quick test_optional_shop_prices
+        ; Alcotest.test_case "shop pricing policy strict parsing and scaling" `Quick test_shop_pricing_policy
         ; Alcotest.test_case "arithmetic and required-field boundaries" `Quick test_policy_boundaries
         ; Alcotest.test_case "half-life is explicit and strictly typed" `Quick test_explicit_half_life
         ; Alcotest.test_case "explicit policy is required" `Quick test_explicit_policy

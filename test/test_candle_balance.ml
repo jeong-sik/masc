@@ -189,6 +189,51 @@ let test_policy_clock_before_first_wallet () =
   | Ok state -> check int "equal-time policy and funding retain one half-life interval" 500
       (Candle_balance.balance state ~keeper:"keeper")
 
+let test_wallet_decay_and_policy_observation () =
+  let t0 = now
+  and t1 = at "2026-09-29T01:00:00Z"
+  and t2 = at "2026-09-29T02:00:00Z"
+  and t3 = at "2026-09-29T03:00:00Z" in
+  let item = match Keeper_portrait_item.of_id "glasses" with
+    | Some item -> item | None -> fail "item missing" in
+  let rows : Candle_event.t list =
+    [ { at = t0; body = Candle_event.Half_life_set (Candle_decay.Hours 1) }
+    ; { at = t0; body = Candle_event.Paid (payment ~keeper:"keeper-a" "goal-1" 1000) }
+    ; { at = t1; body = Candle_event.Purchased { keeper = "keeper-a"; item; amount_milli = 200 } }
+    ; { at = t2; body = Candle_event.Granted { keeper = "keeper-b"; amount_milli = 400; reason = "bonus" } }
+    ] in
+  let at_t1 = match Candle_balance.of_events ~at:t1 (List.filter (fun (e : Candle_event.t) -> Candle_time.compare e.at t1 <= 0) rows) with
+    | Ok state -> state | Error error -> fail (Candle_balance.error_to_string error) in
+  check bool "active half_life is Hours 1" true
+    (Candle_balance.half_life at_t1 = Some (Candle_decay.Hours 1));
+  check int "keeper-a balance after 1h decay (500) and 200 purchase" 300
+    (Candle_balance.balance at_t1 ~keeper:"keeper-a");
+  check string "keeper-a cumulative decayed_milli after 1h" "500"
+    (Z.to_string (Candle_balance.decayed_milli at_t1 ~keeper:"keeper-a"));
+  check (option string) "keeper-a last_event_at is t1" (Some (Candle_time.to_rfc3339 t1))
+    (Option.map Candle_time.to_rfc3339 (Candle_balance.last_event_at at_t1 ~keeper:"keeper-a"));
+  check string "unmentioned keeper has 0 decayed_milli" "0"
+    (Z.to_string (Candle_balance.decayed_milli at_t1 ~keeper:"keeper-b"));
+  check (option string) "unmentioned keeper has None last_event_at" None
+    (Option.map Candle_time.to_rfc3339 (Candle_balance.last_event_at at_t1 ~keeper:"keeper-b"));
+  let at_t2 = match Candle_balance.of_events ~at:t2 rows with
+    | Ok state -> state | Error error -> fail (Candle_balance.error_to_string error) in
+  (* At t2: keeper-a had 300 at t1, decays 1h -> 150 (lost another 150, total decayed = 650).
+     keeper-b granted 400 at t2 -> balance 400, decayed 0. *)
+  check int "keeper-a balance at t2" 150 (Candle_balance.balance at_t2 ~keeper:"keeper-a");
+  check string "keeper-a cumulative decayed at t2" "650"
+    (Z.to_string (Candle_balance.decayed_milli at_t2 ~keeper:"keeper-a"));
+  let summary_t2 = Candle_balance.supply_summary at_t2 in
+  check string "total_supply_milli at t2 is 150 + 400 = 550" "550"
+    (Z.to_string summary_t2.total_supply_milli);
+  check int "active_keepers at t2 is 2" 2 summary_t2.active_keepers;
+  let summary_t3 = match Candle_balance.supply_summary_at at_t2 ~now:t3 with
+    | Ok s -> s | Error error -> fail (Candle_balance.error_to_string error) in
+  (* At t3 (1h after t2): keeper-a 150 -> 75, keeper-b 400 -> 200. Total = 275, active = 2. *)
+  check string "supply_summary_at t3 decays both active keepers" "275"
+    (Z.to_string summary_t3.total_supply_milli);
+  check int "active_keepers at t3 remains 2" 2 summary_t3.active_keepers
+
 let () = run "candle_balance"
   ["ledger credits", [test_case "serialized payments cannot overflow a balance" `Quick test_cumulative_credit_boundary;
     test_case "a Goal is credited once" `Quick test_one_credit_per_goal;
@@ -198,4 +243,5 @@ let () = run "candle_balance"
     test_case "recorded half-life changes preserve purchases and supply" `Quick test_historical_half_life_controls_purchase_and_supply;
     test_case "observations and other activity do not alter wallet decay" `Quick test_observation_and_nonmoney_events_do_not_change_decay;
     test_case "money requires explicit policy and known time" `Quick test_money_requires_policy_and_known_time;
-    test_case "policy chronology is enforced before the first wallet" `Quick test_policy_clock_before_first_wallet]]
+    test_case "policy chronology is enforced before the first wallet" `Quick test_policy_clock_before_first_wallet;
+    test_case "wallet decay and policy observation track cumulative decay and supply summary" `Quick test_wallet_decay_and_policy_observation]]

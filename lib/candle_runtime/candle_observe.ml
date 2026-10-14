@@ -47,6 +47,20 @@ let ready_account_revision ~events ~policy ~balance ~keeper =
   let half_life = match policy.Candle_config.half_life with
     | Candle_decay.Off -> `String "off"
     | Candle_decay.Hours hours -> `Int hours in
+  let pricing = match policy.Candle_config.pricing with
+    | Candle_config.Fixed -> `String "fixed"
+    | Candle_config.Supply_scaled p ->
+      `Assoc
+        [ "mode", `String "supply_scaled"
+        ; "target_per_keeper_milli", `Int p.target_per_keeper_milli
+        ; "min_permille", `Int p.min_permille
+        ; "max_permille", `Int p.max_permille
+        ; ( "rounding"
+          , `String
+              (match p.rounding with
+               | Candle_math.Floor -> "down"
+               | Candle_math.Ceil -> "up") )
+        ] in
   let owned = Candle_balance.owned balance ~keeper
     |> List.map (fun item -> `String (Keeper_portrait_item.id item)) in
   let catalog = Keeper_portrait_item.all |> List.map (fun item ->
@@ -54,12 +68,14 @@ let ready_account_revision ~events ~policy ~balance ~keeper =
       | Candle_config.Unpriced -> `Null
       | Candle_config.Priced amount -> `String (string_of_int amount) in
     `List [`String (Keeper_portrait_item.id item); price]) in
-  let account = `List [
+  let account = `List ([
     half_life;
     `List facts;
     `List owned;
     `List catalog;
-  ] in
+  ] @ (match policy.Candle_config.pricing with
+       | Candle_config.Fixed -> []
+       | Candle_config.Supply_scaled _ -> [ pricing ])) in
   Digestif.SHA256.(digest_string ("ready\000" ^ Yojson.Safe.to_string account) |> to_hex)
 
 let account_revision observation ~keeper = match observation with

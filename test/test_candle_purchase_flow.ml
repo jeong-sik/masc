@@ -682,6 +682,83 @@ let test_tool_surface_is_eager () =
     [ "keeper_candle_balance"; "keeper_candle_catalog"; "keeper_candle_purchase" ]
 ;;
 
+let test_account_decay_and_supply_scaled_pricing () =
+  with_workspace (fun _ _ config ->
+    let base_path = config.Workspace.base_path in
+    let start = Ptime.to_float_s (Candle_time.to_ptime at) in
+    let clock = ref start in
+    let now () = !clock in
+    let keeper_a = ok (Keeper_id.Keeper_name.of_string "keeper-a") in
+    let glasses = match Item.of_id "glasses" with Some i -> i | None -> fail "missing glasses" in
+    let crown = match Item.of_id "crown" with Some i -> i | None -> fail "missing crown" in
+    let shop =
+      {|
+[shop.prices_milli]
+glasses = 400
+crown = 800
+[shop.pricing]
+mode = "supply_scaled"
+target_per_keeper_milli = 1000
+min_permille = 250
+max_permille = 2000
+rounding = "down"
+|}
+    in
+    write_config_half_life config ~half_life:"1" shop;
+    (* Initially no keeper is funded: account has 0 balance, 0 decayed, half_life Hours 1, last_event_at None *)
+    let initial_acct = match Candle_shop.account ~now ~base_path ~keeper:keeper_a with
+      | Ok a -> a | Error e -> fail (Candle_shop.error_to_string e) in
+    check int "initial balance 0" 0 initial_acct.balance_milli;
+    check string "initial decayed 0" "0" (Z.to_string initial_acct.decayed_milli);
+    check bool "initial half_life is Hours 1" true (initial_acct.half_life = Candle_decay.Hours 1);
+    check bool "initial last_event_at is None" true (initial_acct.last_event_at = None);
+    let initial_tool_json = balance config "keeper-a" in
+    check string "tool json decayed_milli" "0" U.(member "decayed_milli" initial_tool_json |> to_string);
+    check int "tool json half_life" 1 U.(member "half_life" initial_tool_json |> to_int);
+    check bool "tool json last_event_at is null" true (U.member "last_event_at" initial_tool_json = `Null);
+    (* Fund keeper-a with 400 milli-Candles at t=start (deflationary relative to target 1000),
+       then synchronize the configured 1h half-life at t=start. *)
+    credit config ~goal:"deflation-goal" ~keeper:"keeper-a" 400;
+    let funded_acct = match Candle_shop.account ~now ~base_path ~keeper:keeper_a with
+      | Ok a -> a | Error e -> fail (Candle_shop.error_to_string e) in
+    check int "funded balance 400" 400 funded_acct.balance_milli;
+    (* After 1 hour (t = start + 3600), keeper-a's 400 decays to 200 (decayed_milli = 200).
+       Active keepers = 1, total_supply_milli = 200.
+       raw_permille = 200 * 1000 / 1000 = 200 -> clamped to min_permille = 250!
+       Effective price of glasses (base 400) = 400 * 250 / 1000 = 100!
+       Under fixed pricing (400), keeper-a (balance 200) could NOT afford glasses.
+       Under supply_scaled pricing (100), keeper-a CAN afford glasses! *)
+    clock := start +. 3600.;
+    let cat = match Candle_shop.catalog ~now ~base_path with
+      | Ok c -> c | Error e -> fail (Candle_shop.error_to_string e) in
+    let glasses_entry = List.find (fun (e : Candle_shop.catalog_entry) -> e.item = glasses) cat in
+    check bool "deflation scales glasses price from 400 down to min_permille (100)" true
+      (glasses_entry.price = Candle_config.Priced 100);
+    let receipt_deflation = match Candle_shop.purchase ~now ~base_path ~keeper:keeper_a ~item:glasses with
+      | Ok r -> r | Error e -> fail (Candle_shop.error_to_string e) in
+    check int "deflationary purchase debited effective price 100" 100 receipt_deflation.amount_milli;
+    check int "remaining balance is 200 - 100 = 100" 100 receipt_deflation.account.balance_milli;
+    check string "cumulative decayed_milli is 200" "200"
+      (Z.to_string receipt_deflation.account.decayed_milli);
+    check bool "half_life is Hours 1" true
+      (receipt_deflation.account.half_life = Candle_decay.Hours 1);
+    check (option string) "last_event_at is purchase timestamp"
+      (Some (Candle_time.to_rfc3339 receipt_deflation.purchased_at))
+      (Option.map Candle_time.to_rfc3339 receipt_deflation.account.last_event_at);
+    (* Now test inflation: grant keeper-a 4900 milli-Candles at t = start + 3600 so balance is 5000.
+       Active keepers = 1, total_supply = 5000 -> raw_permille = 5000 -> clamped to max_permille = 2000 (2.0x).
+       Effective price of crown (base 800) = 800 * 2000 / 1000 = 1600. *)
+    let grant_at = receipt_deflation.purchased_at in
+    append config [ { E.at = grant_at; body = E.Granted { keeper = "keeper-a"; amount_milli = 4900; reason = "inflation-test" } } ];
+    let receipt_inflation = match Candle_shop.purchase ~now ~base_path ~keeper:keeper_a ~item:crown with
+      | Ok r -> r | Error e -> fail (Candle_shop.error_to_string e) in
+    check int "inflationary purchase debited capped effective price 1600" 1600 receipt_inflation.amount_milli;
+    check int "remaining balance after 1600 debit from 5000 is 3400" 3400 receipt_inflation.account.balance_milli;
+    check (list (triple string string int)) "ledger Recorded exact debited amounts"
+      [ "keeper-a", "glasses", 100; "keeper-a", "crown", 1600 ]
+      (purchases config))
+;;
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; "--replay-candle-account"; base_path; keeper_name ] ->
@@ -709,6 +786,9 @@ let () =
           ; test_case
               "recorded decay keeps purchase ownership and portrait equipment coherent" `Quick
               test_policy_intervals_preserve_purchase_and_equipped_ownership
+          ; test_case
+              "account decay observation and supply-scaled pricing under deflation and inflation" `Quick
+              test_account_decay_and_supply_scaled_pricing
           ; test_case
               "purchase debits self and survives a process restart"
               `Quick

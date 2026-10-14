@@ -16,8 +16,7 @@ let route path =
 ;;
 
 let ready_json ~keeper (view : Candle_status.view) =
-  let catalog = List.map (fun item ->
-    { Candle_shop.item; price=Candle_config.price view.policy item }) Item.all in
+  let catalog = Candle_shop.catalog_for_balance view.policy view.balance in
   `Assoc
     [ "status", `String "ready"
     ; "keeper", `String keeper

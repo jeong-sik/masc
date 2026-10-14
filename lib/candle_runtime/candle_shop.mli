@@ -4,6 +4,9 @@
 type account =
   { keeper : string
   ; balance_milli : int
+  ; decayed_milli : Z.t
+  ; half_life : Candle_decay.half_life
+  ; last_event_at : Candle_time.t option
   ; owned_items : Keeper_portrait_item.t list
   }
 
@@ -15,6 +18,17 @@ type catalog_entry =
 val catalog_entry_to_yojson : catalog_entry -> Yojson.Safe.t
 (** One catalog row as the Keeper tool and the dashboard both send it:
     [id], [slot], [price_status], and [price_milli] when priced. *)
+
+val effective_price_for_balance
+  :  Candle_config.policy
+  -> Candle_balance.t
+  -> Keeper_portrait_item.t
+  -> Candle_config.price
+(** Effective item price under [policy.pricing] using the circulating supply
+    and active keeper count of [balance]. *)
+
+val catalog_for_balance : Candle_config.policy -> Candle_balance.t -> catalog_entry list
+(** Canonical catalog priced at the effective prices for [balance]. *)
 
 type receipt =
   { account : account
@@ -43,7 +57,7 @@ val account
     a changed half-life before answering. Read-only surfaces read
     {!Candle_status.observed_view} instead. *)
 
-val catalog : base_path:string -> (catalog_entry list, error) result
+val catalog : now:(unit -> float) -> base_path:string -> (catalog_entry list, error) result
 
 (** The caller supplies its trusted Keeper identity. A single cursor-checked
     ledger update recomputes funds and ownership before appending one purchase.

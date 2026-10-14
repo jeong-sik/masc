@@ -716,22 +716,48 @@ let build_request_artifact
   (match Types.output_token_receipt_effective output_token_receipt with
    | Some mt -> gen_config := ("maxOutputTokens", `Int mt) :: !gen_config
    | None -> ());
+  let dialect = Reasoning_dialect.for_provider_config config in
+  let caps =
+    match Provider_config.capabilities_for_config_model config with
+    | Some c -> c
+    | None -> Capabilities.gemini_capabilities
+  in
   (match config.temperature with
-   | Some t -> gen_config := ("temperature", `Float t) :: !gen_config
+   | Some t ->
+     gen_config
+     := Backend_openai_request.add_sampling_field
+          dialect
+          config
+          Capabilities.Temperature
+          (`Float t)
+          !gen_config
    | None -> ());
   (match config.top_p with
-   | Some p -> gen_config := ("topP", `Float p) :: !gen_config
+   | Some p ->
+     gen_config
+     := Backend_openai_request.add_sampling_field
+          ~wire_field:"topP"
+          dialect
+          config
+          Capabilities.Top_p
+          (`Float p)
+          !gen_config
    | None -> ());
   (match config.top_k with
-   | Some k -> gen_config := ("topK", `Int k) :: !gen_config
+   | Some k when caps.supports_top_k ->
+     gen_config
+     := Backend_openai_request.add_sampling_field
+          ~wire_field:"topK"
+          dialect
+          config
+          Capabilities.Top_k
+          (`Int k)
+          !gen_config
+   | Some _ ->
+     Backend_openai_request.warn_capability_drop ~model_id:config.model_id ~field:"top_k"
    | None -> ());
   (* Seed — Gemini API supports seed in generationConfig *)
-  (let caps =
-     match Provider_config.capabilities_for_config_model config with
-     | Some c -> c
-     | None -> Capabilities.gemini_capabilities
-   in
-   match caps.supports_seed, config.seed with
+  (match caps.supports_seed, config.seed with
    | true, Some seed -> gen_config := ("seed", `Int seed) :: !gen_config
    | false, Some _ ->
      invalid_arg

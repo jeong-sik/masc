@@ -9,6 +9,7 @@ module PC = Llm_provider.Provider_config
 module BOR = Llm_provider.Backend_openai_request
 module BOL = Llm_provider.Backend_ollama
 module BAN = Llm_provider.Backend_anthropic
+module BG = Llm_provider.Backend_gemini
 module CAP = Llm_provider.Capabilities
 module CM = Llm_provider.Capability_manifest
 module MC = Llm_provider.Model_catalog
@@ -1514,6 +1515,48 @@ let test_gemini_reasoning_dialect_uses_thinking_config () =
     (RD.replay_policy_to_string dialect.replay_policy)
 ;;
 
+let test_gemini_declared_ignored_sampling_drops_fields () =
+  let config =
+    PC.make
+      ~kind:Gemini
+      ~model_id:"gemini-4-argon-high"
+      ~base_url:"https://generativelanguage.googleapis.com/v1beta"
+      ~temperature:0.7
+      ~top_p:0.9
+      ~top_k:40
+      ()
+  in
+  let gen_config =
+    BG.build_request ~config ~messages:[ user_msg "hi" ] ()
+    |> json_of_body
+    |> member "generationConfig"
+  in
+  check_member_absent "temperature" gen_config;
+  check_member_absent "topP" gen_config;
+  check_member_absent "topK" gen_config
+;;
+
+let test_gemini_default_keeps_sampling_fields () =
+  let config =
+    PC.make
+      ~kind:Gemini
+      ~model_id:"gemini-3.8-flash-high"
+      ~base_url:"https://generativelanguage.googleapis.com/v1beta"
+      ~temperature:0.7
+      ~top_p:0.9
+      ~top_k:40
+      ()
+  in
+  let gen_config =
+    BG.build_request ~config ~messages:[ user_msg "hi" ] ()
+    |> json_of_body
+    |> member "generationConfig"
+  in
+  check (float 0.001) "temperature" 0.7 (gen_config |> member "temperature" |> to_float);
+  check (float 0.001) "topP" 0.9 (gen_config |> member "topP" |> to_float);
+  check int "topK" 40 (gen_config |> member "topK" |> to_int)
+;;
+
 let () =
   without_ambient_manifest (fun () ->
     run
@@ -1703,6 +1746,14 @@ let () =
               "gemini reasoning dialect uses thinking config"
               `Quick
               test_gemini_reasoning_dialect_uses_thinking_config
+          ; test_case
+              "gemini declared ignored sampling drops fields"
+              `Quick
+              test_gemini_declared_ignored_sampling_drops_fields
+          ; test_case
+              "gemini default keeps sampling fields"
+              `Quick
+              test_gemini_default_keeps_sampling_fields
           ; test_case
               "chat budget field max_completion_tokens"
               `Quick

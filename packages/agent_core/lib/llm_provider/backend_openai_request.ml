@@ -92,8 +92,19 @@ let warn_output_token_clamp ~model_id ~receipt =
       model_id)
 ;;
 
-let add_sampling_field dialect (config : Provider_config.t) parameter value body =
-  let field = Capabilities.sampling_parameter_to_string parameter in
+let add_sampling_field
+      ?wire_field
+      dialect
+      (config : Provider_config.t)
+      parameter
+      value
+      body
+  =
+  let field =
+    Option.value
+      wire_field
+      ~default:(Capabilities.sampling_parameter_to_string parameter)
+  in
   if
     Reasoning_dialect.ignores_sampling_param
       dialect

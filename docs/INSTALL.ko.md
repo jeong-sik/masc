@@ -404,6 +404,35 @@ imp는 글로 답합니다. 음성 도구를 부를 때만 말하고, 그 클립
 
 MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 사용하고 [클라이언트 설정](../README.md#mcp-client-setup)을 따르세요.
 
+### `imp`에게 브라우저와 GitHub 로그인 주기
+
+setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
+모든 줄이 체크된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
+**Skip all of these**를 고르면 아무것도 하지 않고 넘어갑니다.
+
+- **브라우저.** `imp`가 자기 Firefox에서 웹 페이지를 읽습니다. geckodriver가 그 Firefox를 움직입니다.
+  geckodriver나 Firefox가 없으면 Homebrew 설치(Linux는 공식 다운로드 페이지)를 안내하고, 다시
+  확인한 뒤 `masc browser-lane-setup --mode automation`을 실행합니다. 이 명령이 geckodriver 경로를
+  `runtime.toml`에 씁니다. 서버는 시작할 때 이 값을 읽으므로, 이 줄은 `masc setup`이 서버를
+  시작하기 전에 실행합니다.
+- **GitHub.** 이 컴퓨터의 `gh`에 로그인이 있으면 계정, 토큰의 scope, 토큰이 있는 곳을 보여 주고
+  `imp`가 그 로그인을 써도 되는지 묻습니다. 그러면 `imp`는 그 계정 이름으로 push하고 PR을 엽니다.
+  토큰은 복사본이 넘어가므로, 이 컴퓨터에서 토큰을 폐기하거나 갱신하면 `imp`가 끊깁니다.
+  로그인이 없으면 `masc keeper-github login`이 일회용 코드를 보여 주고, 직접 승인하면 됩니다.
+  이 줄은 `masc setup`이 끝난 뒤에 실행합니다. 로그인에는 `imp`가 먼저 있어야 하기 때문입니다.
+
+빠른 설치는 두 줄과 줄마다 명령을 보여 주기만 하고 아무것도 실행하지 않습니다. 나중에 직접
+실행하려면 다음과 같이 합니다.
+
+```bash
+masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
+gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
+masc keeper-github login --keeper imp --base-path "$HOME/masc-workspace"
+```
+
+두 번째 줄은 `gh`에 이미 있는 로그인을 표준 입력으로 넘겨 `imp`에게 줍니다. 세 번째 줄은
+일회용 코드로 로그인합니다.
+
 ## 이미지와 Linux/microVM의 경계
 
 설치 스크립트는 sandbox 이미지를 다운로드하거나 빌드하지 않습니다.

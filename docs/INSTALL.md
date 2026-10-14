@@ -438,6 +438,38 @@ start, and the TUI does not play it. Nothing plays on this computer while
 
 For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and follow the [client setup](../README.md#mcp-client-setup).
 
+### Giving `imp` a browser and a GitHub login
+
+After the sandbox, the setup journey asks **5 · Give imp tools (optional)**. It is
+one checklist and every row starts marked. Nothing is installed or written until
+you confirm it, and **Skip all of these** continues without any of them.
+
+- **Browser.** `imp` reads web pages in a Firefox of its own, driven through
+  geckodriver. If geckodriver or Firefox is missing, the journey offers the
+  Homebrew install (the official download page on Linux), checks again, and then
+  runs `masc browser-lane-setup --mode automation`. That writes the geckodriver
+  path into `runtime.toml`. The server reads it when it starts, so this row runs
+  before `masc setup` starts the server.
+- **GitHub.** If `gh` on this computer is logged in, the journey shows the
+  account, the token's scopes and where the token lives, and asks whether `imp`
+  may use that login. `imp` then pushes and opens pull requests as that account.
+  It gets a copy of the token, so revoking or refreshing the token on this
+  computer disconnects `imp`. Without a login, `masc keeper-github login` shows
+  a one-time code for you to approve. This row runs after `masc setup`, because
+  the login needs `imp` to exist.
+
+Quick setup lists both rows with the command for each and runs none of them. To
+run them later:
+
+```bash
+masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
+gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
+masc keeper-github login --keeper imp --base-path "$HOME/masc-workspace"
+```
+
+The second line gives `imp` the login `gh` already has, passing the token on
+standard input. The third asks for a one-time code instead.
+
 ## Images and the Linux/microVM boundary
 
 The install script neither downloads nor builds a sandbox image.

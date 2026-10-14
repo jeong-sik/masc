@@ -1221,6 +1221,37 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (match Journal.continuation_readiness after_second_loss with
    | Ok Journal.Results_ready -> ()
    | Ok Waiting_for_results | Error _ -> fail "restored original wait cannot recover repeated Lost successors");
+  let retain_wait_without_dispatch candidate =
+    (* Real broker admission binds a successor, then its worker returns the
+       original wait before touching any node. This is the journal boundary
+       used when activation authority becomes unavailable after acceptance. *)
+    let accepted = Async.submit_worker_with_request_id ?request_context:first_entry.request_context
+        ~background_sw:(Async.server_background_switch () |> require "original wait successor switch")
+        ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+        ~on_accepted:(fun request_id -> Journal.bind_continuation candidate ~request_id
+          |> Result.map (fun _ -> ()) |> Result.map_error Journal.error_to_string)
+        ~f:(fun ~request_id:_ _ ->
+          Async.worker_waiting_for_owned_jobs ~job_ids:(Journal.continuation_job_ids candidate)
+            (Tool_result.make_deferred ~tool_name:"original-child-activation-unavailable"
+              ~start_time:(Tool_timing.start ()) ~data:(`Assoc ["dispatch_started",`Bool false]) ())
+          |> require "original wait before node dispatch") ()
+      |> require "actual no-dispatch successor admission" in
+    let ok,_,entry = await_composition env fixture (`Assoc ["request_id",`String accepted.request_id]) in
+    check bool "no-dispatch successor preserves waiting outcome" false ok;
+    let preserved = continuation () in
+    check string "canonical waiting successor owns its inherited wait" entry.request_id
+      (Journal.continuation_request_id preserved);
+    check (list string) "inherited wait retains exact original jobs" [id]
+      (List.map Store.Job_id.to_string (Journal.continuation_job_ids preserved));
+    check int "inherited wait never queries or relaunches backend" before_completed_resume (List.length (calls fixture));
+    (match Journal.continuation_readiness candidate with
+     | Error Journal.Ownership_changed -> ()
+     | Ok _ | Error _ -> fail "inherited wait reused stale predecessor ownership");
+    let report = pending () in
+    check int "inherited wait remains discoverable after the worker settles" 1 (List.length report.ready);
+    check int "inherited wait retains exact predecessor evidence" 0 (List.length report.failures);
+    preserved in
+  let recovery_candidate = retain_wait_without_dispatch after_second_loss |> retain_wait_without_dispatch in
   let module Wake = Masc.Keeper_composition_continuation_wake in
   let config = Workspace.default_config fixture.base_path in
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
@@ -1256,11 +1287,11 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
      | Error (Wake.Profile_unavailable {kind=Invalid_name;_}) -> incr profile_owner_refusals
      | Error error -> failf "%s: unexpected profile failure: %s" label (Wake.error_to_string error)
      | Ok _ -> failf "%s: invalid declaration owner reached async intake" label);
-    check string (label ^ " retains original owner") (Journal.continuation_request_id after_second_loss)
+    check string (label ^ " retains original owner") (Journal.continuation_request_id recovery_candidate)
       (Journal.continuation_request_id (continuation ()));
     check (list string) (label ^ " starts no async worker") requests_before (active_requests ());
     check int (label ^ " performs no backend operation") before_completed_resume (List.length (calls fixture));
-    (match Journal.continuation_readiness after_second_loss with
+    (match Journal.continuation_readiness recovery_candidate with
      | Ok Journal.Results_ready -> ()
      | Ok Waiting_for_results | Error _ -> failf "%s: original wait is no longer ready" label) in
   write_profile ~declared_name:"continuation-foreign" false;
@@ -1302,6 +1333,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "completed result read has no backend operation" before_completed_resume (List.length (calls fixture));
   Printf.printf "OWNED_CONTINUATION_RECOVERY %s\n%!" (Yojson.Safe.to_string
     (`Assoc ["post_binding_losses",`Int (List.length [first_lost_entry;second_lost_entry]);
+      "no_dispatch_wait_successors",`Int 2;
       "maintenance_pulse_to_continuation_completion_ms",`Float recovery_ms;
       "accepted_intakes",`Int !accepted_callbacks;
       "deferred_intakes",`Int deferred_intakes;

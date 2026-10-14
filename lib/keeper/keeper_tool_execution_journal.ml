@@ -784,22 +784,28 @@ let continuation_job_ids (continuation : continuation) = continuation.job_ids
 
 type child_admission_history = Untouched_child | Admitted_child | Admission_unconfirmed
 
-let continuation_child_admission continuation ~node_ids =
+let nodes_child_admission nodes ~node_ids =
   List.fold_left (fun history id ->
-    let current = match Nodes.find_opt (Plan.Node_id.to_string id) continuation.suspended_nodes with
+    let current = match Nodes.find_opt (Plan.Node_id.to_string id) nodes with
       | None -> Untouched_child
       | Some (Attempting _) -> Admission_unconfirmed
       | Some (Settled (_,completed,effect_disposition,wait)) ->
         (match completed.result,effect_disposition,wait with
          | Tool_result.Completed _,_,_ | Tool_result.Deferred _,_,Some _
          | Tool_result.Failed _,Some Tool_result.Proven_post_effect,_ -> Admitted_child
-         | Tool_result.Failed _,Some Tool_result.Proven_pre_effect,_ -> Untouched_child
-         | Tool_result.Failed _,(None | Some Tool_result.Effect_outcome_unknown),_
+         | Tool_result.Failed _,(None | Some Tool_result.Proven_pre_effect
+             | Some Tool_result.Effect_outcome_unknown),_
          | Tool_result.Deferred _,_,None -> Admission_unconfirmed) in
     match history,current with
     | Admitted_child,_ | _,Admitted_child -> Admitted_child
     | Admission_unconfirmed,_ | _,Admission_unconfirmed -> Admission_unconfirmed
     | Untouched_child,Untouched_child -> Untouched_child) Untouched_child node_ids
+
+let continuation_child_admission continuation ~node_ids =
+  nodes_child_admission continuation.suspended_nodes ~node_ids
+
+let child_admission journal ~node_ids =
+  update_existing journal (fun state -> None, Ok (nodes_child_admission state.nodes ~node_ids))
 
 let normalize_job_ids = List.sort_uniq (fun left right ->
   String.compare (Keeper_owned_job_identity.Job_id.to_string left)
@@ -835,8 +841,19 @@ let prior_owned_job_wait journal prior_owners =
             {request_id=prior.request_id;reason}) in
       match entry.status with
       | Async.Waiting_for_owned_jobs {job_ids;_} ->
-        let* job_ids = exact_waiting_jobs ~expected_owner:prior nodes job_ids in
-        Ok (Some (job_ids,List.rev (entry :: terminals)))
+        (match exact_waiting_jobs ~expected_owner:prior nodes job_ids with
+         | Ok job_ids -> Ok (Some (job_ids,List.rev (entry :: terminals)))
+         | Error error ->
+           (* A no-dispatch successor may stop with the exact predecessor wait.
+              Binding snapshots prove that it changed no node ownership or
+              result; the canonical terminal proves the same waiting jobs. *)
+           match rest with
+           | (_,predecessor_nodes)::_ when nodes = predecessor_nodes ->
+             let* original = read (entry :: terminals) rest in
+             (match original with
+              | Some (original_jobs,_) when original_jobs = normalize_job_ids job_ids -> Ok original
+              | Some _ | None -> Error error)
+           | _ -> Error error)
       | Lost _ -> read (entry :: terminals) rest
       | Cancelled _ | Persistence_failed _ | Done _ -> Ok None
       | Queued | Running | Cancelling _ ->
@@ -896,8 +913,20 @@ let waiting_continuation journal = filesystem (fun () ->
         |> Result.map_error (fun reason -> Prior_owner_not_terminal {request_id=expected_owner.request_id;reason}) in
       match entry.status with
       | Async.Waiting_for_owned_jobs {job_ids;_} ->
-        let* job_ids = exact_waiting_jobs ~expected_owner state.nodes job_ids in
-        Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals=[];
+        let* job_ids,predecessor_terminals =
+          match exact_waiting_jobs ~expected_owner state.nodes job_ids with
+          | Ok jobs -> Ok (jobs,[])
+          | Error error ->
+            (match state.prior_owners with
+             | (_,predecessor_nodes)::_ when state.nodes = predecessor_nodes ->
+               let* original = prior_owned_job_wait journal state.prior_owners in
+               (match original with
+                | Some (jobs,proofs) when jobs = normalize_job_ids job_ids ->
+                  let* () = recoverable_lost_nodes state.nodes jobs in
+                  Ok (jobs,proofs)
+                | Some _ | None -> Error error)
+             | _ -> Error error) in
+        Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals;
           suspended_nodes=state.nodes;job_ids})
       | Lost _ ->
         let* original_wait = prior_owned_job_wait journal state.prior_owners in
@@ -1057,6 +1086,11 @@ module For_testing = struct
 end
 
 let check_worker (worker : worker) (state : state) = if same_owner state.owner (Some worker.binding) then Ok () else Error Ownership_changed
+
+let worker_child_admission (worker : worker) ~node_ids =
+  update_existing worker.journal (fun state -> None,
+    let* () = check_worker worker state in
+    Ok (nodes_child_admission state.nodes ~node_ids))
 
 let validate_plan (worker : worker) ~plan =
   let* recorded = frozen_plan ~base_path:worker.journal.base_path worker.journal.immutable_source in

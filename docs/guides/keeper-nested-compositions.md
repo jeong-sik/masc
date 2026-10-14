@@ -54,6 +54,12 @@ existing child admissions and their first activation time, while the physical
 worker retains its own execution context. Original Task references are resolved
 against the current authoritative published snapshot; current profile denial or
 changed exact revisions still refuse execution.
+Every public resume, including a completed run, checks the original child
+activation before accepting a successor. The worker checks it again before
+reusing results. A pre-effect leaf failure does not prove that child admission
+was absent. If a waiting successor stops before dispatch, the original wait
+remains recoverable only through unchanged journal nodes, matching canonical
+job IDs and exact predecessor terminal evidence.
 
 A child output is its declared named export. `/profile` selects export `profile`;
 `/document/items/0` selects within export `document`. RFC 6901 escaping applies to

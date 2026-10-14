@@ -102,19 +102,22 @@ let restore_admissions run ~find_activation =
           ~detail:(Recorder.error_to_string error) (Recorder.error_to_yojson error))) run.children
 ;;
 
-let check_continuation run continuation =
+let check_original_admissions run ~child_history =
   List.fold_left (fun result child -> Result.bind result (fun () ->
+    Result.bind (child_history ~node_ids:(Node_set.elements child.members)
+      |> Result.map_error (fun error -> rejection ~kind:"nested_original_journal_unavailable"
+        ~detail:(Keeper_tool_execution_journal.error_to_string error)
+        (Keeper_tool_execution_journal.error_to_json error))) (fun history ->
     match child.admission with
     | Admitted _ -> Ok ()
     | Rejected error -> Error error
     | Not_attempted ->
-      match Keeper_tool_execution_journal.continuation_child_admission continuation
-              ~node_ids:(Node_set.elements child.members) with
+      match history with
       | Untouched_child -> Ok ()
       | Admitted_child | Admission_unconfirmed -> Error (rejection
           ~kind:"nested_original_activation_missing"
           ~detail:"Original child evidence requires its exact retained activation before result reuse."
-          (Nested.call_to_json child.call)))) (Ok ()) run.children
+          (Nested.call_to_json child.call))))) (Ok ()) run.children
 ;;
 
 let contains child node_id = Node_set.mem node_id child.members

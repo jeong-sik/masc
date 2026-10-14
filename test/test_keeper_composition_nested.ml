@@ -401,12 +401,12 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
       let module Async = Masc.Keeper_msg_async in
       let rec await () = match Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" request_id with
         | Ok proof -> (match (Async.durable_terminal_entry proof).status with
-          | Done {ok;response;data=Some data;_} ->
+          | Done {ok;body;data=Some data} ->
             let entry = Async.durable_terminal_entry proof in
             let context = match entry.request_context with Some fields -> `Assoc fields | None -> fail "original async context absent" in
             check string "completed async request belongs to original Task" "task-nested"
               (context |> member "source_task_id" |> to_string);
-            ok,response,data
+            ok,body,data
           | _ -> fail "nested async parent did not retain a canonical completed result")
         | Error (Canonical_terminal_absent | Canonical_terminal_runtime_active _) -> Eio.Fiber.yield (); await ()
         | Error error -> fail (Async.canonical_terminal_error_to_string error) in
@@ -493,6 +493,56 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
       ~boundary:(Ledger.Model_response { agent_core_turn = 2 }) ~runtime_id:"fixture.runtime"
       |> require "deliver actual public result to its children" in
   check int "actual parent result delivers both activated children" 2 (List.length delivered);
+  (match execution with
+   | Inline -> ()
+   | Async ->
+     let module Async = Masc.Keeper_msg_async in
+     let events = Filename.concat session_dir "skill-activation-events.jsonl" in
+     let saved = Filename.concat base_path "retained-original-activations.jsonl" in
+     let original_request = accepted |> member "request_id" |> to_string in
+     let original_terminal = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
+       |> require "original completed request before authority fault" |> Async.durable_terminal_entry in
+     let resume_input = `Assoc ["sha256",`String draft_reference.sha256;"resume_run_id",`String run_id] in
+     List.iter (fun corrupt ->
+       Unix.rename events saved;
+       Fun.protect ~finally:(fun () ->
+         if Sys.file_exists events then Unix.unlink events;
+         Unix.rename saved events) (fun () ->
+         if corrupt then Eio.Path.save ~create:(`Exclusive 0o600)
+             Eio.Path.(Eio.Stdenv.fs env / events) "invalid-original-activation\n";
+         let reservations = Async.For_testing.reserved_request_id_count () in
+         let workers = Async.For_testing.active_switch_count () in
+         let resumed,_,data = invoke "resume-original-without-authority" Draft.run_tool_name resume_input in
+         check bool "completed public resume refuses missing/corrupt original activation" false resumed;
+         check bool "refusal returns no child exports" true (member "exports" data = `Null);
+         check bool "refusal accepts no successor request" true (member "request_id" data = `Null);
+         check int "refusal reserves no new async identity" reservations (Async.For_testing.reserved_request_id_count ());
+         check int "refusal starts no worker" workers (Async.For_testing.active_switch_count ());
+         let terminal = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
+           |> require "original completed request survives refused resume" |> Async.durable_terminal_entry in
+         check bool "original completed evidence stays exact" true (Async.same_entry_record original_terminal terminal);
+         check int "refused resume cannot consult the later runtime" 1 !runtime_reads)) [false;true];
+     let restored = Ledger.load_existing ~config ~trace_id |> require "restored original activation authority"
+       |> function Some ledger -> ledger | None -> fail "original ledger not restored" in
+     check bool "authority fault preserves exact child activations" true
+       (Ledger.activations restored = Ledger.activations ledger);
+     let resumed,_,data = invoke "resume-original-after-authority-repair" Draft.run_tool_name resume_input in
+     check bool "restored exact authority permits completed public resume" true resumed;
+     let request_id = data |> member "request_id" |> to_string in
+     let rec await_reuse () = match Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" request_id with
+       | Ok proof -> (match (Async.durable_terminal_entry proof).status with
+         | Done {ok=true;data=Some data;_} -> data
+         | _ -> fail "restored original authority did not complete retained child results")
+       | Error (Canonical_terminal_absent | Canonical_terminal_runtime_active _) -> Eio.Fiber.yield (); await_reuse ()
+       | Error error -> fail (Async.canonical_terminal_error_to_string error) in
+     let reused = await_reuse () in
+     check bool "repaired authority reuses the original available answer" true
+       (reused |> member "exports" |> member "answer" |> member "available" |> to_bool);
+     let final_ledger = Ledger.load_existing ~config ~trace_id |> require "original ledger after result reuse"
+       |> function Some ledger -> ledger | None -> fail "original activation disappeared" in
+     check bool "retained results add no child activation or clock" true
+       (Ledger.activations restored = Ledger.activations final_ledger);
+     check int "completed resume retains original runtime without callback selection" 1 !runtime_reads);
   Printf.printf "composition_nested_public_trial rejected_child=%b prepared_scopes=%d admitted_children=%d child_admission_calls=%d actual_leaf_successes=%d blocked_children=%d parent_deliveries=%d exact_run_binding=true original_task_retained=true model_latency_measured=false\n%!"
     reject_child (List.length scopes) (List.length (Ledger.activations ledger)) !calls successful_leaves blocked_children (List.length delivered)
 ;;

@@ -98,7 +98,11 @@ val waiting_continuation : t -> (continuation option, error) result
     owned launch leaf by its recorded exact invocation identity, which grants
     a [Recheck_launch] replay. Cancellation and unknown effects without that
     identity do not grant continuation. Unavailable or inconsistent evidence
-    is [Error]. A later owner change makes the captured value stale. *)
+    is [Error]. A later owner change makes the captured value stale. A successor
+    that stops before dispatch may retain its predecessor's exact wait only
+    when every journal node is unchanged at the binding and the canonical
+    waiting job IDs match. Original occurrence identities and owners remain
+    intact. *)
 
 val continuation_base_path : continuation -> string
 (** Canonical workspace where the sealed owner and node snapshot were read.
@@ -112,7 +116,17 @@ val continuation_child_admission : continuation ->
   node_ids:Keeper_tool_plan.Node_id.t list -> child_admission_history
 (** Inspect the sealed original node evidence. Completion and producer-owned
     wait prove prior admission; an unfinished attempt cannot prove absence.
-    Proven pre-effect refusals do not invent a child activation. *)
+    A tool's pre-effect failure does not prove that child admission was absent. *)
+
+val child_admission : t -> node_ids:Keeper_tool_plan.Node_id.t list ->
+  (child_admission_history, error) result
+(** Strict current journal history for every public resume, including completed
+    runs with no owned-job continuation. Does not bind a new worker. *)
+
+val worker_child_admission : worker -> node_ids:Keeper_tool_plan.Node_id.t list ->
+  (child_admission_history, error) result
+(** Inspect current nodes under the run transaction, checking the accepted
+    worker's exact durable ownership before any retained result is reused. *)
 
 type readiness = Waiting_for_results | Results_ready
 val continuation_readiness : continuation -> (readiness, error) result

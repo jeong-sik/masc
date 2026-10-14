@@ -608,8 +608,10 @@ let async_worker_result
   Option.iter (fun bound -> Keeper_composition_nested_run.restore_admissions nested_run
     ~find_activation:(fun ~invocation ~tool_name ~scope ~reference ->
       Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
-  let admission = match continuation with None -> Ok () | Some continuation ->
-    Keeper_composition_nested_run.check_continuation nested_run continuation in
+  let admission = Keeper_composition_nested_run.check_original_admissions nested_run
+      ~child_history:(fun ~node_ids -> match journal with
+        | Some worker -> Journal.worker_child_admission worker ~node_ids
+        | None -> Error Journal.Missing_journal) in
   match admission,continuation with
   | Error rejection,Some continuation ->
     let result = Tool_result.make_deferred ~tool_name ~start_time
@@ -1638,7 +1640,8 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
         Option.iter (fun bound -> Keeper_composition_nested_run.restore_admissions original_nested
           ~find_activation:(fun ~invocation ~tool_name ~scope ~reference ->
             Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
-        (match Keeper_composition_nested_run.check_continuation original_nested continuation with
+        (match Keeper_composition_nested_run.check_original_admissions original_nested
+          ~child_history:(fun ~node_ids -> Ok (Journal.continuation_child_admission continuation ~node_ids)) with
          | Error rejection -> Tool_result.make_err ~tool_name:Draft.run_tool_name ~start_time
              ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
              ~data:rejection.data rejection.detail
@@ -2291,8 +2294,20 @@ let make_tools_with_authority
                          (match Draft.load_nested_activation ~base_path:config.base_path source with
                           | Error error -> rejection ~tool_name:Draft.run_tool_name ~start_time error
                           | Ok nested_activation ->
-                            execute_run ~journal ?continuation ~nested_activation ~composition_run_id ~run_reference:source.run_reference
-                              ~parent_invocation ~turn_context ()))
+                            let original_nested = Keeper_composition_nested_run.create ~calls:(Draft.nested_calls draft)
+                                ~composition_run_id ~parent_invocation
+                                ~delivery_parent_tool_use_id:(Keeper_composition_nested_run.async_result_parent composition_run_id)
+                                ~tool_name:Draft.run_tool_name ~record_activation:None () in
+                            Option.iter (fun bound -> Keeper_composition_nested_run.restore_admissions original_nested
+                              ~find_activation:(fun ~invocation ~tool_name ~scope ~reference ->
+                                Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
+                            match Keeper_composition_nested_run.check_original_admissions original_nested
+                                ~child_history:(Journal.child_admission journal) with
+                            | Error error -> Tool_result.make_err ~tool_name:Draft.run_tool_name ~start_time
+                                ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
+                                ~data:error.data error.detail
+                            | Ok () -> execute_run ~journal ?continuation ~nested_activation ~composition_run_id ~run_reference:source.run_reference
+                                ~parent_invocation ~turn_context ()))
               | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _), Catalog.Async ->
                 rejection ~tool_name:Draft.run_tool_name ~start_time
                   (Draft.Malformed_draft "resume_run_id must be a string")

@@ -2,7 +2,9 @@ name = "keeper_wiki_search"
 description = """
 Search the wiki by keyword.
 
-Returns one line per matching page: \
+A page matches when it contains the whole query, or every \
+whitespace-separated word of it in any order. Pages containing \
+the whole query come first. Returns one line per matching page: \
 its title and file name. Use to discover relevant pages before \
 reading full content with keeper_wiki_read."""
 

@@ -1046,6 +1046,7 @@ let test_completion_delivery_failure_and_restart () =
   let queue_path = Filename.concat
       (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path:fixture.base_path) keeper)
       Keeper_event_queue_schema.snapshot_filename in
+  Fs_compat.mkdir_p (Filename.dirname queue_path);
   let prior = if Sys.file_exists queue_path then Some (read queue_path) else None in
   (match prior with Some _ -> Unix.unlink queue_path | None -> ());
   Unix.mkdir queue_path 0o700;
@@ -1148,8 +1149,11 @@ let test_completion_consumed_before_producer_ack () = with_fixture @@ fun _env i
   (match Event_registry.enqueue_stimulus_once_durable_result ~base_path:fixture.base_path keeper stimulus with
    | Stimulus_enqueued -> () | _ -> fail "actual interruption-boundary enqueue failed");
   let selection = only_selection fixture in
-  Event_registry.ack_pending_result ~base_path:fixture.base_path keeper ~selection
-    |> require "consumer commits before producer ACK";
+  (match Event_registry.terminalize_pending_turn_completed_result
+      ~base_path:fixture.base_path keeper ~applied_at:(Unix.gettimeofday ()) ~selection with
+   | Ok (Event_registry.Turn_source_acked _) -> ()
+   | Ok Event_registry.Turn_selection_withdrawn -> fail "original completion selection was withdrawn"
+   | Error detail -> fail ("consumer terminalization failed: " ^ detail));
   let path = owner_path fixture id in
   let complete_prefix = read path in
   write path (complete_prefix ^ "{\"completion_delivered\":tr");

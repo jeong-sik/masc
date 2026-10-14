@@ -17,7 +17,6 @@ type deletion_failure =
 type summary =
   { removed : int
   ; retained_references : int
-  ; candidate_files : int
   ; deletion_failures : deletion_failure list
   }
 

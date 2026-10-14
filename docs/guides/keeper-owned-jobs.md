@@ -105,6 +105,19 @@ or refused markers stay visible as named discovery failures; an operator
 confirms the canonical request record and then removes the named file from
 the prepared_continuations directory. This discovery boundary does not
 dispatch continuation workers yet.
+
+The explicit typed continuation intake can submit the original prepared worker
+without a provider turn. A sealed continuation loads only its original
+workspace and draft, recompiles its original recipe
+against current admission and checks every frozen node route/input/output
+contract. It reads strict result readiness before accepting a worker; a
+not-ready candidate defers without a worker or backend operation. An unrelated whole-surface change does not replace the original
+preparation evidence or block unchanged admitted nodes. Current denial or
+schema drift still refuses before acceptance. Ordinary draft loads and Skill
+publication retain their exact whole-surface check. Async acceptance pins the
+original owner/generation/full node snapshot; Task, run, parent, waiting
+occurrences and completed siblings remain original. Server discovery-to-intake
+wiring is still a separate controller step.
 The journal retains the exact producer-owned job wait separately from the
 provider-facing body. Only this exact read-only leaf may be rechecked; it keeps
 its original execution ID and tool-use ID. Completed siblings reuse their full

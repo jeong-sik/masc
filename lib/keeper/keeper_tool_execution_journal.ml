@@ -695,6 +695,7 @@ let bind_continuation (continuation : continuation) ~request_id =
     ~expected_terminal:(Some continuation.waiting_entry)
     ~expected_nodes:(Some continuation.suspended_nodes)
 
+let continuation_base_path (continuation : continuation) = continuation.journal.base_path
 let continuation_source (continuation : continuation) = source continuation.journal
 let continuation_request_id (continuation : continuation) = continuation.expected_owner.request_id
 let continuation_job_ids (continuation : continuation) = continuation.job_ids

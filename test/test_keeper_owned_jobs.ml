@@ -202,7 +202,7 @@ type fixture =
   ; make_bundle : unit -> Masc.Keeper_tools_agent_core.tool_bundle
   }
 
-let frozen_surface ~base_path ~sandbox_profile =
+let frozen_surface_with ~tool_deny ~tool_descriptors ~base_path ~sandbox_profile =
   let config = Skill_source_config.parse_text
       "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n"
       |> require "skill source configuration" in
@@ -215,10 +215,15 @@ let frozen_surface ~base_path ~sandbox_profile =
       ; observation = Skill_catalog_snapshot.Source_ready {resolved_path; candidates=0}
       ; candidates=[] }) config.sources in
   let snapshot = Skill_catalog_snapshot.configured ~config scans |> require "frozen empty skills" in
-  let global_skill_catalog, diagnostics = Masc.Keeper_skill_catalog.of_snapshot snapshot in
+  let global_skill_catalog, diagnostics = Masc.Keeper_skill_catalog.of_snapshot ~descriptors:tool_descriptors snapshot in
   check int "frozen skill catalog has no diagnostics" 0 (List.length diagnostics);
-  Masc.Keeper_capability_surface.create ~tool_deny:[] ~sandbox_profile ~skill_names:None
-    ~global_skill_catalog ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot) ~task_skills:[]
+  Masc.Keeper_capability_surface.create_with_descriptors ~tool_deny ~tool_descriptors
+    ~sandbox_profile ~skill_names:None ~global_skill_catalog
+    ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors:tool_descriptors snapshot) ~task_skills:[]
+
+let frozen_surface ~base_path ~sandbox_profile =
+  frozen_surface_with ~tool_deny:[] ~tool_descriptors:(Descriptor.all_descriptors ())
+    ~base_path ~sandbox_profile
 
 let with_environment values f =
   let rec loop = function
@@ -947,6 +952,26 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     | Ok None -> fail "original run is not canonically waiting"
     | Error error -> fail (Journal.error_to_string error) in
   let original_continuation = continuation () in
+  let resume_candidate capability_surface continuation =
+    let config = Workspace.default_config fixture.base_path in
+    let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+      {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+    let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"physical-continuation-intake"
+      ~turn:52 ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+    Masc.Keeper_tool_composition_surface.resume_continuation ~capability_surface ~continuation
+      ~config ~meta:fixture.meta ~publication_recovery
+      ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"continuation fixture")
+      ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+      ~invocation ~clock:(Eio.Stdenv.clock env) () in
+  let current_surface ?(tool_deny=[]) ?(tool_descriptors=Descriptor.all_descriptors ()) () =
+    frozen_surface_with ~tool_deny ~tool_descriptors ~base_path:fixture.base_path
+      ~sandbox_profile:fixture.meta.sandbox_profile in
+  let not_ready = resume_candidate (current_surface ()) original_continuation in
+  check bool "typed not-ready intake starts no worker" true (Tool_result.is_deferred not_ready);
+  check string "not-ready intake keeps original owner" first_entry.request_id
+    (Journal.continuation_request_id (continuation ()));
+  check int "not-ready intake never queries the backend" calls_before (List.length (calls fixture));
   let pending () = Journal.pending_continuations ~base_path:fixture.base_path
       |> require "pending continuation discovery" in
   let discovery = pending () in
@@ -1068,13 +1093,54 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (match Journal.continuation_readiness ready_continuation with
    | Ok Journal.Results_ready -> ()
    | Ok Waiting_for_results | Error _ -> fail "complete original outputs are not ready");
-  let resumed = resume () in
+  let changed_surface = current_surface ~tool_deny:["keeper_job_start"] () in
+  let module Draft = Masc.Keeper_composition_draft in
+  (match Draft.load ~base_path:fixture.base_path ~capability_surface:changed_surface ~keeper_name:keeper ~sha256 with
+   | Error Draft.Capability_changed -> ()
+   | Ok _ | Error _ -> fail "ordinary draft admission silently adopted a changed whole surface");
+  let preserved = Draft.load_continuation ~base_path:fixture.base_path
+      ~capability_surface:changed_surface discovered |> require "sealed original continuation contracts" in
+  check string "continuation retains original draft" sha256 (Draft.reference preserved).sha256;
+  let other_base = Filename.concat fixture.base_path "other-workspace" in
+  Unix.mkdir other_base 0o700;
+  (match Draft.load_continuation ~base_path:other_base ~capability_surface:changed_surface discovered with
+   | Error (Draft.Malformed_draft _) -> ()
+   | Ok _ | Error _ -> fail "sealed continuation was loaded in a different workspace");
+  let denied = resume_candidate (current_surface ~tool_deny:["keeper_job_result"] ()) discovered in
+  check bool "current denial refuses before async acceptance" true (Tool_result.is_failed denied);
+  check string "current denial keeps original owner" (Journal.continuation_request_id discovered)
+    (Journal.continuation_request_id (continuation ()));
+  let changed_descriptors = List.map (fun (descriptor : Descriptor.t) ->
+    if not (List.mem "keeper_job_result" (Descriptor.keeper_model_names descriptor)) then descriptor
+    else
+      let schema = match descriptor.composable_output with
+        | Descriptor.Json_output {schema=`Assoc fields} ->
+          let properties = match List.assoc_opt "properties" fields with
+            | Some (`Assoc properties) -> properties
+            | Some _ | None -> fail "actual result schema has no object properties" in
+          `Assoc (("properties",`Assoc (("new_optional_field",`Assoc ["type",`String "string"]) :: properties))
+            :: List.remove_assoc "properties" fields)
+        | Descriptor.Opaque_output | Json_output _ -> fail "actual owned result schema is not an object" in
+      {descriptor with composable_output=Descriptor.Json_output {schema}})
+      (Descriptor.all_descriptors ()) in
+  let changed_contract = resume_candidate (current_surface ~tool_descriptors:changed_descriptors ()) discovered in
+  check bool "changed original output contract refuses before async acceptance" true (Tool_result.is_failed changed_contract);
+  check_json "schema drift retains typed contract rejection" (`String "capability_changed")
+    (Tool_result.data changed_contract |> member "kind");
+  check string "schema drift never recaptures original owner" (Journal.continuation_request_id discovered)
+    (Journal.continuation_request_id (continuation ()));
+  check int "contract refusal has no backend operation" before_completed_resume (List.length (calls fixture));
+  let resumed = resume_candidate changed_surface discovered |> Tool_result.data in
   let ok, completed, completed_entry = await_composition env fixture resumed in
   if not ok then
     failf "original completed job resume failed: %s" (Yojson.Safe.to_string completed);
   check bool "original complete job continues the remaining DAG" true ok;
   check string "run identity survives resumption" run_id (resumed |> member "composition_run_id" |> to_string);
   check int "completed result read has no backend operation" before_completed_resume (List.length (calls fixture));
+  check string "continuation does not rewrite original preparation evidence" draft_bytes
+    (Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.base_path) ~sha256
+      |> require "original preparation evidence after continuation"
+      |> function Some bytes -> bytes | None -> fail "original draft disappeared");
   let completed_nodes = composition_nodes fixture completed in
   let final_wait = composition_node "await" completed_nodes in
   List.iter (fun field -> check_json ("original wait identity " ^ field)
@@ -1122,7 +1188,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "completed requests leave no ready continuation" 0 (List.length retired.ready);
   check int "completed request discovery has no unavailable authority" 0 (List.length retired.failures);
   let stable = pending () in
-  check int "retirement leaves no historical scan work" 0 stable.inspected;
+  check int "retirement leaves no pending marker work" 0 stable.inspected;
   check int "composition never recreates original program" 1 (effect_count fixture "create");
   check int "composition never restarts original program" 1 (effect_count fixture "start")
 

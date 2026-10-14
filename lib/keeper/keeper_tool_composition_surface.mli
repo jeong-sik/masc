@@ -76,6 +76,26 @@ val instruction_skill_schema_tool :
 (** Handler-free [keeper_skill] schema with the same exact Available
     description used by the executable tool. *)
 
+val resume_continuation
+  :  capability_surface:Keeper_capability_surface.t
+  -> continuation:Keeper_tool_execution_journal.continuation
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery:Keeper_publication_recovery_availability.turn_context
+  -> ctx_snapshot:Keeper_types.working_context
+  -> turn_context:Keeper_tool_call_log_context.turn_context
+  -> invocation:Agent_core.Tool_contract.Invocation.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> unit
+  -> Tool_result.result
+(** Explicit execution boundary for a sealed original prepared continuation.
+    Strict result readiness and current exact node admission precede async
+    acceptance. Not-ready results defer without a worker or backend operation.
+    The existing journal owner/node CAS precedes all worker effects. Run, draft,
+    source Task/turn/parent and completed sibling results stay original while
+    physical execution observability uses the supplied context and schedule.
+    This entrypoint does not discover candidates or install a controller. *)
+
 val make_tools
   :  capability_surface:Keeper_capability_surface.t
   -> ?instruction_skills:instruction_skill list

@@ -688,8 +688,9 @@ let ensure_same_origin_browser_request ~request_authority request :
        else
          Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
            { reason = Missing_token
-           ; message = "Authentication required: provide a bearer token or Origin header. \
-                        Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."
+           ; message = "Authentication required: provide a bearer token (run `masc login --base-path <dir> --client-env MASC_TOKEN`) \
+                        or a same-origin Origin header. Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true only when \
+                        workspace token auth is disabled."
            })))
   | Single_origin
       { admission = (Same_origin | Allowed_dev_origin); _ } ->

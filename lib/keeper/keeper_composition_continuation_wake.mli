@@ -17,8 +17,9 @@ val error_to_string : error -> string
 val resume :
   context:float Keeper_types_profile.context ->
   Keeper_tool_execution_journal.continuation -> (Tool_result.result, error) result
-(** Strictly resolve current TOML/meta, published Skill snapshot and authorized
-    lane descriptors, then use the original typed continuation intake. No
+(** Strictly resolve current declarations (including name/duplicate ownership),
+    metadata, published Skill snapshot and authorized lane descriptors, then use
+    the original typed continuation intake. No
     provider call, current Task inference or reconstructed plan. *)
 
 type t
@@ -29,4 +30,5 @@ val create :
 val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_tool_execution_journal.error) result
 (** Schedule independent ready-run intake fibers and return without joining
     them. The active set suppresses duplicate live intake only. Exact durable
-    owner/node CAS still admits the worker. No timer, timeout or retry cap. *)
+    owner/node CAS still admits the worker. Single-domain Eio caller. No timer,
+    timeout or retry cap. *)

@@ -39,8 +39,8 @@ let current_snapshot ~base_path =
 let resume ~context continuation =
   let source = Journal.continuation_source continuation in
   let config = context.Keeper_types_profile.config in
-  let* defaults = Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
-      ~base_path:config.base_path source.keeper_name
+  let profiles = Keeper_types_profile.read_keeper_profile_snapshot ~base_path:config.base_path in
+  let* defaults = Keeper_types_profile.snapshot_profile_defaults profiles source.keeper_name
     |> Result.map_error (fun error -> Profile_unavailable error) in
   (* The ordinary metadata path helper creates the directory. This uses the
      same canonical path components for a strict read without that effect. *)

@@ -1225,9 +1225,10 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let config = Workspace.default_config fixture.base_path in
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
   Fs_compat.mkdir_p (Filename.dirname declaration);
-  let write_profile deny =
+  let write_profile ?(path=declaration) ?declared_name deny =
+    let name = match declared_name with None -> "" | Some name -> "name = \"" ^ name ^ "\"\n" in
     let tools = if deny then "\n[keeper.tools]\ndeny = [\"keeper_job_result\"]\n" else "" in
-    write declaration ("[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\n"
+    write path ("[keeper]\n" ^ name ^ "activation_mode = \"manual\"\nsandbox_profile = \"docker\"\n"
       ^ "sandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original result continuation fixture\"\n" ^ tools) in
   let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
   write runtime_path "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n";
@@ -1242,6 +1243,34 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
      sw=Async.server_background_switch () |> require "continuation maintenance switch";
      clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
      publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let active_requests () = Async.list_for_keeper ~base_path:fixture.base_path ~caller:keeper
+      ~keeper_name:keeper () |> require "active requests at maintenance profile admission"
+      |> List.map (fun (entry : Async.entry) -> entry.request_id) |> List.sort String.compare in
+  let profile_owner_refusals = ref 0 in
+  let assert_profile_owner_refused label =
+    let requests_before = active_requests () in
+    let refused,notify_refused = Eio.Promise.create () in
+    let wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
+    Wake.pulse ~sw:context.sw wake |> require label;
+    (match Eio.Promise.await refused with
+     | Error (Wake.Profile_unavailable {kind=Invalid_name;_}) -> incr profile_owner_refusals
+     | Error error -> failf "%s: unexpected profile failure: %s" label (Wake.error_to_string error)
+     | Ok _ -> failf "%s: invalid declaration owner reached async intake" label);
+    check string (label ^ " retains original owner") (Journal.continuation_request_id after_second_loss)
+      (Journal.continuation_request_id (continuation ()));
+    check (list string) (label ^ " starts no async worker") requests_before (active_requests ());
+    check int (label ^ " performs no backend operation") before_completed_resume (List.length (calls fixture));
+    (match Journal.continuation_readiness after_second_loss with
+     | Ok Journal.Results_ready -> ()
+     | Ok Waiting_for_results | Error _ -> failf "%s: original wait is no longer ready" label) in
+  write_profile ~declared_name:"continuation-foreign" false;
+  assert_profile_owner_refused "maintenance rejects filename/declaration owner mismatch";
+  write_profile false;
+  let duplicate_declaration = Config_dir_resolver.keeper_toml_path_for_base_path
+      ~base_path:fixture.base_path "continuation-duplicate" in
+  Fun.protect ~finally:(fun () -> Unix.unlink duplicate_declaration) (fun () ->
+    write_profile ~path:duplicate_declaration ~declared_name:keeper false;
+    assert_profile_owner_refused "maintenance rejects duplicate declaration owner claims");
   write_profile true;
   let refused,notify_refused = Eio.Promise.create () in
   let denied_wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
@@ -1254,26 +1283,41 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "maintenance refusal has no backend operation" before_completed_resume (List.length (calls fixture));
   write_profile false;
   let accepted,notify_accepted = Eio.Promise.create () in
-  let accepted_callbacks = ref 0 in
+  let accepted_callbacks = ref 0 and other_intakes = ref [] in
   (* A fresh supervisor proves durable discovery does not depend on the
      previous intake's process-local reservation. This is not an OS restart. *)
-  let wake = Wake.create ~context ~on_result:(fun _ outcome ->
-      incr accepted_callbacks; Eio.Promise.resolve notify_accepted outcome) () in
+  let wake = Wake.create ~context ~on_result:(fun _ outcome -> match outcome with
+      | Ok (Tool_result.Completed _ as result) ->
+        incr accepted_callbacks; Eio.Promise.resolve notify_accepted result
+      | Ok (Tool_result.Deferred _ | Tool_result.Failed _) | Error _ ->
+        other_intakes := outcome :: !other_intakes) () in
   let recovery_started = Mtime_clock.counter () in
   Wake.pulse ~sw:context.sw wake |> require "actual provider-free maintenance pulse";
   Wake.pulse ~sw:context.sw wake |> require "repeated pulse while original intake is scheduled";
-  let resumed = Eio.Promise.await accepted |> require "maintenance intake accepted original DAG" |> Tool_result.data in
+  let resumed = Eio.Promise.await accepted |> Tool_result.data in
   let ok, completed, completed_entry = await_composition env fixture resumed in
   let recovery_ms = Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000. in
   if not ok then
     failf "original completed job resume failed: %s" (Yojson.Safe.to_string completed);
   check bool "original complete job continues the remaining DAG" true ok;
   check int "repeated maintenance pulses accept only one original worker" 1 !accepted_callbacks;
+  let deferred_intakes,failed_intakes,unavailable_intakes = List.fold_left
+      (fun (deferred,failed,unavailable) -> function
+        | Ok (Tool_result.Deferred _) -> deferred+1,failed,unavailable
+        | Ok (Tool_result.Failed _) -> deferred,failed+1,unavailable
+        | Error _ -> deferred,failed,unavailable+1
+        | Ok (Tool_result.Completed _) -> fail "accepted intake was recorded as a refusal")
+      (0,0,0) !other_intakes in
   check string "run identity survives resumption" run_id (resumed |> member "composition_run_id" |> to_string);
   check int "completed result read has no backend operation" before_completed_resume (List.length (calls fixture));
   Printf.printf "OWNED_CONTINUATION_RECOVERY %s\n%!" (Yojson.Safe.to_string
     (`Assoc ["post_binding_losses",`Int (List.length [first_lost_entry;second_lost_entry]);
       "maintenance_pulse_to_continuation_completion_ms",`Float recovery_ms;
+      "accepted_intakes",`Int !accepted_callbacks;
+      "deferred_intakes",`Int deferred_intakes;
+      "failed_intakes",`Int failed_intakes;
+      "unavailable_intakes",`Int unavailable_intakes;
+      "profile_owner_refusals",`Int !profile_owner_refusals;
       "backend_calls",`Int (List.length (calls fixture) - before_completed_resume);
       "unstarted_worker_calls",`Int !lost_worker_calls;
       "program_creates",`Int (effect_count fixture "create");

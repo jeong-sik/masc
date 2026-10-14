@@ -118,8 +118,10 @@ publication retain their exact whole-surface check. Async acceptance pins the
 original owner/generation/full node snapshot; Task, run, parent, waiting
 occurrences and completed siblings remain original. Server startup and the existing maintenance pulse use this intake directly.
 An already-durable owned-job completion also hints the supervisor immediately.
-Current TOML/meta and the published Skill snapshot are resolved for each intake;
-a paused Keeper, unavailable authority or changed admission retains the wait.
+Current declarations, metadata and the published Skill snapshot are resolved for
+each intake. The declaration snapshot refuses filename/name mismatches and
+duplicate owner claims. A paused Keeper, unavailable authority or changed
+admission retains the wait.
 Separate runs have independent intake fibers; the reservation set does not
 authorize execution. A missing hint is recovered by the existing maintenance
 pulse, with no new timer or retry limit.

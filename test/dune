@@ -2429,6 +2429,7 @@
 
 (include stanzas/test_keeper_census_outputs.inc)
 (include stanzas/test_keeper_shim_fleet.inc)
+(include stanzas/test_keeper_sqlite_observation_io.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
 (include stanzas/test_agent_transport_vocabulary.inc)
 (include stanzas/test_agent_api_query_params.inc)

@@ -40,16 +40,10 @@ let valid binding =
 let schema_objects db =
   statement db "SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name" []
     (fun stmt ->
-      let rec rows acc = match Sqlite3.step stmt with
-        | Sqlite3.Rc.ROW -> rows ((Sqlite3.column_text stmt 0,Sqlite3.column_text stmt 1)::acc)
-        | DONE -> Ok (List.rev acc)
-        | Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM
-        | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM
-        | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT
-        | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL
-        | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT
-        | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH
-        | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _ -> Error (sql_error db) in
+      let rec rows acc = match Keeper_sqlite_observation_io.step stmt with
+        | Row -> rows ((Sqlite3.column_text stmt 0,Sqlite3.column_text stmt 1)::acc)
+        | Done -> Ok (List.rev acc)
+        | Failed _ -> Error (sql_error db) in
       rows [])
 let expected_schema = List.sort compare
   ["receipts",schema;"terminal_immutable",immutable;"receipt_retained",no_delete;"binding_immutable",binding_immutable]
@@ -94,9 +88,10 @@ let read db binding =
   statement db
     "SELECT action,slot,epoch,state,detail,incarnation,change_count,checkpoint_sha256 FROM receipts WHERE operation_id=?"
     [text (Keeper_operation_id.to_string binding.operation_id)] (fun stmt ->
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.DONE -> Ok None
-      | ROW ->
+      match Keeper_sqlite_observation_io.step stmt with
+      | Done -> Ok None
+      | Failed _ -> Error (sql_error db)
+      | Row ->
           if Sqlite3.column_text stmt 0 <> action_name binding.action
              || Sqlite3.column_text stmt 1 <> binding.slot then Error Binding_conflict
           else
@@ -117,14 +112,7 @@ let read db binding =
              | Some (Committed completed) when not (valid_completion completed) ->
                  Error (Store_unavailable "invalid persisted checkpoint completion evidence")
              | Some ((Pending | Committed _ | Refused _ | Unknown _) as state) ->
-                 Ok (Some {binding;epoch=Sqlite3.column_text stmt 2;state}))
-      | Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT
-      | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY
-      | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND
-      | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY
-      | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH
-      | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT
-      | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _ -> Error (sql_error db))
+                 Ok (Some {binding;epoch=Sqlite3.column_text stmt 2;state})))
 let admit ~path ~epoch binding =
   let* () = valid binding in
   if String.trim epoch = "" then Error (Invalid_binding "checkpoint epoch is blank") else

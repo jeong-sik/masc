@@ -418,8 +418,16 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
    passes the surviving user/assistant lines in as [chat_line] values via
    [build_timeline]'s [load_chat]. This module
    only maps that neutral data into timeline events. *)
+type chat_role =
+  | Chat_user
+  | Chat_assistant
+
+let chat_role_to_string = function
+  | Chat_user -> "user"
+  | Chat_assistant -> "assistant"
+
 type chat_line = {
-  cl_role : string;  (** "user" | "assistant" *)
+  cl_role : chat_role;
   cl_content : string;
   cl_ts : float;
   cl_connector : string option;  (** dashboard | discord | slack | agent | ... *)
@@ -444,7 +452,7 @@ let chat_events (lines : chat_line list) : timeline_event list =
         detail =
           `Assoc
             [
-              ("role", `String l.cl_role);
+              ("role", `String (chat_role_to_string l.cl_role));
               ("content", `String l.cl_content);
               ("source", Json_util.string_opt_to_json l.cl_connector);
               ( "conversation_id",

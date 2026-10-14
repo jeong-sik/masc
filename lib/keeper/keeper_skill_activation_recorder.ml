@@ -24,7 +24,7 @@ and recorded_task_provenance =
 
 type bound_context = { context : t; runtime : string }
 
-type result_child = {alias:string;reference:Skill_reference.t;skill_tool_use_id:string}
+type result_child = {alias:string;skill_reference:Skill_reference.t;skill_tool_use_id:string}
 let bound_trace_id bound = bound.context.trace_id
 let bound_turn_ref bound = bound.context.turn_ref
 
@@ -194,7 +194,7 @@ let find_bound_result_children ~config bound ~composition_run_id ~logical_parent
       | Some existing -> Ok existing
       | None -> Error (Invalid_bound_context "admitted original child activation is missing") in
     let* expected = bound_child_activation bound ~tool_use_id:child.skill_tool_use_id ~agent_core_turn:source_turn
-      ~tool_name ~scope ~reference:child.reference ~activated_at:existing.activated_at in
+      ~tool_name ~scope ~reference:child.skill_reference ~activated_at:existing.activated_at in
     if Skill_reference.equal_identity expected.identity existing.identity
       && expected.content_revision = existing.content_revision && expected.snapshot_revision = existing.snapshot_revision
       && Ids.Turn_ref.equal expected.turn_ref existing.turn_ref && expected.runtime_id = existing.runtime_id

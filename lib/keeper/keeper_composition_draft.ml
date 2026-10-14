@@ -479,7 +479,7 @@ let load_nested_result_children ~base_path source ~result =
         | `Null -> Ok None
         | `Assoc [("rejection",_)] -> Ok None
         | `Assoc [("skill_tool_use_id",`String id)] when String.trim id <> "" ->
-          Ok (Some Keeper_skill_activation_recorder.{alias;reference;skill_tool_use_id=id})
+          Ok (Some Keeper_skill_activation_recorder.{alias;skill_reference=reference;skill_tool_use_id=id})
         | _ -> malformed "invalid typed child admission" in
       Ok ((match child with None -> children | Some child -> child::children),frozen::seen)) (Ok ([],[])) scopes in
     if List.length seen <> List.length calls then malformed "terminal result omitted an original child scope"

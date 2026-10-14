@@ -42,4 +42,3 @@ export function parseStrictRfc3339(value: string): Rfc3339Instant | null {
     + (ptimeFraction === '' ? 0 : Number(`0.${ptimeFraction}`))
   return { value: instant }
 }
-

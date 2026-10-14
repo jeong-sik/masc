@@ -37,6 +37,7 @@ related: ["cli-runtimes-as-lane-slots", "exact-lane-walks-one-slot-list", "works
 이유가 하나가 아니다. 서로 다른 세 가지가 한 덩어리로 막혀 있다.
 
 1. **출력.** Muse Code 는 스키마를 건넬 채널이 없다는 이유로 어느 lane 에도 못 들어간다.
+   그런데 lane 이 스키마 채널을 요구하지는 않는다(2.1).
 2. **입력 크기.** Curator 는 CLI 슬롯의 창 크기를 알 수 없다며 구성을 거절한다 (#41391).
 3. **걷는 코드.** Curator 만 CLI 슬롯을 걷는 코드가 없다.
 
@@ -118,21 +119,22 @@ Claude Code, Antigravity, Muse 가 입력 초과를 어떤 모양으로 거절�
 
 ### 3.1 lane 은 요구를 선언하고, runtime 은 능력을 갖고, 맡는지는 계산한다
 
-lane 마다 코드에 닫힌 타입으로 요구를 둔다. 설정 문자열이 아니다.
+lane 마다 코드에 닫힌 타입으로 요구를 둔다. 설정 문자열이 아니다. 요구는 둘뿐이다.
 
 ```ocaml
-type output_requirement = Needs_prompt_json | Needs_provider_schema
-type input_requirement  = Window_must_be_known | Window_not_needed
+type input_requirement   = Window_must_be_known | Window_not_needed
 type verdict_requirement = Verdict_as_text | Verdict_by_tool_call
 ```
 
 runtime 의 능력은 이미 코드에 있는 `api_format` 과 `execution` 에서 계산한다.
 
 ```ocaml
-type output_capability = Native_schema_channel | Prompt_only
-type window_capability = Window_known of int | Window_unknown
+type window_capability  = Window_known of int | Window_unknown
 type verdict_capability = Can_answer_text | Can_call_dispatch_tool
 ```
+
+출력 모양은 요구에 넣지 않는다. 지금 어느 lane 도 provider 의 스키마 채널을 요구하지 않고(2.1),
+요구하는 lane 이 없는 타입을 미리 만들면 쓰이지 않는 분기가 생긴다. 3.2 를 본다.
 
 맡을 수 있는지는 함수 하나가 정한다.
 
@@ -146,15 +148,18 @@ val admits : lane:lane_requirement -> runtime:runtime_capability -> (unit, refus
 클라이언트가 Claude Code 뿐이라고 적고 있다. 코드가 이 조건을 어떻게 지키는지는 읽지 않았다.
 `Verdict_by_tool_call` 이라는 요구를 두면 그 조건도 같은 틀 안에서 계산된다.
 
-### 3.2 출력: `Needs_prompt_json` 이면 채널이 없는 runtime 도 맡는다
+### 3.2 출력: 스키마 채널은 판정에 쓰지 않는다
 
-`Needs_prompt_json` lane 에서는 호출 때 `output_schema` 를 `None` 으로 넘긴다. 프롬프트의
-스키마 문장과 로컬 엄격 파싱은 지금과 같다. 채널이 있는 runtime 은 지금처럼 채널로도 스키마를
-건네서 답이 그 모양을 지키게 한다. 채널이 없는 runtime 은 HTTP 슬롯이 `Json_syntax` 에서 받는 것과 같은 보장을
-받는다.
+`admits` 는 runtime 이 스키마 채널을 가졌는지 보지 않는다. 답을 JSON 으로 받아 로컬에서 엄격하게
+파싱하고 소비자가 검증하는 것은 지금과 같다. 프롬프트에 스키마 문장이 붙는 것도 같다.
 
-`Needs_provider_schema` 를 요구하는 lane 이 생기면 `Prompt_only` runtime 은 로드 때 거절된다.
-그 lane 은 지금 하나도 없다.
+바뀌는 것은 호출 때 `output_schema` 를 넘기는 조건 하나다. 채널이 있는 runtime(Claude Code,
+Codex, Antigravity)에는 지금처럼 채널로도 스키마를 건넨다. 답이 그 모양을 지키게 하는 보강이다.
+채널이 없는 runtime(Muse Code)에는 `None` 을 넘기고, 그 runtime 은 HTTP 슬롯이 `Json_syntax` 에서
+받는 것과 같은 보장(프롬프트 문장과 로컬 파싱)만 받는다. 채널은 보강이지 입장 조건이 아니다.
+
+provider 의 스키마를 꼭 요구하는 lane 이 생기면 그때 요구 타입을 하나 더하고 `admits` 에 한 칸을
+추가한다. 지금은 그런 lane 이 없다.
 
 ### 3.3 입력: CLI 슬롯이 창을 싣는다
 
@@ -231,13 +236,13 @@ CLI 슬롯으로 성공하면 응답에 토큰 사용량이 없다 (`Keeper_lane
 
 - **조합표.** `admits` 의 모든 (요구 × 능력) 칸을 테스트한다. 와일드카드가 없으므로 새
   변이형은 컴파일로 잡힌다.
-- **Muse.** `Needs_prompt_json` lane 에서 runner 가 받는 `output_schema` 가 `None` 이다.
-  `Needs_provider_schema` 를 요구하는 시험용 lane 에서는 로드 때 거절된다.
+- **Muse.** `Window_not_needed` · `Verdict_as_text` lane 이 Muse 를 맡는다. runner 가 받는
+  `output_schema` 는 `None` 이고, 채널이 있는 runtime 은 같은 lane 에서 스키마를 받는다.
 - **Curator, CLI 슬롯.** 가짜 runner 로 HTTP 슬롯 전부 실패 → CLI 슬롯 성공 → 장부 갱신.
   CLI 슬롯이 JSON 이 아닌 답을 내면 walk 가 넘어가고, 모두 실패하면 슬롯별 실패 목록이 남는다.
 - **창을 모르는 슬롯.** publication 에서 거절되고 inventory 가 "admitted" 로 세지 않는다.
 - **묶음 크기.** 창이 다른 두 슬롯이 있으면 작은 쪽에 맞는다.
-- **변이 검사.** `admits` 의 `Needs_prompt_json` 분기를 거절로 바꾸면 Muse 케이스가 실패한다.
+- **변이 검사.** `admits` 가 채널 없는 runtime 을 거절하게 바꾸면 Muse 케이스가 실패한다.
   묶음 크기에서 `min` 을 `max` 로 바꾸면 크기 케이스가 실패한다.
 - **라이브.** 한 lane 의 뒤쪽에 CLI 슬롯 하나를 두고 하루 관찰한 뒤 넓힌다. 어느 lane 인지는
   운영자가 정한다.

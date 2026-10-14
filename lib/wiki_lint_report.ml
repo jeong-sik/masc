@@ -155,6 +155,9 @@ let render ~pages_total ~pages_unreadable ~log ~findings request =
            not read is not the same answer as a log with nothing wrong (§7). *)
         ; "log_unknown_action", `Int log.Wiki_log.unknown_action
         ; "log_unreadable_line", `Int log.Wiki_log.unreadable_line
+        (* A dropped line above zero turns the hole check off, so a caller
+           cannot read an empty revision_log_hole list as "no holes". *)
+        ; "revision_log_hole_suppressed", `Bool (Wiki_lint.log_hole_suppressed log)
         ; "matched", `Int (List.length selected)
         ; "findings", `List (List.map snd shown)
         ; "truncated", `Bool truncated

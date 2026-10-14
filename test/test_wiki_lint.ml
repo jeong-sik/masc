@@ -504,6 +504,37 @@ let test_report_carries_the_hole () =
   check string "the hole names the page" "alpha" Yojson.Safe.Util.(to_string (member "page" hole))
 ;;
 
+(* The hole rule refuses to report while the log has a dropped line, so the
+   response must not leave an empty revision_log_hole list to be read as "no
+   holes". The flag names the condition, and a clean log still reports the
+   hole. *)
+let test_report_says_when_a_dropped_line_turned_the_hole_check_off () =
+  let nodes =
+    [ readable ~page:"alpha" ~revision:4 ("[beta](beta.md)\n" ^ sourced)
+    ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+    ]
+  in
+  let column =
+    "## [2026-10-13 20:00] create r1 | alpha | someone | a\n"
+    ^ "## [2026-10-13 20:01] update r2 | alpha | someone | b\n"
+    ^ "## [2026-10-13 20:02] update r4 | alpha | someone | d\n"
+  in
+  (* One unknown action word ("publish") drops that line; the column below the
+     highest recorded revision may then be incomplete, so the check is off. *)
+  let dropped = render_with nodes (Log.parse (column ^ "## [2026-10-13 20:03] publish r3 | alpha | someone | c\n")) in
+  check int "the dropped line is counted" 1
+    Yojson.Safe.Util.(to_int (member "log_unknown_action" dropped));
+  check bool "the check is reported off" true
+    Yojson.Safe.Util.(to_bool (member "revision_log_hole_suppressed" dropped));
+  check int "and no hole is reported" 0
+    Yojson.Safe.Util.(to_int (member "revision_log_hole" (member "counts" dropped)));
+  let clean = render_with nodes (Log.parse column) in
+  check bool "a clean log leaves the check on" false
+    Yojson.Safe.Util.(to_bool (member "revision_log_hole_suppressed" clean));
+  check int "and the r3 hole is reported" 1
+    Yojson.Safe.Util.(to_int (member "revision_log_hole" (member "counts" clean)))
+;;
+
 let () =
   run
     "wiki_lint"
@@ -552,6 +583,8 @@ let () =
       , [ test_case "the report carries the log counts and the gap" `Quick
             test_report_carries_the_log_counts_and_the_gap
         ; test_case "the report carries the hole" `Quick test_report_carries_the_hole
+        ; test_case "the report says when the check is off" `Quick
+            test_report_says_when_a_dropped_line_turned_the_hole_check_off
         ] )
     ]
 ;;

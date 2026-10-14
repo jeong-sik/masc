@@ -159,8 +159,15 @@ let log_gap_findings graph (log : Wiki_log.t) =
    - A page whose log starts at r3 and never had a create line would be
      reported as hole r1 forever. The column starts where the log's own
      lowest line for the page starts, not at 1. *)
+(* The one predicate that turns the hole rule off. The report names it too,
+   so a response can say the check was skipped rather than leave a caller to
+   read "no findings" as "no holes". *)
+let log_hole_suppressed (log : Wiki_log.t) =
+  log.unknown_action > 0 || log.unreadable_line > 0
+;;
+
 let log_hole_findings graph (log : Wiki_log.t) =
-  if log.unknown_action > 0 || log.unreadable_line > 0
+  if log_hole_suppressed log
   then []
   else (
     let seen = Hashtbl.create 16 in

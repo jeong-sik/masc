@@ -408,8 +408,8 @@ MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 �
 ### `imp`에게 브라우저와 GitHub 로그인 주기
 
 setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
-브라우저, GitHub, 웹 검색 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄은
-해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
+브라우저, GitHub, 웹 검색 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄과 z.ai 줄,
+SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
 모든 줄의 체크를 해제하면 아무것도 하지 않고 넘어갑니다(번호로 고르는 화면에서는 `0`을 입력하세요).
 
 - **브라우저.** `imp`가 자기 Firefox에서 웹 페이지를 읽습니다. geckodriver가 그 Firefox를 움직입니다.
@@ -429,7 +429,22 @@ setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 �
   시작하는 서버는 이 터미널의 환경에서 `MASC_BASE_PATH`, `MASC_CONFIG_DIR` 만 워크스페이스 값으로
   바꾼 환경을 받고, 이미 실행 중인 서버는 가진 환경을 그대로 씁니다. 서버를 시작하는 곳에 키를
   export 한 뒤에 다시 실행하세요. `masc web-search-setup --searxng-url <주소>` 는 다른 실행입니다.
-  `runtime.toml` 의 `[web_search]` 에 씁니다.
+  `runtime.toml` 의 `[web_search]` 에 씁니다. 바로 아래 두 줄이 이 쓰기를 고르는 줄입니다.
+- **z.ai 웹 검색(체크 안 됨).** 설치를 실행하는 곳에 `ZAI_API_KEY` 가 있을 때만 나옵니다. GLM
+  모델이 이미 읽는 변수입니다. 확정하면 `masc web-search-setup --provider zai` 가
+  `web_search.provider = "zai"` 를 쓰고, z.ai 를 먼저 시도한 뒤 나머지 공급자를 평소 순서로
+  시도합니다. 검색할 때마다 그 GLM Coding Plan 의 검색 한도가 줄어듭니다. 키는 저장하지 않고
+  서버가 자기 환경에서 읽습니다.
+- **Docker 의 SearXNG(체크 안 됨).** Docker 가 응답하고 SearXNG 가 아직 없을 때 나옵니다. 확정하면
+  버전을 고정한 이미지를 받아 `127.0.0.1:8888` 에 `masc-searxng` 컨테이너를 띄우고, 설정은
+  `<워크스페이스>/.masc/searxng/` 아래에 쓰고, JSON 검색이 응답할 때까지 기다린 뒤
+  `web_search.searxng_url` 을 씁니다. 키가 필요 없습니다. SearXNG 는 다른 검색 엔진에서 결과를
+  가져오는데 그 엔진들이 서버의 요청을 거절할 수 있어서 결과가 적거나 없을 수 있습니다. 측정한
+  컴퓨터에서는 엔진 하나가 답했고 둘은 거절했습니다. 저장한 뒤에는 키가 필요한 공급자보다 먼저
+  시도하고, `web_search.provider` 로 이름 붙인 공급자 뒤에 둡니다. 그 주소에서 이미 SearXNG 가
+  응답하면 주소만 쓰는 줄로 나옵니다. Docker 가 꺼져 있으면 이 줄은 나오지 않습니다.
+  `masc-searxng` 컨테이너가 일시정지, 재시작 중이거나 Docker 가 시작할 수 없는 상태여도 나오지
+  않고, 어느 Docker 명령으로 살펴볼지 안내합니다.
 - **Firefox 연결 두 줄(체크 안 됨).** Firefox 를 찾았을 때만 `imp`가 로그인해서 쓸 Firefox 를
   연결하는 줄이 둘 더 나옵니다. `masc browser-lane-setup` 이 여는 두 길입니다.
   - *BiDi*: MASC 가 전용 Firefox 를 로컬 포트의 원격 디버깅으로 직접 띄웁니다. 다시 불러올 것이
@@ -445,8 +460,8 @@ setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 �
   실행하세요. 그 폴더 위치는 이 문서가 확인하지 않았습니다.
 
 빠른 설치는 모든 줄과 줄마다 명령, 체크됐을 줄인지를 보여 주기만 합니다. 프로그램의 `--version`과
-`gh auth status`를 실행해 보지만 설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과
-같이 합니다.
+`gh auth status`를 실행하고 Docker 에 `masc-searxng` 컨테이너를, 로컬 주소에 응답을 물어보지만
+설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과 같이 합니다.
 
 ```bash
 # 브라우저 줄: imp 전용 Firefox 의 geckodriver
@@ -457,6 +472,11 @@ masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
 # 웹 검색 줄: 어느 공급자에 키가 있는지(아무것도 쓰지 않음)
 masc web-search-setup --base-path "$HOME/masc-workspace"
+# z.ai 줄: 웹 검색에서 z.ai 를 먼저 시도(서버 환경의 ZAI_API_KEY 를 읽음)
+masc web-search-setup --provider zai --base-path "$HOME/masc-workspace"
+# SearXNG 줄: 컨테이너를 시작(멈춘 컨테이너는 searxng_docker_start_existing)하고 주소를 저장
+masc prerequisite-actions searxng --execute searxng_docker_run --base-path "$HOME/masc-workspace"
+masc web-search-setup --searxng-url http://127.0.0.1:8888 --base-path "$HOME/masc-workspace"
 # GitHub 줄, 로그인이 있을 때: gh 에 이미 있는 로그인을 imp 에게 줌(토큰은 표준 입력)
 gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
 # GitHub 줄, 로그인이 없을 때: 직접 승인하는 일회용 코드

@@ -442,8 +442,9 @@ For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and 
 ### Giving `imp` a browser and a GitHub login
 
 After the sandbox, the setup journey asks **5 · Give imp tools (optional)**. It is
-one checklist. The Browser, GitHub and Web search rows start marked; the two rows
-that connect a Firefox you choose do not. Nothing is installed or written until you confirm it. Unmark every row to continue without any of them (on a terminal
+one checklist. The Browser, GitHub and Web search rows start marked; the rows
+that connect a Firefox you choose, the z.ai row and the SearXNG row do not.
+Nothing is installed or written until you confirm it. Unmark every row to continue without any of them (on a terminal
 that shows numbers, type `0`).
 
 - **Browser.** `imp` reads web pages in a Firefox of its own, driven through
@@ -470,6 +471,26 @@ that shows numbers, type `0`).
   that is already running keeps the one it has. After exporting a key where the
   server starts, run the command again. `masc web-search-setup --searxng-url
   <url>` is a different run: it writes `[web_search]` into `runtime.toml`.
+  The next two rows are those writes, offered as choices.
+- **z.ai web search (not marked).** Shown only when `ZAI_API_KEY` is set where the
+  setup runs, the variable the GLM models already read. Confirming it runs
+  `masc web-search-setup --provider zai`, which writes `web_search.provider = "zai"`,
+  so z.ai is tried first and the other providers follow in their usual order.
+  Each search spends the search allowance of that GLM Coding Plan. The key is
+  never stored: the server reads it from its environment.
+- **SearXNG in Docker (not marked).** Shown when Docker answers and no SearXNG
+  does yet. Confirming it pulls a pinned image and starts a container named
+  `masc-searxng` on `127.0.0.1:8888` with settings written under
+  `<workspace>/.masc/searxng/`, waits until a JSON search is answered, and then
+  writes `web_search.searxng_url`. It needs no key. SearXNG asks other search
+  engines for its results and they can refuse a server's requests, so it can
+  answer with few or no results: on the computer this was measured on, one
+  engine answered and two refused. SearXNG is then tried before the providers
+  that need a key, and behind a provider named in `web_search.provider`. A
+  SearXNG that already answers there is offered as a row that only writes the
+  address. With Docker not running, the row is not shown. A `masc-searxng`
+  container that is paused, restarting or in a state Docker will not start from
+  is not offered either: the setup says which Docker command looks at it.
 - **Firefox routes (not marked).** When Firefox is found, two more rows connect
   a Firefox that `imp` can log in with, the same two routes
   [`masc browser-lane-setup`](../connectors/browser/host/README.md) offers:
@@ -490,7 +511,8 @@ that shows numbers, type `0`).
 
 Quick setup lists every row with the command for each and whether it would be
 marked. It only looks: it runs the programs' `--version` and `gh auth status`,
-and installs and writes nothing. To run them later:
+asks Docker about the `masc-searxng` container and the local address for an
+answer, and installs and writes nothing. To run them later:
 
 ```bash
 # Browser row: geckodriver in imp's own Firefox
@@ -501,6 +523,11 @@ masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
 # Web search row: which providers have a key (writes nothing)
 masc web-search-setup --base-path "$HOME/masc-workspace"
+# z.ai row: z.ai is tried first for web search (reads ZAI_API_KEY from the server's environment)
+masc web-search-setup --provider zai --base-path "$HOME/masc-workspace"
+# SearXNG row: start the container (searxng_docker_start_existing for a stopped one), then save its address
+masc prerequisite-actions searxng --execute searxng_docker_run --base-path "$HOME/masc-workspace"
+masc web-search-setup --searxng-url http://127.0.0.1:8888 --base-path "$HOME/masc-workspace"
 # GitHub row, with a login: gives imp the login gh already has (token on standard input)
 gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
 # GitHub row, without a login: a one-time code you approve

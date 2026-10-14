@@ -1001,11 +1001,20 @@ let change_disk ~path ~backup_path =
    core change in a subdirectory keeps the value. *)
 let pinned_core_source_digest = "cc6489f2ddae4a48596b4879b3c0e368"
 
+(* The Git commit [scripts/opam-pin-external-deps.sh] pins as OCAML_MSX_SHA.
+   This is the build-time identity of the core a pinned build links, recorded
+   so a vendor/pin build — which has no [.git] for [Msx_core_identity] to ask —
+   still names the exact commit. Bump together with the script and with
+   [pinned_core_source_digest]; a SHA bumped alone turns the provenance test
+   red naming the new digest. *)
+let pinned_core_commit = "7cc5836b517c43e3690272d7c7d561d9a1e5cc3b"
+
 type core = {
   source_commit : string option;
   source_digest : string;
   pinned_source_digest : string;
   matches_pin : bool;
+  pinned_commit : string;
 }
 [@@deriving yojson]
 
@@ -1014,12 +1023,15 @@ let core =
   ; source_digest = Msx_core_identity.source_digest
   ; pinned_source_digest = pinned_core_source_digest
   ; matches_pin = String.equal Msx_core_identity.source_digest pinned_core_source_digest
+  ; pinned_commit = pinned_core_commit
   }
 
 type checkpoint_info = {
+  exists : bool;
   version : int;
   frame : int option;
   saved_at_unix : float option;
+  mtime_utc : string option;
   core_sha : string option;
   cartridge : string option;
   disk : string option;
@@ -1112,14 +1124,22 @@ let checkpoint_info ~path =
         let* core_sha = optional_string "core_sha" in
         let* cartridge = optional_string "cartridge" in
         let* disk = optional_string "disk" in
-        let saved_at_unix =
+        let saved_at_unix, mtime_utc =
           match Unix.stat path with
-          | exception _ -> None
-          | stats -> Some stats.st_mtime in
+          | exception _ -> None, None
+          | stats ->
+            let tm = Unix.gmtime stats.st_mtime in
+            let utc =
+              Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+                (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+                tm.tm_hour tm.tm_min tm.tm_sec in
+            Some stats.st_mtime, Some utc in
         Ok
-          { version
+          { exists = true
+          ; version
           ; frame
           ; saved_at_unix
+          ; mtime_utc
           ; core_sha
           ; cartridge
           ; disk

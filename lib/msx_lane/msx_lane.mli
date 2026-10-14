@@ -336,8 +336,9 @@ type core = {
   source_commit : string option;
       (** The linked core's own clean-checkout Git commit, when its build
           can establish it. [None] for dirty, archive or unowned checkouts,
-          or unavailable Git identity. Never replaced by the installation
-          pin or MASC's commit. *)
+          or unavailable Git identity — in particular a vendor/pin build,
+          which has no [.git]. When [None], {!pinned_commit} names the same
+          linked core from the build-time pin. *)
   source_digest : string;
       (** the linked ocaml-msx core's own identity: a digest of its [lib/]
           sources, computed by its build ([Msx_core_identity]). Not a
@@ -350,6 +351,14 @@ type core = {
           [false] means this server runs a
           different core from the one CI builds against — an older opam
           copy, or a vendored checkout on another branch. *)
+  pinned_commit : string;
+      (** the Git commit [scripts/opam-pin-external-deps.sh] pins as
+          [OCAML_MSX_SHA] — the build-time identity of the core a pinned
+          build links. When [source_commit] is [None] (a vendor/pin build
+          has no [.git] for the core to ask), this is the exact linked
+          commit; the build inputs recorded it, not a later switch query.
+          When [source_commit] is [Some], both name the same checkout and
+          agree. *)
 }
 [@@deriving yojson]
 
@@ -364,6 +373,12 @@ val core_to_yojson : core -> Yojson.Safe.t
     campaign to ask a question. *)
 
 type checkpoint_info = {
+  exists : bool;
+      (** always [true] once this record is returned — the slot file is
+          there. A missing slot never produces a record: it is a typed
+          [Invalid_request] refusal naming the path, so existence is
+          answered by reaching this record at all. This field makes the
+          answer explicit for a caller comparing surfaces. *)
   version : int;  (** the checkpoint format version, currently 1 *)
   frame : int option;
       (** the saved frame counter. Checkpoint version 1 does not record it —
@@ -372,6 +387,10 @@ type checkpoint_info = {
   saved_at_unix : float option;
       (** the checkpoint file's modification time: the moment the slot was
           written. Absent when the file cannot be stat'ed. *)
+  mtime_utc : string option;
+      (** the same modification time as an ISO 8601 UTC string
+          (e.g. ["2026-10-14T10:30:27Z"]), so a readback compares a rendered
+          instant without float drift. Absent with [saved_at_unix]. *)
   core_sha : string option;
       (** the [Msx_core_identity.source_digest] of the core that saved the
           checkpoint. Checkpoints saved before the field existed read as

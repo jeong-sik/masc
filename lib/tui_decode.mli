@@ -676,6 +676,11 @@ type keeper_runtime = {
   kr_sandbox_profile : string;
   kr_runtime_blocker_summary : string option;
   (** Current registry failure; [None] means the roster observed no blocker. *)
+  kr_runtime_blocker_signature : string option;
+  (** The machine wire behind a summary that replaced it with a human
+      sentence (the fenced empty assistant turn), [None] on every other
+      blocker and on no blocker. The detail pane draws it as a dimmed
+      follow-on line, so the wire a log search keys on stays on screen. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.

@@ -375,7 +375,10 @@ let check_roster_failure expected json =
     (match Tui_decode.decode_keeper_runtime_list json with
      | Ok ([decoded], [], false, 1, _) ->
        check (option string) "typed TUI projection retains the current failure"
-         expected decoded.kr_runtime_blocker_summary
+         expected decoded.kr_runtime_blocker_summary;
+       check (option string)
+         "the timeout blocker carries no replacement signature"
+         None decoded.kr_runtime_blocker_signature
      | Ok _ -> fail "the current roster must decode one complete reading"
      | Error detail -> failf "TUI rejected the actual roster: %s" detail)
   | other -> failf "expected one Keeper row: %s" (Yojson.Safe.to_string other)

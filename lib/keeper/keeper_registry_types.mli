@@ -31,6 +31,7 @@ type failure_reason =
       ; runtime_id : string option
       ; agent_core_timeout : Keeper_turn_terminal_code.agent_core_timeout option
       ; reason : Keeper_meta_contract.runtime_exhaustion_reason option
+      ; fenced_empty_turn_runtime : string option
       }
       (** Latched from the keeper turn terminal reason when the provider,
           adapter, or runtime fails before useful keeper progress. A later

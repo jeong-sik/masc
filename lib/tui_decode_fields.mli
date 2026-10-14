@@ -17,6 +17,7 @@ val optional_string : Yojson.Safe.t -> string -> (string option, string) result
 val required_nullable_int_field : Yojson.Safe.t -> string -> (int option, string) result
 val required_nullable_float_field : Yojson.Safe.t -> string -> (float option, string) result
 val required_nullable_string_field : Yojson.Safe.t -> string -> (string option, string) result
+val optional_nullable_string_field : Yojson.Safe.t -> string -> (string option, string) result
 val required_nullable_bool_field : Yojson.Safe.t -> string -> (bool option, string) result
 val require_null_field : Yojson.Safe.t -> string -> (unit, string) result
 val required_bool_field : Yojson.Safe.t -> string -> (bool, string) result

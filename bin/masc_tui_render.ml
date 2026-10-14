@@ -5462,23 +5462,33 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
 
       (* The live roster owns this reading, including its absence after a
          successful turn. Neither historical last_error nor the last outcome
-         can answer for the current failure. *)
+         can answer for the current failure. A blocker may carry a signature:
+         the machine wire its summary replaced with a human sentence. It is
+         drawn dimmed underneath, so the wire a log search keys on stays on
+         screen without ever leading the row. *)
       add_section "Current failure";
-      let failure_tone, failure_text =
-        match (keeper_reading state k).Keeper_control.liveness with
-        | Keeper_control.Present runtime ->
-            (match runtime.kr_runtime_blocker_summary with
-             | Some summary -> Theme.bad (), summary
-             | None -> Ansi.dim, "none")
-        | Keeper_control.Unobserved -> Ansi.dim, "unread"
-        | Keeper_control.Absent -> Ansi.dim, "absent from live roster"
-        | Keeper_control.Invalid detail -> Theme.bad (), "config error: " ^ detail
-      in
       let indent = "  " in
-      Message_layout.wrap_words
-        ~max_cells:(max 1 (inner - Message_layout.display_width indent))
-        (Terminal_text.single_line failure_text)
-      |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
+      let wrap ?(tone = "") text =
+        Message_layout.wrap_words
+          ~max_cells:(max 1 (inner - Message_layout.display_width indent))
+          (Terminal_text.single_line text)
+        |> List.iter (fun line -> add_line (indent ^ tone ^ line ^ Ansi.reset))
+      in
+      let () =
+        match (keeper_reading state k).Keeper_control.liveness with
+        | Keeper_control.Present runtime -> (
+            match runtime.kr_runtime_blocker_summary with
+            | Some summary ->
+                wrap ~tone:(Theme.bad ()) summary;
+                (match runtime.kr_runtime_blocker_signature with
+                | Some signature -> wrap ~tone:Ansi.dim signature
+                | None -> ())
+            | None -> wrap ~tone:Ansi.dim "none")
+        | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim "unread"
+        | Keeper_control.Absent -> wrap ~tone:Ansi.dim "absent from live roster"
+        | Keeper_control.Invalid detail ->
+            wrap ~tone:(Theme.bad ()) ("config error: " ^ detail)
+      in
       add_empty ();
 
       (* Blocked Board-attention partitions wait here for an

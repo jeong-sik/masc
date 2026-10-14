@@ -129,6 +129,11 @@ type keeper_runtime = {
   kr_sandbox_profile : string;
   kr_runtime_blocker_summary : string option;
   (** Current registry failure; [None] means the roster observed no blocker. *)
+  kr_runtime_blocker_signature : string option;
+  (** The machine wire behind a summary that replaced it with a human
+      sentence (the fenced empty assistant turn), [None] on every other
+      blocker and on no blocker. The detail pane draws it as a dimmed
+      follow-on line, so the wire a log search keys on stays on screen. *)
 }
 
 type keeper_lane_phase =
@@ -2944,6 +2949,10 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
   let* kr_runtime_blocker_summary =
     required_nullable_string_field json "runtime_blocker_summary"
   in
+  let* kr_runtime_blocker_signature =
+    Tui_decode_fields.optional_nullable_string_field json
+      "runtime_blocker_signature"
+  in
   let* raw_phase = required_string_field json "phase" in
   let* kr_phase =
     match keeper_phase_of_string raw_phase with
@@ -2968,6 +2977,7 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
     ; kr_phase
     ; kr_sandbox_profile
     ; kr_runtime_blocker_summary
+    ; kr_runtime_blocker_signature
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own

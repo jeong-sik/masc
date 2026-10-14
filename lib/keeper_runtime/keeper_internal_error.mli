@@ -279,6 +279,18 @@ val fenced_attempt_summary : masc_internal_error -> string option
     clips the line loses the tail of the cause, not the disposition, and shows
     the cause where {!masc_internal_error_to_json} would have buried it. *)
 
+val fenced_cause_empty_no_progress : fenced_cause -> bool option
+(** Whether the fenced cause is the typed empty assistant turn ([true]) or a
+    typed non-empty rejection ([false]); [None] when this projection cannot
+    vouch for the cause's emptiness — a projected agent-core cause, or a
+    carried MASC error with no empty-turn shape. The fence itself stays: a
+    host or subagent may have run a tool outside MASC's observation, so this
+    is a display fact, never a retry admission. *)
+
+val fenced_cause_of_masc_internal_error : masc_internal_error -> fenced_cause option
+(** The cause of a fenced error ([Provider_attempt_effect_fenced],
+    [Tool_correction_lost]); [None] for every other error. *)
+
 val runtime_id_of_masc_internal_error : masc_internal_error -> string
 
 val accept_no_progress_retry_kind :

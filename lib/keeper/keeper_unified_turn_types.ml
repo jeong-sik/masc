@@ -196,7 +196,34 @@ let registry_failure_reason_of_internal_error ~detail = function
          ; runtime_id = Some (runtime_id)
          ; agent_core_timeout = None
          ; reason = Some (registry_reason_of_internal_reason reason)
+         ; fenced_empty_turn_runtime = None
          })
+  (* A fenced empty assistant turn keeps its typed cause in the record: the
+     status bridge cannot re-derive "empty turn" from the prose [detail] (a
+     preview written for logs), so the write path marks it while the typed
+     error is still in hand. [detail] stays the log-facing preview; the
+     marker decides the human sentence and [code ^ ": " ^ detail] the
+     signature the row keeps for log search. A fenced failure whose cause
+     is not an empty turn maps to [None] like before — the marker vouches
+     for emptiness it cannot see. *)
+  | (Keeper_internal_error.Provider_attempt_effect_fenced _
+    | Keeper_internal_error.Tool_correction_lost _) as err ->
+    (match Keeper_internal_error.fenced_cause_of_masc_internal_error err with
+     | Some cause
+       when Keeper_internal_error.fenced_cause_empty_no_progress cause = Some true ->
+       Some
+         (Keeper_registry.Provider_runtime_error
+            { code = Keeper_internal_error.kind_of_masc_internal_error err
+            ; detail
+            ; provider_id = None
+            ; http_status = None
+            ; runtime_id = None
+            ; agent_core_timeout = None
+            ; reason = None
+            ; fenced_empty_turn_runtime =
+                Some (Keeper_internal_error.runtime_id_of_masc_internal_error err)
+            })
+     | _ -> None)
   | Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
       (* Typed [Internal_*] variants are not runtime-exhaustion reasons; they
@@ -206,8 +233,6 @@ let registry_failure_reason_of_internal_error ~detail = function
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Terminal_effect_failed _
-      | Keeper_internal_error.Provider_attempt_effect_fenced _
-      | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Host_stopped_turn _
       | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _
@@ -341,6 +366,10 @@ let registry_failure_reason_of_terminal_reason
               | Keeper_turn_terminal_code.Operator_interrupt
               | Keeper_turn_terminal_code.Provider_runtime_error _ -> None)
          ; reason = None
+           (* No typed error was in hand on this path, so there is nothing
+              to vouch for an empty turn: the marker stays [None] and the
+              row keeps the fallback reading. *)
+         ; fenced_empty_turn_runtime = None
          })
   | Keeper_turn_disposition.Runtime_attempts_exhausted ->
     Some
@@ -352,6 +381,7 @@ let registry_failure_reason_of_terminal_reason
          ; runtime_id = None
          ; agent_core_timeout = None
          ; reason = None
+         ; fenced_empty_turn_runtime = None
          })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.Checkpoint

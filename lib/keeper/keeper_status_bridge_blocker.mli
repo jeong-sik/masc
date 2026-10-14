@@ -37,10 +37,16 @@ val all_of_runtime_blocker_class : runtime_blocker_class list
 (** Every class, in declaration order. *)
 
 (** [summary] is lazy: the [turn_failures] summary reads the receipt store,
-    and callers that only need [blocker_class] never force it. *)
+    and callers that only need [blocker_class] never force it.
+    [signature] is the machine-readable wire the summary replaced, when the
+    summary is a human sentence written for one known arm (the fenced empty
+    assistant turn): the wire kind and cause text a log search keys on. It
+    is [None] wherever the summary already leads with the machine wire, so
+    a reader never has to choose between the two fields. *)
 type runtime_blocker_surface = {
   blocker_class : runtime_blocker_class;
   summary : string Lazy.t;
+  signature : string option;
 }
 
 (** [latest_receipt] is read only for [Turn_consecutive_failures], whose

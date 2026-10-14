@@ -387,6 +387,7 @@ let test_exhaustion_reaches_the_runtime_exhausted_class () =
       ; runtime_id = Some "r1"
       ; agent_core_timeout = None
       ; reason = Some Keeper_meta_contract.Dns_failure
+      ; fenced_empty_turn_runtime = None
       }
   in
   match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
@@ -410,6 +411,7 @@ let test_provider_error_without_reason_stays_provider_error () =
       ; runtime_id = None
       ; agent_core_timeout = None
       ; reason = None
+      ; fenced_empty_turn_runtime = None
       }
   in
   match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
@@ -420,6 +422,119 @@ let test_provider_error_without_reason_stays_provider_error () =
       "a provider error without an exhaustion reason keeps its own class"
       "provider_runtime_error"
       (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
+
+(* The fenced empty assistant turn, end to end through the real write and
+   read paths. The write path still holds the typed error, so it marks the
+   record; the read path cannot re-derive "empty turn" from the prose
+   [detail] (a preview written for logs), so it trusts the marker. No wire
+   string is retyped here: the error value is built from constructors, the
+   detail is the same preview the failure path applies, and the expected
+   sentence is the product wording this test pins. *)
+let empty_turn_fence ~scope =
+  Keeper_internal_error.Provider_attempt_effect_fenced
+    { runtime_id = scope
+    ; effect_disposition = Keeper_provider_attempt_effect_core.No_effect_observed
+    ; cause =
+        Keeper_internal_error.Fenced_masc
+          (Keeper_internal_error.Accept_rejected
+             { scope
+             ; model = None
+             ; reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+             ; response_shape = Some Keeper_internal_error.Accept_response_empty
+             ; stop_reason = None
+             ; reason = "empty assistant turn"
+             })
+    }
+;;
+
+let test_fenced_empty_turn_is_recorded_with_its_marker () =
+  let scope = "openrouter" in
+  let fence = empty_turn_fence ~scope in
+  let err = Keeper_internal_error.core_error_of_masc_internal_error fence in
+  let raw_error = Agent_core.Error.to_string err in
+  let terminal = Keeper_turn_terminal.of_failure ~raw_error err in
+  let detail =
+    Keeper_types_profile.short_preview
+      (match Keeper_internal_error.fenced_attempt_summary fence with
+       | Some summary -> summary
+       | None -> Alcotest.fail "a fenced attempt must summarize")
+  in
+  match
+    Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+      ~core_error:err terminal ~raw_error
+  with
+  | Some (Keeper_registry.Provider_runtime_error record) ->
+    Alcotest.(check (option string))
+      "the write path marks the typed empty turn"
+      (Some scope) record.fenced_empty_turn_runtime;
+    Alcotest.(check string)
+      "the log-facing preview survives as the detail"
+      detail record.detail;
+    (match
+       Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+         ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)
+         (Keeper_registry.Provider_runtime_error record)
+     with
+     | None -> Alcotest.fail "a marked empty turn must produce a blocker surface"
+     | Some surface ->
+       Alcotest.(check string)
+         "the provider error keeps its own class"
+         "provider_runtime_error"
+         (Keeper_status_bridge.runtime_blocker_class_to_string
+            surface.Keeper_status_bridge.blocker_class);
+       Alcotest.(check string)
+         "the human sentence leads"
+         (Printf.sprintf
+            "Model runtime %s returned an empty assistant turn, so this attempt made no progress; message the keeper again to retry. This runtime does not switch to another runtime automatically."
+            scope)
+         (Lazy.force surface.Keeper_status_bridge.summary);
+       Alcotest.(check (option string))
+         "the signature keeps the machine wire"
+         (Some (record.code ^ ": " ^ record.detail))
+         surface.Keeper_status_bridge.signature)
+  | Some _ -> Alcotest.fail "a fenced empty turn must record a provider runtime error"
+  | None -> Alcotest.fail "a fenced empty turn must record a failure reason"
+;;
+
+(* A fenced failure whose cause is not an empty turn must never earn the
+   marker: the marker vouches for emptiness, and the read path cannot check
+   it a second time. *)
+let test_fenced_non_empty_turn_keeps_no_marker () =
+  let scope = "openrouter" in
+  let cause =
+    Keeper_internal_error.Fenced_masc
+      (Keeper_internal_error.Accept_rejected
+         { scope
+         ; model = None
+         ; reason_kind = Some Keeper_internal_error.Accept_predicate_rejected
+         ; response_shape = Some Keeper_internal_error.Accept_response_empty
+         ; stop_reason = None
+         ; reason = "predicate said no"
+         })
+  in
+  Alcotest.(check (option bool))
+    "a rejected-but-not-empty cause is not an empty turn"
+    (Some false) (Keeper_internal_error.fenced_cause_empty_no_progress cause);
+  let err =
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Provider_attempt_effect_fenced
+         { runtime_id = scope
+         ; effect_disposition =
+             Keeper_provider_attempt_effect_core.No_effect_observed
+         ; cause })
+  in
+  let raw_error = Agent_core.Error.to_string err in
+  let terminal = Keeper_turn_terminal.of_failure ~raw_error err in
+  (match
+     Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+       ~core_error:err terminal ~raw_error
+   with
+   | Some (Keeper_registry.Provider_runtime_error record) ->
+     Alcotest.(check (option string))
+       "a non-empty fence is never marked"
+       None record.fenced_empty_turn_runtime
+   | Some _ | None -> ())
+;;
 
 (* A turn_failures blocker is a count; the registry rebuilds it from the
    durable streak on boot and the typed cause is gone. The summary reads the
@@ -635,6 +750,16 @@ let () =
           "summary names the newest failed receipt"
           `Quick
           test_turn_failures_summary_names_the_newest_failed_receipt
+      ] );
+    ( "fenced empty-turn marker"
+    , [ Alcotest.test_case
+          "the typed empty turn is recorded with its marker"
+          `Quick
+          test_fenced_empty_turn_is_recorded_with_its_marker
+      ; Alcotest.test_case
+          "a non-empty fence keeps no marker"
+          `Quick
+          test_fenced_non_empty_turn_keeps_no_marker
       ] );
     ]
 ;;

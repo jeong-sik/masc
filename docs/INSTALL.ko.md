@@ -407,7 +407,8 @@ MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 �
 ### `imp`에게 브라우저와 GitHub 로그인 주기
 
 setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
-모든 줄이 체크된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
+`imp`가 안전하게 할 수 있는 일을 주는 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄은
+해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
 모든 줄의 체크를 해제하면 아무것도 하지 않고 넘어갑니다(번호로 고르는 화면에서는 `0`을 입력하세요).
 
 - **브라우저.** `imp`가 자기 Firefox에서 웹 페이지를 읽습니다. geckodriver가 그 Firefox를 움직입니다.
@@ -421,12 +422,28 @@ setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 �
   토큰은 복사본이 넘어가므로, 이 컴퓨터에서 토큰을 폐기하거나 갱신하면 `imp`가 끊깁니다.
   로그인이 없으면 `masc keeper-github login`이 일회용 코드를 보여 주고, 직접 승인하면 됩니다.
   이 줄은 `masc setup`이 끝난 뒤에 실행합니다. 로그인에는 `imp`가 먼저 있어야 하기 때문입니다.
+- **Firefox 연결 두 줄(체크 안 됨).** Firefox 를 찾았을 때만 `imp`가 로그인해서 쓸 Firefox 를
+  연결하는 줄이 둘 더 나옵니다. `masc browser-lane-setup` 의 두 길이에요.
+  - *BiDi*: MASC 가 전용 Firefox 를 로컬 포트의 원격 디버깅으로 직접 띄웁니다. 다시 불러올 것이
+    없고, `imp`가 일하는 사이트에 한 번 로그인하면 됩니다. 그 포트에는 인증이 없어서 이
+    컴퓨터의 어떤 프로그램이든 그 브라우저를 움직이고 쿠키를 읽을 수 있습니다.
+  - *부가기능*: 평소 쓰는 Firefox 에 MASC 부가기능으로 붙습니다. Firefox 를 다시 켜면 부가기능이
+    지워져서 그때마다 `about:debugging` 에서 다시 불러야 합니다.
 
-빠른 설치는 두 줄과 줄마다 명령을 보여 주기만 합니다. 프로그램의 `--version`과 `gh auth status`를
-실행해 보지만 설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과 같이 합니다.
+  둘 다 브라우저 줄처럼 `masc setup` 이 서버를 시작하기 전에 씁니다. 같이 골라도 되지만, 그러면
+  연결을 지정하지 않은 요청은 모호하다고 거절됩니다. Firefox 를 못 찾으면 둘 다 나오지 않습니다.
+  Zen 은 감지하지 않습니다. 직접 연결하려면
+  `masc browser-lane-setup --mode extension --manifest-dir <Zen의 native messaging 폴더>` 를
+  실행하세요. 그 폴더 위치는 이 문서가 확인하지 않았습니다.
+
+빠른 설치는 모든 줄과 줄마다 명령, 체크됐을 줄인지를 보여 주기만 합니다. 프로그램의 `--version`과
+`gh auth status`를 실행해 보지만 설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과
+같이 합니다.
 
 ```bash
 masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
+masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
+masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
 gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
 masc keeper-github login --keeper imp --base-path "$HOME/masc-workspace"
 ```

@@ -2498,10 +2498,18 @@ def quick_sandbox(binary, base_path, backend):
             return None
 
 
-# What imp can use once setup ends, offered as one checklist that starts marked
-# (RFC setup-web-search-and-browser-lane section 4.3). Nothing is installed or
-# written until the reader confirms the list, and a quick setup only prints it.
+# What imp can use once setup ends, offered as one checklist
+# (RFC setup-web-search-and-browser-lane section 4.3). The rows that give imp
+# something safe to do start marked; the ones that open a port or need a human
+# at every browser start do not. Nothing is installed or written until the
+# reader confirms the list, and a quick setup only prints it.
+#
+# The three browser keys are also the `--mode` names of `masc browser-lane-setup`,
+# so a confirmed row is the argument the command takes.
 AUTOMATION_TOOL = 'automation'
+BIDI_TOOL = 'bidi'
+EXTENSION_TOOL = 'extension'
+BROWSER_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL)
 GITHUB_TOOL = 'github'
 IMP_KEEPER = 'imp'
 GITHUB_HOST = 'github.com'
@@ -2523,14 +2531,15 @@ class HostGithubLogin:
 @dataclass(frozen=True)
 class ToolRow:
     """One line of the checklist: what it gives imp, and the command a quick
-    setup prints instead of running it. Every row starts marked. [notice] is
-    what the reader is told before marking it. [host_login] is set on the
-    GitHub row when the login on this computer is the one offered."""
+    setup prints instead of running it. [checked] says whether it starts
+    marked. [notice] is what the reader is told before marking it. [host_login]
+    is set on the GitHub row when the login on this computer is the one offered."""
     key: str
     label: str
     command: str
     notice: str = ''
     host_login: Optional[HostGithubLogin] = None
+    checked: bool = True
 
 
 def token_comes_from_environment(source):
@@ -2550,8 +2559,14 @@ def token_argv(login):
     return argv
 
 
+def browser_lane_command(base, modes):
+    """The `masc browser-lane-setup` line for [modes], in the order the command is run in."""
+    flags = ' '.join('--mode ' + mode for mode in modes)
+    return 'masc browser-lane-setup ' + flags + ' --base-path ' + shlex.quote(str(base))
+
+
 def automation_command(base):
-    return 'masc browser-lane-setup --mode automation --base-path ' + shlex.quote(str(base))
+    return browser_lane_command(base, (AUTOMATION_TOOL,))
 
 
 def github_command(base, login):
@@ -2592,8 +2607,43 @@ def action_command(action):
     return None
 
 
-def automation_row(binary, base):
+def browser_rows(binary, base):
+    """The browser rows from one look at geckodriver and Firefox.
+
+    The automation row is always there: it offers the install when a program is
+    missing. The two Firefox routes are shown only when Firefox was found (RFC
+    section 4.3): recommending a browser is not this step's job, so with none
+    there is nothing to attach to and nothing to ask.
+    """
     found = {program: browser_tool(binary, program) for program in BROWSER_TOOLS}
+    rows = [automation_row(found, base)]
+    if found['firefox'][0].available:
+        rows += firefox_route_rows(base)
+    return rows
+
+
+def firefox_route_rows(base):
+    """The two ways to connect a Firefox the reader already uses or MASC starts.
+
+    Both start unmarked. BiDi opens a debugging port with no authentication;
+    the extension has to be loaded by the reader again after every browser
+    start. Each is a thing to choose, not a thing to find ready.
+    """
+    bidi_notice = ('\nThe BiDi route has MASC start a Firefox of its own with remote debugging on a local port. '
+                   'That port has no authentication: any program on this computer can drive that browser and read '
+                   'its cookies. Log in once, after the server starts, to the sites imp works on; its profile keeps '
+                   'the login.')
+    extension_notice = ('\nThe extension route attaches the Firefox you use every day. Firefox removes the add-on '
+                        'when it restarts, so you load it again from about:debugging each time.')
+    return [
+        ToolRow(BIDI_TOOL, "Firefox of its own that MASC starts for imp (BiDi) · log in once · open debugging port",
+                browser_lane_command(base, (BIDI_TOOL,)), notice=bidi_notice, checked=False),
+        ToolRow(EXTENSION_TOOL, 'Your everyday Firefox through the MASC add-on · load the add-on after each restart',
+                browser_lane_command(base, (EXTENSION_TOOL,)), notice=extension_notice, checked=False),
+    ]
+
+
+def automation_row(found, base):
     missing = [program for program in BROWSER_TOOLS if not found[program][0].available]
     head = "Web pages in imp's own Firefox"
     if not missing:
@@ -2668,7 +2718,7 @@ def imp_tool_rows(binary, base):
     inspect the browser tools still offers the GitHub login."""
     rows = []
     try:
-        rows.append(automation_row(binary, base))
+        rows += browser_rows(binary, base)
     except (SetupError, OSError) as error:
         print(terminal_text(str(error)) + '\nRun ' + automation_command(base) + ' to give imp a browser later.',
               file=sys.stderr)
@@ -2703,28 +2753,36 @@ def note_running_server(binary, base, port):
           file=sys.stderr)
 
 
-def prepare_browser_automation(binary, base, port=None):
-    """Bring geckodriver and Firefox up, then write the lane's geckodriver.
+def prepare_browser_lane(binary, base, modes, port=None):
+    """Bring the programs the chosen routes need up, then write them all with one command.
 
-    The command is not told which geckodriver to use. It finds it the way the
-    catalog did (the first one on PATH that answers), and it keeps a value the
-    operator already wrote in runtime.toml, which a named path would replace.
+    One `masc browser-lane-setup` call takes every chosen route, so the command
+    plans them together and writes none if one is refused. It is not told which
+    geckodriver or Firefox to use: it finds them the way the catalog did (the
+    first one on PATH that answers), and it keeps a value the operator already
+    wrote in runtime.toml, which a named path would replace.
     """
-    for program in BROWSER_TOOLS:
+    # The automation lane starts both programs. The two Firefox routes need
+    # the browser only, and the reader was shown them because it was found.
+    programs = BROWSER_TOOLS if AUTOMATION_TOOL in modes else ('firefox',)
+    command = browser_lane_command(base, modes)
+    for program in programs:
         name = BROWSER_TOOL_NAMES[program]
         readiness, _ = browser_tool(binary, program)
         while not readiness.available:
             print(name + ' was not found on this computer.', file=sys.stderr)
             if not prerequisite_menu(binary, program, base_path=base):
-                print("imp's browser is not set up: " + name + ' is missing. Run ' + automation_command(base)
+                print("imp's browser is not set up: " + name + ' is missing. Run ' + command
                       + ' once it is installed.', file=sys.stderr)
                 return
             readiness, _ = browser_tool(binary, program)
-    result = subprocess.run([str(binary), 'browser-lane-setup', '--mode', 'automation', '--base-path', str(base)],
-                            stdout=sys.stderr)
+    argv = [str(binary), 'browser-lane-setup']
+    for mode in modes:
+        argv += ['--mode', mode]
+    result = subprocess.run(argv + ['--base-path', str(base)], stdout=sys.stderr)
     if result.returncode != 0:
         # The writer already said why. The browser is optional, so this does not end setup.
-        print("imp's browser was not saved. Everything else is. Run " + automation_command(base) + ' to try again.',
+        print("imp's browser was not saved. Everything else is. Run " + command + ' to try again.',
               file=sys.stderr)
         return
     if port is not None:
@@ -2737,13 +2795,13 @@ def choose_imp_tools(binary, base):
     for row in rows:
         if row.notice:
             print(row.notice, file=sys.stderr)
-    print('\nEvery row starts marked. To skip this step, unmark all of them (type 0 on a numbered list).',
-          file=sys.stderr)
+    print('\nThe marked rows are the ones recommended. To skip this step, unmark all of them '
+          '(type 0 on a numbered list).', file=sys.stderr)
     # allow_empty: with every mark removed, Enter must confirm nothing. The
     # default would confirm the row under the cursor, which for the GitHub row
     # is a copy of the reader's token after they had said no.
     chosen = pick('5 · Give imp tools (optional)', [row.label for row in rows], multiple=True,
-                  defaults=list(range(len(rows))), allow_empty=True)
+                  defaults=[index for index, row in enumerate(rows) if row.checked], allow_empty=True)
     return tuple(rows[index] for index in chosen)
 
 
@@ -2817,12 +2875,13 @@ def select_imp_tools(binary, base, port=None):
         print(terminal_text(str(error)) + '\nContinuing without them. Later: ' + automation_command(base)
               + ' gives imp a browser, and ' + github_command(base, None) + ' signs it into GitHub.', file=sys.stderr)
         return ()
-    if any(row.key == AUTOMATION_TOOL for row in confirmed):
+    modes = tuple(mode for mode in BROWSER_MODES if any(row.key == mode for row in confirmed))
+    if modes:
         try:
-            prepare_browser_automation(binary, base, port)
+            prepare_browser_lane(binary, base, modes, port)
         except (SetupError, OSError, subprocess.SubprocessError) as error:
-            print(terminal_text(str(error)) + "\nimp's browser was not set up. Run " + automation_command(base)
-                  + ' once the problem is resolved.', file=sys.stderr)
+            print(terminal_text(str(error)) + "\nimp's browser was not set up. Run "
+                  + browser_lane_command(base, modes) + ' once the problem is resolved.', file=sys.stderr)
     return confirmed
 
 
@@ -2837,7 +2896,8 @@ def show_imp_tools(binary, base):
     print("\n5 · imp's tools (quick setup leaves them for later; each line is followed by its command)",
           file=sys.stderr)
     for row in rows:
-        print('  ' + terminal_text(row.label) + '\n      ' + terminal_text(row.command), file=sys.stderr)
+        print('  ' + ('[x] ' if row.checked else '[ ] ') + terminal_text(row.label)
+              + '\n      ' + terminal_text(row.command), file=sys.stderr)
 
 
 def journey(binary, base_path, port, timeout, resume=False):

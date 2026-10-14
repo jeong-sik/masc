@@ -441,7 +441,8 @@ For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and 
 ### Giving `imp` a browser and a GitHub login
 
 After the sandbox, the setup journey asks **5 · Give imp tools (optional)**. It is
-one checklist and every row starts marked. Nothing is installed or written until
+one checklist. The rows that give `imp` something safe to do start marked; the two
+that connect a Firefox you choose do not. Nothing is installed or written until
 you confirm it. Unmark every row to continue without any of them (on a terminal
 that shows numbers, type `0`).
 
@@ -460,13 +461,32 @@ that shows numbers, type `0`).
   computer disconnects `imp`. Without a login, `masc keeper-github login` shows
   a one-time code for you to approve. This row runs after `masc setup`, because
   the login needs `imp` to exist.
+- **Firefox routes (not marked).** When Firefox is found, two more rows connect
+  a Firefox that `imp` can log in with, the same two routes
+  [`masc browser-lane-setup`](../connectors/browser/host/README.md) offers:
+  - *BiDi*: MASC starts a Firefox of its own with remote debugging on a local
+    port. Nothing to reload, and you log in once to the sites `imp` works on.
+    The port has no authentication: any program on this computer can drive that
+    browser and read its cookies.
+  - *Add-on*: your everyday Firefox, through the MASC add-on. Firefox removes the
+    add-on when it restarts, so you load it again from `about:debugging` each
+    time.
 
-Quick setup lists both rows with the command for each. It only looks: it runs the
-programs' `--version` and `gh auth status`, and installs and writes nothing. To
-run them later:
+  Both write before `masc setup` starts the server, like the browser row, and
+  both can be chosen together (a request that names no connection is then
+  refused as ambiguous). With no Firefox found the journey shows neither. A Zen
+  browser is not detected: connect it by hand with
+  `masc browser-lane-setup --mode extension --manifest-dir <Zen's native
+  messaging folder>`, which this guide does not verify.
+
+Quick setup lists every row with the command for each and whether it would be
+marked. It only looks: it runs the programs' `--version` and `gh auth status`,
+and installs and writes nothing. To run them later:
 
 ```bash
 masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
+masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
+masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
 gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
 masc keeper-github login --keeper imp --base-path "$HOME/masc-workspace"
 ```

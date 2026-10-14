@@ -1380,6 +1380,82 @@ let test_first_scroll_holds_the_painted_preview () = at_sizes (fun origin ->
        excerpt.T.held_preview.Masc.Tui_decode.ktp_text_position.kpp_start_byte
        = painted.text_position.start_byte) held))
 
+(* A held excerpt freezes its scroll anchor, not the pane width it was laid
+   out at. Narrowing the pane re-wraps every committed row at the new width;
+   the frozen speech must follow, or its inline margin (clock + badge, laid
+   out for the entry's origin width) keeps the old badge and leaves the body
+   a few cells wide -- the fold task-2292 reports. Holding the reader's line
+   itself is kept: the line scrolled to at the wide width stays on screen. *)
+let test_held_excerpt_reflows_badge_to_current_width () = at_sizes (fun origin ->
+  match origin with
+  | Layout.Origin_row | Layout.Origin_bare -> ()
+  | Layout.Origin_inline ->
+  let module Preview = Masc.Keeper_turn_preview in
+  let set_cols columns = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      Masc_tui_ansi.terminal_size_cache ~probe:(fun () -> Some (26,columns))) in
+  let state = state Layout.Origin_inline in
+  let writer = Preview.reset ~keeper_name:"alpha" ~now:120.
+    ~redaction:Masc.Keeper_secret_redaction.empty in
+  let stream delta = Preview.note_stream ~writer:(Some writer) ~now:121.
+    (Agent_core.Types.ContentBlockDelta {index=0;delta}) in
+  Preview.note_attempt ~writer:(Some writer) ~now:120. ~runtime_id:"fixture-runtime";
+  let poll () =
+    let preview = match Preview.current ~keeper_name:"alpha" with
+      | Some preview -> preview | None -> fail "real preview writer disappeared" in
+    let wire = `Assoc ["schema",`String "masc.keeper_turns.v1";
+      "keepers",`List [`Assoc ["keeper_name",`String "alpha";"status",`String "ok";
+        "turn",`Assoc ["lane",`String "maintenance";
+          "started_at_unix",`Float 120.;"interrupt_token",`String "reflow-margin";
+          "preview",Preview.to_json preview]]]] in
+    state.keeper_turns <- (match Masc.Tui_decode.decode_keeper_turns wire with
+      | Ok rows -> rows | Error detail -> fail detail) in
+  stream (Agent_core.Types.TextDelta
+    (String.concat "" (List.init 100 (fun index -> Printf.sprintf "R%02d\n" index))));
+  poll ();
+  ignore (frame_lines state);
+  T.set_msg_scroll state 5;
+  let tokens = List.init 100 (fun index -> Printf.sprintf "R%02d" index) in
+  let observed =
+    List.find (fun token ->
+      List.exists (Astring.String.is_infix ~affix:token) (frame_lines state)) tokens in
+  let held_at_wide = match state.msg_scroll_pin with
+    | Some {T.pin_mode=(T.Hold_scroll | T.Hold_search); _} -> true | _ -> false in
+  check bool "scrolled polled excerpt is held" true held_at_wide;
+  set_cols 140;
+  let wide = frame_lines state in
+  set_cols 42;
+  let narrowed = frame_lines state in
+  let first_token_column line =
+    let length = String.length line in
+    let rec scan index =
+      if index > length - 3 then None
+      else if line.[index] = 'R' && line.[index + 1] >= '0' && line.[index + 1] <= '9'
+              && line.[index + 2] >= '0' && line.[index + 2] <= '9'
+      then Some index
+      else scan (index + 1) in
+    scan 0 in
+  let widest =
+    List.fold_left max 0
+      (List.filter_map first_token_column narrowed) in
+  check bool "narrowed pane still draws the held excerpt" true (widest > 0);
+  (* Measured at this fixture: the frame's five-cell prefix plus the
+     refitted inline margin (clock column and ten-cell badge) puts the body
+     token at column 26. The badge kept from the wide pane drew it at 36 --
+     the reported fold. The two checks together accept only the refitted
+     drawing and reject the carried one: the first fails before the fix, the
+     second fails after it, so the assertions pin the refit from both sides. *)
+  check bool "held excerpt margin refits the narrowed pane" true (widest <= 25);
+  check bool "red control: the carried badge would draw past column 25" false
+    (widest <= 23);
+  (* Evidence capture for task-2292 keeps the two frames side by side; the
+     assertion texts above are the boundaries an evidence run is cut at. *)
+  print_string "narrowed pane still draws the held excerpt: BEGIN\n";
+  List.iter (fun line -> print_string "|"; print_string line; print_newline ()) wide;
+  List.iter (fun line -> print_string "|"; print_string line; print_newline ()) narrowed;
+  print_string "red control: the carried badge would draw past column 25: END\n";
+  check bool "held excerpt keeps the line the reader was on" true
+    (List.exists (Astring.String.is_infix ~affix:observed) narrowed))
+
 let () = run "chat search projection" [
   "rendered conversation", [
     test_case "navigation retires a running search" `Quick test_navigation_retires_a_running_search;
@@ -1434,6 +1510,8 @@ let () = run "chat search projection" [
     test_case "pending pin survives run start" `Quick test_pending_pin_survives_run_start;
     test_case "first scroll holds the painted preview" `Quick
       test_first_scroll_holds_the_painted_preview;
+    test_case "held excerpt margin refits the narrowed pane" `Quick
+      test_held_excerpt_reflows_badge_to_current_width;
     test_case "no-match search survives a pending arrival" `Quick
       test_no_match_survives_pending_arrival;
     test_case "held polled excerpt keeps its chronology" `Quick

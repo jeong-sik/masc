@@ -2,6 +2,323 @@
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- After upgrading, every Keeper request carries a "Workspace wiki" paragraph: one line per wiki page, built at the start of the turn. Its size grows with the number of pages. Set `enabled = false` under `[wiki_contents]` in runtime.toml (or `MASC_KEEPER_WIKI_CONTENTS_ENABLED=false`) and restart to turn it off. Add the table to a live runtime.toml only after this version is running; earlier versions do not know it (#42961).
+- `MASC_CLUSTER_NAME` is no longer read. All state lives under `<base>/.masc`;
+  nothing creates or reads `<base>/.masc/clusters`. A workspace that used a
+  named cluster keeps that folder untouched and unread, but tool blob cleanup
+  no longer counts references from it, so blobs only that folder referenced
+  are removed by the next cleanups. Move or archive the folder before
+  upgrading to keep them (#43017).
+- The `cluster` field is removed from `/api/v1/status` and from the dashboard,
+  operator snapshot, operator digest and briefing JSON. `masc_status` prints a
+  `Project:` line instead of `Cluster:` (#43017).
+- `.masc/root-state.json` is no longer written or read; `.masc/state.json`
+  alone says a workspace is initialized. An existing `root-state.json` is
+  left in place and can be deleted (#43074).
+
+### Added
+
+- `masc web-search-setup` prints each web search provider's state and the
+  search order a call would use, and writes the `[web_search]` section of
+  runtime.toml when given options. It never writes an API key, and it refuses a
+  SearXNG address that is not an http or https URL (#42821).
+- `masc prerequisite-actions geckodriver` and `masc prerequisite-actions firefox`
+  show whether the program the browser lanes start answers `--version`, and at
+  which absolute path, and offer an install action: a Homebrew step on macOS, the
+  project's own page on Linux. Neither action edits `runtime.toml` (#42843).
+- `masc browser-lane-setup --mode extension` installs the browser lane for a
+  workspace: the lane token, the native messaging host and its launcher, the
+  Firefox native messaging manifest, and the MASC extension, which the binary
+  now carries. It starts no browser. Without `--mode` it prints the lane's state
+  and changes nothing (#42866).
+- `masc browser-lane-setup --mode bidi` installs the browser lane host and its
+  launcher and writes the `[browser.live.bidi]` table of `runtime.toml`, so the
+  MASC server starts a Firefox of its own and attaches the host to it. It writes
+  no extension and no native messaging manifest. A table that is already there
+  keeps its values; `--firefox`, `--profile` and `--port` change only the key
+  they name. `--mode` can be given twice to connect both routes, and an option
+  the chosen modes do not use is refused (#42941).
+- Experimental: each Keeper turn carries the wiki table of contents: one line per wiki file (title, file, one-line summary), built from the pages at the start of the turn rather than read from `index.md`, followed by the request's route to `keeper_wiki_read` (direct, through `keeper_tool_search`, or unavailable). A wiki listing failure shows a fixed line without the IO error. Autonomous turns record the paragraph as the `wiki` layer of the dynamic-context receipt. `[wiki_contents] enabled` in runtime.toml (default `true`) turns it off (#42961).
+- `masc browser-lane-setup --mode host` installs the browser lane host and its
+  launcher and nothing else: no extension, no native messaging manifest, no
+  `runtime.toml`. It is for a browser the operator attaches by hand and for
+  bringing an installed lane's host up to the running build (#42976).
+- Propose a keyless last-resort web-search provider (`Duckduckgo` over DuckDuckGo lite HTML, no API key) in `docs/rfc/RFC-keyless-web-search.md`, so `masc_web_search` keeps working on installs with zero search credentials (#43085).
+- `masc browser-lane-setup --mode automation` writes the geckodriver path of the
+  automation lane into the `runtime.toml` the server reads. It names the
+  `geckodriver` that `PATH` finds first when that file answers `--version`
+  (`--geckodriver` names another); `--browser` writes `binary`, only when named.
+  Keys already in the file keep their values and are edited where they are, in
+  `[browser.automation]` or directly in `[browser]`. It installs no host,
+  extension or manifest (#43093).
+- ```alphatex 펜스에 `rhythm` 단어를 붙이면 가장 낮은 줄 아래에 리듬 줄이 그려진다: 박 길이마다 w/h/q/e/s 글자 하나를 그 박의 첫 칸에 찍는다. 조용한 ```alphatex 펜스는 예전과 칸까지 같은 탭을 그린다. (#43118)
+- The install journey asks "5 · Give imp tools (optional)" after the sandbox
+  step, as one checklist whose rows start marked. The browser row finds
+  geckodriver and Firefox, offers the install menu for what is missing, and runs
+  `masc browser-lane-setup --mode automation` before `masc setup` starts the
+  server. The GitHub row offers the login `gh` holds on this computer (account,
+  scopes and token source are shown first) and, once `masc setup` has created
+  imp, passes the token to `masc keeper-github set-token --keeper imp` on
+  standard input; without a login it runs the one-time code login. Nothing is
+  installed or written until the list is confirmed, unmarking every row skips
+  the step, and quick setup only prints the rows with their commands (#43119).
+- Add `gemini-4-argon` to the embedded model catalog (`packages/agent_core/models.toml`) and bind the current Antigravity CLI models (`antigravity-gemini-4-argon-{high,medium,low}`, `antigravity-claude-opus-5-5-{high,medium,low}`, `antigravity-claude-sonnet-5-5-{high,medium,low}`) in `config/runtime.toml` (#43120).
+- Keeper compositions can declare typed output exports and preserve complete node inputs/results in a durable execution artifact. TOML and structured JSON plans expose the existing independent-branch failure policy and retain both contracts when parameters are bound (#43137).
+- Keepers can prepare and inspect a task-specific read-only composition without publishing a shared Skill, then run the exact Keeper-bound draft inline or asynchronously. Drafts bind inputs, mode and frozen tool contracts, and record the source invocation before dispatch (#43137).
+- Independent named inline Skill compositions can overlap when every leaf permits concurrent reads. Each invocation keeps its own causal history, run identity, observations and activation evidence while the owning turn continues to collect all completions (#43137).
+- The install journey's "5 · Give imp tools" checklist gains two rows that
+  connect a Firefox: BiDi (MASC starts a Firefox of its own on a local debugging
+  port, with a notice that the port has no authentication) and the MASC add-on
+  (through your everyday Firefox, with a notice that Firefox removes the add-on
+  when it restarts). Both start unmarked and are shown only when Firefox was
+  found. The chosen routes go to one `masc browser-lane-setup` call, which plans
+  all of them before writing any, and run before `masc setup` starts the server.
+  Quick setup marks each row `[x]` or `[ ]` in its list and runs nothing (#43138).
+- Add `scripts/migrate-lane-addon-bindings.py`, which classifies lane add-on binding records written by v0.48.0 or earlier using the container's own rules, and can move the records that are safe to move out of the read path (#43139).
+  - Usage: `python3 scripts/migrate-lane-addon-bindings.py --base-path <masc base path> [--write-out <archive dir>]`. The default run is classify-only and changes nothing; it prints one line per record and the before/after counts. `--write-out DIR` (run with the server stopped) additionally archives every detached legacy record byte-identically to `DIR/<name>.json.legacy` (hash-verified) and renames the store file to `<name>.json.migrated`, which the store skips because `read_bindings` reads only files ending in `.json`. Records that are not detached are never moved or rewritten: repairing one means adding top-level `visibility` and `source_access`, which is an authority decision, and the tool reports those instead.
+- The install journey's "5 · Give imp tools" checklist gains a web search
+  check, marked from the start. Confirmed, it runs `masc web-search-setup` with
+  only the workspace, which writes nothing: it shows which providers have a key
+  and which variable to export for one that has none. It runs in the
+  environment the server `masc setup` starts gets, without `MASC_BASE_PATH` and
+  `MASC_CONFIG_DIR`. A refused or unstartable command says how to look again
+  and does not end the journey. Quick setup lists the row and runs nothing
+  (#43145).
+- `masc_web_search` gains a `zai` provider over z.ai's Web Search MCP server
+  (GLM Coding Plan). It reads `ZAI_API_KEY`, the variable the `glm-coding`
+  model provider already uses, and joins the chain only when named in
+  `provider`, `provider_order` or `fallbacks`: a key that is present on every
+  GLM install is not asking for the plan's search allowance to be spent. A
+  search is three requests, each under `MASC_WEB_SEARCH_TIMEOUT_SEC`
+  (#43162).
+
+### Changed
+
+- The "no web search provider is configured" failure names every credential
+  variable and points to `masc web-search-setup`. Provider selection and the six
+  provider fetchers read their credentials through one table,
+  `Web_search_provider` (#42821).
+- The TUI no longer shows "persistence failure history unavailable; provider completeness and liveness unknown" as a `CHILD HEALTH` line on every Child content read. The value never changed, so it read as an alarm and hid real diagnostics. A short caveat that failure history only lives as long as the collector is attached only when a real failure is shown (#42857).
+- The lane token rule (at least 16 visible ASCII characters, whitespace around
+  it trimmed) is one function, `Browser_lane.Lane_token.of_text`, read by the
+  browser host, the server's lane routes and `masc browser-lane-setup`. The
+  server now also refuses a token with a space, control or non-ASCII character
+  inside, which the host never accepted (#42866).
+- `scripts/install-local-build.sh` checks each registered browser lane host after
+  `masc browser-lane-setup` has run: the registration must still name the same
+  launcher and the host beside it must be the one just installed. A workspace
+  that fails either check, or whose refresh fails, is named on stderr and left
+  as it was; the other workspaces are still refreshed and the script exits with
+  status 1 (#42867).
+- Where MASC starts the Firefox (a table exists in `runtime.toml`), the sentence
+  that tells an operator to install the lane names `--mode bidi`, not
+  `--mode extension` (#42941).
+- `scripts/install-local-build.sh` also refreshes the host of the workspace it
+  works with when masc's own lookup resolved it, its lane is installed and no
+  manifest covers it, which is how a lane set up with `--mode bidi` or
+  `--mode host` is found. A lane that has an extension and no manifest there is
+  named on stderr and left as it is (#42976).
+- Where the operator starts the Firefox by hand (no `[browser.live.bidi]` table),
+  the sentence that tells them to install the lane names `--mode host`, which
+  writes no extension and no `runtime.toml`, instead of `--mode extension`
+  (#42976).
+- `Dated_jsonl.Store` lists every store under one root, `<base>/.masc`: the
+  `Base` and `Cluster` groups merge into `Root`, `cluster_root` becomes `root`
+  (made by `root_of_base_path` or `root_of_masc_dir`), and `base` and `cluster`
+  become `at`. `reaction_ledger`, `decision_audit`, `locations_on_disk` and
+  `Dated_jsonl.prune_listed_stores` take that root alone (#43022).
+- `Workspace.dated_store_cluster_root` is renamed `dated_store_root`, and
+  `Server_runtime_startup_maintenance.prune_shared_jsonl_stores` takes
+  `~masc_root` without `~base_path` (#43022).
+- `Telemetry_unified.read_unified`, `read_unified_result` and `summary_json`
+  take `~masc_root` without `~base_path`, as do the source-meta store
+  helpers. `Keeper_wire_capture.capture_request`, `capture_response` and
+  `capture_rejected_reasoning` take `~base_path` without `~masc_root` and
+  write under `<base_path>/.masc`, and
+  `Server_runtime_startup_maintenance.prune_jsonl_at_resolved_window` takes
+  `~base_path` alone (#43047).
+- The Discord connector descriptor no longer carries `names_path` and `names`, which were always `""` and `null`; its status and descriptor views are rendered from one reading instead of the descriptor reading the status JSON back by key (#43080).
+- The MCP `initialize` instructions no longer tell clients to set
+  `MASC_CLUSTER_NAME`, and the `masc_status` tool description no longer
+  mentions cluster info (#43086).
+- `--mode automation` says when a `geckodriver` or `binary` value it keeps is not
+  an executable file now (a brew upgrade or a removed install). The program is
+  looked for and never started. The value is left as it is and the note names the
+  flag that changes it (#43093).
+- `Browser_runtime_dependencies.locate` answers whether a program is there
+  without starting it; `probe` runs what it finds (#43093).
+- `--mode bidi` and `--mode automation` share one guard that refuses to edit a
+  `runtime.toml` where a table is spelled with dotted keys or inline, and one
+  commit step that compares the file's revision again just before writing. When
+  both modes are given, the second table is planned again after the first is
+  written, without running Firefox or geckodriver a second time. A `--firefox` or
+  `--geckodriver` value with a space around it is refused instead of being
+  trimmed in the check and written untrimmed (#43093).
+- A Keeper execution receipt whose `operator_disposition_reason` is not one the receipt writer produces is treated as damaged: the trust snapshot no longer relays its disposition and shows its own verdict instead (#43116).
+- The first conversation is step 6 of the install journey (#43119).
+- `execute_prerequisite` in the setup helper reads geckodriver and Firefox
+  receipts instead of refusing them as an unreadable result (#43119).
+- `resources/read` on `masc://wiki/log` returns the log's tail — the last 64 KiB, starting at a line boundary — instead of the whole file, so an append-only log's read no longer grows with the file. The listing still reports the whole-file size (#43124).
+- `masc_wiki_lint` is no longer experimental: the tool description, `docs/guides/wiki-lint.md` and the glossary now state the seven finding kinds and the response fields as stable, while a later RFC step may still add a kind (`revision_log_gap`). A live call on 2026-10-14 matched the hand-counted values on all five items (#43130).
+- The boot-time message counter repair scans the filed messages before it
+  takes the state lock and holds the lock only to read and write the
+  counter, so numbering a message at boot no longer waits for the scan
+  (#43132).
+- Rows of the "5 · Give imp tools" checklist no longer all start marked: each
+  row says whether it does, and the BiDi and add-on rows do not (#43138).
+- A geckodriver or Firefox whose catalog cannot be read no longer hides the
+  rows that do not need it: the Firefox routes need Firefox only (#43138).
+- The note that a running workspace server must be restarted is printed only
+  for the routes that write a `runtime.toml` table (automation and BiDi). The
+  add-on route writes none (#43138).
+- `masc_wiki_lint` now reads `log.md` as well: it reports a new `revision_log_gap` finding when the log records an `r<N>` a page never reached (with `log_revision` and `page_revision`), and two counts of its own, `log_unknown_action` and `log_unreadable_line`, for log lines whose action word it does not know and lines it cannot read. The log parser is pure and never fails; the finding kind enum, the guide and the RFC table move with it (#43149).
+- `masc_wiki_lint` reports a new `revision_log_hole` finding when `log.md` skips an `r<N>` below the highest revision it records for a page; `missing` carries the skipped number. A page's lines run `r1`, `r2`, … with no skips, so the missing value is a line that reached the page and never reached the log — what an `append_log` that failed leaves. A write in flight only leaves the top of the column empty, so that is not a hole. The check refuses rather than guesses twice: it reports no hole at all when the log has any dropped line, and it starts the column at the lowest revision the log records for the page (#43155).
+- `masc_wiki_lint` adds `revision_log_hole_suppressed` (boolean) to its response so callers can distinguish "no revision holes found" from "the `revision_log_hole` check was turned off because `log.md` has at least one unknown action or unreadable line" (#43169).
+
+### Removed
+
+- `connectors/browser/install-host.sh` is gone. `masc browser-lane-setup --mode
+  extension` does what it did and also writes the extension, so no source
+  checkout or download is needed. `scripts/install-local-build.sh` refreshes
+  registered browser lane hosts through that command (#42867).
+- `Env_config_core.cluster_name` and `cluster_name_opt`,
+  `Backend_types.config.cluster_name`, `Workspace_utils.masc_root_dir_from`
+  and `Common.clusters_dir_from_base_path` (#43017).
+- Tool blob maintenance no longer sweeps `.masc/clusters`: the
+  `Cluster_workspace_rejected` error and the `skipped_cluster_files` report
+  field, also in the deployment preflight output, are gone (#43017).
+- `Workspace.masc_root_dir` (use `Workspace.masc_dir`),
+  `Workspace.masc_dir_from_base_path` (use `Common.masc_dir_from_base_path`),
+  `Workspace.keepers_runtime_dir_for_base_path` (use
+  `Common.keepers_runtime_dir_of_base`) and `Workspace.root_key_of_path` (use
+  `Workspace.key_of_path`). Each gave the same value as the name it is
+  replaced by (#43031).
+- `Workspace.ensure_workspace_bootstrap` (use `Workspace.init`),
+  `Workspace.root_is_initialized` (use `Workspace.is_initialized`),
+  `Workspace.root_state_path`, and `Workspace.read_json_root`,
+  `write_json_root` and `path_exists_root` (use `read_json`, `write_json` and
+  `path_exists`) (#43074).
+- `GET /api/v1/mentions/<agent>` and the `Mention_inbox` module are removed: they read `.masc/mention_inbox.jsonl`, which no code writes, so the route could only return an empty list. The dashboard's mention inbox is built from messages and is unchanged (#43103).
+
+### Fixed
+
+- Listing the wiki (`resources/list`) no longer reads every wiki page file and
+  the whole `log.md` on each call. A page now costs a stat and at most a
+  bounded header prefix (8192 bytes; a page larger than that whose header does
+  not read from the prefix falls back to the whole file), and the log is sized
+  by stat, so the reported sizes are unchanged (#42967).
+- Narrowing the chat pane while reading a held turn excerpt (scrolled-up polled speech) re-lays the excerpt's inline margin out at the pane's current badge column instead of keeping the margin laid out for the pane width the pin was made at; the held line stays where it was, and widening still keeps the excerpt's rows byte-identical (#43068).
+- The boot-time repair of a message counter that fell behind the filed
+  messages now runs: it lived only in `ensure_workspace_bootstrap`, which
+  the server never called, and now runs in `Workspace.init` (#43074).
+- `Workspace.init` writes the declared default workspace state, so a fresh
+  workspace with messages already filed resumes the counter past them
+  instead of starting at 0 (#43074).
+- `Workspace.read_state` no longer writes `state.json` when it is missing,
+  so reading an uninitialized workspace leaves it uninitialized (#43074).
+- `resources/read` answers the resource-not-found error envelope instead of letting `Sys_error` escape when a listed wiki page cannot be read (a `.md`-named directory, or a page that lost read permission between the listing and the read) (#43082).
+- Honor catalog `ignored_sampling_parameters` and `supports_top_k` declarations on the native `Gemini` backend (`Reasoning_dialect` and `Backend_gemini`), and remove the unused duplicate `Host.dynamic_tools` construction in `Keeper_antigravity_runtime` (#43123).
+- The boot-time repair of the message counter now holds the lock that
+  numbering a new message takes on `state.json`, so a message numbered
+  while boot reads and rewrites the counter can no longer have its number
+  written over and reused (#43125).
+- Add `make install` target (`scripts/install-local-build.sh`), pass `--install` in `make dev-setup` for pinned OPAM dependencies, align `make run` to `masc start --port 8935`, and update the HTTP 401 `Missing_token` response message in `Server_auth.ensure_same_origin_browser_request` to guide callers to `masc login --base-path <dir> --client-env MASC_TOKEN` (#43127).
+- A running server now accepts a bearer that another process minted after the server cached its credential index (masc-tui minting its operator token, `masc login`, setup). The index records the state of `.masc/auth/agents` and rebuilds when it changes, so the first run after install no longer gets `401 Token mismatch` for up to a minute. Requests that miss the index together share one rebuild, and the masc-tui mint notice no longer says the first reads may be refused (#43135).
+- Small composition exports and async status results remain readable at the model boundary with exact durable references. Execution manifests retain intermediate artifacts through Skill evidence and async request ownership during offline collection (#43137).
+- `main` builds again: two matches in the keeper composition surface that
+  ended in a wildcard over variants MASC defines now name every constructor,
+  so warning 4 (fragile match) no longer stops the build (#43141).
+- The `masc keeper-create --help` example no longer tells an operator to send a
+  `docker` profile without an image. The server refuses a `docker` or `microvm`
+  keeper that names no image, so the example copied verbatim from the help
+  stopped at the first command on a fresh workspace; it now carries
+  `--sandbox-image base`, the catalog name the option's own documentation uses
+  (#43147).
+- A credential another process writes in the same file time step as the
+  previous one is no longer refused for up to 60 s: a token index listed
+  before that step ends is rebuilt once the step is over (#43148).
+- A Keeper turn on a provider that refuses recursive JSON Schemas no longer
+  fails with `Recursive JSON schemas a...` (Muse: API error 400). The
+  `keeper_composition_prepare` tool now advertises its plan nodes without the
+  self-referencing `$defs.template`; each node input is an object that names the
+  four tagged template shapes, and the plan grammar is still validated when the
+  plan is prepared (#43150).
+- `masc_wiki_search` and `keeper_wiki_search` find a page that holds every
+  word of a multi-word query, in any order. Pages holding the whole query are
+  listed first. Before, words that were not adjacent in the page answered
+  "No pages matching". A term of one or two ASCII letters now matches at word
+  boundaries, the rule `keeper_memory_search` already uses (#43154).
+- Every Keeper turn no longer logs `keeper_model_tool_projection_mismatch` for
+  `keeper_composition_prepare` and `keeper_composition_run`. The expected tool
+  names now include the transient-draft tools and the status and cancel
+  controls that accompany them, as the composition surface builds them; two
+  projection tests that had been failing on main pass again (#43156).
+
+### Documentation
+
+- The RFC for the browser lane and web search setup commands covers both ways to
+  connect a live browser, the extension and the server-started Firefox over
+  BiDi, notes the automation lane's requirements, and plans the web tool
+  support dependencies (geckodriver, Firefox, SearXNG, Chromium, Stagehand) as
+  entries of the install prerequisite catalog that the operator selects from
+  (#42827).
+- RFC: each Keeper turn carries the wiki table of contents (every page's title, file and one-line summary, built from the pages at the start of the turn) with the same reading route the shared-memory section gives. A runtime.toml switch turns it off, and a fixed question set is scored before and after the release (#42951).
+- The `sangokushi-3` Skill records the development (5) order flow: submenu, officer list, amount, confirmation and the officer's reply bubble. In the officer list a number and Enter redraw the list and an empty Enter moves on. It also notes that a short `steps` allowance can end a press before the month report transition finishes, and lists the keys that were not tried (#43030).
+- Add `docs-site` user guides for Browser Lane BiDi auto-start (`browser-bidi.md`), Keeper runtime configuration (`keeper-config.md`), and the TUI Collab hub (`tui-collab.md`), and register them in the Astro sidebar (#43039).
+- RFC: an exact lane is served by any runtime that meets the lane's requirement. A lane declares what input window, overflow reporting and verdict channel it needs, a runtime declares what it can do, and one total function decides admission in place of the per-client checks scattered over `api_format` and the verifier. Muse Code can then serve a lane that asks only for prompt-level JSON, a refused CLI slot is recorded with its reason instead of counting as admitted, and the Curator walks CLI slots that report an oversized input as a typed failure (#43057).
+- The glossary now has an `alphaTex 펜스 (alphaTex Fence)` entry: what the TUI draws from a ` ```alphatex ` fence, what it shows when it cannot draw one, and how the fence differs from a Board Attachment of kind `score` (#43108).
+- The one-root RFC (`docs/rfc/RFC-masc-state-has-one-root.md`) is marked
+  implemented, with a section on what each layer of stack #43087 did and
+  where it differs from the plan. Comments that still described a selected
+  cluster are corrected (#43126).
+- RFC any-runtime-serves-an-exact-lane: correct the origin of the verifier admission function. `verifier_runtime_admission` predates #37382, which is an issue; #37395 merged the two verifier judgements into it and moved the refusal ahead of dispatch. The reference list now names issues and PRs separately (#43128).
+- New guide `docs/guides/alphatex-tab.md` for the experimental alphaTex tab renderer: how the TUI picks up a ` ```alphatex ` fence (first tag word `alphatex`, with an optional `rhythm` word on the tag line to draw the rhythm row), the seven supported directives (`\title \tempo \ts \tuning \ro \rc \ae`), `fret.string` note pairs (1 = high e), what the drawn box and the fallback box look like on screen, failure lines such as `alphatex: the \subtitle directive is not in the subset` and `alphatex: one measure needs N cells and this pane has M`, and how to turn it off (rename the tag) (#43133). The Board section of `docs/TUI-GUIDE.md` and the glossary's alphaTex entry now link to the guide.
+
+### Internal
+
+- Group the provider_error constructor lists behind predicates in Llm_provider.Error and shorten max_tokens_truncation_error (#43046).
+- Flatten nested or-patterns in four modules and spell out wire error kinds in two inline tests (#43050).
+- Name the incomplete-tail private JSONL error set once in Fs_compat and flatten nested or-patterns in the approval queue (#43052).
+- Share the SQLite step check (step, done_, scalar) in keeper_sqlite_observation_io and drop Sqlite3.Rc enumerations in the receiver journals, play room and msx checkpoint receipt (#43054).
+- The chat operation reducer returns the next operation alone; the persistence intent and post-commit effect it also returned were never read (#43058).
+- The Keeper hook accumulator loses its `freeze` snapshot and `hook_outputs` type, which no library code read; the turn reads the accumulator fields directly (#43059).
+- The dashboard composite runtime-attention record drops `cra_stale_long_enough` and `cra_stale_without_live_turn`, intermediate values that no code read or emitted (#43061).
+- The dashboard shell projection trace no longer stores a `light` flag that nothing read; the trace key already separates light and full shells (#43062).
+- The raw-trace prune summary drops `candidate_files`, which always equalled the removed count plus the deletion failures and was never read (#43063).
+- The runtime trust snapshot takes the Keeper attention decision as a typed record instead of reading it back from JSON fields by key, and decides it from the runtime blocker it already read (#43067).
+- The Keeper runtime trust disposition is a closed variant (`Pass`, `Alert`, `Blocked`, `Degraded`) instead of a string; the JSON spelling is unchanged and a "Pause" arm no producer wrote is gone (#43069).
+- The activity graph sorts and counts its nodes and edges from their records instead of reading its own JSON back; an active-agent filter on statuses that no node has is gone, and every `stats` value is unchanged (#43071).
+- Three dashboard composite interfaces alias `composite_runtime_attention` instead of restating its eleven fields, so the record is defined in one place (#43072).
+- A Keeper's live overrides are a closed variant with typed default and live values; the config-drift row and the runtime-lens drift summary read them as values instead of searching the provenance JSON for "model.runtime_id" (#43073).
+- The operator digest decides Keeper attention from a record and reads the runtime blocker once, instead of reading the attention JSON back by key; a severity arm for an attention reason no decision produces is gone (#43075).
+- The sidecar connector state (Telegram) reads its status file and binding store once into a record that both `status_json` and `connector_json` render from one shared field list, instead of `connector_json` decoding keys back out of the JSON `status_json` had just built; the unused `Config.extra_status_fields` hook is removed. Only the key order inside the connector JSON changes (#43083).
+- Keeper trust disposition readers parse the four values the server sends (`Pass`, `Alert`, `Blocked`, `Degraded`) instead of matching spellings: the execution queue reads the field with `Keeper_trust_disposition.of_wire` and matches every constructor, the dashboard narrows it to a closed `TrustDisposition` union, the unproduced `Pause` comparisons are removed, and `trust-dispositions.json` pins the list in both languages (#43088).
+- Activity graph edge kinds are a closed `edge_kind` variant made only by the reducer, written to the graph JSON and edge ids by `edge_kind_to_wire` with the same eight strings as before, instead of string literals that compiled when misspelt (#43091).
+- The Discord connector status views render from one shared field list, with the trigger policy, READY identity and guild count read once into the status record; the Discord and sidecar connectors each name their liveness rule once (`gateway_connected`, `transport_live`) for both the status views and `connected ()`, and the sidecar reads `stale_after_sec` once per reading. Only the key order inside the Discord connector JSON changes (#43094).
+- test: make the held-excerpt test comment in `test_tui_chat_search_projection` match its assertions (widest first-token column 25 after the refit, 35 before the fix, the `not (widest <= 23)` check is a floor, not a discriminator) and stop printing both chat frames to stdout on every run of the suite (#43095)
+- Keeper status attention is a closed `Keeper_attention_reason.t option` instead of a flag and two strings: the status bridge decides one of nine reasons, the trust core and the operator digest take it as a value, the same `needs_attention`, `attention_reason` and `next_human_action` JSON is rendered from it, and the never-produced reason-less attention kind and summary rows are removed; the approval queue reader is renamed `read_approval_queue_attention` (#43096).
+- The Slack connector state reads its gateway state, credentials, binding store and READY identity once into a record that `status_json` and `connector_json` render from one shared field list, instead of `connector_json` copying twenty-three keys back out of the JSON `status_json` had just built. Only the key order inside the connector JSON changes (#43097).
+- The iMessage connector state reads its poll state once, with the rest of its status, into a record that `status_json` and `connector_json` render from one shared field list, instead of `connector_json` copying twenty-two keys back out of `status_json` and `status_json` reading the poll state three times per render (#43098).
+- The DOS tool names and the rule for which calls need the machine controller live once in `Machine_controller_contract`, used by the host's `Tool_schemas_misc.dos_controller_need` and by the DOS add-on worker, which no longer classifies controller calls by matching the tool name string with a catch-all; `Dos_machine_tools.dispatch` takes the typed tool (#43105).
+- `keeper-attention-reasons.json` pins the status bridge's attention reasons and first actions: an OCaml test checks it against `Keeper_attention_reason.all`, and the dashboard test checks that `ATTENTION_REASONS` and `NEXT_HUMAN_ACTIONS` contain it, so a reason the bridge writes cannot go unlabelled as `keepalive_stopped` once did (#43106).
+- The MSX add-on worker parses an incoming tool name once into a closed `Msx_machine_tools.tool` variant; its schema list, special handling and dispatch then match on the variant instead of comparing names as strings (#43107).
+- The Slack, iMessage and Discord connector status records hold only what they read: Slack reads its gateway state once and iMessage its self-chat handle once per status, and `connected` (and Slack's `pid`) are computed from the fields they derive from when the status is rendered (#43111).
+- Chat search 여백 하한(23칸) 단언의 라벨을 실제 확인 사실을 말하는 이름으로 바꿨다. (#43112)
+- The fourteen MSX tools have one type, `Msx_tool.t`, shared by the host and the worker: `Tool_schemas_misc` carries it in one `Misc_msx` operation, the tool catalog permission and the misc read-only flag both come from `Msx_tool.reads_only`, and every MSX tool's TOML definition is read at startup so a missing one refuses the boot (#43113).
+- The Keeper trust snapshot's disposition and attention reasons are typed values rendered to the same JSON strings, and the receipt reason is parsed into the receipt's own variant (#43116).
+- Normalized the hook target path with `Unix.realpath` in `test_dos_tools`'s `inventory temporary directory swap` test so the hook matches `Fs_compat`'s resolved path on macOS (`/var` -> `/private/var`) and continues testing enumeration across temporary directory swaps and restorations (#43122).
+- `masc_msx_meta` now reports `core.pinned_commit` (the commit MASC pins) and `core.linked_commit` (the exact linked core commit, `None` when unknown), and `checkpoint_info` adds `exists` and `mtime_utc` (ISO 8601) (#43152).
+
+## [0.56.0] - 2026-10-14
+
+### Changed
+- TBD
+
+### Deprecated
+- TBD
+
 ## [0.55.0] - 2026-10-14
 
 ### Upgrade notes

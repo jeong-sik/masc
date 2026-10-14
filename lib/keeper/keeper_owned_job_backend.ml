@@ -197,9 +197,7 @@ let run ?env ~operation command arguments =
   |> Result.map_error (fun refusal -> Process_refused {operation; refusal})
 let success ~operation = function
   | Unix.WEXITED 0, stdout, _stderr -> Ok stdout
-  | (Unix.WSIGNALED _ as status, stdout, stderr)
-  | (Unix.WSTOPPED _ as status, stdout, stderr)
-  | (Unix.WEXITED _ as status, stdout, stderr) ->
+  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
     Error (Command_failed {operation; status; stdout; stderr})
 let read_json ?env ~operation command arguments =
   let* result = run ?env ~operation command arguments in
@@ -594,7 +592,7 @@ let after_effect prepared ~operation ~expected_id result =
     match observed with
     | Created id | Running id | Stopped (id, _) when id <> expected_id -> Unconfirmed "post-effect container identity differs"
     | Absent -> Unconfirmed "effectful command returned success but exact owned container is absent"
-    | (Created _ | Running _ | Stopped _ | Unconfirmed _) -> observed
+    | (Created _ | Running _ | Stopped _ | Unconfirmed _) as observation -> observation
 
 let create prepared =
   let* () = isolation_guard () in
@@ -614,9 +612,7 @@ let create prepared =
        let id = String.trim stdout in
        if valid_container_id id then Ok (after_effect prepared ~operation ~expected_id:id result)
        else Ok (Unconfirmed "create returned no exact container identity")
-     | (Unix.WSIGNALED _ as status, stdout, stderr)
-     | (Unix.WSTOPPED _ as status, stdout, stderr)
-     | (Unix.WEXITED _ as status, stdout, stderr) ->
+     | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
        Ok (Unconfirmed (error_to_string (Command_failed {operation; status; stdout; stderr}))))
 
 let start ~container_id prepared =

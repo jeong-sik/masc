@@ -688,28 +688,38 @@ let async_worker_result
          ~execution
          ~result)
     skill_reference;
-  let waiting_job_ids = match journal,execution with
-    | Some _, Error {Executor.cause=Executor.Tool_did_not_complete
-        {deferred_kind=Some (Keeper_tool_execution.Owned_job_result_wait _);_};settled;_} ->
+  let waiting_job_ids =
+    let collect_waiting_jobs settled =
       let rec collect reversed = function
         | [] -> Some (List.rev reversed)
         | (node : Executor.node_result) :: rest ->
-          (match node.result,node.deferred_kind,node.output_validation_error with
-           | Tool_result.Completed _,_,None -> collect reversed rest
-           | Tool_result.Deferred _,Some (Keeper_tool_execution.Owned_job_result_wait id),None ->
-             collect (id :: reversed) rest
-           | (Tool_result.Completed _ | Tool_result.Deferred _ | Tool_result.Failed _),
-             (Some (Keeper_tool_execution.Generic_deferred
-                   | Keeper_tool_execution.External_effect_deferred _
-                   | Keeper_tool_execution.Owned_job_result_wait _) | None),
-             (Some _ | None) -> None) in
+          (match node.output_validation_error with
+           | Some _ -> None
+           | None ->
+             (match node.result with
+              | Tool_result.Completed _ -> collect reversed rest
+              | Tool_result.Failed _ -> None
+              | Tool_result.Deferred _ ->
+                (match node.deferred_kind with
+                 | Some (Keeper_tool_execution.Owned_job_result_wait id) ->
+                   collect (id :: reversed) rest
+                 | None | Some (Keeper_tool_execution.Generic_deferred
+                               | External_effect_deferred _) -> None))) in
       collect [] settled
-    | (None | Some _), (Ok _ | Error {cause=(Executor.Run_journal_rejected _
-        | Executor.Plan_execution_failed _
-        | Executor.Tool_did_not_complete {deferred_kind=(Some (Keeper_tool_execution.Generic_deferred
-            | Keeper_tool_execution.External_effect_deferred _
-            | Keeper_tool_execution.Owned_job_result_wait _) | None);_}
-        | Executor.Node_observation_failed _ | Executor.Outer_completion_mismatch _);_}) -> None in
+    in
+    match journal, execution with
+    | None, (Ok _ | Error _) | Some _, Ok _ -> None
+    | Some _, Error failure ->
+      (match failure.Executor.cause with
+       | Executor.Tool_did_not_complete node ->
+         (match node.deferred_kind with
+          | Some (Keeper_tool_execution.Owned_job_result_wait _) ->
+            collect_waiting_jobs failure.settled
+          | None | Some (Keeper_tool_execution.Generic_deferred
+                        | External_effect_deferred _) -> None)
+       | Executor.Run_journal_rejected _ | Plan_execution_failed _
+       | Node_observation_failed _ | Outer_completion_mismatch _ -> None)
+  in
   match waiting_job_ids with
   | None -> Keeper_msg_async.worker_finished result
   | Some job_ids ->

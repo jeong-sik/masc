@@ -4718,7 +4718,7 @@ let decode_server_identity json =
         let lag_obj =
           match Option.map (member "lag") sched_obj with
           | Some (`Assoc _ as lag) -> Some lag
-          | _ -> sched_obj
+          | _ -> None
         in
         Some
           { ssch_probe = string_in sched_obj "probe"

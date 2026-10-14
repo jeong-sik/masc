@@ -35,14 +35,22 @@ let create ?(interval_s = default_interval_s) ?(window = default_window) () =
 ;;
 
 let global = create ()
+let milliseconds_per_second = 1000.0
+let nanoseconds_per_second = 1e9
+
 let record t ~lag_s =
   let n = Atomic.get t.cursor in
   Atomic.set t.slots.(n mod Array.length t.slots) lag_s;
   Atomic.incr t.cursor
 ;;
 
+let record_lag_ms t lag_ms =
+  record t ~lag_s:(Float.max 0.0 lag_ms /. milliseconds_per_second)
+;;
+
 module For_testing = struct
   let record = record
+  let record_lag_ms = record_lag_ms
 end
 
 let samples t =
@@ -127,9 +135,6 @@ let select xs lo hi k =
   select_within xs lo hi k ~rounds:(rounds_per_halving * halvings_to_one (hi - lo + 1))
 ;;
 
-let milliseconds_per_second = 1000.0
-let nanoseconds_per_second = 1e9
-
 let summarize_samples xs =
   let n = Array.length xs in
   if n = 0
@@ -175,18 +180,6 @@ let summarize_samples xs =
 
 let summarize t = summarize_samples (samples t)
 
-type gc_snapshot =
-  { minor_collections : int
-  ; major_collections : int
-  ; compactions : int
-  ; forced_major_collections : int
-  ; heap_words : int
-  ; top_heap_words : int
-  ; minor_words : float
-  ; major_words : float
-  ; promoted_words : float
-  }
-
 type lag_percentiles =
   { samples : int
   ; p50_ms : float
@@ -198,29 +191,6 @@ type lag_percentiles =
   ; over_50ms_count : int
   ; over_200ms_count : int
   }
-
-type snapshot =
-  { lag : lag_percentiles
-  ; gc : gc_snapshot
-  }
-
-let record_lag_ms t lag_ms =
-  record t ~lag_s:(Float.max 0.0 lag_ms /. milliseconds_per_second)
-;;
-
-let capture_gc () =
-  let s = Gc.quick_stat () in
-  { minor_collections = s.minor_collections
-  ; major_collections = s.major_collections
-  ; compactions = s.compactions
-  ; forced_major_collections = s.forced_major_collections
-  ; heap_words = s.heap_words
-  ; top_heap_words = s.top_heap_words
-  ; minor_words = s.minor_words
-  ; major_words = s.major_words
-  ; promoted_words = s.promoted_words
-  }
-;;
 
 let compute_lag_percentiles t =
   (* [summarize_samples] reorders [xs] in place via [select]; threshold counts
@@ -263,26 +233,6 @@ let compute_lag_percentiles t =
     }
 ;;
 
-let snapshot t =
-  { lag = compute_lag_percentiles t
-  ; gc = capture_gc ()
-  }
-;;
-
-let gc_snapshot_to_yojson (gc : gc_snapshot) : Yojson.Safe.t =
-  `Assoc
-    [ "minor_collections", `Int gc.minor_collections
-    ; "major_collections", `Int gc.major_collections
-    ; "compactions", `Int gc.compactions
-    ; "forced_major_collections", `Int gc.forced_major_collections
-    ; "heap_words", `Int gc.heap_words
-    ; "top_heap_words", `Int gc.top_heap_words
-    ; "minor_words", `Float gc.minor_words
-    ; "major_words", `Float gc.major_words
-    ; "promoted_words", `Float gc.promoted_words
-    ]
-;;
-
 let lag_percentiles_to_yojson (lag : lag_percentiles) : Yojson.Safe.t =
   if lag.samples = 0
   then `Assoc [ "samples", `Int 0 ]
@@ -300,13 +250,6 @@ let lag_percentiles_to_yojson (lag : lag_percentiles) : Yojson.Safe.t =
       ]
 ;;
 
-let snapshot_to_yojson (s : snapshot) : Yojson.Safe.t =
-  `Assoc
-    [ "lag", lag_percentiles_to_yojson s.lag
-    ; "gc", gc_snapshot_to_yojson s.gc
-    ]
-;;
-
 let to_fields t : (string * Yojson.Safe.t) list =
   let probe =
     match Atomic.get t.state with
@@ -322,13 +265,8 @@ let to_fields t : (string * Yojson.Safe.t) list =
     ; "stall_threshold_ms", `Float (stall_threshold_s *. milliseconds_per_second)
     ]
   in
-  let snap = snapshot t in
-  let snapshot_fields =
-    [ "lag", lag_percentiles_to_yojson snap.lag
-    ; "gc", gc_snapshot_to_yojson snap.gc
-    ]
-  in
-  probe @ shape @ snapshot_fields
+  let lag = compute_lag_percentiles t in
+  probe @ shape @ [ "lag", lag_percentiles_to_yojson lag ]
 ;;
 
 let start ~sw ~(mono_clock : _ Eio.Time.Mono.t) t =

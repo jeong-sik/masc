@@ -2484,17 +2484,37 @@ def quick_sandbox(binary, base_path, backend):
 # (RFC setup-web-search-and-browser-lane section 4.3). Nothing is installed or
 # written until the reader confirms the list, and a quick setup only prints it.
 AUTOMATION_TOOL = 'automation'
+GITHUB_TOOL = 'github'
 SKIP_TOOLS = 'Skip all of these'
+IMP_KEEPER = 'imp'
+GITHUB_HOST = 'github.com'
+# `gh auth status` asks GitHub whether the token works, so it answers as slowly
+# as the network does. A login that cannot be confirmed in this time is not
+# offered, and imp signs in with a code instead.
+GH_PROBE_TIMEOUT_SECONDS = 20
+
+
+@dataclass(frozen=True)
+class HostGithubLogin:
+    """The login `gh` holds on this computer, as `gh auth status` describes it.
+    The token is not part of it: it is read only at the moment it is handed over."""
+    login: str
+    scopes: str
+    source: str
 
 
 @dataclass(frozen=True)
 class ToolRow:
     """One line of the checklist: what it gives imp, whether it starts marked,
-    and the command a quick setup prints instead of running it."""
+    and the command a quick setup prints instead of running it. [notice] is
+    what the reader is told before marking it. [host_login] is set on the
+    GitHub row when the login on this computer is the one offered."""
     key: str
     label: str
     command: str
     checked: bool
+    notice: str = ''
+    host_login: Optional[HostGithubLogin] = None
 
 
 def browser_tool(binary, program):
@@ -2531,8 +2551,65 @@ def automation_row(binary, base):
     return ToolRow(AUTOMATION_TOOL, label, ' && '.join([action_command(action) for action in offered] + [setup]), True)
 
 
+def host_github_login():
+    """The github.com login `gh` holds on this computer, or None when there is none to offer.
+
+    `gh auth status --json` names the account, its scopes and where the token
+    lives, and never prints the token. Only an active account that GitHub
+    accepts is offered: a token GitHub refuses reads as `state: error` with no
+    account name, and handing imp a token that does not work helps nobody.
+    """
+    if shutil.which('gh') is None:
+        return None
+    try:
+        result = subprocess.run(['gh', 'auth', 'status', '--hostname', GITHUB_HOST, '--json', 'hosts'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                timeout=GH_PROBE_TIMEOUT_SECONDS)
+        hosts = json.loads(result.stdout)['hosts']
+        accounts = hosts.get(GITHUB_HOST, [])
+    except subprocess.TimeoutExpired:
+        print('gh did not answer in time, so imp signs in with a one-time code instead.', file=sys.stderr)
+        return None
+    except (ValueError, KeyError, TypeError, AttributeError):
+        print("Could not read gh's login (gh auth status --json), so imp signs in with a one-time code instead.",
+              file=sys.stderr)
+        return None
+    for account in accounts if isinstance(accounts, list) else []:
+        if (isinstance(account, dict) and account.get('active') is True and account.get('state') == 'success'
+                and isinstance(account.get('login'), str) and account['login']):
+            return HostGithubLogin(login=account['login'], scopes=str(account.get('scopes', '')),
+                                   source=str(account.get('tokenSource', '')))
+    return None
+
+
+def github_row(base):
+    login = host_github_login()
+    options = ['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', shlex.quote(str(base))]
+    if login is None:
+        return ToolRow(GITHUB_TOOL, 'Sign imp into GitHub with a one-time code you approve in the browser',
+                       ' '.join(['masc keeper-github login'] + options), True)
+    notice = ("\nimp can use the GitHub login on this computer: account {} on {}, token from {}, scopes {}.\n"
+              'imp then pushes and opens pull requests as {}. With the workflow scope it can change workflow files too.\n'
+              'imp gets a copy of the token, so revoking or refreshing it on this computer disconnects imp.\n'
+              'Only imp gets it: other keepers are not given this token.').format(
+                  terminal_text(login.login), GITHUB_HOST, terminal_text(login.source), terminal_text(login.scopes),
+                  terminal_text(login.login))
+    command = 'gh auth token --hostname {} | {}'.format(GITHUB_HOST, ' '.join(['masc keeper-github set-token'] + options))
+    return ToolRow(GITHUB_TOOL, 'Let imp use the GitHub login on this computer · account '
+                   + terminal_text(login.login), command, True, notice=notice, host_login=login)
+
+
 def imp_tool_rows(binary, base):
-    return [automation_row(binary, base)]
+    """The checklist's rows. Each is looked up on its own: a binary that cannot
+    inspect the browser tools still offers the GitHub login."""
+    rows = []
+    try:
+        rows.append(automation_row(binary, base))
+    except SetupError as error:
+        print(terminal_text(str(error)) + '\nRun masc browser-lane-setup --mode automation to give imp a browser later.',
+              file=sys.stderr)
+    rows.append(github_row(base))
+    return rows
 
 
 def prepare_browser_automation(binary, base):
@@ -2565,6 +2642,9 @@ def prepare_browser_automation(binary, base):
 
 def choose_imp_tools(binary, base):
     rows = imp_tool_rows(binary, base)
+    for row in rows:
+        if row.notice:
+            print(row.notice, file=sys.stderr)
     # A multiple pick cannot return nothing: with every mark removed, Enter
     # takes the row under the cursor. Skipping is therefore a row of its own,
     # and it wins over any mark, so a doubt resolves to doing nothing.
@@ -2572,10 +2652,52 @@ def choose_imp_tools(binary, base):
                   defaults=[index for index, row in enumerate(rows) if row.checked])
     if len(rows) in chosen:
         return ()
-    keys = tuple(rows[index].key for index in chosen)
-    if AUTOMATION_TOOL in keys:
+    confirmed = tuple(rows[index] for index in chosen)
+    if any(row.key == AUTOMATION_TOOL for row in confirmed):
         prepare_browser_automation(binary, base)
-    return keys
+    return confirmed
+
+
+def read_host_github_token():
+    """The token `gh` holds for github.com, read at the moment it is handed over."""
+    result = subprocess.run(['gh', 'auth', 'token', '--hostname', GITHUB_HOST],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            timeout=GH_PROBE_TIMEOUT_SECONDS)
+    token = result.stdout.strip()
+    if result.returncode != 0 or not token:
+        raise SetupError('gh did not give its GitHub token')
+    return token
+
+
+def connect_imp_github(binary, base, row):
+    """Give imp its GitHub login, once imp exists.
+
+    imp is created by `masc setup`, and `keeper-github` refuses a keeper that
+    does not exist yet, so this runs after it. The token goes to the command on
+    its standard input, never in an argument another process could read, and is
+    not printed.
+    """
+    options = ['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', str(base)]
+    if row.host_login is None:
+        result = subprocess.run([str(binary), 'keeper-github', 'login'] + options, stdout=sys.stderr)
+    else:
+        result = subprocess.run([str(binary), 'keeper-github', 'set-token'] + options,
+                                input=read_host_github_token(), text=True, stdout=sys.stderr)
+    if result.returncode != 0:
+        # The command already said why. GitHub is optional, so this does not end setup.
+        print("imp's GitHub login was not saved. Everything else is. Run masc keeper-github login --keeper imp "
+              'to try again.', file=sys.stderr)
+
+
+def finish_imp_tools(binary, base, confirmed):
+    """What the reader confirmed that needs imp to exist. Never ends the journey."""
+    for row in confirmed:
+        if row.key == GITHUB_TOOL:
+            try:
+                connect_imp_github(binary, base, row)
+            except (SetupError, OSError, subprocess.SubprocessError) as error:
+                print(terminal_text(str(error)) + "\nimp's GitHub login was not saved. Run masc keeper-github login "
+                      '--keeper imp to sign in with a code.', file=sys.stderr)
 
 
 def select_imp_tools(binary, base):
@@ -2599,12 +2721,7 @@ def show_imp_tools(binary, base):
     Quick setup has no screen where the reader marks anything, so nothing here
     is installed or written. This only reads.
     """
-    try:
-        rows = imp_tool_rows(binary, base)
-    except SetupError as error:
-        print(terminal_text(str(error)) + '\nRun masc browser-lane-setup --mode automation to give imp a browser later.',
-              file=sys.stderr)
-        return
+    rows = imp_tool_rows(binary, base)
     print("\nQuick setup leaves imp's tools for later. Each line is followed by the command that sets it up:",
           file=sys.stderr)
     for row in rows:
@@ -2708,10 +2825,11 @@ def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None,
         return 0
     # After the sandbox and before the first conversation: the server reads the
     # browser table when it starts, and `masc setup` below is what starts it.
+    confirmed = ()
     if quick:
         show_imp_tools(binary, base)
     else:
-        select_imp_tools(binary, base)
+        confirmed = select_imp_tools(binary, base)
     print('\n6 · Open your first conversation', file=sys.stderr)
     while True:
         # Native setup owns staging, image preparation, server/operator login,
@@ -2719,6 +2837,8 @@ def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None,
         code = subprocess.run([str(binary), 'setup', '--base-path', base, '--port', str(port),
                                '--no-tui'] + sandbox_args, stdout=sys.stderr).returncode
         if code == 0:
+            # imp exists now, which the GitHub login needs.
+            finish_imp_tools(binary, base, confirmed)
             return open_workspace(binary, base, port)
         action = pick('imp is not running yet. Keep your workspace and continue when ready.',
                       ['Retry preparation', 'Finish later'])[0]

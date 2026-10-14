@@ -1202,7 +1202,10 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
           Async.worker_finished (Tool_result.make_ok ~tool_name:"unstarted-continuation"
             ~start_time:(Tool_timing.start ()) ())) () in
     let request_id = match lost with
-      | Error (Async.Background_fork_failed {request_id;_}) -> request_id
+      | Error (Async.Background_fork_failed {request_id;_} as error) ->
+        check_json "fork refusal does not guess the canonical request status" `Null
+          (Async.submit_error_to_json error |> member "status");
+        request_id
       | Error _ | Ok _ -> fail "closed worker switch did not publish post-binding Lost" in
     let proof = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
         ~caller:keeper request_id |> require "canonical post-binding Lost" in
@@ -1358,7 +1361,13 @@ let test_cancelled_continuation_cannot_restart () =
           Async.worker_finished (Tool_result.make_ok ~tool_name:"cancelled-continuation"
             ~start_time:(Tool_timing.start ()) ())) () in
     let request_id = match submission with
-      | Error (Background_fork_failed {request_id;_}) -> request_id
+      | Error (Background_fork_failed {request_id;_} as error) ->
+        let wire = Async.submit_error_to_json error in
+        check_json "cancelled fork response keeps the exact request identity" (`String request_id)
+          (wire |> member "request_id");
+        check_json "fork failure transport cannot misreport cancellation as Lost" `Null
+          (wire |> member "status");
+        request_id
       | Error _ | Ok _ -> fail "closed switch did not exercise the failed worker fork" in
     if forget_before_fork then (
       (match Async.poll ~base_path:fixture.base_path ~caller:keeper request_id with

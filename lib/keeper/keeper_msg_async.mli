@@ -484,6 +484,9 @@ val list_for_keeper
 val status_to_string : request_status -> string
 val access_rejection_to_json : access_rejection -> Yojson.Safe.t
 val submit_error_to_json : submit_error -> Yojson.Safe.t
+(** Fork failure names the retained exact request without asserting its
+    canonical status. Cancellation and uncertain persistence can differ from
+    Lost; callers read that request's canonical record for status authority. *)
 val submit_outcome_to_json : submit_outcome -> Yojson.Safe.t
 val cancel_result_to_json : request_id:string -> cancel_result -> Yojson.Safe.t
 

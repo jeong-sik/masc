@@ -1371,6 +1371,26 @@ supports_native_streaming = true
 
 # Gemini Models
 [[models]]
+# gemini-4-argon-{high,medium,low}, served through the Antigravity Google
+# subscription (`agy models` on agy 1.3.2). Official page
+# ai.google.dev/gemini-api/docs/whats-new-gemini-4-argon and OpenRouter
+# GET /api/v1/models (`google/gemini-4-argon`), checked 2026-10-14:
+# 1,048,576 in / 65,536 default out, thinkingLevel low|medium|high (medium
+# default), temperature/top_p/top_k ignored, $2/$10 introductory pricing with
+# 0.05x implicit cache reads.
+id_prefix = "gemini-4-argon"
+base = "gemini"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+accepted_reasoning_efforts = ["low", "medium", "high"]
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.05
+
+[[models]]
 # gemini-3.8-flash-{high,...}, served through the Antigravity Google
 # subscription; masc runs the -high slot. Without this row it prefix-matches
 # the generic "gemini-3" row, which declares no thinking contract at all, so

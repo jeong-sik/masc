@@ -1405,6 +1405,30 @@ wizard-default = true
 # Called that day: claude-sonnet-4-6 and claude-opus-4-6-thinking answered in
 # 8-10s; every gemini model, the one above included, gave no answer in 80s;
 # gpt-oss-120b-medium answered 503 "No capacity available".
+[models.antigravity-gemini-4-argon-high]
+api-name = "gemini-4-argon-high"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-argon-high]
+
+[models.antigravity-gemini-4-argon-medium]
+api-name = "gemini-4-argon-medium"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-argon-medium]
+
+[models.antigravity-gemini-4-argon-low]
+api-name = "gemini-4-argon-low"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-argon-low]
+
 [models.antigravity-gemini-3-8-flash-high]
 api-name = "gemini-3.8-flash-high"
 max-context = 1048576
@@ -1484,6 +1508,54 @@ tools-support = true
 streaming = true
 
 [antigravity_subscription.antigravity-gemini-3-1-pro-low]
+
+[models.antigravity-claude-opus-5-5-high]
+api-name = "claude-opus-5-5-high"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-opus-5-5-high]
+
+[models.antigravity-claude-opus-5-5-medium]
+api-name = "claude-opus-5-5-medium"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-opus-5-5-medium]
+
+[models.antigravity-claude-opus-5-5-low]
+api-name = "claude-opus-5-5-low"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-opus-5-5-low]
+
+[models.antigravity-claude-sonnet-5-5-high]
+api-name = "claude-sonnet-5-5-high"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-sonnet-5-5-high]
+
+[models.antigravity-claude-sonnet-5-5-medium]
+api-name = "claude-sonnet-5-5-medium"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-sonnet-5-5-medium]
+
+[models.antigravity-claude-sonnet-5-5-low]
+api-name = "claude-sonnet-5-5-low"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-sonnet-5-5-low]
 
 [models.antigravity-claude-sonnet-4-6]
 api-name = "claude-sonnet-4-6"

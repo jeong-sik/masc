@@ -34,7 +34,6 @@ type runtime_snapshot = {
 type pool_state = {
   runtimes : runtime list;
   fingerprint : string;
-  parse_errors : string list;
 }
 
 let default_pool_label = "local64"
@@ -61,7 +60,6 @@ let debug_log fmt =
 let empty_pool = {
   runtimes = [];
   fingerprint = "";
-  parse_errors = [];
 }
 
 let pool : pool_state Atomic.t = Atomic.make empty_pool
@@ -221,11 +219,11 @@ let load_runtimes_from_env () =
     safe_discovery_statuses () |> List.map runtime_of_discovery_status
   in
   match discovered with
-  | _ :: _ -> (discovered, [])
+  | _ :: _ -> discovered
   | [] ->
       let endpoints = Llm_provider.Discovery.parse_llm_endpoints_env () in
       let runtimes = List.map runtime_of_endpoint_url endpoints in
-      if runtimes = [] then ([ default_runtime () ], []) else (runtimes, [])
+      if runtimes = [] then [ default_runtime () ] else runtimes
 
 (* ensure_loaded: the only function that may yield (debug_log calls Log.LocalWorker.debug).
    Yield happens AFTER the atomic swap, so later callers see a consistent
@@ -248,7 +246,7 @@ let ensure_loaded () =
       not (String.equal fingerprint (Atomic.get pool).fingerprint))
   in
   if needs_reload then begin
-    let loaded, errors = load_runtimes_from_env () in
+    let loaded = load_runtimes_from_env () in
     let loaded_fingerprint = current_fingerprint () in
     if String.equal loaded_fingerprint fingerprint then begin
       let refreshed = List.map refresh_runtime_metrics loaded in
@@ -257,14 +255,13 @@ let ensure_loaded () =
           let state = Atomic.get pool in
           if not (String.equal fingerprint state.fingerprint) then begin
             Atomic.set pool
-              { runtimes = refreshed; fingerprint; parse_errors = errors };
+              { runtimes = refreshed; fingerprint };
             true
           end else
             false)
       in
       if reloaded then
-        debug_log "reload runtimes count=%d errors=%d" (List.length loaded)
-          (List.length errors)
+        debug_log "reload runtimes count=%d" (List.length loaded)
     end else
       (* Env changed mid-load: drop this attempt.  The next caller will
          capture [loaded_fingerprint] at its own top and redo the load
@@ -287,7 +284,7 @@ module For_testing = struct
   let install_pool runtimes =
     let fingerprint = current_fingerprint () in
     with_pool_lock (fun () ->
-      Atomic.set pool { empty_pool with runtimes; fingerprint })
+      Atomic.set pool { runtimes; fingerprint })
 end
 
 (* [acquire] / [release] / [model_label_of_assignment] removed 2026-05-05 —

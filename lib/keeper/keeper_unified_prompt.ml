@@ -605,6 +605,7 @@ let answered_ask_inputs (observation : Keeper_world_observation.world_observatio
       Some (event.post_id, format_board_event_text event, answered_by)
     | Keeper_world_observation.Board_post_created | Keeper_world_observation.Board_post_updated
     | Keeper_world_observation.Fusion_completed | Keeper_world_observation.Composition_completed
+    | Keeper_world_observation.Owned_job_completed _
     | Keeper_world_observation.Board_comment_added _
     | Keeper_world_observation.Board_reaction_changed _ | Keeper_world_observation.Board_vote_cast _
     | Keeper_world_observation.Delegate_completed _ | Keeper_world_observation.Schedule_due _

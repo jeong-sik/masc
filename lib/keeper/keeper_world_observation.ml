@@ -70,11 +70,13 @@ let same_board_event_identity (left : pending_board_event) (right : pending_boar
      | ( ( Board_post_created | Board_post_updated | Board_comment_added _
          | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
          | Delegate_completed _ | Ask_answered_row _ | Composition_completed
+         | Owned_job_completed _
          | Schedule_due _ | External_attention _ | Completion_authority_rejected _
          | Task_outcome _ | Task_cancelled _ )
        , ( Board_post_created | Board_post_updated | Board_comment_added _
          | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
          | Delegate_completed _ | Ask_answered_row _ | Composition_completed
+         | Owned_job_completed _
          | Schedule_due _ | External_attention _ | Completion_authority_rejected _
          | Task_outcome _ | Task_cancelled _ ) ) -> left.event_kind = right.event_kind
 ;;

@@ -426,7 +426,7 @@ let stimulus_identity_equal a b =
       | Bootstrap | Fusion_completed _
       | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Task_outcome _ )
+      | Delegate_completed _ | Composition_completed _ | Owned_job_completed _ | Task_outcome _ )
     , ( Board_signal
           { kind =
               ( Post_created | Post_updated _ | Comment_added _
@@ -445,7 +445,7 @@ let stimulus_identity_equal a b =
       | Bootstrap | Fusion_completed _
       | Schedule_due _ | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-      | Delegate_completed _ | Composition_completed _ | Task_outcome _ ) ) ->
+      | Delegate_completed _ | Composition_completed _ | Owned_job_completed _ | Task_outcome _ ) ) ->
     identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =

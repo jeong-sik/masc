@@ -329,7 +329,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
          | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
          | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
          | Keeper_event_queue.Task_outcome _ -> None)
       selections
   in
@@ -350,7 +350,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
          | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
          | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
          | Keeper_event_queue.Task_outcome _ -> None)
       connector_selections
     |> List.sort String.compare
@@ -427,7 +427,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
         | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
         | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
         | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-        | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+        | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
         | Keeper_event_queue.Task_outcome _ -> None
       in
       (match grouped_schedule with
@@ -521,7 +521,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
        | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
        | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
        | Keeper_event_queue.Task_outcome _ | Connector_attention _ -> go
            (queue_index + 1)
            (row

@@ -518,6 +518,7 @@ let witness_of_yojson json =
     | (Projected_fusion_terminal, Source_task_cancelled)
     | (Projected_fusion_terminal, Source_workspace_message)
     | (Projected_fusion_terminal, Source_delegate_completed)
+    | (Projected_fusion_terminal, Source_owned_job_completed)
     | (Projected_fusion_terminal, Source_composition_completed) -> true
     | Projected_cancel _, _
     | Projected_transfer _, _

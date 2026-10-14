@@ -58,7 +58,7 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
       | Keeper_event_queue.Task_cancelled _
       | Keeper_event_queue.Workspace_message _
       | Keeper_event_queue.Delegate_completed _
-      | Keeper_event_queue.Composition_completed _
+      | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
       | Keeper_event_queue.Task_outcome _ )
     , (( Board_signal
        | Bootstrap
@@ -72,7 +72,8 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
        | Task_cancelled
        | Workspace_message
        | Delegate_completed
-       | Composition_completed ) as kind) ) ->
+       | Composition_completed
+       | Owned_job_completed ) as kind) ) ->
     digest_id
       "stimulus"
       (String.concat

@@ -8,9 +8,6 @@
     the file does not exist. Unknown top-level keys are rejected with a
     reset-required error.
 
-    The keys #39025 retired ([trace_history], [last_handoff_ts]) are dropped
-    for this one release and reported once per file (#39200).
-
     Issue #28844: a non-canonical value in an enumerated field with a
     canonical default (e.g. [last_proactive_outcome]) is auto-repaired in
     place through the normal serializer and the read proceeds; all other
@@ -58,7 +55,8 @@ type current_meta_rejection =
           enumerated-field repair.  The boot path reads it as absent and
           re-materialises the Keeper from its declaration (#29610), losing
           the accumulated counters and the persisted task binding.  The
-          lossless fix is stripping retired fields or filling missing ones. *)
+          lossless fix is stripping fields outside the current schema or
+          filling missing ones. *)
 
 val read_meta_file_path_read_only :
   ownership_root:string ->
@@ -193,9 +191,6 @@ module Problem_report_state : sig
   type site =
     | Meta_read
     | Meta_repair
-    | Meta_retired_fields
-        (** The file still carries keys #39025 retired; the decoder dropped
-            them. Tolerated for one release (#39200). *)
     | Keepalive_scan
     | Persistent_scan
 

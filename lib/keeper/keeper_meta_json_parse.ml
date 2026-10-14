@@ -440,26 +440,12 @@ let decode_current_meta fields =
     Ok meta
 ;;
 
-type decoded_current_meta =
-  { decoded_meta : keeper_meta
-  ; retired_fields : retired_field list
-  }
-
-let decode_current_meta_json json =
+let meta_of_json json =
   try
     match validate_current_object json with
     | Error error -> Error (validation_error_detail error)
-    | Ok { current_fields; retired_fields_dropped } ->
-      (match decode_current_meta current_fields with
-       | Error _ as error -> error
-       | Ok meta ->
-         Ok { decoded_meta = meta; retired_fields = retired_fields_dropped })
+    | Ok current_fields -> decode_current_meta current_fields
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> invalidf "decoder raised: %s" (Printexc.to_string exn)
-;;
-
-let meta_of_json json =
-  decode_current_meta_json json
-  |> Result.map (fun decoded -> decoded.decoded_meta)
 ;;

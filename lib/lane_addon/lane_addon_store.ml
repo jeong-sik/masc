@@ -302,19 +302,46 @@ let binding_inventory_with ~sync_parent ~root =
   match listed with
   | Error detail -> { records=[]; issues=[directory,detail]; complete=false }
   | Ok names ->
+      (* A binding publication is a temp-file rename and a removal is an
+         unlink; both change the identity metadata of the very file an
+         inventory read has open (rename-over/unlink bumps its ctime and
+         drops its link count, and a path can vanish mid-read). Such a
+         concurrent write is the writer succeeding, not a damaged record, so
+         one bounded retry takes either the published bytes or a confirmed
+         absence; only a failure that repeats without any writer finishing is
+         an issue that makes the reading incomplete. *)
+      let read_record path =
+        let attempt () =
+          Fs_compat.load_owned_regular_file_range
+            ~ownership_root:root ~offset:0 ~max_bytes:max_int path
+          |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+        let rec retry = function
+          | 0 -> attempt ()
+          | remaining ->
+            (match attempt () with
+             | Ok _ as published -> published
+             | Error _ when remaining > 0 -> retry (remaining - 1)
+             | Error _ as failure -> failure) in
+        match retry 1 with
+        | Ok (Some contents) -> Ok (Some (Yojson.Safe.from_string contents.content))
+        | Ok None ->
+            (* The listing saw the name and the record is gone: a rename
+               source or an unlink. Report absence only when a fresh look
+               agrees, so a writer that was mid-flight does not read as
+               cleanup. *)
+            (match Fs_compat.exact_path_kind path with
+             | Fs_compat.Exact_missing -> Ok None
+             | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ ->
+               Error "binding disappeared during inventory read")
+        | Error _ as failure -> failure in
       let records,issues = List.fold_left (fun (records,issues) name ->
         if not (Filename.check_suffix name ".json") then records,issues
         else
           let path = Filename.concat directory name in
-          let read = protect (fun () ->
-            let* contents = Fs_compat.load_owned_regular_file_range
-              ~ownership_root:root ~offset:0 ~max_bytes:max_int path
-              |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
-            match contents with
-            | None -> Error "binding disappeared during inventory read"
-            | Some contents -> Ok (Yojson.Safe.from_string contents.content)) in
+          let read = protect (fun () -> read_record path) in
           match read with
-          | Ok value -> (path,value)::records,issues
+          | Ok (Some value) -> (path,value)::records,issues
+          | Ok None -> records,issues
           | Error detail -> records,(path,detail)::issues) ([],[]) names in
       (* A prior process may have renamed a terminal binding or unlinked it,
          then failed its parent sync. Reestablish that publication before a

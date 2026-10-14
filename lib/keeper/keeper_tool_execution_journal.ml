@@ -796,8 +796,15 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
     let path = Filename.concat directory name in
     match continuation_lock_data_name name with
     | Some data_name ->
-      let* _ = continuation_snapshot ~root (Filename.concat directory data_name) in
-      Ok Lock_infrastructure
+      (* Retirement unlinks only the marker data file, leaving this lock
+         sibling behind. An existence-only check skips those orphaned locks
+         without acquiring or validating them, so each pass stays
+         proportional to live markers, not to every historical request. *)
+      let data_path = Filename.concat directory data_name in
+      if Fs_compat.file_exists data_path then
+        let* _ = continuation_snapshot ~root data_path in
+        Ok Lock_infrastructure
+      else Ok Lock_infrastructure
     | None when not (continuation_data_name name) ->
       Error (Invalid_continuation_marker "unexpected pending partition filename")
     | None ->

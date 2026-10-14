@@ -767,8 +767,15 @@ let test_pending_marker_retirement_rejects_replacement () =
     check int "fresh validated terminal proof retires restored marker" 1 settled.retired;
     check int "normal retirement has no failure" 0 (List.length settled.failures);
     let empty = Journal.pending_continuations ~base_path |> journal_value "retained infrastructure discovery" in
-    check int "retained stable lock is not a pending marker" 0 empty.inspected;
-    check int "validated retained lock has no error" 0 (List.length empty.failures)))
+    check int "retired marker is not a pending marker" 0 empty.inspected;
+    check int "retired marker discovery has no failure" 0 (List.length empty.failures);
+    let lock_path = Fs_compat.private_jsonl_lock_path path in
+    check bool "retirement leaves the lock sibling" true (Sys.file_exists lock_path);
+    Unix.chmod lock_path 0o000;
+    let skipped = Journal.pending_continuations ~base_path |> journal_value "orphaned lock discovery" in
+    check int "orphaned lock is not a pending marker" 0 skipped.inspected;
+    check int "orphaned lock is skipped without validation" 0 (List.length skipped.failures);
+    Unix.chmod lock_path 0o600))
     [`Physical_foreign; `Physical_malformed; `Same_inode_same_length]
 
 let test_pending_marker_retirement_settlement () =
@@ -810,7 +817,14 @@ let test_pending_marker_retirement_settlement () =
     check bool "unlink actually occurred" false (Sys.file_exists path);
     let report = Journal.pending_continuations ~base_path |> journal_value "post-settlement discovery" in
     check int "settled marker is not synthesized by lock validation" 0 report.inspected;
-    check int "retained canonical lock is readable" 0 (List.length report.failures)))
+    check int "settled marker discovery has no failure" 0 (List.length report.failures);
+    let lock_path = Fs_compat.private_jsonl_lock_path path in
+    check bool "settlement leaves the lock sibling" true (Sys.file_exists lock_path);
+    Unix.chmod lock_path 0o000;
+    let skipped = Journal.pending_continuations ~base_path |> journal_value "orphaned lock discovery" in
+    check int "orphaned lock is not synthesized by lock validation" 0 skipped.inspected;
+    check int "orphaned lock is skipped without validation" 0 (List.length skipped.failures);
+    Unix.chmod lock_path 0o600))
     [`Close; `Parent_sync]
 
 let () = match Array.to_list Sys.argv with

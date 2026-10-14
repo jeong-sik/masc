@@ -95,8 +95,10 @@ val pending_continuations : base_path:string -> (pending_continuations, error) r
     readiness. Completed or superseded markers retire only after exact terminal
     proof bound to the exact marker snapshot under its retained stable lock;
     unavailable, unbound or corrupt authority stays visible. Directory listing
-    still includes retained lock metadata, which is validated and excluded from
-    [inspected]. No worker
+    still includes retained lock siblings, which are excluded from [inspected];
+    a lock whose marker data file was already retired is skipped by an
+    existence-only check — it is never acquired or validated, so the pass
+    stays proportional to live markers. No worker
     dispatch, historical terminal scan, backend operation or automatic resume. *)
 
 module For_testing : sig

@@ -97,10 +97,14 @@ a physical replacement or same-inode content change during proof reads is
 refused and retained. This is the owned-directory transaction protocol, not an
 atomic POSIX compare-unlink against a writer bypassing its lock.
 Unavailable original authority remains reported and retained. Discovery
-validates retained lock siblings and excludes them from pending marker counts;
-the directory listing still includes historical lock metadata. It does not
-scan historical terminal records. This discovery boundary does not dispatch
-continuation workers yet.
+excludes retained lock siblings from pending marker counts; a lock whose
+marker data file was already retired is skipped by an existence-only check
+and is never re-acquired or validated, so each pass stays proportional to
+live markers. It does not scan historical terminal records. Corrupt, unbound
+or refused markers stay visible as named discovery failures; an operator
+confirms the canonical request record and then removes the named file from
+the prepared_continuations directory. This discovery boundary does not
+dispatch continuation workers yet.
 The journal retains the exact producer-owned job wait separately from the
 provider-facing body. Only this exact read-only leaf may be rechecked; it keeps
 its original execution ID and tool-use ID. Completed siblings reuse their full

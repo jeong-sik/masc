@@ -856,11 +856,8 @@ let test_checkpoint_history_is_not_current_tool_execution () =
         }
   in
   check int "a resumed no-tool invocation has no executed calls" 0
-    (List.length (Acc.freeze acc).out_tool_calls);
-  let actual = tool_call "Execute" in
-  acc.tool_calls <- [ actual ];
-  check int "only the new execution reaches outputs" 1
-    (List.length (Acc.freeze acc).out_tool_calls);
+    (List.length acc.tool_calls);
+  acc.tool_calls <- [ tool_call "Execute" ];
   check (option (pair string int)) "cross-resume loop detection is preserved"
     (Some ("Execute", 3))
     (Masc.Keeper_agent_run.For_testing.repeated_exact_tool_call ~threshold:3

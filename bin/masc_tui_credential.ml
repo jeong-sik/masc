@@ -241,9 +241,7 @@ let outcome_notice = function
       Some
         (Printf.sprintf
            "%s, so this %s minted one for this workspace and stored it; it \
-            lasts %d days. A server that is already running rebuilds its \
-            credential index on a timer, so the first reads may still be \
-            refused."
+            lasts %d days."
            what_was_there agent_name
            (self_mint_expiry_hours / 24))
   | Workspace_pending ->

@@ -1,7 +1,6 @@
 (** Tests for the credential token-hash index cache.
 
-    The cache itself is opaque (no public counter-read API), so these
-    tests assert the *observable* invariants the cache must preserve:
+    These tests assert the *observable* invariants the cache must preserve:
 
     - [find_credential_by_token] returns the same answer it did before
       the cache existed: hit on a live token, mismatch on a deleted
@@ -15,6 +14,12 @@
       security regression.
     - Repeated lookups for the same token stay correct (cache TTL
       window stays valid).
+    - A token another process minted after the index was cached is found
+      on the next lookup. masc-tui, [masc login] and setup mint beside a
+      running server; the server's own invalidation never sees those writes.
+    - A bearer that matches nothing does not rebuild the index while the
+      credentials are unchanged, so unknown tokens cost one stat each.
+    - Requests that miss together rebuild the index once, not once each.
 
     The cache is keyed by [agents_dir config] (per base_path), so each
     test sets up its own temp workspace and cleans up to avoid cross-test
@@ -136,6 +141,98 @@ let test_unknown_token_is_mismatch () =
         lookup ();
         lookup ()))
 
+(* The other process is this executable started again with
+   [mint_child_flag]: it mints into the same workspace and exits before the
+   suite runs, the way masc-tui mints beside a running server. *)
+let mint_child_flag = "--mint-in-child"
+
+let mint_in_another_process dir ~agent_name =
+  let token_out = Filename.concat dir (agent_name ^ ".minted") in
+  let pid =
+    Unix.create_process Sys.executable_name
+      [| Sys.executable_name; mint_child_flag; dir; agent_name; token_out |]
+      Unix.stdin Unix.stdout Unix.stderr
+  in
+  (* A SIGCHLD handler the Eio runtime left behind interrupts the wait. *)
+  let rec wait_for_child () =
+    match Unix.waitpid [] pid with
+    | status -> status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child ()
+  in
+  match wait_for_child () with
+  | _, Unix.WEXITED 0 -> In_channel.with_open_bin token_out In_channel.input_all
+  | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ->
+    fail "the child process did not mint"
+
+let test_token_minted_by_another_process_is_found () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let raw = create_token_for dir ~agent_name:"local-admin" ~role:Masc_domain.Admin in
+        match Auth.find_credential_by_token dir ~token:raw with
+        | Ok _ -> ()
+        | Error e -> fail ("warm: " ^ Masc_domain.masc_error_to_string e));
+      let minted = mint_in_another_process dir ~agent_name:"masc-tui" in
+      with_eio_runtime (fun () ->
+        match Auth.find_credential_by_token dir ~token:minted with
+        | Ok cred -> check string "masc-tui resolved" "masc-tui" cred.agent_name
+        | Error e ->
+          fail ("a token another process minted was refused: "
+                ^ Masc_domain.masc_error_to_string e)))
+
+let index_rebuilds () =
+  Otel_metric_store_core.get_metric_value
+    Otel_identity_metric_names.metric_auth_credential_index_cache_misses ()
+  |> Option.value ~default:0.0
+
+let test_unknown_bearer_does_not_rebuild_the_index () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let raw = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
+        (match Auth.find_credential_by_token dir ~token:raw with
+         | Ok _ -> ()
+         | Error e -> fail ("warm: " ^ Masc_domain.masc_error_to_string e));
+        let before = index_rebuilds () in
+        for _ = 1 to 3 do
+          match Auth.find_credential_by_token dir ~token:"not-a-real-token" with
+          | Ok cred ->
+            fail (Printf.sprintf "bogus token unexpectedly resolved to %s" cred.agent_name)
+          | Error _ -> ()
+        done;
+        check (float 0.0) "no rebuild for an unknown bearer" before (index_rebuilds ())))
+
+(* Requests that miss together queue on the credential transaction; only
+   the first may re-read the credentials. *)
+let test_requests_that_miss_together_rebuild_once () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let raw = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
+        let before = index_rebuilds () in
+        Eio.Fiber.List.iter
+          (fun () ->
+            match Auth.find_credential_by_token dir ~token:raw with
+            | Ok _ -> ()
+            | Error e -> fail ("concurrent lookup: " ^ Masc_domain.masc_error_to_string e))
+          (List.init 5 (fun _ -> ()));
+        check (float 0.0) "one rebuild" (before +. 1.0) (index_rebuilds ())))
+
+let () =
+  match Array.to_list Sys.argv with
+  | [ _; flag; dir; agent_name; token_out ] when String.equal flag mint_child_flag ->
+    with_eio_runtime (fun () ->
+      let raw = create_token_for dir ~agent_name ~role:Masc_domain.Admin in
+      Out_channel.with_open_bin token_out (fun oc -> output_string oc raw));
+    exit 0
+  | _ -> ()
+
 let () =
   Alcotest.run "auth_credential_index_cache"
     [ ( "cache"
@@ -147,5 +244,11 @@ let () =
           `Quick test_delete_credential_invalidates_cache
         ; test_case "unknown token is mismatch (cold + warm)"
           `Quick test_unknown_token_is_mismatch
+        ; test_case "a token another process minted is found"
+          `Quick test_token_minted_by_another_process_is_found
+        ; test_case "an unknown bearer does not rebuild the index"
+          `Quick test_unknown_bearer_does_not_rebuild_the_index
+        ; test_case "requests that miss together rebuild once"
+          `Quick test_requests_that_miss_together_rebuild_once
         ] )
     ]

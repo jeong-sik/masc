@@ -139,10 +139,9 @@ type outcome =
 
 val outcome_notice : outcome -> string option
 (** What to tell the operator, or [None] when there is nothing worth saying.
-    A fresh mint is worth saying: a server already running rebuilds its
-    credential index on a timer, so the first reads after one can still be
-    refused, and an operator who is not told will read that as a broken
-    credential. {!Workspace_pending} says what is missing and that this client
+    A fresh mint is worth saying: the operator learns this client wrote a
+    durable admin credential into the workspace and how long it lasts.
+    {!Workspace_pending} says what is missing and that this client
     takes it again; it carries no command, because on a first install the
     state clears itself within a second or two and a command offered there
     teaches the operator to distrust the line. Only {!Mint_failed} names

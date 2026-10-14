@@ -16,6 +16,8 @@ type error =
   | Invalid_manifest of string
   | Invalid_result of string
   | Invocation_collision of string
+  | Recorder_failed of Keeper_skill_activation_recorder.error
+  | Ledger_failed of Keeper_skill_activation_ledger.store_error
 
 type binding =
   { entry : Async.entry
@@ -89,6 +91,8 @@ let error_to_string = function
   | Invalid_manifest detail -> "invalid prepared status manifest: " ^ detail
   | Invalid_result detail -> "invalid prepared status result: " ^ detail
   | Invocation_collision id -> "status invocation already binds a different result: " ^ id
+  | Recorder_failed error -> Keeper_skill_activation_recorder.error_to_string error
+  | Ledger_failed error -> Ledger.store_error_to_string error
 
 let create ~base_path ~physical_turn_ref =
   {base_path; physical_turn_ref; bindings=[]; pending=None}
@@ -287,3 +291,49 @@ let observation_to_json observation =
       | Ledger.Model_response {agent_core_turn} -> `Assoc ["kind",`String "model_response";"agent_core_turn",`Int agent_core_turn]
       | Official_client_result_handoff {agent_core_turn} -> `Assoc ["kind",`String "official_client_result_handoff";"agent_core_turn",`Int agent_core_turn]);
     "presentation",`String (match observation.presentation with Inline_result -> "inline_result" | Manifest_reference -> "manifest_reference")]
+
+let persist ~(config : Workspace.config) (observation : observation) =
+  let binding = observation.binding in
+  let* () = canonical_entry ~base_path:config.base_path binding.entry in
+  let* journal = Journal.load ~base_path:config.base_path ~keeper_name:binding.source.keeper_name
+      ~composition_run_id:binding.source.composition_run_id
+    |> Result.map_error (fun error -> Journal_failed error) in
+  let* () = Journal.validate_request journal binding.entry
+    |> Result.map_error (fun error -> Journal_failed error) in
+  let* () = if Journal.source journal = binding.source then Ok () else Error Request_changed in
+  let* result = match binding.entry.status with
+    | Async.Done {data=Some data;_} -> Ok data
+    | Done {data=None;_} | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+    | Persistence_failed _ | Waiting_for_owned_jobs _ -> Error (Invalid_result "completed child result is unavailable") in
+  let* restored = Draft.load_nested_result_children ~base_path:config.base_path binding.source ~result
+    |> Result.map_error (fun error -> Activation_failed error) in
+  let* restored,children = match restored with
+    | Some value -> Ok value | None -> Error (Invalid_context "original nested recorder is unavailable") in
+  let* () = if Yojson.Safe.equal
+      (Keeper_skill_activation_recorder.bound_context_to_yojson restored)
+      (Keeper_skill_activation_recorder.bound_context_to_yojson binding.activation)
+    then Ok () else Error (Invalid_context "original recorder changed before durable handoff") in
+  match children with
+  | [] -> Ok None
+  | _::_ ->
+    let logical_parent_tool_use_id = Keeper_composition_nested_run.async_result_parent binding.source.composition_run_id in
+    let* expected_activations = Keeper_skill_activation_recorder.find_bound_result_children ~config restored
+      ~composition_run_id:binding.source.composition_run_id ~logical_parent_tool_use_id
+      ~source_turn:binding.source.source_turn ~tool_name:Draft.run_tool_name children
+      |> Result.map_error (fun error -> Recorder_failed error) in
+    let* delivery = Keeper_skill_async_delivery.make
+      ~original_turn_ref:(Keeper_skill_activation_recorder.bound_turn_ref restored)
+      ~composition_run_id:binding.source.composition_run_id ~logical_parent_tool_use_id
+      ~request_id:binding.entry.request_id ~physical_turn_ref:observation.physical_turn_ref
+      ~runtime_id:observation.runtime_id ~status_invocation:binding.invocation
+      ~boundary:observation.boundary ~receipt:observation.transport_receipt
+      ~presentation:(match observation.presentation with Inline_result -> Keeper_skill_async_delivery.Inline_result
+        | Manifest_reference -> Keeper_skill_async_delivery.Manifest_reference)
+      ~child_activations:(List.map (fun (activation : Ledger.activation) -> Keeper_skill_async_delivery.{
+        skill_tool_use_id=activation.skill_tool_use_id;activation_sha256=Ledger.activation_frame_sha256 activation}) expected_activations)
+      ~observed_at:(Masc_domain.now_iso ())
+      |> Result.map_error (fun detail -> Invalid_result detail) in
+    Ledger.observe_async_result_delivery ~config
+      ~trace_id:(Keeper_skill_activation_recorder.bound_trace_id restored) ~expected_activations delivery
+    |> Result.map (fun (_,stored) -> Some stored) |> Result.map_error (fun error -> Ledger_failed error)
+;;

@@ -533,7 +533,13 @@ let assemble_hooks
       Log.Keeper.info
         "Prepared composition result handoff keeper=%s evidence=%s"
         meta.name
-        (Keeper_composition_result_delivery.observation_to_json observation |> Yojson.Safe.to_string)
+        (Keeper_composition_result_delivery.observation_to_json observation |> Yojson.Safe.to_string);
+      match Keeper_composition_result_delivery.persist ~config observation with
+      | Ok None -> ()
+      | Ok (Some delivery) -> Log.Keeper.info "Prepared child handoff recorded keeper=%s evidence=%s"
+          meta.name (Keeper_skill_async_delivery.to_json delivery |> Yojson.Safe.to_string)
+      | Error error -> Log.Keeper.warn "Prepared child handoff ledger refused keeper=%s detail=%s"
+          meta.name (Keeper_composition_result_delivery.error_to_string error)
     in
     let composition_delivery_error error =
       Log.Keeper.warn "Prepared composition result handoff refused keeper=%s detail=%s"

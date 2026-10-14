@@ -90,10 +90,11 @@ STEP_ZERO = {
 
 def ledger():
     value = {
-        "schema": "masc.skill-activations/v5",
+        "schema": "masc.skill-activations/v6",
         "workspace_key": WORKSPACE,
         "session_id": SESSION,
         "revision": "",
+        "async_result_deliveries": [],
         "activations": [
             activation(
                 "call-a",
@@ -129,6 +130,38 @@ def header():
 
 
 class SkillActivationEventsTest(unittest.TestCase):
+    def test_async_result_replay_retains_original_child_and_physical_handoff(self):
+        expected = json.loads((REPO_ROOT / "test/fixtures/skill-ledger-async-delivery.json").read_text())
+        raw = log_fixture.event_log(expected)
+        self.assertEqual(events.fold_event_log(raw), expected)
+        self.assertEqual(events.ledger_revision(expected), expected["revision"])
+        self.assertIsNone(expected["activations"][0]["delivery"])
+        self.assertEqual(expected["activations"][0]["invocation"]["origin"]["task_ids"], ["task-A"])
+        original = copy.deepcopy(expected)
+        for field, bad in (("original_turn_ref", "trace-one#73"), ("composition_run_id", "019ffc2b-0a41-7ba2-bf58-598e0e7f711a"),
+                           ("child_activations", [{"skill_tool_use_id":"new-child","activation_sha256":"e"*64}])):
+            changed = copy.deepcopy(expected)
+            changed["async_result_deliveries"][0][field] = bad
+            with self.subTest(field=field), self.assertRaises(events.SkillLedgerError):
+                events.fold_event_log(log_fixture.event_log(changed))
+        duplicate = copy.deepcopy(expected["async_result_deliveries"][0])
+        duplicate["observed_at"] = "2026-10-14T12:00:01Z"
+        with self.assertRaises(events.SkillLedgerError) as caught:
+            events.fold_event_log(raw + log_fixture.encode_rows([{"kind": "async_result_delivered", "delivery": duplicate}]))
+        self.assertIs(caught.exception.fault, Fault.INVALID_ASYNC_RESULT_EVIDENCE)
+        for field, bad in (("runtime_id", "another-runtime"), ("content_revision", "1" * 64),
+                           ("snapshot_revision", "2" * 64), ("activated_at", "2026-10-14T12:00:03Z")):
+            changed = copy.deepcopy(expected)
+            changed["activations"][0][field] = bad
+            with self.subTest(original_frame=field), self.assertRaises(events.SkillLedgerError):
+                events.fold_event_log(log_fixture.event_log(changed))
+        changed = copy.deepcopy(expected)
+        changed["activations"][0]["invocation"]["origin"]["task_ids"] = ["task-B"]
+        with self.assertRaises(events.SkillLedgerError) as caught:
+            events.fold_event_log(log_fixture.event_log(changed))
+        self.assertIs(caught.exception.fault, Fault.INVALID_ASYNC_RESULT_EVIDENCE)
+        self.assertEqual(expected, original)
+
     def test_folding_the_log_of_a_ledger_returns_that_ledger(self):
         expected = ledger()
 
@@ -144,6 +177,7 @@ class SkillActivationEventsTest(unittest.TestCase):
                 "revision",
                 "activations",
                 "transition_rejections",
+                "async_result_deliveries",
             ],
         )
         self.assertEqual(
@@ -160,7 +194,7 @@ class SkillActivationEventsTest(unittest.TestCase):
 
         canonical = (
             '{"workspace_key":"' + WORKSPACE + '","session_id":"' + session + '",'
-            '"activations":[],"transition_rejections":[]}'
+            '"activations":[],"transition_rejections":[],"async_result_deliveries":[]}'
         )
         self.assertEqual(folded["activations"], [])
         self.assertEqual(folded["transition_rejections"], [])
@@ -454,7 +488,7 @@ class SkillActivationEventsTest(unittest.TestCase):
         value["activations"] = [activation("call-\x7f", 7)]
         value["transition_rejections"] = []
         canonical = json.dumps({key: value[key] for key in
-            ("workspace_key", "session_id", "activations", "transition_rejections")},
+            ("workspace_key", "session_id", "activations", "transition_rejections", "async_result_deliveries")},
             ensure_ascii=False, separators=(",", ":")).replace("\x7f", "\\u007f")
 
         self.assertEqual(

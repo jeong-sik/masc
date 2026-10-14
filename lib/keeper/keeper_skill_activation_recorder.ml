@@ -24,6 +24,10 @@ and recorded_task_provenance =
 
 type bound_context = { context : t; runtime : string }
 
+type result_child = {alias:string;reference:Skill_reference.t;skill_tool_use_id:string}
+let bound_trace_id bound = bound.context.trace_id
+let bound_turn_ref bound = bound.context.turn_ref
+
 type error =
   | Turn_scope_mismatch
   | Runtime_attempt_missing
@@ -160,14 +164,43 @@ let bound_task_references bound = bound.context.task_provenance
       | Some _ -> Some provenance.reference | None -> None)
 ;;
 
-let bound_nested_activation bound ~invocation ~tool_name ~scope ~reference ~activated_at =
+let bound_child_activation bound ~tool_use_id ~agent_core_turn ~tool_name ~scope ~reference ~activated_at =
   Ledger.make_activation ~identity:reference.Skill_reference.identity ~content_revision:reference.content_revision
     ~snapshot_revision:bound.context.snapshot_revision ~turn_ref:bound.context.turn_ref ~runtime_id:bound.runtime
-    ~skill_tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
-    ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation)
+    ~skill_tool_use_id:tool_use_id
+    ~agent_core_turn
     ~invocation:(Ledger.Nested_composition_invocation
       {origin=composition_origin bound.context reference;tool_name;scope}) ~activated_at
   |> Result.map_error (fun error -> Activation_rejected error)
+;;
+
+let bound_nested_activation bound ~invocation ~tool_name ~scope ~reference ~activated_at =
+  bound_child_activation bound ~tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+    ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation) ~tool_name ~scope ~reference ~activated_at
+;;
+
+let find_bound_result_children ~config bound ~composition_run_id ~logical_parent_tool_use_id ~source_turn ~tool_name children =
+  let* ledger = Ledger.load_existing ~config ~trace_id:bound.context.trace_id
+    |> Result.map_error (fun error -> Store_failed error) in
+  let* ledger = match ledger with Some ledger -> Ok ledger
+    | None -> Error (Invalid_bound_context "original child activation ledger is missing") in
+  List.fold_left (fun result (child : result_child) ->
+    let* values = result in
+    let* scope = Ledger.nested_composition_scope ~parent_tool_use_id:logical_parent_tool_use_id
+      ~composition_run_id:(Keeper_tool_plan.Composition_run_id.to_string composition_run_id) ~alias:child.alias
+      |> Result.map_error (fun error -> Activation_rejected error) in
+    let* existing = match List.find_opt (fun activation ->
+        String.equal activation.Ledger.skill_tool_use_id child.skill_tool_use_id) (Ledger.activations ledger) with
+      | Some existing -> Ok existing
+      | None -> Error (Invalid_bound_context "admitted original child activation is missing") in
+    let* expected = bound_child_activation bound ~tool_use_id:child.skill_tool_use_id ~agent_core_turn:source_turn
+      ~tool_name ~scope ~reference:child.reference ~activated_at:existing.activated_at in
+    if Skill_reference.equal_identity expected.identity existing.identity
+      && expected.content_revision = existing.content_revision && expected.snapshot_revision = existing.snapshot_revision
+      && Ids.Turn_ref.equal expected.turn_ref existing.turn_ref && expected.runtime_id = existing.runtime_id
+      && expected.agent_core_turn = existing.agent_core_turn && expected.invocation = existing.invocation
+    then Ok (existing::values) else Error (Invalid_bound_context "original child differs from sealed result authority"))
+    (Ok []) children |> Result.map List.rev
 ;;
 
 let find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference =

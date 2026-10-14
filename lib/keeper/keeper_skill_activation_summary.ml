@@ -15,14 +15,36 @@ let empty_summary invalid_transitions =
   }
 ;;
 
-let summarize ~activations ~transition_rejections =
+(* Count a child once per boundary kind. Runtime histograms count a child once
+   per receiving runtime; repeated lookups retain their facts without inflating
+   Skill invocation counts. A manifest pointer does not deliver a child body. *)
+let delivery_contributions ~async_result_deliveries (activation : activation) =
+  let same_boundary left right = match left, right with
+    | Model_response _, Model_response _
+    | Official_client_result_handoff _, Official_client_result_handoff _ -> true
+    | Model_response _, Official_client_result_handoff _
+    | Official_client_result_handoff _, Model_response _ -> false in
+  let original = match activation.delivery with
+    | Some delivery -> [delivery.boundary, delivery.runtime_id]
+    | None -> [] in
+  List.fold_left (fun contributions (delivery : Keeper_skill_async_delivery.t) ->
+    match delivery.presentation with
+    | Manifest_reference -> contributions
+    | Inline_result ->
+      if not (List.exists (fun (child : Keeper_skill_async_delivery.child_activation) -> String.equal activation.skill_tool_use_id child.skill_tool_use_id) delivery.child_activations)
+         || List.exists (fun (boundary, runtime) -> same_boundary boundary delivery.boundary
+              && String.equal runtime delivery.runtime_id) contributions
+      then contributions else contributions @ [delivery.boundary, delivery.runtime_id])
+    original async_result_deliveries
+
+let summarize ~activations ~async_result_deliveries ~transition_rejections =
   List.fold_left
     (fun summary activation ->
        let provider_delivered, official_client_handoff =
-         match activation.delivery with
-         | Some { boundary = Model_response _; _ } -> 1, 0
-         | Some { boundary = Official_client_result_handoff _; _ } -> 0, 1
-         | None -> 0, 0
+         List.fold_left (fun (provider, official) -> function
+           | Model_response _, _ -> 1, official
+           | Official_client_result_handoff _, _ -> provider, 1)
+           (0, 0) (delivery_contributions ~async_result_deliveries activation)
        in
        let actions = List.length activation.actions in
        match activation.invocation with
@@ -115,7 +137,7 @@ let runtime_counts runtime_ids =
     runtime_ids
 ;;
 
-let summarize_by_scope ~activations:all_activations ~transition_rejections:all_rejections =
+let summarize_by_scope ~activations:all_activations ~async_result_deliveries ~transition_rejections:all_rejections =
   let scopes =
     List.fold_left
       (fun scopes activation ->
@@ -145,23 +167,18 @@ let summarize_by_scope ~activations:all_activations ~transition_rejections:all_r
        in
        let provider_delivery_runtime_counts =
          activations
-         |> List.filter_map (fun activation ->
-              match activation.delivery with
-              | Some { boundary = Model_response _; runtime_id; _ } ->
-                Some runtime_id
-              | Some { boundary = Official_client_result_handoff _; _ }
-              | None -> None)
+         |> List.concat_map (fun activation ->
+              delivery_contributions ~async_result_deliveries activation
+              |> List.filter_map (function Model_response _, runtime -> Some runtime
+                  | Official_client_result_handoff _, _ -> None))
          |> runtime_counts
        in
        let official_client_handoff_runtime_counts =
          activations
-         |> List.filter_map (fun activation ->
-              match activation.delivery with
-              | Some
-                  { boundary = Official_client_result_handoff _; runtime_id; _ } ->
-                Some runtime_id
-              | Some { boundary = Model_response _; _ }
-              | None -> None)
+         |> List.concat_map (fun activation ->
+              delivery_contributions ~async_result_deliveries activation
+              |> List.filter_map (function Official_client_result_handoff _, runtime -> Some runtime
+                  | Model_response _, _ -> None))
          |> runtime_counts
        in
        let action_runtime_counts =
@@ -171,7 +188,7 @@ let summarize_by_scope ~activations:all_activations ~transition_rejections:all_r
          |> runtime_counts
        in
        { scope
-       ; summary = summarize ~activations ~transition_rejections
+       ; summary = summarize ~activations ~async_result_deliveries ~transition_rejections
        ; provider_delivery_runtime_counts
        ; official_client_handoff_runtime_counts
        ; action_runtime_counts

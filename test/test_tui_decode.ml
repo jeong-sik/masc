@@ -4096,7 +4096,7 @@ let skill_activation_projection_json activations =
       [ "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "activations", `List activations
-      ; "transition_rejections", `List []
+      ; "transition_rejections", `List []; "async_result_deliveries", `List []
       ]
     |> Yojson.Safe.to_string
     |> Digestif.SHA256.digest_string
@@ -4107,12 +4107,12 @@ let skill_activation_projection_json activations =
     ; "keeper_name", `String "codex-mcp-client"
     ; ( "ledger"
       , `Assoc
-          [ "schema", `String "masc.skill-activations/v5"
+          [ "schema", `String "masc.skill-activations/v6"
           ; "workspace_key", `String workspace_key
           ; "session_id", `String session_id
           ; "revision", `String revision
           ; "activations", `List activations
-          ; "transition_rejections", `List []
+          ; "transition_rejections", `List []; "async_result_deliveries", `List []
           ] )
     ]
 

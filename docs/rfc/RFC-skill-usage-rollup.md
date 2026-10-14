@@ -16,7 +16,7 @@ related: ["skills-as-tools", "RFC-0411-skill-surface-costs-its-reference"]
 
 masc 는 Skill 활성화 증거를 세션마다 durable 하게 남긴다
 (`<base>/.masc/traces/<trace>/skill-activations.json`, 스키마
-`masc.skill-activations/v5`, `Keeper_skill_activation_ledger`). 그런데 이 증거를
+`masc.skill-activations/v6`, `Keeper_skill_activation_ledger`). 그런데 이 증거를
 **세션을 가로질러 집계하는 경로가 없다.** 대시보드와 TUI 는
 `Keeper_skill_activation_projection.resolve ~keeper_name` 으로 **그 keeper 의 현재
 trace 하나**만 본다. 그 결과 운영자에게는 "어떤 Skill 이 얼마나 쓰이는가"가 보이지

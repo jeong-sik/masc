@@ -414,7 +414,7 @@ let record_invocation ~base_path ?nested_activation ~composition_run_id ~invocat
     ; "source_turn", `Int (Agent_core.Tool_contract.Invocation.turn invocation) ])
 ;;
 
-let load_nested_activation ~base_path (source : Keeper_tool_execution_journal.source) =
+let load_nested_run_fields ~base_path (source : Keeper_tool_execution_journal.source) =
   let* bytes = Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:source.run_reference.sha256
     |> Result.map_error (fun error -> Draft_read_failed error) in
   let* bytes = match bytes with Some bytes -> Ok bytes | None -> Error Draft_not_found in
@@ -433,10 +433,55 @@ let load_nested_activation ~base_path (source : Keeper_tool_execution_journal.so
       && List.assoc "tool_use_id" fields = `String source.parent_tool_use_id
       && List.assoc "source_turn" fields = `Int source.source_turn then Ok ()
     else Error (Malformed_draft "original run invocation mismatch") in
+  Ok fields
+;;
+
+let nested_activation_from_fields fields =
   match List.assoc "nested_calls" fields,List.assoc "nested_activation" fields with
   | `List [],`Null -> Ok None
   | `List (_::_),json -> Keeper_skill_activation_recorder.bound_context_of_yojson json
       |> Result.map Option.some |> Result.map_error (fun error ->
           Malformed_draft (Keeper_skill_activation_recorder.error_to_string error))
   | _ -> Error (Malformed_draft "original child activation binding is incoherent")
+;;
+
+let load_nested_activation ~base_path source =
+  let* fields = load_nested_run_fields ~base_path source in
+  nested_activation_from_fields fields
+;;
+
+let load_nested_result_children ~base_path source ~result =
+  let* fields = load_nested_run_fields ~base_path source in
+  let* activation = nested_activation_from_fields fields in
+  match activation with
+  | None -> Ok None
+  | Some activation ->
+    let malformed detail = Error (Malformed_draft detail) in
+    let* calls = match List.assoc "nested_calls" fields with
+      | `List calls -> Ok calls | _ -> malformed "original child calls missing" in
+    let* scopes = match result with
+      | `Assoc result_fields ->
+        (match List.filter_map (fun (name,value) -> if String.equal name "nested_scopes" then Some value else None) result_fields with
+         | [`List scopes] -> Ok scopes
+         | [] | [_] | _::_::_ -> malformed "terminal result has missing, duplicate or invalid child scopes")
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> malformed "terminal result is not an object" in
+    let* children,seen = List.fold_left (fun result scope ->
+      let* children,seen = result in
+      let* fields = exact_fields ~names:["scope";"admission";"disposition";"cause";"nodes";"exports"] scope in
+      let frozen = List.assoc "scope" fields in
+      let* () = if List.exists (Yojson.Safe.equal frozen) calls && not (List.exists (Yojson.Safe.equal frozen) seen)
+        then Ok () else malformed "result child scope differs or repeats the original frozen run" in
+      let* call = exact_fields ~names:["alias";"reference";"args";"node_mapping";"exports"] frozen in
+      let* alias = match List.assoc "alias" call with `String alias -> Ok alias | _ -> malformed "invalid original child alias" in
+      let* reference = Skill_reference.of_yojson (List.assoc "reference" call)
+        |> Result.map_error (fun _ -> Malformed_draft "invalid original child reference") in
+      let* child = match List.assoc "admission" fields with
+        | `Null -> Ok None
+        | `Assoc [("rejection",_)] -> Ok None
+        | `Assoc [("skill_tool_use_id",`String id)] when String.trim id <> "" ->
+          Ok (Some Keeper_skill_activation_recorder.{alias;reference;skill_tool_use_id=id})
+        | _ -> malformed "invalid typed child admission" in
+      Ok ((match child with None -> children | Some child -> child::children),frozen::seen)) (Ok ([],[])) scopes in
+    if List.length seen <> List.length calls then malformed "terminal result omitted an original child scope"
+    else Ok (Some (activation,List.rev children))
 ;;

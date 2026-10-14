@@ -4231,6 +4231,7 @@
  (deps
   test_skill_activation_events.py
   fixtures/skill-ledger-revision.json
+  fixtures/skill-ledger-async-delivery.json
   skill_activation_event_log_fixture.py
   ../scripts/harness/workload/skill_activation_events.py)
  (action
@@ -4718,7 +4719,7 @@
 (test
  (name test_keeper_skill_activation_ledger)
  (modules test_keeper_skill_activation_ledger)
- (deps fixtures/skill-ledger-revision.json)
+ (deps fixtures/skill-ledger-revision.json fixtures/skill-ledger-async-delivery.json)
  (libraries
   alcotest
   digestif

@@ -1039,9 +1039,17 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
   let nodes = Hashtbl.create 64 in
   let edges = Hashtbl.create 96 in
   List.iter (reduce_event ~nodes ~edges) events;
+  let node_list =
+    Hashtbl.fold (fun _ node acc -> node :: acc) nodes []
+    |> List.sort (fun a b -> String.compare a.node_id b.node_id)
+  in
+  let edge_list =
+    Hashtbl.fold (fun _ edge acc -> edge :: acc) edges []
+    |> List.sort (fun a b -> String.compare a.edge_id b.edge_id)
+  in
   let nodes_json =
-    Hashtbl.fold
-      (fun _ node acc ->
+    List.map
+      (fun node ->
         graph_node_to_yojson
           {
             id = node.node_id;
@@ -1051,15 +1059,12 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
             weight = node.weight;
             last_event_at = node.last_event_at;
             meta = node.meta;
-          }
-        :: acc)
-      nodes []
-    |> List.sort (fun a b ->
-           compare ((match Json_util.assoc_member_opt "id" a with Some (`String s) -> s | _ -> "")) ((match Json_util.assoc_member_opt "id" b with Some (`String s) -> s | _ -> "")))
+          })
+      node_list
   in
   let edges_json =
-    Hashtbl.fold
-      (fun _ edge acc ->
+    List.map
+      (fun edge ->
         graph_edge_to_yojson
           {
             id = edge.edge_id;
@@ -1070,39 +1075,19 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
             active = edge.active;
             last_event_at = edge.last_event_at;
             meta = edge.meta;
-          }
-        :: acc)
-      edges []
-    |> List.sort (fun a b ->
-           compare ((match Json_util.assoc_member_opt "id" a with Some (`String s) -> s | _ -> "")) ((match Json_util.assoc_member_opt "id" b with Some (`String s) -> s | _ -> "")))
+          })
+      edge_list
   in
   let timeline =
     let total = List.length events in
     events |> List.drop (max 0 (total - timeline_limit))
   in
-  let count_kind prefix =
-    nodes_json
-    |> List.fold_left
-         (fun acc node ->
-           match Json_util.assoc_member_opt "kind" node with
-           | Some (`String kind) when String.equal kind prefix -> acc + 1
-           | _ -> acc)
-         0
+  let count_kind kind =
+    List.length
+      (List.filter (fun node -> String.equal node.node_kind kind) node_list)
   in
-  let active_agents =
-    nodes_json
-    |> List.fold_left
-         (fun acc node ->
-           match (Json_util.assoc_member_opt "kind" node, Json_util.assoc_member_opt "status" node) with
-           | Some (`String "agent"), Some (`String status)
-             when
-               not
-                 (List.mem status
-                    [ "offline"; "retired"; "stopped"; "finalized" ]) ->
-               acc + 1
-           | _ -> acc)
-         0
-  in
+  (* No node status marks an agent inactive, so every agent node is active. *)
+  let agent_count = count_kind "agent" in
   `Assoc
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
@@ -1118,9 +1103,9 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
           [
             ("event_count", `Int (List.length events));
             ("edge_count", `Int (List.length edges_json));
-            ("agent_count", `Int (count_kind "agent"));
+            ("agent_count", `Int agent_count);
             ("task_count", `Int (count_kind "task"));
-            ("active_agents", `Int active_agents);
+            ("active_agents", `Int agent_count);
           ] );
       ("kind_counts", kind_counts_json);
       ("heatmap", heatmap_json);

@@ -499,6 +499,8 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      let module Async = Masc.Keeper_msg_async in
      let events = Filename.concat session_dir "skill-activation-events.jsonl" in
      let saved = Filename.concat base_path "retained-original-activations.jsonl" in
+     let original_ledger = Ledger.load_existing ~config ~trace_id |> require "exact ledger after child delivery"
+       |> function Some ledger -> ledger | None -> fail "delivered original ledger missing" in
      let original_request = accepted |> member "request_id" |> to_string in
      let original_terminal = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
        |> require "original completed request before authority fault" |> Async.durable_terminal_entry in
@@ -525,7 +527,7 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      let restored = Ledger.load_existing ~config ~trace_id |> require "restored original activation authority"
        |> function Some ledger -> ledger | None -> fail "original ledger not restored" in
      check bool "authority fault preserves exact child activations" true
-       (Ledger.activations restored = Ledger.activations ledger);
+       (Ledger.activations restored = Ledger.activations original_ledger);
      let resumed,_,data = invoke "resume-original-after-authority-repair" Draft.run_tool_name resume_input in
      check bool "restored exact authority permits completed public resume" true resumed;
      let request_id = data |> member "request_id" |> to_string in

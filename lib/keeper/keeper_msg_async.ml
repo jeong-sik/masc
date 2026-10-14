@@ -874,7 +874,7 @@ let read_active_inventory_record ~base_path ~dir name =
               ({ status = (Queued | Running | Cancelling _); _ } as entry) ->
             Ok entry
           | Record_file_found
-              ({ status = (Lost _ | Cancelled _ | Persistence_failed _ | Done _); _ }
+              ({ status = (Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ | Done _); _ }
                as entry) ->
             Error
               (active_inventory_record_error
@@ -1610,6 +1610,7 @@ let set_status ~ops ?(preserve_terminal = false) key status =
                | Lost _
                | Cancelled _
                | Persistence_failed _
+               | Waiting_for_owned_jobs _
                | Done _ )
            ; _
            } as entry) ->

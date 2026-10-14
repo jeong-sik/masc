@@ -916,27 +916,30 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
        (List.map Store.Job_id.to_string job_ids)
    | _ -> fail "owned job wait was flattened into terminal composition failure");
   let module Async = Masc.Keeper_msg_async in
-  let module Record = Masc.Keeper_msg_async_record in
-  let module Types = Masc.Keeper_msg_async_types in
   let module Queue = Masc.Keeper_registry_event_queue in
   let terminal_path = match Async.For_testing.terminal_record_path
       ~base_path:fixture.base_path ~request_id:first_entry.request_id with
     | Some path -> path | None -> fail "original waiting request has no canonical path" in
-  let wire = read terminal_path |> Yojson.Safe.from_string in
-  (match Record.entry_of_record_json ~base_path:fixture.base_path
-      ~request_id:first_entry.request_id wire with
-   | Ok {status=Types.Waiting_for_owned_jobs {job_ids;_};_} ->
+  let original_wire = read terminal_path in
+  let wire = Yojson.Safe.from_string original_wire in
+  (match Async.For_testing.load_record ~base_path:fixture.base_path
+      ~request_id:first_entry.request_id with
+   | Found {status=Async.Waiting_for_owned_jobs {job_ids;_};_} ->
      check (list string) "strict record roundtrip keeps the original wait" [id]
        (List.map Store.Job_id.to_string job_ids)
-   | Ok _ | Error _ -> fail "durable waiting outcome cannot roundtrip");
+   | Found _ | Absent | Unreadable _ | Rejected _ ->
+     fail "durable waiting outcome cannot roundtrip");
   let invalid_wait ids = match wire with
     | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
         key, if key="job_ids" then `List ids else value) fields)
     | _ -> fail "waiting record is not an object" in
   List.iter (fun ids ->
-    match Record.entry_of_record_json ~base_path:fixture.base_path
-        ~request_id:first_entry.request_id (invalid_wait ids) with
-    | Error _ -> () | Ok _ -> fail "strict wait decoder accepted missing/duplicate/invalid identity")
+    Fun.protect ~finally:(fun () -> write terminal_path original_wire) (fun () ->
+      write terminal_path (Yojson.Safe.to_string (invalid_wait ids));
+      match Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+          ~caller:keeper first_entry.request_id with
+      | Error (Async.Canonical_terminal_unreadable _) -> ()
+      | Error _ | Ok _ -> fail "strict wait decoder accepted missing/duplicate/invalid identity"))
     [[];[`String id;`String id];[`String "unknown-job"]];
   let first_job = Store.Job_id.of_string id |> require "original job identity" in
   (match Async.worker_waiting_for_owned_jobs ~job_ids:[first_job]

@@ -12,7 +12,7 @@ related: ["dated-stores-take-retention-from-one-list"]
 
 # RFC: masc 상태는 root 하나 아래에만 둔다
 
-- 상태: 초안. §9 의 물음 둘이 남아 있다.
+- 상태: 초안. §9 의 물음 둘은 운영자가 2026-10-14 에 답했다.
 - 이슈: #42837. 운영자가 2026-10-13 에 보존 규칙 RFC §9 Q6 에서 "기본이 아닌 클러스터는 쓰지 않는다. root 를 하나로"라고 답했다.
 - 근거: §2 의 코드 사실은 `origin/main` `5d142b8fb2` 에서 읽었다. 조사 에이전트가 쓰임새를 모았고, 글쓴이가 핵심 주장 셋(환경 변수를 읽는 곳, 대시보드 연결 표시, 라이브 폴더)을 다시 확인했다. 라이브는 2026-10-14 에 폴더 이름과 환경 변수 이름만 봤다.
 - 앞선 문서: RFC "날짜별 store 는 보존 규칙을 한 목록에서 받는다". 그 RFC 가 만든 store 목록이 두 root 를 타입으로 나눠 적었다(`Dated_jsonl.Store` 의 `Base` 와 `Cluster`).
@@ -35,7 +35,7 @@ masc 는 상태를 `<base>/.masc` 아래에 둔다. 그런데 `MASC_CLUSTER_NAME
 - D1. 클러스터 이름을 지운다. `MASC_CLUSTER_NAME` 을 읽는 코드, `Backend_types.config.cluster_name`, 설정 목록의 그 줄이 사라진다.
 - D2. root 는 `<base>/.masc` 하나다. `Workspace.masc_dir config` 와 base root 를 만드는 함수들은 같은 폴더를 돌려준다. `<base>/.masc/clusters` 는 어떤 코드도 만들거나 읽지 않는다.
 - D3. `Dated_jsonl.Store` 의 `Base`/`Cluster` 나눔과 `cluster_root` 타입을 지운다. 모든 store 는 base path 에서 자리를 얻는다.
-- D4. 클러스터 이름을 보여 주던 라벨을 지운다(§3.4). 대시보드 연결 표시는 §9 Q1 을 따른다.
+- D4. 클러스터 이름을 보여 주던 라벨과 JSON `cluster` 칸을 지운다(§3.4, §9 Q1).
 - D5. tool blob 정리가 `.masc/clusters/*` 를 함께 훑던 코드와 그 보고 칸을 지운다.
 - D6. 이름 붙인 클러스터를 다루는 테스트를 지운다. 같은 동작을 기본 root 에서 보는 테스트가 따로 없으면, 그 동작은 기본 root 로 옮겨 남긴다.
 - D7. 데이터는 옮기지 않는다. 코드가 `clusters` 폴더를 더는 읽지 않는 hard cut 이다. 읽기 호환 코드와 변환 코드를 만들지 않는다.
@@ -118,7 +118,7 @@ Memory backend(`backend_setup.ml:354-355`)는 이름이 아니라 backend root �
 
 ### 3.4 라벨 (D4)
 
-- JSON `"cluster"` 칸: §9 Q1.
+- JSON `"cluster"` 칸을 지운다(§9 Q1). 대시보드는 그 칸 없이 연결을 판단한다.
 - `masc_status` 와 MCP `status` resource 의 "Cluster:" 줄을 지운다. "Project:" 줄은 늘 보인다.
 - MCP `initialize` 안내문과 `masc_status` 도구 설명에서 클러스터 문구를 지운다. MCP 클라이언트가 받는 글자가 바뀐다.
 - TUI 머리 라벨은 `--workspace` 가 없으면 base path 의 마지막 이름을 쓴다. 지금 환경 변수가 없을 때와 같다.
@@ -141,7 +141,7 @@ Memory backend(`backend_setup.ml:354-355`)는 이름이 아니라 backend root �
 
 ## 6. 하지 않는 것
 
-- root 를 문자열로 넘기는 인자(`~masc_root`)의 타입: §9 Q2.
+- root 를 문자열로 넘기는 인자(`~masc_root`)를 타입으로 바꾸는 일: §9 Q2 에 따라 따로 한다.
 - base path 자체를 정하는 일(`.gate/runtime`, `.masc-ide` 가 `.masc` 밖에 있는 #42809 등)은 따로 한다.
 - 다른 뜻의 "cluster"(글자 묶음, 도구 묶음, 실패 이유 묶음)는 건드리지 않는다.
 
@@ -159,15 +159,13 @@ Memory backend(`backend_setup.ml:354-355`)는 이름이 아니라 backend root �
 - 중간: §2.3 이 갈림을 다 찾았는지. 찾은 것만 적었다. 구현 때 컴파일러가 빠진 자리를 알려 준다(D1 이 필드와 함수를 지우므로).
 - 모른다: 자식 프로세스가 `MASC_CLUSTER_NAME` 을 부모 환경에서 물려받아 따로 읽는 곳이 있는지. masc 코드 안에서는 읽는 곳이 하나뿐이다.
 
-## 9. 운영자에게 묻는 것
+## 9. 운영자가 정한 것
 
-- Q1. 대시보드 연결 표시(`dashboard/src/components/ide/ide-presence-strip.ts:43-53`)는 `/api/v1/status` 의 `cluster` 칸이 비어 있으면 "연결 끊김(runtime_unknown)"으로 보이고, 그 값을 `runtime_id` 로 쓴다.
-  - 다른 소비처: `keeper-detail-runtime.ts:1438-1448` 은 값이 `default`/`unknown`/`N/A` 가 아닐 때만 "클러스터" 줄을 보인다. `mission-normalizers.ts:62`, `operator-normalizers.ts:46` 과 타입 파일 둘(`types/dashboard-execution.ts:752`, `types/dashboard-mission.ts:14, :214`)은 이 칸을 선택 칸으로 다룬다. 테스트 `test_dashboard_namespace_truth.ml:256` 이 이 칸을 확인한다.
-  - (가) `cluster` 칸을 모든 응답에서 지운다. 연결 표시는 status 응답을 받았는지로 판단하고, `runtime_id` 에는 `project` 를 쓴다. 다른 소비처에서도 이 칸을 지운다. 권고.
-  - (나) `cluster` 칸을 `"default"` 로 고정해 남긴다. 화면 코드는 그대로다. 대신 뜻 없는 칸이 남는다.
-- Q2. root 를 넘기는 인자 `~masc_root` 는 지금 문자열이다. #42954 의 버그는 이 자리에 base path 를 넘겨도 컴파일된 데서 왔다.
-  - (가) 이 스택은 값만 하나로 맞추고 문자열은 그대로 둔다. 권고. root 가 하나가 되면 틀릴 수 있는 값이 base path 하나로 줄고, 범위가 작다.
-  - (나) 이 스택에서 root 를 타입으로 둔다. base path 를 넘기면 컴파일되지 않는다. lib/bin 에서 `~masc_root` 를 받는 정의가 77개, 넘기는 자리가 160개쯤이고, 테스트에도 300개쯤 있다. 위치 인자로 root 문자열을 넘기는 자리(`store_of_masc_root masc_root` 등)도 따로 있다. 스택이 두 배보다 커진다.
+2026-10-14 에 운영자가 답했다.
+
+- Q1. JSON `cluster` 칸을 모든 응답에서 지운다. 대시보드 연결 표시(`dashboard/src/components/ide/ide-presence-strip.ts:43-53`)는 status 응답을 받았는지로 연결을 판단하고, `runtime_id` 에는 `project` 를 쓴다.
+  - 같이 고칠 소비처: `keeper-detail-runtime.ts:1438-1448` 은 값이 `default`/`unknown`/`N/A` 가 아닐 때만 "클러스터" 줄을 보인다. `mission-normalizers.ts:62`, `operator-normalizers.ts:46` 과 타입 파일 둘(`types/dashboard-execution.ts:752`, `types/dashboard-mission.ts:14, :214`)은 이 칸을 선택 칸으로 다룬다. 테스트 `test_dashboard_namespace_truth.ml:256` 이 이 칸을 확인한다.
+- Q2. 이 스택은 root 값만 하나로 맞춘다. `~masc_root` 는 문자열로 둔다. root 가 하나가 되면 그 자리에 잘못 들어갈 수 있는 값은 base path 하나로 준다. root 를 타입으로 바꾸는 일(lib/bin 160곳쯤, 테스트 300곳쯤)은 이 RFC 밖에서 따로 한다.
 
 ## 10. 구현 순서
 
@@ -176,8 +174,7 @@ Native Stack 하나로 올린다.
 1. 이름과 root(D1, D2). `Workspace.masc_dir` 가 늘 `<base>/.masc` 를 돌려준다. 이름 붙인 클러스터의 경로 테스트를 지운다.
 2. store 목록(D3). `Base`/`Cluster` 나눔과 `cluster_root` 를 지우고 호출처를 `~base_path` 로 바꾼다.
 3. 갈림 자리(§2.3)에서 root 를 두 번 만들던 코드를 하나로 줄인다. 2 뒤에는 값이 같으므로 동작이 바뀌지 않는다.
-4. 라벨과 대시보드(D4, Q1).
+4. 라벨과 대시보드(D4, §9 Q1).
 5. blob 정리(D5).
 6. 문서, 안내문, 도움말.
 
-Q2 가 (나)면 1~3 사이에 타입을 두는 층을 넣는다.

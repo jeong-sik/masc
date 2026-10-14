@@ -1879,7 +1879,7 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
                 SETUP.prepare_browser_automation(BINARY, str(base))
             printed = (root / 'stderr.txt').read_text()
             self.assertEqual(runtime.read_text(), before, 'the value is kept')
-        self.assertIn('is not there now', printed)
+        self.assertIn('is not an executable file now', printed)
         self.assertIn(str(gone), printed)
         self.assertIn('--geckodriver', printed)
 

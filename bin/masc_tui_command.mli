@@ -36,6 +36,10 @@ type t =
   | Play_invite of { name : string; hours : int }
   | Play_revoke of string
   | Play_invalid of string
+  | Listen
+      (** [/listen] — play the newest playable attachment in this
+          conversation (audio through the local player chain, MIDI through
+          fluidsynth with the configured soundfont). *)
   | Open_metrics
       (** [/metrics] or [/telemetry] — open Usage with quotas, Keeper reports, and telemetry. *)
   | Account_login of string

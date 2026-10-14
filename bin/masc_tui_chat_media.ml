@@ -89,3 +89,65 @@ let newest_image media =
         ~name:(Option.value svg.cap ~default:"SVG") svg.svg)
     | Voice _ -> None)
 ;;
+
+(* {1 Playback}
+
+   What /listen plays: an attach with an audio or MIDI extension whose bytes
+   are in the block or fetchable from our own server, or a voice block.
+   External http(s) sources are out of scope — fetching arbitrary URLs is a
+   different trust boundary from reading our own media store. *)
+
+type playable = {
+  name : string;
+  kind : [ `Audio | `Midi ];
+  source : [ `Data of string | `Server_path of string | `Local_path of string ];
+}
+
+let audio_extensions = [ "mp3"; "wav"; "ogg"; "flac"; "m4a"; "aac" ]
+let midi_extensions = [ "mid"; "midi" ]
+
+let extension_of name =
+  match String.rindex_opt name '.' with
+  | Some dot when dot > 0 && dot < String.length name - 1 ->
+      Some (String.lowercase_ascii (String.sub name (dot + 1) (String.length name - dot - 1)))
+  | Some _ | None -> None
+
+let resolve_src = function
+  | Some src when String.starts_with ~prefix:"/api/" src -> Some (`Server_path src)
+  | Some src when String.starts_with ~prefix:"/" src -> Some (`Local_path src)
+  | Some src when String.starts_with ~prefix:"data:" src -> Some (`Data src)
+  | Some _ | None -> None
+
+let attach_bytes (attachment : Blocks.attach_block) =
+  match attachment.data with
+  | Some data -> Some (`Data data)
+  | None -> resolve_src attachment.src
+
+let playable_attach (attachment : Blocks.attach_block) =
+  match extension_of attachment.name with
+  | Some extension when List.mem extension audio_extensions ->
+      Option.map
+        (fun source -> { name = attachment.name; kind = `Audio; source })
+        (attach_bytes attachment)
+  | Some extension when List.mem extension midi_extensions ->
+      Option.map
+        (fun source -> { name = attachment.name; kind = `Midi; source })
+        (attach_bytes attachment)
+  | Some _ | None -> None
+
+let playable_voice (voice : Blocks.voice_block) =
+  let name =
+    match voice.src with
+    | Some src -> Filename.basename src
+    | None -> "voice message"
+  in
+  Option.map
+    (fun source -> { name; kind = `Audio; source })
+    (resolve_src voice.src)
+
+let newest_playable media =
+  List.rev media |> List.find_map (function
+    | Attach attachment -> playable_attach attachment
+    | Voice voice -> playable_voice voice
+    | Image _ | Svg _ -> None)
+;;

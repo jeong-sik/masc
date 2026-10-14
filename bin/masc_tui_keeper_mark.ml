@@ -70,17 +70,15 @@ let activation_word : Reading.keeper_activation_mode -> string = function
 let activations =
   [ Reading.Activation_manual; Reading.Activation_on_demand; Reading.Activation_autonomous ]
 
-type sandbox = Docker | Microvm | Local
+type sandbox = Masc.Keeper_types_profile.sandbox_profile =
+  | Docker
+  | Micro_vm
+  | Remote_ssh
 
-let sandbox_of_profile = function
-  | "docker" -> Some Docker
-  | "microvm" -> Some Microvm
-  | "local" -> Some Local
-  | _ -> None
-
-let sandbox_letter = function Docker -> "D" | Microvm -> "M" | Local -> "L"
-let sandbox_word = function Docker -> "docker" | Microvm -> "microvm" | Local -> "local"
-let sandboxes = [ Docker; Microvm; Local ]
+let sandbox_of_profile = Masc.Keeper_types_profile.sandbox_profile_of_string
+let sandbox_letter = function Docker -> "D" | Micro_vm -> "M" | Remote_ssh -> "R"
+let sandbox_word = Masc.Keeper_types_profile.sandbox_profile_to_string
+let sandboxes = Masc.Keeper_types_profile.all_sandbox_profiles
 
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in

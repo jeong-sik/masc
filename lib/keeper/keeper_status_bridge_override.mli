@@ -18,5 +18,7 @@ val field_name : t -> string
 val default_value_json : t -> Yojson.Safe.t
 val live_value_json : t -> Yojson.Safe.t
 
-val runtime_id : t list -> (string * string) option
+type runtime_drift = { default : string; live : string }
+
+val runtime_drift : t list -> runtime_drift option
 (** The declared and live runtime ids when the runtime is overridden. *)

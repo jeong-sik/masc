@@ -30,10 +30,12 @@ let live_value_json = function
   | Activation_mode { live; _ } -> `String (Keeper_activation_mode.to_string live)
 ;;
 
-let runtime_id overrides =
+type runtime_drift = { default : string; live : string }
+
+let runtime_drift overrides =
   List.find_map
     (function
-      | Runtime_id { default; live } -> Some (default, live)
+      | Runtime_id { default; live } -> Some { default; live }
       | Instructions _ | Mention_targets _ | Board_interests _ | Activation_mode _ -> None)
     overrides
 ;;

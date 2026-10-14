@@ -447,46 +447,50 @@ let override_field_source_json ~default_source_kind ~default_manifest_path overr
 
 type source_provenance =
   { overrides : Keeper_status_bridge_override.t list
-  ; active_config_root : string
-  ; active_config_root_source : string
+  ; live_meta_path : string
   ; default_manifest_path : string option
+  ; default_source_kind : string option
+  ; default_config_error : Keeper_types_profile.keeper_toml_config_error option
+  ; resolution : Config_dir_resolver.resolution
   }
 
 let source_provenance config (meta : keeper_meta) =
   let snapshot =
     keeper_default_source_snapshot ~base_path:config.Workspace.base_path meta.name
   in
-  let resolution =
-    Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path
-  in
   { overrides = live_override_details meta snapshot.defaults
-  ; active_config_root = resolution.config_root.path
-  ; active_config_root_source =
-      Config_dir_resolver.source_to_string resolution.config_root.source
+  ; live_meta_path = keeper_meta_path config meta.name
   ; default_manifest_path = snapshot.defaults.manifest_path
+  ; default_source_kind = snapshot.source_kind
+  ; default_config_error =
+      Option.map
+        (Keeper_types_profile.keeper_toml_config_error_of_load_error
+           ~keeper_name:meta.name)
+        snapshot.config_error
+  ; resolution =
+      Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path
   }
 ;;
 
+let active_config_root provenance = provenance.resolution.config_root.path
+
+let active_config_root_source provenance =
+  Config_dir_resolver.source_to_string provenance.resolution.config_root.source
+;;
+
 let source_provenance_json config (meta : keeper_meta) =
-  let snapshot =
-    keeper_default_source_snapshot ~base_path:config.Workspace.base_path meta.name
+  let provenance = source_provenance config meta in
+  let { overrides
+      ; live_meta_path
+      ; default_manifest_path
+      ; default_source_kind
+      ; default_config_error
+      ; resolution
+      }
+    =
+    provenance
   in
-  let override_details = live_override_details meta snapshot.defaults in
-  let override_fields =
-    List.map Keeper_status_bridge_override.field_name override_details
-  in
-  let resolution =
-    Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path
-  in
-  let live_meta_path = keeper_meta_path config meta.name in
-  let default_manifest_path = snapshot.defaults.manifest_path in
-  let default_source_kind = snapshot.source_kind in
-  let default_config_error =
-    Option.map
-      (Keeper_types_profile.keeper_toml_config_error_of_load_error
-         ~keeper_name:meta.name)
-      snapshot.config_error
-  in
+  let override_fields = List.map Keeper_status_bridge_override.field_name overrides in
   `Assoc
     ([ "live_meta_path", `String live_meta_path
      ; "live_meta", existing_path_json ~source:"runtime_overlay" live_meta_path
@@ -498,9 +502,8 @@ let source_provenance_json config (meta : keeper_meta) =
        , Json_util.option_to_yojson
            Keeper_types_profile.keeper_toml_config_error_to_json
            default_config_error )
-     ; "active_config_root", `String resolution.config_root.path
-     ; ( "active_config_root_source"
-       , `String (Config_dir_resolver.source_to_string resolution.config_root.source) )
+     ; "active_config_root", `String (active_config_root provenance)
+     ; "active_config_root_source", `String (active_config_root_source provenance)
      ; "config_resolution", Config_dir_resolver.to_json resolution
      ; "precedence", `List [ `String "live_meta"; `String "keeper_config" ]
      ]
@@ -510,6 +513,6 @@ let source_provenance_json config (meta : keeper_meta) =
          , `List
              (List.map
                 (override_field_source_json ~default_source_kind ~default_manifest_path)
-                override_details) )
+                overrides) )
        ])
 ;;

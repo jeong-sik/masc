@@ -99,13 +99,17 @@ val source_provenance_json :
 
 type source_provenance =
   { overrides : Keeper_status_bridge_override.t list
-  ; active_config_root : string
-  ; active_config_root_source : string
+  ; live_meta_path : string
   ; default_manifest_path : string option
+  ; default_source_kind : string option
+  ; default_config_error : Keeper_types_profile.keeper_toml_config_error option
+  ; resolution : Config_dir_resolver.resolution
   }
-(** The parts of {!source_provenance_json} a caller decides on: the fields
-    whose live value differs from the declared default, and where the
-    declared config came from. *)
+(** Where a Keeper's config comes from and which fields its live meta
+    overrides. {!source_provenance_json} renders this record. *)
 
 val source_provenance :
   Workspace_utils.config -> keeper_meta -> source_provenance
+
+val active_config_root : source_provenance -> string
+val active_config_root_source : source_provenance -> string

@@ -576,6 +576,25 @@ let test_referer_keeps_separate_url_grammar () =
    | Error error -> fail (Masc_domain.masc_error_to_string error))
 ;;
 
+let test_missing_origin_and_referer_names_masc_login () =
+  let request_authority = admitted_http1 [ "host", "localhost:8935" ] in
+  let request =
+    http1_request ~headers:[ "host", "localhost:8935" ] "/api/v1/dashboard/shell"
+  in
+  match
+    Server_auth.ensure_same_origin_browser_request ~request_authority request
+  with
+  | Ok () -> fail "expected Missing_token rejection when Origin and Referer are absent"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason = Missing_token; message })) ->
+    check
+      bool
+      "401 message guides operator to masc login"
+      true
+      (String_util.contains_substring message "masc login")
+  | Error error ->
+    fail ("unexpected error variant: " ^ Masc_domain.masc_error_to_string error)
+;;
+
 let test_wildcard_bind_keeps_internal_and_public_loopback_identities () =
   let policy =
     trust_policy
@@ -788,6 +807,10 @@ let () =
             "Referer keeps separate URL grammar"
             `Quick
             test_referer_keeps_separate_url_grammar
+        ; test_case
+            "missing Origin and Referer names masc login"
+            `Quick
+            test_missing_origin_and_referer_names_masc_login
         ; test_case
             "auth and CORS consume admitted authority"
             `Quick

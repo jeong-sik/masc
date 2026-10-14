@@ -1389,8 +1389,13 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
                 previous_inline:=false;
                 begin_block ~can_absorb_terminal:true line;
                 let language = fence_language line.source_text in
+                (* An alphatex tag may carry the rhythm word after the tag;
+                   the lexer picks by the tag's first word, the way the fence
+                   arm reads the whole header. *)
                 let lexer =
-                  Option.bind language lexer_of_language
+                  match language with
+                  | Some tag when is_alphatex_tag tag -> lexer_of_language "alphatex"
+                  | _ -> Option.bind language lexer_of_language
                 in
                 walk (Some (marker, language, lexer, line.source_start)) [] rest
             | None -> (

@@ -208,17 +208,19 @@ let test_the_rhythm_line_names_each_beat () =
       Alcotest.(check int) "the rhythm line is one more than the strings" 7
         (List.length lines);
       let rhythm = List.nth lines 6 in
+      (* One-letter tuning names give a lead of [name + bar] = two cells. *)
       Alcotest.(check bool) "the rhythm lead is blank, one wide as a line name" true
-        (String.length rhythm >= 7 && rhythm.[6] = '|');
-      Alcotest.(check char) "the first beat is a quarter" 'q' rhythm.[7];
-      Alcotest.(check char) "the second beat is a quarter" 'q' rhythm.[11];
-      Alcotest.(check char) "the third beat is an eighth" 'e' rhythm.[15];
-      Alcotest.(check char) "the fourth beat is an eighth" 'e' rhythm.[17];
-      Alcotest.(check bool) "no letter rides the string lines" true
+        (String.length rhythm >= 2 && rhythm.[0] = ' ' && rhythm.[1] = '|');
+      Alcotest.(check char) "the first beat is a quarter" 'q' rhythm.[2];
+      Alcotest.(check char) "the second beat is a quarter" 'q' rhythm.[6];
+      Alcotest.(check char) "the third beat is an eighth" 'e' rhythm.[10];
+      Alcotest.(check char) "the fourth beat is an eighth" 'e' rhythm.[12];
+      Alcotest.(check bool) "no letter rides the string lines' cells" true
         (List.for_all
            (fun line ->
-             not (List.exists (fun letter -> String.contains line letter) [ 'w'; 'h'; 'q'; 'e'; 's' ]))
-           (List.filteri (fun i -> i < 6) lines))
+             let cells = String.sub line 2 (String.length line - 2) in
+             not (List.exists (fun letter -> String.contains cells letter) [ 'w'; 'h'; 'q'; 'e'; 's' ]))
+           (List.filteri (fun i _ -> i < 6) lines))
 
 let test_the_rhythm_line_without_the_word_is_not_there () =
   let score = ":4 0.6 3.6 :8 5.6 3.6" in
@@ -234,19 +236,21 @@ let test_the_rhythm_line_without_the_word_is_not_there () =
       List.iter2
         (fun plain drawn ->
           Alcotest.(check string) "the default draws the same line" plain drawn)
-        without with_rhythm
+        without (List.filteri (fun i _ -> i < List.length without) with_rhythm)
 
 let test_the_rhythm_line_fills_between_beats () =
-  match Alphatex.render_tab ~rhythm:true ~max_width:60 ":1 0.6 3.6 5.6 3.6" with
+  (* [":1"] makes whole notes the default, so four beats fill 64 cells; the
+     pane is the full 80 so the measure fits and the letters can be read. *)
+  match Alphatex.render_tab ~rhythm:true ~max_width:80 ":1 0.6 3.6 5.6 3.6" with
   | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
   | Ok lines ->
       let rhythm = List.nth lines 6 in
-      Alcotest.(check char) "every whole beat says w at its first cell" 'w' rhythm.[7];
-      Alcotest.(check char) "the second whole beat too" 'w' rhythm.[23];
+      Alcotest.(check char) "every whole beat says w at its first cell" 'w' rhythm.[2];
+      Alcotest.(check char) "the second whole beat too" 'w' rhythm.[18];
       Alcotest.(check bool) "the letters are one per beat" true
         (String.for_all
            (fun c -> c = '-' || c = 'w' || c = '|' || c = ' ')
-           (String.sub rhythm 7 (String.length rhythm - 7)))
+           (String.sub rhythm 2 (String.length rhythm - 2)))
 
 let repeated_riff =
   "\\ro :4 0.6 3.6 5.6 3.6 | :8 5.6 3.6 :4 0.5 \\rc 2 | \\ae 1 :4 5.5 3.5 | \\ae 2 :4 5.5 \

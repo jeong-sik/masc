@@ -119,7 +119,7 @@ let draw_measure ~strings (measure : Score.measure) =
   List.iter
     (fun (beat : Score.beat) ->
       (match rhythm_letter beat with
-       | Some letter -> rows.(strings).[cells * beat.start] <- letter
+       | Some letter -> Bytes.set rows.(strings) (cells * beat.start) letter
        | None -> ());
       List.iter
         (fun (note : Score.note) ->

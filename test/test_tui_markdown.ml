@@ -409,8 +409,12 @@ let test_alphatex_rhythm_word_draws_the_rhythm_line () =
   let rhythm = render ~width:80 ("```alphatex rhythm\n" ^ score ^ "\n```") in
   Alcotest.(check bool) "the rhythm fence draws one more row" true
     (List.length rhythm = List.length plain + 1);
+  (* The header row says what the fence draws and names the rhythm, so it is
+     the one row allowed to differ; every drawn tab row is the same. *)
   Alcotest.(check bool) "the rhythm fence keeps the score's tab" true
-    (List.for_all (fun row -> contains ~part:row plain rhythm) plain)
+    (List.for_all
+       (fun row -> List.exists (String.equal row) rhythm)
+       (List.filter (fun row -> not (contains ~part:"악보" row)) plain))
 
 let test_alphatex_rhythm_word_survives_case_and_order () =
   let score = ":4 0.6 3.6" in

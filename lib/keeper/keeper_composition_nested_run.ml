@@ -113,8 +113,9 @@ let check_original_admissions run ~child_history =
     | Rejected error -> Error error
     | Not_attempted ->
       match history with
-      | Untouched_child -> Ok ()
-      | Admitted_child | Admission_unconfirmed -> Error (rejection
+      | Keeper_tool_execution_journal.Untouched_child -> Ok ()
+      | Keeper_tool_execution_journal.Admitted_child
+      | Keeper_tool_execution_journal.Admission_unconfirmed -> Error (rejection
           ~kind:"nested_original_activation_missing"
           ~detail:"Original child evidence requires its exact retained activation before result reuse."
           (Nested.call_to_json child.call))))) (Ok ()) run.children

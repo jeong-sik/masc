@@ -70,8 +70,11 @@ UUID, so discover and select it again.
 
 ## Setup: automation
 
-Set the geckodriver executable in the resolved configuration directory's
-`runtime.toml`, then restart MASC:
+`masc browser-lane-setup --mode automation` writes this for you. It names the
+`geckodriver` that `PATH` finds first, when it answers `--version` (`--geckodriver` names
+another; `--browser` writes `binary`), keeps values that are already there, and
+installs no host or extension. Or set the geckodriver executable in the resolved
+configuration directory's `runtime.toml` yourself, then restart MASC:
 
 ```toml
 [browser]

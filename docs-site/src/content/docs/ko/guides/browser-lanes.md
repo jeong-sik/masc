@@ -33,7 +33,7 @@ masc browser-lane-setup --mode bidi --base-path /path/to/workspace
 
 ## 설정: automation
 
-해석된 설정 디렉터리의 `runtime.toml`에 geckodriver 실행 파일 경로를 넣고 MASC를 재시작합니다.
+`masc browser-lane-setup --mode automation`이 이 설정을 써 줍니다. `PATH`가 처음 찾는 `geckodriver`가 `--version`에 답하면 그것을 쓰고(`--geckodriver`로 다른 것을, `--browser`로 `binary`를 지정), 이미 있는 값은 바꾸지 않으며 host와 확장은 설치하지 않습니다. 직접 하려면 해석된 설정 디렉터리의 `runtime.toml`에 geckodriver 실행 파일 경로를 넣고 MASC를 재시작합니다.
 
 ```toml
 [browser]

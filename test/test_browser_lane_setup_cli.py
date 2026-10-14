@@ -20,8 +20,8 @@ HOST = Path(sys.argv.pop(1)).resolve()
 EXTENSION_ID = "browser-lane@masc.local"
 
 
-def masc(root, *args):
-    environment = {"HOME": str(root / "home"), "PATH": "/usr/bin:/bin"}
+def masc(root, *args, path="/usr/bin:/bin"):
+    environment = {"HOME": str(root / "home"), "PATH": path}
     return subprocess.run([str(MASC), "browser-lane-setup", *args], env=environment,
                           capture_output=True, text=True)
 
@@ -56,6 +56,14 @@ def workspace(root, name="workspace"):
     runtime_toml(base).parent.mkdir(parents=True)
     runtime_toml(base).write_text(RUNTIME_TOML)
     return base
+
+
+def fake_geckodriver(root, directory=None):
+    path = (directory or root) / "geckodriver"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\necho 'geckodriver 0.0 (fixture)'\n")
+    path.chmod(0o755)
+    return path
 
 
 def fake_firefox(root):
@@ -197,9 +205,175 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(runtime_toml(base).read_text(), with_table)
         self.assertEqual((lane(base) / "token").read_text(), token)
 
+    # --mode automation: the geckodriver the server starts, and no host.
+    def test_automation_writes_the_geckodriver_and_installs_no_host(self):
+        root = self.scratch()
+        base = workspace(root)
+        driver = fake_geckodriver(root, root / "tools")
+        # No --binary: the lane needs no host to install.
+        result = masc(root, "--mode", "automation", "--base-path", str(base),
+                      path=f"{driver.parent}:/usr/bin:/bin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = runtime_toml(base).read_text()
+        self.assertTrue(text.startswith(RUNTIME_TOML), "what was there is kept, then the table follows")
+        self.assertIn("[browser.automation]", text.splitlines())
+        self.assertIn(f'geckodriver = "{driver}"', text.splitlines())
+        self.assertNotIn("binary", text)
+        self.assertFalse(lane(base).exists(), "no host, no token, no extension")
+        for directory in ("Library", ".mozilla"):
+            self.assertFalse((root / "home" / directory).exists(), "no manifest is registered")
+        self.assertIn("Restart the MASC server", result.stdout)
+        self.assertIn("no login is kept", result.stdout)
+        self.assertIn("Wrote [browser.automation] to", result.stdout)
+        # The extension lane's sentence ("install the host...") is not this
+        # lane's, and nothing here installs one.
+        self.assertNotIn("browser lane host is installed", result.stdout)
+        self.assertNotIn("Browser lane for", result.stdout)
+
+    def test_automation_edits_keys_where_the_file_already_has_them(self):
+        root = self.scratch()
+        base = workspace(root)
+        driver, other = fake_geckodriver(root, root / "one"), fake_geckodriver(root, root / "two")
+        browser = fake_firefox(root)
+        runtime_toml(base).write_text(RUNTIME_TOML + f'\n[browser]\ngeckodriver = "{driver}"\n')
+        result = masc(root, "--mode", "automation", "--base-path", str(base),
+                      "--browser", str(browser))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = runtime_toml(base).read_text()
+        self.assertNotIn("[browser.automation]", text.splitlines(), "no second spelling is added")
+        self.assertIn(f'geckodriver = "{driver}"', text.splitlines(), "the driver is kept")
+        self.assertIn(f'binary = "{browser}"', text.splitlines())
+        self.assertIn("Changed binary in [browser] of", result.stdout)
+        unchanged = masc(root, "--mode", "automation", "--base-path", str(base))
+        self.assertEqual(unchanged.returncode, 0, unchanged.stderr)
+        self.assertIn("was already there and is left as it is", unchanged.stdout)
+        changed = masc(root, "--mode", "automation", "--base-path", str(base),
+                       "--geckodriver", str(other))
+        self.assertEqual(changed.returncode, 0, changed.stderr)
+        self.assertIn(f'geckodriver = "{other}"', runtime_toml(base).read_text().splitlines())
+
+    def test_a_kept_geckodriver_that_is_gone_is_said_and_left_alone(self):
+        # A brew upgrade or a removed install leaves the old absolute path in
+        # runtime.toml while PATH finds a new geckodriver. The command keeps the
+        # value, and it used to say only that, with the server failing later.
+        root = self.scratch()
+        base = workspace(root)
+        gone = root / "removed" / "geckodriver"
+        fake_geckodriver(root, root / "new")
+        text = RUNTIME_TOML + f'\n[browser.automation]\ngeckodriver = "{gone}"\n'
+        runtime_toml(base).write_text(text)
+        result = masc(root, "--mode", "automation", "--base-path", str(base),
+                      path=f"{root / 'new'}:/usr/bin:/bin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("was already there and is left as it is", result.stdout)
+        self.assertIn(f"geckodriver = {gone} is not an executable file now", result.stdout)
+        self.assertIn("name --geckodriver to change it", result.stdout)
+        self.assertEqual(runtime_toml(base).read_text(), text, "the value is not changed")
+        named = masc(root, "--mode", "automation", "--base-path", str(base),
+                     "--geckodriver", str(root / "new" / "geckodriver"))
+        self.assertEqual(named.returncode, 0, named.stderr)
+        self.assertNotIn("is not an executable file now", named.stdout)
+
+    def test_automation_beside_bidi_writes_both_tables_and_one_host(self):
+        root = self.scratch()
+        base = workspace(root)
+        driver, firefox = fake_geckodriver(root), fake_firefox(root)
+        arguments = ("--mode", "automation", "--mode", "bidi", "--binary", str(HOST),
+                     "--base-path", str(base), "--geckodriver", str(driver),
+                     "--firefox", str(firefox), "--profile", str(root / "keeper profile"))
+        first = masc(root, *arguments)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        lines = runtime_toml(base).read_text().splitlines()
+        self.assertIn("[browser.automation]", lines)
+        self.assertIn("[browser.live.bidi]", lines)
+        self.assertTrue((lane(base) / "host/launch.json").is_file())
+        files = [runtime_toml(base), lane(base) / "host/launch", lane(base) / "token"]
+        before = [path.read_bytes() for path in files]
+        second = masc(root, *arguments)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual([path.read_bytes() for path in files], before)
+
+    def test_automation_that_cannot_be_planned_installs_nothing_for_the_other_route(self):
+        root = self.scratch()
+        base = workspace(root)
+        before = runtime_toml(base).read_text()
+        # No geckodriver on PATH (an empty directory is all there is) and none named.
+        empty = root / "empty path"
+        empty.mkdir()
+        result = masc(root, "--mode", "automation", "--mode", "bidi", "--binary", str(HOST),
+                      "--base-path", str(base), "--firefox", str(fake_firefox(root)),
+                      "--profile", str(root / "profile"), path=str(empty))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("No geckodriver answered", result.stderr)
+        self.assertFalse(lane(base).exists(), "the host was not installed first")
+        self.assertEqual(runtime_toml(base).read_text(), before)
+
+    def test_automation_options_are_refused_with_the_other_modes_and_the_reverse(self):
+        root = self.scratch()
+        base = workspace(root)
+        before = runtime_toml(base).read_text()
+        driver = fake_geckodriver(root)
+        for arguments, sentence in (
+            (("--mode", "automation", "--binary", str(HOST)), "--binary only applies with"),
+            (("--mode", "automation", "--token-file", str(root / "t")), "--token-file only applies"),
+            (("--mode", "automation", "--port", "9333"), "--port only applies with --mode bidi"),
+            (("--mode", "automation", "--firefox", str(driver)),
+             "--firefox only applies with --mode bidi"),
+            (("--mode", "automation", "--profile", str(root / "p")),
+             "--profile only applies with --mode bidi"),
+            (("--mode", "automation", "--manifest-dir", str(root / "m")),
+             "--manifest-dir only applies with --mode extension"),
+            (("--mode", "automation", "--host-name", "masc.other"),
+             "--host-name only applies with --mode extension"),
+            (("--mode", "bidi", "--geckodriver", str(driver)),
+             "--geckodriver only applies with --mode automation"),
+            (("--mode", "extension", "--browser", str(driver)),
+             "--browser only applies with --mode automation"),
+            (("--mode", "host", "--geckodriver", str(driver)), "--geckodriver only applies"),
+        ):
+            with self.subTest(arguments):
+                result = masc(root, "--base-path", str(base), *arguments)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(sentence, result.stderr)
+                self.assertFalse(lane(base).exists(), "nothing was installed")
+                self.assertEqual(runtime_toml(base).read_text(), before)
+
+    def test_a_named_geckodriver_with_a_space_after_it_is_refused_not_written_as_another_file(self):
+        root = self.scratch()
+        base = workspace(root)
+        before = runtime_toml(base).read_text()
+        driver = fake_geckodriver(root)
+        result = masc(root, "--mode", "automation", "--base-path", str(base),
+                      "--geckodriver", str(driver) + " ")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("--geckodriver must be an executable file", result.stderr)
+        self.assertEqual(runtime_toml(base).read_text(), before)
+
+    def test_a_geckodriver_that_answers_once_and_not_again_does_not_leave_a_half_install(self):
+        root = self.scratch()
+        base = workspace(root)
+        # A driver that answers --version the first time it is asked and exits 9
+        # after that: a run that asked again after writing would report a
+        # failure after the host and the bidi table were written.
+        # The marker sits beside the script: the scratch directory's name holds a
+        # quote, which a path written into the script would not survive.
+        driver = root / "tools" / "geckodriver"
+        driver.parent.mkdir()
+        driver.write_text('#!/bin/sh\nmarker="$(dirname "$0")/asked"\n'
+                          'if [ -e "$marker" ]; then exit 9; fi\n: > "$marker"\n'
+                          "echo 'geckodriver 0.0 (fixture)'\n")
+        driver.chmod(0o755)
+        result = masc(root, "--mode", "automation", "--mode", "bidi", "--binary", str(HOST),
+                      "--base-path", str(base), "--firefox", str(fake_firefox(root)),
+                      "--profile", str(root / "profile"), path=f"{driver.parent}:/usr/bin:/bin")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = runtime_toml(base).read_text().splitlines()
+        self.assertIn("[browser.automation]", lines)
+        self.assertIn("[browser.live.bidi]", lines)
+
     def test_a_mode_that_does_not_exist_is_refused(self):
         root = self.scratch()
-        result = masc(root, "--mode", "automation", "--base-path", str(root / "workspace"))
+        result = masc(root, "--mode", "everything", "--base-path", str(root / "workspace"))
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((root / "workspace").exists())
 

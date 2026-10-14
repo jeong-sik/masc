@@ -250,6 +250,34 @@ let test_a_relative_path_is_reported_by_its_absolute_path () =
 
 (* A shell searching PATH skips a file it may not execute, and so does the
    check: such a file is not a program, and a directory is not one either. *)
+(* Whether a program is there is a question the file answers. Asking it by
+   starting the program would run the operator's program to learn that it
+   exists, and a launcher may open a window. *)
+let test_locate_finds_a_program_without_starting_it () =
+  with_directory (fun dir ->
+    let marker = Filename.concat dir "was-run" in
+    let path =
+      write_program dir "geckodriver" (Printf.sprintf "#!/bin/sh\ntouch '%s'\n" marker)
+    in
+    check (option string) "an absolute path is located as written" (Some path) (B.locate path);
+    let inherited = Option.value (Sys.getenv_opt "PATH") ~default:"/usr/bin:/bin" in
+    with_env "PATH" (dir ^ ":" ^ inherited) (fun () ->
+      check (option string) "a name is located on PATH" (Some path) (B.locate "geckodriver"));
+    check bool "the program was not started" false (Sys.file_exists marker);
+    (* The same program started by probe does leave the marker: the check above
+       sees a start if there were one. *)
+    ignore (B.probe path);
+    check bool "probe starts it" true (Sys.file_exists marker))
+
+let test_locate_is_none_for_what_cannot_run () =
+  with_directory (fun dir ->
+    let plain = write_program ~mode:0o644 dir "geckodriver" "#!/bin/sh\necho x\n" in
+    let folder = Filename.concat dir "firefox" in
+    Unix.mkdir folder 0o700;
+    List.iter (fun candidate ->
+      check (option string) candidate None (B.locate candidate))
+      [ plain; folder; Filename.concat dir "absent"; "/nonexistent-dir/geckodriver"; "" ])
+
 let test_a_file_that_cannot_be_executed_is_missing () =
   with_directory (fun dir ->
     let plain = write_program ~mode:0o644 dir "geckodriver" "#!/bin/sh\necho x\n" in
@@ -635,6 +663,10 @@ let () = run "prerequisite actions" ["user-selected plans",[
     test_a_name_on_path_resolves_to_an_absolute_path;
   test_case "a relative path is reported by its absolute path" `Quick
     test_a_relative_path_is_reported_by_its_absolute_path;
+  test_case "locate finds a program without starting it" `Quick
+    test_locate_finds_a_program_without_starting_it;
+  test_case "locate is none for what cannot run" `Quick
+    test_locate_is_none_for_what_cannot_run;
   test_case "a file that cannot be executed is missing" `Quick
     test_a_file_that_cannot_be_executed_is_missing;
   test_case "the first program that answers ends the walk" `Quick

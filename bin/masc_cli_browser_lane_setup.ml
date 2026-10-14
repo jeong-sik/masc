@@ -1,8 +1,23 @@
 module Launcher = Masc.Browser_lane_launcher
 module Setup = Masc.Browser_lane_setup
 module Bidi_setup = Masc.Browser_lane_bidi_setup
+module Automation_setup = Masc.Browser_lane_automation_setup
 
-type mode = Launcher.route
+type mode = Extension | Bidi | Host | Automation
+
+let all_modes = [ Extension; Bidi; Host; Automation ]
+
+let mode_name = function
+  | Extension -> "extension"
+  | Bidi -> "bidi"
+  | Host -> "host"
+  | Automation -> "automation"
+
+(* The modes that install the host and its launcher. The automation lane has
+   neither: geckodriver is started by the server and opens a profile of its
+   own. *)
+let host_modes = [ Extension; Bidi; Host ]
+let installs_host modes = List.exists (fun mode -> List.mem mode modes) host_modes
 
 let refuse message =
   prerr_endline message;
@@ -39,22 +54,21 @@ let host_name = function
   | Some name ->
     Setup.Host_name.of_string name |> Result.map_error (fun message -> "--host-name: " ^ message)
 
-(* An option only some routes use. Naming one where no chosen route uses it is
+(* An option only some modes use. Naming one where no chosen mode uses it is
    refused: it would otherwise be accepted and do nothing. *)
 let misplaced ~modes options =
   List.find_map
-    (fun (flag, given, routes) ->
-       if given && not (List.exists (fun route -> List.mem route modes) routes)
+    (fun (flag, given, applies_to) ->
+       if given && not (List.exists (fun mode -> List.mem mode modes) applies_to)
        then
          Some
            (Printf.sprintf "%s only applies with %s." flag
-              (String.concat " or "
-                 (List.map (fun route -> "--mode " ^ Launcher.route_name route) routes)))
+              (String.concat " or " (List.map (fun mode -> "--mode " ^ mode_name mode) applies_to)))
        else None)
     options
 
 let extension_route ~modes ~manifest_dir ~host_name:requested =
-  if not (List.mem Launcher.Extension modes)
+  if not (List.mem Extension modes)
   then Ok None
   else
     let* host_name = host_name requested in
@@ -62,7 +76,7 @@ let extension_route ~modes ~manifest_dir ~host_name:requested =
     Ok (Some { Setup.manifest_dir; host_name })
 
 let bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port =
-  if not (List.mem Launcher.Bidi modes)
+  if not (List.mem Bidi modes)
   then Ok None
   else
     Bidi_setup.plan
@@ -75,6 +89,16 @@ let bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port =
       }
     |> Result.map Option.some
     |> Result.map_error Bidi_setup.error_message
+
+let automation_plan ~modes ~runtime_config_path ~geckodriver ~browser =
+  if not (List.mem Automation modes)
+  then Ok None
+  else
+    Automation_setup.plan
+      ~find_geckodriver:Automation_setup.installed_geckodriver
+      { Automation_setup.runtime_config_path; geckodriver; browser }
+    |> Result.map Option.some
+    |> Result.map_error Automation_setup.error_message
 
 let print_installed ~base_path (installed : Setup.installed) =
   Printf.printf "Installed the browser lane host for %s\n" base_path;
@@ -154,6 +178,46 @@ let print_bidi_state ~base_path ~runtime_config_path =
     (Masc.Browser_bidi_host_status.message
        (Masc.Browser_bidi_host_status.observe ~base_path ~configuration))
 
+let automation_key_names keys = String.concat ", " (List.map Automation_setup.key_name keys)
+
+let print_automation ~runtime_config_path plan =
+  let { Browser_configuration.driver; binary } = Automation_setup.table plan in
+  let where =
+    match Automation_setup.location plan with
+    | Automation_setup.New_table | Automation_setup.Automation_table -> "[browser.automation]"
+    | Automation_setup.Browser_table -> "[browser]"
+  in
+  print_endline "";
+  (match Automation_setup.change plan with
+   | Automation_setup.Created -> Printf.printf "Wrote %s to %s:\n" where runtime_config_path
+   | Automation_setup.Updated keys ->
+     Printf.printf "Changed %s in %s of %s:\n" (automation_key_names keys) where
+       runtime_config_path
+   | Automation_setup.Unchanged ->
+     Printf.printf
+       "%s in %s was already there and is left as it is. To change a value, name it with \
+        --geckodriver or --browser:\n"
+       where runtime_config_path);
+  Printf.printf "  geckodriver  %s\n" driver;
+  Printf.printf "  browser      %s\n"
+    (match binary with
+     | Some path -> path
+     | None -> "(geckodriver finds it)");
+  List.iter (Printf.printf "Note: %s\n") (Automation_setup.notes plan);
+  print_endline "";
+  print_endline "Next, for the automation lane:";
+  if not (Automation_setup.lane_enabled plan)
+  then
+    print_endline
+      "  [browser.automation] enabled = false in runtime.toml keeps the lane off, so the \
+       server starts no geckodriver. Turn it on first.";
+  print_endline
+    "  Restart the MASC server. It starts this geckodriver when it starts and stops it when \
+     it stops. A Keeper opens a session on a fresh profile, so no login is kept: this lane \
+     reads pages that need none.";
+  print_endline
+    "  A browser that needs a login is another route: --mode bidi or --mode extension."
+
 let print_host_only =
   "--mode host connects no browser: the host and its launcher are in place for one you \
    attach yourself. --mode extension loads the MASC extension in Firefox, and --mode bidi \
@@ -174,22 +238,34 @@ let install
       ~firefox
       ~profile
       ~port
+      ~geckodriver
+      ~browser
   =
+  (* Everything that can be refused is refused before the first write. *)
   let planned =
     let* extension = extension_route ~modes ~manifest_dir ~host_name in
     let* bidi = bidi_plan ~modes ~runtime_config_path ~firefox ~profile ~port in
-    Ok (extension, bidi)
+    let* automation = automation_plan ~modes ~runtime_config_path ~geckodriver ~browser in
+    Ok (extension, bidi, automation)
   in
   match planned with
   | Error message -> refuse message
-  | Ok (extension, bidi) ->
-    (match Setup.install { Setup.base_path; binary; token_file; extension } with
-     | Error error -> refuse (Setup.error_message error)
+  | Ok (extension, bidi, automation) ->
+    (* The host first: the server starts nothing for a lane that is not
+       installed, so a table whose host is installed is what a later failure
+       leaves, never a table with no lane. The automation lane has no host. *)
+    let installed =
+      if installs_host modes
+      then
+        Setup.install { Setup.base_path; binary; token_file; extension }
+        |> Result.map Option.some
+        |> Result.map_error Setup.error_message
+      else Ok None
+    in
+    (match installed with
+     | Error message -> refuse message
      | Ok installed ->
-       print_installed ~base_path installed;
-       (* The table is written after the lane: the server starts nothing for a
-          lane that is not installed, and a table whose host is installed is
-          the order a failure leaves harmless. *)
+       Option.iter (print_installed ~base_path) installed;
        let tabled =
          match bidi with
          | None -> Ok None
@@ -201,25 +277,58 @@ let install
        (match tabled with
         | Error message -> refuse message
         | Ok tabled ->
-          Option.iter print_extension_steps installed.extension;
-          Option.iter
-            (fun (plan, applied) ->
-               print_table ~runtime_config_path plan applied;
-               print_bidi_steps plan)
-            tabled;
-          if modes = [ Launcher.Host ] then (print_endline ""; print_endline print_host_only);
-          if List.mem Launcher.Extension modes && List.mem Launcher.Bidi modes
-          then (print_endline ""; print_endline print_both_routes);
-          print_endline "";
-          if Option.is_some installed.extension || List.mem Launcher.Host modes
-          then print_lane_state ~base_path;
-          if Option.is_some tabled then print_bidi_state ~base_path ~runtime_config_path;
-          0))
+          (* Both tables were planned against the same runtime.toml. The bidi
+             table has been written since, so the automation plan would be
+             refused as stale: it keeps its decisions and takes the revision of
+             what the file holds now. Nothing is looked for or run again, and
+             it is refused here only if that file no longer takes the edit. *)
+          let automation =
+            match bidi, automation with
+            | Some _, Some plan ->
+              Automation_setup.replan plan
+              |> Result.map Option.some
+              |> Result.map_error Automation_setup.error_message
+            | None, _ | _, None -> Ok automation
+          in
+          (match
+             Result.bind automation (fun plan ->
+               match plan with
+               | None -> Ok None
+               | Some plan ->
+                 Automation_setup.apply plan
+                 |> Result.map (fun () -> Some plan)
+                 |> Result.map_error Automation_setup.error_message)
+           with
+           | Error message -> refuse message
+           | Ok automation ->
+             Option.iter
+               (fun (installed : Setup.installed) ->
+                  Option.iter print_extension_steps installed.extension)
+               installed;
+             Option.iter
+               (fun (plan, applied) ->
+                  print_table ~runtime_config_path plan applied;
+                  print_bidi_steps plan)
+               tabled;
+             Option.iter (print_automation ~runtime_config_path) automation;
+             if modes = [ Host ] then (print_endline ""; print_endline print_host_only);
+             if List.mem Extension modes && List.mem Bidi modes
+             then (print_endline ""; print_endline print_both_routes);
+             let extension_written =
+               match installed with
+               | Some { Setup.extension = Some _; _ } -> true
+               | Some { Setup.extension = None; _ } | None -> false
+             in
+             if extension_written || List.mem Host modes
+             then (print_endline ""; print_lane_state ~base_path);
+             if Option.is_some tabled
+             then (print_endline ""; print_bidi_state ~base_path ~runtime_config_path);
+             0)))
 
 let run
       ~base_path
       ~runtime_config_path
-      ~modes
+      ~modes:requested
       ~binary
       ~token_file
       ~manifest_dir
@@ -227,19 +336,22 @@ let run
       ~firefox
       ~profile
       ~port
+      ~geckodriver
+      ~browser
   =
-  let modes = List.filter (fun route -> List.mem route modes) Launcher.routes in
-  let both = Launcher.routes in
+  let modes = List.filter (fun mode -> List.mem mode requested) all_modes in
   match
     misplaced
       ~modes
-      [ "--binary", Option.is_some binary, both
-      ; "--token-file", Option.is_some token_file, both
-      ; "--manifest-dir", Option.is_some manifest_dir, [ Launcher.Extension ]
-      ; "--host-name", Option.is_some host_name, [ Launcher.Extension ]
-      ; "--firefox", Option.is_some firefox, [ Launcher.Bidi ]
-      ; "--profile", Option.is_some profile, [ Launcher.Bidi ]
-      ; "--port", Option.is_some port, [ Launcher.Bidi ]
+      [ "--binary", Option.is_some binary, host_modes
+      ; "--token-file", Option.is_some token_file, host_modes
+      ; "--manifest-dir", Option.is_some manifest_dir, [ Extension ]
+      ; "--host-name", Option.is_some host_name, [ Extension ]
+      ; "--firefox", Option.is_some firefox, [ Bidi ]
+      ; "--profile", Option.is_some profile, [ Bidi ]
+      ; "--port", Option.is_some port, [ Bidi ]
+      ; "--geckodriver", Option.is_some geckodriver, [ Automation ]
+      ; "--browser", Option.is_some browser, [ Automation ]
       ]
   with
   | Some message -> refuse message
@@ -257,4 +369,6 @@ let run
          ~host_name
          ~firefox
          ~profile
-         ~port)
+         ~port
+         ~geckodriver
+         ~browser)

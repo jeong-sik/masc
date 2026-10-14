@@ -21,6 +21,9 @@ masc browser-lane-setup --mode extension --base-path /path/to/workspace
 Automation은 resolved configuration directory의 `runtime.toml`에 geckodriver
 실행 파일 경로를 적고 MASC를 재시작한다. 서버가 그 geckodriver를 빈 loopback
 포트로 직접 띄우고, 서버가 끝날 때 같이 내린다.
+`masc browser-lane-setup --mode automation` 이 이 표를 쓴다. 이미 있는 값은 바꾸지
+않고(있던 자리 `[browser.automation]` 또는 `[browser]` 에서 고친다), host 와 확장은
+설치하지 않는다.
 
 ```toml
 [browser.automation]

@@ -2212,8 +2212,8 @@ let browser_lane_setup_cmd =
       & opt_all
           (enum
              (List.map
-                (fun route -> Masc.Browser_lane_launcher.route_name route, route)
-                Masc.Browser_lane_launcher.routes))
+                (fun mode -> Masc_cli_browser_lane_setup.mode_name mode, mode)
+                Masc_cli_browser_lane_setup.all_modes))
           []
       & info
           [ "mode" ]
@@ -2223,9 +2223,10 @@ let browser_lane_setup_cmd =
              MASC extension for Firefox to load; bidi installs the host and writes the \
              [browser.live.bidi] table so the MASC server starts a Firefox of its own; \
              host installs the host and its launcher only, for a browser you attach \
-             yourself or to bring an installed lane's host up to date. Give it twice \
-             for two. Without a mode nothing is written and the current state is \
-             printed.")
+             yourself or to bring an installed lane's host up to date; automation writes \
+             the geckodriver the server starts for the lane that opens a fresh profile \
+             per session and keeps no login. Give it more than once for more than one. \
+             Without a mode nothing is written and the current state is printed.")
   in
   let binary =
     Arg.(
@@ -2308,6 +2309,30 @@ let browser_lane_setup_cmd =
              written and the server uses 9222. An existing table keeps its value unless \
              this is given.")
   in
+  let geckodriver =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "geckodriver" ]
+          ~docv:"FILE"
+          ~doc:
+            "With --mode automation, the geckodriver executable, an absolute path. By \
+             default the geckodriver PATH finds first, if it answers --version. A \
+             configuration that is already there keeps its value unless this is given.")
+  in
+  let browser =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "browser" ]
+          ~docv:"FILE"
+          ~doc:
+            "With --mode automation, the browser executable geckodriver launches (the \
+             binary key), an absolute path. Written only when named: geckodriver finds \
+             Firefox itself.")
+  in
   Cmd.v
     (Cmd.info
        "browser-lane-setup"
@@ -2324,20 +2349,26 @@ let browser_lane_setup_cmd =
              "Installing again replaces the host, launcher, manifest and extension files \
               and keeps the workspace's lane token."
          ; `P
+             "--mode automation writes the geckodriver of the lane that opens a fresh \
+              profile per session ([browser.automation], or the keys where they already \
+              are) and installs no host. It keeps no login."
+         ; `P
              "--mode bidi writes [browser.live.bidi] into runtime.toml without touching \
               its comments or other tables. A table that is already there keeps its \
               values, because its profile holds the logins; a value changes only when it \
               is named. The server reads the table when it starts."
          ])
     Term.(
-      const (fun base_path modes binary token_file manifest_dir host_name firefox profile port ->
+      const (fun base_path modes binary token_file manifest_dir host_name firefox profile port
+                  geckodriver browser ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
           ~base_path
           (* The file the server and masc doctor read: it honors MASC_CONFIG_DIR,
              which the helper the other setup commands use does not. *)
           ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
-          ~modes ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile ~port)
+          ~modes ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile ~port
+          ~geckodriver ~browser)
       $ base_path
       $ modes
       $ binary
@@ -2346,7 +2377,9 @@ let browser_lane_setup_cmd =
       $ host_name
       $ firefox
       $ profile
-      $ port)
+      $ port
+      $ geckodriver
+      $ browser)
 
 let voice_local_setup_cmd =
   let voice =

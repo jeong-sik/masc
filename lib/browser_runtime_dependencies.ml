@@ -56,8 +56,10 @@ let absolute path =
     | exception Sys_error _ -> None)
 
 (* The file a name resolves to, as {!Executable_path} decides what counts as a
-   search directory: an empty entry is not the current directory. *)
-let resolve command =
+   search directory: an empty entry is not the current directory. Nothing is
+   started: {!probe} runs what this finds, and a caller that only asks whether
+   a program is there reads this instead. *)
+let locate command =
   let command = String.trim command in
   if String.equal command ""
   then None
@@ -78,7 +80,7 @@ let resolve command =
     Option.bind found absolute)
 
 let probe command =
-  match resolve command with
+  match locate command with
   | None -> Missing command
   | Some path ->
     let status, stdout, stderr =

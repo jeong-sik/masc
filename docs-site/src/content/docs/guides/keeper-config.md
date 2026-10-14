@@ -1,0 +1,125 @@
+---
+title: Keeper Runtime Configuration
+description: User guide for tool_approval_timeout_sec, keeper_memory_select, and workspace memory metrics gauges.
+---
+
+## (a) Overview / 한 줄 요약
+
+This guide details configuration settings for tuning human-in-the-loop (HITL) tool approval timeouts, enabling the purpose-driven `keeper_memory_select` tool, and observing workspace memory briefing and claim growth through OpenTelemetry (OTLP) metrics gauges.
+
+Keeper 런타임의 인간 개입(HITL) 도구 승인 대기 시간 조절, 목적 기반 장기 기억 선별 도구(`keeper_memory_select`) 활성화, 워크스페이스 메모리 관측 게이지 메트릭을 설정하고 제어하는 가이드입니다.
+
+---
+
+## (b1) Enabling: Settings & Environment Variables / 켜는 법: 설정 이름
+
+### 1. Tool Approval Timeout (`tool_approval_timeout_sec`)
+Controls the duration the runtime waits for an operator's approval when a Keeper invokes a sensitive tool protected by the Gate.
+
+- **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
+  ```toml
+  [keeper.hitl]
+  tool_approval_timeout_sec = 300  # Default: 180 seconds. Clamped between 5 and 3600.
+  ```
+- **Environment Variable**:
+  ```bash
+  export MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC=300
+  ```
+
+### 2. Purpose-Driven Memory Selection (`keeper_memory_select`)
+Enables the `keeper_memory_select` tool, allowing Keepers to retrieve verified current ordinary and source-bound memory facts relevant to an explicit decision context.
+
+- **TOML Setting**: `<base-path>/.masc/config/runtime.toml`
+  ```toml
+  [typesafeai]
+  workspace_memory_selection_enabled = true  # Default: false
+  # excluded_keepers = ["some-keeper"]       # Optional exclusion list
+  ```
+
+### 3. Workspace Memory Observation Gauges (`gauge`)
+Tracks briefing size and classified ledger claim count to prevent unbounded memory growth.
+
+- **Metric Names**:
+  - `masc_keeper_workspace_memory_briefing_bytes`: Current byte size of the published shared workspace briefing summary body.
+  - `masc_keeper_workspace_memory_ledger_claims`: Total count of active classified memory claims in the shared ledger.
+- **Activation**: Automatically collected at the `Workspace_memory_ledger.observe` boundary during both direct owner turns and unified wake turns. No configuration needed.
+
+### Key Code & Module Coordinates
+- `lib/keeper/keeper_config.ml` and `lib/keeper/keeper_config.mli`: HITL configuration parser and validation clamping (`tool_approval_timeout_sec`).
+- `lib/typesafeai/typesafeai_config.ml` & `lib/runtime/runtime_schema.ml`: `workspace_memory_selection_enabled` flag.
+- `lib/keeper/keeper_workspace_memory_observation_metrics.ml`: Unlabeled gauge series definitions and update logic (`record`).
+- `lib/keeper/keeper_turn.ml` & `lib/keeper/keeper_unified_turn.ml`: Turn observation hook boundaries.
+
+---
+
+## (b2) Activation Conditions & Diagnostic Behavior / 켜지는 조건과 실패 증상
+
+### Conditions
+- **Tool Approval Timeout**:
+  - Triggered whenever a Keeper turn generates an effect requiring Gate authorization (`intent = "request_effect"`).
+  - Clamping: Any value below 5s is clamped to 5s; any value above 3600s is clamped to 3600s.
+- **Memory Selection Tool**:
+  - Requires `workspace_memory_selection_enabled = true`, an armed destination, and that the calling Keeper is not in `excluded_keepers`.
+  - Revalidates underlying source-bound file bytes before returning claims.
+- **Metrics Gauges**:
+  - Emitted whenever a Keeper turn completes an observation pass.
+  - Unlabeled single series: Both metrics publish exactly one global series for the workspace rather than proliferating per-Keeper copies.
+
+### Failure Symptoms & Diagnostics
+- **Approval Timeout Expiry**: When the timeout expires before operator decision, the tool call fails with a `timed_out` rejection. If the operator approves later, the response is routed to the late-approval journal rather than resurrecting the expired turn.
+- **Memory Select Rejection**: If `workspace_memory_selection_enabled = false`, calling `keeper_memory_select` fails immediately with `workflow_rejection`.
+- **Missing Briefing Gauge Retention**: If the shared briefing is temporarily missing or unreadable, the gauge retains its last measured size rather than erroneously dropping to 0 bytes.
+
+---
+
+## (c) Runnable Examples / 실행 예시
+
+### 1. Configuration in `runtime.toml`
+```toml
+# Append to .masc/config/runtime.toml
+
+[keeper.hitl]
+# Set operator approval wait window to 5 minutes
+tool_approval_timeout_sec = 300
+
+[typesafeai]
+# Enable purpose-based memory selection
+workspace_memory_selection_enabled = true
+```
+
+### 2. Environment Variable Override
+```bash
+# Launch server with custom approval timeout
+export MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC=600
+dune exec --root . masc -- start --port 8935
+```
+
+### 3. Exporting Memory Gauges via OpenTelemetry (OTLP)
+The gauges are stored in `Otel_metric_store` and pushed via OpenTelemetry OTLP on each collector tick (`lib/otel_metrics/otel_metrics.mli`, `lib/otel_spans/otel_config.mli`; the legacy `/metrics` scrape route was retired in RFC-0217 S4-2):
+```bash
+# Enable OTel export to a local OTLP HTTP collector (defaults to http://127.0.0.1:4318)
+export MASC_OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:4318"
+dune exec --root . masc -- start --port 8935
+
+# Exported gauge series names in OTLP metric batches:
+# - masc_keeper_workspace_memory_briefing_bytes (Gauge, unlabeled)
+# - masc_keeper_workspace_memory_ledger_claims (Gauge, unlabeled)
+```
+
+---
+
+## (d) Disabling & Reverting / 끄는 법 및 되돌리는 법
+
+- **Reset Approval Timeout**: Remove `tool_approval_timeout_sec` or unset `MASC_KEEPER_TOOL_APPROVAL_TIMEOUT_SEC` to restore the 180s default.
+- **Disable Memory Select**: Set `workspace_memory_selection_enabled = false` in `[typesafeai]`.
+- **Metrics**: The metrics gauges are zero-overhead observation probes built into the turn pipeline and require no deactivation.
+
+---
+
+## (e) Experimental Status & Known Limitations / 실험 표시 및 알려진 한계
+
+- **Status**: Stable in v0.52.0+.
+- **Silent Clamping**: Setting `tool_approval_timeout_sec` outside 5–3600 seconds silently clamps the value without raising a configuration error.
+- **Provenance Verification Latency**: When `keeper_memory_select` is called in workspaces with large numbers of source-bound facts, file hash revalidation across local worktrees may introduce slight turn latency.
+- **Unlabeled Aggregation**: Gauges reflect workspace-level totals; individual Keeper attribution is not tracked in the metric series to avoid high-cardinality leakage.

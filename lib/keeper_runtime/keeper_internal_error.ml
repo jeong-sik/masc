@@ -352,7 +352,7 @@ and masc_internal_error =
 let masc_internal_error_prefix = "[masc_agent_core_error] "
 let runtime_runner_execute_site = "runtime_runner.execute"
 
-(* #9933: a keeper [blocker_info] detail string may carry a structured
+(* #9933: a keeper failure detail string may carry a structured
    [masc_agent_core_error] JSON payload — [masc_internal_error_prefix] above,
    possibly wrapped by Agent_core.Error.to_string's "Internal error: ".
    Truncating it at the narrative budget slices the JSON mid-key, so
@@ -361,8 +361,8 @@ let runtime_runner_execute_site = "runtime_runner.execute"
    payload that begins with the prefix up to
    [blocker_detail_structured_max_chars] and truncates plain narrative text
    to [blocker_detail_narrative_max_chars]. Idempotent. Applied where the
-   runtime builds a blocker detail string
-   (keeper_unified_metrics_failure). *)
+   failure route builds its detail string
+   ([Keeper_runtime_failure_route.failure_detail]). *)
 let blocker_detail_narrative_max_chars = 200
 
 (* ~2000 chars fit the small variants whole. Two do not fit reliably: a

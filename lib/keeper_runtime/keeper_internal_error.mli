@@ -234,7 +234,7 @@ val blocker_detail_structured_max_chars : int
     by {!cap_blocker_detail}. *)
 
 val cap_blocker_detail : string -> string
-(** [cap_blocker_detail s] bounds a keeper [blocker_info] detail string: a
+(** [cap_blocker_detail s] bounds a keeper failure detail string: a
     structured payload beginning with [masc_internal_error_prefix] (#9933) is
     preserved up to {!blocker_detail_structured_max_chars}; plain narrative
     text is truncated to the narrative budget (~200). Idempotent. *)

@@ -150,21 +150,6 @@ let runtime_exhaustion_summary = function
     "Runtime exhausted; inspect runtime attempts for the dominant root cause."
 ;;
 
-(* ── Unified blocker_info: typed klass + free-form detail ───────
-   Replaces the historic split blocker fields. The string-only field was used
-   by substring classifiers to recover a typed class — exactly the workaround
-   pattern called out in CLAUDE.md
-   "워크어라운드 거부 기준 #2 String/Substring 분류기 보강". Making
-   [blocker_class] the only authoritative class eliminates that recovery path;
-   [detail] carries free-form context for UI / Otel_metric_store labels (no
-   classification semantics). *)
-type blocker_info = {
-  klass : blocker_class;
-  detail : string;
-}
-
-let blocker_info_of_class ?(detail = "") klass = { klass; detail }
-
 type runtime_attempt_record =
   { provider_id : string
   ; http_status : int option

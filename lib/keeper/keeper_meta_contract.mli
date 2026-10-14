@@ -131,26 +131,6 @@ val blocker_class_of_serialized_string :
     {!Keeper_meta_json_parse} to decode persisted blocker
     state. *)
 
-(** {1 Unified blocker_info} *)
-
-type blocker_info = {
-  klass : blocker_class;
-  detail : string;
-}
-(** Authoritative blocker representation: a typed [blocker_class]
-    paired with optional free-form [detail] (UI / Otel_metric_store label).
-    Replaces the deprecated split blocker fields, so substring
-    classification is no longer load-bearing for persisted keeper_meta.
-    When there is no
-    blocker, the runtime state holds [None]; when there is a blocker,
-    [klass] is always populated and [detail] may be ["" ]. *)
-
-val blocker_info_of_class :
-  ?detail:string -> blocker_class -> blocker_info
-(** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
-    for [klass].  [detail] defaults to [""]. *)
-
-
 (** {1 Runtime attempt provenance} *)
 
 type runtime_attempt_record = {

@@ -1,6 +1,6 @@
 (* test/test_cap_blocker_structured_error.ml
 
-   #9933: a blocker_info detail must preserve structured masc_agent_core_error
+   #9933: a keeper failure detail must preserve structured masc_agent_core_error
    JSON payloads. The pre-fix behaviour truncated at the narrative cap,
    slicing payloads like
    "Internal error: [masc_agent_core_error] {\"kind\":\"provider_timeout\",\

@@ -15,12 +15,13 @@ include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
 type declared_lane_failure =
-  | Provider_context_overflow of { limit_tokens : int option }
+  | Provider_context_overflow
   | Declared_runtime_lane_exhausted
 
 (* Only the context-window axis classifies as [Provider_context_overflow]:
-   the blocker below publishes the [Agent_core_context_window_exceeded] class,
-   which would be wrong for a declared-byte refusal. *)
+   that branch below publishes the cascade reason and the execution-error
+   phase [provider_context_overflow], which would be wrong for a
+   declared-byte refusal. *)
 (* How this lane continues after a failed turn. It restarts its cycle: the next
    cycle is a new turn, and a hint that named the path this one failed on would
    become [turn_state.deferred_runtime_lane] below, replacing the next cycle's
@@ -31,21 +32,10 @@ let lane_retry_continuation = Keeper_turn_driver.Restart_cycle
 
 let declared_lane_failure_of_error err =
   match capacity_refusal_of_error err with
-  | Some (Provider_context_window { limit_tokens }) ->
-    Provider_context_overflow { limit_tokens }
+  | Some (Provider_context_window _) -> Provider_context_overflow
   | Some (Provider_request_body_refusal _)
   | None -> Declared_runtime_lane_exhausted
 
-(* [context_overflow_detected(limit=N)] is a durable string in operator blocker
-   history, not a rendering of any current type. Rows written years apart are
-   read with the same grep, so the shape is fixed here and changing it splits
-   that history. *)
-let context_overflow_blocker_label ~limit_tokens =
-  Printf.sprintf
-    "context_overflow_detected(limit=%s)"
-    (match limit_tokens with
-     | Some n -> string_of_int n
-     | None -> "?")
 
 let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
   match before_dispatch_authority () with
@@ -445,32 +435,19 @@ let run (ctx : ctx)
         Error err, turn_state
       | None ->
         (match declared_lane_failure_of_error err with
-         | Provider_context_overflow { limit_tokens } ->
+         | Provider_context_overflow ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:initial_execution.runtime_id
             ~reason:"provider_context_overflow"
             ~error_kind:(Some Agent_core.Error.(category err |> category_label))
             ~error_message:(Some (Agent_core.Error.to_string err));
-          let current_turn_event_bus =
+          (* Pull the events published before the overflow. The drain moves
+             the tool-call FSM and the registry's pending tool count; its
+             summary is merged into the turn total that the finalize drain
+             returns, so the value here is not needed. *)
+          let (_ : Keeper_turn_runtime_budget.turn_event_bus_summary) =
             drain_turn_event_bus ~site:"context_overflow_capture" ()
-          in
-          let overflow_evidence_detail =
-            turn_event_bus_evidence_detail current_turn_event_bus
-          in
-          let turn_state =
-            { turn_state with
-              current_turn_blocker_info =
-                Some
-                  (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:
-                       (context_overflow_blocker_label ~limit_tokens
-                        ^ ": "
-                        ^ overflow_evidence_detail
-                        ^ ": "
-                        ^ Agent_core.Error.to_string err)
-                     Agent_core_context_window_exceeded)
-            }
           in
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string Agent_coreExecutionErrors)
@@ -594,7 +571,7 @@ let run (ctx : ctx)
 
 module For_testing = struct
   type nonrec declared_lane_failure = declared_lane_failure =
-    | Provider_context_overflow of { limit_tokens : int option }
+    | Provider_context_overflow
     | Declared_runtime_lane_exhausted
 
   let declared_lane_failure_of_error = declared_lane_failure_of_error

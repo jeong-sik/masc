@@ -23,7 +23,6 @@ type runtime_attempt_error =
 type turn_state =
   { cycle_completed : bool
   ; manifest_seq : int
-  ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
   (* The verdict the turn's receipt recorded, carried up from
      [Keeper_agent_result.turn_settlement] so the decision record reports what

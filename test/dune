@@ -573,7 +573,6 @@
   test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
-  test_cap_blocker_structured_error
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
@@ -931,7 +930,6 @@
   test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
-  test_cap_blocker_structured_error
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot

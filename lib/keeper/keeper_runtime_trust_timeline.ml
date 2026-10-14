@@ -12,17 +12,7 @@ let json_string_opt_value = function
 
 let json_bool_opt_member key json = Json_util.get_bool json key
 
-let assoc_bool_default key ~default fields =
-  match List.assoc_opt key fields with
-  | Some (`Bool value) -> value
-  | _ -> default
-
 let json_string_list_member = Json_util.json_string_list_member
-
-let assoc_string_opt key fields =
-  match List.assoc_opt key fields with
-  | Some (`String value) when String.trim value <> "" -> Some value
-  | _ -> None
 
 let take = List.take
 

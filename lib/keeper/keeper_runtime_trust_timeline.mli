@@ -8,11 +8,6 @@ val json_string_opt_member : string -> Yojson.Safe.t -> string option
 
 val json_bool_opt_member : string -> Yojson.Safe.t -> bool option
 
-val assoc_bool_default :
-  string -> default:bool -> (string * Yojson.Safe.t) list -> bool
-
-val assoc_string_opt : string -> (string * Yojson.Safe.t) list -> string option
-
 val take : int -> 'a list -> 'a list
 
 val goal_ids_of_json : Yojson.Safe.t -> string list

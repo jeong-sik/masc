@@ -79,11 +79,24 @@ type approval_queue_attention =
   | Approval_queue_ready of int
   | Approval_queue_unavailable of Keeper_approval_queue_result.storage_error
 
-val attention_fields_json_with_approval_queue :
+type attention =
+  { needs_attention : bool
+  ; attention_reason : string option
+  ; next_human_action : string option
+  }
+(** Whether an operator should look at this Keeper, why, and what to do
+    first. {!attention_fields_json} carries the same three as its first
+    fields. *)
+
+val attention_of_surface :
   Workspace_utils.config ->
   keeper_meta ->
+  runtime_blocker_surface option ->
   approval_queue_attention ->
-  (string * Yojson.Safe.t) list
+  attention
+(** The attention for a blocker already read with
+    {!runtime_blocker_surface_opt}, so a caller that also shows the blocker
+    reads it once. *)
 
 val attention_fields_json :
   Workspace_utils.config -> keeper_meta -> (string * Yojson.Safe.t) list

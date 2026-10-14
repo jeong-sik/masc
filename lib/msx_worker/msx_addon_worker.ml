@@ -34,28 +34,30 @@ let screen ~tool_name ~start_time ~arguments =
             "width", `Int frame.width; "height", `Int frame.height;
             "media_type", `String "image/png"] (Ok observation))
 
-let invoke ~base_path ~principal ~name ~arguments =
+let invoke ~base_path ~principal ~(tool : Machine.tool) ~arguments =
   let actor = match principal with
     | Lane_addon_call_context.Keeper name | Authenticated_agent name | Host_actor name -> name
     | Operator | Anonymous -> Lane_addon_call_context.actor_label principal in
+  let name = Machine.tool_name tool in
   let start_time = Tool_timing.start () in
-  if String.equal name "masc_msx_screen" then screen ~tool_name:name ~start_time ~arguments
-  else if String.equal name "masc_msx_step" && Tool_args.get_bool arguments "include_frame" false then
+  let asks_for_pixels = match arguments with
+    | `Assoc fields -> List.mem_assoc "pixel_response" fields || List.mem_assoc "known_pixels" fields
+    | _ -> false in
+  match tool with
+  | Machine.Msx_screen -> screen ~tool_name:name ~start_time ~arguments
+  | Machine.Msx_step when Tool_args.get_bool arguments "include_frame" false ->
     response (Msx_worker_frame.step ~arguments)
-  else if String.equal name "masc_msx_step" &&
-      (match arguments with `Assoc fields -> List.mem_assoc "pixel_response" fields || List.mem_assoc "known_pixels" fields | _ -> false) then
+  | Machine.Msx_step when asks_for_pixels ->
     response (Tool_result.make_err ~tool_name:name ~start_time
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
       "pixel_response and known_pixels require include_frame=true")
-  else
+  | Machine.(Msx_load | Msx_eject | Msx_save | Msx_restore | Msx_export_disk | Msx_change_disk
+            | Msx_meta | Msx_checkpoint_info | Msx_press | Msx_step | Msx_step_until_change
+            | Msx_peek | Msx_ram_diff) ->
     let events = ref [] in
     let relay ~author content =
       events := `Assoc ["author", `String author; "content", `String content] :: !events in
-    let tool_name = name in
-    let result = match Machine.dispatch ~relay ~base_path ~agent:actor ~name ~arguments with
-      | Some result -> result
-      | None -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
-          ~effect_disposition:Tool_result.Proven_pre_effect "Unknown MSX worker tool" in
+    let result = Machine.dispatch ~relay ~base_path ~agent:actor ~tool ~arguments in
     let result = match !events with
       | [] -> result
       | events ->
@@ -105,16 +107,14 @@ let observation history () =
           "complete", `Bool true; "detail", `Null]]])
 
 let schemas () =
-  ["masc_msx_load"; "masc_msx_eject"; "masc_msx_save"; "masc_msx_restore";
-   "masc_msx_export_disk"; "masc_msx_change_disk"; "masc_msx_screen"; "masc_msx_meta";
-   "masc_msx_checkpoint_info"; "masc_msx_press"; "masc_msx_step";
-   "masc_msx_step_until_change"; "masc_msx_peek"; "masc_msx_ram_diff"]
-  |> List.map (fun name ->
+  Machine.all_of_tool
+  |> List.map (fun tool ->
+      let name = Machine.tool_name tool in
       match Embedded_config.read ("tools/" ^ name ^ ".toml") with
       | None -> invalid_arg ("missing MSX tool definition: " ^ name)
       | Some contents ->
           match Tool_definition_toml.load ~name ~contents with
-          | Ok definition -> definition.Tool_definition_toml.schema
+          | Ok definition -> tool, definition.Tool_definition_toml.schema
           | Error message -> invalid_arg message)
 
 let definition (schema : Masc_domain.tool_schema) =
@@ -126,7 +126,7 @@ let create ~base_path () =
   let history = Machine_input_history.create ~encode:Msx_lane.entry_json () in
   let server = Server.create ~name:"masc-msx-addon" ~version:"0.1.0" () in
   let schemas = schemas () in
-  let server = List.fold_left (fun server (schema : Masc_domain.tool_schema) ->
+  let server = List.fold_left (fun server (_tool, (schema : Masc_domain.tool_schema)) ->
     Server.add_tool (definition schema)
       (fun _context _name _arguments ->
         Ok (response (Tool_result.make_err ~tool_name:schema.name ~start_time:(Tool_timing.start ())
@@ -140,15 +140,15 @@ let create ~base_path () =
       match Lane_addon_call_context.of_json (Option.value ~default:`Null arguments) with
       | Error message -> Error message
       | Ok call ->
-          match List.find_opt (fun (schema : Masc_domain.tool_schema) ->
-              String.equal schema.name call.tool) schemas with
+          match Option.bind (Machine.tool_of_name call.tool) (fun tool ->
+              Option.map (fun schema -> tool, schema) (List.assoc_opt tool schemas)) with
           | None -> Error "Unknown exported machine tool"
-          | Some schema ->
+          | Some (tool, (schema : Masc_domain.tool_schema)) ->
               match Tool_input_contract.check_arguments ~schema:(Some schema.input_schema)
                   ~name:schema.name ~args:call.arguments with
               | Error error -> Ok (response (Tool_input_contract.rejection_result error))
               | Ok (arguments, _) -> Ok (invoke ~base_path ~principal:call.principal
-                  ~name:schema.name ~arguments)) server in
+                  ~tool ~arguments)) server in
   let server = Server.tool Machine_input_history.tool_name
     ~description:"Read a page of the last observed immutable input history."
     ~input_schema:Machine_input_history.input_schema

@@ -828,9 +828,6 @@ let preflight_status ~image ~timeout_sec () =
 let preflight_ok (preflight : Keeper_sandbox_runtime.docker_preflight option) =
   Option.map (fun (p : Keeper_sandbox_runtime.docker_preflight) -> p.ok) preflight
 
-(* The [Local] arm that opened this went with the profile: every keeper runs
-   under a backend now, so the answer is about containers from the first
-   line. *)
 let container_mode (meta : keeper_meta) containers =
   match meta.sandbox_profile with
   | Micro_vm ->
@@ -856,8 +853,6 @@ let container_mode (meta : keeper_meta) containers =
   | Remote_ssh -> "remote_ssh"
 
 let why_no_container (meta : keeper_meta) ~preflight containers =
-  (* "sandbox_profile=local" was the first answer here. No keeper can report
-     it now, so the reasons below are the whole list. *)
   if containers <> [] then
     None
   else

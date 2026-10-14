@@ -718,7 +718,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
               Docker Keeper cannot reach the host root, and a path it cannot
               open is one it will try to [cd] into. [default_cwd] is the root
               as the Keeper sees it (container path for Docker, host path for
-              Local). *)
+              microvm and remote_ssh). *)
            let keeper_visible_abs = Keeper_sandbox.keeper_visible_root_abs sandbox in
            "execution_context", `Assoc [
              ("sandbox_id", `String sandbox.sandbox_id);

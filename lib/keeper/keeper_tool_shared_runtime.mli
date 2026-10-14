@@ -52,8 +52,9 @@ val keeper_observation_sandbox_root
 
 (** [keeper_observation_host_path_of_visible_path ~config ~meta path] maps a
     Docker keeper's sandbox-visible absolute path to the corresponding host
-    playground path without creating the sandbox bundle. Local keepers, relative
-    paths, and unrelated absolute paths are returned unchanged. *)
+    playground path without creating the sandbox bundle. Keepers whose profile
+    is not Docker, relative paths, and unrelated absolute paths are returned
+    unchanged. *)
 val keeper_observation_host_path_of_visible_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

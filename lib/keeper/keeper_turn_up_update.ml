@@ -642,9 +642,6 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
        else old.max_context_override);
     updated_at = now_iso ();
   } in
-  (* The sandbox-profile gate that stood here rejected exactly one profile,
-     [Local], and that profile no longer exists. What remains is reached the
-     same way. *)
          (match
             Keeper_shutdown_supersession.preflight
               ~config:ctx.config

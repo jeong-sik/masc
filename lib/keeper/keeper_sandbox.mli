@@ -1,9 +1,8 @@
 (** Keeper_sandbox — Keeper-facing sandbox contract.
 
-    Keeper tools expose exactly one logical sandbox. The current
-    local-storage implementation lives at
-    [.masc/playground/<keeper>], but that path is an implementation
-    detail of the local / docker backends. *)
+    Keeper tools expose exactly one logical sandbox. Its host side lives
+    under [.masc/playground/], and that path is an implementation detail
+    of the backends. *)
 
 (** {1 Types} *)
 
@@ -131,7 +130,8 @@ val host_path_of_visible_path :
     sandbox root the keeper LLM should treat as its working root,
     derived directly from [meta] without building the full record.
     For Docker keepers this is the in-container path
-    ({!container_root}); for Local keepers this is the host path
+    ({!container_root}); for a keeper whose tree the endpoint owns
+    (microvm, remote_ssh) this is the host bookkeeping path
     ({!host_root_abs_of_meta}). Use this in runtime_contract and
     other LLM-facing surfaces; surfacing a host-absolute workspace
     path to a Docker keeper makes the LLM emit host paths inside the
@@ -165,10 +165,11 @@ val sandbox_root_rel_of_meta :
 
 (** [keeper_visible_root_abs t] is the absolute path the keeper LLM
     should treat as its working root.  For Docker keepers this is the
-    in-container path ({!container_root}); for Local keepers this is
-    {!host_root_abs}.  Surfacing a host-absolute workspace path to a
-    Docker keeper makes the LLM emit host paths inside the container,
-    which fails because that path does not exist there (#10650). *)
+    in-container path ({!container_root}); for a keeper whose tree the
+    endpoint owns (microvm, remote_ssh) this is {!host_root_abs}.
+    Surfacing a host-absolute workspace path to a Docker keeper makes the
+    LLM emit host paths inside the container, which fails because that path
+    does not exist there (#10650). *)
 val keeper_visible_root_abs : t -> string
 
 (** [visible_path_of_host t p] projects a host path into the coordinate
@@ -178,8 +179,9 @@ val keeper_visible_root_abs : t -> string
     collapse to the sandbox root, or search [repos/] for a plausible
     segment — produces a directory the keeper is then told exists.
 
-    Local keepers share the host filesystem, so the projection is the
-    identity and cannot fail. Docker keepers live in a disjoint tree, so a
+    For a tree the endpoint owns, the visible spelling on this side is the
+    host bookkeeping path, so the projection is the identity and cannot
+    fail. Docker keepers live in a disjoint tree, so a
     path outside the sandbox root has no visible spelling and is an
     [Error]; callers must say what to do about that rather than receive a
     substitute.

@@ -322,6 +322,11 @@ let wake owner =
   Option.iter (fun resolver -> Eio.Promise.resolve resolver ()) resolver;
   if queued then Queued else No_owner
 
+(* Keeper_memory_commit_notifications.Current.replace increments snapshot.revision
+   monotonically per (keepers_dir, keeper_id, store), while recovery may
+   re-dispatch the same revision. Suppress only duplicate wakes for a revision
+   that is already in-flight; once in_flight clears at the end of a drain pass,
+   in_flight_revisions is cleared so any subsequent commit wakes a fresh pass. *)
 let wake_for_commit owner (event : Keeper_memory_commit_notifications.event) =
   let key = event.keeper_id, event.store in
   let should_wake, resolver =
@@ -360,10 +365,26 @@ let prepare_execution ~base_path =
     |> Result.map_error Runtime_exact_output_registry.publication_error_to_string in
   let* resolved = Runtime_exact_output_registry.resolve_lane registry ~lane_id
     |> Result.map_error Runtime_exact_output_registry.lane_resolution_error_to_string in
+  let cli_admission =
+    Keeper_lane_cli_oneshot.partition_cli_slots
+      ~lane:(Runtime.requirement_of_exact_lane ~schema:output_schema Runtime.Workspace_curator)
+      resolved.cli_slots
+  in
+  let resolved = { resolved with cli_slots = cli_admission.cli_slots } in
+  let refused_cli_json =
+    List.map
+      (fun ({ slot; refusal } : Keeper_lane_cli_oneshot.refused_slot) ->
+         `Assoc
+           [ "slot", `String slot
+           ; "refusal", `String (Runtime.refusal_to_string refusal)
+           ])
+      cli_admission.refused_cli_slots
+  in
   let configuration = `Assoc
     [ "catalog_generation", `String (Runtime_exact_output_registry.catalog_generation_fingerprint registry)
     ; "slots", `List (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> `String slot.slot_id) resolved.selected_slots)
-    ; "cli_slots", `List (List.map (fun id -> `String id) resolved.cli_slots) ] in
+    ; "cli_slots", `List (List.map (fun id -> `String id) resolved.cli_slots)
+    ; "refused_cli_slots", `List refused_cli_json ] in
   Ok { configuration;
        execute = execute_with_options ~cli_runner:None ~base_path ~resolved;
        summarize = summarize ~base_path ~resolved }
@@ -643,11 +664,16 @@ let start_with ~sw ~base_path ~enabled ~prepare =
            | exn -> Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));
           Stdlib.Mutex.protect owner.mutex (fun () ->
             owner.in_flight <- false;
-            if not owner.pending then Hashtbl.clear owner.in_flight_revisions);
+            Hashtbl.clear owner.in_flight_revisions);
           drain () in
       drain ();
       `Stop_daemon))
 
+(* Runtime.report_exact_output_registry logs a publication warning once when
+   workspace_curator_exact has no admitted slots, and TUI lane inventory
+   surfaces "no admitted slots" with dropped/refused slot details. Returning
+   false here parks the background drain loop instead of emitting a repeated
+   error log on every Keeper memory commit. *)
 let configured () = match Runtime_exact_output_registry.current () with
     | Error _ -> false
     | Ok registry ->

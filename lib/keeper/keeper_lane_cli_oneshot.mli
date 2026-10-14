@@ -67,7 +67,7 @@ val refused_for_input_size : failure -> bool
     [Context_window_exceeded] or Codex [Context_window_exceeded]. *)
 
 type input_size_refusal =
-  | Context_window_exceeded of
+  | Input_over_limit of
       { estimated_tokens : int
       ; limit_tokens : int
       }
@@ -77,7 +77,7 @@ val check_input_size
   -> overflow:Runtime.overflow_behavior
   -> (unit, input_size_refusal) result
 (** Guard caller-bounded runtimes before calling a provider that truncates
-    silently on overflow. Returns [Error (Context_window_exceeded _)] when
+    silently on overflow. Returns [Error (Input_over_limit _)] when
     [overflow] is [Runtime.Caller_bounded { max_input_tokens }] and
     [estimated_tokens > max_input_tokens]. *)
 

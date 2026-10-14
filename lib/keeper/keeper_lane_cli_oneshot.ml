@@ -233,7 +233,7 @@ let refused_for_input_size = function
 ;;
 
 type input_size_refusal =
-  | Context_window_exceeded of
+  | Input_over_limit of
       { estimated_tokens : int
       ; limit_tokens : int
       }
@@ -244,7 +244,7 @@ let check_input_size ~estimated_tokens ~(overflow : Runtime.overflow_behavior) =
     if estimated_tokens > max_input_tokens
     then
       Error
-        (Context_window_exceeded
+        (Input_over_limit
            { estimated_tokens; limit_tokens = max_input_tokens })
     else Ok ()
   | Runtime.Rejects_oversize_input
@@ -261,15 +261,6 @@ type admitted_cli_slots =
   ; refused_cli_slots : refused_slot list
   }
 
-let unknown_runtime_capability : Runtime.runtime_capability =
-  { context_window = Runtime.Window_unknown
-  ; overflow = Runtime.Truncates_silently
-  ; structured_output = Runtime.Text_only
-  ; supports_tool_free = false
-  ; supports_fresh_invocation = false
-  }
-;;
-
 let partition_cli_slots
     ~(lane : Runtime.lane_requirement)
     ?(capability_of = Runtime.capability_of_runtime_id)
@@ -279,14 +270,13 @@ let partition_cli_slots
   let cli_slots_rev, refused_rev =
     List.fold_left
       (fun (admitted, refused) slot ->
-         let runtime =
-           match capability_of slot with
-           | Some cap -> cap
-           | None -> unknown_runtime_capability
-         in
-         match Runtime.admits ~lane ~runtime with
-         | Ok () -> slot :: admitted, refused
-         | Error refusal -> admitted, { slot; refusal } :: refused)
+         match capability_of slot with
+         | None ->
+           admitted, { slot; refusal = Runtime.Runtime_unknown } :: refused
+         | Some runtime ->
+           (match Runtime.admits ~lane ~runtime with
+            | Ok () -> slot :: admitted, refused
+            | Error refusal -> admitted, { slot; refusal } :: refused))
       ([], [])
       slots
   in

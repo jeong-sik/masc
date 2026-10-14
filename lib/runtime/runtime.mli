@@ -1220,8 +1220,13 @@ type runtime_capability =
   }
 
 type refusal =
+  | Runtime_unknown
   | Window_unknown_for_bounded_lane
   | Window_too_small of
+      { required : int
+      ; actual : int
+      }
+  | Caller_bound_too_small of
       { required : int
       ; actual : int
       }
@@ -1245,6 +1250,8 @@ val admits :
 
 val capability_of_runtime : t -> runtime_capability
 val capability_of_runtime_id : string -> runtime_capability option
+
+val curator_min_window_tokens : int
 
 val requirement_of_exact_lane :
   ?schema:Yojson.Safe.t ->

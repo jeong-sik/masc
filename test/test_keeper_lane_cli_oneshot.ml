@@ -807,7 +807,7 @@ let test_admits_exhaustive_branches () =
   check
     (result unit refusal_testable)
     "caller-bounded overflow too small refused"
-    (Error (Runtime.Window_too_small { required = 32_768; actual = 8_192 }))
+    (Error (Runtime.Caller_bound_too_small { required = 32_768; actual = 8_192 }))
     (Runtime.admits
        ~lane:base_lane
        ~runtime:
@@ -899,7 +899,7 @@ let test_partition_cli_slots_preserves_refused_slots_and_muse_output_schema () =
     Cli_oneshot.partition_cli_slots
       ~lane:base_lane
       ~capability_of
-      [ "claude_code.sonnet"; "muse.local"; "ollama.tiny" ]
+      [ "claude_code.sonnet"; "muse.local"; "ollama.tiny"; "unknown.slot" ]
   in
   check
     (list string)
@@ -907,13 +907,20 @@ let test_partition_cli_slots_preserves_refused_slots_and_muse_output_schema () =
     [ "claude_code.sonnet"; "muse.local" ]
     json_syntax_partition.cli_slots;
   (match json_syntax_partition.refused_cli_slots with
-   | [ { slot = "ollama.tiny"; refusal } ] ->
+   | [ { slot = "ollama.tiny"; refusal = tiny_refusal }
+     ; { slot = "unknown.slot"; refusal = unknown_refusal }
+     ] ->
      check
        refusal_testable
        "tiny slot refused for window size"
        (Runtime.Window_too_small { required = 32_768; actual = 4_096 })
-       refusal
-   | _ -> fail "expected exactly ollama.tiny in refused_cli_slots");
+       tiny_refusal;
+     check
+       refusal_testable
+       "unknown slot refused with Runtime_unknown"
+       Runtime.Runtime_unknown
+       unknown_refusal
+   | _ -> fail "expected ollama.tiny and unknown.slot in refused_cli_slots");
   let strict_lane =
     { base_lane with
       verdict =
@@ -968,9 +975,9 @@ let test_input_size_guard_and_refusal_classification () =
        ~overflow:(Runtime.Caller_bounded { max_input_tokens = 32_768 })
    with
    | Error
-       (Cli_oneshot.Context_window_exceeded
+       (Cli_oneshot.Input_over_limit
           { estimated_tokens = 50_000; limit_tokens = 32_768 }) -> ()
-   | Ok () | Error _ -> fail "oversize caller-bounded input must be refused");
+   | Ok () -> fail "oversize caller-bounded input must be refused");
   (match
      Cli_oneshot.check_input_size
        ~estimated_tokens:16_000

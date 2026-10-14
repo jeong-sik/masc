@@ -3767,6 +3767,7 @@ type structured_output_capability =
   | Prompted_json
   | Flag_json_schema
   | Http_response_format_json_schema
+[@@deriving eq]
 
 type runtime_capability =
   { context_window : context_window_capability
@@ -3777,8 +3778,13 @@ type runtime_capability =
   }
 
 type refusal =
+  | Runtime_unknown
   | Window_unknown_for_bounded_lane
   | Window_too_small of
+      { required : int
+      ; actual : int
+      }
+  | Caller_bound_too_small of
       { required : int
       ; actual : int
       }
@@ -3789,6 +3795,7 @@ type refusal =
       }
   | Tool_free_unsupported
   | Fresh_invocation_unsupported
+[@@deriving eq]
 
 let structured_output_capability_to_string = function
   | Text_only -> "text_only"
@@ -3797,82 +3804,19 @@ let structured_output_capability_to_string = function
   | Http_response_format_json_schema -> "http_response_format_json_schema"
 ;;
 
-let equal_structured_output_capability left right =
-  match left, right with
-  | Text_only, Text_only -> true
-  | Prompted_json, Prompted_json -> true
-  | Flag_json_schema, Flag_json_schema -> true
-  | Http_response_format_json_schema, Http_response_format_json_schema -> true
-  | Text_only, (Prompted_json | Flag_json_schema | Http_response_format_json_schema)
-  | Prompted_json, (Text_only | Flag_json_schema | Http_response_format_json_schema)
-  | Flag_json_schema, (Text_only | Prompted_json | Http_response_format_json_schema)
-  | Http_response_format_json_schema, (Text_only | Prompted_json | Flag_json_schema) ->
-    false
-;;
-
-let equal_refusal left right =
-  match left, right with
-  | Window_unknown_for_bounded_lane, Window_unknown_for_bounded_lane -> true
-  | ( Window_too_small { required = r1; actual = a1 }
-    , Window_too_small { required = r2; actual = a2 } ) ->
-    Int.equal r1 r2 && Int.equal a1 a2
-  | Silent_truncation_on_overflow, Silent_truncation_on_overflow -> true
-  | ( Structured_output_unsupported { required = req1; actual = act1 }
-    , Structured_output_unsupported { required = req2; actual = act2 } ) ->
-    let same_req =
-      match req1, req2 with
-      | `Json_syntax, `Json_syntax -> true
-      | `Provider_enforced_json_schema, `Provider_enforced_json_schema -> true
-      | `Json_syntax, `Provider_enforced_json_schema
-      | `Provider_enforced_json_schema, `Json_syntax -> false
-    in
-    same_req && equal_structured_output_capability act1 act2
-  | Tool_free_unsupported, Tool_free_unsupported -> true
-  | Fresh_invocation_unsupported, Fresh_invocation_unsupported -> true
-  | ( Window_unknown_for_bounded_lane
-    , ( Window_too_small _
-      | Silent_truncation_on_overflow
-      | Structured_output_unsupported _
-      | Tool_free_unsupported
-      | Fresh_invocation_unsupported ) )
-  | ( Window_too_small _
-    , ( Window_unknown_for_bounded_lane
-      | Silent_truncation_on_overflow
-      | Structured_output_unsupported _
-      | Tool_free_unsupported
-      | Fresh_invocation_unsupported ) )
-  | ( Silent_truncation_on_overflow
-    , ( Window_unknown_for_bounded_lane
-      | Window_too_small _
-      | Structured_output_unsupported _
-      | Tool_free_unsupported
-      | Fresh_invocation_unsupported ) )
-  | ( Structured_output_unsupported _
-    , ( Window_unknown_for_bounded_lane
-      | Window_too_small _
-      | Silent_truncation_on_overflow
-      | Tool_free_unsupported
-      | Fresh_invocation_unsupported ) )
-  | ( Tool_free_unsupported
-    , ( Window_unknown_for_bounded_lane
-      | Window_too_small _
-      | Silent_truncation_on_overflow
-      | Structured_output_unsupported _
-      | Fresh_invocation_unsupported ) )
-  | ( Fresh_invocation_unsupported
-    , ( Window_unknown_for_bounded_lane
-      | Window_too_small _
-      | Silent_truncation_on_overflow
-      | Structured_output_unsupported _
-      | Tool_free_unsupported ) ) -> false
-;;
-
 let refusal_to_string = function
+  | Runtime_unknown ->
+    "runtime is not configured or has no capability profile"
   | Window_unknown_for_bounded_lane ->
     "context window is unknown for a bounded-input lane"
   | Window_too_small { required; actual } ->
     Printf.sprintf
       "context window %d tokens is smaller than required minimum %d tokens"
+      actual
+      required
+  | Caller_bound_too_small { required; actual } ->
+    Printf.sprintf
+      "caller-bounded input limit %d tokens is smaller than required minimum %d tokens"
       actual
       required
   | Silent_truncation_on_overflow ->
@@ -3930,7 +3874,7 @@ let check_overflow_admission
        then Ok ()
        else
          Error
-           (Window_too_small
+           (Caller_bound_too_small
               { required = min_tokens; actual = max_input_tokens }))
   | Reject_before_truncation, Truncates_silently ->
     Error Silent_truncation_on_overflow
@@ -4010,6 +3954,8 @@ let capability_of_runtime (rt : t) : runtime_capability =
   in
   let overflow =
     match rt.execution with
+    (* Both adapters report a typed Context_window_exceeded error variant
+       (Runtime_claude_code.Context_window_exceeded / Runtime_codex_app_server.Context_window_exceeded). *)
     | Runtime_execution.Claude_code _
     | Runtime_execution.Codex_app_server _ ->
       Rejects_oversize_input
@@ -4073,9 +4019,14 @@ let capability_of_runtime_id (runtime_id : string) : runtime_capability option =
 
 let default_exact_schema : Yojson.Safe.t = `Assoc [ "type", `String "object" ]
 
+(* Minimum context window budget for Workspace_curator: covers the curator
+   system prompt, output schema instruction, and at least one singleton fact +
+   ledger neighbor snapshot before batch narrowing. *)
+let curator_min_window_tokens = 4096
+
 let requirement_of_exact_lane
     ?(schema = default_exact_schema)
-    ?(min_window_tokens = 4096)
+    ?(min_window_tokens = curator_min_window_tokens)
     (lane : exact_lane)
   : lane_requirement
   =

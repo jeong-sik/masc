@@ -92,10 +92,25 @@ let detail_lines (row : row) =
              (fun slot -> not (List.mem slot c.cli_slots))
              c.declared_cli_slots
          in
+         let refused_cli_lines =
+           match row.selection, refused_cli with
+           | _, [] -> []
+           | Exact lane, refused ->
+             let partitioned =
+               Masc.Keeper_lane_cli_oneshot.partition_cli_slots
+                 ~lane:(Runtime.requirement_of_exact_lane lane)
+                 refused
+             in
+             (match partitioned.refused_cli_slots with
+              | _ :: _ as typed_refusals -> refused_cli_slot_lines typed_refusals
+              | [] -> ["Refused CLI slots: " ^ String.concat ", " refused])
+           | (Browser _ | Machine _ | Declaration _ | Manual_instance _), refused ->
+             ["Refused CLI slots: " ^ String.concat ", " refused]
+         in
          ["Declared HTTP slots: " ^ String.concat ", " c.declared_slots;
           "Declared CLI slots: " ^ String.concat ", " c.declared_cli_slots]
          @ (match c.dropped_slots with [] -> [] | values -> ["Dropped HTTP slots: " ^ String.concat ", " values])
-         @ (match refused_cli with [] -> [] | values -> ["Refused CLI slots: " ^ String.concat ", " values])
+         @ refused_cli_lines
          @ (match c.admission_error with None -> [] | Some detail -> ["Admission: " ^ detail])
      | Exact_state (Unconfigured detail | Registry_unavailable detail) -> [detail]
      | Browser_clients _ -> ["Off refuses new requests while accepted requests finish."]

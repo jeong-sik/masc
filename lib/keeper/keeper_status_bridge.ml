@@ -189,69 +189,60 @@ type approval_queue_attention =
   | Approval_queue_ready of int
   | Approval_queue_unavailable of Keeper_approval_queue_result.storage_error
 
-type attention =
-  { needs_attention : bool
-  ; attention_reason : string option
-  ; next_human_action : string option
-  }
-
 let attention_of_surface
       (config : Workspace_utils.config)
       (meta : keeper_meta)
       (runtime_blocker : runtime_blocker_surface option)
       approval_queue
+  : Keeper_attention_reason.t option
   =
-  let needs_attention, attention_reason, next_human_action =
-    match approval_queue with
-    | Approval_queue_unavailable _ ->
-      true, Some "approval_queue_unavailable", Some "reset_runtime_state"
-    | Approval_queue_ready pending_approval_count when pending_approval_count > 0 ->
-      true, Some "approval_pending", Some "resolve_approval"
-    | Approval_queue_ready _ ->
-      match runtime_blocker with
-      | Some _ when meta.paused ->
-        true, Some "paused", Some "inspect_blocker_before_resume"
-      | Some { blocker_class = Blocked_by_runtime_exhaustion; _ } ->
-        true, Some "runtime_attempts_exhausted", Some "inspect_runtime_attempts"
-      | Some { blocker_class = Blocked_by_provider_runtime_error; _ } ->
-        true, Some "provider_runtime_error", Some "inspect_provider_runtime_cause"
-      | Some { blocker_class = Blocked_by_unresolved_fiber; _ } ->
-        true, Some "fiber_unresolved", Some "inspect_turn_finalization"
-      | Some
-          { blocker_class =
-              ( Blocked_by_heartbeat_failures
-              | Blocked_by_turn_failures
-              | Blocked_by_official_client_recovery
-              | Blocked_by_turn_configuration_error
-              | Blocked_by_exception
-              | Blocked_by_operator_interrupt )
-          ; _
-          } -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
-      | None when meta.paused -> true, Some "paused", Some "resume_or_review"
-      (* Every branch above reads a record someone wrote: an approval row, a
-         blocker class, an operator pause. A Keeper whose keepalive fiber is
-         gone writes none of them, so the arms above all miss it and the
-         answer used to fall through to [false]. That is how sangsu reported
-         "no attention" for two and a half hours after its turn ended on
-         "Payment required: Insufficient Balance": the provider failure left
-         no blocker class behind, nobody had paused it, and its Discord queue
-         grew from 14 entries to 53 while the surface said it was fine.
+  let module R = Keeper_attention_reason in
+  match approval_queue with
+  | Approval_queue_unavailable _ -> Some R.Approval_queue_unavailable
+  | Approval_queue_ready pending_approval_count when pending_approval_count > 0 ->
+    Some R.Approval_pending
+  | Approval_queue_ready _ ->
+    match runtime_blocker with
+    | Some _ when meta.paused -> Some R.Paused_on_blocker
+    | Some { blocker_class = Blocked_by_runtime_exhaustion; _ } ->
+      Some R.Runtime_attempts_exhausted
+    | Some { blocker_class = Blocked_by_provider_runtime_error; _ } ->
+      Some R.Provider_runtime_error
+    | Some { blocker_class = Blocked_by_unresolved_fiber; _ } ->
+      Some R.Fiber_unresolved
+    | Some
+        { blocker_class =
+            ( Blocked_by_heartbeat_failures
+            | Blocked_by_turn_failures
+            | Blocked_by_official_client_recovery
+            | Blocked_by_turn_configuration_error
+            | Blocked_by_exception
+            | Blocked_by_operator_interrupt )
+        ; _
+        } -> Some R.Runtime_blocked
+    | None when meta.paused -> Some R.Paused
+    (* Every branch above reads a record someone wrote: an approval row, a
+       blocker class, an operator pause. A Keeper whose keepalive fiber is
+       gone writes none of them, so the arms above all miss it and the
+       answer used to fall through to [false]. That is how sangsu reported
+       "no attention" for two and a half hours after its turn ended on
+       "Payment required: Insufficient Balance": the provider failure left
+       no blocker class behind, nobody had paused it, and its Discord queue
+       grew from 14 entries to 53 while the surface said it was fine.
 
-         Liveness is the one fact none of the written records carry, and it
-         needs no threshold to read -- [is_running] enumerates every phase. A
-         paused Keeper is answered above, so reaching here not running means
-         nobody chose the silence. *)
-      | None when not (runtime_keepalive_running config meta) ->
-        true, Some "keepalive_stopped", Some "inspect_latest_error"
-      | None -> false, None, None
-  in
-  { needs_attention; attention_reason; next_human_action }
+       Liveness is the one fact none of the written records carry, and it
+       needs no threshold to read -- [is_running] enumerates every phase. A
+       paused Keeper is answered above, so reaching here not running means
+       nobody chose the silence. *)
+    | None when not (runtime_keepalive_running config meta) ->
+      Some R.Keepalive_stopped
+    | None -> None
 ;;
 
 let attention_fields_json_of
       (meta : keeper_meta)
       approval_queue
-      { needs_attention; attention_reason; next_human_action }
+      (attention : Keeper_attention_reason.t option)
   =
   let approval_queue_state, pending_approval_count =
     match approval_queue with
@@ -261,9 +252,13 @@ let attention_fields_json_of
       ( Keeper_approval_queue_result.approval_queue_unavailable_state_json error
       , `Null )
   in
-  [ "needs_attention", `Bool needs_attention
-  ; "attention_reason", Json_util.string_opt_to_json attention_reason
-  ; "next_human_action", Json_util.string_opt_to_json next_human_action
+  [ "needs_attention", `Bool (Option.is_some attention)
+  ; ( "attention_reason"
+    , Json_util.string_opt_to_json
+        (Option.map Keeper_attention_reason.to_wire attention) )
+  ; ( "next_human_action"
+    , Json_util.string_opt_to_json
+        (Option.map Keeper_attention_reason.next_human_action attention) )
   ; "approval_queue_state", approval_queue_state
   ; "pending_approval_count", pending_approval_count
   ; (* Typed pause reason surfaced as its stable wire form. [attention_reason]
@@ -278,7 +273,7 @@ let attention_fields_json_of
   ]
 ;;
 
-let approval_queue_attention (config : Workspace_utils.config) (meta : keeper_meta) =
+let read_approval_queue_attention (config : Workspace_utils.config) (meta : keeper_meta) =
   match
     Keeper_approval_queue.pending_count_for_keeper_in_workspace
       ~base_path:config.base_path
@@ -289,7 +284,7 @@ let approval_queue_attention (config : Workspace_utils.config) (meta : keeper_me
 ;;
 
 let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
-  let approval_queue = approval_queue_attention config meta in
+  let approval_queue = read_approval_queue_attention config meta in
   attention_of_surface config meta (runtime_blocker_surface_opt config meta) approval_queue
   |> attention_fields_json_of meta approval_queue
 ;;

@@ -4389,7 +4389,7 @@
 (test
  (name test_operator_attention_summary)
  (modules test_operator_attention_summary)
- (libraries alcotest masc.operator))
+ (libraries alcotest masc masc.operator))
 
 (test
  (name test_tui_render_schedule)

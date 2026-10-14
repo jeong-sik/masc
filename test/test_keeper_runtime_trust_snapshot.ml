@@ -134,9 +134,7 @@ let test_trust_blocker_uses_structured_state () =
       { approval_queue = Core.Approval_queue_available 0
       ; runtime_blocker_class = blocker
       ; receipt_operator_disposition = None
-      ; attention_needs_attention = false
-      ; attention_reason = None
-      ; attention_next_human_action = None
+      ; status_attention = None
       ; terminal_next_human_action = None
       }
   in
@@ -181,9 +179,7 @@ let test_trust_relays_only_a_shown_receipt_operator_disposition () =
       { approval_queue
       ; runtime_blocker_class = None
       ; receipt_operator_disposition = Some fenced_receipt
-      ; attention_needs_attention = false
-      ; attention_reason = None
-      ; attention_next_human_action = None
+      ; status_attention = None
       ; terminal_next_human_action = None
       }
   in

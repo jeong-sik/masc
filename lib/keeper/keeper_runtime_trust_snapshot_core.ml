@@ -7,9 +7,7 @@ type raw =
   ; runtime_blocker_class : Keeper_status_bridge_blocker.runtime_blocker_class option
   ; receipt_operator_disposition :
       (Keeper_execution_receipt.operator_disposition_kind * string) option
-  ; attention_needs_attention : bool
-  ; attention_reason : string option
-  ; attention_next_human_action : string option
+  ; status_attention : Keeper_attention_reason.t option
   ; terminal_next_human_action : string option
   }
 
@@ -74,18 +72,18 @@ let decide raw =
     effective_disposition raw ~fallback_disposition ~fallback_reason
   in
   let needs_attention =
-    raw.attention_needs_attention
+    Option.is_some raw.status_attention
     || Keeper_trust_disposition.requires_attention disposition
   in
   let attention_reason =
-    match raw.attention_reason with
-    | Some _ as reason -> reason
+    match raw.status_attention with
+    | Some reason -> Some (Keeper_attention_reason.to_wire reason)
     | None when needs_attention -> Some disposition_reason
     | None -> None
   in
   let next_human_action =
-    match raw.attention_next_human_action with
-    | Some _ as action -> action
+    match raw.status_attention with
+    | Some reason -> Some (Keeper_attention_reason.next_human_action reason)
     | None when needs_attention -> raw.terminal_next_human_action
     | None -> None
   in

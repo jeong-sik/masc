@@ -394,27 +394,15 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
 }
 
 const runtimeBlockerLabels = {
+  heartbeat_failures: '하트비트 실패',
+  turn_failures: '턴 실패 반복',
   runtime_exhausted: '런타임 후보 소진',
   provider_runtime_error: '런타임 호출 오류',
   official_client_recovery_required: '공식 클라이언트 세션 복구 필요',
+  turn_configuration_error: '실행 설정 오류',
   fiber_unresolved: 'Fiber 미해결',
-  heartbeat_failures: '하트비트 실패',
-  turn_failures: '턴 실패 반복',
   exception: '런타임 예외',
-  agent_core_context_window_exceeded: 'Agent Core 컨텍스트 윈도 초과',
-  agent_core_unrecognized_stop_reason: 'Agent Core 미식별 정지 사유',
-  agent_core_guardrail_violation: 'Agent Core 가드레일 위반',
-  agent_core_tripwire_violation: 'Agent Core Tripwire 위반',
-  agent_core_input_required: 'Agent Core 입력 대기',
-  gate_replay_repair_required: '승인 기록 복구 필요',
-  incomplete_tool_transcript: '도구 기록 깨짐',
-  internal_bridge_exception: '브리지 예외',
-  internal_contract_rejected: '내부 계약 거절',
-  internal_unhandled_exception: '처리하지 못한 예외',
-  provider_attempt_effect_fenced: '중복 실행 위험으로 차단',
-  receipt_persistence_failed: 'Receipt 저장 실패',
-  terminal_effect_failed: '마무리 처리 실패',
-  tool_correction_lost: '도구 수정 내용 유실',
+  operator_interrupt: '운영자가 턴을 멈춤',
 } satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(

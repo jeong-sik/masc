@@ -26,7 +26,15 @@ type runtime_blocker_class =
 val runtime_blocker_class_to_string : runtime_blocker_class -> string
 (** The [runtime_blocker_class] label the status JSON carries. Readers in
     this process take the variant from {!Keeper_status_bridge.runtime_blocker_surface_opt}
-    instead of parsing this label back. *)
+    instead of parsing this label back. The dashboard narrows the label to its
+    own closed list ([KEEPER_RUNTIME_BLOCKER_CLASSES]). That list and
+    {!all_of_runtime_blocker_class} are each checked against
+    [dashboard/src/api/fixtures/runtime-blocker-classes.json], so a label added,
+    renamed or removed here fails a test until the fixture and the dashboard
+    list change with it. *)
+
+val all_of_runtime_blocker_class : runtime_blocker_class list
+(** Every class, in declaration order. *)
 
 (** [summary] is lazy: the [turn_failures] summary reads the receipt store,
     and callers that only need [blocker_class] never force it. *)

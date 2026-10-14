@@ -129,7 +129,7 @@ let tick_frame_json pixel_response (frame : Msx_lane.frame) entries
           (recent_players_of ~now:frame.number entries))] @ pixel_fields)
 
 let step ~arguments =
-  let tool_name = "masc_msx_step" and start_time = Tool_timing.start () in
+  let tool_name = Msx_tool.name Msx_tool.Step and start_time = Tool_timing.start () in
   let fields = match arguments with `Assoc fields -> fields | _ -> [] in
   let fields = List.remove_assoc "include_frame" fields in
   let fields = if List.mem_assoc "frames" fields then fields

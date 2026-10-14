@@ -444,11 +444,10 @@ let test_validate_file_path_angle_bracket_gt () =
    Path Helper Tests
    ============================================================ *)
 
-let make_test_config ~base_path ~cluster_name : Workspace_utils.config =
+let make_test_config ~base_path : Workspace_utils.config =
   let backend_config : Backend_types.config = {
     base_path;
     node_id = "test-node";
-    cluster_name;
     pubsub_max_messages = 1000;
   } in
   let memory_backend = Backend.Memory.create () in
@@ -480,80 +479,16 @@ let test_storage_backend_memory_is_tagged () =
   check string "memory backend" "memory" (storage_backend_tag backend)
 
 let test_config_carries_its_fields () =
-  let cfg = make_test_config ~base_path:"/tmp/cfg" ~cluster_name:"c1" in
+  let cfg = make_test_config ~base_path:"/tmp/cfg" in
   check string "base_path" "/tmp/cfg" cfg.Workspace_utils.base_path;
   check string "workspace_path" "/tmp/cfg" cfg.Workspace_utils.workspace_path;
   check int "lock_expiry_minutes" 30 cfg.Workspace_utils.lock_expiry_minutes;
   check string "backend" "memory" (storage_backend_tag cfg.Workspace_utils.backend)
 
-let test_masc_root_dir_default_cluster () =
-  let cfg = make_test_config ~base_path:"/home/user/project" ~cluster_name:"default" in
-  let result = Workspace_utils.masc_root_dir cfg in
-  check string "default cluster" "/home/user/project/.masc" result
-
-let test_masc_root_dir_empty_cluster () =
-  let cfg = make_test_config ~base_path:"/tmp/test" ~cluster_name:"" in
-  let result = Workspace_utils.masc_root_dir cfg in
-  check string "empty cluster" "/tmp/test/.masc" result
-
-let test_masc_root_dir_custom_cluster () =
-  let cfg = make_test_config ~base_path:"/home/user/project" ~cluster_name:"my-cluster" in
-  let result = Workspace_utils.masc_root_dir cfg in
-  check string "custom cluster" "/home/user/project/.masc/clusters/my-cluster" result
-
-let test_masc_root_dir_with_cluster_nested () =
-  let cfg = make_test_config ~base_path:"/a/b/c" ~cluster_name:"prod" in
-  let result = Workspace_utils.masc_root_dir cfg in
-  check string "nested with cluster" "/a/b/c/.masc/clusters/prod" result
-
-let test_memory_root_initialization_requires_current_marker () =
-  let scratch = Filename.temp_dir "workspace-utils-root-state-memory" "" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf scratch)
-    (fun () ->
-      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
-      Workspace_utils.write_json cfg
-        (Workspace_utils.state_path cfg)
-        (`Assoc [ "protocol_version", `String "retired" ]);
-      check bool "scoped state is not a root marker" false
-        (Workspace_utils.root_is_initialized cfg);
-      Workspace_utils.write_json cfg
-        (Workspace_utils.root_state_path cfg)
-        (`Assoc [ "protocol_version", `String "current" ]);
-      check bool "current root marker initializes root" true
-        (Workspace_utils.root_is_initialized cfg))
-
-let test_filesystem_root_initialization_requires_current_marker () =
-  Eio_main.run @@ fun env ->
-  let scratch = Filename.temp_dir "workspace-utils-root-state-filesystem" "" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf scratch)
-    (fun () ->
-      let root = Filename.concat scratch Common.masc_dirname in
-      Unix.mkdir root 0o700;
-      let backend_config : Backend_types.config =
-        { base_path = root
-        ; node_id = "test-node"
-        ; cluster_name = "default"
-        ; pubsub_max_messages = 1000
-        }
-      in
-      let cfg : Workspace_utils.config =
-        { base_path = scratch
-        ; workspace_path = scratch
-        ; lock_expiry_minutes = 30
-        ; backend_config
-        ; backend =
-            Workspace_utils.FileSystem
-              (Backend.FileSystem.create ~fs:(Eio.Stdenv.fs env) backend_config)
-        }
-      in
-      write_file (Workspace_utils.state_path cfg) "{}";
-      check bool "scoped state is not a root marker" false
-        (Workspace_utils.root_is_initialized cfg);
-      write_file (Workspace_utils.root_state_path cfg) "{}";
-      check bool "current root marker initializes root" true
-        (Workspace_utils.root_is_initialized cfg))
+let test_masc_dir_is_dot_masc_under_base () =
+  let cfg = make_test_config ~base_path:"/home/user/project" in
+  let result = Workspace_utils.masc_dir cfg in
+  check string "root under the base path" "/home/user/project/.masc" result
 
 (* An absent document, a blank one and a broken one send an operator to three
    different places, so the read keeps them apart instead of answering all
@@ -569,7 +504,6 @@ let test_filesystem_read_json_doc_keeps_absence_apart () =
       let backend_config : Backend_types.config =
         { base_path = root
         ; node_id = "test-node"
-        ; cluster_name = "default"
         ; pubsub_max_messages = 1000
         }
       in
@@ -583,7 +517,7 @@ let test_filesystem_read_json_doc_keeps_absence_apart () =
               (Backend.FileSystem.create ~fs:(Eio.Stdenv.fs env) backend_config)
         }
       in
-      let path = Filename.concat (Workspace_utils.masc_root_dir cfg) "doc.json" in
+      let path = Filename.concat (Workspace_utils.masc_dir cfg) "doc.json" in
       let read () = Workspace_utils.read_json_doc cfg path in
       (match read () with
        | Ok None -> ()
@@ -614,8 +548,8 @@ let test_list_dir_prefers_backend_for_memory_keys () =
   Fun.protect
     ~finally:(fun () -> rm_rf scratch)
     (fun () ->
-      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
-      let workers_dir = Filename.concat (Workspace_utils.masc_root_dir cfg) "workers" in
+      let cfg = make_test_config ~base_path:scratch in
+      let workers_dir = Filename.concat (Workspace_utils.masc_dir cfg) "workers" in
       Workspace_utils.write_json cfg
         (Filename.concat workers_dir "backend.json")
         (`Assoc [ ("ok", `Bool true) ]);
@@ -629,8 +563,8 @@ let test_memory_commit_distinguishes_local_mirror_failure () =
   Fun.protect
     ~finally:(fun () -> rm_rf scratch)
     (fun () ->
-      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
-      let masc_dir = Workspace_utils.masc_root_dir cfg in
+      let cfg = make_test_config ~base_path:scratch in
+      let masc_dir = Workspace_utils.masc_dir cfg in
       Unix.mkdir masc_dir 0o700;
       let tasks_path = Filename.concat masc_dir "tasks" in
       write_file tasks_path "blocks local mirror directory creation";
@@ -659,8 +593,8 @@ let test_pretty_json_persistence_preserves_bytes () =
   Fun.protect
     ~finally:(fun () -> rm_rf scratch)
     (fun () ->
-      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
-      let root = Workspace_utils.masc_root_dir cfg in
+      let cfg = make_test_config ~base_path:scratch in
+      let root = Workspace_utils.masc_dir cfg in
       let primary = Filename.concat root "tasks/backlog.json" in
       let recovery = Filename.concat root "tasks/backlog.recovery.json" in
       let read_bytes path =
@@ -739,10 +673,10 @@ let test_default_config_memory_fallback_isolated_by_base_path () =
       let cfg_first = Workspace_utils.default_config first in
       let cfg_second = Workspace_utils.default_config second in
       let first_workers =
-        Filename.concat (Workspace_utils.masc_root_dir cfg_first) "workers"
+        Filename.concat (Workspace_utils.masc_dir cfg_first) "workers"
       in
       let second_workers =
-        Filename.concat (Workspace_utils.masc_root_dir cfg_second) "workers"
+        Filename.concat (Workspace_utils.masc_dir cfg_second) "workers"
       in
       Workspace_utils.write_json cfg_first
         (Filename.concat first_workers "only-first.json")
@@ -929,14 +863,8 @@ let () =
       test_case "angle bracket >" `Quick test_validate_file_path_angle_bracket_gt;
     ];
     "path_helpers", [
-      test_case "masc_root_dir default cluster" `Quick test_masc_root_dir_default_cluster;
-      test_case "masc_root_dir empty cluster" `Quick test_masc_root_dir_empty_cluster;
-      test_case "masc_root_dir custom cluster" `Quick test_masc_root_dir_custom_cluster;
-      test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
-      test_case "memory root initialization requires current marker" `Quick
-        test_memory_root_initialization_requires_current_marker;
-      test_case "filesystem root initialization requires current marker" `Quick
-        test_filesystem_root_initialization_requires_current_marker;
+      test_case "masc_dir is .masc under the base path" `Quick
+        test_masc_dir_is_dot_masc_under_base;
       test_case "read_json_doc keeps absence apart" `Quick
         test_filesystem_read_json_doc_keeps_absence_apart;
       test_case "list_dir prefers backend for memory keys" `Quick

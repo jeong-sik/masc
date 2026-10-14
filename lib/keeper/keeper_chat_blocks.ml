@@ -466,13 +466,13 @@ type next_match =
 let earlier_match left right =
   match left, right with
   | None, None -> None
-  | Some _, None -> left
-  | None, Some _ -> right
+  | (Some (Image_match _), None) | (Some (Code_match _), None) -> left
+  | (None, Some (Image_match _)) | (None, Some (Code_match _)) -> right
   | Some (Image_match image), Some (Code_match code) ->
     if Re.Group.start code 0 <= Re.Group.start image 0 then right else left
   | Some (Code_match code), Some (Image_match image) ->
     if Re.Group.start code 0 <= Re.Group.start image 0 then left else right
-  | Some _, Some _ -> left
+  | (Some (Image_match _), Some _) | (Some (Code_match _), Some _) -> left
 
 (* Official-client runtimes (codex spark and friends) carry whole turns in
    envelope messages, so the content field arrives as raw schema JSON.

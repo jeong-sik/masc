@@ -247,7 +247,18 @@ let on_event ?(stream_scope = 0) t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.StreamRepeating _
   | Agent_core.Types.MessageStart _
   | Agent_core.Types.ContentBlockStart _
-  | Agent_core.Types.ContentBlockDelta _
+  | Agent_core.Types.ContentBlockDelta
+      { delta =
+          ( Agent_core.Types.TextDelta _
+          | Agent_core.Types.TextSnapshot _
+          | Agent_core.Types.ThinkingDelta _
+          | Agent_core.Types.ThinkingSignatureDelta _
+          | Agent_core.Types.RedactedThinkingSnapshot _
+          | Agent_core.Types.ReasoningDetailsDelta _
+          | Agent_core.Types.InputJsonDelta _
+          | Agent_core.Types.InputJsonSnapshot _ )
+      ; _
+      }
   | Agent_core.Types.Connected
   | Agent_core.Types.Ping -> ()
 

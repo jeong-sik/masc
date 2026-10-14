@@ -352,7 +352,7 @@ let backup_path_for_source ~config ~trace_id
       (source_ref : Keeper_checkpoint_ref.t) =
   let backup_dir =
     Filename.concat
-      (Workspace.masc_root_dir config)
+      (Workspace.masc_dir config)
       (Printf.sprintf
          "backups-checkpoint-purge-%s-%s"
          trace_id
@@ -378,7 +378,7 @@ let ensure_exact_backup ~config ~trace_id ~source_ref source_bytes =
   | None ->
     (match
        Keeper_fs.save_bytes_durable_atomic
-         ~ownership_root:(Workspace.masc_root_dir config)
+         ~ownership_root:(Workspace.masc_dir config)
          backup_path
          source_bytes
      with
@@ -533,7 +533,15 @@ let purge_current_unlocked config ~keeper_name ~apply =
                       | Keeper_checkpoint_store.Not_installed
                           { cause = Source_changed _; _ } ->
                         Error Purge_source_changed
-                      | Not_installed { cause; _ } ->
+                      | Not_installed
+                          { cause =
+                              ( Keeper_checkpoint_store.Source_unavailable _
+                              | Keeper_checkpoint_store.Candidate_identity_invalid _
+                              | Keeper_checkpoint_store.Candidate_session_mismatch _
+                              | Keeper_checkpoint_store.Candidate_turn_regressed _
+                              | Keeper_checkpoint_store.Commit_not_installed _ ) as cause
+                          ; _
+                          } ->
                         Error
                           (Purge_install_failed
                              (checkpoint_cas_error_to_string cause))

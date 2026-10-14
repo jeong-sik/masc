@@ -336,7 +336,7 @@ let partition reference =
 ;;
 
 let store_dir config =
-  Filename.concat (Workspace.masc_root_dir config) store_dirname
+  Filename.concat (Workspace.masc_dir config) store_dirname
 ;;
 
 (* Layout: one append-only directory per exact reference, holding one file per
@@ -358,7 +358,7 @@ let legacy_path config reference =
 ;;
 
 let load_file config expected_reference path =
-  let ownership_root = Workspace.masc_root_dir config in
+  let ownership_root = Workspace.masc_dir config in
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error -> Error (Read_failed error)
   | Ok None -> Ok None
@@ -374,7 +374,7 @@ let load_file config expected_reference path =
 ;;
 
 let scan_runs config reference =
-  let ownership_root = Workspace.masc_root_dir config in
+  let ownership_root = Workspace.masc_dir config in
   match
     Fs_compat.read_owned_directory_if_present
       ~owner_uid:(Unix.geteuid ())
@@ -425,7 +425,7 @@ let load_latest config reference =
 ;;
 
 let prepare_store_directory config =
-  let ownership_root = Workspace.masc_root_dir config in
+  let ownership_root = Workspace.masc_dir config in
   Keeper_fs_durable_directory.ensure
     ~before_prepare:(fun () -> ())
     ~before_directory_fsync:(fun _ -> ())
@@ -441,7 +441,7 @@ let save_latest config value =
     Keeper_fs_durable_directory.ensure
       ~before_prepare:(fun () -> ())
       ~before_directory_fsync:(fun _ -> ())
-      ~ownership_root:(Workspace.masc_root_dir config)
+      ~ownership_root:(Workspace.masc_dir config)
       (reference_dir config value.reference)
     |> Result.map_error (fun error -> Directory_prepare_failed error)
   in
@@ -450,7 +450,7 @@ let save_latest config value =
   match
     File_lock_eio.with_durable_lock_observed ~lock_path (fun () ->
       Keeper_fs.save_json_durable_atomic
-        ~ownership_root:(Workspace.masc_root_dir config)
+        ~ownership_root:(Workspace.masc_dir config)
         ~pretty:false
         target
         (to_yojson value)

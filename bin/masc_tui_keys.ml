@@ -1143,17 +1143,32 @@ let footer_hints_approval_detail =
    over a footer saying "Ctrl-E:$EDITOR", with "Enter: newline" beside it
    that the footer never named. Both rows project from here, and the pane
    keeps to what the draft is and where it goes. *)
-let board_compose_writing_bindings =
+let board_compose_writing_bindings ~reply =
   [ b Act "Enter" "newline" ~help:"newline in the draft; Esc opens the send menu"
   ; b Act "Ctrl-E" "$EDITOR" ~help:"hand the draft to $EDITOR and take it back"
-  ; b Meta "Esc" "menu" ~help:"send, discard, or keep writing"
-  ; b Meta "Tab" "surfaces"
   ]
+  (* A comment's wire carries text only, so the hint appears where the key
+     works -- a reply's Ctrl-A says why instead of staging. *)
+  @ (if reply then []
+     else [ b Act "Ctrl-A" "attach" ~help:"stage a local file to upload with the post" ])
+  @ [ b Meta "Esc" "menu" ~help:"send, discard, or keep writing"
+    ; b Meta "Tab" "surfaces"
+    ]
 
 (* No [q] here: while the draft has the keys, [q] is a printable scalar and
    goes into the draft like any other letter. Leaving is Esc and then d. *)
-let footer_hints_board_compose_writing =
-  "type to write  " ^ hints_of_bindings board_compose_writing_bindings
+let footer_hints_board_compose_writing ~reply =
+  "type to write  " ^ hints_of_bindings (board_compose_writing_bindings ~reply)
+
+(* The path input after Ctrl-A owns the compose keys until the file is staged
+   or the input is cancelled. *)
+let board_attach_input_bindings =
+  [ b Act "Enter" "stage"
+  ; b Meta "Esc" "cancel"
+  ]
+
+let footer_hints_board_attach_input =
+  "type the file path  " ^ hints_of_bindings board_attach_input_bindings
 
 let board_compose_armed_bindings ~reply =
   [ b Act "s" "send" ]
@@ -1394,7 +1409,9 @@ let footer_hints_code ~pane =
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
-         { b with label = (match pane with Code_tree -> "move" | _ -> "scroll") }
+         { b with label = (match pane with
+           | Code_tree -> "move"
+           | Code_file | Code_diff | Code_notes | Code_history -> "scroll") }
        else b)
   |> hints_of_bindings
   |> fun hints ->
@@ -1848,7 +1865,10 @@ let help_sections ?current () =
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
            | Lanes -> entries [preflight_detail_binding]
-           | _ -> []
+           | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
+           | Overview | Acting | Metrics | Clients | Board | Approvals | Planning | Schedules
+           | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
+           | Config | Resources | Tools | System_logs -> []
          in
          (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
       help_surfaces

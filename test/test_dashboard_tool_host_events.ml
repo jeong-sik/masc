@@ -233,6 +233,51 @@ let test_blank_entity_id_is_normalized_out () =
     Yojson.Safe.Util.
       (failure_envelope |> member "evidence_ref" |> member "session_id" = `Null)
 
+(* Every envelope is a tool-host failure on one tool call. The JSON names
+   both, and reading an envelope back refuses another surface or entity kind,
+   the way it refuses a cause that is not a tool-host cause. *)
+let test_envelope_is_a_tool_host_tool_call () =
+  let details =
+    Dashboard_tool_host_events.details_json
+      {
+        agent_name = "codex";
+        client_name = "codex";
+        tool_name = "masc_keeper_msg";
+        transport = "mcp_http";
+        phase = None;
+        cause = Failure_envelope.Tool_host_timeout;
+        message = "timed out";
+        request_id = Some "req-1";
+        session_id = None;
+        trace_id = None;
+        timeout_ms = None;
+      }
+  in
+  let envelope = Yojson.Safe.Util.member "failure_envelope" details in
+  check string "surface" "tool_host"
+    Yojson.Safe.Util.(envelope |> member "surface" |> to_string);
+  check string "entity_kind" "tool_call"
+    Yojson.Safe.Util.(envelope |> member "entity_kind" |> to_string);
+  check bool "the written envelope reads back" true
+    (Option.is_some (Failure_envelope.find_in_json details));
+  let with_field key value =
+    match envelope with
+    | `Assoc fields ->
+        `Assoc (List.map (fun (k, v) -> if String.equal k key then (k, value) else (k, v)) fields)
+    | _ -> fail "failure envelope is not an object"
+  in
+  let refused label expected json =
+    match Failure_envelope.of_yojson json with
+    | Error actual -> check string label expected actual
+    | Ok _ -> fail (label ^ ": the envelope was read")
+  in
+  refused "another surface"
+    "failure surface must be \"tool_host\" (received \"browser\")"
+    (with_field "surface" (`String "browser"));
+  refused "another entity kind"
+    "failure entity_kind must be \"tool_call\" (received \"session\")"
+    (with_field "entity_kind" (`String "session"))
+
 let with_report_route ~auth_enabled f =
   let base_path = temp_dir () in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -355,6 +400,8 @@ let () =
             test_explicit_cause_is_not_reparsed_from_message;
           test_case "blank entity_id is normalized out" `Quick
             test_blank_entity_id_is_normalized_out;
+          test_case "an envelope is a tool-host tool call" `Quick
+            test_envelope_is_a_tool_host_tool_call;
           test_case "HTTP report records the bearer reporter" `Quick
             test_report_route_binds_bearer_reporter;
           test_case "HTTP report preserves admitted local attribution" `Quick

@@ -519,6 +519,37 @@ let () = test "dispatch_tasks" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+(* A status that is not one of the six is refused: answering "No tasks."
+   would read as an empty board. The empty string is not a status either. *)
+let check_tasks_status_refused status expected_message =
+  let ctx = make_test_ctx () in
+  let args = `Assoc [ ("status", status) ] in
+  match Task.Tool.dispatch ctx ~name:"masc_tasks" ~args with
+  | Some result ->
+    assert (not (Tool_result.is_success result));
+    assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+    assert (str_contains (Tool_result.message result) expected_message)
+  | None -> failwith "dispatch returned None"
+
+let () = test "dispatch_tasks_refuses_an_unknown_status" (fun () ->
+  check_tasks_status_refused (`String "in-progress")
+    "unknown status \"in-progress\"; expected one of: todo, claimed")
+
+let () = test "dispatch_tasks_refuses_an_empty_status" (fun () ->
+  check_tasks_status_refused (`String "")
+    "unknown status \"\"; expected one of: todo, claimed")
+
+let () = test "dispatch_tasks_refuses_a_non_string_status" (fun () ->
+  check_tasks_status_refused (`Int 1) "status must be a string")
+
+let () = test "dispatch_tasks_accepts_a_known_status" (fun () ->
+  let ctx = make_test_ctx () in
+  let args = `Assoc [ ("status", `String "in_progress") ] in
+  match Task.Tool.dispatch ctx ~name:"masc_tasks" ~args with
+  | Some result -> assert (Tool_result.is_success result)
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "task_history_events_json_filters_by_task_id" (fun () ->
   let ctx = make_test_ctx () in
   let rec mkdir_p path =
@@ -2752,7 +2783,7 @@ let () = test "handle_transition_cancel_metric_carries_the_stated_reason" (fun (
 let () = test "add_task_refuses_replaced_workspace_before_creation" (fun () ->
   let ctx = make_test_ctx () in
   let base = Unix.realpath ctx.config.base_path in
-  let root = Unix.realpath (Workspace.masc_root_dir ctx.config) in
+  let root = Unix.realpath (Workspace.masc_dir ctx.config) in
   let create base_path =
     Task.Tool.handle_add_task ~tool_name:"masc_add_task"
       ~start_time:(Tool_timing.start ()) ctx
@@ -2772,7 +2803,7 @@ let () = test "transition_cancel_refuses_replaced_workspace_before_task_change" 
     ~start_time:(Tool_timing.start ()) ctx
     (`Assoc [ "title", `String "Keep this task in its own workspace" ]) in
   let base = Unix.realpath ctx.config.base_path in
-  let root = Unix.realpath (Workspace.masc_root_dir ctx.config) in
+  let root = Unix.realpath (Workspace.masc_dir ctx.config) in
   let cancel base_path =
     Task.Tool.handle_transition ~tool_name:"masc_transition"
       ~start_time:(Tool_timing.start ()) ctx

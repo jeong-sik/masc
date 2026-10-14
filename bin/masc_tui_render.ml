@@ -88,7 +88,9 @@ let keeper_roster_marquee_target (state : state) ~cols =
         if Message_layout.display_width name > keeper_roster_name_cells then
           Some name
         else None
-    | _ -> None
+    | ((Overview | Keepers (Keeper_detail | Keeper_message)), None)
+    | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick))), _)
+    | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs)))))))))))))))))))), _) -> None
 
 let acting_pane_suppressed (state : state) =
   let modal =
@@ -754,18 +756,35 @@ let planning_next_step (goal : planning_goal) =
   | Goal_phase.Executing, Tui_decode.Proof_refuted _ ->
     ( (Theme.bad ())
     , "refused - fix what the verdict names below, then [c] to resubmit" )
-  | Goal_phase.Executing, _ ->
+  | (Goal_phase.Executing, Proof_idle) | (Goal_phase.Executing, Proof_pending)
+  | (Goal_phase.Executing, Proof_proven _) | (Goal_phase.Executing, Proof_stale _)
+  | (Goal_phase.Executing, Proof_unreadable _) ->
     ( Ansi.dim
     , "work the linked tasks, then [c] to submit it for verification" )
-  | Goal_phase.Verifying, _ ->
+  | (Goal_phase.Verifying, Proof_idle) | (Goal_phase.Verifying, Proof_pending)
+  | (Goal_phase.Verifying, Proof_proven _) | (Goal_phase.Verifying, Proof_refuted _)
+  | (Goal_phase.Verifying, Proof_stale _) | (Goal_phase.Verifying, Proof_unreadable _) ->
     let tone, text = Planning_detail.verifying_next_step goal.pg_verifier_unreconciled in
     (planning_detail_tone tone, text)
-  | Goal_phase.Awaiting_confirmation, _ ->
+  | (Goal_phase.Awaiting_confirmation, Proof_idle)
+  | (Goal_phase.Awaiting_confirmation, Proof_pending)
+  | (Goal_phase.Awaiting_confirmation, Proof_proven _)
+  | (Goal_phase.Awaiting_confirmation, Proof_refuted _)
+  | (Goal_phase.Awaiting_confirmation, Proof_stale _)
+  | (Goal_phase.Awaiting_confirmation, Proof_unreadable _) ->
     (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
-  | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
-  | Goal_phase.Dropped, _ -> (Ansi.dim, "abandoned - [o] reopens it")
-  | Goal_phase.Paused _, _ -> (Theme.warn (), "paused - [r] restores the prior state; linked Tasks continue independently")
-  | Goal_phase.Blocked _, _ -> (Theme.bad (), "blocked - [u] restores the prior state; linked Tasks continue independently")
+  | (Goal_phase.Completed, Proof_idle) | (Goal_phase.Completed, Proof_pending)
+  | (Goal_phase.Completed, Proof_proven _) | (Goal_phase.Completed, Proof_refuted _)
+  | (Goal_phase.Completed, Proof_stale _) | (Goal_phase.Completed, Proof_unreadable _) -> (Ansi.dim, "reached its target - [o] reopens it")
+  | (Goal_phase.Dropped, Proof_idle) | (Goal_phase.Dropped, Proof_pending)
+  | (Goal_phase.Dropped, Proof_proven _) | (Goal_phase.Dropped, Proof_refuted _)
+  | (Goal_phase.Dropped, Proof_stale _) | (Goal_phase.Dropped, Proof_unreadable _) -> (Ansi.dim, "abandoned - [o] reopens it")
+  | (Goal_phase.Paused _, Proof_idle) | (Goal_phase.Paused _, Proof_pending)
+  | (Goal_phase.Paused _, Proof_proven _) | (Goal_phase.Paused _, Proof_refuted _)
+  | (Goal_phase.Paused _, Proof_stale _) | (Goal_phase.Paused _, Proof_unreadable _) -> (Theme.warn (), "paused - [r] restores the prior state; linked Tasks continue independently")
+  | (Goal_phase.Blocked _, Proof_idle) | (Goal_phase.Blocked _, Proof_pending)
+  | (Goal_phase.Blocked _, Proof_proven _) | (Goal_phase.Blocked _, Proof_refuted _)
+  | (Goal_phase.Blocked _, Proof_stale _) | (Goal_phase.Blocked _, Proof_unreadable _) -> (Theme.bad (), "blocked - [u] restores the prior state; linked Tasks continue independently")
 ;;
 
 (* The line under the list, for the goal the cursor is on. A verdict without its
@@ -1173,13 +1192,16 @@ let render_planning_list (state : state) =
                       tally (fun (t : Tui_decode.task) ->
                           match t.status with
                           | Masc_domain.AwaitingVerification _ -> true
-                          | _ -> false)
+                          | Types_core.Todo | Types_core.Claimed _ | Types_core.InProgress _
+                          | Types_core.Done _ | Types_core.Cancelled _ -> false)
                     in
                     let running =
                       tally (fun (t : Tui_decode.task) ->
                           match t.status with
                           | Masc_domain.InProgress _ -> true
-                          | _ -> false)
+                          | Types_core.Todo | Types_core.Claimed _
+                          | Types_core.AwaitingVerification _ | Types_core.Done _
+                          | Types_core.Cancelled _ -> false)
                     in
                     let total = List.length linked in
                     if awaiting > 0 then
@@ -1646,7 +1668,10 @@ let schedule_outcome_word (row : schedule_row) =
   match row.sch_last_wake_status with
   | Some Schedule_contract_values.Wake_succeeded ->
       schedule_delivery_word row
-  | Some other -> schedule_wake_word other
+  | Some
+      (( Schedule_contract_values.Wake_running
+       | Schedule_contract_values.Wake_failed ) as other) ->
+      schedule_wake_word other
   | None -> Masc_tui_theme.Glyph.no_value
 
 (* Whether a status word names a schedule that can still act. The word is
@@ -2527,9 +2552,10 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
         match Mark.sandbox_of_profile row.kr_sandbox_profile, row.kr_sandbox_profile with
         | Some (Mark.Docker as known), _ ->
           (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Mark.sandbox_letter known ^ Ansi.reset
-        | Some (Mark.Microvm as known), _ ->
+        | Some (Mark.Micro_vm as known), _ ->
           (Theme.category Theme.Slot_2) ^ Mark.sandbox_letter known ^ Ansi.reset
-        | Some (Mark.Local as known), _ -> Ansi.dim ^ Mark.sandbox_letter known ^ Ansi.reset
+        | Some (Mark.Remote_ssh as known), _ ->
+          (Theme.category Theme.Slot_1) ^ Mark.sandbox_letter known ^ Ansi.reset
         | None, other when String.length other > 0 ->
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
         | None, _ -> Ansi.dim ^ "?" ^ Ansi.reset
@@ -2893,7 +2919,13 @@ let render_keeper_list (state : state) =
         | Some { Keeper_control.name; liveness = Keeper_control.Invalid detail; _ } ->
             box_line buf cols ((Theme.warn ()) ^ "  "
               ^ Terminal_text.single_line (name ^ ": " ^ detail) ^ Ansi.reset)
-        | Some _ | None -> ())
+        | Some
+            { Keeper_control.liveness =
+                ( Keeper_control.Unobserved | Keeper_control.Absent
+                | Keeper_control.Present _ )
+            ; _
+            }
+        | None -> ())
    | Keeper_control.Roster_partial { observed; total } ->
        box_line buf cols
          (Printf.sprintf
@@ -3128,7 +3160,8 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     | Tui_decode.Standalone_running, Some started ->
         Printf.sprintf "Activity: %d running · latest started %s ago"
           lane.sl_running_count (Masc_tui_answering.elapsed_text ~now started)
-    | _ -> "Activity: " ^ status in
+    | (Standalone_running, None)
+    | ((Standalone_idle | (Standalone_degraded | (Standalone_no_retained_observation | Standalone_unavailable))), _) -> "Activity: " ^ status in
   let run_stats =
     let total = lane.sl_retained_run_count in
     if total > 0 then
@@ -3276,7 +3309,8 @@ let render_exact_lane_provider_editor (state : state) editor =
    | Some picker ->
      let action = match picker.Masc_tui_types.rlp_pick with
        | Masc_tui_types.Pick_exact_lane_replacement _ -> "Replace selected candidate", "Enter replace"
-       | _ -> "Add fallback candidate", "Enter add" in
+       | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
+       | Pick_new_lane _ -> "Add fallback candidate", "Enter add" in
      box_line_styled buf cols ~style:(Theme.info ())
        ("  " ^ fst action);
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -3294,9 +3328,22 @@ let render_exact_lane_provider_editor (state : state) editor =
               match picker.rlp_pick, runtime.ro_exact_slot_group with
               | Masc_tui_types.Pick_exact_lane_replacement _, Tui_decode.Exact_http_slots -> "HTTP replacement"
               | Masc_tui_types.Pick_exact_lane_replacement _, Tui_decode.Exact_cli_slots -> "CLI replacement"
-              | _, Tui_decode.Exact_http_slots -> "HTTP tail"
-              | _, Tui_decode.Exact_cli_slots -> "CLI tail"
-              | _, Tui_decode.Exact_output_unsupported -> "no output schema"
+              | (Pick_conversation_lane _, Tui_decode.Exact_http_slots)
+              | (Pick_exact_lane _, Tui_decode.Exact_http_slots)
+              | (Pick_new_lane _, Tui_decode.Exact_http_slots)
+              | (Pick_media_failover, Tui_decode.Exact_http_slots)
+              | (Pick_route_default, Tui_decode.Exact_http_slots) -> "HTTP tail"
+              | (Pick_conversation_lane _, Tui_decode.Exact_cli_slots)
+              | (Pick_exact_lane _, Tui_decode.Exact_cli_slots)
+              | (Pick_new_lane _, Tui_decode.Exact_cli_slots)
+              | (Pick_media_failover, Tui_decode.Exact_cli_slots)
+              | (Pick_route_default, Tui_decode.Exact_cli_slots) -> "CLI tail"
+              | (Pick_conversation_lane _, Tui_decode.Exact_output_unsupported)
+              | (Pick_exact_lane _, Tui_decode.Exact_output_unsupported)
+              | (Pick_exact_lane_replacement (_, _, _), Tui_decode.Exact_output_unsupported)
+              | (Pick_new_lane _, Tui_decode.Exact_output_unsupported)
+              | (Pick_media_failover, Tui_decode.Exact_output_unsupported)
+              | (Pick_route_default, Tui_decode.Exact_output_unsupported) -> "no output schema"
             in
             let line bracket note =
               Printf.sprintf "  %s [%s] %s%s"
@@ -4268,7 +4315,7 @@ let lane_run_output_lines ~details ~width (detail : Tui_decode.lane_run_detail) 
           @ List.map (fun (decision, probability) ->
               Printf.sprintf "%s %.3f" (Masc.Typesafeai_librarian_preflight.decision_label decision) probability)
               judgment.reported_probabilities
-        | _ -> [] in
+        | Preflight_awaiting | Preflight_not_called _ | Preflight_failed _ | Preflight_invalid _ -> [] in
       let elapsed = match reading.lp_elapsed_s with
         | None -> [] | Some seconds -> [Printf.sprintf "JEV elapsed %.3fs" seconds] in
       let model = match reading.lp_model with None -> [] | Some model -> ["Model " ^ model] in
@@ -4561,7 +4608,7 @@ let render_lane_run_detail (state : state) ~run_id =
       let summary = inspection_summary_lines detail in
       let compact_preflight = match detail with
         | Inspection_lane {Tui_decode.lrd_librarian_preflight=Some _;_} -> not state.lane_run_preflight_details
-        | _ -> false in
+        | Inspection_lane { lrd_librarian_preflight = None;_} | Inspection_measurement (_, _) -> false in
       let split = cols >= keeper_split_threshold_cols && not compact_preflight in
       let payload_rows =
         max 0
@@ -4658,7 +4705,8 @@ let render_lane_run_detail (state : state) ~run_id =
        ?position ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail_for
          ~preflight:(match detail with
            | Some (Inspection_lane {Tui_decode.lrd_librarian_preflight=Some _;_}) -> true
-           | _ -> false)));
+           | Some (Inspection_lane { lrd_librarian_preflight = None;_})
+           | Some (Inspection_measurement (_, _)) | None -> false)));
   finish_surface state ~clamped:(Lane_run_detail_scroll { scroll; content_height })
     ~surface_key:"lane-run" ~rows:terminal_rows ~cols buf
 
@@ -4860,7 +4908,7 @@ let render_clients (state : state) =
           let style =
             match row.cr_status with
             | Client_inactive -> Theme.recede ()
-            | _ -> Ansi.reset
+            | Client_active | Client_busy | Client_listening -> Ansi.reset
           in
           if idx = state.clients_surface_cursor then
             box_line_selected buf cols line
@@ -5220,7 +5268,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           if List.exists (fun line -> Message_layout.display_width line > inner)
                (Masc_tui_keeper_portrait.beside band labels)
           then None else Some band
-      | _, portrait -> portrait
+      | (Detail_info, portrait) | (Detail_items, portrait) | (Detail_sandbox, portrait)
+      | (Detail_instructions, portrait) | (Detail_secrets, portrait) | (Detail_github, portrait)
+      | (Detail_identity, portrait) | (Detail_channels, portrait) | (Detail_automation, portrait)
+      | (Detail_runs, portrait) -> portrait
     in
     let item_lines () =
       let items = Keeper_portrait_item.all in
@@ -8878,7 +8929,17 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, (Viewport_refresh _ | Viewport_cadence _)) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
-        | Loading (_, Viewport_pointer _) -> "Interacting with selected browser viewport…", Theme.info ()
+        | Loading
+            ( _
+            , Viewport_pointer
+                { action =
+                    ( Browser_lane.Activate_tab | Browser_lane.Click _
+                    | Browser_lane.Fill _ | Browser_lane.Scroll _
+                    | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+                    | Browser_lane.Drag _ | Browser_lane.Follow_link _
+                    | Browser_lane.Click_node _ | Browser_lane.Fill_node _ )
+                ; _
+                } ) -> "Interacting with selected browser viewport…", Theme.info ()
         | Loading (_, Screenshot _) ->
             (match browser_label view with
              | Some browser -> "Capturing selected " ^ browser ^ " tab… (any key cancels preview)"
@@ -8993,7 +9054,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | None when Option.is_some view.scene ->
              (match List.nth_opt (scene_targets view) view.scene_cursor with
               | Some node ->
-                  let label = match node.kind with Region _ -> "Region" | _ -> "Element" in
+                  let label = match node.kind with
+                    | Region _ -> "Region"
+                    | Text | Raster | Control _ -> "Element" in
                   Printf.sprintf "  %s %d/%d: %s • n/p:select • y:copy context"
                     label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
@@ -10029,7 +10092,14 @@ let render_runtime (state : state) =
              | Masc_tui_types.Runtime_choice runtime,
                (Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _) ->
                  Masc_tui_types.runtime_model_picker_title runtime
-             | _ -> Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice in
+             | Masc_tui_types.Runtime_choice _,
+               (Masc_tui_types.Pick_route_default | Masc_tui_types.Pick_media_failover
+               | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_new_lane _)
+             | Masc_tui_types.Lane_choice _,
+               (Masc_tui_types.Pick_route_default | Masc_tui_types.Pick_media_failover
+               | Masc_tui_types.Pick_conversation_lane _ | Masc_tui_types.Pick_exact_lane _
+               | Masc_tui_types.Pick_exact_lane_replacement _ | Masc_tui_types.Pick_new_lane _) ->
+                 Masc_tui_types.runtime_picker_label_for picker.rlp_pick choice in
            match choice with
            | Masc_tui_types.Lane_choice lane ->
                let note =
@@ -10044,7 +10114,8 @@ let render_runtime (state : state) =
                  if List.exists (String.equal runtime.ro_id) picker.rlp_already
                  then (match picker.rlp_pick with
                    | Masc_tui_types.Pick_route_default -> "  (current route)"
-                   | _ -> "  (already a candidate)")
+                   | Pick_media_failover | Pick_conversation_lane _ | Pick_exact_lane _
+                   | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ -> "  (already a candidate)")
                  else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
                  then "  (same provider as a current candidate)"
                  else ""
@@ -10054,12 +10125,14 @@ let render_runtime (state : state) =
                    (format_context_tokens runtime.ro_effective_max_context)
                    (match picker.rlp_pick with
                     | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ -> "context"
-                    | _ -> "ctx")
+                    | Pick_media_failover | Pick_route_default | Pick_conversation_lane _
+                    | Pick_new_lane _ -> "ctx")
                in
                let def = if runtime.ro_is_default then
                  (match picker.rlp_pick with
                   | Masc_tui_types.Pick_route_default -> " [entry runtime]"
-                  | _ -> " [default]") else "" in
+                  | Pick_media_failover | Pick_conversation_lane _ | Pick_exact_lane _
+                  | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ -> " [default]") else "" in
                c.push
                  (Printf.sprintf "  %s %s%s%s%s" mark
                     label
@@ -10070,7 +10143,8 @@ let render_runtime (state : state) =
                     c.push ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
                       ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
                       ^ " · " ^ Terminal_text.single_line runtime.ro_id)
-                | _ -> ())) picker.rlp_choices;
+                | Pick_media_failover | Pick_route_default | Pick_conversation_lane _
+                | Pick_new_lane _ -> ())) picker.rlp_choices;
        c.push_divider ());
   if shown = 0 then begin
     let empty =
@@ -10587,7 +10661,13 @@ let render_acting_evidence (state : state) entry =
         @ preview "Input preview" call.kt_tool_args_preview
         @ json "Output" call.kt_tool_result
         @ preview "Output preview" call.kt_tool_output_preview
-    | _ -> []
+    | Masc_tui_observer.Internal_agent_runs_changed | Masc_tui_observer.Agent_core _
+    | Masc_tui_observer.Keeper_heartbeat _ | Masc_tui_observer.Keeper_turn_complete _
+    | Masc_tui_observer.Keeper_turn_observation _ | Masc_tui_observer.Keeper_composite_changed _
+    | Masc_tui_observer.Keeper_chat_appended _ | Masc_tui_observer.Keeper_chat_stream_frame _
+    | Masc_tui_observer.Keeper_turn_stream_frame _
+    | Masc_tui_observer.Keeper_waiting_inventory_changed _ | Masc_tui_observer.Fusion_run_status _
+    | Masc_tui_observer.Lane_resource _ | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ -> []
   in
   let lines = lines @ io_lines in
   let content_height = max 1 (rows - count_frame_lines buf - listing_rows_below_the_body) in
@@ -10651,7 +10731,23 @@ let render_acting (state : state) =
           Acting.duration_of_completion
             ~before:(List.map (fun e -> e.Acting.ae_event) older)
             completed
-      | Masc_tui_observer.Agent_core _ | Masc_tui_observer.Keeper_heartbeat _
+      | Masc_tui_observer.Agent_core
+          { Masc_tui_observer.kind =
+              ( Masc_tui_observer.Tool_called
+              | Masc_tui_observer.Turn_started
+              | Masc_tui_observer.Turn_ready
+              | Masc_tui_observer.Turn_completed
+              | Masc_tui_observer.Agent_started
+              | Masc_tui_observer.Agent_completed _
+              | Masc_tui_observer.Agent_failed _
+              | Masc_tui_observer.Agent_yielded _
+              | Masc_tui_observer.Agent_input_required _
+              | Masc_tui_observer.Tool_approval_completed
+              | Masc_tui_observer.Telemetry
+              | Masc_tui_observer.Agent_core_other _ )
+          ; _
+          }
+      | Masc_tui_observer.Keeper_heartbeat _
       | Masc_tui_observer.Keeper_tool_call _
       | Masc_tui_observer.Keeper_turn_complete _
       | Masc_tui_observer.Keeper_turn_observation _
@@ -12723,7 +12819,8 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
          voice_body_line buf cols
            (Printf.sprintf "    %stry %s: %s%s" Ansi.dim what address Ansi.reset))
        (Voice_wizard.suggested_addresses draft.Voice_wizard.section)
-   | _ -> ());
+   | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Name | Voice_wizard.Model
+   | Voice_wizard.Voice | Voice_wizard.Review | (Address|Credential) -> ());
   voice_body_line buf cols "";
   voice_body_line buf cols (Printf.sprintf "  %sdraft%s" Ansi.bold Ansi.reset);
   field "side" side;
@@ -13151,7 +13248,8 @@ let render_surface (state : state) =
             | None -> render_work_tasks state)
        | None, Overview_tasks.Task_focus _, Planning_list -> render_work_tasks state
        | _, _, Planning_list -> render_planning_list state
-       | _, _, Planning_detail goal_id ->
+       | (_, Overview_tasks.No_task_focus, Planning_detail goal_id)
+       | (_, Overview_tasks.Task_focus _, Planning_detail goal_id) ->
            let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
            match List.find_opt (fun g -> g.pg_id = goal_id) goals with
            | Some goal ->
@@ -13170,7 +13268,11 @@ let render_surface (state : state) =
                         c.push (match state.planning_error with
                           | Some error -> " Goal detail unavailable · " ^ Terminal_text.single_line error
                           | None -> " Goal detail not read · waiting for its source"))
-                | Some _ | None -> render_planning_list state))
+                | Some
+                    ( Home_held_call _ | Home_gate_request _
+                    | Home_operator_request _ | Home_question _
+                    | Home_goal_confirmation _ | Home_operator_task _ )
+                | None -> render_planning_list state))
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->
       Masc_tui_render_approvals.render_question_reader state
   | Approvals ->
@@ -13325,8 +13427,8 @@ let render_context_inspector state =
         with
         | (Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), true ->
             "1/2/3 or Tab:switch  [ / ]:turn  /:search  j/k:select or scroll  h/l:pane  Enter:open exact  r:refresh  Esc:close"
-        | _ ->
-            "1/2/3 or Tab:switch  [ / ]:turn  /:search  j/k:select  Enter:open exact  r:refresh  Esc:close")
+        | ((Masc_tui_context_inspector.Exact_input | Masc_tui_context_inspector.Input_map), false)
+        | (Masc_tui_context_inspector.Composition, _) -> "1/2/3 or Tab:switch  [ / ]:turn  /:search  j/k:select  Enter:open exact  r:refresh  Esc:close")
   in
   let content = context_inspector_content_lines ~cols state in
   (* The plain shapes are one list, so the contract windows it and says which

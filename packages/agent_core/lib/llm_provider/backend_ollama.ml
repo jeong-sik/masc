@@ -855,7 +855,18 @@ let%test "parse_ollama_response maps done_reason=tool_calls to StopToolUse" =
     &&
       (match resp.content with
       | [ Types.ToolUse { name = "get_weather"; _ } ] -> true
-      | _ -> false)
+      | []
+      | [ Types.ToolUse _ ]
+      | [ ( Types.Text _
+          | Types.Thinking _
+          | Types.ReasoningDetails _
+          | Types.RedactedThinking _
+          | Types.ToolResult _
+          | Types.Image _
+          | Types.Document _
+          | Types.Audio _ )
+        ]
+      | _ :: _ :: _ -> false)
 ;;
 
 let%test "parse_ollama_response rejects tool_calls without tool blocks" =
@@ -944,7 +955,19 @@ let%test "parse_ollama_response extracts thinking block from message" =
     (match resp.content with
      | [ Types.Thinking { content = thinking }; Types.Text "The answer is 42." ] ->
        String.length thinking > 0
-     | _ -> false)
+     | []
+     | [ ( Types.Text _
+         | Types.Thinking _
+         | Types.ReasoningDetails _
+         | Types.RedactedThinking _
+         | Types.ToolUse _
+         | Types.ToolResult _
+         | Types.Image _
+         | Types.Document _
+         | Types.Audio _ )
+       ]
+     | [ _; _ ]
+     | _ :: _ :: _ :: _ -> false)
 ;;
 
 let%test "Ollama sync keeps ordered inline channels only under declared framing" =
@@ -954,14 +977,19 @@ let%test "Ollama sync keeps ordered inline channels only under declared framing"
   | Ok split, Ok plain ->
       split.content = [Text "A"; Thinking {content="B";signature=None}; Text "C"]
       && plain.content = [Text "A<think>B</think>C"]
-  | _ -> false
+  | Ok _, Error _ | Error _, (Ok _ | Error _) -> false
 ;;
 
 let%test "Ollama sync flush retains unfinished reasoning as reasoning" =
   let wire = {|{"model":"fixture","done_reason":"stop","message":{"content":"<think>private</thi"}}|} in
   match parse_ollama_response ~content_inline_reasoning:Capabilities.Think_tags wire with
   | Ok response ->
-      List.for_all (function Thinking _ -> true | _ -> false) response.content
-      && String.concat "" (List.filter_map (function Thinking {content;_} -> Some content | _ -> None) response.content) = "private</thi"
-  | _ -> false
+      let thinking_text = function
+        | Thinking {content;_} -> Some content
+        | Text _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+        | Image _ | Document _ | Audio _ -> None in
+      let blocks = List.map thinking_text response.content in
+      List.for_all Option.is_some blocks
+      && String.concat "" (List.filter_map Fun.id blocks) = "private</thi"
+  | Error _ -> false
 ;;

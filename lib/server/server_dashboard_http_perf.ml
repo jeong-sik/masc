@@ -37,6 +37,22 @@ type dashboard_perf_row =
   ; notes : string
   }
 
+(* How a benchmark moved against its baseline. Closed, so the counts in
+   [verdict_counts_json] answer for each one: they used to match the label,
+   with a wildcard that put any label they did not list under "stable". *)
+type verdict =
+  | Improved
+  | Stable
+  | Mixed
+  | Regressed
+
+let verdict_to_string = function
+  | Improved -> "improved"
+  | Stable -> "stable"
+  | Mixed -> "mixed"
+  | Regressed -> "regressed"
+;;
+
 type dashboard_perf_compare_row =
   { benchmark : string
   ; avg_delta_ms : int
@@ -44,7 +60,7 @@ type dashboard_perf_compare_row =
   ; p95_delta_ms : int
   ; p95_delta_pct : float option
   ; max_delta_ms : int
-  ; verdict : string
+  ; verdict : verdict
   }
 
 let dedupe_strings values =
@@ -226,16 +242,16 @@ let compare_verdict ~avg_delta ~p95_delta =
   if
     ((avg_delta > 0 && p95_delta < 0) || (avg_delta < 0 && p95_delta > 0))
     && (abs avg_delta >= 50 || abs p95_delta >= 50)
-  then "mixed"
+  then Mixed
   else if avg_delta >= 50 && p95_delta >= 0
-  then "regressed"
+  then Regressed
   else if p95_delta >= 50 && avg_delta >= 0
-  then "regressed"
+  then Regressed
   else if avg_delta <= -50 && p95_delta <= 0
-  then "improved"
+  then Improved
   else if p95_delta <= -50 && avg_delta <= 0
-  then "improved"
-  else "stable"
+  then Improved
+  else Stable
 ;;
 
 let compare_rows ~baseline ~current =
@@ -276,7 +292,7 @@ let dashboard_perf_compare_row_json (row : dashboard_perf_compare_row) =
     ; ( "p95_delta_pct"
       , Option.fold ~none:`Null ~some:(fun value -> `Float value) row.p95_delta_pct )
     ; "max_delta_ms", `Int row.max_delta_ms
-    ; "verdict", `String row.verdict
+    ; "verdict", `String (verdict_to_string row.verdict)
     ]
 ;;
 
@@ -356,10 +372,10 @@ let verdict_counts_json rows =
     |> List.fold_left
          (fun (improved, stable, mixed, regressed) (row : dashboard_perf_compare_row) ->
             match row.verdict with
-            | "improved" -> improved + 1, stable, mixed, regressed
-            | "mixed" -> improved, stable, mixed + 1, regressed
-            | "regressed" -> improved, stable, mixed, regressed + 1
-            | _ -> improved, stable + 1, mixed, regressed)
+            | Improved -> improved + 1, stable, mixed, regressed
+            | Stable -> improved, stable + 1, mixed, regressed
+            | Mixed -> improved, stable, mixed + 1, regressed
+            | Regressed -> improved, stable, mixed, regressed + 1)
          (0, 0, 0, 0)
   in
   let improved, stable, mixed, regressed = counts in

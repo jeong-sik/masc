@@ -51,7 +51,7 @@ let with_content (block : Agent_core.Types.content_block) replacement =
   match block with
   | Agent_core.Types.ToolResult fields ->
     Agent_core.Types.ToolResult { fields with content = replacement }
-  | other -> other
+  | (Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _) as other -> other
 ;;
 
 (* Addressing uses this exact preview and byte count. SHA256 hex digits have

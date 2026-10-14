@@ -154,7 +154,7 @@ let write_with ~replace_file ~directory request = protect (fun () ->
   let* () = match request.expected,current with
     | Create,None -> Ok ()
     | Save revision,Some observed when revision=observed.source_revision -> Ok ()
-    | _ -> reject ?current Revision_conflict "declaration source changed; read the current document before saving" in
+    | Create,Some _ | Save _,(None | Some _) -> reject ?current Revision_conflict "declaration source changed; read the current document before saving" in
   if not snapshot.complete then reject ?current Io_error "configuration inventory is unreadable; no declaration was written"
   else
     let document = describe ~snapshot ~path request.source_text in

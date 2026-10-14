@@ -54,7 +54,8 @@ let parse = function
       let* frame_path = parse_frame_path (`Assoc fields) in
       let* () = match interaction, frame_path with
         | (Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog), _ :: _ -> Error "this action operates on the top-level tab"
-        | _ -> Ok () in
+        | ((Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog), [])
+        | ((Click _ | (Fill _ | (Press _ | (Select _ | (Scroll _ | Upload _))))), _) -> Ok () in
       let* tab_id = integer "tabId" in
       if tab_id < 0 then Error "tabId must be nonnegative"
       else Ok (On_tab {tab_id;frame_path;interaction}) in

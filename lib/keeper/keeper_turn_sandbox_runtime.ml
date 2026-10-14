@@ -603,7 +603,7 @@ let ensure_policy_network backend ~keeper_name (mode : Keeper_types_profile_sand
          (match Keeper_sandbox_microvm.policy_network_gateway ~inspect with
           | Ok gateway -> Ok (Some gateway)
           | Error detail -> Error ("microvm_policy_network_unreadable: " ^ detail))
-       | _, output ->
+       | (Unix.WEXITED _, output) | (Unix.WSIGNALED _, output) | (Unix.WSTOPPED _, output) ->
          Error
            (Printf.sprintf
               "microvm_policy_network_unreadable: %s: %s"
@@ -623,7 +623,7 @@ let ensure_policy_network backend ~keeper_name (mode : Keeper_types_profile_sand
          | Ok create_argv ->
            (match run_argv_with_status ~timeout_sec:policy_network_create_timeout_s create_argv with
             | Unix.WEXITED 0, _ -> Ok ()
-            | _, output ->
+            | (Unix.WEXITED _, output) | (Unix.WSIGNALED _, output) | (Unix.WSTOPPED _, output) ->
               Error
                 (Printf.sprintf
                    "microvm_policy_network_uncreatable: %s: %s"
@@ -640,7 +640,7 @@ let ensure_policy_network backend ~keeper_name (mode : Keeper_types_profile_sand
               | Ok () -> gateway_of_network ())
            | Error detail ->
              Error ("microvm_policy_network_unreadable: " ^ detail))
-        | _, listing ->
+        | (Unix.WEXITED _, listing) | (Unix.WSIGNALED _, listing) | (Unix.WSTOPPED _, listing) ->
           Error
             (Printf.sprintf
                "microvm_policy_network_unreadable: %s: %s"
@@ -798,7 +798,7 @@ let inspect_container_exists ?timeout_sec ~microvm_backend container_name =
   in
   match inspect_st with
   | Unix.WEXITED 0 -> Ok ()
-  | _ -> Error inspect_out
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error inspect_out
 ;;
 
 (* [container] has no [--format] template; state comes back as JSON and a
@@ -815,7 +815,8 @@ let probe_microvm_container_state ?timeout_sec ~backend container_name =
      | Ok true -> Ok Keeper_sandbox_runtime.Docker_container_running
      | Ok false -> Ok Keeper_sandbox_runtime.Docker_container_stopped
      | Error _ as err -> err)
-  | _ -> Ok Keeper_sandbox_runtime.Docker_container_absent
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    Ok Keeper_sandbox_runtime.Docker_container_absent
 ;;
 
 let inspect_container_running ?timeout_sec ~microvm_backend container_name =
@@ -1109,7 +1110,7 @@ let reclaim_work_volume_space ~backend ~keeper_name ~image ~volume_name ~timeout
      | Ok (Unix.WEXITED 0, out) ->
        Log.Keeper.info "microvm work volume %s trimmed: %s" volume_name (String.trim out);
        Ok ()
-     | Ok (status, out) ->
+     | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), out) ->
        Log.Keeper.warn
          "microvm work volume %s not trimmed, booting without reclaim: %s (%s)"
          volume_name
@@ -1157,7 +1158,7 @@ let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_
     in
     (match run_argv_with_status ?timeout_sec probe with
      | Unix.WEXITED 0, _ -> Ok ()
-     | _, out ->
+     | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
        let detail = Keeper_sandbox_runtime.docker_failure_output_for_log out in
        Error
          (Printf.sprintf
@@ -1184,7 +1185,7 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
        | Some argv ->
          match run_argv_with_status ?timeout_sec argv with
          | Unix.WEXITED 0, _ -> Ok ()
-         | _, out ->
+         | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
            Error
              ("microvm_work_volume_search_failed: "
               ^ Keeper_sandbox_runtime.docker_failure_output_for_log out))
@@ -1216,7 +1217,7 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
     in
     (match run_argv_with_status ?timeout_sec probe with
      | Unix.WEXITED 0, _ -> Ok ()
-     | _, out ->
+     | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
        Error
          (Printf.sprintf
             "microvm_keeper_work_root_not_writable: %s as %d:%d: %s"
@@ -1224,7 +1225,7 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
             t.uid
             t.gid
             (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
-  | _, out ->
+  | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
     Error
       (Printf.sprintf
          "microvm_keeper_work_root_failed: %s: %s"
@@ -1308,15 +1309,15 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~backend ~container_name =
              in
              (match run_argv_with_status ?timeout_sec apply with
               | Unix.WEXITED 0, _ -> ()
-              | _, out ->
+              | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
                 Log.Keeper.warn ~keeper_name:t.meta.name
                   "microvm_build_link_apply_failed: %s"
                   (Keeper_sandbox_runtime.docker_failure_output_for_log out))
-           | (_, out), _ ->
+           | ((Unix.WEXITED _, out), _) | ((Unix.WSIGNALED _, out), _) | ((Unix.WSTOPPED _, out), _) ->
              Log.Keeper.warn ~keeper_name:t.meta.name
                "microvm_build_link_mkdir_failed: %s"
                (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
-     | _, out ->
+     | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
        Log.Keeper.warn ~keeper_name:t.meta.name
          "microvm_build_scan_failed: %s"
          (Keeper_sandbox_runtime.docker_failure_output_for_log out))
@@ -1772,7 +1773,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                take_down_after_boot
                  ~check:Inspect_cannot_see
                  ~detail:inspect_out)
-          | _ ->
+          | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
             (* Two turns of one keeper can race to boot the shared name;
                the loser's run fails on the name and the guest the winner
                booted is the one both wanted. *)
@@ -1845,7 +1846,7 @@ let start_microvm_container ?timeout_sec t =
 ;;
 
 (* Shutdown finalization retains the typed backend through registry removal.
-   A Local or remote-SSH keeper owns no local container, while Docker and
+   A remote-SSH keeper owns no local container, while Docker and
    microVM names project to different runtimes and must not probe each other. *)
 let teardown_keeper_sandbox_by_name
       ?timeout_sec
@@ -1950,23 +1951,62 @@ let teardown_keeper_sandbox_by_name
          | Ok (), trim_cleanup -> trim_cleanup))
 ;;
 
+(* Separate from the teardown because a paused keeper is torn down too and
+   must come back to its work volume. Only dissolution calls this, after the
+   teardown has removed the guest that held the volumes. *)
+let remove_keeper_volumes_by_name
+      ?timeout_sec
+      ~(keeper_name : string)
+      ~(backend : Keeper_sandbox.backend)
+      ?microvm_backend
+      ()
+  =
+  let timeout_sec =
+    match timeout_sec with
+    | Some seconds -> seconds
+    | None -> Env_config_sandbox.Runtime.microvm_remove_timeout_sec ()
+  in
+  match backend with
+  | Keeper_sandbox.Docker | Keeper_sandbox.Remote_ssh -> Ok ()
+  | Keeper_sandbox.Micro_vm ->
+    (match microvm_backend with
+     | None ->
+       Error
+         (Printf.sprintf
+            "microvm_volume_removal_backend_unresolved: keeper %s's volumes \
+             cannot be removed without the runtime that created them"
+            keeper_name)
+     | Some Keeper_microvm_backend.Apple_container ->
+       with_microvm_lifecycle_lock (fun () ->
+         Keeper_sandbox_microvm.remove_apple_keeper_volumes
+           ~run:(fun ~timeout_sec argv -> run_argv_with_status_split ~timeout_sec argv)
+           ~timeout_sec
+           ~keeper_name)
+     | Some
+         ((Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata) as
+          microvm_backend) ->
+       (* Both create the work volume as a host directory, but no removal
+          spelling is established for either. Name what is left instead of
+          reporting a removal that did not happen. *)
+       Error
+         (Printf.sprintf
+            "microvm_volume_removal_not_established: keeper %s's work volume \
+             on %s was left on the host; remove it with that runtime's CLI"
+            keeper_name
+            (Keeper_microvm_backend.to_string microvm_backend)))
+;;
+
 let teardown_keeper_sandbox
       ?timeout_sec
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ()
   =
-  let backend =
-    match meta.sandbox_profile with
-    | Docker -> Keeper_sandbox.Docker
-    | Micro_vm -> Keeper_sandbox.Micro_vm
-    | Remote_ssh -> Keeper_sandbox.Remote_ssh
-  in
   teardown_keeper_sandbox_by_name
     ?timeout_sec
     ~config
     ~keeper_name:meta.name
-    ~backend
+    ~backend:meta.sandbox_profile
     (* The meta is still here, so the runtime the guest was booted on travels
        with the removal. Without it a microsandbox guest would be sent
        [container delete --force] and survive its own teardown. *)
@@ -2141,7 +2181,7 @@ let start_container ?timeout_sec (t : t) =
                      (Printf.sprintf
                         "docker_container_inspect_failed (existence check): %s"
                         (Exec_policy.truncate_for_log inspect_out)))
-              | _ ->
+              | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
                 (match probe_state () with
                  | Ok Keeper_sandbox_runtime.Docker_container_running ->
                    (* Another turn or server of this keeper booted the shared
@@ -2149,8 +2189,8 @@ let start_container ?timeout_sec (t : t) =
                       name loss is the winner's, and this call adopts the
                       winner. *)
                    adopt_running ()
-                 | _ ->
-                   let status_label =
+                 | Ok (Keeper_sandbox_runtime.Docker_container_stopped | Keeper_sandbox_runtime.Docker_container_absent)
+                 | Error _ -> let status_label =
                      match st with
                      | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
                      | Unix.WSIGNALED signal ->
@@ -2485,7 +2525,7 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
     let status, output = run_argv_with_status ~timeout_sec argv in
       (match status with
        | Unix.WEXITED 0 -> retire ()
-       | _ ->
+       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
          (match
             Keeper_sandbox_runtime.probe_container_state_optional
               ~container_name
@@ -2725,7 +2765,8 @@ let run_exec_with_optional_output_files
             ~status
             ~output:(output_for_status ~stdout ~stderr)
             detail))
-  | Ok other -> Ok other
+  | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _, _) as other) ->
+    Ok other
 ;;
 
 let run_exec_with_status_split
@@ -2874,7 +2915,8 @@ let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
             ~status
             ~output:(output_for_status ~stdout ~stderr)
             detail))
-  | Ok other -> Ok other
+  | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) as other) ->
+    Ok other
 ;;
 
 let run_command_with_status
@@ -2899,7 +2941,7 @@ let run_command_with_status
             if String.length out > max_bytes then String.sub out 0 max_bytes else out
           in
           Ok (st, body)
-        | _ -> Error (format_docker_exec_error ~head_program ~st ~out)))
+        | Unix.WSIGNALED _ | Unix.WSTOPPED _ | WEXITED _ -> Error (format_docker_exec_error ~head_program ~st ~out)))
 ;;
 
 let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
@@ -2940,7 +2982,7 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
                 argv))
         | Failed_exec_state_probe_error detail ->
           Error (failed_exec_state_probe_error ~status ~output:out detail))
-     | _ -> Ok (st, out))
+     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Ok (st, out))
 ;;
 
 let cleanup (t : t) =
@@ -3010,8 +3052,15 @@ let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
                Error ("Keeper guest cleanup transport failed: " ^ reason)
              | _, Keeper_sandbox_remote.Execution_unavailable _ ->
                Error "Keeper guest cleanup exit receipt missing"
-             | _ -> Error "Keeper guest cleanup command failed"))
+             | Masc_exec.Sandbox_target.Ran
+                 { status =
+                     (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _)
+                 ; _
+                 },
+               Keeper_sandbox_remote.Execution_observed _ ->
+               Error "Keeper guest cleanup command failed"))
      | Ok (Keeper_sandbox_runtime.Docker_container_stopped
           | Keeper_sandbox_runtime.Docker_container_absent) -> Ok None
      | Error detail -> Error detail)
-  | _ -> Ok None
+  | (Keeper_types_profile_sandbox.Micro_vm, Some (Keeper_microvm_backend.Microsandbox | Keeper_microvm_backend.Nerdctl_kata))
+  | (Keeper_types_profile_sandbox.Micro_vm, None) | ((Docker | Remote_ssh), _) -> Ok None

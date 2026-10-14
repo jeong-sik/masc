@@ -1,5 +1,5 @@
-let index_file = "index.md"
-let log_file = "log.md"
+let index_file = Wiki_page_name.index_name ^ ".md"
+let log_file = Wiki_page_name.log_name ^ ".md"
 let is_own_file name = String.equal name index_file || String.equal name log_file
 
 type entry =

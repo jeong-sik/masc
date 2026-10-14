@@ -285,7 +285,13 @@ let stale_factor = 3.0
     normal stale_grace before retrying.  #5402 *)
 let bg_revalidate_backoff_factor = 2.0
 
-exception Compute_timeout of string * bool
+(* Whose window closed: the fiber computing the value, or one waiting on it.
+   The envelope's kind is read from this, so it is never inferred later. *)
+type compute_timeout_role =
+  | Compute_owner
+  | Compute_waiter
+
+exception Compute_timeout of { key : string; role : compute_timeout_role }
 
 let is_compute_timeout exn =
   match exn with
@@ -300,43 +306,52 @@ let should_restore_stale_after_failure exn =
 
 (* The one shape a timed-out compute takes on the wire.
 
-   Every timeout path in this module goes through [timeout_error_json], and the
-   only sanctioned reader is [is_timeout_envelope] beside it. Both read
-   [timeout_error_code], so changing the wire value cannot leave a reader
-   behind — a recognizer that lives in another module and matches the string
-   itself drifts silently the moment a producer changes.
+   Every timeout path, in this module and outside it, goes through
+   [timeout_envelope_json], and the only sanctioned reader is
+   [is_timeout_envelope] beside it. Both read [timeout_error_code], so changing
+   the wire value cannot leave a reader behind — a recognizer that lives in
+   another module and matches the string itself drifts silently the moment a
+   producer changes. The same holds for a producer: one that writes the object
+   by hand keeps the old shape when this one changes.
 
    The envelope still travels in-band, as a value indistinguishable from a
    computed payload until a reader checks; #28400 tracks moving it out of band
    and giving it its own HTTP status. *)
 let timeout_error_code = "computation_timeout"
 
-type timeout_envelope = {
-  key : string;
-  timeout_sec : float;
-  timeout_kind : string;
-  waiting : bool;
-}
+(* Which wait ran out. *)
+type timeout_kind =
+  | Timeout_owner (* the caller's own compute exceeded its window *)
+  | Timeout_waiter (* the caller was waiting on another fiber's compute *)
+  | Timeout_compute (* a computing slot yielded no result within [max_wait_sec] *)
+  | Timeout_circuit_open (* repeated timeouts for the key: failing fast *)
 
-let timeout_envelope_message { key; timeout_sec; timeout_kind; waiting } =
-  match timeout_kind with
-  | "circuit_open" ->
+let timeout_kind_to_string = function
+  | Timeout_owner -> "owner"
+  | Timeout_waiter -> "waiter"
+  | Timeout_compute -> "compute"
+  | Timeout_circuit_open -> "circuit_open"
+
+let timeout_envelope_message ~kind ~key ~timeout_sec =
+  match kind with
+  | Timeout_circuit_open ->
     Printf.sprintf "Dashboard %s is failing fast after repeated cache timeouts" key
-  | _ when waiting ->
+  | Timeout_waiter ->
     Printf.sprintf
       "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
       key timeout_sec
-  | _ -> Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
+  | Timeout_owner | Timeout_compute ->
+    Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
 
-let timeout_envelope_json envelope =
+let timeout_envelope_json ~kind ~key ~timeout_sec =
   `Assoc
     [
       ("error", `String timeout_error_code);
-      ("message", `String (timeout_envelope_message envelope));
+      ("message", `String (timeout_envelope_message ~kind ~key ~timeout_sec));
       ("generated_at", `String (Masc_domain.now_iso ()));
-      ("timeout_kind", `String envelope.timeout_kind);
-      ("timeout_sec", `Float envelope.timeout_sec);
-      ("key", `String envelope.key);
+      ("timeout_kind", `String (timeout_kind_to_string kind));
+      ("timeout_sec", `Float timeout_sec);
+      ("key", `String key);
     ]
 
 let is_timeout_envelope = function
@@ -357,13 +372,9 @@ let () =
   Http_server_eio.Response.register_timeout_envelope_recognizer
     is_timeout_envelope
 
-let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
-  let timeout_kind =
-    match timeout_kind with
-    | Some timeout_kind -> timeout_kind
-    | None -> if waiting then "waiter" else "owner"
-  in
-  timeout_envelope_json { key; timeout_sec; timeout_kind; waiting }
+let timeout_kind_of_role = function
+  | Compute_owner -> Timeout_owner
+  | Compute_waiter -> Timeout_waiter
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.
@@ -505,7 +516,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       (* PR-0.2.A: cache hit observation (no logic change). *)
       inc_cache_hit ();
       entry
-    | `Timed_out -> raise (Compute_timeout (key, true))
+    | `Timed_out -> raise (Compute_timeout { key; role = Compute_waiter })
     | `Wait token ->
       (* Per-fiber ±20% jitter on the poll interval. Concurrent waiters
          parked on the same in-flight cache key (e.g. several keepers
@@ -537,8 +548,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
             match SMap.find_opt key map with
             | Some (Computing { token = c; _ }) when c = token ->
               ((), SMap.add key (Ready new_entry) map)
-            | _ ->
-              Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
+            | Some (Ready _) | None | Some (Computing _) -> Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
               ((), map)
           )
         (* [do_bg_compute] runs inside [Eio.Fiber.fork ~sw] on the process
@@ -573,7 +583,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                 stale_until = ts +. backoff_grace;
               } in
               ((), SMap.add key (Ready refreshed) map)
-            | _ -> ((), map)
+            | Some (Ready _) | None | Some (Computing _) -> ((), map)
           )
       and restore_stale_ready () =
         atomic_update table (fun map ->
@@ -587,7 +597,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                 stale_until = ts +. backoff_grace;
               } in
               ((), SMap.add key (Ready restored) map)
-          | _ -> ((), map)
+          | Some (Ready _) | None | Some (Computing _) -> ((), map)
         )
       in
       (* Snapshot refreshes can read this cache from an executor worker. Eio
@@ -627,7 +637,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            | Eio.Cancel.Cancelled _ as e ->
              restore_stale_ready ();
              raise e)
-        | _ -> ()
+        | Some (Ready _) | None | Some (Computing _) -> ()
       in
       (try Eio_context.run_on_owner_domain register_refresh with
        | Invalid_argument _ -> abandon_registration ()
@@ -664,7 +674,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
               ((), SMap.add key (Ready restored) map)
           | Some (Computing { token = c; stale = None; _ }) when c = token ->
               ((), SMap.remove key map)
-          | _ -> ((), map))
+          | Some (Ready _) | None | Some (Computing _) -> ((), map))
       in
       let run_compute () =
         try result_ref := Some (Ok (compute ()))
@@ -695,8 +705,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
              match SMap.find_opt key map with
              | Some (Computing { token = c; _ }) when c = token ->
                ((), SMap.add key (Ready new_entry) map)
-             | _ ->
-               Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
+             | Some (Ready _) | None | Some (Computing _) -> Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
                ((), map)
            );
            new_entry
@@ -717,7 +726,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                  ((), SMap.add key (Ready refreshed) map)
              | Some (Computing { token = c; stale = None; _ }) when c = token ->
                  ((), SMap.remove key map)
-             | _ -> ((), map)
+             | Some (Ready _) | None | Some (Computing _) -> ((), map)
            );
            (match !fallback_val with
             | Some entry when should_restore_stale_after_failure exn ->
@@ -726,7 +735,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
        | None ->
            let fallback_val = ref None in
            let fallback_payload = Prepared (payload_of_json ~origin:Timeout
-             (timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ()))) in
+             (timeout_envelope_json
+                ~kind:Timeout_compute ~key ~timeout_sec:(max_wait_sec ()))) in
            atomic_update table (fun map ->
              match SMap.find_opt key map with
              | Some (Computing { token = c; stale; _ }) when c = token ->
@@ -739,7 +749,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                       let cooldown = { payload = fallback_payload; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
                       fallback_val := Some cooldown;
                       ((), SMap.add key (Ready cooldown) map))
-             | _ -> ((), map)
+             | Some (Ready _) | None | Some (Computing _) -> ((), map)
            );
            (match !fallback_val with
             | Some entry -> entry
@@ -766,8 +776,7 @@ let get_or_compute_simple key ~ttl compute =
     match SMap.find_opt key map with
     | Some (Ready entry) when entry.stale_until > ts ->
       (`Hit entry, map)
-    | _ ->
-      let token = next_token () in
+    | Some (Computing _) | None | Some (Ready _) -> let token = next_token () in
       (`Compute token, SMap.add key (Computing { token; started_at = ts; stale = None }) map)
   ) with
   | `Hit entry ->
@@ -789,14 +798,14 @@ let get_or_compute_simple key ~ttl compute =
          match SMap.find_opt key map with
          | Some (Computing { token = c; _ }) when c = token ->
            ((), SMap.add key (Ready entry) map)
-         | _ -> ((), map)
+         | Some (Ready _) | None | Some (Computing _) -> ((), map)
        );
        entry
      | exception exn ->
        atomic_update table (fun map ->
          match SMap.find_opt key map with
          | Some (Computing { token = c; _ }) when c = token -> ((), SMap.remove key map)
-         | _ -> ((), map)
+         | Some (Ready _) | None | Some (Computing _) -> ((), map)
        );
        raise exn)
 
@@ -814,7 +823,7 @@ let peek_entry key =
   match SMap.find_opt key map with
   | Some (Ready entry) when entry.stale_until > ts -> Some entry
   | Some (Computing { stale = Some stale_entry; _ }) -> Some stale_entry
-  | _ -> None
+  | Some (Computing { stale = None;_}) | None | Some (Ready _) -> None
 
 let peek_payload key =
   Option.bind (peek_entry key) (fun entry -> peek_cached_payload entry.payload)
@@ -877,14 +886,14 @@ let compute_under_timeout ~clock ~timeout_sec ~key f =
   | Ok value -> value
   | Error `Timeout ->
     Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-    raise (Compute_timeout (key, false))
+    raise (Compute_timeout { key; role = Compute_owner })
 ;;
 
 let get_or_compute_value_with_timeout ~preparation
     key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
     Prepared (payload_of_json ~origin:Timeout
-      (timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec))
+      (timeout_envelope_json ~kind:Timeout_circuit_open ~key ~timeout_sec))
   else
     let compute = offloaded_value ~preparation compute in
     let with_timeout f = compute_under_timeout ~clock ~timeout_sec ~key f in
@@ -899,10 +908,11 @@ let get_or_compute_value_with_timeout ~preparation
       clear_timeout_circuit key;
       payload_of_entry entry
     with
-    | Compute_timeout (key, waiting) ->
+    | Compute_timeout { key; role } ->
         record_timeout_circuit key;
         Prepared (payload_of_json ~origin:Timeout
-          (timeout_error_json ~waiting key timeout_sec))
+          (timeout_envelope_json
+             ~kind:(timeout_kind_of_role role) ~key ~timeout_sec))
 
 let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
     key ~ttl ~clock ~timeout_sec compute =
@@ -916,9 +926,11 @@ let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
        | Eio_guard.Eio_fiber ->
            try compute_under_timeout ~clock ~timeout_sec ~key
              (fun () -> force_cached_payload value)
-           with Compute_timeout (key, waiting) ->
+           with Compute_timeout { key; role } ->
              record_timeout_circuit key;
-             payload_of_json ~origin:Timeout (timeout_error_json ~waiting key timeout_sec))
+             payload_of_json ~origin:Timeout
+               (timeout_envelope_json
+                  ~kind:(timeout_kind_of_role role) ~key ~timeout_sec))
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   get_or_compute_value_with_timeout ~preparation:Cache_json

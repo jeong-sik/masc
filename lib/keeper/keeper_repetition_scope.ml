@@ -75,7 +75,7 @@ module Execution = struct
       (match execution.current with
        | None -> execution.current <- Some (Ok state); Ok ()
        | Some (Ok current) when Snapshot.active current = Some execution.scope -> Ok ()
-       | Some _ -> Error Snapshot.Restore_target_conflict)
+       | Some (Ok _ | Error _) -> Error Snapshot.Restore_target_conflict)
     | Some _ | None -> Error (Snapshot.Invalid_snapshot "native Gate frame belongs to another operation")
 
   let failure execution = match execution.current with

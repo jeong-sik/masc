@@ -18,7 +18,6 @@ type severity = Critical | Warning | Info
 
 type attention_item = {
   severity : severity;
-  category : string;
   summary : string;
   suggested_tool : string;
 }

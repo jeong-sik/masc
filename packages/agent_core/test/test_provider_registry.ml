@@ -29,8 +29,8 @@ let test_register_and_find () =
     ; defaults =
         { kind = OpenAI_compat
         ; base_url = "http://localhost:9999"
-        ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; requires_api_key = false
         }
     ; max_context = Some 128_000
     ; capabilities = Capabilities.default_capabilities
@@ -51,8 +51,8 @@ let test_overwrite () =
     ; defaults =
         { kind = OpenAI_compat
         ; base_url = url
-        ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; requires_api_key = false
         }
     ; max_context = Some 128_000
     ; capabilities = Capabilities.default_capabilities
@@ -74,8 +74,8 @@ let test_unregister () =
     ; defaults =
         { kind = OpenAI_compat
         ; base_url = "http://x"
-        ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; requires_api_key = false
         }
     ; max_context = Some 128_000
     ; capabilities = Capabilities.default_capabilities
@@ -97,8 +97,8 @@ let test_concurrent_register_keeps_every_snapshot_update () =
       ; defaults =
           { kind = OpenAI_compat
           ; base_url = "http://localhost"
-          ; api_key_env = ""
           ; request_path = "/v1/chat/completions"
+          ; requires_api_key = false
           }
       ; max_context = Some 128_000
       ; capabilities = Capabilities.default_capabilities
@@ -149,8 +149,8 @@ let test_available_filter () =
     ; defaults =
         { kind = OpenAI_compat
         ; base_url = "http://x"
-        ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; requires_api_key = false
         }
     ; max_context = Some 128_000
     ; capabilities = Capabilities.default_capabilities
@@ -212,8 +212,8 @@ let test_find_capable_tools () =
     ; defaults =
         { kind = OpenAI_compat
         ; base_url = "http://x"
-        ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; requires_api_key = false
         }
     ; max_context = Some 128_000
     ; capabilities = caps
@@ -238,8 +238,8 @@ let test_find_capable_composite () =
     ; defaults =
         { kind = OpenAI_compat
         ; base_url = "http://x"
-        ; api_key_env = ""
         ; request_path = "/v1/chat/completions"
+        ; requires_api_key = false
         }
     ; max_context = Some 128_000
     ; capabilities = caps
@@ -336,7 +336,7 @@ let test_default_ollama_cloud_entry () =
   | Some e ->
     check bool "kind is Ollama" true (e.defaults.kind = Provider_config.Ollama);
     check string "base_url" "https://ollama.com" e.defaults.base_url;
-    check string "api_key_env" "OLLAMA_CLOUD_API_KEY" e.defaults.api_key_env;
+    check bool "requires_api_key" true e.defaults.requires_api_key;
     check string "request_path" "/api/chat" e.defaults.request_path;
     check
       bool
@@ -366,22 +366,11 @@ let test_default_deepseek_entry () =
       true
       (e.defaults.kind = Provider_config.OpenAI_compat);
     check string "base_url" "https://api.deepseek.com" e.defaults.base_url;
-    check string "api_key_env" "DEEPSEEK_API_KEY" e.defaults.api_key_env;
+    check bool "requires_api_key" true e.defaults.requires_api_key;
     check string "request_path" "/chat/completions" e.defaults.request_path
   | None -> fail "deepseek should exist"
 ;;
 
-let test_default_deepseek_api_key_env () =
-  let availability ~deepseek =
-    with_env "DEEPSEEK_API_KEY" deepseek (fun () ->
-      let reg = Provider_registry.default () in
-      match Provider_registry.find reg "deepseek" with
-      | Some e -> e.is_available ()
-      | None -> fail "deepseek should exist")
-  in
-  check bool "no key unavailable" false (availability ~deepseek:"");
-  check bool "documented key available" true (availability ~deepseek:"deepseek-secret")
-;;
 
 let test_default_mimo_entry () =
   with_env "MIMO_BASE_URL" "" (fun () ->
@@ -398,7 +387,7 @@ let test_default_mimo_entry () =
         "base_url"
         "https://token-plan-sgp.xiaomimimo.com/v1"
         e.defaults.base_url;
-      check string "api_key_env" "MIMO_API_KEY" e.defaults.api_key_env;
+      check bool "requires_api_key" true e.defaults.requires_api_key;
       check string "request_path" "/chat/completions" e.defaults.request_path;
       check (option int) "max_context" (Some 1_000_000) e.max_context;
       check bool "has reasoning" true e.capabilities.supports_reasoning;
@@ -417,7 +406,7 @@ let test_embedded_no_auth_rows_keep_explicit_empty_credentials () =
     match Provider_registry.find reg id with
     | None -> failf "%s should exist" id
     | Some entry ->
-      check string (id ^ " empty api_key_env") "" entry.defaults.api_key_env;
+      check bool (id ^ " keyless") false entry.defaults.requires_api_key;
       check string (id ^ " request path") expected_path entry.defaults.request_path;
       check bool (id ^ " available without credential") true (entry.is_available ())
   in
@@ -443,7 +432,7 @@ let load_model_catalog_source source =
        Model_catalog.load_file path)
 ;;
 
-let test_embedded_provider_rejects_padded_api_key_env () =
+let test_embedded_provider_rejects_padded_auth () =
   let source value =
     Printf.sprintf
       {|[[providers]]
@@ -451,7 +440,7 @@ id = "padded-auth"
 kind = "openai_compat"
 base_url = "https://provider.example/v1"
 request_path = "/chat/completions"
-api_key_env = %S
+auth = %S
 capabilities_base = "openai_chat"
 |}
       value
@@ -460,8 +449,8 @@ capabilities_base = "openai_chat"
     (fun value ->
        match load_model_catalog_source (source value) with
        | Error _ -> ()
-       | Ok _ -> failf "padded api_key_env %S must be rejected" value)
-    [ " PROVIDER_API_KEY"; "PROVIDER_API_KEY " ]
+       | Ok _ -> failf "padded auth %S must be rejected" value)
+    [ " api-key"; "api-key "; "none "; " api-key "; "bearer" ]
 ;;
 
 let test_provider_name_is_wire_kind_projection () =
@@ -559,12 +548,12 @@ let test_default_zai_base_urls () =
   (match Provider_registry.find reg "glm" with
    | Some e ->
      check string "glm base_url" Zai_catalog.general_base_url e.defaults.base_url;
-     check string "glm api_key_env" "ZAI_API_KEY" e.defaults.api_key_env
+     check bool "glm requires_api_key" true e.defaults.requires_api_key
    | None -> fail "glm should exist");
   (match Provider_registry.find reg "glm-coding" with
    | Some e ->
      check string "glm-coding base_url" Zai_catalog.coding_base_url e.defaults.base_url;
-     check string "glm-coding api_key_env" "ZAI_CODING_API_KEY" e.defaults.api_key_env
+     check bool "glm-coding requires_api_key" true e.defaults.requires_api_key
    | None -> fail "glm-coding should exist");
   match Provider_registry.find reg "kimi" with
   | Some e ->
@@ -573,31 +562,6 @@ let test_default_zai_base_urls () =
   | None -> fail "kimi should exist"
 ;;
 
-let test_glm_coding_api_key_env_isolated () =
-  let prev_general = Sys.getenv_opt "ZAI_API_KEY" in
-  let prev_coding = Sys.getenv_opt "ZAI_CODING_API_KEY" in
-  let restore key = function
-    | Some v -> Unix.putenv key v
-    | None -> Unix.putenv key ""
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      restore "ZAI_API_KEY" prev_general;
-      restore "ZAI_CODING_API_KEY" prev_coding)
-    (fun () ->
-       Unix.putenv "ZAI_API_KEY" "general-key";
-       Unix.putenv "ZAI_CODING_API_KEY" "";
-       let general_only = Provider_registry.default () in
-       (match Provider_registry.find general_only "glm-coding" with
-        | Some e ->
-          check bool "general key does not enable coding lane" false (e.is_available ())
-        | None -> fail "glm-coding should exist");
-       Unix.putenv "ZAI_CODING_API_KEY" "coding-key";
-       let coding = Provider_registry.default () in
-       match Provider_registry.find coding "glm-coding" with
-       | Some e -> check bool "coding key enables coding lane" true (e.is_available ())
-       | None -> fail "glm-coding should exist")
-;;
 
 (* ── Provider catalog overlay ────────────────────────── *)
 
@@ -1153,16 +1117,15 @@ let () =
         ; test_case "correct capabilities" `Quick test_default_capabilities
         ; test_case "ollama_cloud entry" `Quick test_default_ollama_cloud_entry
         ; test_case "deepseek entry" `Quick test_default_deepseek_entry
-        ; test_case "deepseek api key env" `Quick test_default_deepseek_api_key_env
         ; test_case "mimo entry" `Quick test_default_mimo_entry
         ; test_case
             "explicit no-auth rows"
             `Quick
             test_embedded_no_auth_rows_keep_explicit_empty_credentials
         ; test_case
-            "padded embedded credential declaration rejected"
+            "padded embedded auth declaration rejected"
             `Quick
-            test_embedded_provider_rejects_padded_api_key_env
+            test_embedded_provider_rejects_padded_auth
         ; test_case
             "provider_name_of_config projects wire kind"
             `Quick
@@ -1177,10 +1140,6 @@ let () =
             `Quick
             test_default_max_context_matches_capabilities
         ; test_case "zai base urls" `Quick test_default_zai_base_urls
-        ; test_case
-            "glm coding api key env isolated"
-            `Quick
-            test_glm_coding_api_key_env_isolated
         ] )
     ; ( "provider_catalog"
       , [ test_case

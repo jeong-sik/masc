@@ -12,12 +12,6 @@ module Keeper_counterpart_observation = Masc.Keeper_counterpart_observation
 
 let keeper_name = "durable-reader"
 
-let config_in_cluster config cluster_name =
-  { config with
-    Workspace.backend_config = { config.Workspace.backend_config with cluster_name }
-  }
-;;
-
 let write_keeper_declaration config =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path
@@ -2248,120 +2242,6 @@ let test_new_unreadable_boundary_is_not_hidden_by_preflight () =
   | Ok _ -> fail "new unreadable boundary was hidden as a quiet tick"
 ;;
 
-let test_same_name_clusters_keep_independent_ranges () =
-  with_workspace @@ fun default ->
-  let a = config_in_cluster default "Durable/A" in
-  let b = config_in_cluster default "Durable/B" in
-  let run config trace_id marker =
-    establish_progress config ~trace_id (marker ^ "-before");
-    let messages = [ message (marker ^ "-before"); message marker ] in
-    append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
-    save_checkpoint config ~trace_id messages 2;
-    let carried = ref [] in
-    (match
-       consume config (fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
-         carried := text_markers input;
-         true)
-     with
-     | Consumer.Progress_advanced _ -> ()
-     | Consumer.Nothing_to_read
-     | Consumer.Baseline_advanced _
-     | Consumer.Official_advanced _
-     | Consumer.Memory_not_committed -> fail "cluster range did not advance");
-    !carried
-  in
-  let a_carried = run a "trace-a" "cluster-a" in
-  let b_carried = run b "trace-b" "cluster-b" in
-  check (list string) "A reads only A" [ "cluster-a" ] a_carried;
-  check (list string) "B reads only B" [ "cluster-b" ] b_carried;
-  check bool "cluster progress paths differ" false
-    (String.equal
-       (Progress.path_for_keepers_dir
-          ~keepers_dir:(Workspace.keepers_runtime_dir a)
-          ~keeper_id:keeper_name)
-       (Progress.path_for_keepers_dir
-          ~keepers_dir:(Workspace.keepers_runtime_dir b)
-          ~keeper_id:keeper_name))
-;;
-
-let test_same_name_clusters_keep_independent_commit_receipts () =
-  with_workspace @@ fun default ->
-  let module Current = Masc.Keeper_memory_os_current in
-  let a = config_in_cluster default "Receipt/A" in
-  let b = config_in_cluster default "Receipt/B" in
-  let memory_keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path
-      ~base_path:default.Workspace.base_path
-  in
-  let prepare config trace_id marker =
-    establish_progress config ~trace_id (marker ^ "-before");
-    let messages = [ message (marker ^ "-before"); message marker ] in
-    append_boundary config ~trace_id ~turn:2 ~recorded_at:2.0 messages;
-    save_checkpoint config ~trace_id messages 2
-  in
-  prepare a "trace-receipt-a" "cluster-a";
-  prepare b "trace-receipt-b" "cluster-b";
-  let commits = ref 0 in
-  let commit ~expected_revision:_ ~range_id ~official_range_id input =
-    incr commits;
-    match
-      Current.apply_disposition ~revisions:[]
-        ?durable_range_id:range_id
-        ?official_range_id
-        ~absorbed:[]
-        ~keepers_dir:memory_keepers_dir
-        ~keeper_id:keeper_name
-        ~now:(Float.of_int !commits)
-        ~source:
-          { kind = Current.Librarian
-          ; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref
-          }
-        ~new_claims:[]
-        ()
-    with
-    | Ok _ -> true
-    | Error detail -> fail detail
-  in
-  let fail_progress ~keepers_dir:_ ~keeper_id:_ _ =
-    Error
-      (Progress.Write_failed
-         { path = "injected-progress-write"; message = "post-commit failure" })
-  in
-  let commit_without_progress config trace_id =
-    write_meta config trace_id;
-    match
-      Consumer.For_testing.consume_one_with_progress_writer
-        ~write_progress_store:fail_progress
-        ~write_official_progress_store:Masc.Keeper_librarian_official_progress.write
-        ~config
-        ~keeper_name
-        ~commit
-    with
-    | Error (Consumer.Progress_write_failed _) -> ()
-    | Error error -> fail (Consumer.error_to_string error)
-    | Ok _ -> fail "cluster commit did not reach injected progress failure"
-  in
-  commit_without_progress a "trace-receipt-a";
-  commit_without_progress b "trace-receipt-b";
-  check int "both clusters committed Memory once" 2 !commits;
-  let recover config trace_id =
-    write_meta config trace_id;
-    match
-      Consumer.consume_one ~config ~keeper_name
-        ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
-          fail "cluster receipt recovery replayed Memory commit")
-    with
-    | Ok (Consumer.Progress_advanced progress) -> progress
-    | Error error -> fail (Consumer.error_to_string error)
-    | Ok _ -> fail "cluster receipt did not repair progress"
-  in
-  let a_progress = recover a "trace-receipt-a" in
-  let b_progress = recover b "trace-receipt-b" in
-  check string "A recovers its own receipt" "trace-receipt-a" a_progress.position.trace_id;
-  check string "B recovers its own receipt" "trace-receipt-b" b_progress.position.trace_id;
-  check int "receipt recovery performs no replay commits" 2 !commits
-;;
-
 let test_counterpart_range_reads_beyond_recent_windows () =
   with_workspace @@ fun config ->
   let base_dir = config.Workspace.base_path in
@@ -3556,10 +3436,6 @@ let () =
             test_torn_external_tail_retries_the_same_range_once
         ; test_case "torn chat tail retries the same range once" `Quick
             test_torn_chat_tail_retries_the_same_range_once
-        ; test_case "same-name clusters isolate range progress" `Quick
-            test_same_name_clusters_keep_independent_ranges
-        ; test_case "same-name clusters isolate commit receipts" `Quick
-            test_same_name_clusters_keep_independent_commit_receipts
         ; test_case "counterpart range exceeds recent windows" `Quick
             test_counterpart_range_reads_beyond_recent_windows
         ; test_case "counterpart range includes upper boundary once" `Quick

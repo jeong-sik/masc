@@ -24,7 +24,8 @@ let text_of_response (resp : api_response) =
   List.filter_map
     (function
       | Text s -> Some s
-      | _ -> None)
+      | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ | Image _
+      | Document _ | Audio _ -> None)
     resp.content
   |> String.concat "\n"
 ;;

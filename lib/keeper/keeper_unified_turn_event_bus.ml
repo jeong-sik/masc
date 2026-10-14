@@ -109,7 +109,13 @@ let record_fsm_tool_transitions ~keeper_name ~turn_id old_count events =
          then (
            count := prev - 1;
            if prev = 1 then transitions := Leave_awaiting :: !transitions)
-       | _ -> ())
+       | Agent_core.Event_bus.AgentStarted _ | Agent_core.Event_bus.AgentCompleted _
+       | Agent_core.Event_bus.AgentYielded _ | Agent_core.Event_bus.AgentInputRequired _
+       | Agent_core.Event_bus.AgentFailed _ | Agent_core.Event_bus.TurnStarted _
+       | Agent_core.Event_bus.TurnReady _ | Agent_core.Event_bus.TurnCompleted _
+       | Agent_core.Event_bus.HandoffRequested _ | Agent_core.Event_bus.HandoffCompleted _
+       | Agent_core.Event_bus.ElicitationCompleted _ | Agent_core.Event_bus.ToolApprovalCompleted _
+       | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> ())
     events;
   !count, List.rev !transitions
 ;;
@@ -134,9 +140,9 @@ let emit_fsm_transition ~keeper_name ~turn_id ~pending_count transition =
       Log.Keeper.debug
         "%s: event-bus FSM transition dropped: %s -> %s (reason=%s; pending_count=%d)"
         keeper_name
-        violation.from_state
-        violation.to_state
-        violation.reason
+        (Keeper_turn_fsm.any_state_tla_symbol violation.from_state)
+        (Keeper_turn_fsm.any_state_tla_symbol violation.to_state)
+        Keeper_turn_fsm.transition_violation_reason
         pending_count;
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string EventBusDrain)
@@ -275,7 +281,7 @@ let start_background_drain ~clock t =
              already claimed the active drainer role. Either way this fiber
              must not install [cc] or start polling. *)
           ()))
-  | _ -> ()
+  | (Subscribed _, None) | (No_event_bus, _) -> ()
 ;;
 
 (* Atomically claim the [Closed] state and hand back any background drain

@@ -52,16 +52,23 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
   ; ts = 1_787_600_000.
   }
 
+(* The turn record store of keeper "omega" under a temporary root. *)
 let with_store fn =
   let root = Filename.temp_dir "memory-input-store-" "" in
-  let month = Filename.concat root "2026-10" in
-  Unix.mkdir month 0o700;
+  let location =
+    Dated_jsonl.Store.keeper (Dated_jsonl.Store.root_of_masc_dir root) ~keeper:"omega" Turn_records
+  in
+  let dir = Dated_jsonl.Store.dir location in
+  let month = Filename.concat dir "2026-10" in
+  (* [root/keepers/omega/turn-records/2026-10], made and removed one level at a time. *)
+  let made = [ Filename.dirname (Filename.dirname dir); Filename.dirname dir; dir; month ] in
+  List.iter (fun d -> Unix.mkdir d 0o700) made;
   let path = Filename.concat month "04.jsonl" in
-  let store = Dated_jsonl.create ~base_dir:root () in
+  let store = Dated_jsonl.open_store location in
   Fun.protect ~finally:(fun () ->
     if Sys.file_exists path then
       if Sys.is_directory path then Unix.rmdir path else Sys.remove path;
-    Unix.rmdir month; Unix.rmdir root)
+    List.iter Unix.rmdir (List.rev made); Unix.rmdir root)
     (fun () -> fn store path)
 
 let write path text =

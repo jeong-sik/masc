@@ -212,7 +212,8 @@ let current_generation_floor ~config ~keeper_name ~trace_id =
                 (Some (Option.fold ~none:turn ~some:(Int.max turn) latest_turn))
                 floor
                 rest
-            | _ -> loop latest_turn floor rest)
+            | Keeper_turn_boundaries.Turn_ended _
+            | Keeper_turn_boundaries.History_restarted _ -> loop latest_turn floor rest)
        in
        loop None None lines)
 ;;

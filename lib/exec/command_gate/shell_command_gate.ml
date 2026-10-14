@@ -269,7 +269,9 @@ let rec structural_refusal (ir : SI.t) =
          SI.subst_children_of_arg
          (s.SI.args @ List.map snd s.SI.env))
   | SI.Pipeline stages ->
-    if List.exists (function SI.Pipeline _ -> true | _ -> false) stages
+    if List.exists
+         (function SI.Pipeline _ -> true | SI.Simple _ | SI.Sequence _ -> false)
+         stages
     then Some (`Too_complex Unsupported_nested_pipeline)
     else if List.compare_length_with stages 2 < 0
     then Some (`Cannot_parse Parse_error)

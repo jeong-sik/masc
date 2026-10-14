@@ -1155,7 +1155,7 @@ let test_the_completion_hook_rows_by_attempt () =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     Time_compat.set_clock (Eio.Stdenv.clock env);
     let config = Masc.Workspace.default_config base_path in
-    let masc_root = Masc.Workspace.masc_root_dir config in
+    let masc_root = Masc.Workspace.masc_dir config in
     let hooks = Masc.Keeper_hooks_agent_core.make_hooks
         ~config
         ~meta_ref:(ref (make_meta "ledger-keeper"))
@@ -1220,7 +1220,7 @@ let test_a_client_report_row_records_the_report () =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     Time_compat.set_clock (Eio.Stdenv.clock env);
     let masc_root =
-      Masc.Workspace.masc_root_dir (Masc.Workspace.default_config base_path) in
+      Masc.Workspace.masc_dir (Masc.Workspace.default_config base_path) in
     Masc.Keeper_hooks_agent_core.emit_client_usage_report
       ~trajectory_acc:
         (Some

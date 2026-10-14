@@ -9,9 +9,6 @@ open Workspace_state
 open Workspace_broadcast
 open Workspace_identity
 
-(* Single-namespace: workspace_id/namespace_id concepts retired (#unify-namespace).
-   All workspace scoped by cluster basepath only. *)
-
 (** Bounded snapshot of a corrupt agent JSON file for error diagnostics.
     Reads at most 200 bytes to avoid OOM on large/corrupt files. *)
 let agent_parse_error_snapshot ~agent_name ~agent_file =
@@ -117,7 +114,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
            { s with active_agents = agents }
          ) in
          broadcast ~audience:System_record config ~from_agent:nickname
-           ~msg_type:"session_rebound"
+           ~msg_type:Msg_session_rebound
            ~content:(Printf.sprintf "%s rebound the namespace session" nickname)
          |> log_lifecycle_broadcast_result
               ~operation:"session_rebound"
@@ -187,7 +184,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
 
   (* Broadcast session binding *)
   broadcast ~audience:System_record config ~from_agent:nickname
-    ~msg_type:"session_bound"
+    ~msg_type:Msg_session_bound
     ~content:(Printf.sprintf "%s bound the namespace session" nickname)
   |> log_lifecycle_broadcast_result
        ~operation:"session_bound"
@@ -246,7 +243,7 @@ let end_session config ~agent_name =
     ) in
 
     broadcast ~audience:System_record config ~from_agent:"system"
-      ~msg_type:"session_ended"
+      ~msg_type:Msg_session_ended
       ~content:(Printf.sprintf "%s ended the namespace session" actual_name)
     |> log_lifecycle_broadcast_result
          ~operation:"session_ended"

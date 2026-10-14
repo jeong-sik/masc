@@ -32,6 +32,15 @@ let test_error_text_does_not_become_storage_fact () =
     (member_int "storage_space_exhaustion_observations_total" (Disk.observation_fields ()))
 ;;
 
+let test_other_errnos_do_not_become_storage_facts () =
+  Disk.reset_for_tests ();
+  List.iter
+    (fun code -> Disk.note_exception ~site:"test.other" (Unix.Unix_error (code, "write", "fixture")))
+    [ Unix.EMFILE; Unix.ENFILE; Unix.EACCES; Unix.EAGAIN; Unix.EUNKNOWNERR 4242 ];
+  check int "other errnos ignored" 0
+    (member_int "storage_space_exhaustion_observations_total" (Disk.observation_fields ()))
+;;
+
 let test_snapshot_contains_raw_facts_without_admission () =
   Disk.reset_for_tests ();
   Eio_main.run
@@ -57,6 +66,7 @@ let () =
     [ ( "typed errors"
       , [ test_case "ENOSPC" `Quick test_typed_enospc_is_observed
         ; test_case "untyped text ignored" `Quick test_error_text_does_not_become_storage_fact
+        ; test_case "other errnos ignored" `Quick test_other_errnos_do_not_become_storage_facts
         ] )
     ; "snapshot", [ test_case "raw facts only" `Quick test_snapshot_contains_raw_facts_without_admission ]
     ]

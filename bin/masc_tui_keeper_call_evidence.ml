@@ -124,14 +124,22 @@ let result_state outcome association =
     | (Keeper_chat_transcript.Never_returned | Started | Awaiting_result),
       Call_execution_exact call when Option.is_some call.kc_output -> Durable_output
     | (Started | Awaiting_result | Returned | Native_running | Native_ended
-      | Native_failed | Failed | Never_returned | Outcome_unrecorded), _ ->
+      | Native_failed | Failed | Never_returned | Outcome_unrecorded),
+      ( Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
+      | Call_execution_unrecorded | Call_execution_missing
+      | Call_execution_coverage_gap _ | Call_execution_ambiguous _
+      | Call_execution_exact _ ) ->
         Transcript_outcome outcome
 
 let result_marker = function
   | Durable_failed -> Keeper_chat_transcript.marker_of_outcome Keeper_chat_transcript.Failed
   | Durable_output -> Keeper_chat_transcript.received_marker
   | Transcript_outcome Keeper_chat_transcript.Returned -> Keeper_chat_transcript.received_marker
-  | Transcript_outcome outcome -> Keeper_chat_transcript.marker_of_outcome outcome
+  | Transcript_outcome
+      (( Keeper_chat_transcript.Started | Awaiting_result | Native_running
+       | Native_ended | Native_failed | Failed | Never_returned
+       | Outcome_unrecorded ) as outcome) ->
+      Keeper_chat_transcript.marker_of_outcome outcome
 
 let result_label = function
   | Durable_failed -> "failed"

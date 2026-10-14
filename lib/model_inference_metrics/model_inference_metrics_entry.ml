@@ -72,6 +72,18 @@ type cached_input = {
   ci_sample_count : int;
 }
 
+type coverage_status =
+  | Coverage_error_only
+  | Coverage_full
+  | Coverage_none
+  | Coverage_partial
+
+let coverage_status_to_string = function
+  | Coverage_error_only -> "error_only"
+  | Coverage_full -> "full"
+  | Coverage_none -> "none"
+  | Coverage_partial -> "partial"
+
 type model_stats =
   { model_id : string
   ; entry_count : int
@@ -108,7 +120,7 @@ type model_stats =
   ; telemetry_sample_count : int
   ; usage_missing_count : int
   ; telemetry_missing_count : int
-  ; coverage_status : string
+  ; coverage_status : coverage_status
   ; primary_coverage_stage : string option
   ; primary_coverage_reason : string option
   ; coverage_reason_counts : coverage_reason_count list
@@ -247,7 +259,7 @@ let parse_error_label = function
 
 let parse_error_detail = function
   | Invalid_current_cost_row error -> Cost_ledger.decode_error_to_string error
-  | error -> parse_error_label error
+  | (Not_assoc | Invalid_ts_unix | Missing_ts_unix | Out_of_window | No_telemetry_object | Missing_outcome | Missing_usage_reported | Missing_telemetry_reported | Missing_success_model | Missing_success_inference_identity | Missing_error_model_attribution | Invalid_executed_runtime_id) as error -> parse_error_label error
 ;;
 
 (* [Out_of_window] and [Not_assoc] are routine in mixed jsonl streams; we never

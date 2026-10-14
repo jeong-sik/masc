@@ -139,7 +139,7 @@ let plot ~width trend row =
       | Some {report = Measured (_, Some share); _} when share = 0.0 -> pad "0"
       | Some {report = Measured (_, None); _} -> pad "$"
       | Some {report = Reported_no_windows; _} -> pad empty_report_mark
-      | Some _ -> pad "─") row.samples |> String.concat "") in
+      | Some {report = Measured (_, Some _); _} -> pad "─") row.samples |> String.concat "") in
     let first_day = utc_day trend.generated_at - days + 1 in
     let dates = List.init days (fun offset ->
       let day = Unix.gmtime (float_of_int (first_day + offset) *. seconds_per_day) in

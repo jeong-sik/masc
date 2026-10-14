@@ -102,14 +102,16 @@ type calibration_example = {
 
 let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 
-let base_path () =
-  Config_dir_resolver.verdicts_dir ~base_path:(Env_config_core.base_path ())
+let location ~base_path =
+  Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Verdicts)
 
 let rec get_store () =
   match Atomic.get store_ref with
   | Some s -> s
   | None ->
-    let s = Dated_jsonl.create ~base_dir:(base_path ()) () in
+    let s =
+      Dated_jsonl.open_store (location ~base_path:(Env_config_core.base_path ()))
+    in
     if Atomic.compare_and_set store_ref None (Some s)
     then s
     else
@@ -120,8 +122,8 @@ let rec get_store () =
 
 module For_testing = struct
   let reset_store () = Atomic.set store_ref None
-  let set_store ~base_dir =
-    Atomic.set store_ref (Some (Dated_jsonl.create ~base_dir ()))
+  let set_store ~base_path =
+    Atomic.set store_ref (Some (Dated_jsonl.open_store (location ~base_path)))
 end
 
 

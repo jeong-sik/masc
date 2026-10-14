@@ -2012,7 +2012,7 @@ let add_routes ~sw ~clock router =
                        ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))
                        ::("account_emails",Runtime_account_email.inventory_json config)::fields)
                    | value -> value) reqd)
-           | _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
+           | Error _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd) request reqd)
   |> Http.Router.get "/api/v1/setup/account-emails" (fun request reqd ->
        (* The Overview reads this on every refresh, so it carries only the
@@ -2202,7 +2202,8 @@ let add_routes ~sw ~clock router =
          (fun state _agent_name req reqd ->
            let config = Mcp_server.workspace_config state in
            let observed =
-             Onboarding_status.inspect_loaded ~configuration:(Runtime.browser_configuration ())
+             Onboarding_status.inspect_loaded
+               ~configuration:(Runtime.browser_configuration ())
                ~base_path:(Some config.base_path) in
            Http.Response.json_value ~request:req (Onboarding_status.to_json observed) reqd)
          request reqd)

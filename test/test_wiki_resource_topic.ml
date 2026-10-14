@@ -129,6 +129,25 @@ let test_missing_topic_is_a_protocol_error () =
       [ "masc://wiki/missing"; "masc://wiki/missing.json" ])
 ;;
 
+(* A page can be listed and then fail to read: [list_pages] selects on the
+   ".md" suffix alone, so a directory named like a page reaches the read and
+   [load_file] raises [Sys_error] ("Is a directory"). The handler must answer
+   with an error envelope instead of letting it escape, as the index and log
+   branches already do — the [.mli] promises "Never raises". *)
+let test_unreadable_page_answers_an_error_envelope () =
+  with_wiki (fun state ->
+    let base_path = (Lib.Mcp_server.workspace_config state).Lib.Workspace.base_path in
+    let wiki_dir = Lib.Tool_wiki.wiki_root ~base_path in
+    Unix.mkdir (Filename.concat wiki_dir "ghost.md") 0o755;
+    List.iter
+      (fun uri ->
+        let response = read_resource state uri in
+        check (option string) (uri ^ " has no content") None (served_text response);
+        check int (uri ^ " error code") (-32602)
+          Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int))
+      [ "masc://wiki/ghost"; "masc://wiki/ghost.json" ])
+;;
+
 let test_missing_wiki_has_empty_json_index () =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
@@ -232,6 +251,175 @@ let test_json_topic_of_an_unreadable_document () =
       Yojson.Safe.Util.(json |> member "content" |> to_string))
 ;;
 
+(* A client that only lists resources cannot expand the [masc://wiki/{topic}]
+   template, so the listing names each page itself and the log beside them. *)
+let listed state =
+  let base_path = (Lib.Mcp_server.workspace_config state).Lib.Workspace.base_path in
+  Lib.Mcp_server_eio_resource.wiki_resources ~base_path
+;;
+
+let find_listed uri resources =
+  List.find_opt
+    (fun (resource : Lib.Mcp_server.mcp_resource) -> String.equal resource.uri uri)
+    resources
+;;
+
+let test_pages_are_listed_with_title_and_summary () =
+  with_wiki ~documents:contract_documents (fun state ->
+    match find_listed "masc://wiki/alpha" (listed state) with
+    | None -> fail "expected masc://wiki/alpha to be listed"
+    | Some resource ->
+      check (option string) "title is the page title" (Some "Alpha Doc") resource.title;
+      check string "description is the page summary" "What alpha holds" resource.description;
+      check string "pages are markdown" "text/markdown" resource.mime_type)
+;;
+
+let test_unreadable_page_is_listed_by_file_with_reason () =
+  with_wiki ~documents:contract_documents (fun state ->
+    match find_listed "masc://wiki/beta" (listed state) with
+    | None -> fail "expected masc://wiki/beta to be listed"
+    | Some resource ->
+      check string "named by file" "beta.md" resource.name;
+      (* [make_resource] titles a resource by its name when it has no title,
+         so the file name stands in; no page title is invented for it. *)
+      check (option string) "titled by its file name" (Some "beta.md") resource.title;
+      check string "described by the reason" beta_reason resource.description)
+;;
+
+(* A page's body can be far larger than its header. The listing names it from
+   the header and reports the whole file's size, which it takes from a stat
+   rather than from reading the body (task-2309). *)
+let test_large_page_is_listed_from_header_and_stat () =
+  let header =
+    "---\ntitle: Big Doc\nsummary: A body far larger than the header bound\n\
+     source: research\nauthor: codex\ncreated: 2026-10-13\nrevision: 1\ntags: []\n---\n"
+  in
+  let body = "\n" ^ String.make 40000 'x' in
+  with_wiki ~documents:[ "big.md", header ^ body ] (fun state ->
+    match find_listed "masc://wiki/big" (listed state) with
+    | None -> fail "expected masc://wiki/big to be listed"
+    | Some resource ->
+      check (option string) "title comes from the header" (Some "Big Doc") resource.title;
+      check (option int) "size is the whole file, from a stat"
+        (Some (String.length header + String.length body)) resource.size)
+;;
+
+(* A header longer than the read bound still parses: the listing falls back to
+   the whole file rather than reporting the header unreadable. The summary
+   alone is longer than the bound. *)
+let test_header_longer_than_the_bound_still_parses () =
+  let long_summary = String.make 9000 's' in
+  let header =
+    "---\ntitle: Long Doc\nsummary: " ^ long_summary
+    ^ "\nsource: research\nauthor: codex\ncreated: 2026-10-13\nrevision: 1\ntags: []\n---\n"
+  in
+  with_wiki ~documents:[ "long.md", header ^ "body\n" ] (fun state ->
+    match find_listed "masc://wiki/long" (listed state) with
+    | None -> fail "expected masc://wiki/long to be listed"
+    | Some resource ->
+      check (option string) "title comes from the whole header" (Some "Long Doc")
+        resource.title)
+;;
+
+(* A file whose name is not a valid page topic would resolve to a different
+   page or to nothing, so it must not become a listing row: every listed page
+   URI reads back as the file it was made from. *)
+let test_only_round_trippable_pages_are_listed () =
+  let bad_name_documents =
+    [ "notes.json.md", "# not a page\n"
+    ; "release notes.md", "# not a page\n"
+    ; "a?b.md", "# not a page\n"
+    ; "a#b.md", "# not a page\n" ]
+  in
+  with_wiki ~documents:(bad_name_documents @ contract_documents) (fun state ->
+    let resources = listed state in
+    List.iter
+      (fun file ->
+        let uri = "masc://wiki/" ^ Filename.chop_suffix file ".md" in
+        check bool (file ^ " is not listed") true
+          (Option.is_none (find_listed uri resources)))
+      [ "notes.json.md"; "release notes.md"; "a?b.md"; "a#b.md" ];
+    List.iter
+      (fun (resource : Lib.Mcp_server.mcp_resource) ->
+        match served_text (read_resource state resource.uri) with
+        | None -> fail ("listed uri does not serve: " ^ resource.uri)
+        | Some _ -> ())
+      resources)
+;;
+
+let test_log_is_listed_and_served_once_it_exists () =
+  let log = "## [2026-10-13 10:00] create r1 | alpha | codex | first\n" in
+  with_wiki ~documents:(("log.md", log) :: contract_documents) (fun state ->
+    (match find_listed "masc://wiki/log" (listed state) with
+     | None -> fail "expected masc://wiki/log to be listed"
+     | Some resource ->
+       check (option string) "log title" (Some "Wiki log") resource.title;
+       check string "log is markdown" "text/markdown" resource.mime_type);
+    match served_text (read_resource state "masc://wiki/log") with
+    | None -> fail "expected the log to be served"
+    | Some text -> check string "the log file is served as written" log text)
+;;
+
+(* The log is append-only and grows without bound, so an explicit read returns
+   its tail, not the whole file (task-2309). The listing still reports the
+   whole-file size, so a client can tell a tail from the whole. *)
+let test_a_large_log_is_served_from_its_tail () =
+  let line i =
+    Printf.sprintf "## [2026-10-13 10:00] update r%d | alpha | codex | note %d\n" i i
+  in
+  let buffer = Buffer.create 131072 in
+  for i = 1 to 3000 do
+    Buffer.add_string buffer (line i)
+  done;
+  let log = Buffer.contents buffer in
+  let full = String.length log in
+  check bool "the fixture log exceeds the read bound" true (full > 65536);
+  with_wiki ~documents:(("log.md", log) :: contract_documents) (fun state ->
+    match served_text (read_resource state "masc://wiki/log") with
+    | None -> fail "expected the log to be served"
+    | Some served ->
+      let served_len = String.length served in
+      check bool "the tail is shorter than the file" true (served_len < full);
+      check string "the tail is a suffix of the file"
+        (String.sub log (full - served_len) served_len)
+        served;
+      check char "the tail starts at a line boundary" '\n' log.[(full - served_len) - 1];
+      let last = line 3000 in
+      let last_len = String.length last in
+      check bool "the tail ends with the last line" true
+        (served_len >= last_len
+         && String.sub served (served_len - last_len) last_len = last))
+;;
+
+let test_log_is_neither_listed_nor_served_without_a_log_file () =
+  with_wiki ~documents:contract_documents (fun state ->
+    check bool "no log entry" true
+      (Option.is_none (find_listed "masc://wiki/log" (listed state)));
+    let response = read_resource state "masc://wiki/log" in
+    check (option string) "no log content" None (served_text response);
+    check int "a missing log is a protocol error" (-32602)
+      Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int))
+;;
+
+(* [index.md] and [log.md] are the wiki's own files. The index has its own
+   resource, [masc://wiki], so the file is not a page under a second URI. *)
+let test_own_index_file_is_not_a_listed_page () =
+  with_wiki ~documents:(("index.md", "# Wiki index\n") :: contract_documents) (fun state ->
+    check bool "index.md is not listed as a page" true
+      (Option.is_none (find_listed "masc://wiki/index" (listed state)));
+    check (option string) "index.md is not served as a page" None
+      (served_text (read_resource state "masc://wiki/index")))
+;;
+
+let test_missing_wiki_lists_nothing () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    check int "no wiki directory lists no resources" 0
+      (List.length (Lib.Mcp_server_eio_resource.wiki_resources ~base_path:dir)))
+;;
+
 let () =
   run
     "wiki_resource_topic"
@@ -265,6 +453,49 @@ let () =
             test_prefix_without_separator_is_not_a_topic
         ; test_case "missing topic is a protocol error" `Quick test_missing_topic_is_a_protocol_error
         ; test_case "missing wiki has an empty JSON index" `Quick test_missing_wiki_has_empty_json_index
+        ; test_case
+            "an unreadable page answers an error envelope"
+            `Quick
+            test_unreadable_page_answers_an_error_envelope
+        ] )
+    ; ( "listing"
+      , [ test_case
+            "pages are listed with title and summary"
+            `Quick
+            test_pages_are_listed_with_title_and_summary
+        ; test_case
+            "an unreadable page is listed by file with the reason"
+            `Quick
+            test_unreadable_page_is_listed_by_file_with_reason
+        ; test_case
+            "a large page is listed from its header and a stat"
+            `Quick
+            test_large_page_is_listed_from_header_and_stat
+        ; test_case
+            "a header longer than the read bound still parses"
+            `Quick
+            test_header_longer_than_the_bound_still_parses
+        ; test_case
+            "only round-trippable pages are listed"
+            `Quick
+            test_only_round_trippable_pages_are_listed
+        ; test_case
+            "the log is listed and served once it exists"
+            `Quick
+            test_log_is_listed_and_served_once_it_exists
+        ; test_case
+            "the log is neither listed nor served without a log file"
+            `Quick
+            test_log_is_neither_listed_nor_served_without_a_log_file
+        ; test_case
+            "a large log is served from its tail"
+            `Quick
+            test_a_large_log_is_served_from_its_tail
+        ; test_case
+            "the index file is not a listed page"
+            `Quick
+            test_own_index_file_is_not_a_listed_page
+        ; test_case "a missing wiki lists nothing" `Quick test_missing_wiki_lists_nothing
         ] )
     ]
 ;;

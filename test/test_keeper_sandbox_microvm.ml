@@ -1455,11 +1455,104 @@ let test_build_volume_mount_targets_the_guest_root () =
        (M.build_volume_mount_args ~volume_name:"masc-keeper-build-polisher"))
 ;;
 
-let test_apple_build_volume_delete_argv_names_the_volume () =
-  let argv = M.apple_build_volume_delete_argv ~volume_name:"masc-keeper-build-x" in
+let test_apple_volume_delete_argv_names_the_volume () =
+  let argv = M.apple_volume_delete_argv ~volume_name:"masc-keeper-build-x" in
   Alcotest.(check bool) "goes through container" true (contains "container" argv);
   Alcotest.(check bool) "deletes a volume" true (adjacent ~flag:"volume" ~value:"delete" argv);
   Alcotest.(check bool) "names it" true (contains "masc-keeper-build-x" argv)
+;;
+
+(* A dissolved keeper's volume removal against a scripted runtime: [deletes]
+   answers each [volume delete] in order and [listing] answers the one
+   [volume list] that settles absence. The calls are recorded so a case can
+   check what was sent. *)
+let run_volume_removal ~deletes ~listing ~keeper_name =
+  let sent = ref [] in
+  let deletes = ref deletes in
+  let run ~timeout_sec:_ argv =
+    sent := argv :: !sent;
+    if adjacent ~flag:"volume" ~value:"delete" argv
+    then (
+      match !deletes with
+      | answer :: rest ->
+        deletes := rest;
+        answer
+      | [] -> Alcotest.fail "more volume deletes than scripted")
+    else if adjacent ~flag:"volume" ~value:"list" argv
+    then listing
+    else Alcotest.failf "unexpected command: %s" (String.concat " " argv)
+  in
+  let result = M.remove_apple_keeper_volumes ~run ~timeout_sec:1.0 ~keeper_name in
+  result, List.rev !sent
+;;
+
+let deleted_volume_names sent =
+  List.filter_map
+    (fun argv ->
+       if adjacent ~flag:"volume" ~value:"delete" argv
+       then Some (List.nth argv (List.length argv - 1))
+       else None)
+    sent
+;;
+
+let test_dissolution_removes_both_volumes_of_the_keeper () =
+  let ok = Unix.WEXITED 0, "", "" in
+  let result, sent =
+    run_volume_removal
+      ~deletes:[ ok; ok ]
+      ~listing:(Unix.WEXITED 0, {|[{"id":"masc-keeper-work-other"}]|}, "")
+      ~keeper_name:"retired"
+  in
+  Alcotest.(check (result unit string)) "both gone is a removal" (Ok ()) result;
+  Alcotest.(check (list string))
+    "exactly this keeper's work and build volumes are deleted"
+    [ "masc-keeper-work-retired"; "masc-keeper-build-retired" ]
+    (deleted_volume_names sent)
+;;
+
+let test_a_failed_work_delete_still_deletes_the_build_volume () =
+  let result, sent =
+    run_volume_removal
+      ~deletes:[ (Unix.WEXITED 1, "", "volume not found"); (Unix.WEXITED 0, "", "") ]
+      ~listing:(Unix.WEXITED 0, "[]", "")
+      ~keeper_name:"retired"
+  in
+  Alcotest.(check (result unit string))
+    "an already-absent volume is a removal" (Ok ()) result;
+  Alcotest.(check (list string))
+    "the build volume delete is still sent"
+    [ "masc-keeper-work-retired"; "masc-keeper-build-retired" ]
+    (deleted_volume_names sent)
+;;
+
+let test_a_volume_still_listed_is_an_error () =
+  let result, _ =
+    run_volume_removal
+      ~deletes:[ (Unix.WEXITED 1, "", "volume in use"); (Unix.WEXITED 0, "", "") ]
+      ~listing:(Unix.WEXITED 0, {|[{"id":"masc-keeper-work-retired"}]|}, "")
+      ~keeper_name:"retired"
+  in
+  match result with
+  | Ok () -> Alcotest.fail "a volume still listed was reported removed"
+  | Error detail ->
+    Alcotest.(check bool)
+      "the error names the volume left behind"
+      true
+      (Astring.String.is_infix ~affix:"masc-keeper-work-retired" detail)
+;;
+
+let test_an_unreadable_volume_listing_is_an_error () =
+  let ok = Unix.WEXITED 0, "", "" in
+  let result, _ =
+    run_volume_removal
+      ~deletes:[ ok; ok ]
+      ~listing:(Unix.WEXITED 1, "", "container system is not running")
+      ~keeper_name:"retired"
+  in
+  Alcotest.(check bool)
+    "absence that cannot be read is not a removal"
+    true
+    (Result.is_error result)
 ;;
 
 (* The build volume goes through the same [container volume] probe and
@@ -3445,8 +3538,16 @@ let () =
             test_build_volume_name_refuses_unsafe_names
         ; Alcotest.test_case "build volume mount targets the guest root" `Quick
             test_build_volume_mount_targets_the_guest_root
-        ; Alcotest.test_case "apple build volume delete argv names the volume" `Quick
-            test_apple_build_volume_delete_argv_names_the_volume
+        ; Alcotest.test_case "apple volume delete argv names the volume" `Quick
+            test_apple_volume_delete_argv_names_the_volume
+        ; Alcotest.test_case "dissolution removes both volumes of the keeper" `Quick
+            test_dissolution_removes_both_volumes_of_the_keeper
+        ; Alcotest.test_case "a failed work delete still deletes the build volume" `Quick
+            test_a_failed_work_delete_still_deletes_the_build_volume
+        ; Alcotest.test_case "a volume still listed is an error" `Quick
+            test_a_volume_still_listed_is_an_error
+        ; Alcotest.test_case "an unreadable volume listing is an error" `Quick
+            test_an_unreadable_volume_listing_is_an_error
         ; Alcotest.test_case "recreate shares the work volume's commands" `Quick
             test_recreate_apple_build_volume_shares_the_work_volume_commands
         ; Alcotest.test_case "plan never deletes real build output" `Quick

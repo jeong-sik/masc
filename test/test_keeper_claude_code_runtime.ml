@@ -163,6 +163,7 @@ type fixture_step =
   | Close_transport
 
 let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
+    ?(auth_body = auth_subscription) ?(auth_exit = 0) ?auth_stderr ?auth_first_body
     lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
   let output = open_out_bin path in
@@ -175,10 +176,16 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
      the turn body instead, which answers it with turn output and reports
      nothing. *)
   output_string output "case \" $* \" in *\" auth status \"*)\n";
-  output_string output ("  printf '%s\\n' " ^ shell_quote auth_subscription ^ "\n");
+  Option.iter (fun first ->
+    output_string output
+      ("  marker=\"$0.auth-first\"\n  if [ ! -e \"$marker\" ]; then\n    : > \"$marker\"\n    printf '%s\\n' "
+       ^ shell_quote first ^ "\n    exit 0\n  fi\n")) auth_first_body;
+  output_string output ("  printf '%s\\n' " ^ shell_quote auth_body ^ "\n");
+  Option.iter (fun text ->
+    output_string output ("  printf '%s\\n' " ^ shell_quote text ^ " >&2\n")) auth_stderr;
   if remove_after_auth
   then output_string output "  rm -- \"$0\"\n";
-  output_string output "  exit 0\n";
+  output_string output (Printf.sprintf "  exit %d\n" auth_exit);
   output_string output "  ;;\nesac\n";
   Option.iter (fun marker ->
     output_string output ("previous_arg=''\nfor arg in \"$@\"; do\n" ^
@@ -230,10 +237,17 @@ let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(
   path
 ;;
 
-let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp lines f =
-  let path = fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp lines in
+let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?auth_body ?auth_exit
+    ?auth_stderr ?auth_first_body lines f =
+  let path =
+    fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?auth_body ?auth_exit
+      ?auth_stderr ?auth_first_body lines
+  in
   Fun.protect
-    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    ~finally:(fun () ->
+      let marker = path ^ ".auth-first" in
+      if Sys.file_exists marker then Sys.remove marker;
+      if Sys.file_exists path then Sys.remove path)
     (fun () -> f path)
 ;;
 
@@ -4797,6 +4811,104 @@ let test_subscription_spawn_failure_is_pre_dispatch () =
        |> check_pre_dispatch_attempt "subscription probe spawn failure")
 ;;
 
+(* A CLI that dies mid-status leaves its reason on stderr: the probe keeps
+   an excerpt with the parse failure instead of only the cut. *)
+let test_truncated_auth_probe_keeps_cli_stderr () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1
+         ~auth_stderr:"boom:\tkeychain denied" []
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+                check bool "truncated probe names the stage" true
+                  (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
+                check bool "truncated probe keeps the cli stderr" true
+                  (Astring.String.is_infix ~affix:"; stderr: boom: keychain denied" detail)
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
+let test_cut_auth_probe_is_retried_once () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_first_body:"{\"loggedIn\":true," [] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail }))
+           when Astring.String.is_infix ~affix:"auth status" detail ->
+             fail ("cut probe was not retried: " ^ detail)
+         | Error _ | Ok _ ->
+             (* The fixture leaves this marker on its first, cut answer. *)
+             check bool "the cut first probe ran" true
+               (Sys.file_exists (cli_path ^ ".auth-first"))))
+;;
+
+let test_cut_auth_probe_reports_stdout_bytes () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+             check bool "persistent cut names the byte count" true
+               (Astring.String.is_infix ~affix:"(stdout 18 bytes)" detail)
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "cut auth probe completed the Keeper turn"))
+;;
+
+let test_truncated_auth_probe_without_stderr_keeps_detail () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+             check bool "truncated probe names the stage" true
+               (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
+             check bool "no stderr marker without stderr" false
+               (Astring.String.is_infix ~affix:"; stderr:" detail)
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
+let test_truncated_auth_probe_truncates_long_stderr () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1
+         ~auth_stderr:(String.make 400 'a') []
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+                check bool "long stderr is capped with an ellipsis" true
+                  (Astring.String.is_infix
+                     ~affix:("; stderr: " ^ String.make 300 'a' ^ "…") detail)
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
+let test_blank_auth_stderr_keeps_detail_bare () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 ~auth_stderr:"   " []
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+                check bool "no stderr marker for blank stderr" false
+                  (Astring.String.is_infix ~affix:"; stderr:" detail)
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
 let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
   let base_path = temp_workspace () in
   let tool =
@@ -5972,6 +6084,30 @@ let () =
             "subscription spawn failure is pre-dispatch"
             `Quick
             test_subscription_spawn_failure_is_pre_dispatch
+        ; test_case
+            "truncated auth probe keeps cli stderr"
+            `Quick
+            test_truncated_auth_probe_keeps_cli_stderr
+        ; test_case
+            "cut auth probe is retried once"
+            `Quick
+            test_cut_auth_probe_is_retried_once
+        ; test_case
+            "cut auth probe reports stdout bytes"
+            `Quick
+            test_cut_auth_probe_reports_stdout_bytes
+        ; test_case
+            "truncated auth probe without stderr keeps detail"
+            `Quick
+            test_truncated_auth_probe_without_stderr_keeps_detail
+        ; test_case
+            "truncated auth probe truncates long stderr"
+            `Quick
+            test_truncated_auth_probe_truncates_long_stderr
+        ; test_case
+            "blank auth stderr keeps detail bare"
+            `Quick
+            test_blank_auth_stderr_keeps_detail_bare
         ; test_case
             "turn spawn failure is pre-dispatch with tools"
             `Quick

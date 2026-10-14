@@ -78,7 +78,10 @@ let write_sampling_blob t bytes =
       | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR ->
           let* () = write t (recovery_blob_path (digest bytes)) bytes in
           Ok (blob_reference bytes)
-      | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown -> Error detail)
+      | Fs_compat.Exact_kind (Unix.S_REG) | Fs_compat.Exact_unknown
+      | Fs_compat.Exact_kind (Unix.S_CHR) | Fs_compat.Exact_kind (Unix.S_BLK)
+      | Fs_compat.Exact_kind (Unix.S_LNK) | Fs_compat.Exact_kind (Unix.S_FIFO)
+      | Fs_compat.Exact_kind (Unix.S_SOCK) -> Error detail)
 type retained_kind = Blob | Sequence
 let retained_address (reference : evidence) =
   match reference.sha256 with
@@ -136,7 +139,9 @@ let read_blob_bounded ~budget t reference =
       (match kind with
        | Fs_compat.Exact_kind Unix.S_REG -> read canonical
        | Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_DIR -> read (recovery_blob_path hash)
-       | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+       | Fs_compat.Exact_unknown | Fs_compat.Exact_kind (Unix.S_CHR)
+       | Fs_compat.Exact_kind (Unix.S_BLK) | Fs_compat.Exact_kind (Unix.S_LNK)
+       | Fs_compat.Exact_kind (Unix.S_FIFO) | Fs_compat.Exact_kind (Unix.S_SOCK) ->
            Error (Read_failed "retained evidence is not a regular file"))
 let read_blob ?(max_bytes=max_int) t reference =
   read_blob_bounded ~budget:(read_budget ~max_bytes) t reference
@@ -265,16 +270,14 @@ let load_broadcast t ~instance_id ~request_id = protect (fun () ->
   let path = Filename.concat t.root (broadcast_path ~instance_id ~request_id) in
   match Fs_compat.exact_path_kind path with
   | Fs_compat.Exact_missing -> Ok None
-  | _ ->
-      let stat = Unix.stat path in
+  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> let stat = Unix.stat path in
       if stat.Unix.st_kind <> Unix.S_REG then Error "Broadcast evidence record is not a regular file"
       else Ok (Some (Fs_compat.load_file path |> Yojson.Safe.from_string)))
 let read_directory t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with
   | Fs_compat.Exact_missing -> Ok []
-  | _ ->
-      let names = Fs_compat.read_dir path |> List.sort String.compare in
+  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> let names = Fs_compat.read_dir path |> List.sort String.compare in
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | name :: rest when Filename.check_suffix name ".json" ->
@@ -295,7 +298,7 @@ let binding_inventory_with ~sync_parent ~root =
   let listed = protect (fun () ->
     match Fs_compat.exact_path_kind directory with
     | Fs_compat.Exact_missing -> Ok []
-    | _ -> Ok (Fs_compat.read_dir directory |> List.sort String.compare)) in
+    | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> Ok (Fs_compat.read_dir directory |> List.sort String.compare)) in
   match listed with
   | Error detail -> { records=[]; issues=[directory,detail]; complete=false }
   | Ok names ->
@@ -462,11 +465,10 @@ let load_sampling_request_bounded_with ~sync_file ~sync_parent ~budget t ~instan
   let outcome_path = path_in sampling_outcome_directory in
   let path = match Fs_compat.exact_path_kind outcome_path with
     | Fs_compat.Exact_missing -> path_in sampling_directory
-    | _ -> outcome_path in
+    | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> outcome_path in
   match Fs_compat.exact_path_kind path with
   | Fs_compat.Exact_missing -> Ok None
-  | _ ->
-      let* bytes = with_record_fd path (fun fd ->
+  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> let* bytes = with_record_fd path (fun fd ->
         let stat = Unix.fstat fd in
         if stat.Unix.st_kind <> Unix.S_REG then
           Error (Read_failed "retained file is not a regular file")
@@ -496,8 +498,7 @@ let highwater t instance_id = protect (fun () ->
   let directory = Filename.concat t.root (observation_dir instance_id) in
   match Fs_compat.exact_path_kind directory with
   | Fs_compat.Exact_missing -> Ok 0
-  | _ ->
-      let handle = Unix.opendir directory in
+  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> let handle = Unix.opendir directory in
       Fun.protect ~finally:(fun () -> Unix.closedir handle) (fun () ->
         let rec scan maximum =
           match Unix.readdir handle with
@@ -509,27 +510,58 @@ let highwater t instance_id = protect (fun () ->
           | _ -> scan maximum
           | exception End_of_file -> Ok maximum
         in scan 0))
+type unreadable_binding = { path : string; detail : string; contents : Yojson.Safe.t option }
+type binding_reading = { readable : Yojson.Safe.t list; unreadable : unreadable_binding list }
 (* A renamed observation can survive a failed binding write. Recover its
-   sequence for every retained reader; reads still verify the exact record. *)
-let bindings t =
-  let* values = read_directory t "bindings" in
+   sequence for every retained reader; reads still verify the exact record.
+   Each file is read on its own: a file that is not JSON, is not an object,
+   lacks an instance id or sequence, or sits beside a misnamed observation
+   file is listed in [unreadable] and never hides its siblings. Only a
+   directory that cannot be listed or synced fails the whole reading. *)
+let read_bindings t =
+  let directory = Filename.concat t.root "bindings" in
+  let* names = protect (fun () ->
+    match Fs_compat.exact_path_kind directory with
+    | Fs_compat.Exact_missing -> Ok []
+    | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> Ok (Fs_compat.read_dir directory |> List.sort String.compare)) in
+  let read name =
+    let path = Filename.concat directory name in
+    let unreadable ?contents detail = Some (Error { path; detail; contents }) in
+    (* A binding removed between the listing and this read is absent,
+       the same as one never listed. *)
+    match protect (fun () -> Ok (Fs_compat.load_file_opt path)) with
+    | Error detail -> unreadable detail
+    | Ok None -> None
+    | Ok (Some bytes) ->
+        (match Yojson.Safe.from_string bytes with
+         | exception Yojson.Json_error detail -> unreadable detail
+         | `Assoc fields as json ->
+             (match List.assoc_opt "instance_id" fields, List.assoc_opt "observation_seq" fields with
+              | Some (`String instance_id), Some (`Int sequence) when sequence >= 0 ->
+                  (match highwater t instance_id with
+                   | Ok retained ->
+                       Some (Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
+                         List.remove_assoc "observation_seq" fields)))
+                   | Error detail -> unreadable ~contents:json detail)
+              | _ -> unreadable ~contents:json "invalid retained binding sequence")
+         | json -> unreadable ~contents:json "invalid retained binding") in
+  let reading = List.fold_left (fun reading name ->
+    if not (Filename.check_suffix name ".json") then reading
+    else match read name with
+      | None -> reading
+      | Some (Ok value) -> { reading with readable = value :: reading.readable }
+      | Some (Error issue) -> { reading with unreadable = issue :: reading.unreadable })
+    { readable = []; unreadable = [] } names in
   (* This reading also authorizes reconciliation. On a cold process, confirm
      the publication of terminal records/absence before admitting replacement. *)
-  let* () = protect (fun () ->
-    sync_existing_parent ~sync_parent:sync_parent_directory (Filename.concat t.root "bindings"); Ok ()) in
-  let rec reconcile = function
-    | [] -> Ok []
-    | `Assoc fields :: rest ->
-        let* instance_id, sequence = match List.assoc_opt "instance_id" fields,
-            List.assoc_opt "observation_seq" fields with
-          | Some (`String id), Some (`Int seq) when seq >= 0 -> Ok (id, seq)
-          | _ -> Error "invalid retained binding sequence" in
-        let* retained = highwater t instance_id in
-        let* rest = reconcile rest in
-        Ok (`Assoc (("observation_seq", `Int (max sequence retained)) ::
-          List.remove_assoc "observation_seq" fields) :: rest)
-    | _ -> Error "invalid retained binding" in
-  reconcile values
+  let* () = protect (fun () -> sync_existing_parent ~sync_parent:sync_parent_directory directory; Ok ()) in
+  Ok { readable = List.rev reading.readable; unreadable = List.rev reading.unreadable }
+(* The whole-store reading for a caller that cannot use a partial one. *)
+let bindings t =
+  let* reading = read_bindings t in
+  match reading.unreadable with
+  | [] -> Ok reading.readable
+  | issue :: _ -> Error (issue.path ^ ": " ^ issue.detail)
 let retained_read_limit max_bytes =
   let envelope_bytes = String.length {|{"sources":,"output":}|} in
   if max_bytes <= 0 || max_bytes > (max_int - envelope_bytes) / 2

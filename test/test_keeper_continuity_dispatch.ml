@@ -132,10 +132,10 @@ let test_real_dispatch_preserves_pair_across_refusal () =
       ^ working_state));
   check string "dispatch does not rewrite saved pair" saved_before (Fs_compat.load_file path);
   let observed = latest_observation ~config in
-  let evidence_store = Dated_jsonl.create
-      ~base_dir:(Filename.concat
-        (Filename.concat (Workspace.keepers_runtime_dir config) keeper_name)
-        "continuity-requests") () in
+  let evidence_store =
+    Dated_jsonl.open_store
+      (Keeper_types_support.keeper_store_location config keeper_name Continuity_requests)
+  in
   let evidence = Dated_jsonl.read_recent evidence_store 10 in
   List.iter (fun (runtime, peer) ->
     let row = match List.find_opt (fun row ->

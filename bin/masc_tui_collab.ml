@@ -24,7 +24,9 @@ let write_access t access =
     | (Name _ | Hours _ | Confirm_revoke _), (Pending _ | Uncertain _ | Read_only _)
     | Confirm_resolution _, (Writable | Pending _ | Read_only _) -> Browsing
     | Confirm_resolution request_id, Uncertain current when request_id <> current.request_id -> Browsing
-    | form, _ -> form in
+    | (Browsing as form), _
+    | ((Name _ | Hours _ | Confirm_revoke _) as form), Writable
+    | (Confirm_resolution _ as form), Uncertain _ -> form in
   {t with write_access = access; form}
 let loading t =
   let read = Read (ref ()) in

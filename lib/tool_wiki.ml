@@ -11,136 +11,24 @@
 
 open Printf
 
-(** The page [source] vocabulary. [source_to_string] is the one place the
-    spelling is written: [valid_source_strings] and [source_of_string_opt] are
-    derived from it over [all_of_wiki_source], so a new constructor is a
-    non-exhaustive match there and nowhere else in this module.
-    masc_wiki_create's schema writes the same strings as a literal enum in
-    config/tools/masc_wiki_create.toml; the "wiki source enum" case in
-    test_enum_mirror_sync compares that enum with [valid_source_strings]. *)
-type wiki_source =
+(* The page contract and the page names live in [Wiki_page] and
+   [Wiki_page_name]; this module re-exports them so every caller, and the
+   interface below, keeps the names it had. *)
+type wiki_source = Wiki_page.wiki_source =
   | Direct_experience
   | Research
   | Experiment
   | Observation
-[@@deriving enumerate]
 
-let source_to_string = function
-  | Direct_experience -> "direct_experience"
-  | Research -> "research"
-  | Experiment -> "experiment"
-  | Observation -> "observation"
-
-let valid_source_strings = List.map source_to_string all_of_wiki_source
-
-let source_of_string_opt raw =
-  List.find_opt
-    (fun source -> String.equal (source_to_string source) raw)
-    all_of_wiki_source
-
+let source_to_string = Wiki_page.source_to_string
+let valid_source_strings = Wiki_page.valid_source_strings
+let source_of_string_opt = Wiki_page.source_of_string_opt
 let string_contains = String_util.string_contains_substring
 
-(* Header values. Each is written on one line as [key: value] and read back
-   trimmed. A [Line.t] comes back as it went in: not blank, one line, nothing
-   to trim. Both ways into this module, the tool arguments and a page on
-   disk, build one with [Line.of_string], and the page writer takes nothing
-   else, so a header value nobody checked does not type. *)
-module Line : sig
-  type t = private string
+module Line = Wiki_page.Line
+module Tag = Wiki_page.Tag
 
-  type problem =
-    | Blank
-    | Spans_lines
-    | Outer_whitespace
-
-  val of_string : string -> (t, problem) result
-
-  val of_date : Unix.tm -> t
-  (** [YYYY-MM-DD]. *)
-end = struct
-  type t = string
-
-  type problem =
-    | Blank
-    | Spans_lines
-    | Outer_whitespace
-
-  let of_string value =
-    let trimmed = String.trim value in
-    if String.equal trimmed ""
-    then Error Blank
-    else if String.contains value '\n' || String.contains value '\r'
-    then Error Spans_lines
-    else if not (String.equal trimmed value)
-    then Error Outer_whitespace
-    else Ok value
-
-  let of_date (date : Unix.tm) =
-    sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday
-end
-
-(* The tags line is [tags: \[a, b\]]. A tag is a header value with no comma:
-   a comma would come back as two tags. [of_line] reads what [to_line] wrote
-   and nothing looser: a value outside the brackets, or an empty piece between
-   two commas, is not cut down to the pieces that happen to parse. *)
-module Tag : sig
-  type t = private string
-
-  type problem =
-    | Not_a_line of Line.problem
-    | Has_comma
-
-  val of_string : string -> (t, problem) result
-  val to_line : t list -> string
-  val of_line : string -> t list option
-end = struct
-  type t = string
-
-  type problem =
-    | Not_a_line of Line.problem
-    | Has_comma
-
-  let of_string value =
-    match Line.of_string value with
-    | Error problem -> Error (Not_a_line problem)
-    | Ok _ when String.contains value ',' -> Error Has_comma
-    | Ok _ -> Ok value
-
-  let to_line tags = "[" ^ String.concat ", " tags ^ "]"
-
-  let of_line value =
-    let raw = String.trim value in
-    let len = String.length raw in
-    if len < 2 || not (Char.equal raw.[0] '[' && Char.equal raw.[len - 1] ']')
-    then None
-    else (
-      let inner = String.sub raw 1 (len - 2) in
-      if String.equal (String.trim inner) ""
-      then Some []
-      else
-        String.split_on_char ',' inner
-        |> List.fold_left
-             (fun read piece ->
-                match read, of_string (String.trim piece) with
-                | Some tags, Ok tag -> Some (tag :: tags)
-                | None, _ | _, Error _ -> None)
-             (Some [])
-        |> Option.map List.rev)
-end
-
-type context = {
-  base_path: string;
-  agent_name: string;
-}
-
-(* Paths. [base_path] is the workspace the caller already resolved, the same
-   one every other tool in the request reads. *)
-let wiki_root ~base_path = Config_dir_resolver.wiki_dir ~base_path
-
-(* YAML frontmatter parsing. Every field a writer sets and a reader projects
-   is required: a page missing one does not read, rather than reading as an
-   empty string. [updated] is written but nothing reads it. *)
-type frontmatter = {
+type frontmatter = Wiki_page.frontmatter = {
   title: Line.t;
   summary: Line.t;
   source: wiki_source;
@@ -150,99 +38,31 @@ type frontmatter = {
   tags: Tag.t list;
 }
 
-type frontmatter_field =
-  | Title
-  | Summary
-  | Source
-  | Author
-  | Created
-  | Revision
-  | Tags
+type frontmatter_error = Wiki_page.frontmatter_error
 
-let frontmatter_field_key = function
-  | Title -> "title"
-  | Summary -> "summary"
-  | Source -> "source"
-  | Author -> "author"
-  | Created -> "created"
-  | Revision -> "revision"
-  | Tags -> "tags"
+let parse_frontmatter = Wiki_page.parse_frontmatter
+let frontmatter_error_to_string = Wiki_page.frontmatter_error_to_string
+let describe_unreadable = Wiki_page.describe_unreadable
+let render_page = Wiki_page.render_page
+let page_body = Wiki_page.page_body
 
-(* Why a page's header does not read as a wiki page. The raw value
-   of an unknown source is kept only to name it back to the reader. *)
-type frontmatter_error =
-  | No_frontmatter
-  | Unclosed_frontmatter
-  | Missing_field of frontmatter_field
-  | Unknown_source of string
-  | Bad_revision of string
-  | Bad_tags of string
-  | Not_one_line of frontmatter_field
+type page_name_error = Wiki_page_name.page_name_error =
+  | Empty_page_name
+  | Bad_page_characters
+  | Dash_at_edge
+  | Reserved_page_name
 
-let parse_frontmatter content =
-  match Frontmatter.read content with
-  | Frontmatter.Absent -> Error No_frontmatter
-  | Frontmatter.Unclosed -> Error Unclosed_frontmatter
-  | Frontmatter.Closed parsed ->
-    let ( let* ) = Result.bind in
-    let lookup field =
-      List.assoc_opt (frontmatter_field_key field) parsed.Frontmatter.fields
-    in
-    (* A scalar that is present but empty says nothing, so it reads as absent.
-       [tags] is a list, and [tags: []] is a page with no tags. *)
-    let scalar field =
-      match lookup field with
-      | Some value when not (String.equal value "") -> Ok value
-      | Some _ | None -> Error (Missing_field field)
-    in
-    (* The reader trims a value, so the only [Line] problem left for one that
-       is present is a carriage return inside it. *)
-    let line field =
-      let* value = scalar field in
-      match Line.of_string value with
-      | Ok line -> Ok line
-      | Error Line.Blank -> Error (Missing_field field)
-      | Error (Line.Spans_lines | Line.Outer_whitespace) -> Error (Not_one_line field)
-    in
-    let* title = line Title in
-    let* summary = line Summary in
-    let* raw_source = scalar Source in
-    let* source =
-      Option.to_result ~none:(Unknown_source raw_source) (source_of_string_opt raw_source)
-    in
-    let* author = line Author in
-    let* created = line Created in
-    let* raw_revision = scalar Revision in
-    let* revision =
-      match int_of_string_opt raw_revision with
-      | Some revision when revision >= 1 -> Ok revision
-      | Some _ | None -> Error (Bad_revision raw_revision)
-    in
-    let* tags =
-      match lookup Tags with
-      | Some value -> Option.to_result ~none:(Bad_tags value) (Tag.of_line value)
-      | None -> Error (Missing_field Tags)
-    in
-    Ok { title; summary; source; author; created; revision; tags }
-;;
+let validate_page_name = Wiki_page_name.validate_page_name
+let page_name_error_to_string = Wiki_page_name.page_name_error_to_string
 
-(* The raw source is quoted as written: [%S] would escape a non-ASCII value
-   into decimal byte codes the reader cannot recognise. *)
-let frontmatter_error_to_string = function
-  | No_frontmatter -> "no frontmatter"
-  | Unclosed_frontmatter -> "frontmatter has no closing ---"
-  | Missing_field field -> sprintf "no %s in frontmatter" (frontmatter_field_key field)
-  | Unknown_source raw ->
-    sprintf "source \"%s\" is not one of: %s" raw (String.concat ", " valid_source_strings)
-  | Bad_revision raw -> sprintf "revision \"%s\" is not a whole number from 1" raw
-  | Bad_tags raw -> sprintf "tags \"%s\" is not a list of tags" raw
-  | Not_one_line field ->
-    sprintf "%s in frontmatter is not one line" (frontmatter_field_key field)
+type context = {
+  base_path: string;
+  agent_name: string;
+}
 
-(* The one line list, read and search print for a page whose header does
-   not read: its filename and the reason. *)
-let describe_unreadable path error =
-  sprintf "%s (%s)" (Filename.basename path) (frontmatter_error_to_string error)
+(* Paths. [base_path] is the workspace the caller already resolved, the same
+   one every other tool in the request reads. *)
+let wiki_root ~base_path = Config_dir_resolver.wiki_dir ~base_path
 
 (* Every page file in the wiki, in name order. Only the wiki's own two files
    ([index.md], [log.md]) are left out: any other Markdown file that is not a
@@ -277,6 +97,11 @@ let index_entries ~base_path =
          Some
            (Wiki_journal.Unreadable
               { file; reason = frontmatter_error_to_string error })))
+
+let read_index_entries ~base_path =
+  match index_entries ~base_path with
+  | entries -> Ok entries
+  | exception Sys_error detail -> Error detail
 
 (* RFC-0189 PR-1b.7 — handlers in this module return typed
    [Tool_result.result]. Boundary back to [Tool_result.result option] in
@@ -370,84 +195,17 @@ let handle_read ~tool_name ~start_time ctx args : Tool_result.result =
                  (Tool_error.to_string (Tool_error.of_exn exn)))
   end
 
-(* Page names. The writer chooses the name. Nothing is derived from the title
-   or the date, and a name that breaks the rule is refused rather than
-   repaired: dropping characters silently is how two different titles ended
-   up in one file. *)
-type page_name_error =
-  | Empty_page_name
-  | Bad_page_characters
-  | Dash_at_edge
-  | Reserved_page_name
-
-(* [index] and [log] are the wiki's own files. *)
-let reserved_page_names = [ "index"; "log" ]
-
-let validate_page_name raw =
-  let allowed c =
-    match c with
-    | 'a' .. 'z' | '0' .. '9' | '-' -> true
-    | _ -> false
-  in
-  if String.equal raw ""
-  then Error Empty_page_name
-  else if not (Stdlib.String.for_all allowed raw)
-  then Error Bad_page_characters
-  else if Char.equal raw.[0] '-' || Char.equal raw.[String.length raw - 1] '-'
-  then Error Dash_at_edge
-  else if List.exists (String.equal raw) reserved_page_names
-  then Error Reserved_page_name
-  else Ok raw
-
-(* The name is quoted as written: [%S] would escape a non-ASCII name into
-   decimal byte codes the writer cannot recognise. *)
-let page_name_error_to_string raw = function
-  | Empty_page_name -> "page is required"
-  | Bad_page_characters ->
-    sprintf
-      "page name \"%s\" may only contain lowercase a-z, digits and '-'. Put other \
-       scripts in the title."
-      raw
-  | Dash_at_edge -> sprintf "page name \"%s\" may not start or end with '-'" raw
-  | Reserved_page_name -> sprintf "page name \"%s\" is reserved by the wiki" raw
-
 let page_path ~base_path page =
   Filename.concat (wiki_root ~base_path) (page ^ ".md")
 
 let today () =
   (* Local, not UTC: the header dates are read by the people and Keepers on
      this machine. *)
-  Line.of_date (Time_compat.now () |> Unix.localtime)
-
-let render_page (header : frontmatter) ~(updated : Line.t) ~body =
-  let body_end = if String.ends_with ~suffix:"\n" body then "" else "\n" in
-  sprintf {|---
-title: %s
-summary: %s
-source: %s
-author: %s
-created: %s
-updated: %s
-revision: %d
-tags: %s
----
-
-%s%s|}
-    (header.title :> string)
-    (header.summary :> string)
-    (source_to_string header.source)
-    (header.author :> string)
-    (header.created :> string)
-    (updated :> string)
-    header.revision (Tag.to_line header.tags) body body_end
-
-(* The body as the writer sent it: everything after the header, without the
-   blank line [render_page] puts between the two. *)
-let page_body content =
-  let body = (Frontmatter.parse content).Frontmatter.body in
-  if String.starts_with ~prefix:"\n" body
-  then String.sub body 1 (String.length body - 1)
-  else body
+  let date = Time_compat.now () |> Unix.localtime in
+  Line.of_calendar_date
+    ~year:(date.tm_year + 1900)
+    ~month:(date.tm_mon + 1)
+    ~day:date.tm_mday
 
 (* One lock for the whole wiki directory. Create and update check the file and
    then write it; without the lock two writers both pass the check. The lock
@@ -757,6 +515,102 @@ let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
            (List.length matches) (String.concat "\n" matches))
   end
 
+(* The nodes the lint reads: one per page file [list_pages] names, a readable
+   page with its links and sources, or the file and the reason its header does
+   not read. The same listing and the same header parser the other handlers
+   use, so the lint cannot disagree with them about what a page is. A file that
+   vanishes between the listing and the read is left out, as in
+   [index_entries]. Nothing is written and no lock is taken. *)
+let lint_nodes ~base_path =
+  list_pages ~base_path
+  |> List.filter_map (fun path ->
+    let file = Filename.basename path in
+    match In_channel.with_open_text path In_channel.input_all with
+    | exception Sys_error message ->
+      (* Gone between the listing and the read: not a page any more. Still
+         there but not opened (permissions, I/O): a page that does not read,
+         not a page that does not exist. *)
+      if Sys.file_exists path
+      then
+        Some
+          (Wiki_graph.Unreadable
+             { file; reason = Printf.sprintf "the file could not be opened: %s" message })
+      else None
+    | content ->
+      (match parse_frontmatter content with
+       | Ok _ ->
+         let body = page_body content in
+         Some
+           (Wiki_graph.Readable
+              { page = Filename.chop_suffix file ".md"
+              ; links = Wiki_link.extract body
+              ; sources = Wiki_sources.of_body body
+              })
+       | Error error ->
+         Some
+           (Wiki_graph.Unreadable { file; reason = frontmatter_error_to_string error })))
+
+let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
+  (* A value of the wrong type is refused, not read as "not given": a limit
+     of "20" would otherwise be the default and a kind of 5 no filter. *)
+  let typed name ~expected ~pick =
+    match args with
+    | `Assoc fields ->
+      (match List.assoc_opt name fields with
+       | None | Some `Null -> Ok None
+       | Some value ->
+         (match pick value with
+          | Some picked -> Ok (Some picked)
+          | None -> Error (Printf.sprintf "%s must be %s" name expected)))
+    | _ -> Ok None
+  in
+  let string_arg name =
+    typed name ~expected:"a string" ~pick:(function `String s -> Some s | _ -> None)
+  in
+  let ( let* ) = Result.bind in
+  let request =
+    let* page = string_arg "page" in
+    let* kind = string_arg "kind" in
+    let* limit =
+      typed "limit" ~expected:"a whole number" ~pick:(function `Int n -> Some n | _ -> None)
+    in
+    let* cursor = string_arg "cursor" in
+    Ok { Wiki_lint_report.page; kind; limit; cursor }
+  in
+  match request with
+  | Error message -> workflow_err ~tool_name ~start_time message
+  | Ok request ->
+  let page_checked =
+    match request.page with
+    | None -> Ok ()
+    | Some page ->
+      validate_page_name page |> Result.map ignore
+      |> Result.map_error (page_name_error_to_string page)
+  in
+  match page_checked with
+  | Error message -> workflow_err ~tool_name ~start_time message
+  | Ok () ->
+    let nodes = lint_nodes ~base_path:ctx.base_path in
+    let pages_unreadable =
+      List.length
+        (List.filter
+           (function
+             | Wiki_graph.Unreadable _ -> true
+             | Wiki_graph.Readable _ -> false)
+           nodes)
+    in
+    let findings = Wiki_lint.run (Wiki_graph.of_nodes nodes) in
+    (match
+       Wiki_lint_report.render
+         ~pages_total:(List.length nodes)
+         ~pages_unreadable
+         ~findings
+         request
+     with
+     | Error problem ->
+       workflow_err ~tool_name ~start_time (Wiki_lint_report.problem_to_string problem)
+     | Ok json -> text_ok ~tool_name ~start_time (Yojson.Safe.to_string json))
+
 (* RFC-0189 PR-1b.7 — boundary projection. Handlers are typed; the
    dispatch ABI stays [Tool_result.result option] so external callers
    (mcp_server_eio_execute, keeper_tag_dispatch) remain unchanged.
@@ -789,6 +643,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
     lift (handle_update ~tool_name:name ~start_time:start ctx args)
   | Some Tool_schemas_wiki.Search_pages ->
     lift (handle_search ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_wiki.Lint_pages ->
+    lift (handle_lint ~tool_name:name ~start_time:start ctx args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

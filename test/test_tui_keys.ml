@@ -1036,6 +1036,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_hearth = None
   ; bp_kind = None
   ; bp_closed = None
+  ; bp_attachments = []
   }
 
 let board_state () =

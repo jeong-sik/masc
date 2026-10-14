@@ -101,7 +101,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
     (I.official_client_recovery_summary expected) terminal.summary;
   (match Route.route_of_error ~boundary:Route.Masc_execution error with
    | Route.Exhausted_visible_alive
-       { terminal = Route.Session_claim_refused; _ }
+       { terminal = Route.Session_claim_refused }
        as route ->
      Alcotest.(check string)
        "local claim refusal has its own route label"
@@ -138,11 +138,14 @@ let check_preserved ~base_path ~keeper_name ~expected error =
                ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) observed with
            | Some surface ->
              Alcotest.(check string) "public local recovery class"
-               "official_client_recovery_required" surface.blocker_class;
+               "official_client_recovery_required"
+               (Masc.Keeper_status_bridge.runtime_blocker_class_to_string surface.blocker_class);
              Alcotest.(check string) "public recovery identity"
                (I.official_client_recovery_summary expected) (Lazy.force surface.summary);
              `Assoc
-               [ "runtime_blocker_class", `String surface.blocker_class
+               [ "runtime_blocker_class",
+                 `String
+                   (Masc.Keeper_status_bridge.runtime_blocker_class_to_string surface.blocker_class)
                ; "runtime_blocker_summary", `String (Lazy.force surface.summary) ]
            | None -> Alcotest.fail "registry failure has no public blocker"
          in
@@ -373,7 +376,7 @@ let check_remote_fence () =
     (I.classify_masc_internal_error error = Some cause);
   match Route.route_of_error ~boundary:Route.Masc_execution error with
   | Route.Exhausted_visible_alive
-      { terminal = Route.Provider_attempt_effect_fenced Route.Fenced_effect_attempted; _ } -> ()
+      { terminal = Route.Provider_attempt_effect_fenced Route.Fenced_effect_attempted } -> ()
   | _ -> Alcotest.fail "remote attempt fence was conflated with local claim refusal"
 
 let () =

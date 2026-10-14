@@ -81,13 +81,36 @@ val peek_payload : string -> cached_payload option
     entry. JSON-only entries return [None] until a payload reader prepares them.
     This never serializes, waits for preparation, or submits executor work. *)
 
-exception Compute_timeout of string * bool
+(** Whose window closed when a compute timed out. *)
+type compute_timeout_role =
+  | Compute_owner (** the caller's own compute exceeded its window *)
+  | Compute_waiter (** the caller was waiting on another fiber's compute *)
+
+exception Compute_timeout of { key : string; role : compute_timeout_role }
 (** Raised internally when the compute function exceeds [timeout_sec].
     Callers of [get_or_compute_with_timeout] do not need to handle this —
     it is caught and converted to a timeout-error JSON response. *)
 
 val timeout_error_code : string
 (** The [error] value carried by every timeout envelope this module emits. *)
+
+(** Which wait ran out; the envelope reports it as [timeout_kind]. *)
+type timeout_kind =
+  | Timeout_owner (** the caller's own compute exceeded its window *)
+  | Timeout_waiter (** the caller was waiting on another fiber's compute *)
+  | Timeout_compute (** a computing slot yielded no result in time *)
+  | Timeout_circuit_open (** repeated timeouts for the key: failing fast *)
+
+val timeout_kind_of_role : compute_timeout_role -> timeout_kind
+(** The kind an envelope reports for a {!Compute_timeout} with this role. *)
+
+val timeout_envelope_json
+  :  kind:timeout_kind
+  -> key:string
+  -> timeout_sec:float
+  -> Yojson.Safe.t
+(** The timeout envelope for [key]. Every producer builds it here, so the
+    shape {!is_timeout_envelope} recognizes has one writer. *)
 
 val is_timeout_envelope : Yojson.Safe.t -> bool
 (** [is_timeout_envelope json] is [true] when [json] is a timeout envelope

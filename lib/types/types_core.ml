@@ -234,7 +234,7 @@ type task_status =
    statuses map to it exhaustively; neither boundary needs placeholder tasks. *)
 module Task_status_tag = struct
   type t = Todo | Claimed | In_progress | Awaiting_verification | Done | Cancelled
-  [@@deriving enumerate]
+  [@@deriving enumerate, eq]
 
   let to_string = function
     | Todo -> "todo"
@@ -883,6 +883,29 @@ let message_mention_delivery_to_string = function
   | Mention_accepted -> "accepted"
   | Mention_rejected -> "rejected"
 
+(* The kinds of message this codebase writes. [message.msg_type] stays the
+   string on disk, so a row written by another build still decodes; read it
+   with [message_kind_of_string]. *)
+type message_kind =
+  | Msg_broadcast
+  | Msg_session_bound
+  | Msg_session_rebound
+  | Msg_session_ended
+  | Msg_cache_invalidated
+[@@deriving enumerate]
+
+let message_kind_to_string = function
+  | Msg_broadcast -> "broadcast"
+  | Msg_session_bound -> "session_bound"
+  | Msg_session_rebound -> "session_rebound"
+  | Msg_session_ended -> "session_ended"
+  | Msg_cache_invalidated -> "cache_invalidated"
+
+let message_kind_of_string raw =
+  List.find_opt
+    (fun kind -> String.equal (message_kind_to_string kind) raw)
+    all_of_message_kind
+
 type message = {
   request_id: string;
   seq: int;
@@ -913,10 +936,10 @@ type workspace_state = {
 } [@@deriving yojson { strict = false }, show]
 
 (* ============================================ *)
-(* Tempo configuration for cluster pace control *)
+(* Tempo configuration for workspace pace control *)
 (* ============================================ *)
 
-(** Tempo mode - controls cluster execution pace *)
+(** Tempo mode - controls workspace execution pace *)
 type tempo_mode =
   | Normal    (* Default speed *)
   | Slow      (* Slow pace - careful work *)

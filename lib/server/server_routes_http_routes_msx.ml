@@ -117,7 +117,7 @@ let press_response ~config ~who ~body =
       let fields = if List.mem_assoc "hold_frames" fields then fields
         else ("hold_frames", `Int press_default_hold_frames) :: fields in
       let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor who)
-        ~schema:Tool_schemas_misc_toml.msx_press ~arguments:(`Assoc fields) in
+        ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Press) ~arguments:(`Assoc fields) in
       let fields = ["ok", `Bool result.ok; "message", `String result.message] in
       let fields = match result.code with None -> fields | Some code -> ("code", `String code)::fields in
       let observation = if result.ok then match result.data with
@@ -136,7 +136,7 @@ let handle_press ~state ~who request reqd =
 
 let carts_response ~config =
   let result = worker_response ~config ~principal:Lane_addon_call_context.Anonymous
-    ~schema:Tool_schemas_misc_toml.msx_meta ~arguments:(`Assoc ["include_inventory", `Bool true]) in
+    ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Meta) ~arguments:(`Assoc ["include_inventory", `Bool true]) in
   if not result.ok then result.status, `Assoc ["ok", `Bool false; "message", `String result.message]
   else match result.data with
     | `Assoc fields -> (match List.assoc_opt "inventory" fields with
@@ -157,7 +157,7 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
   | Error refusal -> refusal
   | Ok arguments ->
       let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor agent_name)
-        ~schema:Tool_schemas_misc_toml.msx_load ~arguments in
+        ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Load) ~arguments in
       result.status, load_result_json ~ok:result.ok ~message:result.message
 ;;
 
@@ -174,7 +174,7 @@ let handle_load ~state ~agent_name request reqd =
 let msx_tick_default_frames = 18
 
 let clamp_tick_frames requested =
-  let schema = Tool_schemas_misc_toml.msx_step.Masc_domain.input_schema in
+  let schema = (Tool_schemas_misc_toml.msx_schema Msx_tool.Step).Masc_domain.input_schema in
   let maximum = Yojson.Safe.Util.(schema |> member "properties" |> member "frames" |> member "maximum" |> to_int) in
   max 1 (min maximum requested)
 
@@ -228,7 +228,7 @@ let tick_response ~config ~body =
             (match known with None -> [] | Some p -> ["known_pixels", `Assoc [
               "revision", `String p.revision; "width", `Int p.width; "height", `Int p.height]]) in
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
-        ~schema:Tool_schemas_misc_toml.msx_step
+        ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Step)
         ~arguments:(`Assoc (["frames", `Int frames; "include_frame", `Bool true] @ pixels)) in
       if result.ok then result.status, result.data
       else if result.machine_absent then
@@ -267,7 +267,7 @@ let checkpoint_legacy_response ~(config : Workspace.config) ~restore ~body =
     when List.length fields <> List.length (List.sort_uniq String.compare (List.map fst fields)) ->
       `Bad_request, load_result_json ~ok:false ~message:"checkpoint has duplicate fields"
   | Ok arguments ->
-      let schema = if restore then Tool_schemas_misc_toml.msx_restore else Tool_schemas_misc_toml.msx_save in
+      let schema = Tool_schemas_misc_toml.msx_schema (if restore then Msx_tool.Restore else Msx_tool.Save) in
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator ~schema ~arguments in
       result.status, load_result_json ~ok:result.ok ~message:result.message
 ;;
@@ -339,7 +339,7 @@ let receipt_json ~(config : Workspace.config) (receipt : Checkpoint_receipt.rece
         "checkpoint_sha256",`String completed.checkpoint_sha256]] in
   ["ok",`Bool (status="committed");
    "workspace",`Assoc ["base_path",`String (Unix.realpath config.base_path);
-                         "masc_root",`String (Unix.realpath (Workspace.masc_root_dir config))];
+                         "masc_root",`String (Unix.realpath (Workspace.masc_dir config))];
    "operation_id",`String (Keeper_operation_id.to_string binding.operation_id);
    "checkpoint",`String (match binding.action with Save -> "save" | Restore -> "restore");
    "slot",`String binding.slot;"epoch",`String receipt.epoch;"status",`String status] @ extra
@@ -385,7 +385,7 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
                state=Unknown (Executor_pool_ref.strict_submit_error_to_string failure)})
         | Ok (Error Checkpoint_receipt.Binding_conflict) ->
             `Conflict,write_error_json "checkpoint operation identity is bound to another action or slot"
-        | Ok (Error error) ->
+        | Ok (Error ((Invalid_binding _ | Store_unavailable _) as error)) ->
             (* A failed lookup may hide an already-running duplicate. Failure
                to acquire admission is not proof this operation had no effect. *)
             `Service_unavailable, `Assoc (receipt_json ~config
@@ -400,7 +400,7 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
                        made. Admission stays here, ahead of the dispatch. *)
                     let settled =
                       try
-                        let schema = if restore then Tool_schemas_misc_toml.msx_restore else Tool_schemas_misc_toml.msx_save in
+                        let schema = Tool_schemas_misc_toml.msx_schema (if restore then Msx_tool.Restore else Msx_tool.Save) in
                         let arguments = match args with
                           | `Assoc fields -> `Assoc (List.remove_assoc "operation_id" fields)
                           | other -> other in
@@ -433,7 +433,7 @@ let checkpoint_operation_response ~(config : Workspace.config) ~restore ~body =
                     leaves pending evidence; the direct answer still proves this
                     request did not dispatch its effect. *)
                  refused binding "MSX checkpoint worker is unavailable"
-             | Error failure ->
+             | Error ((Work_failed _ | Submission_failed _) as failure) ->
                  `Internal_server_error,write_error_json (Executor_pool_ref.strict_submit_error_to_string failure))
 
 let checkpoint_status_response ~(config : Workspace.config) ~body =
@@ -481,7 +481,7 @@ let change_disk_response ~(config : Workspace.config) ~body =
   | Error refusal -> refusal
   | Ok arguments ->
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
-        ~schema:Tool_schemas_misc_toml.msx_change_disk ~arguments in
+        ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Change_disk) ~arguments in
       result.status, load_result_json ~ok:result.ok ~message:result.message
 ;;
 
@@ -519,34 +519,34 @@ let add_routes router =
            let status,json = checkpoint_status_response ~config ~body in
            respond_json_value_with_cors ~status request reqd json)) request reqd)
   |> Http.Router.post "/api/v1/msx/press" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_msx_press"
+       with_tool_actor_auth ~tool_name:(Msx_tool.name Msx_tool.Press)
          (fun state who _req reqd ->
            handle_press ~state ~who request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/load" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_msx_load"
+       with_tool_actor_auth ~tool_name:(Msx_tool.name Msx_tool.Load)
          (fun state agent_name _req reqd ->
            handle_load ~state ~agent_name request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/save" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_msx_save"
+       with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Save)
          (fun state _req reqd ->
            handle_checkpoint ~state ~restore:false
              request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/restore" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_msx_restore"
+       with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Restore)
          (fun state _req reqd ->
            handle_checkpoint ~state ~restore:true
              request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/disk" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_msx_change_disk"
+       with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Change_disk)
          (fun state _req reqd ->
            handle_change_disk ~state request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/msx/tick" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_msx_step"
+       with_tool_auth ~tool_name:(Msx_tool.name Msx_tool.Step)
          (fun state _req reqd -> handle_tick ~config:(Mcp_server.workspace_config state) request reqd)
          request reqd)
 ;;

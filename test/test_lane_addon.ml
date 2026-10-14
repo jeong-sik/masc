@@ -346,54 +346,71 @@ let test_request_refusals_preserve_runtime_failure_distinction () =
     runtime_failed (dispatch Runtime.Detach ["instance_id", `String "absent"]);
     runtime_failed (dispatch Runtime.Slice []))
 
-let test_invalid_retained_visibility_is_isolated () = with_fixture (fun env _ config dir _ ->
+let test_unreadable_retained_bindings_are_isolated () = with_fixture (fun env _ config dir _ ->
   let id = attach config dir "good" in
   let clock = Eio.Stdenv.clock env in
   await clock (fun () -> int "observation_seq" (instance config id) = 1);
   let current = instance config id |> Yojson.Safe.Util.to_assoc in
   let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-  List.iteri (fun index visibility ->
+  (* One record names no reader at all, one names a reader kind that does not exist. *)
+  let unreadable_ids = List.mapi (fun index visibility ->
     let retained_id = "unreadable-" ^ string_of_int index in
     let fields = ("instance_id",`String retained_id) ::
-      List.remove_assoc "instance_id" (List.remove_assoc "visibility" current) in
-    let fields = match visibility with None -> fields | Some value -> ("visibility",value)::fields in
+      List.remove_assoc "instance_id" (List.remove_assoc "visibility"
+        (List.remove_assoc "source_access" current)) in
+    let fields = match visibility with
+      | None -> fields
+      | Some value -> ("visibility",value)::("source_access",
+          Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated)::fields in
     let fields = ("configuration",`Assoc ["id",`String ("invalid-producer-" ^ string_of_int index);
       "source_path",`String (Filename.concat dir "invalid.toml");"revision",`String "fixture"])
       :: List.remove_assoc "configuration" fields in
-    unwrap (Store.save_binding store ~instance_id:retained_id (`Assoc fields)))
-    [None; Some (`Assoc ["kind",`String "unknown"])];
-  let consumer_id = "released-invalid-consumer" in
-  let consumer = current
-    |> List.filter (fun (key, _) -> not (List.mem key
-      ["runtime_presence";"visibility";"source_access";"instance_id";"incarnation";"binding"]))
-    |> List.map (function
-      | "package", `Assoc fields -> "package", `Assoc (List.remove_assoc "tool_invocation" (List.remove_assoc "state_storage" (List.remove_assoc "exported_tools" (List.remove_assoc "model_access" fields))))
-      | field -> field) in
-  let consumer = `Assoc (("instance_id",`String consumer_id)::("incarnation",`String consumer_id)::
-    ("binding",`Assoc ["sources",`List [`Assoc ["source_id",`String "upstream";
-      "kind",`String "lane_output";"installation_id",`String "invalid-producer-1";
-      "selection",`String "latest_completed"]]])::consumer) in
-  let valid_producer = match consumer with
-    | `Assoc fields -> `Assoc (("instance_id",`String "released-producer")::
-        ("incarnation",`String "released-producer")::("binding",`Assoc ["sources",`List []])::
-        ("configuration",`Assoc ["id",`String "invalid-producer-1";
-          "source_path",`String (Filename.concat dir "producer.toml");"revision",`String "fixture"])::
-        List.filter (fun (key, _) -> not (List.mem key
-          ["instance_id";"incarnation";"binding";"configuration"])) fields)
-    | _ -> assert false in
-  check bool "released consumer shape is valid with a proved shared producer" true
-    (Result.is_ok (Runtime.authorize_retained_read ~bindings:[valid_producer;consumer]
-      ~access:Lane_addon_sources.Unauthenticated consumer));
-  unwrap (Store.save_binding store ~instance_id:consumer_id consumer);
-  check Alcotest.int "unreadable retained policy cannot hide a valid live installation" 1
+    unwrap (Store.save_binding store ~instance_id:retained_id (`Assoc fields));
+    retained_id)
+    [None; Some (`Assoc ["kind",`String "unknown"])] in
+  let records = unwrap (Store.bindings store) in
+  let record wanted = List.find (fun json -> text "instance_id" json = wanted) records in
+  check Alcotest.int "unreadable retained records cannot hide a valid live installation" 1
     (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
-  check bool "unreadable record still cannot be requested directly" true
-    (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect
-      (`Assoc ["instance_id",`String "unreadable-0"])));
-  check bool "omitting an invalid producer cannot authorize its released consumer" true
-    (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect
-      (`Assoc ["instance_id",`String consumer_id])));
-  check Alcotest.int "invalid records and dependent consumer remain available for operator repair" 4
+  List.iter (fun retained_id ->
+    check bool "an unreadable record authorizes no read, even the operator's" true
+      (Result.is_error (Runtime.authorize_retained_read ~bindings:records
+        ~access:Lane_addon_sources.Operator_configuration (record retained_id)));
+    check bool "an unreadable record cannot be requested directly" true
+      (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Inspect
+        (`Assoc ["instance_id",`String retained_id])))) unreadable_ids;
+  check bool "the live record keeps its own read authority" true
+    (Result.is_ok (Runtime.authorize_retained_read ~bindings:records
+      ~access:Lane_addon_sources.Unauthenticated (record id)));
+  let refusal access instance_id =
+    match Runtime.dispatch ~config ~access ~operation:Runtime.Inspect
+      (`Assoc ["instance_id", `String instance_id]) with
+    | Error message -> message
+    | Ok _ -> fail "an unreadable or absent instance is refused" in
+  List.iter (fun retained_id ->
+    List.iter (fun access ->
+      check string "a caller that cannot operate gets the refusal of an absent instance"
+        (refusal access "absent-instance") (refusal access retained_id))
+      [Lane_addon_sources.Keeper "someone"; Lane_addon_sources.Unauthenticated];
+    check bool "the operator is told why the record is unreadable" true
+      (refusal Lane_addon_sources.Operator_configuration retained_id
+       <> refusal Lane_addon_sources.Operator_configuration "absent-instance")) unreadable_ids;
+  let slice access = unwrap (Runtime.dispatch ~config ~access ~operation:Runtime.Slice (`Assoc [])) in
+  let coverage_sources access =
+    slice access |> member "coverage" |> Yojson.Safe.Util.to_list |> List.map (text "source_id") in
+  List.iter (fun retained_id ->
+    check bool "the operator's slice names each unreadable record" true
+      (List.mem retained_id (coverage_sources Lane_addon_sources.Operator_configuration));
+    List.iter (fun access ->
+      check bool "another caller's slice does not name an unreadable record" false
+        (List.mem retained_id (coverage_sources access))) 
+      [Lane_addon_sources.Keeper "someone"; Lane_addon_sources.Unauthenticated]) unreadable_ids;
+  List.iter (fun access ->
+    check bool "a slice that skipped unreadable records is incomplete for every caller" false
+      (member "complete" (slice access) = `Bool true))
+    [Lane_addon_sources.Operator_configuration; Lane_addon_sources.Keeper "someone";
+     Lane_addon_sources.Unauthenticated];
+  check Alcotest.int "unreadable records stay in place for operator repair" 3
     (Store.bindings store |> unwrap |> List.length);
   detach config id; await_phase clock config id "detached")
 
@@ -1348,104 +1365,6 @@ let test_broadcast_pending_commit_recovers_same_identity () =
       (Sys.file_exists (member "evidence" uncertain |> text "path"));
     detach config id; await_phase clock config id "detached")
 
-let test_released_shared_bindings_keep_read_and_cleanup () =
-  with_fixture (fun env _sw config dir state ->
-    let clock = Eio.Stdenv.clock env in
-    let id = attach config dir "good" in
-    await clock (fun () -> int "observation_seq" (instance config id) = 1);
-    detach config id; await_phase clock config id "detached";
-    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
-    (* Inspect adds presentation fields; a published binding is the durable
-       record, whose exact shape the released reader must continue to enforce. *)
-    let captured = unwrap (Store.bindings store)
-      |> List.find (fun value -> text "instance_id" value = id)
-      |> Yojson.Safe.Util.to_assoc in
-    let released = List.remove_assoc "visibility" (List.remove_assoc "source_access" captured) in
-    (* The published package envelope predates host model declarations. *)
-    let released = List.map (fun (key, value) ->
-      match key, value with
-      | "package", `Assoc fields -> key, `Assoc (List.remove_assoc "tool_invocation" (List.remove_assoc "state_storage" (List.remove_assoc "exported_tools" (List.remove_assoc "model_access" fields))))
-      | _ -> key, value) released in
-    let before = `Assoc released in
-    unwrap (Store.save_binding store ~instance_id:id before);
-    Runtime.For_testing.reset ();
-    let observed = instance config id in
-    check string "released reads carry no operator acquisition authority" "unauthenticated"
-      (observed |> member "source_access" |> text "kind");
-    check Alcotest.int "released direct retained rows remain readable" 1
-      (unwrap (dispatch config Runtime.Slice []) |> member "rows" |> Yojson.Safe.Util.to_list |> List.length);
-    check bool "read recognition leaves durable bytes unchanged" true
-      (unwrap (Store.bindings store) = [before]);
-    let set fields key value = (key,value)::List.remove_assoc key fields in
-    let record name installation sources =
-      released |> fun f -> set f "instance_id" (`String name)
-      |> fun f -> set f "incarnation" (`String name)
-      |> fun f -> set f "configuration" (`Assoc ["id",`String installation;
-          "source_path",`String (Filename.concat dir (installation ^ ".toml"));
-          "revision",`String (Store.digest installation)])
-      |> fun f -> set f "binding" (`Assoc ["sources",`List sources]) |> fun f -> `Assoc f in
-    let upstream installation = `Assoc ["source_id",`String "upstream";"kind",`String "lane_output";
-      "installation_id",`String installation;"selection",`String "latest_completed"] in
-    let producer = record "released-producer" "producer" [] in
-    let consumer = record "released-consumer" "consumer" [upstream "producer"] in
-    let authorize bindings value = Runtime.authorize_retained_read ~bindings
-      ~access:Lane_addon_sources.Unauthenticated value in
-    check bool "released composed graph is shared only with its unique producer" true
-      (Result.is_ok (authorize [producer;consumer] consumer));
-    let refused label bindings value = check bool label true (Result.is_error (authorize bindings value)) in
-    let current_producer model_access = match producer with
-      | `Assoc f ->
-          let package = List.assoc "package" f |> Yojson.Safe.Util.to_assoc in
-          `Assoc (("visibility", `Assoc ["kind",`String "shared"]) ::
-            ("source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated) ::
-            set f "package" (`Assoc (("model_access",model_access)::package)))
-      | _ -> assert false in
-    List.iter (fun model_access ->
-      check bool "released consumer reads current shared producer without rewriting it" true
-        (Result.is_ok (authorize [current_producer (`String model_access);consumer] consumer)))
-      ["disabled";"host_sampling"];
-    let with_producer_package transform = match current_producer (`String "disabled") with
-      | `Assoc f ->
-          let package = List.assoc "package" f |> Yojson.Safe.Util.to_assoc in
-          `Assoc (set f "package" (`Assoc (transform package)))
-      | _ -> assert false in
-    let pre_model_producer = with_producer_package (List.remove_assoc "model_access") in
-    check bool "released consumer reads authority-bearing pre-model producer" true
-      (Result.is_ok (authorize [pre_model_producer;consumer] consumer));
-    List.iter (fun model_access ->
-      refused "invalid explicit model access fails closed"
-        [current_producer model_access;consumer] consumer)
-      [`String "unknown"; `Null; `Bool false];
-    let duplicate_model = with_producer_package (fun fields ->
-      ("model_access",`String "disabled")::fields) in
-    refused "duplicate producer model field fails closed" [duplicate_model;consumer] consumer;
-    let unknown_pre_model = with_producer_package (fun fields ->
-      ("unknown",`Bool true)::List.remove_assoc "model_access" fields) in
-    refused "unknown pre-model producer field fails closed" [unknown_pre_model;consumer] consumer;
-    let forged_released = match current_producer (`String "disabled") with
-      | `Assoc f -> `Assoc (List.remove_assoc "visibility" (List.remove_assoc "source_access" f))
-      | _ -> assert false in
-    refused "released envelope cannot smuggle current package fields" [forged_released] forged_released;
-    refused "missing producer fails closed" [consumer] consumer;
-    refused "ambiguous producer incarnation fails closed" [producer;producer;consumer] consumer;
-    let cycle = record "released-producer" "producer" [upstream "consumer"] in
-    refused "producer cycles fail closed" [cycle;consumer] consumer;
-    let private_producer = match producer with `Assoc f -> `Assoc (("visibility",`Assoc ["kind",`String "keeper";"keeper",`String "other"])
-      ::("source_access",Lane_addon_sources.access_to_json (Lane_addon_sources.Keeper "other"))::f) | _ -> assert false in
-    refused "private producer never becomes shared" [private_producer;consumer] consumer;
-    let private_without_authority = record "released-producer" "producer" [`Assoc [
-      "source_id",`String "fusion";"kind",`String "fusion_run";"run_id",`String "private-run"]] in
-    refused "private source missing both authority fields is refused" [private_without_authority;consumer] consumer;
-    let malformed = match producer with `Assoc f -> `Assoc (set f "observation_seq" `Null) | _ -> assert false in
-    refused "malformed released record is refused" [malformed] malformed;
-    let unknown = match producer with `Assoc f -> `Assoc (("unknown",`Bool true)::f) | _ -> assert false in
-    refused "unknown released record field is refused" [unknown] unknown;
-    let missing_modern = `Assoc (List.remove_assoc "visibility" captured) in
-    refused "current source access without visibility is refused" [missing_modern] missing_modern;
-    unwrap (Store.save_binding store ~instance_id:id (`Assoc (set released "phase" (Types.phase_to_json Types.Attached))));
-    detach config id; await_phase clock config id "detached";
-    check Alcotest.int "released surviving container retains exact cleanup ownership" 1 (List.length !(state.recovery)))
-
 let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw config dir state ->
   let clock = Eio.Stdenv.clock env in
   let access = Lane_addon_sources.Operator_configuration in
@@ -1828,7 +1747,7 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "machine activity applies to worker calls" `Quick test_machine_activity_applies_to_worker_calls;
   test_case "machine export host admission" `Quick test_machine_export_host_admission;
   test_case "tool exports bind live incarnations" `Quick test_tool_exports_bind_live_incarnations;
-  test_case "invalid retained visibility is isolated" `Quick test_invalid_retained_visibility_is_isolated;
+  test_case "unreadable retained bindings are isolated" `Quick test_unreadable_retained_bindings_are_isolated;
   test_case "MCP attribution never authorizes private Lane reads" `Quick
     test_mcp_attribution_does_not_authorize_private_lane;
   test_case "Fleet service isolates blocked recipients, later admissions and cancellation" `Quick
@@ -1842,8 +1761,6 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "Broadcast intention and failed commit retain exact evidence" `Quick
     test_broadcast_pending_commit_recovers_same_identity;
   test_case "Fusion read ownership survives retirement and restart" `Quick test_private_fusion_reads_survive_retirement;
-  test_case "published shared bindings retain read and exact cleanup authority" `Quick
-    test_released_shared_bindings_keep_read_and_cleanup;
   test_case "MCP attribution never grants private Lane authority" `Quick
     test_mcp_attributed_name_is_not_private_lane_authority;
   test_case "Fusion state hint wakes only the exact run binding" `Quick

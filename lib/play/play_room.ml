@@ -81,6 +81,7 @@ let parse_action = function
       Ok { client_id; machine; operation }
   | _ -> Error (Invalid_request "room request must be an object")
 
+let storage_error ~operation:_ ~detail = Unavailable ("game room storage: " ^ detail)
 let sql_error db rc = Unavailable ("game room storage: " ^ Sqlite3.Rc.to_string rc ^ ": " ^ Sqlite3.errmsg db)
 let exec db sql =
   let rc = Sqlite3.exec db sql in
@@ -95,12 +96,12 @@ let with_stmt db sql values fn =
         if Sqlite3.Rc.is_success rc then bind (index + 1) rest else Error (sql_error db rc) in
     bind 1 values)
 let update db sql values = with_stmt db sql values (fun stmt ->
-  match Sqlite3.step stmt with Sqlite3.Rc.DONE -> Ok () | rc -> Error (sql_error db rc))
+  Keeper_sqlite_observation_io.done_ ~error:storage_error db stmt ~operation:"update")
 let rows db sql values decode = with_stmt db sql values (fun stmt ->
-  let rec loop acc = match Sqlite3.step stmt with
-    | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-    | ROW -> let* row = decode stmt in loop (row :: acc)
-    | rc -> Error (sql_error db rc) in
+  let rec loop acc = match Keeper_sqlite_observation_io.step stmt with
+    | Done -> Ok (List.rev acc)
+    | Row -> let* row = decode stmt in loop (row :: acc)
+    | Failed rc -> Error (sql_error db rc) in
   loop [])
 let schema = {|
 CREATE TABLE IF NOT EXISTS messages (

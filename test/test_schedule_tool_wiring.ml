@@ -1075,7 +1075,7 @@ let test_due_signal_and_dashboard_projection () =
   let signal_json =
     match
       Dated_jsonl.read_recent
-        (Dated_jsonl.create ~base_dir:(Schedule_runner.signals_dir config) ())
+        (Schedule_runner.signal_store config)
         1
     with
     | [ row ] -> row

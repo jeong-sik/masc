@@ -367,7 +367,7 @@ let seed_prepared_recovery ~fs ~base_path ~owner ~operation_id =
     Fs_compat.Publication_recovery.open_registry
       ~sw
       ~fs
-      ~registry_root:Eio.Path.(fs / Masc.Workspace.masc_root_dir config)
+      ~registry_root:Eio.Path.(fs / Masc.Workspace.masc_dir config)
   with
   | Error error ->
     Alcotest.fail
@@ -575,7 +575,7 @@ let test_registry_unavailable_keeps_server_state_live () =
       ignore (Masc.Workspace.init config ~agent_name:None);
       write_empty_file
         (Filename.concat
-           (Masc.Workspace.masc_root_dir config)
+           (Masc.Workspace.masc_dir config)
            "fs-publication-recovery");
       Eio.Switch.run
       @@ fun sw ->

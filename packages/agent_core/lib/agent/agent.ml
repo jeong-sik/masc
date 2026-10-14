@@ -389,7 +389,23 @@ let lifecycle_outcome_of_error error =
   match error with
   | Error.Agent (Error.InputRequired request) ->
     Agent_lifecycle_events.Input_required request
-  | error -> Agent_lifecycle_events.Failed error
+  | ( Error.Agent
+        ( Error.UnrecognizedStopReason _
+        | Error.ToolRoundLimitExceeded _
+        | Error.HookExecutionFailed _
+        | Error.TerminalToolEffectFailed _
+        | Error.TerminalToolDurabilityFailed _
+        | Error.GuardrailViolation _
+        | Error.TripwireViolation _ )
+    | Error.Api _
+    | Error.Provider _
+    | Error.Mcp _
+    | Error.Config _
+    | Error.Serialization _
+    | Error.Io _
+    | Error.Orchestration _
+    | Error.Internal _
+    | Error.Internal_carried _ ) as error -> Agent_lifecycle_events.Failed error
 ;;
 
 let with_classified_run_lifecycle_events agent ~classify_success f =

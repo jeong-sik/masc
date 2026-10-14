@@ -2,9 +2,28 @@
 
 open Masc_tui_types
 
+(* The Resources screen has one status line, [resources_error], and a listing
+   the walk cut short must be said there: shown rows that stop mid-listing
+   otherwise read as the whole listing, which is the defect the walk fixes.
+   A warning is not a failure, so the row count stays. The note does not
+   promise a remedy: [r] reloads the surface but walks under the same bound,
+   and a server that repeats a cursor may well repeat it again. *)
+let truncated_listing_note (stop : Masc_tui_mcp.resources_walk_stop) =
+  match stop with
+  | `Complete -> None
+  | `Page_limit_reached pages ->
+    Some
+      (Printf.sprintf
+         "Resources listing may be incomplete: stopped after %d pages and the \
+          server has more."
+         pages)
+  | `Repeated_cursor _ ->
+    Some
+      "Resources listing may be incomplete: the server repeated a page cursor."
+
 let listed state result =
   match result with
-  | Ok rows ->
+  | Ok (rows, stop) ->
     let rows =
       List.map
         (fun (resource : Masc_tui_mcp.resource) ->
@@ -23,7 +42,7 @@ let listed state result =
         rows
     in
     state.resources_list <- Some rows;
-    state.resources_error <- None;
+    state.resources_error <- truncated_listing_note stop;
     let open_uri =
       match
         state.resource_pending_uri, state.resource_content_error, state.resource_content

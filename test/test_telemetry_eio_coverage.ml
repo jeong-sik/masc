@@ -582,47 +582,30 @@ let test_read_all_events_is_chronological_across_day_files () =
       "oldest first across months, malformed row dropped"
       [ 100.0; 200.0; 300.0 ] timestamps)
 
-let test_track_applies_default_retention_days () =
-  with_env "MASC_TELEMETRY_RETENTION_DAYS" "" (fun () ->
-    with_env "MASC_TELEMETRY_MAX_BYTES" "0" (fun () ->
-      with_temp_dir (fun base_dir ->
-        Eio_main.run @@ fun env ->
-        Fs_compat.set_fs (Eio.Stdenv.fs env);
-        let config = Workspace.default_config base_dir in
-        let telemetry_dir = telemetry_dir base_dir in
-        let old_file =
-          Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
-        in
-        write_dated_file telemetry_dir "2020-01" "01" [ {|{"old":true}|} ];
-        Telemetry_eio.track_agent_session_bound config ~agent_id:"retention-test" ();
-        check bool "old telemetry file pruned by default retention" false
-          (Sys.file_exists old_file))))
-
 let test_track_applies_telemetry_max_bytes () =
-  with_env "MASC_TELEMETRY_RETENTION_DAYS" "0" (fun () ->
-    with_env "MASC_TELEMETRY_MAX_BYTES" "120" (fun () ->
-      with_temp_dir (fun base_dir ->
-        Eio_main.run @@ fun env ->
-        Fs_compat.set_fs (Eio.Stdenv.fs env);
-        let config = Workspace.default_config base_dir in
-        let telemetry_dir = telemetry_dir base_dir in
-        let old_file_1 =
-          Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
-        in
-        let old_file_2 =
-          Filename.concat (Filename.concat telemetry_dir "2020-01") "02.jsonl"
-        in
-        write_dated_file telemetry_dir "2020-01" "01"
-          [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'a') ];
-        write_dated_file telemetry_dir "2020-01" "02"
-          [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'b') ];
-        Telemetry_eio.track_agent_session_bound config ~agent_id:"max-bytes-test" ();
-        check bool "old telemetry file 1 pruned by max bytes" false
-          (Sys.file_exists old_file_1);
-        check bool "old telemetry file 2 pruned by max bytes" false
-          (Sys.file_exists old_file_2);
-        check int "current row remains readable" 1
-          (List.length (Telemetry_eio.read_all_events config)))))
+  with_env "MASC_TELEMETRY_MAX_BYTES" "120" (fun () ->
+    with_temp_dir (fun base_dir ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Workspace.default_config base_dir in
+      let telemetry_dir = telemetry_dir base_dir in
+      let old_file_1 =
+        Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
+      in
+      let old_file_2 =
+        Filename.concat (Filename.concat telemetry_dir "2020-01") "02.jsonl"
+      in
+      write_dated_file telemetry_dir "2020-01" "01"
+        [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'a') ];
+      write_dated_file telemetry_dir "2020-01" "02"
+        [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'b') ];
+      Telemetry_eio.track_agent_session_bound config ~agent_id:"max-bytes-test" ();
+      check bool "old telemetry file 1 pruned by max bytes" false
+        (Sys.file_exists old_file_1);
+      check bool "old telemetry file 2 pruned by max bytes" false
+        (Sys.file_exists old_file_2);
+      check int "current row remains readable" 1
+        (List.length (Telemetry_eio.read_all_events config))))
 
 (* ============================================================
    Test Runners
@@ -693,8 +676,6 @@ let () =
         test_legacy_single_file_is_ignored;
       test_case "read_all_events is chronological across day files" `Quick
         test_read_all_events_is_chronological_across_day_files;
-      test_case "track applies default retention days" `Quick
-        test_track_applies_default_retention_days;
       test_case "track applies telemetry max bytes" `Quick
         test_track_applies_telemetry_max_bytes;
     ];

@@ -15,22 +15,9 @@
     parse land in [unrecognized_affordance_labels], and lines that fail
     JSON parsing land in [malformed_lines], so writer drift and log
     corruption show up as numbers instead of silently reshaping the known
-    buckets. *)
-
-(** Closed turn-outcome vocabulary of the decision log writer:
-    [Keeper_unified_turn_success.decision_outcome_to_label] plus the
-    ["error"] label [Keeper_unified_turn] writes on failure. *)
-type turn_outcome =
-  | Success
-  | Checkpoint
-  | Input_required
-  | Error
-
-val turn_outcome_to_string : turn_outcome -> string
-val turn_outcome_of_string : string -> turn_outcome option
-(** Exact match on the writer label. [None] for anything else, including
-    padded or empty strings; callers count [None] as unrecognized, never
-    as success. *)
+    buckets. A turn's [outcome] is read with [Keeper_decision_outcome.of_string],
+    the type the writer takes; a label it does not know counts as
+    unrecognized, never as success. *)
 
 (** Closed observed-affordance vocabulary of the decision log writer:
     [Keeper_unified_metrics_support.observed_affordances_of_observation]. *)
@@ -50,7 +37,7 @@ val affordance_of_string : string -> affordance option
 
 (** The keeper's declared stance, for reading the practice against. *)
 type role =
-  { activation_mode : string
+  { activation_mode : Keeper_activation_mode.t
   ; paused : bool
   }
 

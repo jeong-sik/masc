@@ -13,7 +13,7 @@ let run argv =
   match Process_eio.run_argv_with_status_split_or_refusal
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Env_config_sandbox.Shell_timeout.Read ()) argv with
   | Ok (Unix.WEXITED 0, stdout, _) -> Ok stdout
-  | Ok _ | Error _ -> Error ()
+  | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) | Error _ -> Error ()
 
 let credential_source () =
   Llm_provider.Provider_config.Refreshable_credential (refresh_with ~run)

@@ -132,10 +132,10 @@ val get_wake_payload_store : unit -> Dated_jsonl.t
     directory.  Test-only seam used between cases. *)
 val reset_runtime_stores_for_testing : unit -> unit
 
-(** Forces the wake-payload store to point at [base_dir]
+(** Forces the wake-payload store to the one under [base_path]
     instead of the resolved configuration default.
     Test-only seam — production paths leave this alone. *)
-val set_wake_payload_store_for_testing : base_dir:string -> unit
+val set_wake_payload_store_for_testing : base_path:string -> unit
 
 (** {1 Dashboard JSON entry} *)
 

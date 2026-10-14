@@ -299,7 +299,7 @@ let test_waiting_invite_listing_is_cancellable ~invalid_expiry () =
 let test_invite_listing_is_bound_to_the_expected_workspace () =
   with_workspace @@ fun base_path state operator ->
   let config = Masc.Workspace.default_config base_path in
-  let masc_root = Masc.Workspace.masc_root_dir config in
+  let masc_root = Masc.Workspace.masc_dir config in
   let other = Filename.temp_dir "play-invites-other-" "" in
   let path = Server_routes_http_routes_play.invites_path in
   let bound base root = Printf.sprintf "%s?expected_base_path=%s&expected_masc_root=%s" path base root in

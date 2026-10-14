@@ -267,29 +267,20 @@ let composite_claim_attempt_json ~claim_window ~keeper_name =
       ]
 ;;
 
-let find_override_field_source field sources =
-  match json_member "override_field_sources" sources with
-  | `List values ->
-    List.find_opt
-      (fun value -> json_string "field" value = Some field)
-      values
-  | _ -> None
-;;
-
 let composite_config_drift_json ~config ~keeper_name =
   match Keeper_meta_store.read_meta config keeper_name with
   | Ok (Some meta) ->
-    let sources = Keeper_status_bridge.source_provenance_json config meta in
-    let override_fields = Json_util.get_string_list sources "override_fields" in
-    let runtime_detail = find_override_field_source "model.runtime_id" sources in
+    let sources = Keeper_status_bridge.source_provenance config meta in
+    let override_fields =
+      List.map Keeper_status_bridge_override.field_name sources.overrides
+    in
+    let runtime_drift = Keeper_status_bridge_override.runtime_drift sources.overrides in
     let default_runtime_id, live_runtime_id =
-      match runtime_detail with
-      | Some detail ->
-        Json_util.get_string detail "default_value",
-        Json_util.get_string detail "live_value"
+      match runtime_drift with
+      | Some { default; live } -> Some default, Some live
       | None -> None, None
     in
-    let runtime_override = Option.is_some runtime_detail in
+    let runtime_override = Option.is_some runtime_drift in
     `Assoc
       [ "present", `Bool true
       ; "status", `String (if runtime_override then "drift" else "ok")
@@ -297,7 +288,7 @@ let composite_config_drift_json ~config ~keeper_name =
       ; "override_fields", Json_util.json_string_list override_fields
       ; "default_runtime_id", Json_util.string_opt_to_json default_runtime_id
       ; "live_runtime_id", Json_util.string_opt_to_json live_runtime_id
-      ; "active_config_root", Json_util.string_opt_to_json (json_string "active_config_root" sources)
+      ; "active_config_root", `String (Keeper_status_bridge.active_config_root sources)
       ]
   | Ok None ->
     `Assoc
@@ -533,14 +524,12 @@ let runtime_attention_state_to_wire = function
 type composite_runtime_attention =
   { cra_is_live : bool
   ; cra_fiber_stop_requested : bool
-  ; cra_stale_long_enough : bool
   ; cra_idle_attention : bool
   ; cra_blocked : bool
   ; cra_execution_current : bool
   ; cra_stale_execution_receipt : bool
   ; cra_live_turn_started_at : float option
   ; cra_live_turn_last_progress_at : float option
-  ; cra_stale_without_live_turn : bool
   ; cra_needs_attention : bool
   ; cra_reason : string option
   ; cra_state : runtime_attention_state
@@ -610,14 +599,12 @@ let composite_runtime_attention ~snapshot ~execution =
   in
   { cra_is_live = is_live
   ; cra_fiber_stop_requested = fiber_stop_requested
-  ; cra_stale_long_enough = stale_long_enough
   ; cra_idle_attention = idle_attention
   ; cra_blocked = blocked
   ; cra_execution_current = execution_current
   ; cra_stale_execution_receipt = stale_execution_receipt
   ; cra_live_turn_started_at = composite_live_turn_started_epoch snapshot
   ; cra_live_turn_last_progress_at = composite_live_turn_last_progress_epoch snapshot
-  ; cra_stale_without_live_turn = stale_without_live_turn
   ; cra_needs_attention = needs_attention
   ; cra_reason = reason
   ; cra_state = state

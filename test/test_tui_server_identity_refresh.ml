@@ -68,26 +68,11 @@ let test_workspace_identity_mismatch_keeps_both_paths () =
     Alcotest.(check string) "server path" "/workspace/server" server_base_path
   | _ -> Alcotest.fail "different workspaces were not blocked"
 
-(* A non-default cluster's server reports [<base>/.masc/clusters/<name>] as
-   its root. The TUI started with the same MASC_CLUSTER_NAME must call that
-   the same workspace; comparing against a plain [<base>/.masc] refused every
-   Keeper message on a healthy connection. The server's root is computed the
-   way the server computes it. *)
-let with_cluster_name value f =
-  let key = "MASC_CLUSTER_NAME" in
-  let previous = Sys.getenv_opt key in
-  let set = function
-    | Some v -> Unix.putenv key v
-    | None -> Unix.unsetenv key
-  in
-  set value;
-  Fun.protect ~finally:(fun () -> set previous) f
-
-let test_workspace_identity_follows_the_cluster_selection () =
+(* The server reports [<base>/.masc] as its root and the TUI composes its
+   own the same way. The same base matches; a server reporting another root
+   under the same base is another store. *)
+let test_workspace_identity_compares_the_masc_root () =
   let base = "/workspace/local" in
-  let server_root cluster_name =
-    Workspace_utils.masc_root_dir_from ~base_path:base ~cluster_name
-  in
   let classify masc_root =
     Masc_tui_types.workspace_identity_of_refresh ~local_base_path:base
       (Ok { (identity base) with Tui_decode.sid_masc_root = masc_root })
@@ -98,16 +83,10 @@ let test_workspace_identity_follows_the_cluster_selection () =
     | Masc_tui_types.Workspace_identity_mismatch _
     | Masc_tui_types.Workspace_identity_unread -> false
   in
-  with_cluster_name (Some "team-a") (fun () ->
-    Alcotest.(check bool) "the cluster's own root is this workspace" true
-      (is_match (classify (server_root "team-a")));
-    Alcotest.(check bool) "the default root is another store" false
-      (is_match (classify (server_root "default"))));
-  with_cluster_name None (fun () ->
-    Alcotest.(check bool) "without a cluster the default root is this workspace" true
-      (is_match (classify (server_root "default")));
-    Alcotest.(check bool) "and a cluster root is another store" false
-      (is_match (classify (server_root "team-a"))))
+  Alcotest.(check bool) "the base's .masc is this workspace" true
+    (is_match (classify (Filename.concat base ".masc")));
+  Alcotest.(check bool) "another root under the same base is another store" false
+    (is_match (classify (Filename.concat base "elsewhere/.masc")))
 
 let test_broadcast_retry_scope_follows_verified_workspace () =
   let scope reading = Masc_tui_types.broadcast_workspace_scope
@@ -171,7 +150,7 @@ let test_detail_intents_wait_for_comparable_identity () =
 
 let test_same_base_with_different_masc_root_cannot_restore_inputs () =
   let a = identity "/workspace/shared" in
-  let b = { a with sid_masc_root = "/workspace/other-cluster/.masc" } in
+  let b = { a with sid_masc_root = "/workspace/other-store/.masc" } in
   (match Masc_tui_types.workspace_identity_of_refresh
       ~local_base_path:"/workspace/shared" (Ok b) with
    | Masc_tui_types.Workspace_identity_mismatch _ -> ()
@@ -466,7 +445,7 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
     { bp_id = "same-id"; bp_author = "author"; bp_title = "Thread";
       bp_body = body; bp_votes = 0; bp_comment_count = 0;
       bp_created_at = "2026-10-07"; bp_created_at_unix = None; bp_updated_at = None;
-      bp_hearth = None; bp_kind = None; bp_closed = None } in
+      bp_hearth = None; bp_kind = None; bp_closed = None; bp_attachments = [] } in
   let a = post "A's retained post" and b = post "B's delayed post" in
   let begin_read () = match Detail.start state.board_detail ~post_id:a.bp_id with
     | Detail.Started (next, request) -> state.board_detail <- next; request
@@ -947,8 +926,8 @@ let () =
             test_failed_probe_is_unread_not_stale
         ; Alcotest.test_case "canonical aliases match" `Quick
             test_workspace_identity_matches_canonical_paths
-        ; Alcotest.test_case "workspace identity follows the cluster selection" `Quick
-            test_workspace_identity_follows_the_cluster_selection
+        ; Alcotest.test_case "workspace identity compares the masc root" `Quick
+            test_workspace_identity_compares_the_masc_root
         ; Alcotest.test_case "mismatch preserves both paths" `Quick
             test_workspace_identity_mismatch_keeps_both_paths
         ; Alcotest.test_case "Broadcast retry uses verified workspace store" `Quick

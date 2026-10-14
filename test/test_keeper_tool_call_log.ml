@@ -196,6 +196,12 @@ let with_tmp_log f =
       Fs_compat.remove_tree dir)
     (fun () -> f ())
 
+(* The tool call store of a workspace whose base path is [base_path]. *)
+let tool_calls_location base_path =
+  Dated_jsonl.Store.at
+    (Dated_jsonl.Store.root_of_masc_dir (Filename.concat base_path ".masc"))
+    Tool_calls
+
 let with_tmp_log_dir f =
   incr counter;
   let dir = Filename.concat (Filename.get_temp_dir_name ())
@@ -397,12 +403,11 @@ let test_carried_entry_answers_only_while_nothing_aged_out () =
 let test_file_change_tally_drops_rows_that_aged_out () =
   with_tmp_log (fun () ->
     let module Change = Keeper_tool_call_file_change in
-    let store_dir =
-      match Keeper_tool_call_log.store_dir () with
-      | Some dir -> dir
+    let store =
+      match Keeper_tool_call_log.store () with
+      | Some store -> store
       | None -> Alcotest.fail "the log has no store"
     in
-    let store = Dated_jsonl.create ~base_dir:store_dir () in
     let now = Unix.gettimeofday () in
     let write ~ts tool =
       Dated_jsonl.append store
@@ -1694,9 +1699,7 @@ let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
 let test_dashboard_aggregate_separates_unsettled_from_malformed () =
   with_tmp_log_dir (fun dir ->
     let store =
-      Dated_jsonl.create
-        ~base_dir:(Filename.concat dir ".masc/tool_calls")
-        ()
+      Dated_jsonl.open_store (tool_calls_location dir)
     in
     let row fields =
       `Assoc
@@ -1732,9 +1735,7 @@ let test_dashboard_aggregate_separates_unsettled_from_malformed () =
 let test_dashboard_hourly_trend_numeric_ts () =
   with_tmp_log_dir (fun dir ->
     let store =
-      Dated_jsonl.create
-        ~base_dir:(Filename.concat dir ".masc/tool_calls")
-        ()
+      Dated_jsonl.open_store (tool_calls_location dir)
     in
     let ts = 1_710_000_000 in
     Dated_jsonl.append store
@@ -1774,9 +1775,7 @@ let test_dashboard_hourly_trend_numeric_ts () =
 let test_dashboard_aggregate_window_hours () =
   with_tmp_log_dir (fun dir ->
     let store =
-      Dated_jsonl.create
-        ~base_dir:(Filename.concat dir ".masc/tool_calls")
-        ()
+      Dated_jsonl.open_store (tool_calls_location dir)
     in
     let now = Unix.gettimeofday () in
     let inside = now -. (30.0 *. 60.0) in
@@ -1819,9 +1818,7 @@ let test_dashboard_aggregate_window_hours () =
 let test_dashboard_aggregate_drops_rows_without_result_bytes () =
   with_tmp_log_dir (fun dir ->
     let store =
-      Dated_jsonl.create
-        ~base_dir:(Filename.concat dir ".masc/tool_calls")
-        ()
+      Dated_jsonl.open_store (tool_calls_location dir)
     in
     let now = Unix.gettimeofday () in
     Dated_jsonl.append store
@@ -1864,9 +1861,7 @@ let test_dashboard_aggregate_drops_rows_without_result_bytes () =
 let test_dashboard_aggregate_only_malformed_rows_is_empty_summary () =
   with_tmp_log_dir (fun dir ->
     let store =
-      Dated_jsonl.create
-        ~base_dir:(Filename.concat dir ".masc/tool_calls")
-        ()
+      Dated_jsonl.open_store (tool_calls_location dir)
     in
     Dated_jsonl.append store
       (`Assoc
@@ -2473,8 +2468,8 @@ let write_rows store ~keeper ~count ~base_ts ~label =
 ;;
 
 let log_store () =
-  match Keeper_tool_call_log.store_dir () with
-  | Some dir -> Dated_jsonl.create ~base_dir:dir ()
+  match Keeper_tool_call_log.store () with
+  | Some store -> store
   | None -> Alcotest.fail "the log has no store"
 ;;
 
@@ -2935,8 +2930,8 @@ let test_continuity_follows_ledger_retention () =
     let module Index = Keeper_tool_call_index in
     let store = log_store () in
     let ledger_dir = Dated_jsonl.base_dir store in
-    let old = Jsonl_writer.dated_path ~base_dir:ledger_dir ~ts:0. in
-    Jsonl_writer.append_jsonl ~path:old.path
+    let old_path = List.fold_left Filename.concat ledger_dir [ "1970-01"; "01.jsonl" ] in
+    Jsonl_writer.append_jsonl ~path:old_path
       (`Assoc ["keeper", `String "alice"; "tool", `String "expired"; "ts", `Float 0.]);
     let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
       | Ok batch -> batch | Error detail -> Alcotest.fail detail in
@@ -2944,7 +2939,7 @@ let test_continuity_follows_ledger_retention () =
     Alcotest.(check int) "expired file had a continuity record" 1 (List.length first.rows);
     ignore (Dated_jsonl.prune store ~days:1 : int);
     Alcotest.(check bool) "continuity does not prevent month removal" false
-      (Sys.file_exists (Filename.dirname old.path));
+      (Sys.file_exists (Filename.dirname old_path));
     let retired = read first.frontier in
     Alcotest.(check bool) "retained frontier releases the retired file" true
       (Index.equal_frontiers Index.empty_frontier retired.retained);

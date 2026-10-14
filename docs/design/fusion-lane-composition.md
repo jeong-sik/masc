@@ -34,8 +34,9 @@ Native `fusion_run` captures are visible to the authoritative registry Keeper
 and to the operator. HTTP access uses verified operator or agent credentials;
 local actor attribution and player credentials cannot grant private source access.
 The MCP facade also carries verified Lane authority separately from the attributed
-name; omitted authority is unauthenticated. Unreadable retained visibility is
-omitted from inventory without discarding its evidence or exposing its rows.
+name; omitted authority is unauthenticated. A retained record whose visibility
+cannot be read is listed in the configuration issues for the operator. It
+exposes no rows to any caller, and its evidence stays on disk.
 Unknown and foreign run identities receive the same acquisition denial.
 
 Every retained binding records a strict read visibility: shared, operator, or one

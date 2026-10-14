@@ -122,6 +122,26 @@ type task_status =
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
 [@@deriving show]
 
+(** A {!task_status} constructor without its payload: what a status filter
+    names. *)
+module Task_status_tag : sig
+  type t =
+    | Todo
+    | Claimed
+    | In_progress
+    | Awaiting_verification
+    | Done
+    | Cancelled
+
+  val all : t list
+  val equal : t -> t -> bool
+  val to_string : t -> string
+
+  val of_string : string -> t option
+  (** The tag whose {!to_string} is exactly the input. *)
+end
+
+val task_status_tag : task_status -> Task_status_tag.t
 val task_status_to_string : task_status -> string
 val string_of_task_status : task_status -> string
 val task_status_icon : task_status -> string
@@ -319,6 +339,20 @@ type message_mention_delivery =
 [@@deriving yojson, show]
 
 val message_mention_delivery_to_string : message_mention_delivery -> string
+
+(** The kinds of message this codebase writes. {!message.msg_type} stays the
+    string on disk; read it with {!message_kind_of_string}. *)
+type message_kind =
+  | Msg_broadcast
+  | Msg_session_bound
+  | Msg_session_rebound
+  | Msg_session_ended
+  | Msg_cache_invalidated
+
+val message_kind_to_string : message_kind -> string
+
+(** [None] for a type this build does not write. *)
+val message_kind_of_string : string -> message_kind option
 
 type message =
   { request_id : string

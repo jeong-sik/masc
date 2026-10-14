@@ -225,7 +225,7 @@ let ensure_nonempty_completion
 let%test "latency counter yields non-negative elapsed duration when available" =
   match start_latency_counter () with
   | Unknown_latency -> true
-  | counter ->
+  | (Monotonic_latency _ | Eio_clock_latency _) as counter ->
     (match latency_ms_float counter with
      | Some elapsed_ms -> elapsed_ms >= 0.0
      | None -> false)
@@ -249,6 +249,7 @@ let patch_telemetry
       ~(config : Provider_config.t)
       ?(ttfrc_ms : float option = None)
       ?(prefill_ms : float option = None)
+      ?(reasoning_prefix : Types.Reasoning_prefix.t option = None)
       (latency_ms : int option)
   : Types.api_response
   =
@@ -272,6 +273,7 @@ let patch_telemetry
         ; provider_kind = pk
         ; canonical_model_id = canonical
         ; reasoning_source
+        ; reasoning_prefix
         ; effective_context_window = ctx_window
         ; ttfrc_ms =
             (match ttfrc_ms with
@@ -289,6 +291,7 @@ let patch_telemetry
         ; provider_kind = pk
         ; canonical_model_id = canonical
         ; reasoning_source
+        ; reasoning_prefix
         ; effective_context_window = ctx_window
         ; ttfrc_ms
         ; prefill_ms
@@ -303,17 +306,6 @@ let patch_telemetry
    | observations ->
      emit_capability_observations ~config ~source:capability_source observations);
   patched
-;;
-
-(** Internal helper: canonical provider name for metric labels.
-    Kept in sync with the log tag used by the [WARN Complete] line. *)
-let provider_name_of_kind : Provider_config.provider_kind -> string = function
-  | Ollama -> "ollama"
-  | Anthropic -> "anthropic"
-  | Kimi -> "kimi"
-  | OpenAI_compat -> "openai"
-  | Gemini -> "gemini"
-  | Glm -> "glm"
 ;;
 
 let tool_use_count (content : Types.content_block list) =

@@ -170,14 +170,8 @@ let server_workspace_matches ~expected reading =
 let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_identity) =
   let local_base_path = canonical_path local_base_path in
   let server_base_path = canonical_path identity.sid_base_path in
-  (* The server reports its cluster-aware masc root ([<base>/.masc] for the
-     default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
-     the local one with the same function from the same cluster selection:
-     a plain [<base>/.masc] calls every healthy non-default-cluster server
-     a mismatch, and every Keeper message is refused. *)
   let local_masc_root = canonical_path
-    (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
-       ~cluster_name:(Env_config_core.cluster_name ())) in
+    (Common.masc_dir_from_base_path ~base_path:local_base_path) in
   let server_masc_root = canonical_path identity.sid_masc_root in
   if String.equal local_base_path ""
   then Workspace_identity_unread
@@ -728,7 +722,9 @@ let project_gate_history ~visibility entries =
         | Message_status, Some gate
           when entry.me_keeper_name <> "" && gate.gs_approval_id <> "" ->
             Some (entry.me_keeper_name, gate.gs_approval_id)
-        | _ -> None
+        | (Message_status, None)
+        | ((Message_keeper | (Message_autonomous | (Message_local | (Message_error | (Message_tool | (Message_thinking | (Message_memory | (Message_user _ | Message_skill _)))))))), _)
+        | (Message_status, Some _) -> None
       in
       let _, groups = List.fold_left (fun (index, groups) (entry, _) ->
         let groups = match key entry, entry.me_gate with
@@ -765,7 +761,17 @@ let project_gate_history ~visibility entries =
               Printf.sprintf "%s · %d steps · %s" text (List.length steps)
                 expand_hint)
               (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
-        | _ -> None) groups
+        | ([] | [ _ ]), _, _
+        | _ :: _ :: _, true, _
+        | _ :: _ :: _, false,
+          ( None
+          | Some
+              Keeper_approval_lifecycle.(
+                Approval_requested | Approval_resolved_approved
+                | Approval_resolved_rejected | Approval_replay_applied_with_warning
+                | Approval_replay_failed | Approval_replay_indeterminate
+                | Approval_continuation_recorded | Approval_continuation_failed) )
+          -> None) groups
       in
       List.filter_mapi (fun index ((entry, extra) as row) ->
         match Option.bind (key entry) (fun key -> Approvals.find_opt key compact) with
@@ -1751,6 +1757,230 @@ type board_post_close_state = {
   bpc_summary: string option;
 }
 
+(** One attachment declared on a board post's [meta.attachments]. The wire
+    writer is the board post handler
+    (lib/board_tool_adapter/board_tool_attachment.ml): a stored entry is
+    [{"kind", "url"|"artifact", "name"?}], and the [artifact] form is the
+    normalized [_blob] wrapper from
+    [Tool_output.normalized_artifact_ref_to_json].
+
+    The strings here are the post author's own text. Nothing is cleaned at
+    decode; a pane cleans what it prints. *)
+type board_attachment_kind =
+  | Ak_image
+  | Ak_video
+  | Ak_youtube
+  | Ak_external_link
+  | Ak_file
+  | Ak_audio
+  | Ak_score
+  | Ak_midi
+  | Ak_unknown of string
+      (** A kind this build was not taught. Carried like
+          {!Post_kind_unknown}: the entry still decodes and a reader can say
+          "unsupported kind" with the wire's own word. *)
+
+type board_attachment_source =
+  | As_url of string
+  | As_artifact of { sha256 : string; bytes : int }
+      (** A blob in the artifact store, as the post handler records it: its
+          digest and its size. The size rides on the entry, so the read
+          pane's label needs no store round-trip. *)
+
+type board_attachment = {
+  ba_kind: board_attachment_kind;
+  ba_source: board_attachment_source;
+  ba_name: string option;
+}
+
+(** One [meta.attachments] entry as read: the attachment, or why the entry
+    could not be read. The failure stays on its entry -- one broken
+    attachment never fails the post or the entries beside it (spec decision
+    5) -- and a broken entry has no kind or source to mistake for real ones. *)
+type board_attachment_entry = (board_attachment, string) result
+
+let board_attachment_kind_of_string = function
+  | "image" -> Ak_image
+  | "video" -> Ak_video
+  | "youtube" -> Ak_youtube
+  | "external_link" -> Ak_external_link
+  | "file" -> Ak_file
+  | "audio" -> Ak_audio
+  | "score" -> Ak_score
+  | "midi" -> Ak_midi
+  | other -> Ak_unknown other
+;;
+
+(* The store's own rule for a digest, so a post's reader and the store agree
+   on what one is. *)
+let is_sha256 text = Result.is_ok (Tool_output.validate_sha256 text)
+
+(* A stored artifact is the handler's normalized [_blob] wrapper, which
+   always carries the digest and the size. Anything else under [artifact] is
+   not its wrapper, and the entry breaks rather than reading as an artifact
+   of unknown size. The wrapper's other fields are not read: the pane shows
+   a kind, a name and a size. *)
+let board_attachment_artifact = function
+  | `Assoc [ "_blob", `Assoc blob ] -> (
+      match List.assoc_opt "sha256" blob, List.assoc_opt "bytes" blob with
+      | Some (`String sha256), Some (`Int bytes)
+        when is_sha256 sha256 && bytes >= 0 ->
+          Some (As_artifact { sha256; bytes })
+      | _ -> None)
+  | _ -> None
+;;
+
+let decode_board_attachment index entry : board_attachment_entry =
+  let broken detail = Error (Printf.sprintf "attachments[%d] %s" index detail) in
+  let ( let* ) = Result.bind in
+  match entry with
+  | `Assoc entry_fields ->
+      let names, fields =
+        List.partition (fun (key, _) -> String.equal key "name") entry_fields
+      in
+      let kinds, sources =
+        List.partition (fun (key, _) -> String.equal key "kind") fields
+      in
+      let* ba_kind =
+        match kinds with
+        | [ _, `String raw ] -> Ok (board_attachment_kind_of_string raw)
+        | [ _ ] -> broken "kind must be a string"
+        | [] -> broken "kind is missing"
+        | _ -> broken "kind must appear exactly once"
+      in
+      (* The two forms the handler stores. A bare [sha256] is what a client
+         sends, never what a post holds. *)
+      let* ba_source =
+        match sources with
+        | [ "url", `String url ] -> Ok (As_url url)
+        | [ "artifact", artifact ] -> (
+            match board_attachment_artifact artifact with
+            | Some source -> Ok source
+            | None ->
+                broken "artifact must be a normalized _blob carrying a sha256 and its size")
+        | [ "url", _ ] -> broken "url must be a string"
+        | [] -> broken "source is missing"
+        | _ -> broken "must carry exactly one of url or artifact"
+      in
+      let* ba_name =
+        match names with
+        | [] -> Ok None
+        | [ _, `String name ] -> Ok (Some name)
+        | [ _ ] -> broken "name must be a string"
+        | _ -> broken "name must appear exactly once"
+      in
+      Ok { ba_kind; ba_source; ba_name }
+  | _ -> broken "must be an object"
+;;
+
+(* Attachments sit under [meta.attachments]. A post with no [meta], or a
+   meta that did not say attachments, has none. An attachments value that is
+   not a list decodes as one broken entry rather than []: the post claimed
+   attachments it did not deliver, and [] would read as a post that never
+   had any. *)
+let decode_board_attachments json : board_attachment_entry list =
+  match Yojson.Safe.Util.member "meta" json with
+  | `Assoc meta -> (
+      match List.assoc_opt "attachments" meta with
+      | Some (`List entries) -> List.mapi decode_board_attachment entries
+      | Some _ -> [ Error "attachments must be an array" ]
+      | None -> [])
+  | _ -> []
+;;
+
+(** {1 Board attachments: the write side}
+
+    The compose pane stages local files, uploads them to the artifact store
+    at send time, and names the returned digests in the post payload's
+    [attachments] field. The wire form written here is the bare [sha256]
+    entry; the server handler turns it into the [artifact] wrapper the read
+    side above decodes. *)
+
+(** What a local file can be attached as. Narrower than
+    {!board_attachment_kind} on purpose: a staged file is never a youtube
+    link or a kind this build does not know, and the server refuses both for
+    a stored file. *)
+type board_upload_kind =
+  | Uk_image
+  | Uk_audio
+  | Uk_score
+  | Uk_midi
+  | Uk_file
+
+let board_upload_kind_to_wire = function
+  | Uk_image -> "image"
+  | Uk_audio -> "audio"
+  | Uk_score -> "score"
+  | Uk_midi -> "midi"
+  | Uk_file -> "file"
+;;
+
+(* Case-insensitive -- tab editors and macOS saves routinely write uppercase
+   extensions, and the kind describes the file, not the case of its name. A
+   bare dotfile (".gp5") or a trailing dot ("notes.") is not an extension. *)
+let extension_of_path path =
+  let base = Filename.basename path in
+  match String.rindex_opt base '.' with
+  | Some dot when dot > 0 && dot < String.length base - 1 ->
+      Some
+        (String.lowercase_ascii
+           (String.sub base (dot + 1) (String.length base - dot - 1)))
+  | Some _ | None -> None
+;;
+
+(* The file's name decides its kind: the store keeps no media type per file,
+   so the name is the only signal a client has. A name that says nothing is
+   a plain file. *)
+let upload_kind_of_path path =
+  match extension_of_path path with
+  | None -> Uk_file
+  | Some extension -> (
+      match extension with
+      | "gp" | "gp3" | "gp4" | "gp5" | "gpx" | "cap" | "capx" | "atex"
+      | "musicxml" | "mxl" ->
+          Uk_score
+      | "mid" | "midi" -> Uk_midi
+      | "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" -> Uk_image
+      | "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" -> Uk_audio
+      | _ -> Uk_file)
+;;
+
+(** A local file the operator staged in board compose. [sa_path] is read at
+    send time, so a file replaced on disk since staging posts its current
+    bytes. *)
+type board_staged_attachment = {
+  sa_path: string;
+  sa_name: string;  (** Basename, sent as the entry's [name]. *)
+  sa_kind: board_upload_kind;
+}
+
+(** One uploaded attachment ready for the post payload. *)
+type board_outbound_attachment = {
+  oa_kind: board_upload_kind;
+  oa_sha256: string;
+  oa_name: string;
+}
+
+(* The payload field for a post's staged uploads. [None] -- the field absent
+   from the payload -- when nothing was staged, so a plain post's payload is
+   exactly what it was before attachments existed. *)
+let board_outbound_attachments_field attachments =
+  match attachments with
+  | [] -> None
+  | _ ->
+      Some
+        ( "attachments"
+        , `List
+            (List.map
+               (fun { oa_kind; oa_sha256; oa_name } ->
+                  `Assoc
+                    [ "kind", `String (board_upload_kind_to_wire oa_kind)
+                    ; "sha256", `String oa_sha256
+                    ; "name", `String oa_name
+                    ])
+               attachments) )
+;;
+
 (** Board post (light projection for list view) *)
 type board_post = {
   bp_id: string;
@@ -1780,6 +2010,10 @@ type board_post = {
   bp_closed: board_post_close_state option;
       (** task-1758/#39356: [None] means open, same reading as the absent
           JSON key it comes from. *)
+  bp_attachments: board_attachment_entry list;
+      (** Decoded from [meta.attachments]; [] when the post carried no meta
+          attachments. A broken entry is carried as its [Error], never
+          dropped and never fatal to the post. *)
 }
 
 (** Board comment *)
@@ -2262,14 +2496,23 @@ type runtime_probe_annotation =
 let runtime_probe_status_label = function
   | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli -> "CLI not probed"
   | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> "ADC not probed"
-  | status -> Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string status
+  | (Masc.Tui_decode_runtime_probe.Runtime_provider_reachable | Masc.Tui_decode_runtime_probe.Runtime_provider_missing_auth | Masc.Tui_decode_runtime_probe.Runtime_provider_auth_failed | Masc.Tui_decode_runtime_probe.Runtime_provider_network_error | Masc.Tui_decode_runtime_probe.Runtime_provider_server_error | Masc.Tui_decode_runtime_probe.Runtime_provider_endpoint_not_found | Masc.Tui_decode_runtime_probe.Runtime_provider_http_error | Masc.Tui_decode_runtime_probe.Runtime_provider_unknown_http_status | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_endpoint | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_execution_transport) as status -> Masc.Tui_decode_runtime_probe.runtime_provider_status_to_string status
 
 let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
     match status with
     | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli
     | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
-    | _ -> Runtime_probe_failure detail) detail
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_reachable
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_missing_auth
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_auth_failed
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_network_error
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_server_error
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_endpoint_not_found
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_http_error
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_unknown_http_status
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_endpoint
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_invalid_execution_transport -> Runtime_probe_failure detail) detail
 
 (** Planning surface sub-mode *)
 type planning_mode =
@@ -4047,6 +4290,15 @@ module Browser_lane_view = struct
     | Open_session | Close_session | Goto _ | Scene_scroll _ | Scene_click _
     | Scene_follow _ | Viewport_pointer _ -> false
 
+  (* The operations [cadence_operation] can return: they re-read what is already
+     on screen, mark [refresh_pending] while they run, and give way to operator
+     input in [yield_refresh_to_input]. [Viewport_refresh] is not one of them. *)
+  let operation_is_refresh = function
+    | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> true
+    | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _
+    | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _
+    | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _ -> false
+
   (* A committed gesture is never retried. Only its discarded observation
      can be resumed after workspace identity is reconfirmed. *)
   let observation_after_effect = function
@@ -4139,7 +4391,14 @@ module Browser_lane_view = struct
   let fail_action detail t =
     let url_draft = match t.load with
       | Loading (_, Goto url) -> Some url
-      | Loading _ | Idle | No_browser | Failed _ -> t.url_draft
+      | Loading
+          ( _
+          , ( Discover _ | Read | Open_session | Close_session | Screenshot _
+            | Read_refresh | Scene_read _ | Scene_regions _ | Scene_refresh _
+            | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _
+            | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _
+            | Viewport_pointer _ ) )
+      | Idle | No_browser | Failed _ -> t.url_draft
     in
     { t with load = Failed detail; url_draft }
   let awaiting_browser t = match t.load with
@@ -4504,7 +4763,12 @@ module Browser_lane_view = struct
     match t.bidi_host with
     | Host_reported { state = (Never_started | Ended _ | Died _); _ } when bidi_listed ->
         [host_line "A listed BiDi connection may be stale or belong to another host"]
-    | Host_not_reported | Host_report_unreadable _ | Host_reported _ -> []
+    | Host_not_reported | Host_report_unreadable _
+    | Host_reported
+        { state =
+            ( Never_started | Record_missing_but_locked | Running _ | Ended _
+            | Died _ | Unreadable _ )
+        ; _ } -> []
   (* Everything the picker says of the BiDi host: whether one runs, what
      stands in the way of the next one, how one is started, and, where MASC
      starts it, what MASC's last start left. A host that is running is not
@@ -4769,9 +5033,11 @@ module Browser_lane_view = struct
                Some (Scene_follow_refresh {tab_id;guard;scene_view})
            | Some _ | None -> Some (Scene_refresh {tab_id;scene_view;scope}))
       | Some _, Text_view -> Some Read_refresh
+  (* [Viewport_refresh] stays loading: the operator's own [r] key in the viewport
+     launches it (bin/masc_tui.ml), [cadence_operation] never does. *)
   let yield_refresh_to_input t =
     match t.load with
-    | Loading (_, (Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)) -> {t with load = Idle}
+    | Loading (_, operation) when operation_is_refresh operation -> {t with load = Idle}
     | Loading _ | Idle | No_browser | Failed _ -> t
   let read_view_for_operation operation previous =
     match operation with
@@ -4817,7 +5083,7 @@ module Browser_lane_view = struct
              | Some _, _, _ when selected_client_available next ->
                  { next with client_picker = (match purpose with Choose_client -> Some 0 | Read_after_discovery -> None) },
                  purpose = Read_after_discovery
-             | _, _, _ ->
+             | (_, _, Read_after_discovery) | (_, _, Choose_client) ->
                  let load = match t.selected_client, clients with
                    | _, [] -> No_browser
                    | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
@@ -4825,7 +5091,14 @@ module Browser_lane_view = struct
                  in
                  { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None; scroll = 0;
                    client_picker = Some 0; load }, false)
-    | Loading _ | Idle | No_browser | Failed _ -> t, false
+    | Loading
+        ( _
+        , ( Discover _ | Read | Open_session | Close_session | Goto _
+          | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
+          | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
+          | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ ) )
+    | Idle | No_browser | Failed _ -> t, false
   let ( let* ) = Result.bind
   let field name = function
     | `Assoc fields -> (match List.assoc_opt name fields with
@@ -4990,7 +5263,13 @@ module Browser_lane_view = struct
         match node.kind with
         | Region Masc.Browser_scene.Article ->
             {counts with article_count = counts.article_count + 1}
-        | Region _ -> {counts with region_count = counts.region_count + 1}
+        | Region (Masc.Browser_scene.Main) | Region (Masc.Browser_scene.Navigation)
+        | Region (Masc.Browser_scene.Complementary) | Region (Masc.Browser_scene.Named_region)
+        | Region (Masc.Browser_scene.Section) | Region (Masc.Browser_scene.Header)
+        | Region (Masc.Browser_scene.Footer) | Region (Masc.Browser_scene.Search)
+        | Region (Masc.Browser_scene.Form) | Region (Masc.Browser_scene.Log)
+        | Region (Masc.Browser_scene.Banner) | Region (Masc.Browser_scene.Content_info)
+        | Region (Masc.Browser_scene.Scroll_area) | Region (Masc.Browser_scene.Unknown _) -> {counts with region_count = counts.region_count + 1}
         | Control {href = Some _; _} -> {counts with link_count = counts.link_count + 1}
         | Control _ -> {counts with control_count = counts.control_count + 1}
         | Raster -> {counts with raster_count = counts.raster_count + 1}
@@ -5136,7 +5415,9 @@ module Browser_lane_view = struct
   let region_observed (target : Browser_lane.node_ref) (scene : scene) =
     scene.content.document_id = target.document_id
     && List.exists (fun (node : Masc.Browser_scene.node) ->
-      node.node_id = target.node_id && match node.kind with Region _ -> true | _ -> false)
+      node.node_id = target.node_id && match node.kind with
+        | Region _ -> true
+        | Text | Raster | Control _ -> false)
       scene.content.nodes
 
   let publish_scene (scene : scene) t =
@@ -5199,26 +5480,40 @@ module Browser_lane_view = struct
           | Scene_click {scope;_} -> Browser_lane.Content, scope
           | Scene_follow _ -> Browser_lane.Content, None
           | Scene_follow_refresh {scene_view;_} -> scene_view, None
-          | _ -> Browser_lane.Content, None in
+          | Read | Open_session | Close_session | Read_refresh | Discover _ | Goto _ | Screenshot _
+          | Scene_read _ | Scene_refresh _ | Viewport_refresh _ | Viewport_cadence _
+          | Viewport_pointer _ -> Browser_lane.Content, None in
         (match result with
          | Ok scene when scene.source = t.source && scene.client_id = client_id t
                          && scene.tab_id = tab_id && t.selected_tab = Some tab_id
                          && scene.content.view = expected_view && scene.content.scope = expected_scope
                          && (match operation with
                              | Scene_scroll {document_id;_} -> scene.content.document_id = document_id
-                             | _ -> true) ->
+                             | Read | Open_session | Close_session | Read_refresh | Discover _
+                             | Goto _ | Screenshot _ | Scene_read _ | Scene_regions _
+                             | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _
+                             | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _
+                             | Viewport_pointer _ -> true) ->
              publish_scene scene t
          | Ok _ ->
              let scene_guard = match operation with
                | Scene_follow_refresh {guard;_} -> Some guard
-               | _ -> t.scene_guard in
+               | Read | Open_session | Close_session | Read_refresh | Discover _ | Goto _
+               | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _
+               | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _
+               | Viewport_cadence _ | Viewport_pointer _ -> t.scene_guard in
              {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed "scene source, client or tab mismatch"}
          | Error detail ->
              let scene_guard = match operation with
                | Scene_follow_refresh {guard;_} -> Some guard
-               | _ -> t.scene_guard in
+               | Read | Open_session | Close_session | Read_refresh | Discover _ | Goto _
+               | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _
+               | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _
+               | Viewport_cadence _ | Viewport_pointer _ -> t.scene_guard in
              {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed detail})
-    | _ -> t
+    | Loading (_, (Read | (Open_session | (Close_session | (Read_refresh | (Discover _ | (Goto _ | (Screenshot _ | (Viewport_refresh _ | (Viewport_cadence _ | Viewport_pointer _))))))))))
+    | Idle | No_browser | Failed _
+    | Loading (_, (Scene_read _|Scene_regions _|Scene_refresh _|Scene_scroll _| Scene_focus _|Scene_click _|Scene_follow _|Scene_follow_refresh _)) -> t
 
   let accept_follow ~generation ~(guard : navigation_guard)
       (result : (scene, string) result) t =
@@ -5234,7 +5529,14 @@ module Browser_lane_view = struct
              load = Failed "follow destination source, client, tab or scope mismatch"}
          | Error detail -> {t with scene = None; scene_scope = None; scene_delta = None; scene_guard = Some guard;
              load = Failed detail})
-    | _ -> t
+    | Loading
+        ( _
+        , ( Discover _ | Read | Open_session | Close_session | Goto _
+          | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
+          | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
+          | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ ) )
+    | Idle | No_browser | Failed _ -> t
 
 
   type scene_action = Read_region | Follow_link | Click_control
@@ -5274,7 +5576,12 @@ module Browser_lane_view = struct
              List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
                match node.kind with
                | Region Masc.Browser_scene.Article -> Some index
-               | Region _ | Text | Raster | Control _ -> None) targets
+               | Region
+                   Masc.Browser_scene.(
+                   Main | Navigation | Complementary | Named_region | Section
+                   | Header | Footer | Search | Form | Log | Banner
+                   | Content_info | Scroll_area | Unknown _)
+               | Text | Raster | Control _ -> None) targets
          | Browser_lane.Content ->
              let seen = Hashtbl.create 16 in
              List.filter_map (fun (index, (node : Masc.Browser_scene.node)) ->
@@ -5283,7 +5590,15 @@ module Browser_lane_view = struct
                  when not (Hashtbl.mem seen node_id) ->
                    Hashtbl.add seen node_id ();
                    Some index
-               | Some _ | None -> None) targets
+               | Some
+                   { role =
+                       Masc.Browser_scene.(
+                         Main | Navigation | Complementary | Named_region
+                         | Section | Article | Header | Footer | Search | Form
+                         | Log | Banner | Content_info | Scroll_area
+                         | Unknown _)
+                   ; _ }
+               | None -> None) targets
 
   let scene_has_articles t = scene_article_target_indices t <> []
 
@@ -5391,11 +5706,39 @@ module Browser_lane_view = struct
                               && t.selected_tab = Some requested_tab
                               && (match t.load with
                                   | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_pointer {expected_url;action=Browser_lane.Scroll_at _;_})) -> screenshot.url = expected_url
-                                  | _ -> true) ->
+                                  | Loading
+                                      ( _
+                                      , Viewport_pointer
+                                          { action =
+                                              Browser_lane.(
+                                                Activate_tab | Click _ | Fill _
+                                                | Scroll _ | Hover_at _
+                                                | Click_at _ | Drag _
+                                                | Follow_link _ | Click_node _
+                                                | Fill_node _)
+                                          ; _ } )
+                                  | Loading
+                                      ( _
+                                      , ( Discover _ | Read | Open_session
+                                        | Close_session | Goto _ | Screenshot _
+                                        | Read_refresh | Scene_read _
+                                        | Scene_regions _ | Scene_refresh _
+                                        | Scene_scroll _ | Scene_focus _
+                                        | Scene_click _ | Scene_follow _
+                                        | Scene_follow_refresh _
+                                        | Viewport_cadence _ ) )
+                                  | Idle | No_browser | Failed _ -> true) ->
              { t with load = Idle }, Some screenshot
          | Ok _ -> { t with load = Failed "screenshot source, client, tab or expected URL mismatch" }, None
          | Error detail -> { t with load = Failed detail }, None)
-    | Loading _ | Idle | No_browser | Failed _ -> t, None
+    | Loading
+        ( _
+        , ( Discover _ | Read | Open_session | Close_session | Goto _
+          | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
+          | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
+          | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ ) )
+    | Idle | No_browser | Failed _ -> t, None
 
   let accept ~generation (result : (reading, string) result) t =
     let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
@@ -5416,7 +5759,14 @@ module Browser_lane_view = struct
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
          | Error detail -> { t with load = Failed detail })
-    | Loading _ | Idle | No_browser | Failed _ -> t
+    | Loading
+        ( _
+        , ( Discover _ | Read | Open_session | Close_session | Goto _
+          | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
+          | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
+          | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+          | Viewport_cadence _ | Viewport_pointer _ ) )
+    | Idle | No_browser | Failed _ -> t
   let select_tab direction t =
     match t.reading with
     | None -> t
@@ -5480,7 +5830,7 @@ module Browser_history = struct
     | Listing -> {t with content=List_failed detail; resume=Some Reload_list}
     | Entries ({selection=Loading; _} as entries) ->
         {t with content=Entries {entries with selection=Failed detail}; resume=Some Reload_selection}
-    | List_failed _ | Entries _ -> t
+    | List_failed _ | Entries {selection=(Failed _ | Observed _); _} -> t
   let entries (snapshot : Tui_decode.keeper_calls_snapshot) =
     snapshot.kcs_entries |> List.rev |> List.concat_map (fun (call : Tui_decode.keeper_call) ->
       match call.kc_execution_id with
@@ -5504,7 +5854,7 @@ module Browser_history = struct
     | Listing | List_failed _ -> t
   let observation t = match t.content with
     | Entries {selection=Observed observation;_} -> Some observation
-    | Entries _ | Listing | List_failed _ -> None
+    | Entries {selection=(Loading | Failed _); _} | Listing | List_failed _ -> None
   let page_view t =
     let view = Browser_lane_view.create () in
     match observation t with
@@ -5584,8 +5934,11 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
                not (block_tag node.tag) || node.node_id = anchor.node_id
            | Masc.Browser_scene.Heading left, Masc.Browser_scene.Heading right ->
                left = right && (not (block_tag node.tag) || node.node_id = anchor.node_id)
-           | _ -> false)
-      | _ -> false in
+           | Masc.Browser_scene.Plain_text, Masc.Browser_scene.Heading _
+           | Masc.Browser_scene.Heading _, Masc.Browser_scene.Plain_text -> false)
+      | (Masc.Browser_scene.Text, (Masc.Browser_scene.Raster | (Masc.Browser_scene.Region _ | Masc.Browser_scene.Control _)))
+      | ((Masc.Browser_scene.Raster | (Masc.Browser_scene.Region _ | Masc.Browser_scene.Control _)), _)
+      | (Text, Text) -> false in
     (* A group is the block fragment that opened it and the fragments joined
        after it, newest first. The row closes at the block's last observed
        fragment: everything up to it is one paragraph by the observed id, and
@@ -5645,7 +5998,20 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       | Region Masc.Browser_scene.Article, _ -> register_article node.node_id
       | _, Some {role = Masc.Browser_scene.Article; node_id; _} ->
           register_article node_id
-      | _ -> ()) scene.content.nodes;
+      | ( Text | Raster | Control _
+        | Region
+            Masc.Browser_scene.(
+                   Main | Navigation | Complementary | Named_region | Section
+                   | Header | Footer | Search | Form | Log | Banner
+                   | Content_info | Scroll_area | Unknown _) )
+        , ( None
+          | Some
+              { role =
+                  Masc.Browser_scene.(
+                   Main | Navigation | Complementary | Named_region | Section
+                   | Header | Footer | Search | Form | Log | Banner
+                   | Content_info | Scroll_area | Unknown _)
+              ; _ } ) -> ()) scene.content.nodes;
     let article_total = !article_count in
     let reversed, _, selected, _, _ = List.fold_left
       (fun (reversed, offset, selected, previous_block_bottom, previous_region)
@@ -6872,6 +7238,14 @@ type state = {
   mutable board_compose_armed: bool;
   mutable board_compose_reply_to: string option;
   mutable board_compose_hearth: string option;
+  (* Files staged with Ctrl-A, read and uploaded at send time so a file
+     replaced since staging posts its current bytes. The list shares the
+     draft's lifecycle: leaving compose keeps it, discard clears it. Comments
+     have no attachment wire, so staged files wait for a new post. *)
+  mutable board_compose_attachments: board_staged_attachment list;
+  (* The path being typed after Ctrl-A. [Some] routes every compose key to
+     the path input instead of the draft. *)
+  mutable board_compose_attach_input: Buffer.t option;
   (* One send at a time: the gate a slow server needs so s-s cannot post
      the same draft twice, and the completion knows it owns the clear. *)
   mutable board_post_inflight: bool;
@@ -7726,7 +8100,8 @@ let suspend_workspace_readings state =
     | Browser_lane_view.Loading (generation, operation) when Browser_lane_view.operation_is_read operation ->
         state.browser_lane_read_resume <- Some (generation, view, operation);
         {view with load=Browser_lane_view.Idle; refresh_pending=None}
-    | _ -> view) state.browser_lane;
+    | Browser_lane_view.Idle | Browser_lane_view.No_browser | Browser_lane_view.Failed _
+    | Loading (_, _) -> view) state.browser_lane;
   let suspend_lane (view : Masc_tui_lane_addons.t) =
     if state.lane_addons_reading = Some view.generation then begin
       Option.iter (fun read -> state.lane_installer_read_resume <- Some (view.generation, read))
@@ -8128,7 +8503,14 @@ let tools_skill_profiles (state : state) =
   | Some { Masc.Tui_decode_tools.ts_effective =
              Some (Masc.Tui_decode_tools.Effective_surface_available { ets_skill_profiles; _ }); _ } ->
       ets_skill_profiles
-  | Some _ | None -> []
+  | Some
+      { Masc.Tui_decode_tools.ts_effective =
+          ( None
+          | Some
+              ( Masc.Tui_decode_tools.Effective_surface_unavailable _
+              | Masc.Tui_decode_tools.Effective_surface_warming _ ) )
+      ; _ }
+  | None -> []
 
 let selected_tools_skill_profile (state : state) =
   List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
@@ -8181,7 +8563,17 @@ let accept_measurement_artifact state ~sha256 ~generation result =
 let browser_lane_on_screen (state : state) =
   match state.view, state.browser_lane_visibility with
   | Connectors, Browser_lane_shown _ -> state.browser_lane
-  | _, Browser_lane_hidden | _, Browser_lane_shown _ -> None
+  | (Overview, Browser_lane_hidden) | (_, Browser_lane_shown _) | (Acting, Browser_lane_hidden)
+  | (Metrics, Browser_lane_hidden) | (Keepers _, Browser_lane_hidden)
+  | (Memory, Browser_lane_hidden) | (Lanes, Browser_lane_hidden) | (Clients, Browser_lane_hidden)
+  | (Board, Browser_lane_hidden) | (Approvals, Browser_lane_hidden)
+  | (Planning, Browser_lane_hidden) | (Schedules, Browser_lane_hidden)
+  | (Verification, Browser_lane_hidden) | (Harness, Browser_lane_hidden)
+  | (Fusion, Browser_lane_hidden) | (Repositories, Browser_lane_hidden)
+  | (Code, Browser_lane_hidden) | (Changes, Browser_lane_hidden) | (Connectors, Browser_lane_hidden)
+  | (Runtime, Browser_lane_hidden) | (Config, Browser_lane_hidden)
+  | (Resources, Browser_lane_hidden) | (Tools, Browser_lane_hidden)
+  | (System_logs, Browser_lane_hidden) -> None
 
 let browser_history_on_screen state =
   Option.bind (browser_lane_on_screen state) (fun _ -> state.browser_history)
@@ -8332,6 +8724,7 @@ type text_input_target =
   | Text_goal_drop_reason
   | Text_github_token
   | Text_board_draft
+  | Text_board_attach_path
 
 (* The order is the key dispatch's order, which is what an operator already
    experiences: a preset name being typed holds every letter, and the two
@@ -8380,7 +8773,8 @@ let text_input_target (state : state) ~compact_viewport =
     state.view = Planning && not compact_viewport
     && (match state.planning_mode, state.goal_action_pending with
         | Planning_detail goal_id, Some (Goal_drop_reason entry) -> String.equal goal_id entry.goal_id
-        | (Planning_detail _ | Planning_list), _ -> false)
+        | (Planning_detail _ | Planning_list),
+          (None | Some (Goal_action_armed _ | Goal_drop_reason _)) -> false)
   then Some Text_goal_drop_reason
   else if
     state.view = Config
@@ -8442,7 +8836,11 @@ let text_input_target (state : state) ~compact_viewport =
   else if github_surface && Option.is_some state.github_token_input then
     Some Text_github_token
   else if state.view = Board && state.board_mode = Board_compose then
-    Some Text_board_draft
+    (* The attach path is typed over the draft: while it is open, keys and
+       pastes are path text, not post text. *)
+    match state.board_compose_attach_input with
+    | Some _ -> Some Text_board_attach_path
+    | None -> Some Text_board_draft
   else None
 ;;
 
@@ -8465,7 +8863,7 @@ let quit_key_allowed_for = function
       | Text_voice_wizard | Text_palette | Text_row_search
       | Text_runtime_picker_filter | Text_keeper_runtime_picker_filter
       | Text_identity_app_form | Text_identity_filter | Text_github_token
-      | Text_board_draft | Text_goal_drop_reason ) ->
+      | Text_board_draft | Text_board_attach_path | Text_goal_drop_reason ) ->
       false
   | None -> true
 ;;
@@ -9122,7 +9520,10 @@ let same_skill_invocation ~inventory
 
 let skills_drawn_by_items items =
   List.concat_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
-    match item.drawn with Drawn_skill skills -> skills | _ -> []) items
+    match item.drawn with
+      | Drawn_skill skills -> skills
+      | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _ | Drawn_status _
+      | Drawn_error _ -> []) items
 
 let skills_in_source_rows ~keeper_name source rows =
   List.concat_map (fun (row : msg_entry) ->
@@ -9351,7 +9752,11 @@ let retain_preflight_inputs (state : state) entries =
         state.msg_history <- List.filter (fun row ->
           not (String.equal row.me_keeper_name request.keeper_name
                && String.equal row.me_request_id request.request_id
-               && match row.me_role with Message_user _ -> true | _ -> false))
+               && match row.me_role with
+                 | Message_user _ -> true
+                 | Message_keeper | Message_autonomous | Message_status | Message_local
+                 | Message_error | Message_tool | Message_skill _ | Message_thinking
+                 | Message_memory -> false))
           state.msg_history;
         Masc_tui_message_input.insert state.msg_input request.message;
         state.msg_attachments <- request.attachments;
@@ -9709,12 +10114,23 @@ let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
 let remember_keeper_detail_focus state =
-  match state.detail_focus_recovery, state.view, state.workspace_identity,
-        state.server_identity, selected_keeper state with
-  | None, Keepers Keeper_detail, Workspace_identity_match, Some origin, Some keeper
-    when state.detail_tab <> Detail_items ->
-      state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
-  | _ -> ()
+  match state.view with
+  | Keepers Keeper_detail ->
+      (match state.detail_focus_recovery, state.workspace_identity,
+             state.server_identity, selected_keeper state with
+       | None, Workspace_identity_match, Some origin, Some keeper
+         when state.detail_tab <> Detail_items ->
+           state.detail_focus_recovery <- Some (origin, keeper.k_name, state.detail_tab)
+       | ( (None | Some _)
+         , ( Workspace_identity_unread | Workspace_identity_match
+           | Workspace_identity_match_unconfirmed _
+           | Workspace_identity_mismatch _ )
+         , (None | Some _)
+         , (None | Some _) ) -> ())
+  | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
+  | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ()
 
 let restore_keeper_detail_focus state =
   match state.detail_focus_recovery with
@@ -9824,7 +10240,10 @@ let workspace_activity_context_height state ~surface_rows =
   let stale = match state.workspace_activity_repo with
     | None -> false
     | Some repo_id -> (match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
-                      | Masc_tui_fetched.Stale _ -> true | _ -> false) in
+                      | Masc_tui_fetched.Stale _ -> true | Masc_tui_fetched.Absent
+                                                         | Masc_tui_fetched.Loading
+                                                         | Masc_tui_fetched.Ready _
+                                                         | Masc_tui_fetched.Failed _ -> false) in
   max 1 (surface_rows - Masc_tui_frame.chrome_rows - (if stale then 1 else 0))
 
 let apply_workspace_activity_read state request result =
@@ -10215,7 +10634,7 @@ let dispatch_play_change state request =
   state.play_changes <- List.map (function
     | Preparing_invite_change held when held.change_ticket == request.change_ticket ->
         admitted := true; Sending_invite_change held
-    | change -> change) state.play_changes;
+    | (Sending_invite_change _ | Unknown_invite_change _ | Detached_invite_change _ | Preparing_invite_change _) as change -> change) state.play_changes;
   !admitted
 
 let play_change_dispatched state request =
@@ -10774,6 +11193,8 @@ let create_state
   board_compose_armed = false;
   board_compose_reply_to = None;
   board_compose_hearth = None;
+  board_compose_attachments = [];
+  board_compose_attach_input = None;
   board_post_inflight = false;
   board_post_error = None;
   board_vote_armed = None;
@@ -11333,7 +11754,9 @@ let transcript_replaces_session_output ~(fresh : msg_entry list)
           && match entry.me_role, row.me_role with
              | Message_keeper, Message_keeper
              | Message_autonomous, Message_autonomous -> true
-             | _ -> false)))
+             | (Message_keeper, (Message_autonomous | (Message_status | (Message_local | (Message_error | (Message_tool | (Message_thinking | (Message_memory | (Message_user _ | Message_skill _)))))))))
+             | (Message_autonomous, (Message_keeper | (Message_status | (Message_local | (Message_error | (Message_tool | (Message_thinking | (Message_memory | (Message_user _ | Message_skill _)))))))))
+             | ((Message_status | (Message_local | (Message_error | (Message_tool | (Message_thinking | (Message_memory | (Message_user _ | Message_skill _))))))), _) -> false)))
     fresh
 ;;
 
@@ -11514,7 +11937,9 @@ let keeper_message_waiting_positions (state : state) ~keeper_name =
             Some (entry.sent_request, Server_answered (Server_started, Reading_delivery_again))
         | Stream_failed _, (None | Some (Masc_tui_keeper_chat_live.Settled, _)) ->
             Some (entry.sent_request, Rechecking)
-        | Waiting, (None | Some _) | (Working | Stream_ended), _ -> None)
+        | Waiting,
+          (None | Some (Masc_tui_keeper_chat_live.(Queued | Running | Settled), _))
+        | (Working | Stream_ended), _ -> None)
   in
   submitted @ List.map (fun (item : Masc_tui_keeper_chat_queue.item) ->
     item.request, In_local_queue) local
@@ -11590,7 +12015,12 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
              (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
                match item.drawn with
                | Masc_tui_keeper_chat_transcript.Drawn_reply _ -> true
-               | _ -> false)
+               | Masc_tui_keeper_chat_transcript.Drawn_thinking _
+               | Masc_tui_keeper_chat_transcript.Drawn_skill _
+               | Masc_tui_keeper_chat_transcript.Drawn_tools _
+               | Masc_tui_keeper_chat_transcript.Drawn_text _
+               | Masc_tui_keeper_chat_transcript.Drawn_status _
+               | Masc_tui_keeper_chat_transcript.Drawn_error _ -> false)
              (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript)
          then Some (turn_log_execution_source log)
          else None)
@@ -11602,7 +12032,8 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
         | Message_keeper | Message_autonomous
           when List.exists (fun source -> row.me_execution_source = Some source) partial_replies ->
             media_remainder row
-        | _ -> Some row)
+        | Message_status | Message_local | Message_error | Message_tool | Message_thinking
+        | Message_memory | Message_user _ | Message_skill _ | (Message_keeper|Message_autonomous) -> Some row)
       rows
   in
   (* Selected logs own the exact tool receipts already drawn, including after
@@ -11624,7 +12055,8 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
                match item.drawn with
                | Drawn_tools observed -> List.filter_map (fun (activity : Transcript.tool_activity) ->
                    activity.execution_id) observed.activities
-               | _ -> []) drawn in
+               | Transcript.Drawn_thinking _ | Transcript.Drawn_skill _ | Transcript.Drawn_text _
+               | Transcript.Drawn_reply _ | Transcript.Drawn_status _ | Transcript.Drawn_error _ -> []) drawn in
              let activities = List.filter (fun (activity : Transcript.tool_activity) ->
                not (Option.exists (fun id -> List.mem id executions) activity.execution_id)) block.activities in
              if activities = [] && block.omitted_steps = 0 then None
@@ -11641,7 +12073,8 @@ let compute_chat_rows_for (state : state) keeper_name ~queued_request_ids =
         if skills = [] then None
         else Some {row with me_skill_block=skills;
           me_role=Message_skill (Transcript.skill_block_state skills)}
-    | _ -> Some row
+    | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
+    | Message_thinking | Message_memory | Message_user _ | Message_skill _ -> Some row
   in
   let loaded = List.filter_map remaining_activity loaded in
   let session = List.filter_map remaining_activity session in
@@ -11774,7 +12207,7 @@ let set_msg_scroll (state : state) rows =
      wheel/Home request become a deferred scroll against future arrivals. *)
   let rows = match state.msg_scroll_pin with
     | Some {pin_mode=Follow_live;pin_points=[];_} -> 0
-    | Some _ | None -> rows in
+    | Some {pin_mode=(Follow_live | Hold_scroll | Hold_search);_} | None -> rows in
   state.msg_scroll <- rows;
   state.msg_scroll_pin <- Option.map (fun pin ->
     if rows = 0 then
@@ -12190,7 +12623,8 @@ let put_runtime_config_edit ?(preserve_view=false) (state : state) ~workspace se
   let view = match preserve_view, previous, session.current with
     | true, Some {rce_view=Config_edit_current _;_}, Some current ->
         Config_edit_current (runtime_config_source_rows ~path:current.path current.source_text)
-    | _ -> Config_edit_draft in
+    | (true, Some { rce_view = Config_edit_current _;_}, None)
+    | (true, Some { rce_view = Config_edit_draft;_}, _) | (true, None, _) | (false, _, _) -> Config_edit_draft in
   let edit = { rce_workspace = workspace; rce_session = session;
     rce_rows = runtime_config_source_rows ~path:session.Masc_tui_runtime_config_edit.base.path session.text;
     rce_view = view } in
@@ -12307,7 +12741,11 @@ type memory_fact_row =
 (* Memory already trims its filter; count and cursor search must use that
    same query. Other surfaces keep their literal-space search semantics. *)
 let surface_search_query surface query =
-  match surface with Memory -> String.trim query | _ -> query
+  match surface with
+    | Memory -> String.trim query
+    | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board | Approvals | Planning
+    | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
+    | Runtime | Config | Resources | Tools | System_logs -> query
 
 let memory_fact_search_text = function
   | Memory_row_fact f ->
@@ -12692,8 +13130,7 @@ let next_memory_category (current : memory_category_filter)
     (categories : memory_category_filter list) : memory_category_filter =
   match current with
   | Category_all -> (match categories with [] -> Category_all | first :: _ -> first)
-  | c ->
-      let rec after = function
+  | (Category_source | Category_dropped | Category_ordinary _) as c -> let rec after = function
         | [] -> Category_all
         | candidate :: rest ->
             if candidate = c then
@@ -12706,8 +13143,7 @@ let prev_memory_category (current : memory_category_filter)
     (categories : memory_category_filter list) : memory_category_filter =
   match current with
   | Category_all -> (match List.rev categories with [] -> Category_all | last :: _ -> last)
-  | c ->
-      let rev = List.rev categories in
+  | (Category_source | Category_dropped | Category_ordinary _) as c -> let rev = List.rev categories in
       let rec before = function
         | [] -> Category_all
         | candidate :: rest ->
@@ -12789,7 +13225,8 @@ let runtime_picker_label_for pick choice =
   match pick, choice with
   | (Pick_exact_lane _ | Pick_exact_lane_replacement _), Runtime_choice runtime ->
       runtime_model_picker_label runtime
-  | _ -> runtime_picker_label choice
+  | ((Pick_exact_lane _ | Pick_exact_lane_replacement (_, _, _)), Lane_choice _)
+  | ((Pick_media_failover | (Pick_route_default | (Pick_conversation_lane _ | Pick_new_lane _))), _) -> runtime_picker_label choice
 
 (* The picker opens on the first row. Exact lanes start typing a filter
    immediately; the other pickers wait for [/]. Closing drops both. *)
@@ -12797,7 +13234,7 @@ let open_runtime_lane_pick (state : state) pick =
   let list = match pick with
     | Pick_exact_lane _ | Pick_exact_lane_replacement _ ->
       Masc_tui_pick_list.type_text Masc_tui_pick_list.closed ""
-    | _ -> Masc_tui_pick_list.closed in
+    | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_new_lane _ -> Masc_tui_pick_list.closed in
   state.runtime_lane_pick <- Some (pick, list)
 
 (* A conversation lane's candidates as the runtime surface last resolved
@@ -12955,7 +13392,11 @@ let runtime_picker_rows (state : state) pick =
           not (List.mem runtime.Tui_decode.ro_id already))
     | Pick_exact_lane_replacement _,
       (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _) -> []
-    | _ -> landing @ refused in
+    | ( ( Pick_conversation_lane _ | Pick_exact_lane _ | Pick_new_lane _
+        | Pick_media_failover | Pick_route_default )
+      , ( Runtime_catalog_unread | Runtime_catalog_loading
+        | Runtime_catalog_read | Runtime_catalog_failed _ ) ) ->
+        landing @ refused in
   let runtime_choices =
     rows
     |> List.filter (fun runtime ->
@@ -12983,7 +13424,8 @@ let runtime_picker_empty_note picker =
       if picker.rlp_total = 0 then
         match picker.rlp_pick with
         | Pick_exact_lane_replacement _ -> "  (no eligible replacement in this candidate group)"
-        | _ -> Printf.sprintf "  (%s catalogue is empty)" noun
+        | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
+        | Pick_new_lane _ -> Printf.sprintf "  (%s catalogue is empty)" noun
       else
         Printf.sprintf "  (no %s among %d matches the filter)" noun picker.rlp_total
 
@@ -13000,10 +13442,13 @@ let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
       lanes_action_error_row_count ~cols state.lanes_action_error
       + runtime_lane_notice_lines ~cols state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
-      + (match state.runtime_lane_write with Lane_write_idle -> 0 | _ -> 1) in
+      + (match state.runtime_lane_write with
+        | Lane_write_idle -> 0
+        | Lane_write_posting | Lane_write_rereading _ -> 1) in
     (* Two lines per model, after the frame, search, selected ID and keys. *)
     max 1 ((surface_body_rows state ~terminal_rows - 10 - extra) / 2)
-  | _ -> runtime_picker_page
+  | (Lanes, Some { se_target = Media_failover_slots;_}) | (Lanes, None)
+  | ((Overview | (Acting | (Metrics | (Memory | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> runtime_picker_page
 
 let runtime_model_picker_title (runtime : Tui_decode.runtime_option) =
   let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
@@ -14030,7 +14475,7 @@ let runtime_surface_base_chrome_with ~cols state ~route_rows =
     ~picker_rows:(Option.map (fun picker ->
       List.length picker.rlp_choices * (match picker.rlp_pick with
         | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> 2
-        | _ -> 1))
+        | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_new_lane _ -> 1))
       (runtime_picker_projection state))
     ()
 
@@ -14297,7 +14742,11 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
      Planning and Schedules move a cursor or a detail pane rather than a plain
      list. *)
-  | Overview | Acting | Metrics | Keepers _ | Board | Approvals | Planning | Schedules
+  | Overview | Acting | Metrics
+  | Keepers
+      ( Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+      | Keeper_message | Keeper_runtime_pick )
+  | Board | Approvals | Planning | Schedules
   | Fusion | Resources | Code | Tools ->
       None
 
@@ -14465,7 +14914,8 @@ let keeper_message_visible_status_rows (state : state) live ~now =
         match kind with
         | Masc_tui_keeper_chat_transcript.Attention
           when state.msg_origin_display = Masc_tui_message_layout.Origin_bare -> true
-        | _ -> Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
+        | Masc_tui_keeper_chat_transcript.Progress | Masc_tui_keeper_chat_transcript.Answer_needed
+        | Masc_tui_keeper_chat_transcript.Approval _ | Attention -> Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
       rows
   else rows
 
@@ -14494,7 +14944,7 @@ let keeper_observed_turn (state : state) keeper_name =
     else match row.ktr_state with
       | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token; _ } ->
         Some (started_at_unix, interrupt_token)
-      | _ -> None) state.keeper_turns
+      | Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_unavailable _ -> None) state.keeper_turns
 ;;
 
 let keeper_message_draft_empty (state : state) =
@@ -14522,7 +14972,9 @@ let keeper_observed_interrupt_action (state : state) keeper_name =
   let previous = List.find_opt (fun item -> item.oi_keeper = keeper_name)
     state.keeper_observed_interrupts
     |> Option.map (fun item -> item.oi_token, item.oi_sent_ns,
-      match item.oi_status with Interrupt_declined _ | Interrupt_failed _ -> true | _ -> false) in
+      match item.oi_status with
+        | Interrupt_declined _ | Interrupt_failed _ -> true
+        | Interrupt_sending | Interrupt_signalled -> false) in
   Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
 ;;
 
@@ -14993,7 +15445,11 @@ let keeper_message_command_window ?scroll state ~terminal_rows ~terminal_cols =
        if max_rows = 0 || not (Masc_tui_message_layout.message_viewport_supported
            ~terminal_rows ~terminal_cols:chat_cols ~status_rows) then None
        else Some (menu, Masc_tui_command.menu_window ~max_rows menu))
-  | _ -> None
+  | (Keepers (Keeper_message), Right_pane, None, Some _)
+  | (Keepers (Keeper_message), Right_pane, Some _, _) | (Keepers (Keeper_message), Left_pane, _, _)
+  | (Keepers (Keeper_list | (Keeper_detail | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick)))), _, _, _)
+  | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _, _, _)
+  | (Keepers Keeper_message, Right_pane, None, None) -> None
 
 (* Support cannot disappear merely because PgUp adds the reading-back notice.
    At the live edge, reserve that possible row only for the support threshold;

@@ -102,8 +102,8 @@ val default_hostname : string
 val secret_files_of_base_path : base_path:string -> keeper_name:string -> string list
 (** Paths of the GitHub CLI files that can hold credentials ([hosts.yml])
     for callers that hold only [base_path]. The directory is the one
-    {!config_dir} names for this process's cluster, which is where a login
-    writes. Intended as [additional_secret_files] input for
+    {!config_dir} names, which is where a login writes. Intended as
+    [additional_secret_files] input for
     {!Keeper_secret_redaction.snapshot_with_additional_secret_files};
     missing files are ignored there, so the paths are safe to pass
     unconditionally. *)

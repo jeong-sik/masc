@@ -570,44 +570,46 @@ let handle_keeper_checkpoints_post state req reqd body_str =
     try
       let args = Yojson.Safe.from_string body_str in
       let action = Safe_ops.json_string ~default:"" "action" args in
+      let purge ~purge_action ~apply =
+        (match Checkpoints.purge_current config ~keeper_name:name ~apply with
+         | Error error ->
+           let status =
+             match error with
+             | Checkpoints.Purge_invalid_keeper_name _ -> `Bad_request
+             | Checkpoints.Purge_keeper_not_found _ -> `Not_found
+             | Purge_keeper_active _
+             | Purge_checkpoint_invalid _
+             | Purge_librarian_rebase_refused _
+             | Purge_source_changed -> `Conflict
+             | Purge_checkpoint_unavailable _
+             | Purge_librarian_position_unreadable _
+             | Purge_boundaries_unreadable _
+             | Purge_continuity_unreadable _
+             | Purge_librarian_cancel_failed _
+             | Purge_librarian_position_not_written _
+             | Purge_backup_failed _
+             | Purge_install_failed _ -> `Internal_server_error
+           in
+           respond_error
+             ~status
+             ~request:req
+             ~ok:false
+             reqd
+             (Checkpoints.purge_error_to_string error)
+         | Ok result ->
+           let (_status, inventory) =
+             keeper_checkpoint_inventory_json config name
+           in
+           let response =
+             match Checkpoints.purge_result_json ~action:purge_action result with
+             | `Assoc fields -> `Assoc (("inventory", inventory) :: fields)
+             | other -> other
+           in
+           Http.Response.json_value ~compress:true ~request:req response reqd)
+      in
       match action with
-      | ("preview_purge" | "apply_purge") as purge_action ->
-          let apply = String.equal purge_action "apply_purge" in
-          (match Checkpoints.purge_current config ~keeper_name:name ~apply with
-           | Error error ->
-             let status =
-               match error with
-               | Checkpoints.Purge_invalid_keeper_name _ -> `Bad_request
-               | Checkpoints.Purge_keeper_not_found _ -> `Not_found
-               | Purge_keeper_active _
-               | Purge_checkpoint_invalid _
-               | Purge_librarian_rebase_refused _
-               | Purge_source_changed -> `Conflict
-               | Purge_checkpoint_unavailable _
-               | Purge_librarian_position_unreadable _
-               | Purge_boundaries_unreadable _
-               | Purge_continuity_unreadable _
-               | Purge_librarian_cancel_failed _
-               | Purge_librarian_position_not_written _
-               | Purge_backup_failed _
-               | Purge_install_failed _ -> `Internal_server_error
-             in
-             respond_error
-               ~status
-               ~request:req
-               ~ok:false
-               reqd
-               (Checkpoints.purge_error_to_string error)
-           | Ok result ->
-             let (_status, inventory) =
-               keeper_checkpoint_inventory_json config name
-             in
-             let response =
-               match Checkpoints.purge_result_json ~action:purge_action result with
-               | `Assoc fields -> `Assoc (("inventory", inventory) :: fields)
-               | other -> other
-             in
-             Http.Response.json_value ~compress:true ~request:req response reqd)
+      | "preview_purge" as purge_action -> purge ~purge_action ~apply:false
+      | "apply_purge" as purge_action -> purge ~purge_action ~apply:true
       | "delete_history" ->
           let snapshot_ids =
             Safe_ops.json_string_list "snapshot_ids" args
@@ -684,27 +686,10 @@ let refresh_keeper_execution_surfaces =
 let invalidate_keeper_execution_surfaces =
   Server_dashboard_http_keeper_api_lifecycle_post.invalidate_keeper_execution_surfaces
 
-let dashboard_config_string_fields =
-  [
-    "runtime_id";
-    "instructions";
-    "sandbox_profile";
-    "network_mode";
-    "activation_mode";
-    "input_policy";
-  ]
-
-let dashboard_config_string_list_fields =
-  [
-    "mention_targets";
-    "board_interests";
-  ]
-
-(* Accepts a string or an explicit null, so it cannot join
-   [dashboard_config_string_fields] -- that list's check demands a string and
-   would refuse the clear. Null is how an operator detaches the endpoint when
-   moving off remote_ssh; omitting the field instead carries the keeper TOML's
-   value forward into a profile that refuses it
+(* Accepts a string or an explicit null, unlike the plain string fields, which
+   refuse the clear. Null is how an operator detaches the endpoint when moving
+   off remote_ssh; omitting the field instead carries the keeper TOML's value
+   forward into a profile that refuses it
    ([remote_endpoint_requires_remote_ssh]). *)
 let remote_endpoint_field = "remote_endpoint"
 
@@ -714,19 +699,50 @@ let remote_endpoint_field = "remote_endpoint"
 let confirm_context_shrink_field = "confirm_context_shrink"
 let expected_config_revision_field = "expected_config_revision"
 
-let dashboard_config_patch_allowed_fields =
-  [ "name"
-  ; "tools"
-  ; "skills"
-  ; "max_context_override"
-  ; confirm_context_shrink_field
-  ; expected_config_revision_field
-  ; remote_endpoint_field
-  ; "sandbox_image"
-  ]
-  @
-  dashboard_config_string_fields
-  @ dashboard_config_string_list_fields
+(* Every field a dashboard config POST may carry. A key outside this set is
+   refused, and each field has exactly one check in
+   [validate_dashboard_config_field]. *)
+type dashboard_config_field =
+  | Field_name
+  | Field_tools
+  | Field_skills
+  | Field_max_context_override
+  | Field_confirm_context_shrink
+  | Field_expected_config_revision
+  | Field_remote_endpoint
+  | Field_sandbox_image
+  | Field_runtime_id
+  | Field_instructions
+  | Field_sandbox_profile
+  | Field_network_mode
+  | Field_activation_mode
+  | Field_input_policy
+  | Field_mention_targets
+  | Field_board_interests
+[@@deriving enumerate]
+
+let dashboard_config_field_key = function
+  | Field_name -> "name"
+  | Field_tools -> "tools"
+  | Field_skills -> "skills"
+  | Field_max_context_override -> "max_context_override"
+  | Field_confirm_context_shrink -> confirm_context_shrink_field
+  | Field_expected_config_revision -> expected_config_revision_field
+  | Field_remote_endpoint -> remote_endpoint_field
+  | Field_sandbox_image -> "sandbox_image"
+  | Field_runtime_id -> "runtime_id"
+  | Field_instructions -> "instructions"
+  | Field_sandbox_profile -> "sandbox_profile"
+  | Field_network_mode -> "network_mode"
+  | Field_activation_mode -> "activation_mode"
+  | Field_input_policy -> "input_policy"
+  | Field_mention_targets -> "mention_targets"
+  | Field_board_interests -> "board_interests"
+
+let dashboard_config_field_of_key key =
+  List.find_opt
+    (fun field -> String.equal (dashboard_config_field_key field) key)
+    all_of_dashboard_config_field
 
 let dedupe_keep_order_strings values =
   let rec loop seen acc = function
@@ -845,94 +861,141 @@ let validate_dashboard_string_list_field key = function
       loop 0 items
   | other -> dashboard_field_type_error key "an array of strings" other
 
+type max_context_override_change =
+  | Clear_max_context_override
+  | Set_max_context_override of int
+
 let validate_dashboard_max_context_override = function
-  | `Null -> Ok ()
+  | `Null -> Ok Clear_max_context_override
   | `Int value ->
-      Keeper_config.validate_max_context_override_value value |> Result.map ignore
+      Keeper_config.validate_max_context_override_value value
+      |> Result.map (fun value -> Set_max_context_override value)
   | other -> dashboard_field_type_error "max_context_override" "an integer or null" other
 
-let validate_dashboard_config_field key value =
-  if key = "name" then
-    match value with
-    | `String _ -> Ok ()
-    | other -> dashboard_field_type_error key "a string" other
-  else if key = "tools" then
-    (match value with
-     | `Assoc _ -> Ok ()
-     | other -> dashboard_field_type_error key "an object" other)
-  else if key = "skills" then
-    (match value with
-     | `Assoc _ -> Ok ()
-     | other -> dashboard_field_type_error key "an object" other)
-  else if key = "input_policy" then
-    (match value with
-     | `String raw when Option.is_some (Keeper_input_policy.of_string raw) -> Ok ()
-     | other -> dashboard_field_type_error key "small or wide" other)
-  else if key = "max_context_override" then
+let max_context_override_json = function
+  | Clear_max_context_override -> `Null
+  | Set_max_context_override value -> `Int value
+
+(* What one checked field contributes. The two control fields are consumed by
+   [handle_keeper_config_post] and never persisted. [max_context_override] is
+   persisted and also read by [context_shrink_of_patch]. *)
+type checked_config_field =
+  | Persisted_field of string * Yojson.Safe.t
+  | Max_context_override of max_context_override_change
+  | Confirm_context_shrink of bool
+  | Expected_config_revision
+
+let validate_dashboard_config_field field value =
+  let key = dashboard_config_field_key field in
+  let persisted = Result.map (fun () -> Persisted_field (key, value)) in
+  match field with
+  (* Shape only. The apply path ([Keeper_turn_up_args.parse], then the
+     create/update resolution) reads each value and refuses one it cannot
+     read, so a second value check here would only disagree with it. *)
+  | Field_name
+  | Field_runtime_id
+  | Field_instructions
+  | Field_sandbox_profile
+  | Field_network_mode
+  | Field_activation_mode
+  | Field_input_policy ->
+    persisted
+      (match value with
+       | `String _ -> Ok ()
+       | other -> dashboard_field_type_error key "a string" other)
+  | Field_tools | Field_skills ->
+    persisted
+      (match value with
+       | `Assoc _ -> Ok ()
+       | other -> dashboard_field_type_error key "an object" other)
+  | Field_max_context_override ->
     validate_dashboard_max_context_override value
-  else if key = confirm_context_shrink_field then
+    |> Result.map (fun change -> Max_context_override change)
+  | Field_confirm_context_shrink ->
     (match value with
-     | `Bool _ -> Ok ()
+     | `Bool confirm -> Ok (Confirm_context_shrink confirm)
      | other -> dashboard_field_type_error key "a boolean" other)
-  else if key = expected_config_revision_field then
-    Keeper_turn_up_config_persistence.config_revision_of_yojson value
-    |> Result.map ignore
-  else if key = "sandbox_image" then
-    (match value with
-     | `Null -> Ok ()
-     | `String image ->
-       (match Keeper_sandbox_image_catalog.name_error ~field:key image with
-        | None -> Ok ()
-        | Some detail -> Error detail)
-     | other -> dashboard_field_type_error key "an image catalog name or null" other)
-  else if key = remote_endpoint_field then
+  | Field_expected_config_revision ->
+    (* The handler parses and requires this before the patch is checked;
+       here it is only kept out of the persisted fields. *)
+    Ok Expected_config_revision
+  | Field_sandbox_image ->
+    persisted
+      (match value with
+       | `Null -> Ok ()
+       | `String image ->
+         (match Keeper_sandbox_image_catalog.name_error ~field:key image with
+          | None -> Ok ()
+          | Some detail -> Error detail)
+       | other -> dashboard_field_type_error key "an image catalog name or null" other)
+  | Field_remote_endpoint ->
     (* Shape only. Whether the name is declared under [exec.ssh.endpoints], and
        whether the profile admits an endpoint at all, are decided by
        [Keeper_turn_up_args.parse] on the apply path. *)
-    (match value with
-     | `String raw ->
-         if String.trim raw = "" then
-           Error "remote_endpoint must not be blank (send null to clear it)"
-         else Ok ()
-     | `Null -> Ok ()
-     | other -> dashboard_field_type_error key "a string or null" other)
-  else if List.mem key dashboard_config_string_fields then
-    match value with
-    | `String _ -> Ok ()
-    | other -> dashboard_field_type_error key "a string" other
-  else if List.mem key dashboard_config_string_list_fields then
-    validate_dashboard_string_list_field key value
-  else Ok ()
+    persisted
+      (match value with
+       | `String raw ->
+           if String.trim raw = "" then
+             Error "remote_endpoint must not be blank (send null to clear it)"
+           else Ok ()
+       | `Null -> Ok ()
+       | other -> dashboard_field_type_error key "a string or null" other)
+  | Field_mention_targets | Field_board_interests ->
+    persisted (validate_dashboard_string_list_field key value)
 
-let validate_dashboard_config_patch ~meta:_ fields =
+type dashboard_config_patch = {
+  confirm_context_shrink : bool;
+  max_context_override : max_context_override_change option;
+  config_fields : (string * Yojson.Safe.t) list;
+}
+
+let validate_dashboard_config_patch fields =
   match duplicate_assoc_keys fields with
   | _ :: _ as duplicates ->
       Error
         (Printf.sprintf "duplicate dashboard config field(s): %s"
            (String.concat ", " duplicates))
   | [] ->
-      let unknown =
-        fields
-        |> List.filter_map (fun (key, _) ->
-             if List.mem key dashboard_config_patch_allowed_fields then None
-             else Some key)
-        |> dedupe_keep_order_strings
+      let known, unknown =
+        List.fold_right
+          (fun (key, value) (known, unknown) ->
+             match dashboard_config_field_of_key key with
+             | Some field -> ((field, value) :: known, unknown)
+             | None -> (known, key :: unknown))
+          fields ([], [])
       in
-      if unknown <> [] then
-        Error
-          (Printf.sprintf "unsupported dashboard config field(s): %s"
-             (String.concat ", " unknown))
-      else
-        let rec validate_types = function
-          | [] -> Ok ()
-          | (key, value) :: rest ->
-              (match validate_dashboard_config_field key value with
-               | Error msg -> Error msg
-               | Ok () -> validate_types rest)
-        in
-        (match validate_types fields with
-         | Error msg -> Error msg
-         | Ok () -> Ok ())
+      (match dedupe_keep_order_strings unknown with
+       | _ :: _ as unknown ->
+           Error
+             (Printf.sprintf "unsupported dashboard config field(s): %s"
+                (String.concat ", " unknown))
+       | [] ->
+           let rec check patch = function
+             | [] -> Ok { patch with config_fields = List.rev patch.config_fields }
+             | (field, value) :: rest ->
+                 (match validate_dashboard_config_field field value with
+                  | Error msg -> Error msg
+                  | Ok (Persisted_field (key, value)) ->
+                      check
+                        { patch with config_fields = (key, value) :: patch.config_fields }
+                        rest
+                  | Ok (Max_context_override change) ->
+                      let key = dashboard_config_field_key Field_max_context_override in
+                      check
+                        { patch with
+                          max_context_override = Some change;
+                          config_fields =
+                            (key, max_context_override_json change) :: patch.config_fields }
+                        rest
+                  | Ok (Confirm_context_shrink confirm) ->
+                      check { patch with confirm_context_shrink = confirm } rest
+                  | Ok Expected_config_revision -> check patch rest)
+           in
+           check
+             { confirm_context_shrink = false;
+               max_context_override = None;
+               config_fields = [] }
+             known)
 
 (* [Some (previous_display, new_value)] when the patch reduces the keeper's
    context window below its current setting — introducing a cap where there was
@@ -940,14 +1003,15 @@ let validate_dashboard_config_patch ~meta:_ fields =
    the field is absent, set to Null (removing the cap = expand), or raised.
    Compares the persisted override only; a stricter check against the live
    checkpoint token size is a follow-up. *)
-let context_shrink_of_patch ~(meta : Keeper_meta_contract.keeper_meta) fields =
-  match List.assoc_opt "max_context_override" fields with
-  | Some (`Int new_v) ->
+let context_shrink_of_patch ~(meta : Keeper_meta_contract.keeper_meta)
+    (patch : dashboard_config_patch) =
+  match patch.max_context_override with
+  | None | Some Clear_max_context_override -> None
+  | Some (Set_max_context_override new_v) ->
     (match meta.Keeper_meta_contract.max_context_override with
      | None -> Some ("unset (full model window)", new_v)
      | Some old_v when new_v < old_v -> Some (string_of_int old_v, new_v)
      | Some _ -> None)
-  | _ -> None
 
 let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event =
   Dashboard_cache.invalidate (keeper_config_cache_key config name);
@@ -996,6 +1060,18 @@ let config_write_fields = function
     ; "authoritative_reload_required", `Bool true
     ]
 
+(* A config POST refused before the update runs: nothing was written and the
+   lane was not touched. The answer says so with the fields an update
+   refusal that wrote nothing carries. *)
+let respond_config_refused_before_write
+    ?(status : [ `Bad_request | `Not_found ] = `Bad_request) reqd message =
+  Http.Response.json_value
+    ~status:(status :> Httpun.Status.t)
+    (`Assoc
+      (("error", `String message)
+       :: config_write_fields Keeper_turn_up_update.Config_unchanged))
+    reqd
+
 (* A refused config POST. Status, [code] and the write fields all come from
    the typed refusal; nothing here reads the tool result's JSON back. *)
 let config_refusal_status = function
@@ -1026,26 +1102,24 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_config in
   if String.length name = 0 then
-    respond_error reqd "keeper name is required"
+    respond_config_refused_before_write reqd "keeper name is required"
   else
     let workspace_scope = Mcp_server.workspace_scope state in
     let config = workspace_scope.config in
     match Keeper_meta_store.read_meta config name with
-    | Error msg -> respond_error ~status:`Not_found reqd msg
+    | Error msg -> respond_config_refused_before_write ~status:`Not_found reqd msg
     | Ok None ->
-        respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+        respond_config_refused_before_write ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
     | Ok (Some meta0) ->
-        (try
-           let args = Yojson.Safe.from_string body_str in
-           let fields_opt =
-             match args with
-             | `Assoc fields -> Some fields
-             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
-             | `String _ | `List _ ->
-                 None
-           in
-           match fields_opt with
-           | Some fields ->
+        (* Only the body parse is guarded: a [Json_error] raised after the write
+           must not come back as a refusal that says nothing was written. *)
+        (match Yojson.Safe.from_string body_str with
+           | exception Yojson.Json_error e ->
+               respond_config_refused_before_write reqd (Printf.sprintf "invalid json: %s" e)
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+           | `String _ | `List _ ->
+               respond_config_refused_before_write reqd "request body must be a JSON object"
+           | `Assoc fields ->
                let expected_config_revision =
                  match List.assoc_opt expected_config_revision_field fields with
                  | None -> Error "expected_config_revision is required"
@@ -1053,7 +1127,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                    Keeper_turn_up_config_persistence.config_revision_of_yojson value
                in
                (match expected_config_revision with
-                | Error detail -> respond_error reqd detail
+                | Error detail -> respond_config_refused_before_write reqd detail
                 | Ok expected_config_revision ->
                let body_name =
                  match List.assoc_opt "name" fields with
@@ -1065,28 +1139,16 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                if Option.is_some body_name
                   && body_name <> Some name
                then
-                 respond_error reqd
+                 respond_config_refused_before_write reqd
                    (Printf.sprintf "keeper name mismatch: route=%S body=%S" name
                       (Option.value ~default:"" body_name))
                else
-                 (match validate_dashboard_config_patch ~meta:meta0 fields with
-                  | Error msg -> respond_error reqd msg
-                  | Ok () ->
-                      let confirm_context_shrink =
-                        match
-                          List.assoc_opt confirm_context_shrink_field fields
-                        with
-                        | Some (`Bool b) -> b
-                        | _ -> false
-                      in
-                      (* Control field: consumed here, never persisted. *)
-                      let fields =
-                        List.remove_assoc confirm_context_shrink_field fields
-                        |> List.remove_assoc expected_config_revision_field
-                      in
-                      (match context_shrink_of_patch ~meta:meta0 fields with
+                 (match validate_dashboard_config_patch fields with
+                  | Error msg -> respond_config_refused_before_write reqd msg
+                  | Ok ({ confirm_context_shrink; config_fields = fields; _ } as patch) ->
+                      (match context_shrink_of_patch ~meta:meta0 patch with
                        | Some (previous, new_v) when not confirm_context_shrink ->
-                           respond_error reqd
+                           respond_config_refused_before_write reqd
                              (Printf.sprintf
                                 "reducing max_context_override (%s -> %d) can push \
                                  this keeper's existing context past the new window \
@@ -1113,7 +1175,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                          Keeper_turn_up_args.parse keeper_ctx args_with_name
                        with
                        | Error result ->
-                           respond_error reqd
+                           respond_config_refused_before_write reqd
                              (Keeper_types_profile.tool_result_body result)
                        | Ok parsed ->
                            (
@@ -1188,11 +1250,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                reqd
                                ~name
                                ~refusal
-                               ~receipt:(config_write_receipt result))))))
-           | None ->
-               respond_error reqd "request body must be a JSON object"
-         with Yojson.Json_error e ->
-           respond_error reqd (Printf.sprintf "invalid json: %s" e))
+                               ~receipt:(config_write_receipt result)))))))
 
 let secret_projection_response_json config name =
   `Assoc

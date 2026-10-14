@@ -212,7 +212,6 @@ let string_of_provider_kind = Provider_kind.to_string
 
 let provider_kind_of_string = Provider_kind.of_string
 let all_provider_kinds = Provider_kind.all
-let default_api_key_env = Provider_kind.default_api_key_env
 let pp_provider_kind = Provider_kind.pp
 let show_provider_kind = Provider_kind.show
 let provider_kind_to_yojson = Provider_kind.to_yojson
@@ -523,8 +522,11 @@ let validate_anthropic_thinking_tool_choice (config : t) =
     Error
       (Unsupported_named_tool_choice_with_thinking
          { provider_kind = config.kind; model_id = config.model_id; tool_name })
-  | Anthropic, _, _ | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _, _ ->
-    Ok ()
+  | ( Anthropic
+    , (None | Some false)
+    , (None | Some (Types.Auto | Types.Any | Types.Tool _ | Types.None_)) )
+  | Anthropic, Some true, (None | Some (Types.Auto | Types.None_))
+  | (Kimi | OpenAI_compat | Ollama | Gemini | Glm), _, _ -> Ok ()
 ;;
 
 let validate_tool_choice_request_typed (config : t) =

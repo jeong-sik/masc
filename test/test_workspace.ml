@@ -641,7 +641,6 @@ let with_memory_test_env f =
   let backend_config : Backend_types.config = {
     base_path = Filename.concat tmp_dir Common.masc_dirname;
     node_id = "test-node";
-    cluster_name = "default";
     pubsub_max_messages = 1000;
   } in
   let memory_backend = Backend.Memory.create () in
@@ -974,7 +973,7 @@ let test_is_agent_session_bound_after_default_join () =
 
 let test_workspace_bootstrap_preserves_backend_state () =
   with_memory_test_env (fun config ->
-    Workspace.ensure_workspace_bootstrap config;
+    ignore (Workspace.init config ~agent_name:None);
     let _ =
       Workspace.update_state config (fun state ->
         { state with message_seq = 41 })
@@ -990,7 +989,7 @@ let test_workspace_bootstrap_preserves_backend_state () =
     Workspace_utils.write_json config (Workspace.backlog_path config)
       (Masc_domain.backlog_to_yojson backlog);
 
-    Workspace.ensure_workspace_bootstrap config;
+    ignore (Workspace.init config ~agent_name:None);
 
     let state = Workspace.read_state config in
     let saved_backlog = Workspace.read_backlog config in
@@ -1000,8 +999,8 @@ let test_workspace_bootstrap_preserves_backend_state () =
 
 let test_workspace_bootstrap_ignores_invalid_workspace_id_in_flat_mode () =
   with_memory_test_env (fun config ->
-    Workspace.ensure_workspace_bootstrap config;
-    Alcotest.(check bool) "root state initialized" true
+    ignore (Workspace.init config ~agent_name:None);
+    Alcotest.(check bool) "state initialized" true
       (Workspace.is_initialized config)
   )
 
@@ -1405,29 +1404,6 @@ let test_xss_in_agent_name () =
        which is FileSystem-specific. For other backends, we just verify the join worked) *)
     let state = Workspace.read_state config in
     Alcotest.(check bool) "agent registered" true (List.length state.active_agents > 0)
-  )
-
-let test_xss_in_message_type () =
-  with_test_env (fun config ->
-    ignore (Workspace.bind_session config ~agent_name:"tester" ~capabilities:[] ());
-    let xss_msg_type = "<script>alert('xss')</script>" in
-    ignore
-      (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"tester" ~msg_type:xss_msg_type
-         ~content:"hello");
-    let messages = Workspace.get_all_messages_raw config ~since_seq:0 in
-    let msg_type =
-      match
-        List.find_opt
-          (fun (message : Types.message) -> String.equal message.content "hello")
-          messages
-      with
-      | Some message -> message.msg_type
-      | None -> Alcotest.fail "broadcast message not found"
-    in
-    (* #29736 stopped escaping at the store, so the type comes back as the
-       caller wrote it. [test_broadcast_stores_raw_text] pins the same contract
-       for the content; the type has no coverage there, so it is pinned here. *)
-    Alcotest.(check string) "msg_type is stored as written" xss_msg_type msg_type
   )
 
 (* === Board Admin Tests === *)
@@ -3418,7 +3394,6 @@ let () =
     (* === Security Tests (v2.1) === *)
     "security", [
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
-      Alcotest.test_case "xss in message type" `Quick test_xss_in_message_type;
     ];
 
     (* === RFC-0323 G-3: state-keyed completion side effects === *)

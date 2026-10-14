@@ -340,7 +340,6 @@ let apply_event ~current_phase ~conditions ~event ~now =
         ; new_phase
         ; updated_conditions
         ; entry_actions = []
-        ; event_applied = event
         ; timestamp = now
         }
     else if can_transition ~from_phase:current_phase ~to_phase:new_phase
@@ -350,7 +349,6 @@ let apply_event ~current_phase ~conditions ~event ~now =
         ; new_phase
         ; updated_conditions
         ; entry_actions = entry_actions_for ~prev_phase:current_phase ~new_phase ~event
-        ; event_applied = event
         ; timestamp = now
         }
     else

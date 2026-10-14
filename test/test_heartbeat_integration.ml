@@ -218,7 +218,7 @@ let publication_recovery_registry env sw config =
   Masc_test_deps.with_publication_recovery_registry
     ~sw
     ~fs:(Eio.Stdenv.fs env)
-    ~registry_root:(Workspace.masc_root_dir config)
+    ~registry_root:(Workspace.masc_dir config)
     Fun.id
 
 let make_meta name =
@@ -506,13 +506,12 @@ let test_restart_state_preservation () =
   (* Simulate sweep restart: re-register then restore state *)
   let _reg2 = R.For_testing.register ~base_path:bp "restartable" meta in
   R.restore_supervisor_state ~base_path:bp "restartable"
-    ~restart_count:1 ~last_restart_ts:200.0
+    ~restart_count:1
     ~crash_log:[(100.0, "first crash")];
   match R.get ~base_path:bp "restartable" with
   | None -> fail "expected restartable"
   | Some e ->
     check int "restart_count preserved" 1 e.restart_count;
-    check (float 0.1) "last_restart_ts preserved" 200.0 e.last_restart_ts;
     check int "crash_log preserved" 1 (List.length e.crash_log);
     (* failure_reason should be cleared by re-register *)
     check bool "failure_reason cleared" true
@@ -675,7 +674,8 @@ let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
          (match (Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
              ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason with
           | Some surface -> check string "public blocker follows remaining turn debt"
-              "turn_failures" surface.blocker_class
+              "turn_failures"
+              (Masc.Keeper_status_bridge.runtime_blocker_class_to_string surface.blocker_class)
           | None -> fail "remaining turn debt has no public blocker")
        | Some reason ->
          failf "heartbeat recovery left the wrong reason: %s"
@@ -2506,7 +2506,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         in
         Filename.concat
           (Filename.concat
-             (Workspace.masc_root_dir config)
+             (Workspace.masc_dir config)
              ("paused-work-dispositions-"
               ^ Paused_work_receipt.store_version))
           ("keeper-" ^ keeper_hash)
@@ -3034,7 +3034,7 @@ let test_keeper_up_shared_boundary_outlives_calling_turn () =
       Masc_test_deps.with_publication_recovery_registry
         ~sw:root_sw
         ~fs:(Eio.Stdenv.fs env)
-        ~registry_root:(Workspace.masc_root_dir config)
+        ~registry_root:(Workspace.masc_dir config)
       @@ fun publication_recovery_registry ->
       let stop_target () =
         ignore

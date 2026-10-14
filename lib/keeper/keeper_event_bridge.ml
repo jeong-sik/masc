@@ -591,37 +591,20 @@ let deliver_pending_with
   | exn -> Retryable_failure (pending, Broadcast, exn)
 ;;
 
-let agent_core_event_retention_days_default = 30
 
-let resolve_agent_core_event_retention_days = function
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | Some _ -> None
-     | None -> Some agent_core_event_retention_days_default)
-  | None -> Some agent_core_event_retention_days_default
-;;
-
-let agent_core_event_retention_days () =
-  resolve_agent_core_event_retention_days (Sys.getenv_opt "MASC_AGENT_CORE_EVENTS_RETENTION_DAYS")
-;;
-
+(* The reference keeps the location beside the handle so a failed append can
+   open the same store again. *)
 let deliver_pending ?store_ref (pending : pending_relay) =
   let append_json =
     match store_ref with
     | None -> fun _json -> ()
     | Some store_ref ->
       fun json ->
-        let store = !store_ref in
+        let location, store = !store_ref in
         (try Dated_jsonl.append store json with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           let retention_days = agent_core_event_retention_days () in
-           store_ref :=
-             Dated_jsonl.create
-               ~base_dir:(Dated_jsonl.base_dir store)
-               ?retention_days
-               ();
+           store_ref := location, Dated_jsonl.open_store location;
            raise exn)
   in
   try deliver_pending_with ~append_json ~broadcast_json:broadcast_relay_json pending with
@@ -673,11 +656,12 @@ let rec process_pending ?store_ref acc = function
 ;;
 
 let agent_core_event_store ~config =
-  let retention_days = agent_core_event_retention_days () in
-  Dated_jsonl.create
-    ~base_dir:(Filename.concat (Workspace.masc_root_dir config) "agent-core-events")
-    ?retention_days
-    ()
+  let location =
+    Dated_jsonl.Store.at
+      (Workspace.dated_store_root config)
+      Dated_jsonl.Store.Root.Agent_core_events
+  in
+  location, Dated_jsonl.open_store location
 ;;
 
 let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
@@ -711,7 +695,14 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
                  Some (match Tool_schemas_misc.misc_operation_of_tool_name tool_name with
                    | Some operation -> Lane_addon_sources.activity_of_misc_operation operation
                    | None -> Lane_addon_sources.Tool_completed)
-             | _ -> None) events |> List.sort_uniq Stdlib.compare in
+             | Agent_core.Event_bus.AgentStarted _ | Agent_core.Event_bus.AgentCompleted _
+             | Agent_core.Event_bus.AgentYielded _ | Agent_core.Event_bus.AgentInputRequired _
+             | Agent_core.Event_bus.AgentFailed _ | Agent_core.Event_bus.ToolCalled _
+             | Agent_core.Event_bus.TurnStarted _ | Agent_core.Event_bus.TurnReady _
+             | Agent_core.Event_bus.TurnCompleted _ | Agent_core.Event_bus.HandoffRequested _
+             | Agent_core.Event_bus.HandoffCompleted _ | Agent_core.Event_bus.ElicitationCompleted _
+             | Agent_core.Event_bus.ToolApprovalCompleted _
+             | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> None) events |> List.sort_uniq Stdlib.compare in
            List.iter (fun activity -> Lane_addon_runtime.notify_activity ~config ~activity) activities;
            pending := prepare_pending_events events;
            pending := process_pending ~store_ref:store [] !pending);

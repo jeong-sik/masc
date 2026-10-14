@@ -35,15 +35,29 @@ type read_result = {
 
 (* ── Store paths ────────────────────────────────────── *)
 
-let fixed_store_dir ~masc_root ~base_path = function
-  | Agent_event  -> Some (Filename.concat masc_root "telemetry")
-  | Tool_call_io -> Some (Filename.concat masc_root "tool_calls")
-  | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
-  | Agent_core_event    -> Some (Filename.concat masc_root "agent-core-events")
+(* [masc_root] is [<base>/.masc] in every function below. *)
+let fixed_store_location ~masc_root source =
+  let at_root store =
+    Some Dated_jsonl.Store.(at (root_of_masc_dir masc_root) store)
+  in
+  match source with
+  | Agent_event -> at_root Dated_jsonl.Store.Root.Telemetry
+  | Tool_call_io -> at_root Dated_jsonl.Store.Root.Tool_calls
+  | Tool_usage -> at_root Dated_jsonl.Store.Root.Tool_usage
+  | Agent_core_event -> at_root Dated_jsonl.Store.Root.Agent_core_events
   | Keeper_metric | Trajectory_tool_call | Execution_receipt | Goal_event
-  | Tool_metric ->
-      None
+  | Tool_metric -> None
     (* handled separately *)
+
+let fixed_store_dir ~masc_root source =
+  Option.map Dated_jsonl.Store.dir (fixed_store_location ~masc_root source)
+
+let keeper_metric_location ~masc_root name =
+  Dated_jsonl.Store.(keeper (root_of_masc_dir masc_root) ~keeper:name Keeper.Metrics)
+
+let execution_receipt_location ~masc_root name =
+  Dated_jsonl.Store.(
+    keeper (root_of_masc_dir masc_root) ~keeper:name Keeper.Execution_receipts)
 
 let source_freshness_slo_s ?keeper_keepalive_interval_s = function
   | Keeper_metric ->
@@ -86,20 +100,19 @@ let source_dashboard_surface = function
   | Goal_event -> "/api/v1/dashboard/goals"
   | Tool_metric -> "/api/v1/tool-metrics"
 
-let source_durable_store ~masc_root ~base_path = function
+let source_durable_store ~masc_root = function
   | Keeper_metric -> Filename.concat masc_root "keepers/*/metrics"
   | Trajectory_tool_call -> Filename.concat masc_root "trajectories/*/*.jsonl"
   | Execution_receipt -> Filename.concat masc_root "keepers/*/execution-receipts"
   | Goal_event -> Filename.concat masc_root "goal_events.jsonl"
   | Tool_metric -> Filename.concat masc_root "tool-metrics.sqlite3"
-  | source -> (
-      match fixed_store_dir ~masc_root ~base_path source with
+  | (Agent_event | Tool_call_io | Tool_usage | Agent_core_event) as source -> (
+      match fixed_store_dir ~masc_root source with
       | Some dir -> dir
       | None -> "")
 
 let source_metadata_fields
       ?keeper_keepalive_interval_s
-      ~base_path
       ~masc_root
       source
   =
@@ -109,7 +122,7 @@ let source_metadata_fields
         (source_freshness_slo_s ?keeper_keepalive_interval_s source) );
     ("producer", `String (source_producer source));
     ( "durable_store",
-      `String (source_durable_store ~masc_root ~base_path source) );
+      `String (source_durable_store ~masc_root source) );
     ("dashboard_surface", `String (source_dashboard_surface source));
   ]
 
@@ -139,7 +152,6 @@ let replay_retention_json
                  (("source", `String (source_to_string source))
                  :: source_metadata_fields
                       ?keeper_keepalive_interval_s
-                      ~base_path
                       ~masc_root
                       source))
              sources) );
@@ -181,7 +193,9 @@ let discover_keeper_metric_dirs masc_root : (string * string) list =
         ~default:[] (fun () -> Array.to_list (Sys.readdir keepers_dir))
     in
     List.filter_map (fun name ->
-      let metrics_dir = Filename.concat keepers_dir (name ^ "/metrics") in
+      let metrics_dir =
+        Dated_jsonl.Store.dir (keeper_metric_location ~masc_root name)
+      in
       if Sys.file_exists metrics_dir then Some (name, metrics_dir)
       else None
     ) entries
@@ -227,8 +241,7 @@ let discover_execution_receipt_dirs masc_root : (string * string) list =
       |> Array.to_list
       |> List.filter_map (fun name ->
            let dir =
-             Filename.concat (Filename.concat keepers_dir name)
-               "execution-receipts"
+             Dated_jsonl.Store.dir (execution_receipt_location ~masc_root name)
            in
            if
              is_directory Execution_receipt

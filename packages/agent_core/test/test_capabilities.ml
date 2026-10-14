@@ -1876,19 +1876,20 @@ let test_example_manifest_base_labels_are_canonical () =
   | Ok entries ->
     List.iter
       (fun (entry : Capability_manifest.entry) ->
+         let id_prefix = Model_identifiers.Id_prefix.to_string entry.id_prefix in
          match entry.base_label with
          | None ->
            (* The Codex Spark entry intentionally does not inherit a public
               chat-completions preset; every other example entry must specify a
               base so the manifest actually applies the intended preset. *)
-           if entry.id_prefix <> "gpt-5.3-codex-spark"
+           if id_prefix <> "gpt-5.3-codex-spark"
            then
-             check bool (Printf.sprintf "expected base for %s" entry.id_prefix) true false
+             check bool (Printf.sprintf "expected base for %s" id_prefix) true false
          | Some label ->
            let label = Capability_manifest.base_label_to_string label in
            check
              bool
-             (Printf.sprintf "base label resolves for %s: %s" entry.id_prefix label)
+             (Printf.sprintf "base label resolves for %s: %s" id_prefix label)
              true
              (Option.is_some (Capabilities.capabilities_for_provider_label label)))
       entries
@@ -3059,7 +3060,7 @@ id = "precedence-provider"
 kind = "gemini"
 base_url = "https://example.invalid"
 request_path = ""
-api_key_env = ""
+auth = "none"
 capabilities_base = "gemini"
 
 [[models]]

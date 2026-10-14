@@ -16,21 +16,10 @@ val browser_interact : Masc_domain.tool_schema
 val browser_instruct : Masc_domain.tool_schema
 
 
-(** MSX lane tools (RFC-0439 §3.5), read from config/tools/masc_msx_*.toml. *)
-val msx_load : Masc_domain.tool_schema
-val msx_eject : Masc_domain.tool_schema
-val msx_export_disk : Masc_domain.tool_schema
-val msx_save : Masc_domain.tool_schema
-val msx_restore : Masc_domain.tool_schema
-val msx_change_disk : Masc_domain.tool_schema
-val msx_screen : Masc_domain.tool_schema
-val msx_meta : Masc_domain.tool_schema
-val msx_checkpoint_info : Masc_domain.tool_schema
-val msx_press : Masc_domain.tool_schema
-val msx_step : Masc_domain.tool_schema
-val msx_step_until_change : Masc_domain.tool_schema
-val msx_peek : Masc_domain.tool_schema
-val msx_ram_diff : Masc_domain.tool_schema
+(** An MSX lane tool's schema (RFC-0439 §3.5), read from
+    config/tools/masc_msx_*.toml. Every {!Msx_tool.t} is read when the module
+    initializes, so a missing definition refuses the boot. *)
+val msx_schema : Msx_tool.t -> Masc_domain.tool_schema
 val portrait_read : Masc_domain.tool_schema
 val candle_balance : Masc_domain.tool_schema
 val candle_catalog : Masc_domain.tool_schema

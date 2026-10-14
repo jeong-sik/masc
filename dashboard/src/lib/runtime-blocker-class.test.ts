@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest'
+import serverLabels from '../api/fixtures/runtime-blocker-classes.json'
 import { KEEPER_RUNTIME_BLOCKER_CLASSES, type KeeperRuntimeBlockerClass } from '../types'
 import {
   asKeeperRuntimeBlockerClass,
   isKeeperRuntimeBlockerClass,
 } from './runtime-blocker-class'
+
+describe('KEEPER_RUNTIME_BLOCKER_CLASSES', () => {
+  it('is exactly the labels the server sends, in its order', () => {
+    // test_runtime_blocker_classification pins this fixture to every OCaml
+    // runtime_blocker_class, so a label added or removed on either side fails.
+    expect([...KEEPER_RUNTIME_BLOCKER_CLASSES]).toEqual(serverLabels)
+  })
+})
 
 describe('asKeeperRuntimeBlockerClass', () => {
   it('accepts every literal listed in KEEPER_RUNTIME_BLOCKER_CLASSES (SSOT round-trip)', () => {
@@ -20,7 +29,7 @@ describe('asKeeperRuntimeBlockerClass', () => {
 
   it('trims surrounding whitespace before membership check — parity with asString/asNullableString', () => {
     expect(asKeeperRuntimeBlockerClass('runtime_exhausted ')).toBe('runtime_exhausted')
-    expect(asKeeperRuntimeBlockerClass('  agent_core_context_window_exceeded\t')).toBe('agent_core_context_window_exceeded')
+    expect(asKeeperRuntimeBlockerClass('  turn_configuration_error\t')).toBe('turn_configuration_error')
     expect(asKeeperRuntimeBlockerClass('   ')).toBeNull()
   })
 

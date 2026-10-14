@@ -275,7 +275,9 @@ let err_json ?detail ~failure_class code =
    same wiring, so this one still ends the walk. *)
 let wiring_rejected = function
   | Llm_provider.Http_client.AcceptRejected _ -> true
-  | _ -> false
+  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _
+  | Llm_provider.Http_client.TimeoutError _ | Llm_provider.Http_client.ProviderTerminal _
+  | Llm_provider.Http_client.ProviderFailure _ -> false
 
 (* Capacity belongs to the selected binding. A later image runtime may admit
    the same pixels under a different request/context ceiling. HTTP 413 states
@@ -284,7 +286,26 @@ let candidate_capacity_http_error = function
   | Llm_provider.Http_client.HttpError { code = 413; _ }
   | Llm_provider.Http_client.ProviderFailure
       { kind = Llm_provider.Http_client.Context_overflow _; _ } -> true
-  | _ -> false
+  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _
+  | Llm_provider.Http_client.TimeoutError _ | Llm_provider.Http_client.AcceptRejected _
+  | Llm_provider.Http_client.ProviderTerminal _
+  | Llm_provider.Http_client.ProviderFailure
+      { kind =
+          ( Llm_provider.Http_client.Capacity_exhausted _
+          | Llm_provider.Http_client.Hard_quota _
+          | Llm_provider.Http_client.Capability_mismatch _
+          | Llm_provider.Http_client.Cli_policy_invalid _
+          | Llm_provider.Http_client.Cli_startup_failed _
+          | Llm_provider.Http_client.Provider_parse_error _
+          | Llm_provider.Http_client.Provider_wire_error _
+          | Llm_provider.Http_client.Provider_reported_error _
+          | Llm_provider.Http_client.Provider_interrupted
+          | Llm_provider.Http_client.Response_body_too_large _
+          | Llm_provider.Http_client.Empty_completion _
+          | Llm_provider.Http_client.Repeating_generation _
+          | Llm_provider.Http_client.Unknown_provider_failure _ )
+      ; _
+      } -> false
 
 (* Every other 4xx is this binding's verdict on this request: a parameter
    range (glm-4.6v refused max_tokens 40960 on 2026-09-07), a media type, a
@@ -301,7 +322,9 @@ let candidate_policy_http_error err =
     && code < 500
     && (not (candidate_capacity_http_error err))
     && not (Runtime_attempt_fsm.should_try_next err)
-  | _ -> false
+  | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.TimeoutError _
+  | Llm_provider.Http_client.AcceptRejected _ | Llm_provider.Http_client.ProviderTerminal _
+  | Llm_provider.Http_client.ProviderFailure _ -> false
 
 let failure_class_of_http_error = function
   | err when wiring_rejected err || candidate_policy_http_error err ->
@@ -488,7 +511,19 @@ type candidate_failure =
 let official_failure_can_advance : Fusion_official_client.failure -> bool = function
   | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _ -> false
   | Claude_admission_failure (Invalid_config _) -> false
-  | Claude_admission_failure _ -> true
+  | Claude_admission_failure (Runtime_claude_code.Spawn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Protocol_error _)
+  | Claude_admission_failure (Runtime_claude_code.Subscription_required _)
+  | Claude_admission_failure (Runtime_claude_code.Unsupported_control_request _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_transport_interrupted _)
+  | Claude_admission_failure (Runtime_claude_code.Context_window_exceeded _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed_with_observation _)
+  | Claude_admission_failure (Runtime_claude_code.Stopped_by_host _)
+  | Claude_admission_failure (Runtime_claude_code.Quota_blocked _)
+  | Claude_admission_failure (Runtime_claude_code.Process_exited _)
+  | Claude_admission_failure (Runtime_claude_code.Unhandled_exception _)
+  | Claude_admission_failure (Runtime_claude_code.Timeout _) -> true
   | Codex_failure error ->
     (match error with
      | Subscription_required _ | Spawn_failed _
@@ -529,7 +564,20 @@ let outcome_of_official_failure ~runtime_id failure =
    Only typed pre-submission or explicit no-effect observations grant that
    receipt. The stateless runner supplies no durable recovery session. *)
 let official_failure_effect : Fusion_official_client.failure -> Tool_result.failure_effect_disposition = function
-  | Setup_failure _ | Claude_admission_failure _ -> Proven_pre_effect
+  | Setup_failure _ | Claude_admission_failure (Runtime_claude_code.Invalid_config _)
+  | Claude_admission_failure (Runtime_claude_code.Spawn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Protocol_error _)
+  | Claude_admission_failure (Runtime_claude_code.Subscription_required _)
+  | Claude_admission_failure (Runtime_claude_code.Unsupported_control_request _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_transport_interrupted _)
+  | Claude_admission_failure (Runtime_claude_code.Context_window_exceeded _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed_with_observation _)
+  | Claude_admission_failure (Runtime_claude_code.Stopped_by_host _)
+  | Claude_admission_failure (Runtime_claude_code.Quota_blocked _)
+  | Claude_admission_failure (Runtime_claude_code.Process_exited _)
+  | Claude_admission_failure (Runtime_claude_code.Unhandled_exception _)
+  | Claude_admission_failure (Runtime_claude_code.Timeout _) -> Proven_pre_effect
   | Codex_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
       | Reasoning_effort_admission_failed _
       | Timeout { turn_accepted = false; _ }
@@ -538,7 +586,24 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
       | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
       | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
-  | Missing_reply | Codex_failure _ | Claude_failure _ | Antigravity_failure _ | Muse_failure _ ->
+  | Missing_reply | Antigravity_failure _ | Muse_failure _
+  | Codex_failure
+      ( Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
+      | Unsupported_server_request _ | Turn_failed _ | Stopped_by_host _
+      | Turn_interrupted | Runtime_shutting_down | Process_exited _
+      | Timeout { turn_accepted = true; _ }
+      | Context_window_exceeded { tool_effect_attempted = true; _ })
+  | Claude_failure
+      ( Protocol_error _ | Unsupported_control_request _ | Turn_transport_interrupted _
+      | Turn_failed _ | Stopped_by_host _ | Process_exited _ | Unhandled_exception _
+      | Timeout _
+      | Quota_blocked { tool_effect_attempted = true; _ }
+      | Quota_blocked { tool_effect_attempted = false; response_emitted = true; _ }
+      | Context_window_exceeded { tool_effect_attempted = true; _ }
+      | Context_window_exceeded { tool_effect_attempted = false; response_emitted = true; _ }
+      | Turn_failed_with_observation { tool_effect_attempted = true; _ }
+      | Turn_failed_with_observation
+          { tool_effect_attempted = false; response_emitted = true; _ }) ->
     Effect_outcome_unknown
 ;;
 
@@ -634,7 +699,7 @@ let run_candidates_outcome
               ~reason:"provider_response" ~duration_ms:0.0 ~success:true ();
             Vo_ok { text; runtime_id; requested_model = rt.model.api_name;
                     response_model = response.model }
-          | parsed ->
+          | (Ok _ | Error _) as parsed ->
             let detail = match parsed with
               | Error detail -> detail
               | Ok _ -> "empty extraction" in
@@ -674,7 +739,12 @@ let run_candidates_outcome
               ?tool_use_id ?trace_id ~runtime_id ~result:"error"
               ~reason:"timeout" ~duration_ms:0.0 ~success:false ();
             continue_with Candidate_timeout
-       | Error err ->
+       | Error
+           (( Llm_provider.Http_client.HttpError _
+            | Llm_provider.Http_client.NetworkError _
+            | Llm_provider.Http_client.AcceptRejected _
+            | Llm_provider.Http_client.ProviderTerminal _
+            | Llm_provider.Http_client.ProviderFailure _ ) as err) ->
             if candidate_capacity_http_error err
             then (
               record_vision_candidate_attempt
@@ -782,8 +852,7 @@ let run_candidates_outcome
                continue_with
                  (Candidate_invalid_output
                     (Printf.sprintf "%s: empty extraction" runtime_id))
-             | outcome ->
-               record_vision_candidate_attempt
+             | (Vo_timeout | Vo_ok _ | Vo_invalid_request _ | Vo_no_runtime _ | Vo_provider _ | Vo_official_failure _) as outcome -> record_vision_candidate_attempt
                  ?tool_use_id ?trace_id ~runtime_id ~result:"ok"
                  ~reason:"provider_response" ~duration_ms:0.0
                  ~success:true ();
@@ -912,7 +981,26 @@ let execution_of_vision_outcome = function
         Tool_result.Policy_rejection, "provider_error"
       | _ when official_failure_can_advance failure ->
         Tool_result.Dependency_unavailable, "provider_error"
-      | _ -> Tool_result.Runtime_failure, "provider_error" in
+      | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _
+      | Codex_failure
+          ( Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+          | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
+          | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _
+          | Stopped_by_host _ | Turn_interrupted | Runtime_shutting_down
+          | Process_exited _ )
+      | Claude_failure
+          ( Invalid_config _ | Spawn_failed _ | Protocol_error _
+          | Unsupported_control_request _ | Turn_transport_interrupted _
+          | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Unhandled_exception _ )
+      | Claude_admission_failure
+          ( Invalid_config _ | Spawn_failed _ | Protocol_error _
+          | Unsupported_control_request _ | Turn_transport_interrupted _
+          | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Unhandled_exception _ ) ->
+        Tool_result.Runtime_failure, "provider_error" in
     failed ~failure_class ~effect_disposition ~detail code
   | Vo_empty ->
     failed ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
@@ -1007,7 +1095,7 @@ let handle_with_outcome
                         ~failure_class:Tool_result.Runtime_failure
                         ~detail
                         "artifact_store_failed")
-                 | outcome -> execution_of_vision_outcome outcome)))))
+                 | (Vo_timeout | Vo_empty | Vo_truncated | Vo_invalid_request _ | Vo_no_runtime _ | Vo_invalid_structured_response _ | Vo_provider _ | Vo_official_failure _) as outcome -> execution_of_vision_outcome outcome)))))
 
 let handle ?base_path ?complete ?tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args () =
   (handle_with_outcome

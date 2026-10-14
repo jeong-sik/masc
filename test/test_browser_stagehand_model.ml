@@ -37,7 +37,7 @@ let resolver_snapshot ~base_url ~system_prompt =
        kind = \"openai_compat\"\n\
        base_url = %S\n\
        request_path = \"/v1/chat/completions\"\n\
-       api_key_env = \"\"\n\n\
+       auth = \"none\"\n\n\
        [[models]]\n\
        id_prefix = \"model\"\n\
        provider_name = \"stagehand-fixture\"\n\

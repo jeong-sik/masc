@@ -49,7 +49,7 @@ follow the same new link and the check succeeds by construction. The existing
 below the session parent, but do not provide the missing upper bound.
 
 The caller topology does have a distinct root fact: `session_base_dir` is
-derived from `Workspace.masc_root_dir config`, and production bootstrap has
+derived from `Workspace.masc_dir config`, and production bootstrap has
 already canonicalized `config.base_path`. The missing operation is preserving
 the boot-time physical identity of the resulting `.masc` data root instead of
 resolving it again later.

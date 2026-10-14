@@ -46,9 +46,11 @@ let failure_metric site =
     ()
 
 let append_raw_tool_event json =
-  let dir = Filename.concat (Env_config.base_path ()) ".masc/tool-events" in
-  Fs_compat.mkdir_p dir;
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location =
+    Dated_jsonl.Store.(at (root_of_base_path ~base_path:(Env_config.base_path ())) Root.Tool_events)
+  in
+  Fs_compat.mkdir_p (Dated_jsonl.Store.dir location);
+  let store = Dated_jsonl.open_store location in
   Dated_jsonl.append store json
 
 (* The store answers for the base path in force. A test executable moves

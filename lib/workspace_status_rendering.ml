@@ -118,7 +118,6 @@ let status_summary_string
     ~(credential_state : credential_state)
     ~credential_blocked:_
     ~(current_task : string option)
-    ~(effective_cluster_name : string)
     ~(agents : Masc_domain.agent list)
     ~(active_tasks : Masc_domain.task list)
     ~(todo_count : int)
@@ -137,9 +136,7 @@ let status_summary_string
   let agent_count = List.length agents in
   let shown_active_tasks = take_items max_active_tasks_display active_tasks in
   let buf = Buffer.create 256 in
-  Printf.bprintf buf "🏢 Cluster: %s\n" effective_cluster_name;
-  if not (String.equal effective_cluster_name state.project) then
-    Printf.bprintf buf "Project: %s\n" state.project;
+  Printf.bprintf buf "Project: %s\n" state.project;
   Buffer.add_string buf "📍 Workspace: root\n";
   Printf.bprintf buf "📁 Path: %s\n" ctx.config.base_path;
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";

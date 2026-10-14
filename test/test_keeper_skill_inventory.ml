@@ -720,15 +720,22 @@ let test_invalid_skill_search_is_isolated () =
         ; candidate ~directory:"broken" "---\nname: broken\n---\nbody\n"
         ] ]
   in
-  let hits = search_candidates (capability_surface frozen) "broken" in
-  check int "only invalid Skill matches" 1 (List.length hits);
-  match hits with
-  | [ hit ] ->
-    (match hit.Masc.Keeper_capability_search.document.payload with
-     | Masc.Keeper_capability_surface.Skill capability ->
-       check bool "invalid availability retained" true
-         (capability.availability = Masc.Keeper_capability_surface.Invalid_definition)
-     | Ordinary_tool _ -> fail "invalid Skill query returned a Tool")
+  (* The search covers Tools and Skills together, so another Tool whose
+     description happens to use the word (masc_wiki_lint's broken_link kind)
+     is a legitimate hit. This test is about Skills: only the invalid one may
+     match, and the valid Skill must not. *)
+  let skill_hits =
+    search_candidates (capability_surface frozen) "broken"
+    |> List.filter_map (fun hit ->
+      match hit.Masc.Keeper_capability_search.document.payload with
+      | Masc.Keeper_capability_surface.Skill capability -> Some capability
+      | Ordinary_tool _ -> None)
+  in
+  check int "only invalid Skill matches" 1 (List.length skill_hits);
+  match skill_hits with
+  | [ capability ] ->
+    check bool "invalid availability retained" true
+      (capability.availability = Masc.Keeper_capability_surface.Invalid_definition)
   | _ -> fail "invalid Skill search count changed after assertion"
 ;;
 

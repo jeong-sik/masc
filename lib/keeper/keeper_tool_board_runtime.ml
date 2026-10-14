@@ -184,8 +184,7 @@ let handle_board_name_with_outcome
             "masc_board_post_get requires post_id (format: p-xxxx). \
              You sent empty or missing post_id."))
   | Tool_name.Board_name.Board_list -> dispatch_board_list args
-  | board_name ->
-    dispatch_board
+  | (Tool_name.Board_name.Board_post_update | Tool_name.Board_name.Board_comment | Tool_name.Board_name.Board_vote | Tool_name.Board_name.Board_stats | Tool_name.Board_name.Board_search | Tool_name.Board_name.Board_comment_vote | Tool_name.Board_name.Board_reaction | Tool_name.Board_name.Board_profile | Tool_name.Board_name.Board_hearths | Tool_name.Board_name.Board_curation_read | Tool_name.Board_name.Board_curation_submit | Tool_name.Board_name.Board_delete | Tool_name.Board_name.Board_cleanup | Tool_name.Board_name.Board_close | Tool_name.Board_name.Board_reopen | Tool_name.Board_name.Board_sub_board_create | Tool_name.Board_name.Board_sub_board_list | Tool_name.Board_name.Board_sub_board_get | Tool_name.Board_name.Board_sub_board_update | Tool_name.Board_name.Board_sub_board_delete) as board_name -> dispatch_board
       board_name
       (bind_board_identity ~keeper_name:meta.name board_name args)
 ;;

@@ -258,8 +258,7 @@ let validate_setting_value key row value =
          ~severity:Error
          (match row.value_kind with
           | Keeper_runtime_setting_registry.Float -> "expected a numeric TOML value"
-          | kind ->
-            Printf.sprintf
+          | (Keeper_runtime_setting_registry.Boolean | Keeper_runtime_setting_registry.Integer | Keeper_runtime_setting_registry.String) as kind -> Printf.sprintf
               "expected a %s TOML value"
               (Keeper_runtime_setting_registry.value_kind_label kind)))
   else if range_matches row.value_range value
@@ -278,7 +277,9 @@ let validate_setting_value key row value =
               }
             when Float.equal minimum 0.0 ->
             "expected a finite, positive number of seconds"
-          | range ->
+          | ( Keeper_runtime_setting_registry.Unbounded
+            | Keeper_runtime_setting_registry.Integer_range _
+            | Keeper_runtime_setting_registry.Float_range _ ) as range ->
             Printf.sprintf
               "value is outside the declared range %s"
               (Keeper_runtime_setting_registry.value_range_label range)))
@@ -288,7 +289,20 @@ let schema_version_of_doc doc =
   match List.assoc_opt schema_version_key doc with
   | None -> current_schema_version, []
   | Some (Keeper_toml_loader.Toml_int version) when version > 0 -> version, []
-  | Some _ ->
+  | Some
+      ( Keeper_toml_loader.Toml_string _
+      | Keeper_toml_loader.Toml_int _
+      | Keeper_toml_loader.Toml_float _
+      | Keeper_toml_loader.Toml_bool _
+      | Keeper_toml_loader.Toml_string_array _
+      | Keeper_toml_loader.Toml_array _
+      | Keeper_toml_loader.Toml_table _
+      | Keeper_toml_loader.Toml_inline_table _
+      | Keeper_toml_loader.Toml_table_array _
+      | Keeper_toml_loader.Toml_offset_datetime _
+      | Keeper_toml_loader.Toml_local_datetime _
+      | Keeper_toml_loader.Toml_local_date _
+      | Keeper_toml_loader.Toml_local_time _ ) ->
     ( current_schema_version
     , [ validation_issue
           ~key:schema_version_key

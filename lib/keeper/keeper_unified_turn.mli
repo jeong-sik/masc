@@ -39,35 +39,6 @@ val resolved_max_context_for_turn
   -> Keeper_context_runtime.max_context_resolution
   -> int
 
-(* runtime→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
-   (단일 runtime 에서 죽은 코드였으므로 제거됨). *)
-
-(** Typed phase-gate output for the first turn pipeline boundary.
-    [run_keeper_cycle] converts this record into the manifest
-    [Phase_gate_decided] row and then dispatches the matching terminal or
-    runtime-routing branch. *)
-type turn_plan_status =
-  | Turn_plan_dispatch
-  | Turn_plan_skipped
-  | Turn_plan_cancelled
-  | Turn_plan_error
-
-type turn_plan =
-  { turn_plan_keeper_turn_id : int
-  ; turn_plan_phase : string option
-  ; turn_plan_status : turn_plan_status
-  ; turn_plan_executable : bool
-  ; turn_plan_reason : string
-  ; turn_plan_terminal_reason_code : string option
-  }
-
-val decide_turn_plan_at_phase_gate
-  :  keeper_turn_id:int
-  -> supervisor_stop_at_entry:bool
-  -> Keeper_state_machine.phase option
-  -> turn_plan
-
-
 (** Record the streaming-cancel observation shared by the Eio.Cancel handler.
     Exposed so tests can pin the supervisor [fiber_stop] branch without forcing
     a live provider cancellation. *)

@@ -1,6 +1,7 @@
 type distribution = Debian | Ubuntu | Other
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
+  | Geckodriver | Firefox
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
@@ -45,6 +46,10 @@ let whisper_formula_source = "https://formulae.brew.sh/formula/whisper-cpp"
 let whisper_models_source = "https://huggingface.co/ggerganov/whisper.cpp"
 let sox_formula_source = "https://formulae.brew.sh/formula/sox"
 let sox_source = "https://sourceforge.net/projects/sox/"
+let geckodriver_formula_source = "https://formulae.brew.sh/formula/geckodriver"
+let geckodriver_source = "https://github.com/mozilla/geckodriver/releases"
+let firefox_cask_source = "https://formulae.brew.sh/cask/firefox"
+let firefox_linux_source = "https://support.mozilla.org/en-US/kb/install-firefox-linux"
 
 (* The model masc asks whisper for by default. Measured 2026-09-12: this file
    is 1,624,555,275 bytes, and on an M3 Max it transcribed a Korean sentence in
@@ -153,7 +158,7 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
      rather than a link even where the transcriber is not. Written per
      distribution because naming one package manager for every Linux installs
      something else or nothing. *)
-  | Whisper_cli, Linux _ ->
+  | (Whisper_cli, Linux (Sandbox_readiness.Arm64)) | (Whisper_cli, Linux (Sandbox_readiness.X64)) ->
     let recorder =
       match distribution with
       | Debian | Ubuntu ->
@@ -191,7 +196,8 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
         ~detail:"Follow the vendor instructions. Muse Code asks for its own sign-in the first time it runs."
         ~source_url:(Runtime_official_cli_install.source_url Muse)
         (Runtime_official_cli_install.source_url Muse)]
-  | Presentation_tools {base_path}, (Macos _ | Linux _) ->
+  | (Presentation_tools { base_path }, (Macos _ | Linux (Sandbox_readiness.Arm64)))
+  | (Presentation_tools { base_path }, Linux (Sandbox_readiness.X64)) ->
     let parser = commands ~id:"presentation_parser_install" ~label:"Install the presentation parser for this workspace"
       ~detail:"Create a Python virtual environment under this workspace's .masc/runtime-tools/presentation and install python-pptx from PyPI. Uses the current host python3; it must support venv and pip. System Python, immutable release files, and producer containers are not modified."
       ~source_url:"https://python-pptx.readthedocs.io/en/latest/user/install.html" ~requires_admin:false
@@ -210,12 +216,35 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
           ~source_url:"https://www.libreoffice.org/installation-instructions/" "https://www.libreoffice.org/installation-instructions/"]
       | Unsupported, _ -> [] in
     renderer @ [parser] @ catalog ?model_dir ~host ~distribution Pdf_tools
+  (* The automation lane starts geckodriver itself, and geckodriver starts
+     Firefox, so a workspace needs both on the host. One action each: neither
+     is a service, and neither action writes runtime.toml -- naming the
+     executable there is a separate step, which needs the absolute path this
+     install leaves behind and so has to follow it. *)
+  | Geckodriver, Macos _ ->
+    [commands ~id:"geckodriver_brew_install" ~label:"Install geckodriver with Homebrew"
+       ~detail:"Install the geckodriver formula through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. The executable is checked after installation. Naming it in runtime.toml and restarting the server are separate steps."
+       ~source_url:geckodriver_formula_source ~requires_admin:false
+       [[homebrew;"install";"geckodriver"]]]
+  | Geckodriver, Linux _ ->
+    [open_ ~id:"geckodriver_releases" ~label:"Open the geckodriver releases"
+       ~detail:"Download the release for this machine and put its geckodriver executable on the PATH of the shell that runs this check, then refresh detection. Detection reports the absolute path it found; that path is what runtime.toml names. Distributions package it under different names, so this opens the project's own releases instead of guessing one."
+       ~source_url:geckodriver_source geckodriver_source]
+  | Firefox, Macos _ ->
+    [commands ~id:"firefox_brew_install" ~label:"Install Firefox with Homebrew"
+       ~detail:"Install the Firefox cask through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Homebrew stops without changing anything when Firefox.app is already in /Applications; that Firefox is used as it is. The executable is checked after installation."
+       ~source_url:firefox_cask_source ~requires_admin:false
+       [[homebrew;"install";"--cask";"firefox"]]]
+  | Firefox, Linux _ ->
+    [open_ ~id:"firefox_install_instructions" ~label:"Open Firefox installation instructions"
+       ~detail:"Install Firefox the way this distribution packages it, then refresh detection."
+       ~source_url:firefox_linux_source firefox_linux_source]
   | Pdf_tools, Macos _ ->
     [commands ~id:"poppler_install" ~label:"Install PDF inspection tools with Homebrew"
        ~detail:"Install Poppler through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Both PDF commands are checked after installation."
        ~source_url:"https://formulae.brew.sh/formula/poppler" ~requires_admin:false
        [[homebrew;"install";"poppler"]]]
-  | Pdf_tools, Linux _ ->
+  | (Pdf_tools, Linux (Sandbox_readiness.Arm64)) | (Pdf_tools, Linux (Sandbox_readiness.X64)) ->
     (match distribution with
      | Debian | Ubuntu ->
        let source_url = match distribution with
@@ -254,7 +283,8 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
      commands ~id:"docker_desktop_start" ~label:"Open installed Docker Desktop"
        ~detail:"Launch Docker Desktop and finish its first-start prompts, then recheck the engine."
        ~source_url:docker_mac_source ~requires_admin:false [["open";"-a";"Docker"]]]
-  | Sandbox Docker, Linux _ ->
+  | (Sandbox (Docker), Linux (Sandbox_readiness.Arm64))
+  | (Sandbox (Docker), Linux (Sandbox_readiness.X64)) ->
     let install = match distribution with
       | Debian | Ubuntu ->
         let source_url = match distribution with

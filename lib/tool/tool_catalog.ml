@@ -216,6 +216,14 @@ let keeper_shard_add_task = keeper_shard_permission Masc_domain.CanAddTask
 (* Explicit metadata registry                                       *)
 (* ================================================================ *)
 
+(* An MSX tool that only reads needs the read permission; one that changes the
+   machine or writes a file needs the mutating one. *)
+let msx_metadata =
+  List.map
+    (fun tool ->
+      (Msx_tool.name tool, if Msx_tool.reads_only tool then read_state_tool else mutating_tool))
+    Msx_tool.all
+
 let explicit_metadata : (string * metadata) list =
   [
     ( "masc_operator_judgment_write",
@@ -241,26 +249,12 @@ let explicit_metadata : (string * metadata) list =
     ("masc_lane_evidence", mutating_tool);
     ("masc_lane_act", mutating_tool);
     ("masc_lane_action_status", read_state_tool);
-    ("masc_msx_screen", read_state_tool);
-    ("masc_msx_meta", read_state_tool);
-    ("masc_msx_checkpoint_info", read_state_tool);
     ("keeper_portrait_read", read_state_tool);
     ("keeper_candle_balance", mutating_tool);
     ("keeper_candle_catalog", read_state_tool);
     ("keeper_candle_purchase", mutating_tool);
     ("keeper_candle_equip", mutating_tool);
     ("keeper_candle_gift", mutating_tool);
-    ("masc_msx_load", mutating_tool);
-    ("masc_msx_eject", mutating_tool);
-    ("masc_msx_export_disk", mutating_tool);
-    ("masc_msx_save", mutating_tool);
-    ("masc_msx_restore", mutating_tool);
-    ("masc_msx_change_disk", mutating_tool);
-    ("masc_msx_press", mutating_tool);
-    ("masc_msx_step", mutating_tool);
-    ("masc_msx_step_until_change", mutating_tool);
-    ("masc_msx_peek", read_state_tool);
-    ("masc_msx_ram_diff", read_state_tool);
     ("masc_dos_screen", play_machine_read_tool);
     ("masc_dos_meta", read_state_tool);
     ("masc_dos_inventory", read_state_tool);
@@ -492,6 +486,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_wiki_create", broadcast_tool);
     ("masc_wiki_update", broadcast_tool);
     ("masc_wiki_search", read_state_tool);
+    ("masc_wiki_lint", read_state_tool);
     ( "keeper_tasks_list",
       hidden_runtime_tool
         "Keeper task-list runtime tool; callable but hidden from the public MCP schema surface."
@@ -588,6 +583,7 @@ let explicit_metadata : (string * metadata) list =
         read_state_tool );
     ("sidecar", { mutating_tool with visibility = Hidden });
   ]
+  @ msx_metadata
 
 (* ================================================================ *)
 (* Runtime metadata table (O(1) lookup, seeded from explicit list)  *)

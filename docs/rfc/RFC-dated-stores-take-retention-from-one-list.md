@@ -1,9 +1,9 @@
 ---
 rfc: "dated-stores-take-retention-from-one-list"
 title: "날짜별 store 는 보존 규칙을 한 목록에서 받는다"
-status: Draft
+status: Implemented
 created: 2026-10-13
-updated: 2026-10-13
+updated: 2026-10-14
 author: claude
 supersedes: []
 superseded_by: null
@@ -12,11 +12,12 @@ related: ["0103", "every-durable-store-has-one-boot-policy", "tool-librarian-act
 
 # RFC: 날짜별 store 는 보존 규칙을 한 목록에서 받는다
 
-- 상태: 초안.
+- 상태: 구현됨. Native Stack #42853 으로 2026-10-13 에 main 에 들어갔다. 구현과 이 문서의 차이는 §11 에 적었다.
 - 이슈: #42785. 운영자가 2026-10-13 에 "RFC 먼저"를 골랐다.
+- 구현: Native Stack #42853(#42847 → #42848 → #42849 → #42850 → #42878 → #42880 → #42884).
 - 근거: §2 의 크기와 날짜는 2026-10-13 라이브 base path 에서 파일 이름과 크기만 읽어 쟀다. tool events 는 하루치(2026-10-12)의 줄 수와 바이트만 셌다. §3 은 `origin/main` `0a7538661e` 의 코드다.
 - 앞선 문서: RFC-0103(보존 기간을 기본으로 끈다), RFC "모든 영속 store 가 부팅 정책을 한 목록에서 받는다"(같은 틀을 부팅 정책에 썼다).
-- 같이 볼 PR: #42625(열림). 운영자 창을 `runtime.toml` 의 `[maintenance].jsonl_retention_days` 에서도 읽게 한다. 본문에 따르면 운영자는 30일이 아니라 7일을 원한다.
+- 같이 볼 PR: #42625(병합). 운영자 창을 `runtime.toml` 의 `[maintenance].jsonl_retention_days` 에서도 읽게 한다.
 
 ## 0. 요약
 
@@ -225,7 +226,7 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
 - `top_level_dated_stores`, placement 로 뽑던 두 목록, `decision_audit` 줄, `wire-capture` 의 시작 정리를 지운다.
 - `Dated_jsonl.create` 에서 `?retention_days` 를 지운다. append 마다 handle 을 새로 만드는 곳이 5곳 있는데, 거기에 이 인자를 넘기면 append 마다 정리가 돈다. 하루에 한 번이라는 표시가 handle 안에 있기 때문이다. 정리를 한 곳으로 모으면 이 문제가 생기지 않는다.
 - 용량 한도(`?max_bytes`)는 `create` 의 인자로 그대로 둔다. append 하는 handle 만 쓰는 값이라 읽는 handle 과 어긋나지 않는다. 용량 정리 테스트도 지금처럼 작은 값을 넘긴다.
-- `Keeper_observability_artifact_registry` 의 다섯 행이 `retention_owner = "Server_runtime_startup_maintenance"` 를 문자열로 들고 있다. 정리의 자리가 바뀌면 이 문자열도 같이 고친다.
+- `Keeper_observability_artifact_registry.retention_owner` 가 정리의 주인을 글자로 적는다. 날짜별 store 넷은 `Dated_jsonl_operator_window`(`"Dated_jsonl.Store"`), runtime manifest 는 `Startup_flat_file_mtime`(`"Server_runtime_startup_maintenance"`)이다. 정리의 자리가 바뀌면 이 함수의 글자도 같이 고친다.
 - 날짜별이 아닌 폴더(`logs`, `trajectories`, `keeper_chat_events`, `keeper_turn_events`, `messages`, `raw-traces`, `runtime-manifests`)는 지금 줄 그대로 둔다(§6).
 
 ### 4.4 지금 있는 store 의 규칙 (D4)
@@ -308,21 +309,18 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
 - 중간: `create` 43곳의 분류는 조사 에이전트가 읽은 표다. `masc_root` 를 인자로 받는 12곳이 실제로 어느 root 를 받는지는 끝까지 따라가지 않았다. 항목마다 `root` 를 답하려면 구현 전에 이 12곳을 따라가야 한다. `Assigned` 줄이 언제 쓰이는지(턴마다, `tools/list` 마다)는 호출 자리만 보았다.
 - 모른다: 테스트 123곳을 옮기는 데 드는 품. 날짜 경로를 직접 만드는 파일들이 `Dated_jsonl` 을 거치지 않는 까닭. 빌드와 테스트는 아무것도 돌리지 않았다. 이 문서는 설계뿐이다.
 
-## 9. 열어 둔 물음
+## 9. 운영자가 정한 것
 
-- Q1. tool events 를 계속 쓸 것인가. 읽는 코드가 없다.
-  - (가) 지금처럼 쓰고 운영자 창으로 지운다. 30일이면 586MB, 7일이면 129MB.
-  - (나) 그 agent 의 도구 목록이 바뀔 때만 `Assigned` 를 쓴다. 2026-10-12 기준으로 16,005줄이 276줄이 된다. 이때 창으로 지우면, 목록이 30일 넘게 안 바뀐 agent 는 `Assigned` 줄이 하나도 안 남는다. 읽을 계획인 RFC 는 "첫 호출 전 마지막 `Assigned`"를 찾으므로, (나)를 고르면 이 store 의 규칙을 다시 정해야 한다.
-  - (다) 읽는 쪽이 생길 때까지 쓰지 않고 모듈을 지운다.
-- Q2. verdicts 를 `Kept` 로 둘 것인가, 날수를 줄 것인가.
-- Q3. 운영자 창의 기본값. RFC-0103 은 기본을 끄자고 했고 지금 코드는 30일이다. 이 RFC 는 30일을 그대로 둔다. RFC-0103 을 닫을지 정해야 한다.
-- Q4. `tool_usage` 의 기본을 무엇으로 볼 것인가. `.ml` 은 "안 지움", `.mli` 는 30일, 실제 동작은 운영자 창이다. 이 RFC 는 실제 동작인 운영자 창으로 맞춘다.
-- Q5. `continuity-requests` 는 진단용이다. 며칠치가 있어야 진단에 쓸 수 있는가. 이 store 를 읽는 코드를 더하는 열린 PR 은 없다(2026-10-13 검색).
-- Q6. 기본이 아닌 클러스터를 실제로 쓰는가. 안 쓴다면 root 를 하나로 줄이고 `root` 답을 지우는 쪽이 더 단순하다.
-- Q7. telemetry, tool_calls, agent-core-events, tool_usage 의 자기 변수를 지워도 되는가. 이 RFC 는 지운다(§4.4).
-  - 남기는 쪽을 고르면 그 store 는 자기 변수만 따른다. 이때 달라지는 것은 셋이다. 창보다 긴 값이 듣는다. 0 을 주면 지우지 않는다. 운영자가 창을 30일보다 짧게 줄여도 이 store 들은 자기 기본값 30일에 남는다.
-  - 이 장비의 `~/.zshenv`, `~/.zshrc`, `~/.config/masc` 에는 네 변수가 없다. 서버가 다른 길로 받는 환경은 확인하지 않았다.
-- Q8. `Shared_audit` 모듈을 지울 것인가. `lib` 와 `bin` 에서 부르는 곳이 없다.
+2026-10-13 에 운영자가 답했다.
+
+- Q1. tool events 는 지금처럼 쓰고 운영자 창으로 지운다.
+- Q2. verdicts 는 `Kept` 다.
+- Q3. 운영자 창의 기본값은 30일 그대로 둔다. 장비마다 `runtime.toml` 로 줄인다.
+- Q4. `tool_usage` 는 운영자 창을 따른다(Q7 의 결과).
+- Q5. `continuity-requests` 는 운영자 창을 따른다.
+- Q6. 기본이 아닌 클러스터는 쓰지 않는다. root 를 하나로 줄이는 일은 이 RFC 밖에서 한다(#42837).
+- Q7. telemetry, tool_calls, agent-core-events, tool_usage 의 자기 변수 넷을 지운다.
+- Q8. `Shared_audit` 모듈을 지운다.
 
 ## 10. 구현 순서
 
@@ -337,3 +335,26 @@ Native Stack 하나로 올린다.
    - 이 조건이 빠지면 옛 자리의 파일은 어느 정리도 맡지 않는다. `Kept` 로 두려는 verdicts 는 읽히지 않는 자리에 남는다.
 
 Q1 의 답이 (나)나 (다)면 그 일은 이 스택과 따로 한다.
+
+## 11. 구현 결과
+
+Native Stack #42853 의 일곱 층이 2026-10-13 에 한 번에 main 에 들어갔다.
+
+| PR | 한 일 | §10 의 단계 |
+|---|---|---|
+| #42847 | `Dated_jsonl.Store` 목록과 `location` 을 더했다 | 1 |
+| #42848, #42849, #42850 | base root, 클러스터 root, Keeper 별 호출처를 목록으로 옮겼다 | 2 |
+| #42878 | 정리가 목록의 규칙대로 지운다. `?retention_days` 와 자기 변수 넷, §4.3 의 손으로 적은 목록을 지웠다 | 4, 3 의 일부 |
+| #42880 | 빠진 6개 중 다섯을 `Operator_window` 로, verdicts 를 `Kept` 로 두었다 | 5 |
+| #42884 | `open_store` 만 남기고 옛 `create` 를 지웠다. `Jsonl_writer.dated_path*` 를 `Dated_jsonl.Store` 로 옮겼다. `Shared_audit` 를 지웠다(Q8) | 3 |
+
+이 문서와 다른 곳은 셋이다.
+
+- 순서. §10 은 3단계(옛 문 지우기)를 정리보다 먼저 두었다. 실제로는 `?retention_days` 만 정리 층(#42878)에서 지우고, 옛 `create` 와 `dated_path*` 는 맨 위 층(#42884)에서 지웠다. 스택이 한 번에 들어갔으므로 main 에서 보이는 결과는 같다.
+- `wire-capture` 는 서버가 뜰 때 한 번 지우던 코드를 지웠다. 이제 다른 store 와 함께 정리가 서버가 뜰 때와 24시간마다 자기 날수(`Own_days`)로 지운다.
+- 5단계의 선행 조건은 채우지 못했다. 병합 때 옛 자리 `<base>/data/{tool-events,keeper-wake-payload,verdicts}/2026-10/13.jsonl` 세 파일이 남아 있었다. 서버가 그 이름으로 새 자리에 쓰고 있어서, 서버를 멈춘 사이에 옛 파일을 새 파일 앞에 붙이고 지운다. 이 일은 #42880 이 든 빌드를 띄우기 전에 한다.
+
+이 RFC 밖에 남은 일:
+
+- #42891: 정리가 폴더 하나의 `Sys_error` 로 그날 정리를 멈춘다. 지우지 못한 파일도 지운 수에 센다. 둘 다 이 스택 전부터 있던 모양이다.
+- #42837: root 를 하나로 줄인다(Q6).

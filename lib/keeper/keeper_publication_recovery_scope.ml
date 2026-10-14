@@ -31,5 +31,12 @@ let resolve_turn_resources ~provider ~base_path ~keeper_name =
       { entry
       ; publication_recovery = { provider; keeper_name = entry.name }
       }
-  | Some (_, health) -> Error (Registry_entry_unhealthy health)
+  | Some
+      ( _
+      , (( Keeper_registry.Lifecycle_transaction_reserved _
+         | Keeper_registry.Meta_validation_failed _
+         | Keeper_registry.Required_field_missing _
+         | Keeper_registry.Base_path_mismatch _
+         | Keeper_registry.Name_mismatch _ ) as health) ) ->
+    Error (Registry_entry_unhealthy health)
 ;;

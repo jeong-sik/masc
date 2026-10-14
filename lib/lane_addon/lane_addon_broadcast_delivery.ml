@@ -79,7 +79,9 @@ let initial json =
         | `String name -> Ok (name::rest) | _ -> Error (Corrupt "recipient must be text")) names (Ok [])
     | _ -> Error (Corrupt "recipients must be a list") in
   let payload = {sender_authority;caller;operation_id;artifact_sha256;content;recipients} in
-  let* () = validate payload |> Result.map_error (function Invalid_input e -> Corrupt e | e -> e) in
+  let* () = validate payload |> Result.map_error (function
+    | Invalid_input e -> Corrupt e
+    | (Conflict | Unknown_operation | Corrupt _ | Io_error _ | Settlement_failed _) as e -> e) in
   let* workspace_request_id = request_id payload in
   Ok {payload;workspace_request_id;workspace=Uncommitted;
       recipients=List.map (fun name -> name,Pending None) recipients}
@@ -91,7 +93,7 @@ let transition record json =
           (match List.assoc "seq" f,record.workspace with
            | `Int seq,Uncommitted when seq>0 -> Ok {record with workspace=Committed seq}
            | `Int seq,Committed previous when seq=previous -> Ok record
-           | _ -> Error (Corrupt "contradictory workspace commit"))
+           | _,(Uncommitted | Committed _) -> Error (Corrupt "contradictory workspace commit"))
       | Some (`String "recipient") ->
           let* f = exact ["event";"recipient";"state";"error"] json in
           let* recipient=text f "recipient" in let* state=text f "state" in
@@ -106,7 +108,8 @@ let transition record json =
            | Committed _,Some (Pending _),_ | Committed _,Some Accepted,Accepted ->
                Ok {record with recipients=List.map (fun (name,old) ->
                  name,(if name=recipient then next else old)) record.recipients}
-           | _ -> Error (Corrupt "recipient not admitted, commit absent or accepted state regressed"))
+           | (Committed _, Some (Accepted), Pending _) | (Committed _, None, _)
+           | (Uncommitted, _, _) -> Error (Corrupt "recipient not admitted, commit absent or accepted state regressed"))
       | Some _ | None -> Error (Corrupt "unknown delivery event"))
   | _ -> Error (Corrupt "delivery event must be an object")
 let decode bytes =
@@ -145,7 +148,10 @@ let settle_marker t filename receipt =
   match remove_marker t filename with
   | Ok () -> receipt
   | Error error ->
-      let detail=match error with Io_error detail -> detail | _ -> "pending index cleanup failed" in
+      let detail=match error with
+        | Io_error detail -> detail
+        | Invalid_input _ | Conflict | Unknown_operation | Corrupt _ | Settlement_failed _ ->
+          "pending index cleanup failed" in
       {receipt with settlement_error=Some (match receipt.settlement_error with
         | None -> detail | Some previous -> previous ^ "; " ^ detail)}
 type transaction_mode = Admit_operation | Update_operation
@@ -269,7 +275,7 @@ type journal_reconciliation =
 let pending_markers_after_scan t ~after_scan = protect (fun () ->
   let names = match Fs_compat.exact_path_kind (pending_dir t) with
     | Fs_compat.Exact_missing -> []
-    | _ -> Fs_compat.read_dir (pending_dir t) |> List.sort String.compare in
+    | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ -> Fs_compat.read_dir (pending_dir t) |> List.sort String.compare in
   after_scan ();
   Ok names)
 let pending_markers t = pending_markers_after_scan t ~after_scan:(fun () -> ())

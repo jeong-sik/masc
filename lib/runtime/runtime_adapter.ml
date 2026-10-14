@@ -151,6 +151,9 @@ let selected_credential_env key =
 type credential_requirement =
   | Reference of Runtime_schema.credential
   | Not_required
+  | Missing_declared_credential of { provider_id : string }
+      (** The catalog row says the endpoint takes an API key and the runtime
+          row declares no credential; the deployment must name one. *)
   | Unknown_provider
 
 let explicit_credential_requirement = function
@@ -169,11 +172,13 @@ let credential_requirement
   | None ->
     (match find_registry_entry provider_id with
      | Some entry ->
-       let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
-       (* An empty [api_key_env] is how the catalog declares a provider that
-          takes no key; the schema requires the field and allows it to be
-          empty. Two of the shipped rows use it. *)
-       if String.trim env = "" then Not_required else explicit_credential_requirement (Runtime_schema.Env env)
+       (* The catalog states whether the endpoint takes a key
+          ([requires_api_key]); which environment variable holds it is
+          deployment config, so a key-needing provider with no declared
+          credential is a refusal, not a silent empty key. *)
+       if entry.Llm_provider.Provider_registry.defaults.requires_api_key
+       then Missing_declared_credential { provider_id }
+       else Not_required
      | None -> Unknown_provider)
 ;;
 
@@ -183,7 +188,7 @@ let credential_requirement
 let effective_credential_reference ~provider_id credential =
   match credential_requirement ~provider_id credential with
   | Reference reference -> Some reference
-  | Not_required | Unknown_provider -> None
+  | Not_required | Missing_declared_credential _ | Unknown_provider -> None
 ;;
 
 let api_key_from_env key =
@@ -224,18 +229,12 @@ let api_key_from_file path =
         else Ok value
 ;;
 
-let api_key_of_credential ?registry_entry (credential : Runtime_schema.credential option) =
+let api_key_of_credential ?registry_entry:_ (credential : Runtime_schema.credential option) =
   match credential with
   | Some (Env key) -> Ok (api_key_from_env key)
   | Some (Inline value) -> Ok value
   | Some (File path) -> api_key_from_file path
-  | None ->
-    Ok
-      (match registry_entry with
-       | Some entry ->
-         let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
-         if env = "" then "" else api_key_from_env env
-       | None -> "")
+  | None -> Ok ""
 ;;
 
 (* --- Provider kind resolution --- *)
@@ -247,6 +246,11 @@ let resolve_credential_requirement = function
        is a guess, and it used to be a silent one: discovery resolved [Ok ""]
        and reported success without a credential. *)
     Error "No provider credential is configured and the provider has no catalog entry"
+  | Missing_declared_credential { provider_id } ->
+    Error
+      (Printf.sprintf
+         "provider %S requires an API key and declares no credential: add           [providers.%s.credentials] with the environment variable that holds it"
+         provider_id provider_id)
   | Not_required -> Ok (Llm_provider.Secret.of_string "")
   | Reference reference ->
     (match api_key_of_credential (Some reference) with
@@ -371,7 +375,12 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
       (match effective_provider_kind ?registry_entry provider with
        | Some Llm_provider.Provider_config.Ollama ->
          Llm_provider.Provider_config.OpenAI_compat
-       | Some kind -> kind
+       | Some
+           (( Llm_provider.Provider_kind.Anthropic
+            | Llm_provider.Provider_kind.Kimi
+            | Llm_provider.Provider_kind.OpenAI_compat
+            | Llm_provider.Provider_kind.Gemini
+            | Llm_provider.Provider_kind.Glm ) as kind) -> kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api ->
     (match effective_provider_kind ?registry_entry provider with
@@ -414,12 +423,21 @@ let normalize_http_request_path ~kind ~base_url ~request_path =
   match kind with
   | Llm_provider.Provider_config.OpenAI_compat ->
     normalize_openai_compat_request_path ~base_url ~request_path
-  | _ -> request_path
+  | Llm_provider.Provider_kind.Anthropic
+  | Llm_provider.Provider_kind.Kimi
+  | Llm_provider.Provider_kind.Ollama
+  | Llm_provider.Provider_kind.Gemini
+  | Llm_provider.Provider_kind.Glm -> request_path
 
 let default_http_request_path ~kind ~base_url =
   let request_path = match kind with
     | Llm_provider.Provider_config.OpenAI_compat -> Masc_network_defaults.chat_completions_path
-    | _ -> Llm_provider.Provider_config.request_path_default_for_kind kind in
+    | Llm_provider.Provider_kind.Anthropic
+    | Llm_provider.Provider_kind.Kimi
+    | Llm_provider.Provider_kind.Ollama
+    | Llm_provider.Provider_kind.Gemini
+    | Llm_provider.Provider_kind.Glm ->
+      Llm_provider.Provider_config.request_path_default_for_kind kind in
   normalize_http_request_path ~kind ~base_url ~request_path
 
 let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~registry_entry ~kind
@@ -461,7 +479,26 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
       (match provider.api_format, kind with
        | Runtime_schema.Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
          Masc_network_defaults.chat_completions_path
-       | _ ->
+       | Runtime_schema.Chat_completions_api,
+         ( Llm_provider.Provider_kind.Anthropic
+         | Llm_provider.Provider_kind.Kimi
+         | Llm_provider.Provider_kind.Ollama
+         | Llm_provider.Provider_kind.Gemini
+         | Llm_provider.Provider_kind.Glm )
+       | ( ( Runtime_schema.Messages_api
+           | Runtime_schema.Ollama_api
+           | Runtime_schema.Gemini_api
+           | Runtime_schema.Vertex_gemini_api
+           | Runtime_schema.Codex_app_server_runtime
+           | Runtime_schema.Antigravity_cli_runtime
+           | Runtime_schema.Claude_code_runtime
+           | Runtime_schema.Muse_serve_runtime ),
+           ( Llm_provider.Provider_kind.Anthropic
+           | Llm_provider.Provider_kind.Kimi
+           | Llm_provider.Provider_kind.OpenAI_compat
+           | Llm_provider.Provider_kind.Ollama
+           | Llm_provider.Provider_kind.Gemini
+           | Llm_provider.Provider_kind.Glm ) ) ->
          (match registry_entry with
           | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
           | None -> Llm_provider.Provider_config.request_path_default_for_kind kind))
@@ -634,7 +671,15 @@ let with_client_history_replay
            Llm_provider.Capabilities.reasoning_replay_override =
              Llm_provider.Capabilities.Force_latest_user_turn_tool_calls
          }
-     | Some _ | None -> declared)
+     | Some
+         { Llm_provider.Capabilities.reasoning_replay_override =
+             ( Llm_provider.Capabilities.Force_no_replay
+             | Llm_provider.Capabilities.Force_drop_without_tool_preserve_with_tool
+             | Llm_provider.Capabilities.Force_latest_user_turn_tool_calls
+             | Llm_provider.Capabilities.Force_preserve_always )
+         ; _
+         }
+     | None -> declared)
   | Llm_provider.Provider_kind.Kimi
   | Llm_provider.Provider_kind.OpenAI_compat
   | Llm_provider.Provider_kind.Ollama

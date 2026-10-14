@@ -283,7 +283,11 @@ let discover_with_after_first_pass ~after_first_pass config reference =
                         , ledgers_loaded + 1
                         , (trace_id, revision_option (Some ledger)) :: observations
                         , gaps )))
-                | { Unix.st_kind; _ } ->
+                | { Unix.st_kind =
+                      ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+                      | Unix.S_SOCK ) as st_kind
+                  ; _
+                  } ->
                   (match Keeper_id.Trace_id.of_string entry with
                    | Error _ ->
                      ( candidates
@@ -349,7 +353,11 @@ let discover_with_after_first_pass ~after_first_pass config reference =
                   { operation = Stat_entry; path = ownership_root; cause }
               ]
           }))
-  | { Unix.st_kind; _ } ->
+  | { Unix.st_kind =
+        ( Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+        | Unix.S_SOCK ) as st_kind
+    ; _
+    } ->
     { empty with
       scope = Trace_store_unavailable
     ; gaps = [ Trace_root_not_directory st_kind ]

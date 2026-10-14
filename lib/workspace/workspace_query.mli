@@ -131,8 +131,8 @@ val get_all_messages_raw :
 
 (** List tasks with optional filters, returning a formatted string. *)
 val list_tasks :
-  ?include_done:bool -> ?include_cancelled:bool -> ?status:string ->
-  config -> string
+  ?include_done:bool -> ?include_cancelled:bool ->
+  ?status:Masc_domain.Task_status_tag.t -> config -> string
 (** AwaitingVerification tasks expose request metadata only. Submitted evidence
     is available through the authenticated completion-authority boundary. *)
 

@@ -2,7 +2,7 @@
     captured once for both rotation and pruning; readers share the same store. *)
 type t
 
-val create : base_dir:string -> max_bytes:int -> t
+val create : location:Dated_jsonl.Store.location -> max_bytes:int -> t
 (** Nonpositive [max_bytes] keeps all records. A positive target rotates the
     current file at half the target (at least one byte), leaving room for a
     completed segment, and prunes oldest completed files after an append. The newest

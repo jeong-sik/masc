@@ -99,14 +99,19 @@ let hooks t (original : Agent_core.Hooks.hooks) =
           committed t invocation
         | Agent_core.Hooks.PostToolUseFailure
             { stage = Agent_core.Hooks.Execution; _ } -> ()
-        | _ -> ())
+        | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
+        | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.OnStop _
+        | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ -> ())
       (fun () -> invoke hook event)
   in
   { original with
     pre_tool_use = Some (fun event ->
       (match event with
        | Agent_core.Hooks.PreToolUse { invocation; _ } -> bind t invocation
-       | _ -> ());
+       | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
+       | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PostToolUse _
+       | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _
+       | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ -> ());
       invoke original.pre_tool_use event)
   ; post_tool_use = Some (after original.post_tool_use)
   ; post_tool_use_failure = Some (after original.post_tool_use_failure)

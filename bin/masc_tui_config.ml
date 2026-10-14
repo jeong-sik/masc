@@ -46,7 +46,13 @@ let opening_keeper_of_doc doc =
     (match Keeper_id.Keeper_name.of_string name with
      | Ok name -> Ok (Some name)
      | Error reason -> Error ("Invalid [tui].opening_keeper: " ^ reason))
-  | Some _ -> Error "[tui].opening_keeper must be a Keeper name string"
+  | Some (Keeper_toml_loader.Toml_int _) | Some (Keeper_toml_loader.Toml_float _)
+  | Some (Keeper_toml_loader.Toml_bool _) | Some (Keeper_toml_loader.Toml_string_array _)
+  | Some (Keeper_toml_loader.Toml_array _) | Some (Keeper_toml_loader.Toml_table _)
+  | Some (Keeper_toml_loader.Toml_inline_table _) | Some (Keeper_toml_loader.Toml_table_array _)
+  | Some (Keeper_toml_loader.Toml_offset_datetime _)
+  | Some (Keeper_toml_loader.Toml_local_datetime _) | Some (Keeper_toml_loader.Toml_local_date _)
+  | Some (Keeper_toml_loader.Toml_local_time _) -> Error "[tui].opening_keeper must be a Keeper name string"
 
 let last_chat_keeper_of_doc doc =
   match List.assoc_opt (tui_table ^ ".last_chat_keeper") doc with
@@ -55,7 +61,13 @@ let last_chat_keeper_of_doc doc =
       (match Keeper_id.Keeper_name.of_string name with
        | Ok name -> Ok (Some name)
        | Error reason -> Error ("Invalid [tui].last_chat_keeper: " ^ reason))
-  | Some _ -> Error "[tui].last_chat_keeper must be a Keeper name string"
+  | Some (Keeper_toml_loader.Toml_int _) | Some (Keeper_toml_loader.Toml_float _)
+  | Some (Keeper_toml_loader.Toml_bool _) | Some (Keeper_toml_loader.Toml_string_array _)
+  | Some (Keeper_toml_loader.Toml_array _) | Some (Keeper_toml_loader.Toml_table _)
+  | Some (Keeper_toml_loader.Toml_inline_table _) | Some (Keeper_toml_loader.Toml_table_array _)
+  | Some (Keeper_toml_loader.Toml_offset_datetime _)
+  | Some (Keeper_toml_loader.Toml_local_datetime _) | Some (Keeper_toml_loader.Toml_local_date _)
+  | Some (Keeper_toml_loader.Toml_local_time _) -> Error "[tui].last_chat_keeper must be a Keeper name string"
 
 let opening_of_doc doc =
   match List.assoc_opt (tui_table ^ ".opening") doc with
@@ -72,7 +84,13 @@ let opening_of_doc doc =
      | Error reason -> Error reason)
   | Some (Keeper_toml_loader.Toml_string value) ->
     Error ("Unknown [tui].opening: " ^ value)
-  | Some _ -> Error "[tui].opening must be overview, last, or keeper"
+  | Some (Keeper_toml_loader.Toml_int _) | Some (Keeper_toml_loader.Toml_float _)
+  | Some (Keeper_toml_loader.Toml_bool _) | Some (Keeper_toml_loader.Toml_string_array _)
+  | Some (Keeper_toml_loader.Toml_array _) | Some (Keeper_toml_loader.Toml_table _)
+  | Some (Keeper_toml_loader.Toml_inline_table _) | Some (Keeper_toml_loader.Toml_table_array _)
+  | Some (Keeper_toml_loader.Toml_offset_datetime _)
+  | Some (Keeper_toml_loader.Toml_local_datetime _) | Some (Keeper_toml_loader.Toml_local_date _)
+  | Some (Keeper_toml_loader.Toml_local_time _) -> Error "[tui].opening must be overview, last, or keeper"
 
 (* Remember a chat target only when [opening] is [Last] and the target
    changes. The edit shares Runtime's config write lock with other settings. *)

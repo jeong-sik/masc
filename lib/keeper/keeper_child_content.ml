@@ -60,7 +60,18 @@ let validate (value : view) =
     | Parent_input_refused Binding.Unknown_parent,Some _ -> Error (Invalid_view "unknown parent is present")
     | Original_parent_input (Command_inherited_parent_input {stamp_uuid}),Some _ -> identity "stamp_uuid" stamp_uuid
     | Original_parent_input (Explicit_parent_input | Response_inherited_parent_input),Some _
-    | Parent_input_refused _,_ -> Ok () in
+    | Parent_input_refused
+        ( Binding.Missing_ticket
+        | Binding.Conflicting_invocation
+        | Binding.Foreign_session
+        | Binding.Foreign_invocation
+        | Binding.Unknown_parent
+        | Binding.Conflicting_parent_provenance
+        | Binding.Missing_assistant_evidence
+        | Binding.Unattributed_assistant
+        | Binding.Rejected_assistant _
+        | Binding.Input_not_in_group
+        | Binding.Conflicting_assistant_evidence ),(None | Some _) -> Ok () in
   Ok value
 
 let obj fields = `Assoc fields
@@ -78,8 +89,7 @@ let input_rejection_to_string = function
 let rejection_to_json = function
   | Binding.Rejected_assistant reason -> obj ["kind",str "rejected_assistant";
       "input_rejection",str (input_rejection_to_string reason)]
-  | reason ->
-      let kind = match reason with
+  | (Keeper_claude_task_binding.Missing_ticket | Keeper_claude_task_binding.Conflicting_invocation | Keeper_claude_task_binding.Foreign_session | Keeper_claude_task_binding.Foreign_invocation | Keeper_claude_task_binding.Unknown_parent | Keeper_claude_task_binding.Conflicting_parent_provenance | Keeper_claude_task_binding.Missing_assistant_evidence | Keeper_claude_task_binding.Unattributed_assistant | Keeper_claude_task_binding.Input_not_in_group | Keeper_claude_task_binding.Conflicting_assistant_evidence) as reason -> let kind = match reason with
         | Binding.Missing_ticket -> "missing_ticket" | Conflicting_invocation -> "conflicting_invocation"
         | Foreign_session -> "foreign_session" | Foreign_invocation -> "foreign_invocation"
         | Unknown_parent -> "unknown_parent" | Conflicting_parent_provenance -> "conflicting_parent_provenance"

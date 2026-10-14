@@ -346,7 +346,7 @@ kind = "kimi"
 identity_kinds = ["kimi", "openai_compat"]
 base_url = "https://api.kimi.com/coding"
 request_path = "/v1/messages"
-api_key_env = "KIMI_API_KEY"
+auth = "api-key"
 capabilities_base = "kimi"
 identity_hosts = ["api.kimi.com"]
 |}
@@ -2690,7 +2690,7 @@ id = "ollama_cloud"
 kind = "openai_compat"
 base_url = "https://ollama.example/v1"
 request_path = "/chat/completions"
-api_key_env = ""
+auth = "none"
 supports_parallel_tool_suppression = true
 
 [[models]]

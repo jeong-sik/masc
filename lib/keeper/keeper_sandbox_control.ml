@@ -727,7 +727,12 @@ let repository_checkouts_json_with_budget_impl
             (match catalog, scan with
              | Ok _, Ok (Keeper_playground_checkouts.Partial { limit = Checkout_budget_exhausted _; _ }) ->
                "inspection_budget_exhausted"
-             | Ok _, Ok _ -> "available"
+             | (Ok _, Ok (Keeper_playground_checkouts.Complete _))
+             | ( Ok _
+               , Ok
+                   (Keeper_playground_checkouts.Partial
+                     { limit = Entry_budget_exhausted _ | Directory_unreadable _; _ }) )
+               -> "available"
              | Error _, _ -> "catalog_unavailable"
              | Ok _, Error _ -> "filesystem_unavailable") )
       ; "scan", Keeper_playground_checkouts.scan_json scan
@@ -823,9 +828,6 @@ let preflight_status ~image ~timeout_sec () =
 let preflight_ok (preflight : Keeper_sandbox_runtime.docker_preflight option) =
   Option.map (fun (p : Keeper_sandbox_runtime.docker_preflight) -> p.ok) preflight
 
-(* The [Local] arm that opened this went with the profile: every keeper runs
-   under a backend now, so the answer is about containers from the first
-   line. *)
 let container_mode (meta : keeper_meta) containers =
   match meta.sandbox_profile with
   | Micro_vm ->
@@ -851,8 +853,6 @@ let container_mode (meta : keeper_meta) containers =
   | Remote_ssh -> "remote_ssh"
 
 let why_no_container (meta : keeper_meta) ~preflight containers =
-  (* "sandbox_profile=local" was the first answer here. No keeper can report
-     it now, so the reasons below are the whole list. *)
   if containers <> [] then
     None
   else
@@ -1170,7 +1170,7 @@ let logs_json ~(config : Workspace.config) ~keeper_name ~timeout_sec ~tail () =
                let error =
                  match status with
                  | Unix.WEXITED 0 -> `Null
-                 | status ->
+                 | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status ->
                    `String
                      (Printf.sprintf "log command failed (%s)"
                         (Keeper_sandbox_exec_failure.status_label status))

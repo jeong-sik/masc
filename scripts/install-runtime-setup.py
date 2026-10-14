@@ -240,9 +240,15 @@ def render(spec, binary=None, base_path=None):
             valid = False
         if not valid:
             raise SetupError('endpoint must be an HTTP(S) URL without embedded credentials, query or fragment')
-        key = text(spec, 'api_key_env')
-        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
-            raise SetupError('api_key_env must name an environment variable, not a credential value')
+        key = spec.get('api_key_env', '')
+        credential_file = spec.get('credential_file', '')
+        if key:
+            if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
+                raise SetupError('api_key_env must name an environment variable, not a credential value')
+        elif (not isinstance(credential_file, str) or not credential_file
+                or credential_file != credential_file.strip()
+                or any(ord(c) < 32 for c in credential_file) or not os.path.isabs(credential_file)):
+            raise SetupError('a named catalog provider needs api_key_env or an absolute credential_file')
         provider = text(spec, 'provider_id')
         model_key = provider + '-' + text(spec, 'model_key')
         runtime = ''
@@ -251,7 +257,8 @@ def render(spec, binary=None, base_path=None):
                                                        'protocol': protocol, 'endpoint': endpoint})
             runtime += table(('providers', provider, 'healthcheck'),
                              {'path': '/api/tags' if choice == 'ollama' else '/models'})
-            runtime += table(('providers', provider, 'credentials'), {'type': 'env', 'key': key})
+            credential = {'type': 'env', 'key': key} if key else {'type': 'file', 'path': credential_file}
+            runtime += table(('providers', provider, 'credentials'), credential)
         model_fields = {'api-name': model, 'tools-support': spec['tools'], 'streaming': spec['streaming']}
         if spec.get('reasoning_effort'):
             model_fields.update(**{'thinking-support': True, 'reasoning-effort': text(spec, 'reasoning_effort')})
@@ -741,6 +748,7 @@ def connection_sources(binary, inventory):
                       choice=PROTOCOL_CHOICES.get(integration.get('protocol')),
                       endpoint=integration.get('endpoint') or '', command=integration.get('command') or '',
                       api_key_env=integration.get('api_key_env') or '',
+                      requires_api_key=bool(integration.get('requires_api_key')),
                       credential_kind=integration.get('credential_kind', 'env' if integration.get('api_key_env') else 'none'),
                       credential_file=integration.get('credential_file'), provider_timeout_s=integration.get('provider_timeout_s'),
                       account_home=integration.get('account_home'),
@@ -749,10 +757,13 @@ def connection_sources(binary, inventory):
         # A catalog-advertised new connection carries the provider's own name,
         # so the wizard renders a named provider instead of an anonymous one.
         # verification_support absent means an older binary that predates the
-        # field; those rows were always response-tool verified.
+        # field; those rows were always response-tool verified. Catalog rows
+        # state whether a key is needed (requires_api_key) rather than naming
+        # an environment variable, and classify the same either way.
         if (integration.get('setup_support') == 'new_connection'
                 and integration.get('protocol') in PROTOCOL_CHOICES
-                and integration.get('api_key_env') and integration.get('endpoint')
+                and (integration.get('api_key_env') or integration.get('requires_api_key'))
+                and integration.get('endpoint')
                 and integration.get('verification_support', 'response_tool') == 'response_tool'):
             source['catalog_provider'] = dict(declared=integration.get('origin') == 'runtime_config')
         sources.append(source)
@@ -785,6 +796,8 @@ def source_label(source):
         status = 'CLI found; sign-in checked after selection' if source.get('command_path') else 'CLI needs installation'
     elif key:
         status = 'API key found; account access will be checked' if os.environ.get(key) else 'API key needed; enter it privately after selection'
+    elif source.get('requires_api_key'):
+        status = 'API key needed; enter it privately after selection'
     else:
         status = endpoint or 'configured connection'
     return source['label'] + ' — ' + status
@@ -1298,7 +1311,7 @@ def prepare_connection(binary, source, credentials):
         selected = pick('Choose the running local server address', urls + ['Another API URL'])[0]
         source['endpoint'] = urls[selected] if selected < len(urls) else ask_text('API base URL')
     has_credential = bool(source.get('credential_file') or (source['api_key_env'] and os.environ.get(source['api_key_env'])))
-    if source['api_key_env'] and not has_credential and credentials is not None:
+    if (source['api_key_env'] or source.get('requires_api_key')) and not has_credential and credentials is not None:
         action = pick(source['label'] + ': account access', [
             'Enter an API key now (hidden, saved for future terminals)',
             'Return to connection selection'])[0]
@@ -1584,6 +1597,8 @@ def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
                     provider_id=source['provider_id'], provider_display_name=source['label'],
                     model_key=model_slug(model['id']),
                     provider_declared=source['catalog_provider'].get('declared') is True)
+        if source.get('credential_file'):
+            spec['credential_file'] = source['credential_file']
         if catalog.get('default_reasoning_effort'):
             spec['reasoning_effort'] = catalog['default_reasoning_effort']
         return render(spec, binary, base_path=base_path)[0], spec

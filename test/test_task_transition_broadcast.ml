@@ -547,9 +547,11 @@ let test_submit_schedules_review_after_log_failure () =
   with_test_env (fun config ~baseline_seq:_ ->
     let task_id = "task-submit-log-failure" in
     seed config (make_task ~id:task_id ~status:(D.InProgress { assignee = owner; started_at = now }));
-    let events_dir = Filename.concat (Workspace_utils_paths_backend.masc_dir config) "events" in
-    let dated = Jsonl_writer.dated_path_now ~base_dir:events_dir in
-    if Sys.file_exists dated.Jsonl_writer.path then Unix.unlink dated.path;
+    let dated =
+      Dated_jsonl.Store.(
+        dated_path_now (at (Workspace.dated_store_root config) Root.Events))
+    in
+    if Sys.file_exists dated.Dated_jsonl.Store.path then Unix.unlink dated.path;
     Unix.mkdir dated.path 0o755;
     let previous = Atomic.get Workspace_hooks.verification_submitted_fn in
     let scheduled = ref None in

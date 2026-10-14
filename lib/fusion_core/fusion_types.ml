@@ -382,7 +382,10 @@ type judge_failure =
   | Internal_error of string
 [@@deriving yojson, show, eq]
 
-let judge_failure_is_timeout = function Timeout -> true | _ -> false
+let judge_failure_is_timeout = function
+  | Timeout -> true
+  | Provider_error _ | Empty_response _ | Empty_result | Build_error _ | Parse_error _
+  | Panels_unavailable _ | Unknown_route _ | Route_unavailable _ | Internal_error _ -> false
 
 let judge_failure_text = function
   | Timeout -> "timeout"

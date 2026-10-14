@@ -41,7 +41,8 @@ let read_snapshot path read =
        | Unix.Unix_error (error, operation, failed_path) ->
          Unavailable (Printf.sprintf "%s: %s: %s" operation failed_path (Unix.error_message error))
        | Sys_error detail -> Unavailable detail)
-    | _ -> Unavailable (path ^ ": snapshot is not a regular file")
+    | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+      Unavailable (path ^ ": snapshot is not a regular file")
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Missing
   | Unix.Unix_error (error, operation, path) ->
@@ -76,7 +77,8 @@ let discover ~keepers_dir =
        with
        | Unix.Unix_error (error, operation, path) -> Error (failure error operation path)
        | Sys_error detail -> Error detail)
-    | _ -> Error "Keeper memory directory is not a directory"
+    | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+      Error "Keeper memory directory is not a directory"
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) ->
     Error ("Keeper memory directory is missing: " ^ keepers_dir)

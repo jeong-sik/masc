@@ -560,5 +560,34 @@ let%test "a refusal this stage makes before dispatch is Attempt_rejected" =
      | Error.Api
          (Llm_provider.Retry.InvalidRequest
             { reason = Llm_provider.Retry.Attempt_rejected; _ }) -> true
-     | _ -> false)
+     | Error.Api
+         Llm_provider.Retry.(
+           InvalidRequest
+             { reason =
+                 Json_parse_error
+                 | Request_body_refused_by_provider _
+                 | Refusal_body_not_received
+                 | Unknown_invalid_request
+             ; _
+             }
+           | RateLimited _
+           | Overloaded _
+           | ServerError _
+           | AuthError _
+           | AuthorizationError _
+           | PaymentRequired _
+           | NotFound _
+           | ContextOverflow _
+           | InputCapacity _
+           | NetworkError _
+           | Timeout _)
+     | Error.Provider _
+     | Error.Agent _
+     | Error.Mcp _
+     | Error.Config _
+     | Error.Serialization _
+     | Error.Io _
+     | Error.Orchestration _
+     | Error.Internal _
+     | Error.Internal_carried _ -> false)
 ;;

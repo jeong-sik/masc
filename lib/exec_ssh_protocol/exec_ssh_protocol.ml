@@ -178,8 +178,7 @@ let encode_request (r : request) ~stdin : (string, string) result =
   match classify_float r.timeout_sec with
   | FP_nan | FP_infinite ->
     transport_error "request timeout_sec is not finite (%F)" r.timeout_sec
-  | _ ->
-    if asks_a_box_of_v2 r then
+  | FP_normal | FP_subnormal | FP_zero -> if asks_a_box_of_v2 r then
       version_error
         "a v2 frame cannot ask for the %s box: the endpoint's shim speaks v2 and runs \
          every request unboxed"
@@ -369,8 +368,7 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
   (match classify_float timeout_sec with
    | FP_nan | FP_infinite ->
      transport_error "request timeout_sec is not finite (%F)" timeout_sec
-   | _ ->
-     if Int64.compare stdin_len 0L < 0 then
+   | FP_normal | FP_subnormal | FP_zero -> if Int64.compare stdin_len 0L < 0 then
        transport_error "request stdin_len is negative (%Ld)" stdin_len
      else
        Ok { v; argv; env; cwd; remote_root; timeout_sec; stdin_len; mode })
@@ -445,7 +443,8 @@ let execution_receipt_of_json json =
     | Effect, "unrestricted"
     | Observe, "filesystem_and_network_box"
     | Guest_local, "network_box" -> Ok ()
-    | _ -> transport_error "execution receipt mode and plan disagree"
+    | (Effect | Observe | Guest_local), _ ->
+      transport_error "execution receipt mode and plan disagree"
   in
   let* boundary = member ~what "boundary" fields >>= expect_string ~what "boundary" in
   let* boundary = match boundary with

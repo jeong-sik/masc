@@ -16,8 +16,7 @@ type attention_item = {
 }
 
 type recommended_action = {
-  action_type : string;
-  target_type : string;
+  action : Operator_action_catalog.t;
   target_id : string option;
   severity : operator_severity;
   reason : string;
@@ -26,14 +25,13 @@ type recommended_action = {
 
 val keeper_attention_summary :
   name:string ->
-  reason:string option ->
+  reason:Keeper_attention_reason.t ->
   runtime_blocker_summary:string option ->
   string
 (** What one Keeper's attention row says: its name, the attention reason after
-    a colon, and the runtime blocker summary in parentheses --
-    ["lane-smith: paused"], ["yeongsu: runtime_blocked (every candidate
-    refused)"], ["yeongsu (keepalive lost)"]. With neither reading the row is
-    ["<name> needs operator attention"]. *)
+    a colon, and the runtime blocker summary in parentheses when there is one
+    -- ["lane-smith: paused"], ["yeongsu: runtime_blocked (every candidate
+    refused)"]. *)
 
 val severity_rank : operator_severity -> int
 
@@ -47,7 +45,6 @@ val compare_attention : attention_item -> attention_item -> int
 val compare_recommendation : recommended_action -> recommended_action -> int
 
 val attention_item_to_yojson : attention_item -> Yojson.Safe.t
-val recommended_confirm_required : string -> bool
 val recommended_action_to_yojson : actor:string -> recommended_action -> Yojson.Safe.t
 
 val summary_of_attention_items : attention_item list -> Yojson.Safe.t

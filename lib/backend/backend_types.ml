@@ -33,7 +33,6 @@ type health_result = {
 type config = {
   base_path: string;
   node_id: string;
-  cluster_name: string;
   pubsub_max_messages: int;
 }
 
@@ -60,7 +59,6 @@ let generate_node_id () =
 let default_config () = {
   base_path = Common.masc_dirname;
   node_id = generate_node_id ();
-  cluster_name = "default";
   pubsub_max_messages = pubsub_max_messages;
 }
 

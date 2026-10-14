@@ -14,10 +14,7 @@
     2026-05-05 and was removed surgically per audit response;
     if leasing semantics are needed in the future, the design
     should land at the AGENT_CORE runtime layer per RFC-0026 (the
-    same architectural rollback as [admission_queue]).
-    [parse_errors] below is currently unconsumed — the local-runtime
-    status tool that surfaced it was removed — but is retained because
-    it captures runtime.toml load-time parse errors. See
+    same architectural rollback as [admission_queue]). See
     [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
     §7.1 for the verification matrix.
 
@@ -67,7 +64,6 @@ type runtime_snapshot = {
 type pool_state = {
   runtimes : runtime list;
   fingerprint : string;
-  parse_errors : string list;
 }
 (** Snapshot of the pool.  [fingerprint] is recomputed from
     the discovery cache on each load and used by
@@ -85,11 +81,6 @@ val default_pool_label : string
 val reset : unit -> unit
 (** Reinstalls the empty state under the pool lock.  Used by
     tests to clear state between cases. *)
-
-module For_testing : sig
-  val install_pool : runtime list -> unit
-  (** Install a deterministic runtime snapshot under the pool lock. *)
-end
 
 val runtime_id_of_base_url : string -> string
 (** Derives a stable runtime id from a [base_url] (e.g.

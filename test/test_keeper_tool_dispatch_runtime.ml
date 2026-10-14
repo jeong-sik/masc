@@ -5420,9 +5420,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              (match exact_route with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
-                     Keeper_runtime_failure_route.Terminal_effect_runtime_failure
-                 ; _
-                 } ->
+                     Keeper_runtime_failure_route.Terminal_effect_runtime_failure } ->
                ()
              | _ -> fail "typed terminal failure did not reach its exact route");
             let transient_terminal_error =
@@ -5444,9 +5442,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
-                     Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable
-                 ; _
-                 } ->
+                     Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable } ->
                ()
              | Keeper_runtime_failure_route.Retry_after_observed _ ->
                fail "unknown transient terminal effect was requeued"
@@ -7435,7 +7431,7 @@ value = {surface="dashboard", content="must not run"}
       Masc.Keeper_tool_call_log.reset_for_testing ();
       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
       if break_evidence then (
-        let path = Filename.concat (Masc.Workspace.masc_root_dir config) "skill-composition-evidence-v1" in
+        let path = Filename.concat (Masc.Workspace.masc_dir config) "skill-composition-evidence-v1" in
         Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
       Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_automation_executor (Some (function
@@ -7892,7 +7888,7 @@ default = "local.sample"
        if break_evidence
        then (
          let path =
-           Filename.concat (Masc.Workspace.masc_root_dir config) "skill-composition-evidence-v1"
+           Filename.concat (Masc.Workspace.masc_dir config) "skill-composition-evidence-v1"
          in
          Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
        let lane_addon_exports = (Masc.Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name).exports in

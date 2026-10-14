@@ -186,8 +186,7 @@ type operator_disposition_kind =
 val operator_disposition_kind_to_string : operator_disposition_kind -> string
 val operator_disposition_kind_of_string : string -> operator_disposition_kind option
 
-(** Reason paired with [operator_disposition_kind]. Closed set; the wire
-    form is byte-compatible with the pre-typing string. *)
+(** Reason paired with [operator_disposition_kind]. Closed set. *)
 type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted
@@ -260,6 +259,10 @@ type operator_disposition_reason =
   | Reason_unmapped_runtime_state
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string
+
+val operator_disposition_reason_of_string : string -> operator_disposition_reason option
+(** [None] for a string {!operator_disposition_reason_to_string} never
+    writes. *)
 
 (** Derived display pair (disposition, reason) computed from receipt fields.
     Exposed for test access; the runtime path consumes it via [append]. *)

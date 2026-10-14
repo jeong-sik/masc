@@ -283,7 +283,8 @@ let validate_resolution resolution =
   | Scope_unavailable ->
     (match resolution.basis, resolution.observation, resolution.delta with
      | Unavailable, Some observation, None when sample_is_valid observation -> Ok ()
-     | _ -> Error "scope_unavailable resolution has contradictory fields")
+     | (Per_request | Turn_total | Conversation_counter _ | Unavailable), _, _ ->
+       Error "scope_unavailable resolution has contradictory fields")
   | Invalid_observation ->
     (match resolution.observation, resolution.delta with
      | Some observation, None when not (sample_is_valid observation) -> Ok ()
@@ -294,7 +295,12 @@ let validate_resolution resolution =
        , Some observation
        , None )
        when sample_is_valid observation -> Ok ()
-     | _ -> Error "cumulative resolution has contradictory fields")
+     | ( ( Per_request
+         | Turn_total
+         | Conversation_counter { position = Fresh | Resumed; _ }
+         | Unavailable )
+       , _
+       , _ ) -> Error "cumulative resolution has contradictory fields")
 ;;
 
 let to_json resolution =

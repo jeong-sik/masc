@@ -208,7 +208,10 @@ let uses_anthropic_schema_prefill (config : Provider_config.t) messages =
   | ( Provider_config.Anthropic
     , Types.JsonSchema _
     , ({ role = Types.Assistant; _ } : Types.message) :: _ ) -> true
-  | Provider_config.Anthropic, Types.JsonSchema _, _ -> false
+  | ( Provider_config.Anthropic
+    , Types.JsonSchema _
+    , ([] | ({ role = Types.System | Types.User | Types.Tool; _ } : Types.message) :: _) )
+    -> false
   | Provider_config.Anthropic, (Types.Off | Types.JsonMode), _
   | ( ( Provider_config.Kimi
       | Provider_config.OpenAI_compat
@@ -228,7 +231,7 @@ let request_uses_exact_cross_feature (request : Llm_transport.completion_request
   || config.disable_parallel_tool_use
   || (match config.tool_choice with
       | None | Some Types.None_ -> false
-      | Some _ -> true)
+      | Some (Types.Auto) | Some (Types.Any) | Some (Types.Tool _) -> true)
   || Option.is_some config.preserve_thinking
   || Option.is_some config.clear_thinking
   || uses_anthropic_schema_prefill config request.messages
@@ -699,7 +702,8 @@ let%test "JsonMode records syntax-only validation provenance" =
   match normalize_response Types.JsonMode response with
   | Ok { value = `Assoc [ ("accepted", `Bool true) ]; validation = Json_syntax_validated }
     -> true
-  | Ok _ -> fail "returned a different value or provenance than expected"
+  | Ok { value = _; validation = Json_syntax_validated | Provider_schema_requested_client_validation_required }
+    -> fail "returned a different value or provenance than expected"
   | Error e ->
     fail "normalize_response unexpectedly failed: %s" (normalization_error_name e)
 ;;
@@ -717,11 +721,13 @@ let%test "Off reads the prompt-requested JSON locally and refuses other text" =
   (match normalize_response Types.Off (response {|{"accepted":true}|}) with
    | Ok { value = `Assoc [ ("accepted", `Bool true) ]; validation = Json_syntax_validated }
      -> true
-   | Ok _ | Error _ -> false)
+   | Ok { value = _; validation = Json_syntax_validated | Provider_schema_requested_client_validation_required }
+   | Error _ -> false)
   &&
   match normalize_response Types.Off (response "not json") with
   | Error (Invalid_json _) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Incomplete_structured_response _) | Error (Missing_structured_text)
+  | Error (Ambiguous_structured_text _) | Error (Unexpected_structured_content) -> false
 ;;
 
 let%test "canonical fingerprint is sensitive to the frozen response codec" =
@@ -801,7 +807,21 @@ let%test "exact preflight refuses a connect-only wire" =
       ~body_timeout_s:None ~anthropic_thinking_control:None
   with
   | Error (Missing_deadline _) -> true
-  | Error e -> failwith ("connect-only preflight hit another rejection: " ^ rejection_name e)
+  | Error
+      (( Explicit_capability_snapshot_required
+       | Unsupported_output_contract _
+       | Unsupported_exact_cross_feature
+       | Global_admission_not_allowed
+       | Invalid_connect_timeout _
+       | Invalid_body_timeout _
+       | Caller_supplied_header_not_allowed _
+       | Unsupported_image_input
+       | Unsupported_document_input
+       | Unsupported_audio_input
+       | Unsupported_system_prompt
+       | Provider_request_rejected _
+       | Request_serialization_rejected _ ) as e) ->
+    failwith ("connect-only preflight hit another rejection: " ^ rejection_name e)
   | Ok _ -> false
 ;;
 
@@ -856,7 +876,13 @@ let%test "exact preflight still rejects genuinely caller-supplied headers" =
     with
     | Error (Caller_supplied_header_not_allowed reported) ->
       expected_err = Some reported
-    | Error _ -> false
+    | Error (Explicit_capability_snapshot_required) | Error (Unsupported_output_contract _)
+    | Error (Unsupported_exact_cross_feature) | Error (Global_admission_not_allowed)
+    | Error (Invalid_connect_timeout _) | Error (Invalid_body_timeout _)
+    | Error (Missing_deadline _) | Error (Unsupported_image_input)
+    | Error (Unsupported_document_input) | Error (Unsupported_audio_input)
+    | Error (Unsupported_system_prompt) | Error (Provider_request_rejected _)
+    | Error (Request_serialization_rejected _) -> false
     | Ok _ -> expected_err = None in
   test_headers None []
   && test_headers None [ ("Content-Type", "application/json") ]

@@ -47,7 +47,7 @@ let fetch_schema ?base_path id =
           let trimmed = String.trim stdout in
           Hashtbl.replace schema_cache id trimmed;
           Ok trimmed
-        | _ ->
+        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
           Error
             "schema_dump failed; ensure the sidecar's Python deps are installed (run \
              `./run.sh start` once or `uv sync`)"))

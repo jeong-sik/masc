@@ -4,26 +4,16 @@ type 'a context = 'a Tool_operator.context
 
 open Result.Syntax
 
-(* The two surfaces a judgment can be recorded against. Closed, because every
-   per-surface policy below has to answer for each one: the freshness TTL used
-   to be selected by matching the normalized string with a wildcard default of
-   120s, an arm no caller could reach — [normalize_judgment_surface] rejects
-   everything else before the TTL is asked for. A third surface now breaks
-   compilation where the policy lives instead of silently getting 120s. *)
-type judgment_surface =
-  | Command_namespace
-  | Intervene
-
-let judgment_surface_to_string = function
-  | Command_namespace -> "command.namespace"
-  | Intervene -> "intervene"
-;;
-
 let normalize_judgment_surface value =
-  match String.trim value |> String.lowercase_ascii with
-  | "command.namespace" -> Ok Command_namespace
-  | "intervene" -> Ok Intervene
-  | _ -> Error "surface must be one of command.namespace, intervene"
+  match
+    Operator_judgment.surface_of_string (String.trim value |> String.lowercase_ascii)
+  with
+  | Some surface -> Ok surface
+  | None ->
+    Error
+      ("surface must be one of "
+       ^ String.concat ", "
+           (List.map Operator_judgment.surface_to_string Operator_judgment.all_of_surface))
 
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
@@ -32,9 +22,11 @@ let normalize_judgment_target_type value =
       Ok (Operator_judgment.target_type_to_string target_type, target_type)
   | None -> Error Operator_action_constants.workspace_target_type_error
 
+(* Each surface answers for its own freshness default; a new surface stops
+   compiling here instead of falling into a shared default. *)
 let default_fresh_ttl_sec = function
-  | Command_namespace -> 60
-  | Intervene -> 300
+  | Operator_judgment.Command_namespace -> 60
+  | Operator_judgment.Intervene -> 300
 
 let judgment_write_json (ctx : 'a context) args =
   let* surface = normalize_judgment_surface (get_string args "surface" "") in
@@ -47,9 +39,11 @@ let judgment_write_json (ctx : 'a context) args =
   else
     let now_unix = Unix.gettimeofday () in
     let generated_at = Masc_domain.iso8601_of_unix_seconds now_unix in
-    let fresh_ttl_sec =
-      let default = default_fresh_ttl_sec surface in
-      max 1 (get_int args "fresh_ttl_sec" default)
+    let* fresh_ttl_sec =
+      match get_int_opt args "fresh_ttl_sec" with
+      | None -> Ok (default_fresh_ttl_sec surface)
+      | Some ttl when ttl >= 1 -> Ok ttl
+      | Some _ -> Error "fresh_ttl_sec must be at least 1"
     in
     let fresh_until_unix = now_unix +. float_of_int fresh_ttl_sec in
     let fresh_until = Masc_domain.iso8601_of_unix_seconds fresh_until_unix in
@@ -65,11 +59,9 @@ let judgment_write_json (ctx : 'a context) args =
       | None -> Error "confidence is required"
     in
     let* confidence =
-      if Float.is_finite confidence
-         && Float.compare confidence 0.0 >= 0
-         && Float.compare confidence 1.0 <= 0
-      then Ok confidence
-      else Error "confidence must be a number between 0.0 and 1.0"
+      Option.to_result
+        ~none:"confidence must be a number between 0.0 and 1.0"
+        (Operator_judgment.Confidence.of_float confidence)
     in
     (* The writer is the caller's authenticated name, never a body field:
        a body field would let any caller record a judgment as another
@@ -79,7 +71,7 @@ let judgment_write_json (ctx : 'a context) args =
     in
     let recommended_action = Json_util.get_object args "recommended_action" in
     let judgment =
-      Operator_judgment.record ctx.config ~surface:(judgment_surface_to_string surface)
+      Operator_judgment.record ctx.config ~surface
         ~target_type:judgment_target_type ~target_id ~summary ~confidence
         ?model_name:(get_string_opt args "model_name")
         ?runtime_name:(get_string_opt args "runtime_name")
@@ -103,7 +95,7 @@ let judgment_latest_json (_ctx : 'a context) args =
   let require_fresh = get_bool args "require_fresh" true in
   let judgment =
     match
-      Operator_judgment.latest_active _ctx.config ~surface:(judgment_surface_to_string surface)
+      Operator_judgment.latest_active _ctx.config ~surface
         ~target_type:judgment_target_type ~target_id
     with
     | Some value when (not require_fresh) || Operator_judgment.is_fresh value ->
@@ -119,34 +111,18 @@ let judgment_latest_json (_ctx : 'a context) args =
            | None -> `Null );
        ])
 
+(* [action] is the parsed catalog member, so executing a request never asks
+   whether its action exists. The target type is not a field: the catalog
+   decides it ({!Operator_action_catalog.target_type}), and a request that
+   names another one is refused in [action_request_of_args]. A staged request
+   goes back to strings in the pending-confirm store and is read again by
+   [action_request_of_pending_confirm]. *)
 type action_request = {
   actor : string;
-  action_type : string;
-  target_type : string;
+  action : Operator_action_catalog.t;
   target_id : string option;
   payload : Yojson.Safe.t;
 }
-
-let canonical_action_type action_type = action_type
-
-let normalize_action_target_type target_type =
-  let normalized = String.trim target_type |> String.lowercase_ascii in
-  if String.equal normalized ""
-  then Ok ""
-  else
-    match Operator_action_constants.target_type_of_string normalized with
-    | Some target_type ->
-        Ok (Operator_action_constants.target_type_to_string target_type)
-    | None -> Error Operator_action_constants.invalid_target_type_message
-
-let default_target_type_for action_type =
-  match action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject"
-    -> Operator_action_constants.workspace_target_type
-  | "keeper_message" | "keeper_probe" -> Operator_action_constants.keeper_target_type
-  | action when String.equal action Operator_action_constants.keeper_recover ->
-      Operator_action_constants.keeper_target_type
-  | _ -> ""
 
 let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
   let max_attempts = 10 in
@@ -181,51 +157,66 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
 let resolved_actor ?actor_hint (ctx : 'a context) =
   normalized_actor ~context_actor:ctx.agent_name actor_hint
 
-let action_request_of_args ?actor_hint (ctx : 'a context) args =
-  let action_type =
-    get_string args "action_type" "" |> String.trim |> String.lowercase_ascii
-    |> canonical_action_type
-  in
-  let raw_target_type =
-    get_string args "target_type" "" |> String.trim |> String.lowercase_ascii
-  in
-  let actor = resolved_actor ?actor_hint ctx in
+let parse_action_type raw =
+  let normalized = String.trim raw |> String.lowercase_ascii in
+  match Operator_action_catalog.of_string normalized with
+  | Some action -> Ok action
+  | None when String.equal normalized "" -> Error "action_type is required"
+  | None -> Error (Printf.sprintf "unsupported action_type: %s" normalized)
+
+(* A request may leave [target_type] out, or repeat the one its action
+   addresses. *)
+let check_request_target_type action raw =
+  let normalized = String.trim raw |> String.lowercase_ascii in
+  if String.equal normalized ""
+  then Ok ()
+  else
+    match Operator_action_constants.target_type_of_string normalized with
+    | None -> Error Operator_action_constants.invalid_target_type_message
+    | Some named when named = Operator_action_catalog.target_type action -> Ok ()
+    | Some _ ->
+      Error
+        (Printf.sprintf
+           "invalid target_type for %s (expected %s)"
+           (Operator_action_catalog.to_string action)
+           (Operator_action_catalog.target_type_string action))
+
+let action_request_of_args ?actor_hint (ctx : 'a context) args :
+    (action_request, string) result =
+  let* action = parse_action_type (get_string args "action_type" "") in
+  let* () = check_request_target_type action (get_string args "target_type" "") in
   Ok
     {
-      actor;
-      action_type;
-      target_type =
-        if raw_target_type <> "" then raw_target_type
-        else default_target_type_for action_type;
+      actor = resolved_actor ?actor_hint ctx;
+      action;
       target_id = get_string_opt args "target_id";
       payload = get_payload args;
     }
 
-let normalize_request_target_type (request : action_request) =
-  let* target_type =
-    if request.target_type <> "" then normalize_action_target_type request.target_type
-    else Ok (default_target_type_for request.action_type)
-  in
-  Ok { request with target_type }
-
-let delegated_tool_for action_type =
-  match
-    List.find_opt
-      (fun (a : Operator_pending_confirm.available_action) ->
-        String.equal a.action_type action_type)
-      Operator_pending_confirm.available_actions
-  with
-  | Some action -> Ok action.tool_name
-  | None -> Error (Printf.sprintf "unsupported action_type: %s" action_type)
-
-let confirm_required = Operator_action_catalog.requires_confirmation
+(* A stored entry spells its action as a string: its record is declared in
+   [Workspace_hooks], below this library. Reading the store has already
+   refused an entry whose action is not in the catalog, so the error here
+   restates the store's contract; it is not a case this module handles. *)
+let action_request_of_pending_confirm (entry : pending_confirm) :
+    (action_request, string) result =
+  match Operator_action_catalog.of_string entry.action_type with
+  | Some action ->
+    Ok
+      {
+        actor = entry.actor;
+        action;
+        target_id = entry.target_id;
+        payload = entry.payload;
+      }
+  | None -> Error (Printf.sprintf "unsupported action_type: %s" entry.action_type)
 
 let preview_of_action (request : action_request) =
   let base =
     [
       ("actor", `String request.actor);
-      ("action_type", `String request.action_type);
-      ("target_type", `String request.target_type);
+      ("action_type", `String (Operator_action_catalog.to_string request.action));
+      ( "target_type",
+        `String (Operator_action_catalog.target_type_string request.action) );
       ("target_id", Json_util.string_opt_to_json request.target_id);
     ]
   in
@@ -235,16 +226,6 @@ let preview_of_action (request : action_request) =
     | _ -> []
   in
   `Assoc (base @ [ ("payload", `Assoc payload_fields) ])
-
-let validate_target_type expected request =
-  match Operator_action_constants.target_type_of_string request.target_type with
-  | Some actual when actual = expected -> Ok ()
-  | Some _ | None ->
-    Error
-      (Printf.sprintf
-         "invalid target_type for %s (expected %s)"
-         request.action_type
-         (Operator_action_constants.target_type_to_string expected))
 
 let require_target_id request =
   match request.target_id with

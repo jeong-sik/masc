@@ -1485,7 +1485,7 @@ let pad_clock text =
 let continued_mark : style -> string = function
   | User | Inbound | Keeper | Tool -> "\xe2\x94\x82"
   | Thinking _ -> "\xc2\xb7"
-  | style -> speaker_mark style
+  | (Status | Local | Journal | Error | Skill _) as style -> speaker_mark style
 
 
 
@@ -1518,7 +1518,7 @@ let origin_gutter ~origin ~previous ~inner_width entry =
               (match entry.delivery_state with
                | Some state -> speaker_mark Local ^ " " ^ state
                | None -> speaker_mark Local)
-          | style -> speaker_mark style
+          | (Inbound | Keeper | Status | Journal | Error | Skill _ | Thinking _) as style -> speaker_mark style
       in
       Some (mark, 0, display_width mark, 0)
   | Origin_inline ->
@@ -1703,7 +1703,10 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
   let sender_chunks = match origin, entry.style with
     | Origin_bare, (Inbound | Thinking Thinking_arrived) when not (continues_previous ~previous entry) ->
         wrap_words ~max_cells:body_width entry.speaker
-    | _ -> [] in
+    | (Origin_bare, Thinking (Thinking_own))
+    | (Origin_bare, (User | (Keeper | (Status | (Local | (Journal | (Error | (Tool | Skill _))))))))
+    | ((Origin_row | Origin_inline), _) | (Origin_bare, Thinking Thinking_arrived)
+    | (Origin_bare, Inbound) -> [] in
   let sender_rows = List.length sender_chunks in
   let body_chunks = sender_chunks @ body_chunks in
   let body_rows =
@@ -1811,7 +1814,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
            { kind = Spacing; text = ""; gutter = ""; shade = Shade_none;
              style = Status; gutter_rail_cells = 0; gutter_clock_cells = 0;
              gutter_label_at = 0; action = Action_none } :: message_rows
-       | _ -> message_rows)
+       | (Some { style = (User | Inbound | Keeper | Local);_}, [])
+       | (Some { style = (Status | (Journal | (Error | (Tool | (Skill _ | Thinking _)))));_}, _)
+       | (None, _) -> message_rows)
   | Origin_inline | Origin_row ->
       (match timeline_break_row ~previous ~inner_width:pane_width entry with
        | None -> message_rows
@@ -1900,7 +1905,8 @@ let collapse_repeated_body_rows ~inner_width rows =
 let split_before_first_body rows =
   let rec loop prefix = function
     | ({ kind = Body; _ } as opening) :: rest -> List.rev prefix, Some (opening, rest)
-    | row :: rest -> loop (row :: prefix) rest
+    | ({ kind = Metadata _ | Spacing | Viewport_gap _; _ } as row) :: rest ->
+      loop (row :: prefix) rest
     | [] -> List.rev prefix, None
   in
   loop [] rows
@@ -1925,7 +1931,9 @@ let newest_entry_window ~inner_width ~height rows =
     | { kind = Metadata (Timeline_break _); _ } :: rest
       when List.length rows > height ->
         1, rest
-    | _ -> 0, rows
+    | { kind = Metadata (Diagnostic | (Sender | (Origin _ | Continued_at _)));_}::_
+    | { kind = (Body | (Spacing | Viewport_gap _));_}::_ | []
+    | {kind=Metadata (Timeline_break _); _ }::_ -> 0, rows
   in
   (* Diagnostics trail the body, and scrolling back slices physical rows from
      the bottom up, so a diagnostic dropped at the live edge could never be

@@ -51,3 +51,48 @@ let admission_schema = `Assoc [
     "release", `Assoc ["enum", `List [`Null; `String "keeper_stopped";
       `String "credential_expired"; `String "no_credential";
       `String "participant_departed"]]]]
+
+type dos_tool =
+  | Dos_load
+  | Dos_eject
+  | Dos_pass
+  | Dos_meta
+  | Dos_inventory
+  | Dos_screen
+  | Dos_step
+  | Dos_press
+  | Dos_click
+  | Dos_type
+  | Dos_peek
+  | Dos_save
+  | Dos_restore
+[@@deriving enumerate]
+
+let dos_tool_name = function
+  | Dos_load -> "masc_dos_load"
+  | Dos_eject -> "masc_dos_eject"
+  | Dos_pass -> "masc_dos_pass"
+  | Dos_meta -> "masc_dos_meta"
+  | Dos_inventory -> "masc_dos_inventory"
+  | Dos_screen -> "masc_dos_screen"
+  | Dos_step -> "masc_dos_step"
+  | Dos_press -> "masc_dos_press"
+  | Dos_click -> "masc_dos_click"
+  | Dos_type -> "masc_dos_type"
+  | Dos_peek -> "masc_dos_peek"
+  | Dos_save -> "masc_dos_save"
+  | Dos_restore -> "masc_dos_restore"
+
+let dos_tool_of_name name =
+  List.find_opt (fun tool -> String.equal (dos_tool_name tool) name) all_of_dos_tool
+
+type controller_need =
+  | Takes_controller
+  | Hands_controller
+  | No_controller
+
+let controller_need = function
+  | Dos_load | Dos_eject | Dos_step | Dos_press | Dos_click | Dos_type
+  | Dos_restore -> Takes_controller
+  | Dos_pass -> Hands_controller
+  | Dos_meta | Dos_inventory | Dos_screen | Dos_peek | Dos_save -> No_controller

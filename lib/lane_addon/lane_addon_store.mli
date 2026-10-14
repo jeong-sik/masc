@@ -63,12 +63,24 @@ val save_broadcast : t -> instance_id:string -> request_id:string -> Yojson.Safe
 val load_broadcast : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 (** Retain the exact published evidence before sending its idempotent Broadcast.
     Repeated sends read that original artifact, not a changing live binding. *)
+(** One binding file that could not be read as a retained binding. [contents]
+    is the parsed JSON when the file was JSON, so the caller can still say whose
+    record it is. *)
+type unreadable_binding = { path : string; detail : string; contents : Yojson.Safe.t option }
+type binding_reading = { readable : Yojson.Safe.t list; unreadable : unreadable_binding list }
+val read_bindings : t -> (binding_reading, string) result
+(** Reads every binding file on its own. A file that is not JSON, is not an
+    object, lacks an instance id or sequence, or sits beside a misnamed
+    observation file is listed in [unreadable] and does not hide its siblings.
+    The result is [Error] only when the directory cannot be listed or synced.
+    Confirms containing-directory durability after capturing records/absence,
+    including cold reads used to authorize reconciliation. Each readable
+    sequence is reconciled with retained observation filenames so a failed
+    binding write cannot hide a renamed observation. Exact record reads still
+    require their own durability and payload verification. *)
 val bindings : t -> (Yojson.Safe.t list, string) result
-(** Confirms containing-directory durability after capturing records/absence,
-    including cold reads used to authorize reconciliation. *)
-(** Reconciles each binding sequence with retained observation filenames so a
-    failed binding write cannot hide a renamed observation. Exact record reads
-    still require their own durability and payload verification. *)
+(** [read_bindings] for a caller that cannot use a partial reading: [Error]
+    names the first unreadable file. *)
 type binding_inventory = {
   records : (string * Yojson.Safe.t) list;
   issues : (string * string) list;

@@ -6,9 +6,7 @@
 let board_base_path () = Env_config_core.base_path ()
 
 let board_masc_dir () =
-  Workspace_utils.masc_root_dir_from
-    ~base_path:(board_base_path ())
-    ~cluster_name:(Env_config_core.cluster_name ())
+  Common.masc_dir_from_base_path ~base_path:(board_base_path ())
 ;;
 
 type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes

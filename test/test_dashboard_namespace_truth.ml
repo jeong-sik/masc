@@ -243,6 +243,9 @@ let test_dashboard_namespace_truth_empty_workspace () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
+      (* The server initializes its workspace at startup; this is the
+         initialized workspace with nothing in it. *)
+      ignore (Lib.Workspace.init (Lib.Mcp_server.workspace_config state) ~agent_name:None);
       Eio.Switch.run (fun sw ->
         warm_execution_cache ();
         let json =
@@ -251,9 +254,6 @@ let test_dashboard_namespace_truth_empty_workspace () =
             (request "/api/v1/dashboard/namespace-truth")
         in
         let open Yojson.Safe.Util in
-        check string "cluster default"
-          "default"
-          (json |> member "workspace" |> member "status" |> member "cluster" |> to_string);
         check int "pending confirms zero"
           0
           (json |> member "operator" |> member "pending_confirm_summary" |> member "total_count" |> to_int);

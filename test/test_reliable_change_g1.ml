@@ -65,7 +65,6 @@ let test_usage_aggregation_exact_fixture () =
       ; scenario = Matrix_scenario Retry_success
       ; repeat_index = 1
       ; run_id = "run-fixture-1"
-      ; execution_mode = "matrix"
       ; request_or_task_identity = Some "failed-attempt"
       ; run_turn_attempt_identity = Some "attempt-1"
       ; target_revision = Some "rev-1"
@@ -92,7 +91,6 @@ let test_usage_aggregation_exact_fixture () =
       ; scenario = Matrix_scenario Retry_success
       ; repeat_index = 1
       ; run_id = "run-fixture-2"
-      ; execution_mode = "matrix"
       ; request_or_task_identity = Some "successful-attempt"
       ; run_turn_attempt_identity = Some "attempt-2-snap-1"
       ; target_revision = Some "rev-1"
@@ -119,7 +117,6 @@ let test_usage_aggregation_exact_fixture () =
       ; scenario = Matrix_scenario Retry_success
       ; repeat_index = 1
       ; run_id = "run-fixture-3"
-      ; execution_mode = "matrix"
       ; request_or_task_identity = Some "successful-attempt"
       ; run_turn_attempt_identity = Some "attempt-2-snap-2"
       ; target_revision = Some "rev-1"
@@ -146,7 +143,6 @@ let test_usage_aggregation_exact_fixture () =
       ; scenario = Matrix_scenario Retry_success
       ; repeat_index = 1
       ; run_id = "run-fixture-4"
-      ; execution_mode = "matrix"
       ; request_or_task_identity = Some "verifier"
       ; run_turn_attempt_identity = Some "verifier-attempt-1"
       ; target_revision = Some "rev-1"
@@ -191,7 +187,6 @@ let make_dummy_observation ~case_id ~repeat_index ~run_id ~mode ~verified ~exit_
   ; scenario
   ; repeat_index
   ; run_id
-  ; execution_mode = mode
   ; request_or_task_identity = Some (Printf.sprintf "req-%s-%d" case_id repeat_index)
   ; run_turn_attempt_identity = Some (Printf.sprintf "att-%s-%d-%d" case_id repeat_index attempt_seq)
   ; target_revision = Some (if case_id = "stale-revision" then "stale-rev-999" else "rev-1")
@@ -215,25 +210,25 @@ let generate_compliant_observations () =
   for rep = 1 to 3 do
     (* success: 1 record, verified = true *)
     obs := make_dummy_observation ~case_id:"success" ~repeat_index:rep ~run_id:(Printf.sprintf "succ-%d" rep)
-             ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
+             ~mode:Matrix ~verified:true ~exit_code:(Some 0)
              ~usage:(Usage_reported { input_tokens = 10; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
              ~attempt_seq:1 :: !obs;
 
     (* exit-nonzero: 1 record, verified = false, exit = 1 *)
     obs := make_dummy_observation ~case_id:"exit-nonzero" ~repeat_index:rep ~run_id:(Printf.sprintf "exit-%d" rep)
-             ~mode:"matrix" ~verified:false ~exit_code:(Some 1)
+             ~mode:Matrix ~verified:false ~exit_code:(Some 1)
              ~usage:(Usage_reported { input_tokens = 10; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
              ~attempt_seq:1 :: !obs;
 
     (* stale-revision: 1 record, verified = false *)
     obs := make_dummy_observation ~case_id:"stale-revision" ~repeat_index:rep ~run_id:(Printf.sprintf "stale-%d" rep)
-             ~mode:"matrix" ~verified:false ~exit_code:(Some 0)
+             ~mode:Matrix ~verified:false ~exit_code:(Some 0)
              ~usage:(Usage_reported { input_tokens = 10; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
              ~attempt_seq:1 :: !obs;
 
     (* missing-artifact: 1 record, verified = false *)
     obs := make_dummy_observation ~case_id:"missing-artifact" ~repeat_index:rep ~run_id:(Printf.sprintf "missing-%d" rep)
-             ~mode:"matrix" ~verified:false ~exit_code:(Some 0)
+             ~mode:Matrix ~verified:false ~exit_code:(Some 0)
              ~usage:(Usage_reported { input_tokens = 10; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
              ~attempt_seq:1 :: !obs;
 
@@ -241,14 +236,14 @@ let generate_compliant_observations () =
     let retry_run_id_prefix = Printf.sprintf "retry-%d" rep in
     let r1 =
       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-1")
-           ~mode:"matrix" ~verified:false ~exit_code:(Some 1)
+           ~mode:Matrix ~verified:false ~exit_code:(Some 1)
            ~usage:(Usage_reported { input_tokens = 10; output_tokens = 2; cache_read_input_tokens = 3; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
            ~attempt_seq:1)
         with request_or_task_identity = Some "failed-attempt"; usage_scope = Some Per_request }
     in
     let r2 =
       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-2")
-           ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
+           ~mode:Matrix ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 10; output_tokens = 2; cache_read_input_tokens = 2; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
            ~attempt_seq:2)
         with request_or_task_identity = Some "successful-attempt"; usage_scope = Some Cumulative_request_snapshot }
@@ -259,14 +254,14 @@ let generate_compliant_observations () =
          identity (mirroring the canonical fixture's attempt-2-snap-1/-snap-2),
          same request identity and attempt_sequence. *)
       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-3")
-           ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
+           ~mode:Matrix ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 25; output_tokens = 5; cache_read_input_tokens = 4; cost_usd = Some 0.05; cost_usd_exact = Some "0.05" })
            ~attempt_seq:2)
         with request_or_task_identity = Some "successful-attempt"; usage_scope = Some Cumulative_request_snapshot; run_turn_attempt_identity = Some snap2_identity }
     in
     let r4 =
       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-4")
-           ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
+           ~mode:Matrix ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 5; output_tokens = 1; cache_read_input_tokens = 1; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
            ~attempt_seq:3)
         with request_or_task_identity = Some "verifier"; usage_scope = Some Per_request }
@@ -275,28 +270,28 @@ let generate_compliant_observations () =
 
     (* usage-unreported: 1 record, verified = false, usage missing *)
     obs := make_dummy_observation ~case_id:"usage-unreported" ~repeat_index:rep ~run_id:(Printf.sprintf "unrep-%d" rep)
-             ~mode:"matrix" ~verified:false ~exit_code:(Some 0)
+             ~mode:Matrix ~verified:false ~exit_code:(Some 0)
              ~usage:(Usage_missing "provider_no_metrics")
              ~attempt_seq:1 :: !obs;
   done;
 
   (* Live runs: 3 runs. Rule 68: retry-success requires an observed failed attempt and subsequent success *)
   obs := make_dummy_observation ~case_id:"success" ~repeat_index:1 ~run_id:"live-succ-1"
-           ~mode:"live" ~verified:true ~exit_code:(Some 0)
+           ~mode:Live ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 15; output_tokens = 3; cache_read_input_tokens = 0; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
            ~attempt_seq:1 :: !obs;
   obs := make_dummy_observation ~case_id:"negative" ~repeat_index:1 ~run_id:"live-neg-1"
-           ~mode:"live" ~verified:false ~exit_code:(Some 1)
+           ~mode:Live ~verified:false ~exit_code:(Some 1)
            ~usage:(Usage_reported { input_tokens = 15; output_tokens = 3; cache_read_input_tokens = 0; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
            ~attempt_seq:1 :: !obs;
   (* Live retry attempt 1: failed *)
   obs := make_dummy_observation ~case_id:"retry-success" ~repeat_index:1 ~run_id:"live-retry-1-att1"
-           ~mode:"live" ~verified:false ~exit_code:(Some 1)
+           ~mode:Live ~verified:false ~exit_code:(Some 1)
            ~usage:(Usage_reported { input_tokens = 10; output_tokens = 2; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
            ~attempt_seq:1 :: !obs;
   (* Live retry attempt 2: verified success *)
   obs := make_dummy_observation ~case_id:"retry-success" ~repeat_index:1 ~run_id:"live-retry-1-att2"
-           ~mode:"live" ~verified:true ~exit_code:(Some 0)
+           ~mode:Live ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 25; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.04; cost_usd_exact = Some "0.04" })
            ~attempt_seq:2 :: !obs;
 
@@ -394,13 +389,16 @@ let test_checker_rejects_missing_matrix_mode () =
       ~execution_mode:"matrix"
   in
   let raw_obs = generate_compliant_observations () in
-  (* Change all matrix observations to execution_mode = "live" *)
-  let all_live =
-    List.map
-      (fun (o : run_observation) -> { o with execution_mode = "live" })
+  (* Keep only the live observations: no matrix run is observed. *)
+  let live_only =
+    List.filter
+      (fun (o : run_observation) ->
+         match o.scenario with
+         | Live_scenario _ -> true
+         | Matrix_scenario _ -> false)
       raw_obs
   in
-  let summary = check_observations ~manifest ~observations:all_live in
+  let summary = check_observations ~manifest ~observations:live_only in
   check int "matrix observed is 0" 0 summary.matrix_observed;
   check int "matrix expected is 18" 18 summary.matrix_expected;
   check bool "overall failed when matrix not observed" false summary.overall_passed;
@@ -564,6 +562,23 @@ let test_strict_parsing_rejects_unknown_scope () =
   | Error err ->
     check bool "error mentions invalid or unknown usage_scope" true
       (contains_sub "invalid or unknown usage_scope" err)
+;;
+
+(* A mode that is neither matrix nor live used to be read as matrix, and the
+   observation then matched neither family in the checker and went uncounted. *)
+let test_strict_parsing_rejects_unknown_execution_mode () =
+  let json =
+    `Assoc
+      [ "case_id", `String "success"
+      ; "repeat_index", `Int 1
+      ; "run_id", `String "run-test"
+      ; "execution_mode", `String "controlled"
+      ]
+  in
+  match run_observation_of_json json with
+  | Ok _ -> fail "should fail on unknown execution_mode"
+  | Error err ->
+    check string "error names the mode" "unknown execution_mode: controlled" err
 ;;
 
 let test_strict_parsing_rejects_unknown_scenario () =
@@ -742,7 +757,7 @@ let test_roundtrip_observation () =
       ~case_id:"success"
       ~repeat_index:1
       ~run_id:"roundtrip-1"
-      ~mode:"matrix"
+      ~mode:Matrix
       ~verified:true
       ~exit_code:(Some 0)
       ~usage:(Usage_reported { input_tokens = 100; output_tokens = 20; cache_read_input_tokens = 5; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
@@ -778,6 +793,8 @@ let () =
       )
     ; ( "strict_parsing"
       , [ test_case "rejects unknown usage scope" `Quick test_strict_parsing_rejects_unknown_scope
+        ; test_case "rejects unknown execution mode" `Quick
+            test_strict_parsing_rejects_unknown_execution_mode
         ; test_case "rejects unknown scenario" `Quick test_strict_parsing_rejects_unknown_scenario
         ; test_case "type error caught gracefully" `Quick test_type_error_caught_gracefully
         ; test_case "harness output decoding" `Quick test_harness_output_decoding

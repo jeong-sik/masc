@@ -137,6 +137,19 @@ val fit_continuity :
     carries counts. Returns [None] if no safe source fits. Does not dispatch a
     provider or change Memory receipts. *)
 
+(** Standalone judgment {!run_best_effort} applies to its optional admission
+    arguments: an explicit admission batch rides only a standalone
+    [Memory_maintenance] pass with no continuity or range binding. Each boolean
+    is the presence of the corresponding optional argument. Exposed so tests
+    can pin the accepted and rejected combinations. *)
+val admission_mode_valid
+  :  has_admission:bool
+  -> write_scope:write_scope
+  -> has_continuity:bool
+  -> has_durable_range_id:bool
+  -> has_official_range_id:bool
+  -> bool
+
 val run_best_effort
   :  ?write_scope:write_scope
   -> ?admission:Keeper_memory_admission_queue.batch

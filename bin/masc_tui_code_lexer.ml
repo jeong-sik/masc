@@ -933,6 +933,78 @@ let sql_lexer text =
   advance 0;
   runs_segments runs
 
+(* {1 alphaTex}
+
+   The score markup a board post shares when it shares music. The shapes a
+   reader recognises at a glance: a directive is a backslash and the word it
+   names ([\title], [\tempo], [\ts], [\tuning]), a note is fret.string
+   ([3.6]), a chord is its bracketed span with the duration the closing
+   bracket carries ([(0.4 2.4).2]), a duration is the [:4] a beat holds, and
+   the comments are the C family's two forms. A tokenizer like the rest: the
+   chord is one span whether or not the notes inside it would parse, and a
+   backslash with no word after it is plain text rather than a directive of
+   no name. *)
+
+(* The chord from its opening bracket: through the close, then the [.2]
+   suffix. One span of one kind -- the reader takes the chord as one event.
+   An unclosed bracket holds the rest of the body, the way an unclosed
+   string does. *)
+let take_alphatex_chord text index (runs : runs) =
+  let limit = String.length text in
+  let rec scan i =
+    if i >= limit then i
+    else begin
+      let char = text.[i] in
+      runs_add runs kind_string char;
+      if char = ')' then i + 1 else scan (i + 1)
+    end
+  in
+  let stop = scan index in
+  if stop + 1 < limit && text.[stop] = '.' && is_digit text.[stop + 1] then begin
+    runs_add runs kind_string '.';
+    take_while text (stop + 1) is_digit kind_string runs
+  end
+  else stop
+
+let alphatex_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let is_letter char =
+    (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z')
+  in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if index + 1 < limit && char = '/' && text.[index + 1] = '/' then
+        advance (take_line_comment text index runs)
+      else if index + 1 < limit && char = '/' && text.[index + 1] = '*' then
+        advance (take_c_block_comment text index runs)
+      else if char = '\\' && index + 1 < limit && is_letter text.[index + 1] then begin
+        runs_add runs kind_keyword char;
+        advance (take_while text (index + 1) is_letter kind_keyword runs)
+      end
+      else if char = '"' then advance (take_quoted ~quote:'"' text index runs)
+      else if char = '(' then advance (take_alphatex_chord text index runs)
+      else if char = ':' && index + 1 < limit && is_digit text.[index + 1] then begin
+        runs_add runs kind_type char;
+        advance (take_while text (index + 1) is_digit kind_type runs)
+      end
+      else if is_digit char then advance (take_number text index runs)
+      else if is_letter char then
+        (* A word of the markup -- the note names a [\tuning] lists, an
+           effect name after a note -- stays plain, its digits included:
+           the [4] of [E4] is an octave, not a value of its own. *)
+        advance (take_while text index is_identifier_char kind_code runs)
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
 (* Segments of a lexed fence body, cut into rows at the newlines the lexer
    carried as plain text. Piece order inside a row is the lexer's order, so
    the styling reads left to right as the code does. *)
@@ -1118,6 +1190,7 @@ let rec lexer_of_language (tag : string) =
       | "scala" | "php" | "dart" ->
           Some c_like_lexer
       | "python" | "py" -> Some python_lexer
+      | "alphatex" -> Some alphatex_lexer
       | _ -> None)
 
 

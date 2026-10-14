@@ -326,7 +326,7 @@ let test_cancelled_turn_response_carries_the_actor ~sw ~clock ~base_path ~state 
 let test_tool_approval_expected_workspace_admission ~sw ~clock ~base_path ~state ~token ~keeper:_ =
   let config = Mcp_server.workspace_config state in
   let base = Unix.realpath config.base_path in
-  let root = Unix.realpath (Workspace.masc_root_dir config) in
+  let root = Unix.realpath (Workspace.masc_dir config) in
   let expected base_path masc_root =
     `Assoc [ ("base_path", `String base_path); ("masc_root", `String masc_root) ]
   in

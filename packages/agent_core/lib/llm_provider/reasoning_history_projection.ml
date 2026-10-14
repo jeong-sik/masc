@@ -363,6 +363,247 @@ let summarize_drops drops =
     drops
 ;;
 
+(* Creation-prefix binding: admit stored reasoning only when the bytes
+   before it still hash to the digest its producing request carried. *)
+
+(* Why one message's reasoning was removed before serialization. Every cause
+   fails closed: the block is not sent and the turn proceeds without it.
+   - [Prefix_entry_invalid] and [Prefix_entry_duplicate]: the stored digest
+     tag cannot be read. They name corrupted history, not a changed request.
+   - [Prefix_request_mismatch]: the request digest differs from the chain and
+     no earlier drop in this request could have changed the chain.
+   - [Prefix_chain_broken_upstream]: the same mismatch after an earlier drop
+     that could have changed the chain. Later digests were stamped over the
+     history with that block present, so this one is not an independent
+     finding. *)
+type prefix_drop_cause =
+  | Prefix_source_not_present
+  | Prefix_digest_absent
+  | Prefix_entry_invalid
+  | Prefix_entry_duplicate
+  | Prefix_request_mismatch
+  | Prefix_chain_broken_upstream
+  | Prefix_reasoning_mismatch
+[@@deriving show]
+
+type prefix_drop =
+  { message_index : int
+  ; cause : prefix_drop_cause
+  ; stored_message_digest : string option
+  }
+[@@deriving show]
+
+type prefix_verdict =
+  { messages : Types.message list
+  ; prefix_drops : prefix_drop list
+  ; removed_empty_assistant_indices : int list
+  ; reasoning_message_count : int
+  ; final_digest : string
+  }
+[@@deriving show]
+
+(* Whether a dropped block can be the reason a later stored digest no longer
+   matches the chain. A block that carried no readable stamp was never admitted
+   by any request: every request that stamped a later block dropped it too, so
+   the later digests already chain over its absence. A block that was stamped,
+   or whose stamp is unreadable and so might have been, was sent at some point,
+   and removing it moves every digest stamped after it. Listing every
+   constructor makes a new cause fail to compile until it is classified. *)
+let drop_can_change_later_digests = function
+  | Prefix_source_not_present | Prefix_digest_absent -> false
+  | Prefix_entry_invalid
+  | Prefix_entry_duplicate
+  | Prefix_request_mismatch
+  | Prefix_chain_broken_upstream
+  | Prefix_reasoning_mismatch -> true
+;;
+
+let sha256_hex material = Digestif.SHA256.(to_hex (digest_string material))
+
+(* One chain step over a running hex digest and one tagged piece. Chained
+   single-shot hashes cost O(total bytes); the fold compares at every
+   message start, so a per-message snapshot of one running context would
+   either re-feed the whole prefix or rely on context persistence. *)
+let chain_extend previous_hex tag payload =
+  sha256_hex (previous_hex ^ "\000" ^ tag ^ "\000" ^ payload)
+;;
+
+let block_bytes ~encode_block block = Yojson.Safe.to_string (encode_block block)
+
+let content_wire_digest ~encode_block content =
+  let material =
+    String.concat "\000" (List.map (fun block -> "blk\000" ^ block_bytes ~encode_block block) content)
+  in
+  sha256_hex ("msg\000" ^ material)
+;;
+
+let verify_prefix_binding ~head ~encode_block ~role_tag messages =
+  let head_bytes = Yojson.Safe.to_string (`Assoc head) in
+  let chain = ref (sha256_hex ("head\000" ^ head_bytes)) in
+  let rec loop message_index projected drops removed reasoning_messages = function
+    | [] ->
+      { messages = List.rev projected
+      ; prefix_drops = List.rev drops
+      ; removed_empty_assistant_indices = List.rev removed
+      ; reasoning_message_count = reasoning_messages
+      ; final_digest = !chain
+      }
+    | (message : Types.message) :: rest ->
+      let has_reasoning = content_has_reasoning message.content in
+      let dropped ?stored_message_digest cause =
+        ( without_reasoning message.content
+        , Some { message_index; cause; stored_message_digest } )
+      in
+      let content, drop =
+        if not has_reasoning
+        then message.content, None
+        else (
+          match Types.Reasoning_source.classify message.metadata with
+          | Types.Reasoning_source.Present _ -> (
+            match Types.Reasoning_prefix.classify message.metadata with
+            | Types.Reasoning_prefix.Absent -> dropped Prefix_digest_absent
+            | Types.Reasoning_prefix.Invalid -> dropped Prefix_entry_invalid
+            | Types.Reasoning_prefix.Duplicate -> dropped Prefix_entry_duplicate
+            | Types.Reasoning_prefix.Present prefix ->
+              let stored_message_digest = prefix.Reasoning_prefix.message_digest in
+              if
+                not
+                  (String.equal prefix.Reasoning_prefix.request_digest !chain)
+              then (
+                let cause =
+                  if
+                    List.exists
+                      (fun drop -> drop_can_change_later_digests drop.cause)
+                      drops
+                  then Prefix_chain_broken_upstream
+                  else Prefix_request_mismatch
+                in
+                dropped ~stored_message_digest cause)
+              else (
+                let current = content_wire_digest ~encode_block message.content in
+                if not (String.equal stored_message_digest current)
+                then dropped ~stored_message_digest Prefix_reasoning_mismatch
+                else message.content, None))
+          | Types.Reasoning_source.Absent
+          | Types.Reasoning_source.Invalid
+          | Types.Reasoning_source.Duplicate ->
+            (* Projection strips or refuses these before the fold runs; a
+               standalone caller gets the same fail-closed answer. *)
+            dropped Prefix_source_not_present)
+      in
+      chain := chain_extend !chain "role" (role_tag message.role);
+      List.iter
+        (fun block ->
+           chain := chain_extend !chain "blk" (block_bytes ~encode_block block))
+        content;
+      let message = { message with content } in
+      let projected, removed =
+        match message.role, content with
+        | Assistant, [] -> projected, message_index :: removed
+        | (System | User | Tool), _ | Assistant, _ :: _ ->
+          message :: projected, removed
+      in
+      let drops =
+        match drop with
+        | Some drop -> drop :: drops
+        | None -> drops
+      in
+      loop
+        (message_index + 1)
+        projected
+        drops
+        removed
+        (if has_reasoning then reasoning_messages + 1 else reasoning_messages)
+        rest
+  in
+  loop 0 [] [] [] 0 messages
+;;
+
+(* Tag-corruption causes are unexpected state and log at Warn; the other
+   causes follow from a changed request and log at Info. Listing every
+   constructor makes a new cause fail to compile until it is classified. *)
+let is_unreadable_entry_cause = function
+  | Prefix_entry_invalid | Prefix_entry_duplicate -> true
+  | Prefix_source_not_present
+  | Prefix_digest_absent
+  | Prefix_request_mismatch
+  | Prefix_chain_broken_upstream
+  | Prefix_reasoning_mismatch -> false
+;;
+
+(* A dropped block is named in the log by the head of its stored message
+   digest, which does not move when the history window slides. Counting
+   distinct blocks cut is then a log query over this field. *)
+let block_id_hex_length = 12
+let dropped_block_id_sample_limit = 8
+
+let block_id_of_digest digest =
+  if String.length digest <= block_id_hex_length
+  then digest
+  else String.sub digest 0 block_id_hex_length
+;;
+
+let prefix_snapshot_json ~component ~stream verdict =
+  let drops = verdict.prefix_drops in
+  let count cause =
+    List.fold_left
+      (fun total drop -> if drop.cause = cause then total + 1 else total)
+      0
+      drops
+  in
+  let rec take limit acc = function
+    | [] -> List.rev acc
+    | _ when limit <= 0 -> List.rev acc
+    | id :: rest -> take (limit - 1) (id :: acc) rest
+  in
+  let block_ids =
+    List.filter_map
+      (fun drop -> Option.map block_id_of_digest drop.stored_message_digest)
+      drops
+  in
+  let dropped = List.length drops in
+  `Assoc
+    [ "event", `String "reasoning_prefix_request_snapshot"
+    ; "component", `String component
+    ; "stream", `Bool stream
+    ; "reasoning_messages", `Int verdict.reasoning_message_count
+    ; "reasoning_messages_replayed", `Int (verdict.reasoning_message_count - dropped)
+    ; "reasoning_messages_dropped", `Int dropped
+    ; "source_not_present", `Int (count Prefix_source_not_present)
+    ; "digest_absent", `Int (count Prefix_digest_absent)
+    ; "entry_invalid", `Int (count Prefix_entry_invalid)
+    ; "entry_duplicate", `Int (count Prefix_entry_duplicate)
+    ; "request_mismatch", `Int (count Prefix_request_mismatch)
+    ; "chain_broken_upstream", `Int (count Prefix_chain_broken_upstream)
+    ; "reasoning_mismatch", `Int (count Prefix_reasoning_mismatch)
+    ; ( "dropped_block_ids"
+      , `List
+          (List.map
+             (fun id -> `String id)
+             (take dropped_block_id_sample_limit [] block_ids)) )
+    ; ( "removed_empty_assistant_count"
+      , `Int (List.length verdict.removed_empty_assistant_indices) )
+    ]
+;;
+
+(* A per-request reading of the history window, not an event count: the same
+   stale block is dropped again by every request that still carries it. Only
+   the first mismatch of a request is [request_mismatch]. *)
+let observe_prefix_drops ~component ~stream verdict =
+  match verdict.prefix_drops with
+  | [] when verdict.removed_empty_assistant_indices = [] -> ()
+  | drops ->
+    let log =
+      if List.exists (fun drop -> is_unreadable_entry_cause drop.cause) drops
+      then Diag.warn
+      else Diag.info
+    in
+    log
+      component
+      "%s"
+      (Yojson.Safe.to_string (prefix_snapshot_json ~component ~stream verdict))
+;;
+
 (* [stream] tells the two serializations of one request apart. Exact-output
    planning serializes with [stream:false] before admission serializes with the
    transport's real value, so the same history is projected twice and this

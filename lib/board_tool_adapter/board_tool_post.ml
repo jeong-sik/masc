@@ -23,6 +23,7 @@ let attachment_error ~tool_name ~start_time error : Tool_result.result =
     | Board_tool_attachment.Entry_not_object _
     | Board_tool_attachment.Invalid_entry_fields _
     | Board_tool_attachment.Invalid_kind _
+    | Board_tool_attachment.Invalid_name _
     | Board_tool_attachment.Invalid_url _
     | Board_tool_attachment.Invalid_sha256 _
     | Board_tool_attachment.Missing_artifact _

@@ -262,8 +262,14 @@ let is_method_not_found_error = function
   | Mcp_client.Rpc { code; _ } ->
     (match Mcp_error_code.of_wire_code code with
      | Some Mcp_error_code.Method_not_found -> true
-     | Some _ | None -> false)
-  | _ -> false
+     | Some (Mcp_error_code.Parse_error) | None | Some (Mcp_error_code.Invalid_request)
+     | Some (Mcp_error_code.Invalid_params) | Some (Mcp_error_code.Internal_error)
+     | Some (Mcp_error_code.Auth_error) | Some (Mcp_error_code.Not_ready)
+     | Some (Mcp_error_code.Provider_timeout) | Some (Mcp_error_code.Tool_dispatch_failure)
+     | Some (Mcp_error_code.Backpressure_shed) | Some (Mcp_error_code.Session_evicted)
+     | Some (Mcp_error_code.Header_mismatch) | Some (Mcp_error_code.Unsupported_protocol_version)
+     | Some (Mcp_error_code.Quiet _) -> false)
+  | Mcp_client.Transport _ | Mcp_client.Unauthorized _ | Mcp_client.Http _ | Mcp_client.Malformed _ -> false
 ;;
 
 (* What changed between the catalog a turn was assembled from and what the
@@ -335,7 +341,12 @@ let rpc_rejects_before_execution code =
   | Some
       ( Mcp_error_code.Invalid_request | Mcp_error_code.Method_not_found
       | Mcp_error_code.Invalid_params ) -> true
-  | Some _ | None -> false
+  | Some (Mcp_error_code.Parse_error) | None | Some (Mcp_error_code.Internal_error)
+  | Some (Mcp_error_code.Auth_error) | Some (Mcp_error_code.Not_ready)
+  | Some (Mcp_error_code.Provider_timeout) | Some (Mcp_error_code.Tool_dispatch_failure)
+  | Some (Mcp_error_code.Backpressure_shed) | Some (Mcp_error_code.Session_evicted)
+  | Some (Mcp_error_code.Header_mismatch) | Some (Mcp_error_code.Unsupported_protocol_version)
+  | Some (Mcp_error_code.Quiet _) -> false
 ;;
 
 type call_proof =
@@ -395,7 +406,13 @@ let tool_result_of_call ~read_only answer =
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       "this keeper's credential for that service is no longer accepted; attach \
        it again"
-  | Error (Mcp { error; _ } as call_error) ->
+  | Error
+      (Mcp
+         { error =
+             ( Mcp_client.Transport _ | Mcp_client.Rpc _ | Mcp_client.Http _
+             | Mcp_client.Malformed _ ) as error
+         ; _
+         } as call_error) ->
     let detail = Mcp_client.error_to_string error in
     let error_class =
       match error with
@@ -510,7 +527,13 @@ let force_refresh ~token_post ~discover ~base_path ~keeper_name
        later. *)
     | Error (Keeper_oauth_discovery.Transport _ as err) ->
       Error (Renew_transient (Keeper_oauth_discovery.error_to_string err))
-    | Error err -> Error (Renew_permanent (Keeper_oauth_discovery.error_to_string err))
+    | Error
+        (( Keeper_oauth_discovery.Bad_mcp_url _
+         | Keeper_oauth_discovery.Not_published _
+         | Keeper_oauth_discovery.Rejected _
+         | Keeper_oauth_discovery.Malformed _
+         | Keeper_oauth_discovery.No_authorization_server _ ) as err) ->
+      Error (Renew_permanent (Keeper_oauth_discovery.error_to_string err))
   in
   let* configured_client_id =
     match
@@ -548,7 +571,11 @@ let force_refresh ~token_post ~discover ~base_path ~keeper_name
     | Error (Keeper_oauth_flow.Provider_rejected { status; _ } as err)
       when status = 429 || status >= 500 ->
       Error (Renew_transient (Keeper_oauth_flow.exchange_error_to_string err))
-    | Error err -> Error (Renew_permanent (Keeper_oauth_flow.exchange_error_to_string err))
+    | Error
+        (( Keeper_oauth_flow.Provider_rejected _
+         | Keeper_oauth_flow.Malformed_response _
+         | Keeper_oauth_flow.State_mismatch ) as err) ->
+      Error (Renew_permanent (Keeper_oauth_flow.exchange_error_to_string err))
   in
   let* () =
     match store_tokens ~base_path ~keeper_name ~provider tokens with
@@ -700,7 +727,7 @@ let run_call ~transports ~(config : Workspace.config) ~keeper_name
       | Ok _ ->
         run_call_once ~transports ~config ~keeper_name ~provider
           ~remote_name ~arguments ()))
-  | other -> other
+  | (Error (Mcp { error = (Mcp_client.Transport _ | (Mcp_client.Http _ | (Mcp_client.Rpc _ | Mcp_client.Malformed _)));_}) | Error (Precondition _ | Transient_precondition _) | Ok _) as other -> other
 ;;
 
 let agent_tools ~(provider : Provider.t) catalog =

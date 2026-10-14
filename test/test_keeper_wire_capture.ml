@@ -69,8 +69,15 @@ let parse_single_jsonl content =
   | _ -> Alcotest.failf "expected exactly one JSONL record, got %d" (List.length lines)
 ;;
 
+(* Where a capture under [base] must land. Spelled out here rather than
+   taken from the code under test, so a record written anywhere else under
+   [base] is not found. *)
+let wire_capture_dir base =
+  Filename.concat (Filename.concat base ".masc") "wire-capture"
+;;
+
 let read_single_json_record base =
-  let files = find_jsonl base in
+  let files = find_jsonl (wire_capture_dir base) in
   Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
   read_file (List.hd files) |> parse_single_jsonl
 ;;
@@ -184,7 +191,7 @@ let env_is_restored () =
 let disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_off" "" in
-    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_request ~base_path:base ~keeper_name:"alpha"
       ~turn_id:1
       ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"u" ~history_messages:[] ~tools:[] ();
@@ -201,13 +208,13 @@ let enabled_writes_redacted () =
         Agent_core.Types.user_msg "continue";
       ]
     in
-    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_request ~base_path:base ~keeper_name:"alpha"
       ~turn_id:7
       ~agent_core_turn:3
       ~system_prompt:("token " ^ projected_secret ^ " end")
       ~extra_system_context:(Some "dynamic context")
       ~user_message:"hello world" ~history_messages:history ~tools:[] ();
-    let files = find_jsonl base in
+    let files = find_jsonl (wire_capture_dir base) in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
     let json = parse_single_jsonl content in
@@ -253,11 +260,11 @@ let record_size_is_independent_of_history_length () =
   with_flag "1" (fun () ->
     let capture ~history_messages =
       let base = Filename.temp_dir "wirecap_size" "" in
-      Wire.capture_request ~base_path:base ~masc_root:base
+      Wire.capture_request ~base_path:base
         ~keeper_name:"alpha" ~turn_id:1 ~agent_core_turn:1 ~system_prompt:"sys"
         ~extra_system_context:None ~user_message:"u" ~history_messages
         ~tools:[] ();
-      match find_jsonl base with
+      match find_jsonl (wire_capture_dir base) with
       | [ path ] -> String.length (read_file path)
       | files ->
         Alcotest.failf "expected one jsonl, got %d" (List.length files)
@@ -295,11 +302,11 @@ let request_captures_exact_redacted_tool_schemas () =
         (fun _input -> Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None })
     in
     let raw_tools = `List [ Agent_core.Tool.schema_to_json tool ] in
-    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_request ~base_path:base ~keeper_name:"alpha"
       ~turn_id:8
       ~agent_core_turn:2 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ~tools:[ tool ] ();
-    let files = find_jsonl base in
+    let files = find_jsonl (wire_capture_dir base) in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
     let json = parse_single_jsonl content in
@@ -350,14 +357,14 @@ let tools_blob_is_shared_across_requests () =
         (fun _input -> Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None })
     in
     let capture ~turn_id =
-      Wire.capture_request ~base_path:base ~masc_root:base
+      Wire.capture_request ~base_path:base
         ~keeper_name:"alpha" ~turn_id ~agent_core_turn:1 ~system_prompt:"sys"
         ~extra_system_context:None ~user_message:"u" ~history_messages:[]
         ~tools:[ tool ] ()
     in
     capture ~turn_id:1;
     capture ~turn_id:2;
-    let files = find_jsonl base in
+    let files = find_jsonl (wire_capture_dir base) in
     Alcotest.(check int) "one day file written" 1 (List.length files);
     let rows =
       read_file (List.hd files)
@@ -377,7 +384,7 @@ let request_trace_id_emitted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_req_trace" "" in
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-req-abc" in
-    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_request ~base_path:base ~keeper_name:"alpha"
       ~turn_id:1
       ~trace_id ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ~tools:[] ();
@@ -398,7 +405,7 @@ let request_capture_failure_is_best_effort () =
     in
     check_metric_delta "request write failure metric increments"
       write_failures_metric ~labels (fun () ->
-        Wire.capture_request ~base_path:root_file ~masc_root:root_file ~keeper_name
+        Wire.capture_request ~base_path:root_file ~keeper_name
           ~turn_id
           ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
           ~user_message:"hello" ~history_messages:[] ~tools:[] ()))
@@ -406,7 +413,7 @@ let request_capture_failure_is_best_effort () =
 let response_disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_off" "" in
-    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_response ~base_path:base ~keeper_name:"alpha"
       ~turn_id:1
       ~agent_core_turn:2 ~response_text:"anything" ();
     Alcotest.(check (list string))
@@ -416,10 +423,10 @@ let response_capture_writes_redacted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_on" "" in
     install_projected_secret ~base_path:base ~keeper_name:"alpha";
-    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_response ~base_path:base ~keeper_name:"alpha"
       ~turn_id:9
       ~agent_core_turn:4 ~response_text:("out " ^ projected_secret ^ " done") ();
-    let files = find_jsonl base in
+    let files = find_jsonl (wire_capture_dir base) in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
     let json = parse_single_jsonl content in
@@ -446,7 +453,7 @@ let response_capture_failure_is_best_effort () =
     in
     check_metric_delta "response write failure metric increments"
       write_failures_metric ~labels (fun () ->
-        Wire.capture_response ~base_path:root_file ~masc_root:root_file ~keeper_name
+        Wire.capture_response ~base_path:root_file ~keeper_name
           ~turn_id
           ~agent_core_turn:1 ~response_text:"ok" ()))
 
@@ -454,79 +461,12 @@ let response_trace_id_emitted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_trace" "" in
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-resp-xyz" in
-    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_response ~base_path:base ~keeper_name:"alpha"
       ~turn_id:2
       ~agent_core_turn:1 ~trace_id ~response_text:"ok" ();
     let json = read_single_json_record base in
     check_json_string "response trace_id string recorded" "trace_id"
       "trace-resp-xyz" json)
-
-let capture_prunes_old_files () =
-  with_flag "1" (fun () ->
-    with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
-      with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "4096" (fun () ->
-        let base = Filename.temp_dir "wirecap_prune" "" in
-        let capture_dir = Filename.concat base "wire-capture" in
-        let old_month = Filename.concat capture_dir "2000-01" in
-        ensure_dir capture_dir;
-        ensure_dir old_month;
-        let old_file = Filename.concat old_month "01.jsonl" in
-        write_file old_file (String.make 1024 'x');
-        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
-          ~turn_id:10
-          ~agent_core_turn:1 ~response_text:"bounded" ();
-        Alcotest.(check bool) "old capture file pruned" false
-          (Sys.file_exists old_file);
-        Alcotest.(check int) "only current capture remains" 1
-          (List.length (find_jsonl base)))))
-
-let startup_prune_removes_old_files_without_new_capture () =
-  with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
-    let base = Filename.temp_dir "wirecap_startup_prune" "" in
-    let capture_dir = Filename.concat base "wire-capture" in
-    let old_month = Filename.concat capture_dir "2000-01" in
-    ensure_dir capture_dir;
-    ensure_dir old_month;
-    let old_file = Filename.concat old_month "01.jsonl" in
-    write_file old_file (String.make 1024 'x');
-    match Wire.prune_expired ~masc_root:base with
-    | Ok count ->
-      Alcotest.(check int) "startup owner prune removes expired capture" 1 count;
-      Alcotest.(check bool) "expired capture is gone without a new write" false
-        (Sys.file_exists old_file)
-    | Error error ->
-      Alcotest.fail (Wire.prune_error_to_string error))
-
-let capture_cache_reloads_when_retention_changes () =
-  with_flag "1" (fun () ->
-    with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "4096" (fun () ->
-      let base = Filename.temp_dir "wirecap_cache_retention" "" in
-      let capture_dir = Filename.concat base "wire-capture" in
-      let old_ts = Unix.gettimeofday () -. (2. *. 24. *. 60. *. 60.) in
-      let old_tm = Unix.gmtime old_ts in
-      let old_month_name =
-        Printf.sprintf "%04d-%02d"
-          (old_tm.Unix.tm_year + 1900)
-          (old_tm.Unix.tm_mon + 1)
-      in
-      let old_day_name = Printf.sprintf "%02d.jsonl" old_tm.Unix.tm_mday in
-      let old_month = Filename.concat capture_dir old_month_name in
-      ensure_dir capture_dir;
-      ensure_dir old_month;
-      let old_file = Filename.concat old_month old_day_name in
-      write_file old_file (String.make 1024 'x');
-      with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "30" (fun () ->
-        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
-          ~turn_id:20
-          ~agent_core_turn:1 ~response_text:"cache warmup" ());
-      Alcotest.(check bool) "old capture retained by warm cache" true
-        (Sys.file_exists old_file);
-      with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
-        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
-          ~turn_id:21
-          ~agent_core_turn:1 ~response_text:"cache reload" ());
-      Alcotest.(check bool) "old capture pruned after retention change" false
-        (Sys.file_exists old_file)))
 
 (* #29009: the byte cap rotates the full current file to a completed
    [DD.NNN.jsonl] segment instead of dropping every later record of the
@@ -544,9 +484,9 @@ let capture_rotates_when_current_file_cap_would_be_exceeded () =
     with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "8192" (fun () ->
       let base = Filename.temp_dir "wirecap_cap" "" in
       let keeper_name = "wirecap_cap_metric" in
-      Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name ~turn_id:11
+      Wire.capture_response ~base_path:base ~keeper_name ~turn_id:11
         ~agent_core_turn:1 ~response_text:"small" ();
-      let files = find_jsonl base in
+      let files = find_jsonl (wire_capture_dir base) in
       Alcotest.(check int) "small record written" 1 (List.length files);
       let current_file = List.hd files in
       let first_record = read_file current_file in
@@ -557,10 +497,10 @@ let capture_rotates_when_current_file_cap_would_be_exceeded () =
       in
       let exhausted_before = skip_value "rotation_sequence_exhausted" in
       let guard_before = skip_value "append_guard_refused" in
-      Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name
+      Wire.capture_response ~base_path:base ~keeper_name
         ~turn_id:12
         ~agent_core_turn:1 ~response_text:(String.make 4096 'x') ();
-      let files_after = find_jsonl base in
+      let files_after = find_jsonl (wire_capture_dir base) in
       Alcotest.(check int)
         "cap rotates the full file into a segment: two jsonl files"
         2
@@ -608,13 +548,12 @@ let response_capture_matches_replayed_history_text () =
     Alcotest.(check string) "tool-only reply stays empty" "" history_text;
     Wire.capture_response
       ~base_path:base
-      ~masc_root:base
       ~keeper_name:"history_keeper"
       ~turn_id:5
       ~agent_core_turn:2
       ~response_text:history_text
       ();
-    let files = find_jsonl base in
+    let files = find_jsonl (wire_capture_dir base) in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
     Alcotest.(check bool)
@@ -777,10 +716,10 @@ let rejected_reasoning_capture_writes_the_guard_window () =
     install_projected_secret ~base_path:base ~keeper_name:"alpha";
     let chant = "Let me write.\n\nNow.\n\nGo.\n\nProducing.\n\nOK.\n\n" in
     let reasoning = "prelude " ^ projected_secret ^ " " ^ repeat 2000 chant in
-    Wire.capture_rejected_reasoning ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_rejected_reasoning ~base_path:base ~keeper_name:"alpha"
       ~turn_id:7 ~trace_id:"trace-1" ~runtime_id:"ollama_cloud.deepseek-v4-1-flash"
       (thinking_only_response ~stop_reason:Agent_core.Types.MaxTokens reasoning);
-    let files = find_jsonl base in
+    let files = find_jsonl (wire_capture_dir base) in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
     let json = parse_single_jsonl content in
@@ -821,7 +760,7 @@ let rejected_reasoning_capture_ignores_other_shapes () =
       ; telemetry = None
       }
     in
-    Wire.capture_rejected_reasoning ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_rejected_reasoning ~base_path:base ~keeper_name:"alpha"
       ~runtime_id:"glm-coding.glm-5.3-flash" response;
     Alcotest.(check (list string)) "a response with text writes nothing" []
       (find_jsonl base))
@@ -829,7 +768,7 @@ let rejected_reasoning_capture_ignores_other_shapes () =
 let rejected_reasoning_capture_disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_rej_off" "" in
-    Wire.capture_rejected_reasoning ~base_path:base ~masc_root:base ~keeper_name:"alpha"
+    Wire.capture_rejected_reasoning ~base_path:base ~keeper_name:"alpha"
       ~runtime_id:"r"
       (thinking_only_response ~stop_reason:Agent_core.Types.MaxTokens (repeat 100 "loop "));
     Alcotest.(check (list string)) "no jsonl written when disabled" [] (find_jsonl base))
@@ -877,12 +816,6 @@ let () =
             response_capture_writes_redacted;
           Alcotest.test_case "write failure is best effort" `Quick
             response_capture_failure_is_best_effort;
-          Alcotest.test_case "capture store prunes old files" `Quick
-            capture_prunes_old_files;
-          Alcotest.test_case "startup owner prune expires inactive captures" `Quick
-            startup_prune_removes_old_files_without_new_capture;
-          Alcotest.test_case "capture store reloads on retention change" `Quick
-            capture_cache_reloads_when_retention_changes;
           Alcotest.test_case "current file cap rotates into a segment" `Quick
             capture_rotates_when_current_file_cap_would_be_exceeded;
           Alcotest.test_case "trace_id is emitted when provided" `Quick

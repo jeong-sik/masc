@@ -34,10 +34,13 @@ type entry =
       ; reason : string  (** Why its header does not read. *)
       }
 
+val render_entry : entry -> string
+(** One entry's line: [- \[title\](file) — summary] for a page,
+    [- file (reason)] for a file whose header does not read. *)
+
 val render_index : entry list -> string
-(** One line per entry in the order given: [- \[title\](file) — summary] for a
-    page, [- file (reason)] for a file whose header does not read. No entries
-    renders the heading and a line saying the wiki is empty. *)
+(** The heading and one {!render_entry} line per entry in the order given. No
+    entries renders the heading and a line saying the wiki is empty. *)
 
 val write_index : wiki_root:string -> entry list -> (unit, string) result
 (** Replace [index.md] by rename. *)

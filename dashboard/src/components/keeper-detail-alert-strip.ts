@@ -118,7 +118,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const pendingApprovalTaskId = pendingFirst?.task_id?.trim() || null
   const pendingApprovalBlockerClass = pendingFirst?.blocker_class?.trim() || null
   const isBlockedBeforeWorktree = pendingApprovalBlockerClass === 'blocked_before_worktree'
-  const trustDisposition = keeper.trust?.disposition?.trim() || null
+  const trustDisposition = keeper.trust?.disposition ?? null
   const trustSummary =
     canonicalAttentionReason(keeper.trust?.attention_reason?.trim() || null)
     || keeper.trust?.disposition_reason?.trim()
@@ -261,15 +261,11 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const trustToneClass =
     trustDisposition === 'Alert'
       ? 'bg-[var(--bad-soft)] text-[var(--color-status-err)]'
-      : trustDisposition === 'Blocked' || trustDisposition === 'Pause' || keeper.trust?.needs_attention
+      : trustDisposition === 'Blocked' || keeper.trust?.needs_attention
         ? 'bg-[var(--warn-14)] text-[var(--color-status-warn)]'
         : trustDisposition === 'Pass'
           ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)]'
           : 'bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]'
-  // Inline 4-entry copy moved to `./fsm-hub-types` so the same map
-  // doesn't drift between this surface and `goals/goal-tree.ts:194`.
-  // Local result var keeps a different name from the imported function so
-  // there's no need for an `as resolveTrustDispositionLabel` alias.
   const trustDispositionDisplay = trustDispositionLabel(trustDisposition)
 
   return html`

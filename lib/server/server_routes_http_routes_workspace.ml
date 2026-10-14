@@ -106,7 +106,7 @@ let resolve_workspace_base ~state ~uri =
   let lookup_playground name =
     match Keeper_meta_store.read_effective_meta config name with
     | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
-    | _ -> None
+    | Ok (None) | Error _ -> None
   in
   let exists_dir p = Sys.file_exists p && Sys.is_directory p in
   classify_workspace_query
@@ -543,7 +543,11 @@ let scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc dir =
                (fun () ->
                   match Unix.lstat full with
                   | { Unix.st_kind = Unix.S_LNK; _ } -> false
-                  | _ -> Sys.is_directory full)
+                  | { Unix.st_kind =
+                        ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK
+                        | Unix.S_FIFO | Unix.S_SOCK )
+                    ; _
+                    } -> Sys.is_directory full)
            in
            let rel = rel_under base full in
            (* A directory is expandable regardless of the scan depth it was

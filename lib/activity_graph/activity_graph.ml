@@ -14,20 +14,24 @@ module StringSet = Set_util.StringSet
 
 (* The directory this store occupies under [.masc]. Exposed so readers of the
    same store name it from here instead of spelling the literal. *)
-let store_dirname = "activity-events"
+let store_dirname = Dated_jsonl.Store.Root.(relative_path Activity_events)
 
-let root_dir (config : Workspace_utils.config) =
-  Filename.concat (Workspace_utils.masc_dir config) store_dirname
+let location (config : Workspace_utils.config) =
+  Dated_jsonl.Store.at
+    (Workspace_utils.dated_store_root config)
+    Dated_jsonl.Store.Root.Activity_events
+
+let root_dir (config : Workspace_utils.config) = Dated_jsonl.Store.dir (location config)
 
 (* [Jsonl_writer] owns the YYYY-MM/DD.jsonl layout. This module used to spell
    it out again, and it read the clock once for the month and once more for
    the day, so a write that crossed midnight on the last of a month could put
    the new day's file under the old month's directory (#27143). *)
 let current_dated_path (config : Workspace_utils.config) =
-  Jsonl_writer.dated_path_now ~base_dir:(root_dir config)
+  Dated_jsonl.Store.dated_path_now (location config)
 
 let day_path (config : Workspace_utils.config) =
-  (current_dated_path config).Jsonl_writer.path
+  (current_dated_path config).Dated_jsonl.Store.path
 
 let seq_path (config : Workspace_utils.config) =
   Filename.concat (root_dir config) "_seq"
@@ -37,10 +41,10 @@ let lock_path (config : Workspace_utils.config) =
 
 (* Takes the path the caller is about to append to, so the directory made and
    the file opened come from one reading of the clock. *)
-let ensure_dirs config (dated : Jsonl_writer.dated_path) =
+let ensure_dirs config (dated : Dated_jsonl.Store.dated_path) =
   Workspace_utils.mkdir_p (root_dir config);
   (* [month_dir] is the directory name, not a path; the full one is here. *)
-  Workspace_utils.mkdir_p (Filename.dirname dated.Jsonl_writer.path)
+  Workspace_utils.mkdir_p (Filename.dirname dated.Dated_jsonl.Store.path)
 
 let read_current_seq config =
   match Safe_ops.read_file_safe (seq_path config) with
@@ -904,7 +908,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
           |> sanitize_event_traced
         in
         let json_line = Yojson.Safe.to_string (event_to_yojson value) in
-        append_line dated.Jsonl_writer.path (json_line ^ "\n");
+        append_line dated.Dated_jsonl.Store.path (json_line ^ "\n");
         (value, json_line))
   in
   let encoded = format_sse_event_data ~seq:value.seq json_line in
@@ -1035,9 +1039,17 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
   let nodes = Hashtbl.create 64 in
   let edges = Hashtbl.create 96 in
   List.iter (reduce_event ~nodes ~edges) events;
+  let node_list =
+    Hashtbl.fold (fun _ node acc -> node :: acc) nodes []
+    |> List.sort (fun a b -> String.compare a.node_id b.node_id)
+  in
+  let edge_list =
+    Hashtbl.fold (fun _ edge acc -> edge :: acc) edges []
+    |> List.sort (fun a b -> String.compare a.edge_id b.edge_id)
+  in
   let nodes_json =
-    Hashtbl.fold
-      (fun _ node acc ->
+    List.map
+      (fun node ->
         graph_node_to_yojson
           {
             id = node.node_id;
@@ -1047,58 +1059,35 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
             weight = node.weight;
             last_event_at = node.last_event_at;
             meta = node.meta;
-          }
-        :: acc)
-      nodes []
-    |> List.sort (fun a b ->
-           compare ((match Json_util.assoc_member_opt "id" a with Some (`String s) -> s | _ -> "")) ((match Json_util.assoc_member_opt "id" b with Some (`String s) -> s | _ -> "")))
+          })
+      node_list
   in
   let edges_json =
-    Hashtbl.fold
-      (fun _ edge acc ->
+    List.map
+      (fun edge ->
         graph_edge_to_yojson
           {
             id = edge.edge_id;
             source = edge.source;
             target = edge.target;
-            kind = edge.edge_kind;
+            kind = edge_kind_to_wire edge.edge_kind;
             weight = edge.weight;
             active = edge.active;
             last_event_at = edge.last_event_at;
             meta = edge.meta;
-          }
-        :: acc)
-      edges []
-    |> List.sort (fun a b ->
-           compare ((match Json_util.assoc_member_opt "id" a with Some (`String s) -> s | _ -> "")) ((match Json_util.assoc_member_opt "id" b with Some (`String s) -> s | _ -> "")))
+          })
+      edge_list
   in
   let timeline =
     let total = List.length events in
     events |> List.drop (max 0 (total - timeline_limit))
   in
-  let count_kind prefix =
-    nodes_json
-    |> List.fold_left
-         (fun acc node ->
-           match Json_util.assoc_member_opt "kind" node with
-           | Some (`String kind) when String.equal kind prefix -> acc + 1
-           | _ -> acc)
-         0
+  let count_kind kind =
+    List.length
+      (List.filter (fun node -> String.equal node.node_kind kind) node_list)
   in
-  let active_agents =
-    nodes_json
-    |> List.fold_left
-         (fun acc node ->
-           match (Json_util.assoc_member_opt "kind" node, Json_util.assoc_member_opt "status" node) with
-           | Some (`String "agent"), Some (`String status)
-             when
-               not
-                 (List.mem status
-                    [ "offline"; "retired"; "stopped"; "finalized" ]) ->
-               acc + 1
-           | _ -> acc)
-         0
-  in
+  (* No node status marks an agent inactive, so every agent node is active. *)
+  let agent_count = count_kind "agent" in
   `Assoc
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
@@ -1114,9 +1103,9 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
           [
             ("event_count", `Int (List.length events));
             ("edge_count", `Int (List.length edges_json));
-            ("agent_count", `Int (count_kind "agent"));
+            ("agent_count", `Int agent_count);
             ("task_count", `Int (count_kind "task"));
-            ("active_agents", `Int active_agents);
+            ("active_agents", `Int agent_count);
           ] );
       ("kind_counts", kind_counts_json);
       ("heatmap", heatmap_json);
@@ -1140,9 +1129,23 @@ let graph_json config ?(kinds = []) ?(limit = 500)
 
 (* Span start events paired with their matching end events *)
 let span_start_kind = function
-  | "task.claimed" | "task.started" -> Some "task"
-  | "agent.session_bound" -> Some "presence"
-  | _ -> None
+  | Some (Task_event Event_kind.Task.(Claimed | Started)) -> Some Task_span
+  | Some Agent_session_bound_event -> Some Presence_span
+  | Some
+      (Task_event
+         Event_kind.Task.(
+           ( Created | Released | Done | Cancelled | Submit_for_verification
+           | Approved | Rejected | Linked )))
+  | Some (Tool_execution_event (External_tool_called | Keeper_in_turn_tool_executed))
+  | Some (Message_event Event_kind.Message.(Broadcast | Mentioned))
+  | Some (Board_event Event_kind.Board.(Posted | Commented | Voted | Deleted))
+  | None -> None
+
+(* Whose span an ending event closes. A verdict keeps its authority as actor,
+   and the span belongs to the producer whose work the verdict commits. *)
+type span_closer =
+  | Acting_agent
+  | Task_producer
 
 (** Issue #8711: single SSOT for span-ending event kinds. The previous
     [span_end_kind] / [span_end_status] pair reproduced the same
@@ -1150,20 +1153,36 @@ let span_start_kind = function
     other being updated the catch-all in [span_end_status] would
     silently map the new kind to [Span_ended], losing semantic
     information. Combining them forces both pieces to stay in sync at
-    compile time (Parse, don't validate). *)
+    compile time (Parse, don't validate). Whose span the event closes is
+    answered here too, for the same reason. *)
 let span_end_classification = function
-  | "task.done"                 -> Some ("task",      Span_completed)
+  | Some (Task_event Event_kind.Task.Done) ->
+    Some (Task_span, Span_completed, Acting_agent)
   (* RFC-0323 G-3: approve-produced Done completes the task span too. *)
-  | "task.approved"             -> Some ("task",      Span_completed)
-  | "task.released"             -> Some ("task",      Span_released)
-  | "task.cancelled"            -> Some ("task",      Span_cancelled)
-  | _                           -> None
+  | Some (Task_event Event_kind.Task.Approved) ->
+    Some (Task_span, Span_completed, Task_producer)
+  | Some (Task_event Event_kind.Task.Released) ->
+    Some (Task_span, Span_released, Acting_agent)
+  | Some (Task_event Event_kind.Task.Cancelled) ->
+    Some (Task_span, Span_cancelled, Task_producer)
+  | Some
+      (Task_event
+         Event_kind.Task.(
+           ( Created | Claimed | Started | Submit_for_verification | Rejected
+           | Linked )))
+  | Some Agent_session_bound_event
+  | Some (Tool_execution_event (External_tool_called | Keeper_in_turn_tool_executed))
+  | Some (Message_event Event_kind.Message.(Broadcast | Mentioned))
+  | Some (Board_event Event_kind.Board.(Posted | Commented | Voted | Deleted))
+  | None -> None
 
 
 
 let build_agent_spans_json ~events ~events_store_total ~limit =
   let now_ms = now_ts_ms () in
-  let open_spans : (string * string option, int * string * string) Hashtbl.t =
+  let open_spans
+    : (string * string option, int * agent_span_kind * string) Hashtbl.t
+    =
     Hashtbl.create 32
   in
   let closed_spans : agent_span list ref = ref [] in
@@ -1181,7 +1200,8 @@ let build_agent_spans_json ~events ~events_store_total ~limit =
     | None -> ()
     | Some aid ->
         Hashtbl.replace agents_set aid true;
-        (match span_start_kind e.kind with
+        let kind = drawn_event_kind_of_string e.kind in
+        (match span_start_kind kind with
          | Some sk ->
              let label = match subject_id with
                | Some sid -> sid
@@ -1189,13 +1209,13 @@ let build_agent_spans_json ~events ~events_store_total ~limit =
              in
              Hashtbl.replace open_spans (aid, subject_id) (e.ts_ms, sk, label)
          | None -> ());
-        (match span_end_classification e.kind with
-         | Some (ek, status) ->
+        (match span_end_classification kind with
+         | Some (ek, status, closer) ->
              (* Verdicts retain their authority as actor. Their producer
                 owns the span; direct cancellations use the acting owner. *)
              let closing_aid =
-               match e.kind with
-               | "task.approved" | "task.cancelled" ->
+               match closer with
+               | Task_producer ->
                    (match
                       Json_util.assoc_member_opt
                         Event_kind.Task.producer_payload_key
@@ -1203,11 +1223,11 @@ let build_agent_spans_json ~events ~events_store_total ~limit =
                     with
                     | Some (`String name) when String.trim name <> "" -> name
                     | Some _ | None -> aid)
-               | _ -> aid
+               | Acting_agent -> aid
              in
              let key = (closing_aid, subject_id) in
              (match Hashtbl.find_opt open_spans key with
-              | Some (start_ms, sk, label) when String.equal sk ek ->
+              | Some (start_ms, sk, label) when sk = ek ->
                   Hashtbl.remove open_spans key;
                   closed_spans := {
                     agent = closing_aid;

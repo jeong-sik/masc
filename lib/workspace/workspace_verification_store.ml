@@ -633,7 +633,7 @@ let project_root_of_base_path base_path =
 
 let active_verifications_dir base_path =
   let base_path = project_root_of_base_path base_path in
-  Filename.concat (Workspace_utils.masc_dir_from_base_path ~base_path) "verifications"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "verifications"
 
 let verifications_dir base_path =
   active_verifications_dir base_path
@@ -926,7 +926,7 @@ let evidence_body_directory = "evidence"
 let persist_binary_body ~base_path ?request_id ?index data =
   match (request_id, index) with
   | Some request_id, Some index ->
-    let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
+    let masc_dir = Common.masc_dir_from_base_path ~base_path in
     let dir = Filename.concat (Filename.concat masc_dir evidence_body_directory) request_id in
     Fs_compat.mkdir_p dir;
     let file = Printf.sprintf "%d.bin" index in
@@ -980,7 +980,7 @@ let read_binary_body_base64 ~base_path (item : submitted_evidence_item) =
     else
     let path =
       Filename.concat
-        (Workspace_utils.masc_dir_from_base_path ~base_path)
+        (Common.masc_dir_from_base_path ~base_path)
         relative
     in
     (try

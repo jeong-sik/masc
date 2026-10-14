@@ -16,7 +16,7 @@ type tools_projection = {
 }
 
 let prepare_tools ~(config : Workspace.config) compute =
-  let masc_root = Workspace.masc_root_dir config in
+  let masc_root = Workspace.masc_dir config in
   let json = compute () in
   let raw = Yojson.Safe.to_string json in
   { base_path = config.base_path; workspace_path = config.workspace_path; masc_root;
@@ -109,7 +109,7 @@ let refresh_tools_projection ~now ~ttl ~cache ~config compute =
   | Some (Ready_tools entry)
     when should_reuse_projection ~now:(now ()) ~ttl ~refreshed_at:entry.refreshed_at ->
     entry.value
-  | _ ->
+  | None | Some (Pending_tools _ | Failed_tools _ | Ready_tools _) ->
     let started_at = now () in
     let allocated_before = Gc.allocated_bytes () in
     let retain_or_prepare transient json =
@@ -117,7 +117,9 @@ let refresh_tools_projection ~now ~ttl ~cache ~config compute =
       | Some (Ready_tools entry), _ -> entry.value
       | Some (Pending_tools value), `Pending
       | Some (Failed_tools value), `Failed -> value
-      | _ ->
+      | None, _
+      | Some (Pending_tools _), `Failed
+      | Some (Failed_tools _), `Pending ->
         let value = prepare_tools ~config (fun () -> json) in
         Atomic.set cache (Some (match transient with
           | `Pending -> Pending_tools value
@@ -309,7 +311,7 @@ let refresh_loop
     let telemetry_summary =
       cached_projection ~ttl:30.0 ~cache:telemetry_cache "telemetry_summary" (fun () ->
         let base_path = config.base_path in
-        let masc_root = Workspace.masc_root_dir config in
+        let masc_root = Workspace.masc_dir config in
         let keeper_keepalive_interval_s =
           Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
           |> float_of_int
@@ -320,7 +322,6 @@ let refresh_loop
         Telemetry_unified.summary_json
           ~keeper_keepalive_interval_s
           ~keeper_metric_producer_active
-          ~base_path
           ~masc_root
           ())
     in

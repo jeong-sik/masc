@@ -21,7 +21,7 @@ let persistence_counter reason =
 let () = Mirage_crypto_rng_unix.use_default ()
 
 let active_verifications_dir base_path =
-  Filename.concat (CU.masc_dir_from_base_path ~base_path) "verifications"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "verifications"
 
 (** Use a temporary directory for each test.
 
@@ -40,7 +40,7 @@ let with_temp_dir f =
       Masc_test_deps.cleanup_test_workspace dir)
     (fun () ->
       Masc.Eval_calibration.For_testing.set_store
-        ~base_dir:(Filename.concat dir ".masc/verdicts");
+        ~base_path:dir;
       Alcotest.(check int) "new workspace has no earlier verdicts" 0
         Yojson.Safe.Util.(Masc.Eval_calibration.calibration_stats ()
                           |> member "total_verdicts" |> to_int);
@@ -2225,7 +2225,7 @@ let test_rejected_verdict_audit_preserves_reason () =
     let tm = gmtime (gettimeofday ()) in
     let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
     let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
-    let events_dir = Filename.concat (CU.masc_dir_from_base_path ~base_path) "events" in
+    let events_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "events" in
     let event_path = Filename.concat (Filename.concat events_dir month) day in
     let event =
       Fs_compat.load_jsonl event_path
@@ -2305,7 +2305,7 @@ let test_verdict_audit_names_the_judging_runtime () =
     let tm = gmtime (gettimeofday ()) in
     let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
     let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
-    let events_dir = Filename.concat (CU.masc_dir_from_base_path ~base_path) "events" in
+    let events_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "events" in
     let event_path = Filename.concat (Filename.concat events_dir month) day in
     let event =
       Fs_compat.load_jsonl event_path
@@ -4131,7 +4131,7 @@ let test_complete_large_binary_snapshots () =
       Alcotest.(check int) "full size" (String.length bytes) (item |> member "bytes" |> to_int);
       Alcotest.(check string) "full SHA" Digestif.SHA256.(digest_string bytes |> to_hex)
         (item |> member "sha256" |> to_string);
-      let body = Filename.concat (CU.masc_dir_from_base_path ~base_path)
+      let body = Filename.concat (Common.masc_dir_from_base_path ~base_path)
           (item |> member "body" |> to_string) in
       Fs_compat.save_file source "changed";
       Unix.unlink source;
@@ -4174,7 +4174,7 @@ let test_a_binary_payload_is_adopted_and_filed () =
       let body_path = item |> member "body" |> to_string in
       Alcotest.(check string) "the body is filed under the request"
         "evidence/vrf-binary-test/0.bin" body_path;
-      let masc_dir = CU.masc_dir_from_base_path ~base_path in
+      let masc_dir = Common.masc_dir_from_base_path ~base_path in
       let filed_bytes = Fs_compat.load_file (Filename.concat masc_dir body_path) in
       Alcotest.(check string) "the filed bytes are the read bytes" png_bytes filed_bytes;
       let unfiled =
@@ -4298,7 +4298,7 @@ let test_an_unreadable_image_body_is_named_in_the_review_record () =
         VS.persist_binary_body
           ~base_path ~request_id:"vrf-unread" ~index:1 png_bytes
       in
-      let masc_dir = CU.masc_dir_from_base_path ~base_path in
+      let masc_dir = Common.masc_dir_from_base_path ~base_path in
       (match gone_body with
        | Some relative -> Sys.remove (Filename.concat masc_dir relative)
        | None -> Alcotest.fail "the body was filed under a request id");

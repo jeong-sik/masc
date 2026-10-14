@@ -172,11 +172,10 @@ val execution_evidence_of_metadata : Yojson.Safe.t option -> Yojson.Safe.t optio
 (** The audit object {!execution_evidence_metadata} put in tool-result
     metadata, or [None] when the metadata carries none. *)
 
-val init : ?cluster_name:string -> base_path:string -> unit -> unit
-(** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
-    store. Call once at startup. [MASC_TOOL_CALL_LOG_RETENTION_DAYS] controls
-    opportunistic retention; default is 30 days, and values <= 0 disable
-    pruning. *)
+val init : base_path:string -> unit -> unit
+(** [init ~base_path ()] creates the Dated_jsonl store under
+    [<base>/.masc]. Call once at startup. The server's prune pass removes its day files
+    by age. *)
 
 val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
 (** [start_flush_fiber ~sw ~clock] enables bounded asynchronous appends and
@@ -199,6 +198,9 @@ val flush_now : unit -> unit
     are raised after draining the remaining rows; returning
     normally means every row taken by this drain committed. *)
 
+val store : unit -> Dated_jsonl.t option
+(** [store ()] is the initialized durable store, if any. *)
+
 val store_dir : unit -> string option
 (** [store_dir ()] returns the initialized durable store directory, if any. *)
 
@@ -208,9 +210,9 @@ val current_log_path : unit -> string option
     been appended today. *)
 
 val configured_masc_root : unit -> string option
-(** [configured_masc_root ()] returns the cluster-aware MASC root passed to
-    [init], even if the store failed to open. Runtime sidecars use this to
-    keep their durable projections in the same cluster namespace. *)
+(** [configured_masc_root ()] returns the MASC root passed to [init], even if
+    the store failed to open. Runtime sidecars use this to keep their durable
+    projections under the same root. *)
 
 val committed_revision : keeper_name:string -> int
 (** Monotonic in-process revision of one keeper, advanced exactly after each

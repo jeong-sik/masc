@@ -1037,13 +1037,25 @@ let test_response_cache_tracks_reasoning_source_projection () =
   let source = Reasoning_dialect.reasoning_source_for_provider_config config |> Result.get_ok in
   let foreign = Reasoning_dialect.reasoning_source_for_provider_config
       { config with model_id = "foreign-model" } |> Result.get_ok in
+  let prior_content =
+    [ Types.Thinking { signature = Some "opaque-signed-history"; content = "prior reasoning" }
+    ; Types.Text "prior answer" ] in
+  (* The producing request had no earlier history, so the digest the record
+     side stamps is the one over an empty message list. The foreign case keeps
+     it, so only the reasoning source differs between the two histories. *)
+  let prefix_metadata =
+    match
+      Backend_anthropic.transmitted_reasoning_prefix
+        ~config ~messages:[] ~tools:[] ~response_content:prior_content ()
+    with
+    | Some prefix -> Types.Reasoning_prefix.metadata prefix
+    | None -> fail "the producing request records no reasoning prefix"
+  in
   let history metadata : Types.message list =
-    [ { (Types.assistant_msg "prior answer") with metadata
-      ; content = [ Thinking { signature = Some "opaque-signed-history"; content = "prior reasoning" }
-                  ; Text "prior answer" ] }
+    [ { (Types.assistant_msg "prior answer") with metadata; content = prior_content }
     ; Types.user_msg "continue" ] in
-  let matching = history (Types.Reasoning_source.metadata source) in
-  let mismatching = history (Types.Reasoning_source.metadata foreign) in
+  let matching = history (Types.Reasoning_source.metadata source @ prefix_metadata) in
+  let mismatching = history (Types.Reasoning_source.metadata foreign @ prefix_metadata) in
   check bool "canonical content alone cannot distinguish source" true
     (List.map Api_common.message_to_json matching = List.map Api_common.message_to_json mismatching);
   let run messages = Complete.complete ~sw ~net ~config ~messages ~cache () |> require_cached_response in
@@ -1075,7 +1087,21 @@ let test_response_cache_does_not_restamp_cached_reasoning () =
   let cached = run () in
   check int "unchanged effective body reuses the stored response" 1 (List.length !bodies);
   check bool "cached signed content is unchanged" true (cached.content = original.content);
-  check bool "cache retains original telemetry" true (cached.telemetry = original.telemetry);
+  (* A hit replays the original call's telemetry, including its reasoning
+     source, but not the three latency figures: they describe a network round
+     trip this call never made (#42728). *)
+  let without_latency (t : Types.inference_telemetry) =
+    { t with request_latency_ms = None; ttfrc_ms = None; prefill_ms = None } in
+  check bool "the stored call measured a network latency" true
+    (match original.telemetry with
+     | Some t -> Option.is_some t.request_latency_ms
+     | None -> false);
+  check bool "a hit carries no latency of its own" true
+    (match cached.telemetry with
+     | Some t -> t = without_latency t
+     | None -> false);
+  check bool "cache retains original telemetry apart from latency" true
+    (cached.telemetry = Option.map without_latency original.telemetry);
   let original_source = Option.bind original.telemetry (fun telemetry -> telemetry.reasoning_source)
       |> Option.get in
   check bool "fixture changed the current source" false

@@ -20,14 +20,14 @@ let schema =
     ]
 ;;
 
-let catalog_entry ~id ~base_url ~api_key_env =
+let catalog_entry ~id ~base_url ~requires_api_key =
   Printf.sprintf
     "[[providers]]\n\
      id = %S\n\
      kind = \"openai_compat\"\n\
      base_url = %S\n\
      request_path = \"/v1/chat/completions\"\n\
-     api_key_env = %S\n\n\
+     auth = %S\n\n\
      [[models]]\n\
      id_prefix = %S\n\
      provider_name = %S\n\
@@ -42,7 +42,7 @@ let catalog_entry ~id ~base_url ~api_key_env =
      %s"
     id
     base_url
-    api_key_env
+    (if requires_api_key then "api-key" else "none")
     (id ^ "-model")
     id
     id
@@ -62,7 +62,7 @@ let with_catalog ~base_url f =
       catalog_entry
         ~id
         ~base_url
-        ~api_key_env:(if String.equal id "evidence-a" then "MISSING_EVIDENCE_KEY" else ""))
+        ~requires_api_key:(String.equal id "evidence-a"))
     |> String.concat "\n"
   in
   let document : EO.catalog_document =

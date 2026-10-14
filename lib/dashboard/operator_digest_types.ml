@@ -32,9 +32,11 @@ type attention_item = {
   evidence : Yojson.Safe.t;
 }
 
+(* [action] is the catalog member. The target type is not a field: the
+   catalog decides it, so a recommendation cannot pair an action with a target
+   type it does not address. *)
 type recommended_action = {
-  action_type : string;
-  target_type : string;
+  action : Operator_action_catalog.t;
   target_id : string option;
   severity : operator_severity;
   reason : string;
@@ -74,6 +76,13 @@ let compare_attention (a : attention_item) (b : attention_item) =
     | None, Some _ -> 1
     | None, None -> String.compare a.kind b.kind
 
+(* By wire name, the order the string field gave. *)
+let compare_recommended_action_name (a : recommended_action) (b : recommended_action) =
+  String.compare
+    (Operator_action_catalog.to_string a.action)
+    (Operator_action_catalog.to_string b.action)
+;;
+
 let compare_recommendation (a : recommended_action) (b : recommended_action) =
   let by_severity = Int.compare (severity_rank b.severity) (severity_rank a.severity) in
   if by_severity <> 0 then by_severity
@@ -81,10 +90,10 @@ let compare_recommendation (a : recommended_action) (b : recommended_action) =
     match (a.target_id, b.target_id) with
     | Some x, Some y ->
         let by_target = String.compare x y in
-        if by_target <> 0 then by_target else String.compare a.action_type b.action_type
+        if by_target <> 0 then by_target else compare_recommended_action_name a b
     | Some _, None -> -1
     | None, Some _ -> 1
-    | None, None -> String.compare a.action_type b.action_type
+    | None, None -> compare_recommended_action_name a b
 
 let attention_item_to_yojson (item : attention_item) =
   `Assoc
@@ -100,27 +109,28 @@ let attention_item_to_yojson (item : attention_item) =
       ("authoritative", `Bool false);
     ]
 
-let recommended_confirm_required = Operator_action_catalog.requires_confirmation
-
 let recommended_action_to_yojson ~actor (item : recommended_action) =
+  let action_type = Operator_action_catalog.to_string item.action in
+  let target_type = Operator_action_catalog.target_type_string item.action in
   let preview =
     `Assoc
       [
         ("actor", `String actor);
-        ("action_type", `String item.action_type);
-        ("target_type", `String item.target_type);
+        ("action_type", `String action_type);
+        ("target_type", `String target_type);
         ("target_id", Json_util.string_opt_to_json item.target_id);
         ("payload", item.suggested_payload);
       ]
   in
   `Assoc
     [
-      ("action_type", `String item.action_type);
-      ("target_type", `String item.target_type);
+      ("action_type", `String action_type);
+      ("target_type", `String target_type);
       ("target_id", Json_util.string_opt_to_json item.target_id);
       ("severity", `String (operator_severity_to_string item.severity));
       ("reason", `String item.reason);
-      ("confirm_required", `Bool (recommended_confirm_required item.action_type));
+      ( "confirm_required",
+        `Bool (Operator_action_catalog.requires_confirmation item.action) );
       ("suggested_payload", item.suggested_payload);
       ("preview", preview);
       ("provenance", `String "fallback");
@@ -174,8 +184,7 @@ let dedup_recommendations (items : recommended_action list) =
         let key =
           String.concat "|"
             [
-              item.action_type;
-              item.target_type;
+              Operator_action_catalog.to_string item.action;
               Option.value ~default:"" item.target_id;
               String.trim item.reason |> String.lowercase_ascii;
             ]

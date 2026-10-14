@@ -83,7 +83,7 @@ let with_ws name fn =
          different workspace, so bind its store explicitly and reset it only
          after the case's switch has stopped all completion-authority fibers. *)
       Masc.Eval_calibration.For_testing.set_store
-        ~base_dir:(Filename.concat dir ".masc/verdicts");
+        ~base_path:dir;
       check int "new workspace has no verdicts from earlier cases" 0
         Yojson.Safe.Util.(Masc.Eval_calibration.calibration_stats ()
                           |> member "total_verdicts" |> to_int);
@@ -93,7 +93,7 @@ let with_ws name fn =
       (* Effective producer metadata reads operational settings from the
          Keeper manifest; the runtime snapshot only carries runtime state. *)
       let keepers_dir =
-        Filename.concat (Workspace.masc_root_dir config) "config/keepers"
+        Filename.concat (Workspace.masc_dir config) "config/keepers"
       in
       Fs_compat.mkdir_p keepers_dir;
       Out_channel.with_open_text
@@ -493,7 +493,7 @@ let test_rendered_image_reaches_verifier_http_request () =
           check string "exact PNG bytes and MIME reached HTTP provider"
             ("data:image/png;base64," ^ png_base64)
             (List.hd images |> member "image_url" |> member "url" |> to_string);
-          let body_path = Filename.concat (Workspace.masc_root_dir config)
+          let body_path = Filename.concat (Workspace.masc_dir config)
               ("evidence/" ^ single_submission () ^ "/0.bin") in
           check string "immutable snapshot body" png (Fs_compat.load_file body_path);
           check string "producer file changed independently" "changed after submission"

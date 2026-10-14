@@ -42,12 +42,11 @@ let test_day_file_follows_the_shared_layout () =
       let path = Activity_graph.For_testing.current_day_path config in
       check bool "the emitted day file exists" true (Sys.file_exists path);
       let expected =
-        (Jsonl_writer.dated_path_now
-           ~base_dir:
-             (Filename.concat
-                (Workspace_utils.masc_dir config)
-                "activity-events"))
-          .Jsonl_writer.path
+        (Dated_jsonl.Store.dated_path_now
+           (Dated_jsonl.Store.at
+              (Workspace_utils.dated_store_root config)
+              Activity_events))
+          .Dated_jsonl.Store.path
       in
       check string "and Jsonl_writer names the same file" expected path;
       check bool

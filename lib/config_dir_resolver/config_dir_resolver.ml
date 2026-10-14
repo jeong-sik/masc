@@ -468,7 +468,7 @@ let log_resolution ?(context = "ConfigDir") () =
             unset MASC_CONFIG_DIR to prefer the overlay)"
            overlay_path
        | _ -> "")
-    | _ -> ""
+    | Local_masc | Invalid_env | Missing -> ""
   in
   let signature =
     Printf.sprintf "source=%s path=%s%s" source item.path shadow_note
@@ -521,15 +521,6 @@ let microvm_shim_dir ~base_path =
   Filename.concat (Filename.concat (masc_root ~base_path) "microvm") "shim"
 
 let wiki_dir ~base_path = Filename.concat (masc_root ~base_path) "wiki"
-
-let tool_events_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "tool-events"
-
-let keeper_wake_payload_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "keeper-wake-payload"
-
-let verdicts_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "verdicts"
 
 let event_queue_bulk_backups_dir ~base_path =
   Filename.concat (masc_root ~base_path) "event-queue-bulk-backups"

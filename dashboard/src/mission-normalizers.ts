@@ -59,7 +59,6 @@ function normalizeSummary(raw: unknown): DashboardMissionSummary {
   const root = isRecord(raw) ? raw : {}
   return {
     workspace_health: asString(root.workspace_health),
-    cluster: asString(root.cluster),
     project: asString(root.project),
     paused: asBoolean(root.paused),
     tempo_interval_s: asNumber(root.tempo_interval_s),

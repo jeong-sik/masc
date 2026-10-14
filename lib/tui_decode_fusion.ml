@@ -301,7 +301,7 @@ let decode_fusion_stage ~status ~stage ~progress =
            { frs_expected; frs_answered; frs_failed })
   | Fusion_completed, "completed", `Null -> Ok Fusion_stage_completed
   | Fusion_failed _, "failed", `Null -> Ok Fusion_stage_failed
-  | _ ->
+  | (Fusion_running | Fusion_completed | Fusion_failed _), _, _ ->
       Error
         (Printf.sprintf "fusion status/stage/progress disagree: status=%s stage=%S"
            (fusion_run_status_to_string status) stage)
@@ -333,7 +333,8 @@ let decode_fusion_run json =
     match fur_status, fur_finished_at with
     | Fusion_running, None -> Ok ()
     | (Fusion_completed | Fusion_failed _), Some ts when Float.is_finite ts && ts >= 0. -> Ok ()
-    | _ -> Error "Fusion finish timestamp disagrees with run status"
+    | (Fusion_completed, None) | (Fusion_failed _, None) | (Fusion_running, Some _)
+    | (Fusion_completed, Some _) | (Fusion_failed _, Some _) -> Error "Fusion finish timestamp disagrees with run status"
   in
   let* stage = required_string_field json "stage" in
   let* progress = required_member json "progress" in
@@ -366,15 +367,17 @@ let decode_fusion_run json =
 
 let decode_fusion_replay json =
   let* status = required_string_field json "status" in
+  let replayed ~incomplete =
+    let* _lines_read = required_nonnegative_int_field json "lines_read" in
+    let* malformed_lines = required_nonnegative_int_field json "malformed_lines" in
+    let* dropped_running = required_nonnegative_int_field json "dropped_running" in
+    Ok (Fusion_replayed { malformed_lines; dropped_running; incomplete })
+  in
   match status with
   | "not_replayed" -> Ok Fusion_not_replayed
   | "absent" -> Ok Fusion_log_absent
-  | "complete" | "incomplete" ->
-      let* _lines_read = required_nonnegative_int_field json "lines_read" in
-      let* malformed_lines = required_nonnegative_int_field json "malformed_lines" in
-      let* dropped_running = required_nonnegative_int_field json "dropped_running" in
-      Ok (Fusion_replayed { malformed_lines; dropped_running;
-                            incomplete = String.equal status "incomplete" })
+  | "complete" -> replayed ~incomplete:false
+  | "incomplete" -> replayed ~incomplete:true
   | other -> Error (Printf.sprintf "unknown Fusion replay status %S" other)
 
 let decode_fusion_historical_evidence json =

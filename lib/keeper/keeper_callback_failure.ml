@@ -5,7 +5,7 @@ let durable_store = "keeper_lifecycle_events"
 let dashboard_surface = "keeper_lifecycle"
 let stale_reason = "callback_exception"
 
-let record ~(base_dir : string) ~(meta : Keeper_meta_contract.keeper_meta)
+let record ~(masc_root : string) ~(meta : Keeper_meta_contract.keeper_meta)
     ~(callback : string) exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -18,7 +18,7 @@ let record ~(base_dir : string) ~(meta : Keeper_meta_contract.keeper_meta)
       callback error;
     try
       Telemetry_coverage_gap.record
-        ~masc_root:base_dir
+        ~masc_root
         ~source
         ~producer:callback
         ~durable_store

@@ -27,7 +27,7 @@ let append_decision_record
     ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
-    ~(outcome : string)
+    ~(outcome : Keeper_decision_outcome.t)
     ?channel
     ~(execution_path : execution_path)
     ~(degraded_retry_applied : Keeper_error_classify.degraded_retry option)
@@ -105,16 +105,19 @@ let append_decision_record
     match response_preview, error with
     | Some preview, _ -> preview
     | None, Some err -> err
-    | None, None -> Option.value ~default:outcome turn_mode_label
+    | None, None ->
+      Option.value ~default:(Keeper_decision_outcome.to_string outcome) turn_mode_label
   in
   let terminal_reason =
     match terminal_reason with
     | Some reason -> reason
     | None -> (
         match outcome, error with
-        | "success", _ -> Keeper_turn_terminal.success ()
-        | _, Some _ -> Keeper_turn_terminal.of_code ~source:"decision_error" "unknown_error"
-        | _ -> Keeper_turn_terminal.of_code "unknown_error")
+        | Keeper_decision_outcome.Success, _ -> Keeper_turn_terminal.success ()
+        | Keeper_decision_outcome.(Checkpoint | Input_required | Failed), Some _ ->
+          Keeper_turn_terminal.of_code ~source:"decision_error" "unknown_error"
+        | Keeper_decision_outcome.(Checkpoint | Input_required | Failed), None ->
+          Keeper_turn_terminal.of_code "unknown_error")
   in
   let terminal_reason_code = Keeper_turn_terminal.code terminal_reason in
   let json =
@@ -157,7 +160,7 @@ let append_decision_record
           `String
             (Keeper_world_observation.channel_to_string
                channel) );
-        ("outcome", `String outcome);
+        ("outcome", `String (Keeper_decision_outcome.to_string outcome));
         (* Which path wrote the row. Without it the two are indistinguishable
            once [fallback_reason] is gone, and a cross-path disagreement cannot
            be measured from the log at all. *)
@@ -358,7 +361,7 @@ let append_decision_record
               `Assoc ([
                 ("model_used", `Null);
                 ("resolved_model_id", `Null);
-                ("outcome", `String "success");
+                ("outcome", `String Keeper_decision_outcome.(to_string Success));
                 ("turn_count", `Int r.turn_count);
                 ("agent_core_turn_ordinal", `Int r.final_agent_core_turn_ordinal);
                 ("stop_reason", `String stop_reason_str);
@@ -369,19 +372,17 @@ let append_decision_record
               ] @ usage_fields @ thinking_enabled_field @ inference_fields @ runtime_fields @ tool_surface_fields)
           | None ->
               (* Partial telemetry for turns without a run_result: record
-                 what we know without collapsing skipped/cancelled/partial
-                 outcomes into telemetry.outcome=error. *)
+                 the turn's own outcome instead of reporting it as a success. *)
               `Assoc [
                 (* The terminal reason is the typed failure projection built at
                    the dispatch boundary. Persist its canonical code directly;
                    free-form provider/error prose is diagnostic data, never a
                    classification input. *)
                 ("error_category", `String terminal_reason_code);
-                ("outcome", `String outcome);
+                ("outcome", `String (Keeper_decision_outcome.to_string outcome));
                 ("usage_reported", `Bool false);
                 ("telemetry_reported", `Bool false);
-                ( "coverage_stage",
-                  `String (coverage_stage_of_no_result_outcome outcome) );
+                ("coverage_stage", `String "unknown");
                 ( "coverage_reason",
                   `String (coverage_reason_of_no_result_outcome outcome) );
               ] );

@@ -183,26 +183,6 @@ let lsp_method_of_string = Lsp_method_catalog.of_string
 let lsp_method_to_string = Lsp_method_catalog.to_string
 let lsp_method_classification = Lsp_method_catalog.classification
 
-let is_document_sync_notification = function
-  | Did_open | Did_change | Did_save | Did_close -> true
-  | Initialize
-  | Initialized
-  | Shutdown
-  | Exit
-  | Masc_lsp_status
-  | Hover
-  | CodeLens
-  | InlayHint
-  | Diagnostic
-  | Definition
-  | References
-  | Completion
-  | CodeAction
-  | Document_symbol
-  | Folding_range
-  | Document_highlight -> false
-;;
-
 (* Who fixes the workspace tree document paths are relative to. The
    connection URL declares it when it names an IDE scope ([codebase]) or a
    workspace ([repo_id]/[keeper]); only a connection that declared neither
@@ -548,7 +528,7 @@ let fpath_within ~base path =
      | Some rel ->
        if List.exists (String.equal "..") (Fpath.segs rel) then None else Some rel
      | None -> None)
-  | _ -> None
+  | Ok _, (Ok _ | Error _) | Error _, (Ok _ | Error _) -> None
 ;;
 
 let relative_to_string rel =
@@ -602,7 +582,7 @@ let workspace_root_for_initialize ~base_path root_uri =
   match
     (match Fpath.of_string candidate with
      | Ok p when Fpath.is_abs p -> Some p
-     | _ -> None)
+     | Ok _ | Error _ -> None)
   with
   | Some candidate ->
     (* Keep the original segments until realpath: [link/..] is not generally
@@ -1056,9 +1036,9 @@ let dispatch_fields cs fields =
         connected / command / last_error. *)
      | Some Masc_lsp_status, Some n -> send_response cs n (current_status_json cs)
      | Some Masc_lsp_status, None -> ()
-     | Some method_, None when is_document_sync_notification method_ ->
+     | Some ((Did_open | Did_change | Did_save | Did_close) as method_), None ->
        forward_document_sync_notification cs method_ params
-     | Some method_, Some n when is_document_sync_notification method_ ->
+     | Some ((Did_open | Did_change | Did_save | Did_close) as method_), Some n ->
        send_error cs n
          Mcp_error_code.(to_wire_code Invalid_request)
          (Printf.sprintf
@@ -1073,7 +1053,10 @@ let dispatch_fields cs fields =
      | Some CodeAction, Some n -> relay_or_empty cs ~method_:CodeAction ~empty:(`List []) params n
      | Some Folding_range, Some n ->
        relay_or_empty cs ~method_:Folding_range ~empty:(`List []) params n
-     | _ ->
+     | None, _
+     | Some (Initialize | Shutdown), None
+     | Some (Hover | CodeLens | Diagnostic | Completion | CodeAction | Folding_range), None
+     | Some (InlayHint | Definition | References | Document_symbol | Document_highlight), _ ->
        (match id_opt with
         | Some n ->
           (* Other read-only requests with a textDocument URI → forward to LSP.
@@ -1107,6 +1090,8 @@ let dispatch_fields cs fields =
                      n
                      Mcp_error_code.(to_wire_code Invalid_params)
                      ("No LSP server for: " ^ request.relative_path))))
+        (* No id: a JSON-RPC message without an id is a notification, so it
+           gets no response. *)
         | None -> ()))
   (* No method field *)
   | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"

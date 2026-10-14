@@ -76,6 +76,32 @@ let test_excludes_other_keeper () =
       check int "no events for the queried handle" 0
         (summary_int json "total_events"))
 
+(* The summary adds up each turn's usage from the turn itself. A value a turn
+   did not carry adds nothing rather than failing the sum. *)
+let test_sums_turn_usage () =
+  with_config (fun config ->
+      let turn payload =
+        ignore
+          (Activity_graph.emit config ~kind:"keeper.turn_completed"
+             ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
+             ~payload:(`Assoc payload)
+             ())
+      in
+      turn
+        [ ("input_tokens", `Int 10)
+        ; ("output_tokens", `Int 3)
+        ; ("cost_usd", `Float 0.5)
+        ];
+      turn [ ("input_tokens", `Int 5) ];
+      let json = build config ~agent_name:"testkeeper" in
+      check int "both turns counted" 2 (summary_int json "turns_completed");
+      check int "input tokens of both turns" 15
+        (summary_int json "total_input_tokens");
+      check int "output tokens of the turn that carried them" 3
+        (summary_int json "total_output_tokens");
+      check (float 0.0) "cost of the turn that carried it" 0.5
+        Yojson.Safe.Util.(json |> member "summary" |> member "total_cost_usd" |> to_number))
+
 (* Exposes [dir] as well as [config] so a test can drive the chat store,
    which is keyed by [base_dir] (= dir) rather than by the config. *)
 let with_dir_config f =
@@ -316,6 +342,27 @@ let emit_keeper_tool_exec config ~keeper_name ~tool_name ~success =
     ~task_id:(Some "task-1")
     ()
 
+(* When the activity write fails, emit_tool_exec records a coverage gap. The
+   gap goes under [<base>/.masc], where the readers
+   look, and not beside it under the base path (#42837). A plain file where
+   the activity store's folder belongs makes the write fail. *)
+let test_failed_emit_records_its_gap_under_masc () =
+  with_dir_config (fun dir config ->
+      let masc_root = Lib.Workspace.masc_dir config in
+      Fs_compat.mkdir_p masc_root;
+      Out_channel.with_open_text
+        (Dated_jsonl.Store.dir
+           (Dated_jsonl.Store.at
+              (Lib.Workspace.dated_store_root config)
+              Dated_jsonl.Store.Root.Activity_events))
+        (fun oc -> output_string oc "not a folder");
+      emit_keeper_tool_exec config ~keeper_name:"testkeeper"
+        ~tool_name:"masc_status" ~success:true;
+      check int "one gap under .masc" 1
+        (List.length (Telemetry_coverage_gap.read_recent ~masc_root ~n:5));
+      check bool "nothing beside .masc" false
+        (Sys.file_exists (Filename.concat dir "telemetry-coverage-gaps")))
+
 let tool_call_events_of json =
   events_list json
   |> List.filter (fun e -> String.equal (ev_type e) "tool_call")
@@ -376,6 +423,7 @@ let () =
           test_case "turn_completed surfaces for short handle" `Quick
             test_surfaces_turn_completed_for_the_keeper_name;
           test_case "other keeper excluded" `Quick test_excludes_other_keeper;
+          test_case "summary sums each turn's usage" `Quick test_sums_turn_usage;
         ] );
       ( "keeper-chat-source",
         [
@@ -397,6 +445,8 @@ let () =
         ] );
       ( "keeper-tool-exec-source",
         [
+          test_case "a failed emit records its gap under .masc" `Quick
+            test_failed_emit_records_its_gap_under_masc;
           test_case "keeper in-turn execution surfaces" `Quick
             test_keeper_tool_exec_surfaces_in_timeline;
           test_case "external and keeper sources merge" `Quick

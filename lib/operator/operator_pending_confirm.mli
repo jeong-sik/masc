@@ -61,7 +61,14 @@ val remove_pending_confirms_by_typed_target :
   Workspace.config -> target -> (int, string) result
 val pending_confirm_scope_of_entries : ?actor:string -> pending_confirm list -> pending_confirm_scope
 val pending_confirm_scope : ?actor:string -> Workspace.config -> pending_confirm_scope
+val delegated_tool_name : Operator_action_catalog.t -> string
+(** The tool name an action is recorded under: what a pending confirm stores
+    as [delegated_tool] and what a result reports as [tool_name]. It is a
+    label, not always a tool that is dispatched. *)
+
 val available_actions : available_action list
+(** One row per catalog action, in catalog order. *)
+
 val available_actions_json : Yojson.Safe.t
 val pending_confirm_summary_json_of_scope : pending_confirm_scope -> Yojson.Safe.t
 val pending_confirm_summary_json : ?actor:string -> Workspace.config -> Yojson.Safe.t

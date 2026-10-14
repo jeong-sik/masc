@@ -425,7 +425,16 @@ let is_retryable = function
   | ServerError r -> r.transient
   | NetworkError { kind = Http_client.Tls_error; _ } -> false
   | NetworkError { kind = Http_client.Local_resource_exhaustion; _ } -> false
-  | NetworkError _ -> true
+  | NetworkError
+      { kind =
+          ( Http_client.Connection_refused
+          | Http_client.Dns_failure
+          | Http_client.Timeout
+          | Http_client.Connection_reset
+          | Http_client.End_of_file
+          | Http_client.Unknown )
+      ; _
+      } -> true
   | Timeout _ -> true
   | MissingApiKey _
   | InvalidConfig _
@@ -441,5 +450,92 @@ let is_retryable = function
   | AuthorizationError _
   | InvalidRequest _
   | NotFound _
+  | ProviderTerminal _ -> false
+;;
+
+(* The classifications below are the one place that lists every constructor
+   for its question. A new [provider_error] constructor stops the build here,
+   so no caller answers the question by default. *)
+
+let is_repeating_generation = function
+  | RepeatingGeneration _ -> true
+  | MissingApiKey _
+  | InvalidConfig _
+  | ParseError _
+  | ProviderWireError _
+  | ProviderReportedError _
+  | UnknownVariant _
+  | ProviderUnavailable _
+  | EmptyCompletion _
+  | RateLimit _
+  | HardQuota _
+  | CapacityExhausted _
+  | AuthError _
+  | AuthorizationError _
+  | ServerError _
+  | NetworkError _
+  | Timeout _
+  | InvalidRequest _
+  | NotFound _
+  | ProviderTerminal _ -> false
+;;
+
+let timeout_phase_is_local_admission = function
+  | Some (Http_client.Queue | Http_client.Capacity_backpressure) -> true
+  | Some
+      ( Http_client.First_token
+      | Http_client.Wall_clock
+      | Http_client.Http_operation
+      | Http_client.Non_streaming_body
+      | Http_client.Stream_body
+      | Http_client.Stream_idle _
+      | Http_client.Provider_step
+      | Http_client.Cli_stdout_idle
+      | Http_client.Unknown_timeout )
+  | None -> false
+;;
+
+let is_local_admission_timeout = function
+  | Timeout { timeout_phase; provider = _; detail = _ } ->
+    timeout_phase_is_local_admission timeout_phase
+  | MissingApiKey _
+  | InvalidConfig _
+  | ParseError _
+  | ProviderWireError _
+  | ProviderReportedError _
+  | UnknownVariant _
+  | ProviderUnavailable _
+  | EmptyCompletion _
+  | RepeatingGeneration _
+  | RateLimit _
+  | HardQuota _
+  | CapacityExhausted _
+  | AuthError _
+  | AuthorizationError _
+  | ServerError _
+  | NetworkError _
+  | InvalidRequest _
+  | NotFound _
+  | ProviderTerminal _ -> false
+;;
+
+let is_candidate_access_rejection = function
+  | AuthError _ | AuthorizationError _ | NotFound _ -> true
+  | MissingApiKey _
+  | InvalidConfig _
+  | ParseError _
+  | ProviderWireError _
+  | ProviderReportedError _
+  | UnknownVariant _
+  | ProviderUnavailable _
+  | EmptyCompletion _
+  | RepeatingGeneration _
+  | RateLimit _
+  | HardQuota _
+  | CapacityExhausted _
+  | ServerError _
+  | NetworkError _
+  | Timeout _
+  | InvalidRequest _
   | ProviderTerminal _ -> false
 ;;

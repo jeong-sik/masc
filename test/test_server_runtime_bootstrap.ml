@@ -1081,96 +1081,67 @@ let test_restore_persisted_sessions_uses_flat_agents_dir () =
         "restore uses flat agents dir"
         [ "test-agent" ] restored)
 
-let test_keeper_paths_use_cluster_root () =
-  with_temp_dir "startup-cluster" (fun dir ->
-      with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
-          let config = Workspace.default_config dir in
-          let keeper_dir = Keeper_fs.keeper_dir config in
-          let expected_root =
-            Filename.concat
-              (Filename.concat (Filename.concat dir Common.masc_dirname) "clusters")
-              "cluster-alpha"
-          in
-          Alcotest.(check bool) "keeper dir under cluster root" true
-            (String.starts_with ~prefix:expected_root keeper_dir)))
+let test_keeper_paths_use_masc_root () =
+  with_temp_dir "startup-masc-root" (fun dir ->
+      let config = Workspace.default_config dir in
+      let keeper_dir = Keeper_fs.keeper_dir config in
+      Alcotest.(check bool) "keeper dir under <base>/.masc" true
+        (String.starts_with ~prefix:(Filename.concat dir Common.masc_dirname) keeper_dir))
 
-let test_tool_usage_log_uses_cluster_root () =
-  with_temp_dir "startup-tool-usage-cluster" (fun dir ->
-      with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
-          Tool_usage_log.init ~base_path:dir ~cluster_name:"cluster-alpha" ();
-          Tool_usage_log.log_call
-            ~on_io_failure:(fun ~site:_ _ -> ())
-            ~tool_name:"keeper_tasks_list"
-            ~disposition:(Tool_result.Completed ())
-            ~caller:(Some "oracle");
+let test_tool_usage_log_uses_masc_root () =
+  with_temp_dir "startup-tool-usage-root" (fun dir ->
+      Tool_usage_log.init ~base_path:dir ();
+      Tool_usage_log.log_call
+        ~on_io_failure:(fun ~site:_ _ -> ())
+        ~tool_name:"keeper_tasks_list"
+        ~disposition:(Tool_result.Completed ())
+        ~caller:(Some "oracle");
+      let expected_dir =
+        Filename.concat (Filename.concat dir Common.masc_dirname) "tool_usage"
+      in
+      Alcotest.(check bool) "tool_usage dir under <base>/.masc" true
+        (Sys.file_exists expected_dir && Sys.is_directory expected_dir);
+      match Tool_usage_log.read_recent ~n:10 () with
+      | [ row ] ->
+        Alcotest.(check string)
+          "tool_usage row preserves disposition"
+          "completed"
+          Yojson.Safe.Util.(row |> member "disposition" |> to_string);
+        Alcotest.(check bool)
+          "tool_usage row has no legacy success bool"
+          true
+          Yojson.Safe.Util.(row |> member "success" = `Null)
+      | rows ->
+        Alcotest.failf "expected one tool_usage row, got %d" (List.length rows))
+
+let test_keeper_tool_call_log_uses_masc_root () =
+  with_temp_dir "startup-tool-call-root" (fun dir ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Fun.protect
+        ~finally:Keeper_tool_call_log.reset_for_testing
+        (fun () ->
+          Keeper_tool_call_log.init ~base_path:dir ();
+          Keeper_tool_call_log.log_call
+            ~keeper_name:"oracle" ~tool_name:"keeper_tasks_list"
+            ~input:(`Assoc []) ~output_text:"ok"
+            ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
           let expected_dir =
-            Filename.concat
-              (Filename.concat
-                 (Filename.concat (Filename.concat dir Common.masc_dirname) "clusters")
-                 "cluster-alpha")
-              "tool_usage"
+            Filename.concat (Filename.concat dir Common.masc_dirname) "tool_calls"
           in
-          let legacy_dir =
-            Filename.concat (Filename.concat dir Common.masc_dirname) "tool_usage"
-          in
-          Alcotest.(check bool) "cluster tool_usage dir exists" true
+          Alcotest.(check bool) "tool_calls dir under <base>/.masc" true
             (Sys.file_exists expected_dir && Sys.is_directory expected_dir);
-          Alcotest.(check bool) "legacy tool_usage dir absent" false
-            (Sys.file_exists legacy_dir);
-          match Tool_usage_log.read_recent ~n:10 () with
-          | [ row ] ->
-            Alcotest.(check string)
-              "tool_usage row preserves disposition"
-              "completed"
-              Yojson.Safe.Util.(row |> member "disposition" |> to_string);
-            Alcotest.(check bool)
-              "tool_usage row has no legacy success bool"
-              true
-              Yojson.Safe.Util.(row |> member "success" = `Null)
-          | rows ->
-            Alcotest.failf
-              "expected one tool_usage row from cluster store, got %d"
-              (List.length rows)))
-
-let test_keeper_tool_call_log_uses_cluster_root () =
-  with_temp_dir "startup-tool-call-cluster" (fun dir ->
-      with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
-          Keeper_tool_call_log.reset_for_testing ();
-          Fun.protect
-            ~finally:Keeper_tool_call_log.reset_for_testing
-            (fun () ->
-              Keeper_tool_call_log.init ~base_path:dir
-                ~cluster_name:"cluster-alpha" ();
-              Keeper_tool_call_log.log_call
-                ~keeper_name:"oracle" ~tool_name:"keeper_tasks_list"
-                ~input:(`Assoc []) ~output_text:"ok"
-                ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
-              let expected_dir =
-                Filename.concat
-                  (Filename.concat
-                     (Filename.concat (Filename.concat dir Common.masc_dirname) "clusters")
-                     "cluster-alpha")
-                  "tool_calls"
-              in
-              let legacy_dir =
-                Filename.concat (Filename.concat dir Common.masc_dirname) "tool_calls"
-              in
-              Alcotest.(check bool) "cluster tool_calls dir exists" true
-                (Sys.file_exists expected_dir && Sys.is_directory expected_dir);
-              Alcotest.(check bool) "legacy tool_calls dir absent" false
-                (Sys.file_exists legacy_dir);
-              Alcotest.(check int) "tool_call row readable from cluster store"
-                1
-                (match Keeper_tool_call_log.read_recent ~n:10 () with
-                 | Ok rows -> List.length rows
-                 | Error (Keeper_tool_call_log.Index_unavailable detail) ->
-                   Alcotest.fail detail))))
+          Alcotest.(check int) "tool_call row readable"
+            1
+            (match Keeper_tool_call_log.read_recent ~n:10 () with
+             | Ok rows -> List.length rows
+             | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+               Alcotest.fail detail)))
 
 let test_workspace_init_bootstraps_keeper_runtime_dirs () =
   with_temp_dir "startup-keeper-dirs" (fun dir ->
       let config = Workspace.default_config dir in
       ignore (Workspace.init config ~agent_name:None);
-      let root_dir = Workspace.masc_root_dir config in
+      let root_dir = Workspace.masc_dir config in
       let keeper_dir = Filename.concat root_dir "keepers" in
       let traces_dir = Filename.concat root_dir "traces" in
       Alcotest.(check bool) "keeper dir exists" true
@@ -2047,8 +2018,6 @@ let test_health_json_keeps_awaiting_verification_in_system_llm_lane () =
             recovering_names = [];
             configuration_blocked_names = [];
             official_client_recovery_required_names = [];
-            phase_values = [];
-            phase_details = [];
           }
         in
         let execution_snapshot :
@@ -2386,8 +2355,6 @@ let test_health_json_owner_rows_answer_from_each_keepers_own_reads () =
             recovering_names = [];
             configuration_blocked_names = [];
             official_client_recovery_required_names = [];
-            phase_values = [];
-            phase_details = [];
           }
         in
         let execution_snapshot :
@@ -2467,8 +2434,6 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             recovering_names = [];
             configuration_blocked_names = [];
             official_client_recovery_required_names = [];
-            phase_values = [];
-            phase_details = [];
           }
         in
         let execution_snapshot :
@@ -2726,8 +2691,6 @@ let test_health_json_capacity_uses_execution_snapshot () =
         ; recovering_names
         ; configuration_blocked_names = []
         ; official_client_recovery_required_names = []
-        ; phase_values = []
-        ; phase_details = []
         }
       in
       let execution_snapshot :
@@ -3268,8 +3231,6 @@ let test_health_json_blocks_terminal_configuration_failures () =
     ; recovering_names = []
     ; configuration_blocked_names = [ keeper_name ]
     ; official_client_recovery_required_names = []
-    ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
-    ; phase_details = []
     }
   in
   let execution_snapshot :
@@ -3326,10 +3287,6 @@ let test_health_json_blocks_terminal_configuration_failures () =
     { phase_snapshot with
       counts = partial_phase_counts
     ; running_names = [ healthy_name ]
-    ; phase_values =
-        [ keeper_name, Keeper_state_machine.Failing
-        ; healthy_name, Keeper_state_machine.Running
-        ]
     }
   in
   let partial =
@@ -3365,11 +3322,6 @@ let test_health_json_blocks_all_target_operator_recovery () =
       ; recovering_names = []
       ; configuration_blocked_names = configuration_names
       ; official_client_recovery_required_names = recovery_names
-      ; phase_values =
-          List.map
-            (fun name -> name, Keeper_state_machine.Failing)
-            target_names
-      ; phase_details = []
       }
     in
     Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -3419,8 +3371,6 @@ let test_health_json_counts_configuration_blocker_outside_autoboot () =
     ; recovering_names = []
     ; configuration_blocked_names = [ keeper_name ]
     ; official_client_recovery_required_names = []
-    ; phase_values = [ keeper_name, Keeper_state_machine.Failing ]
-    ; phase_details = []
     }
   in
   let fleet_safety =
@@ -6219,12 +6169,12 @@ let () =
             test_constructor_is_pure;
           Alcotest.test_case "restore_persisted_sessions uses flat agents dir"
             `Quick test_restore_persisted_sessions_uses_flat_agents_dir;
-          Alcotest.test_case "keeper paths use cluster root" `Quick
-            test_keeper_paths_use_cluster_root;
-          Alcotest.test_case "tool usage log uses cluster root" `Quick
-            test_tool_usage_log_uses_cluster_root;
-          Alcotest.test_case "keeper tool call log uses cluster root" `Quick
-            test_keeper_tool_call_log_uses_cluster_root;
+          Alcotest.test_case "keeper paths use the masc root" `Quick
+            test_keeper_paths_use_masc_root;
+          Alcotest.test_case "tool usage log uses the masc root" `Quick
+            test_tool_usage_log_uses_masc_root;
+          Alcotest.test_case "keeper tool call log uses the masc root" `Quick
+            test_keeper_tool_call_log_uses_masc_root;
           Alcotest.test_case "workspace init bootstraps keeper runtime dirs" `Quick
             test_workspace_init_bootstraps_keeper_runtime_dirs;
           Alcotest.test_case "otel exporter setup failure is soft" `Quick

@@ -601,7 +601,7 @@ let keeper_fleet_runtime_resolution_base_fields
     match base_path with
     | Some base_path ->
       Keeper_disk_pressure.snapshot_json
-        ~masc_root:(Workspace_utils.masc_dir_from_base_path ~base_path)
+        ~masc_root:(Common.masc_dir_from_base_path ~base_path)
         ()
     | None -> `Null
   in

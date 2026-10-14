@@ -1,4 +1,5 @@
-(** Hook accumulator + immutable outputs for Agent_core.Agent.run callbacks. *)
+(** Hook accumulator for Agent_core.Agent.run callbacks. The hooks write it
+    during the run; the turn reads its fields after the run returns. *)
 
 (** Whether the historical calls form one observed sequence. Independent
     checkpoint and ledger streams cannot prove adjacency to one another. *)
@@ -7,6 +8,9 @@ type historical_order = Ordered | Unordered
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : Keeper_agent_result.tool_call_detail list
+    (** This invocation's executed calls only, newest first. Checkpoint
+        history ([historical_tool_calls]) is never execution evidence for a
+        new invocation; it only feeds the repetition checks below. *)
   ; historical_tool_calls : Keeper_agent_result.tool_call_detail list
   ; historical_order : historical_order
   ; history_pairs_at_setup : int option
@@ -32,17 +36,6 @@ type hook_accumulator =
     (** Sum of the turn's provider responses' wire [cache_n] / [prompt_n]. *)
   }
 
-type hook_outputs =
-  { out_meta : Keeper_meta_contract.keeper_meta
-  ; out_tool_calls : Keeper_agent_result.tool_call_detail list
-  ; out_tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
-  ; out_requested_tool_names : string list
-  ; out_receipt_completion_contract_result :
-      Keeper_execution_receipt.completion_contract_result
-  ; out_receipt_actionable_signal :
-      Keeper_contract_classifier.actionable_signal option
-  }
-
 val create :
   meta:Keeper_meta_contract.keeper_meta ->
   tool_surface:Keeper_agent_tool_surface.tool_surface_metrics ->
@@ -53,10 +46,6 @@ val create :
 (** Begin a new invocation, retaining checkpoint calls only for repetition.
     [history_pairs_at_setup] is the checkpoint history's matched pair count
     on the lane that seeds from it, [None] on a scope-bound lane. *)
-
-(** Current invocation outputs only. Checkpoint history is never execution
-    evidence for a new invocation. *)
-val freeze : hook_accumulator -> hook_outputs
 
 (** Current calls followed by historical evidence for exact input/output
     repetition counts. Historical evidence may contain disjoint streams. *)

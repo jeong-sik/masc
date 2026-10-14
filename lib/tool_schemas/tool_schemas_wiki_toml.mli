@@ -1,4 +1,4 @@
-(** The five wiki tool declarations that moved to
+(** The six wiki tool declarations that moved to
     [config/tools/masc_wiki_*.toml] (RFC
     prompts-and-tool-definitions-outside-ocaml §2.2).
 
@@ -12,3 +12,4 @@ val read : Tool_definition_toml.loaded
 val create : Tool_definition_toml.loaded
 val update : Tool_definition_toml.loaded
 val search : Tool_definition_toml.loaded
+val lint : Tool_definition_toml.loaded

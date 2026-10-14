@@ -9,7 +9,6 @@ type severity = Critical | Warning | Info
 
 type attention_item = {
   severity : severity;
-  category : string;
   summary : string;
   suggested_tool : string;
 }
@@ -53,7 +52,6 @@ let detect_stuck_agents ~(now : float)
              Some
                {
                  severity = Critical;
-                 category = "stuck_agent";
                  summary =
                    Printf.sprintf "Agent stuck: %s (%s%s)" agent.name elapsed
                      task_info;
@@ -95,7 +93,6 @@ let detect_idle_with_pending ~(now : float)
     [
       {
         severity = Info;
-        category = "idle_with_pending";
         summary =
           Printf.sprintf "%d idle agent%s with %d pending task%s" idle_count
             (if idle_count > 1 then "s" else "")
@@ -125,14 +122,7 @@ let detect_operator_tasks (items : Operator_task_attention.item list)
          | Operator_task_attention.Held_without_actor _ -> Critical
          | Operator_task_attention.Producer_record_unreadable _ -> Warning
        in
-       let category =
-         match item with
-         | Operator_task_attention.Held_without_actor _ -> "held_without_actor"
-         | Operator_task_attention.Producer_record_unreadable _ ->
-           "producer_record_unreadable"
-       in
        { severity
-       ; category
        ; summary = Operator_task_attention.summary item
        ; suggested_tool = Operator_task_attention.next_step item
        })

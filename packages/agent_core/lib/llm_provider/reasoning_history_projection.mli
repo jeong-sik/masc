@@ -74,3 +74,110 @@ val project_for_provider_config
     the immutable projection value; payload size is independent of history
     length and endpoint URLs are never logged. *)
 val observe : component:string -> stream:bool -> t -> unit
+
+(** {1 Creation-prefix binding} *)
+
+(** Why one message's reasoning was removed before serialization. Every cause
+    fails closed: the block is not sent and the turn proceeds without it.
+    - [Prefix_entry_invalid] and [Prefix_entry_duplicate]: the stored digest tag
+      cannot be read. They name corrupted history, not a changed request.
+    - [Prefix_request_mismatch]: the request digest differs from the chain and
+      no earlier drop in this request could have changed the chain.
+    - [Prefix_chain_broken_upstream]: the same mismatch after an earlier drop
+      that could have changed the chain. Blocks that carried no readable stamp
+      ([Prefix_source_not_present], [Prefix_digest_absent]) were never sent, so
+      dropping them again explains nothing about a later mismatch. Later
+      digests were stamped over the history with a stamped block present, so a
+      mismatch after one is not an independent finding. *)
+type prefix_drop_cause =
+  | Prefix_source_not_present
+  | Prefix_digest_absent
+  | Prefix_entry_invalid
+  | Prefix_entry_duplicate
+  | Prefix_request_mismatch
+  | Prefix_chain_broken_upstream
+  | Prefix_reasoning_mismatch
+[@@deriving show]
+
+(** [stored_message_digest] is the message digest read from the stored tag.
+    It is [Some] only for the three causes decided after the tag parsed
+    ([Prefix_request_mismatch], [Prefix_chain_broken_upstream],
+    [Prefix_reasoning_mismatch]). *)
+type prefix_drop =
+  { message_index : int
+  ; cause : prefix_drop_cause
+  ; stored_message_digest : string option
+  }
+[@@deriving show]
+
+(** [reasoning_message_count] is the number of messages that carried reasoning
+    when they entered the fold; each drop removes one of them. *)
+type prefix_verdict =
+  { messages : Types.message list
+  ; prefix_drops : prefix_drop list
+  ; removed_empty_assistant_indices : int list
+  ; reasoning_message_count : int
+  ; final_digest : string
+  }
+[@@deriving show]
+
+(** Wire bytes of one message's content through the caller's encoder, hashed.
+    The record side hashes the response content with the same function, so a
+    byte edited inside the message fails the comparison below. *)
+val content_wire_digest
+  :  encode_block:(Types.content_block -> Yojson.Safe.t)
+  -> Types.content_block list
+  -> string
+
+(** Drop reasoning whose creation prefix cannot be proven identical to the
+    current request. A binding wire (Anthropic today) verifies each signed
+    thinking block against the system prompt, the tools, and every message
+    before it — exactly the fields the API's own prefix check covers;
+    replaying one across a rewritten prefix fails the whole request with a
+    400 no retry clears. The fold chains a digest over [head] (the
+    API-checked head members in wire order) and every admitted block, and
+    admits a message's reasoning only
+    when the source is present, the recorded request digest equals the chain
+    before the message, and the recorded message digest equals
+    {!content_wire_digest} of its current content.
+
+    Callers pass post-projection, post-merge messages with the exact encoder
+    the wire serializes with; [role_tag] is the wire's role spelling. The
+    fold mirrors {!project}: emptied assistants are removed, other roles
+    never are. [final_digest] is the chain after the last message — the
+    value the record side stamps as the new response's request digest.
+    An unreadable tag (invalid or duplicated) drops the message's reasoning
+    with its own cause instead of failing the request: the tag sits in the
+    stored history, so a failure would repeat on every request while the
+    message stays in the window. Every doubt drops.
+    Dropping stays safe only while the Anthropic branch never emits manual
+    [enabled] thinking (which requires the last assistant turn to start with
+    a thinking block); revisit this policy the day it does. *)
+val verify_prefix_binding
+  :  head:(string * Yojson.Safe.t) list
+  -> encode_block:(Types.content_block -> Yojson.Safe.t)
+  -> role_tag:(Types.role -> string)
+  -> Types.message list
+  -> prefix_verdict
+
+(** The fields of the per-request snapshot {!observe_prefix_drops} logs:
+    messages entering the fold with reasoning, replayed and dropped, a count
+    per cause, and a bounded sample of dropped blocks named by the first 12 hex
+    characters of their stored message digest. It reads one request, not an
+    event count: a stale block is dropped again by every request that still
+    carries it, so the number of distinct blocks cut is a query over
+    [dropped_block_ids]. *)
+val prefix_snapshot_json
+  :  component:string
+  -> stream:bool
+  -> prefix_verdict
+  -> Yojson.Safe.t
+
+(** Logs {!prefix_snapshot_json} when the request dropped reasoning or removed
+    an emptied assistant. The line is Warn when a stored tag was unreadable
+    and Info otherwise. Exact per-message evidence remains in the verdict. *)
+val observe_prefix_drops
+  :  component:string
+  -> stream:bool
+  -> prefix_verdict
+  -> unit

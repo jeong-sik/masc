@@ -31,6 +31,10 @@ let original_evidence ?task () =
     ; "tool_trace", `Assoc ["status", `String "partial"]
     ]
 
+let events_day_file config =
+  Dated_jsonl.Store.(
+    dated_path_now (at (Workspace.dated_store_root config) Root.Events))
+
 let with_fixture f = Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base = Filename.temp_dir "fusion-decision-" "" in
@@ -137,8 +141,7 @@ let test_generated_decision_note_is_read_without_rewriting_history () =
       | `Assoc fields -> fields
       | _ -> fail "recorded decision is not an object" in
     let historical = `Assoc (("notes", `String note) :: fields) in
-    let dated = Jsonl_writer.dated_path_now
-      ~base_dir:(Filename.concat (Workspace.masc_dir config) "events") in
+    let dated = events_day_file config in
     Fs_compat.append_file dated.path (Yojson.Safe.to_string historical ^ "\n");
     let decisions = Fusion_decision.read ~config ~run_id:"run-advice"
       |> require "read historical decision" in
@@ -150,7 +153,7 @@ let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
   let proposal = Fusion_decision.parse (args task_id "adopted" "Measured evidence supports it") |> require "parse" in
   rejected (Fusion_decision.read_for_keeper ~config ~keeper:"foreign" ~run_id:"run-advice");
   rejected (Fusion_decision.read_for_keeper ~config ~keeper:"fusion-keeper" ~run_id:"absent");
-  let dated = Jsonl_writer.dated_path_now ~base_dir:(Filename.concat (Workspace.masc_dir config) "events") in
+  let dated = events_day_file config in
   Fs_compat.append_file dated.path "malformed historical event\n";
   (match Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref proposal with
    | Error (Fusion_decision.Storage_failure _ as error) ->

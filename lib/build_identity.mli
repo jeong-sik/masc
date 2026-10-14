@@ -112,6 +112,20 @@ val runtime_instance_id : string
 (** Immutable process identity minted at initialization. Reading this value
     performs no repository or executable provenance probes. *)
 
+(** The package managers a dashboard build receipt may name. *)
+type package_manager_kind =
+  | Pnpm
+  | Corepack
+
+val package_manager_kind_to_string : package_manager_kind -> string
+
+val dashboard_build_mode : string
+(** The only build mode a dashboard build receipt may name; the receipt check
+    refuses any other, so a verified identity carries no mode field. *)
+
+val dashboard_build_producer : string
+(** The only producer a dashboard build receipt may name, refused otherwise. *)
+
 type executable_provenance = {
   binary_commit : string;
   build_input_fingerprint : string;
@@ -143,19 +157,17 @@ and dashboard_assets_provenance = {
   build_input_file_count : int;
   build_input_matches_head : bool;
   build_lock_sha256 : string;
-  build_mode : string;
   build_environment_path : string;
   build_environment_path_identity_sha256 : string;
   build_environment_path_executable_sha256 : string;
   build_environment_path_executable_count : int;
   build_environment_profile_sha256 : string;
-  build_producer : string;
   build_node_executable : string;
   build_node_executable_sha256 : string;
   build_node_version : string;
   build_node_platform : string;
   build_node_arch : string;
-  build_package_manager_kind : string;
+  build_package_manager_kind : package_manager_kind;
   build_package_manager_executable : string;
   build_package_manager_executable_sha256 : string;
   build_pnpm_version : string;
@@ -197,37 +209,9 @@ type dashboard_asset_resolution =
       launch_source_inode : int;
       expected_size : int;
       expected_sha256 : string;
-      tree_sha256 : string;
       snapshot_root : string;
       snapshot_device : int;
       snapshot_inode : int;
-      file_count : int;
-      build_source_commit : string;
-      build_head_tree : string;
-      build_index_tree : string;
-      build_input_sha256 : string;
-      build_input_file_count : int;
-      build_input_matches_head : bool;
-      build_lock_sha256 : string;
-      build_mode : string;
-      build_environment_path : string;
-      build_environment_path_identity_sha256 : string;
-      build_environment_path_executable_sha256 : string;
-      build_environment_path_executable_count : int;
-      build_environment_profile_sha256 : string;
-      build_producer : string;
-      build_node_executable : string;
-      build_node_executable_sha256 : string;
-      build_node_version : string;
-      build_node_platform : string;
-      build_node_arch : string;
-      build_package_manager_kind : string;
-      build_package_manager_executable : string;
-      build_package_manager_executable_sha256 : string;
-      build_pnpm_version : string;
-      build_vite_version : string;
-      build_installed_graph_metadata_sha256 : string;
-      build_installed_graph_metadata_count : int;
     }
 
 

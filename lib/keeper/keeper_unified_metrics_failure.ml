@@ -35,7 +35,20 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some summary -> summary
             | None -> reason)
-        | Some err ->
+        | Some
+            (( Keeper_turn_driver.Official_client_recovery_required _
+             | Keeper_turn_driver.Accept_rejected _
+             | Keeper_turn_driver.Internal_unhandled_exception _
+             | Keeper_turn_driver.Internal_bridge_exception _
+             | Keeper_turn_driver.Internal_contract_rejected _
+             | Keeper_turn_driver.Incomplete_tool_transcript _
+             | Keeper_turn_driver.Terminal_effect_failed _
+             | Keeper_turn_driver.Provider_attempt_effect_fenced _
+             | Keeper_turn_driver.Tool_correction_lost _
+             | Keeper_turn_driver.Host_stopped_turn _
+             | Keeper_turn_driver.Runtime_connection_closed _
+             | Keeper_turn_driver.Receipt_persistence_failed _
+             | Keeper_turn_driver.Gate_replay_repair_required _ ) as err) ->
             Option.value
               ~default:reason
               (Keeper_turn_driver.summary_of_masc_internal_error err)

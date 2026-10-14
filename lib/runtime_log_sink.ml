@@ -35,7 +35,7 @@
 let field_to_json (field : Agent_core.Log.field) : string * Yojson.Safe.t =
   match field with
   | Agent_core.Log.Secret (k, _) -> (k, `String "[REDACTED]")
-  | field -> Agent_core.Log.field_to_json field
+  | (Agent_core.Log.S (_, _) | Agent_core.Log.I (_, _) | Agent_core.Log.F (_, _) | Agent_core.Log.B (_, _) | Agent_core.Log.J (_, _)) as field -> Agent_core.Log.field_to_json field
 
 let level_to_masc (level : Agent_core.Log.level) : Log.level =
   match level with

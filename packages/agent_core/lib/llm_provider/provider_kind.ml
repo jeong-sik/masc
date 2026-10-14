@@ -27,17 +27,6 @@ let to_string = function
 
 let all : t list = [ Anthropic; Kimi; OpenAI_compat; Ollama; Gemini; Glm ]
 
-let default_api_key_env = function
-  | Anthropic -> Some "ANTHROPIC_API_KEY"
-  | Kimi -> Some "KIMI_API_KEY"
-  | Gemini -> Some "GEMINI_API_KEY"
-  | Glm -> Some "ZAI_API_KEY"
-  | OpenAI_compat | Ollama ->
-    (* Named providers sharing these wire kinds declare their own exact
-       credential environment in the provider catalog. *)
-    None
-;;
-
 let of_canonical_string raw =
   List.find_opt (fun kind -> String.equal raw (to_string kind)) all
 ;;

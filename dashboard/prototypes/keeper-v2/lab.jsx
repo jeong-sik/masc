@@ -18,7 +18,7 @@ const LAB_SECS = [
 /* ── 도구 ─────────────────────────────────────────────────────────────── */
 const LAB_CONFIG_RES = [
   { k: 'config root', v: '~/.masc', src: 'MASC_CONFIG_ROOT' },
-  { k: 'workspace root marker', v: '.masc/root-state.json', src: '단일 마커' },
+  { k: 'workspace state', v: '.masc/state.json', src: '초기화 표시' },
   { k: 'model catalog', v: 'agent_core/models.toml (embedded)', src: 'AGENT_CORE_MODEL_CATALOG' },
   { k: 'stream idle timeout', v: '600s (floor)', src: '미설정 시 기본 · boot log 가 출처 명시' },
   { k: 'tool_policy.toml', v: 'config-root 마커 · 런타임 masc-improver비', src: 'legacy' },

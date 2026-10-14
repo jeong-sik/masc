@@ -187,7 +187,9 @@ let of_board_error board_error =
     | Board.Io_error detail ->
       Log.Server.error "Board reaction storage operation failed: %s" detail;
       "Board reaction storage operation failed"
-    | _ -> Board_tool.board_error_to_string board_error
+    | Board_types.Invalid_id _ | Board_types.Post_not_found _ | Board_types.Comment_not_found _
+    | Board_types.Validation_error _ | Board_types.Already_voted _ | Board_types.Already_exists _
+    | Board_types.Unauthorized _ -> Board_tool.board_error_to_string board_error
   in
   make_error
     ~code

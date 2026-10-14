@@ -179,9 +179,19 @@ let message_matches_target target (message : Keeper_chat_store.chat_message) =
       { channel_id = target_channel; thread_ts = target_thread; blocks = _ },
     Some (Surface_ref.Slack { channel_id; thread_ts; _ }) ->
     String.equal target_channel channel_id && target_thread = thread_ts
-  | To_dashboard, _
-  | To_discord _, _
-  | To_slack _, _ -> false
+  | To_dashboard, _ -> false
+  | To_discord _,
+    ( None
+    | Some
+        ( Surface_ref.Dashboard _ | Surface_ref.Slack _ | Surface_ref.Webhook _
+        | Surface_ref.Agent | Surface_ref.Broadcast | Surface_ref.Gate _ ) ) ->
+    false
+  | To_slack _,
+    ( None
+    | Some
+        ( Surface_ref.Dashboard _ | Surface_ref.Discord _ | Surface_ref.Webhook _
+        | Surface_ref.Agent | Surface_ref.Broadcast | Surface_ref.Gate _ ) ) ->
+    false
 
 let validate_user_mentions_against_roster ~target ~messages mention_user_ids =
   if mention_user_ids = [] then Ok ()
@@ -400,7 +410,7 @@ let resolve_target ~surface ~channel_id ?continuation_channel
 let set_blocks target blocks_opt =
   match target with
   | To_slack s -> To_slack { s with blocks = blocks_opt }
-  | other -> other
+  | (To_dashboard | To_discord _) as other -> other
 
 let matches_continuation_route target channel =
   match target, channel with

@@ -1,25 +1,22 @@
 (** Phase-gate turn plan helpers for [Keeper_unified_turn]. *)
 
-type turn_plan_status =
-  | Turn_plan_dispatch
-  | Turn_plan_skipped
-  | Turn_plan_cancelled
-  | Turn_plan_error
+(** What the phase gate decided for one keeper turn. The gate appends it as
+    the manifest [Phase_gate_decided] row and then takes the matching
+    branch. Private: whether a phase is executable is
+    {!Keeper_state_machine.can_execute_turn}'s answer, so a plan is built only
+    by {!supervisor_stopped} or {!turn_plan_of_registry_phase}. *)
+type turn_plan = private
+  | Supervisor_stopped
+    (** The supervisor's stop flag was up at turn entry. The registry phase
+        is not read. *)
+  | Registry_phase_missing
+  | Phase_not_executable of Keeper_state_machine.phase
+  | Phase_executable of Keeper_state_machine.phase
 
-type turn_plan =
-  { turn_plan_keeper_turn_id : int
-  ; turn_plan_phase : string option
-  ; turn_plan_status : turn_plan_status
-  ; turn_plan_executable : bool
-  ; turn_plan_reason : string
-  ; turn_plan_terminal_reason_code : string option
-  }
+val supervisor_stopped : turn_plan
 
-val decide_turn_plan_at_phase_gate
-  :  keeper_turn_id:int
-  -> supervisor_stop_at_entry:bool
-  -> Keeper_state_machine.phase option
-  -> turn_plan
+val turn_plan_of_registry_phase : Keeper_state_machine.phase option -> turn_plan
+(** The plan for a turn whose supervisor has not asked it to stop. *)
 
 val turn_plan_manifest_status : turn_plan -> string
 val turn_plan_manifest_decision : turn_plan -> Yojson.Safe.t

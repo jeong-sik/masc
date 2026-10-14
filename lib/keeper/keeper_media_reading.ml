@@ -350,7 +350,9 @@ let project projector ~needs_projection blocks =
           project_one ~kind:Audio ~media_type ~data ~source_type block
         | Agent_core.Types.Document { media_type; data; source_type } ->
           project_one ~kind:Document ~media_type ~data ~source_type block
-        | _ -> block)
+        | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+        | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+        | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ -> block)
       blocks
   in
   projected, List.rev !replaced

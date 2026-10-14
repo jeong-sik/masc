@@ -10,15 +10,18 @@ let redact redaction text =
 (* Dated per-day store, mirroring the cost-ledger appender
    ([Keeper_hooks_agent_core_cost_events.emit_cost_event]); concurrent keepers
    serialise on a per-day file rather than one global blob. *)
-let wire_capture_dir masc_root = Filename.concat masc_root "wire-capture"
+let wire_capture_location masc_root =
+  Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Wire_capture)
+;;
+
+let wire_capture_dir masc_root = Dated_jsonl.Store.dir (wire_capture_location masc_root)
 
 (** Cache [Dated_jsonl.t] handles per MASC root so the diagnostic harness does
     not recreate the store (and re-scan/re-prune) on every request/response
     capture. The cache is keyed by the effective root path and invalidated when
-    retention or byte-budget configuration changes. *)
+    the byte budget changes. *)
 type store_entry =
   { store : Dated_jsonl.t
-  ; retention_days : int
   ; max_bytes : int
   }
 
@@ -26,45 +29,19 @@ let store_cache : (string, store_entry) Hashtbl.t = Hashtbl.create 16
 let store_cache_mu = Stdlib.Mutex.create ()
 
 let store_for ~masc_root =
-  let retention_days = Env_config_keeper.KeeperWireCapture.retention_days () in
   let max_bytes = Env_config_keeper.KeeperWireCapture.max_bytes () in
   Stdlib.Mutex.protect store_cache_mu (fun () ->
     match Hashtbl.find_opt store_cache masc_root with
     | Some entry
-      when entry.retention_days = retention_days && entry.max_bytes = max_bytes ->
+      when entry.max_bytes = max_bytes ->
       entry
     | _ ->
       let store =
-        Dated_jsonl.create
-          ~base_dir:(wire_capture_dir masc_root)
-          ~retention_days
-          ~max_bytes
-          ()
+        Dated_jsonl.open_store ~max_bytes (wire_capture_location masc_root)
       in
-      let entry = { store; retention_days; max_bytes } in
+      let entry = { store; max_bytes } in
       Hashtbl.replace store_cache masc_root entry;
       entry)
-;;
-
-type prune_error =
-  | Retention_prune_failed of
-      { path : string
-      ; detail : string
-      }
-
-let prune_error_to_string = function
-  | Retention_prune_failed { path; detail } ->
-    Printf.sprintf "wire-capture retention prune failed path=%s: %s" path detail
-;;
-
-let prune_expired ~masc_root =
-  let path = wire_capture_dir masc_root in
-  try
-    let { store; retention_days; _ } = store_for ~masc_root in
-    Ok (Dated_jsonl.prune store ~days:retention_days)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Retention_prune_failed { path; detail = Printexc.to_string exn })
 ;;
 
 type record_skip_reason =
@@ -175,11 +152,12 @@ let rec redact_json_strings
     `List (List.map (redact_json_strings redaction) values)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
 
-let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
+let capture_request ~base_path ~keeper_name ~turn_id ~agent_core_turn
     ~system_prompt ~extra_system_context ~user_message ~history_messages ~tools
     ?trace_id () =
   if not (enabled ()) then ()
   else
+    let masc_root = Common.masc_dir_from_base_path ~base_path in
     best_effort ~site:Request_capture ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let raw_tools =
@@ -250,10 +228,11 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
       in
       write_payload ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) payload)
 
-let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
+let capture_response ~base_path ~keeper_name ~turn_id ~agent_core_turn
     ~response_text ?trace_id () =
   if not (enabled ()) then ()
   else
+    let masc_root = Common.masc_dir_from_base_path ~base_path in
     best_effort ~site:Response_capture ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let payload : Yojson.Safe.t =
@@ -349,10 +328,11 @@ let reasoning_text_of_response (response : Agent_core.Types.api_response) =
     | Agent_core.Types.Audio _ -> None)
   |> String.concat ""
 
-let capture_rejected_reasoning ~base_path ~masc_root ~keeper_name ?turn_id ?trace_id
+let capture_rejected_reasoning ~base_path ~keeper_name ?turn_id ?trace_id
     ~runtime_id (response : Agent_core.Types.api_response) =
   if not (enabled ()) then ()
   else
+    let masc_root = Common.masc_dir_from_base_path ~base_path in
     let summary = Agent_core.Response_shape.summarize response in
     match Agent_core.Response_shape.content_shape response summary with
     | Agent_core.Response_shape.Empty

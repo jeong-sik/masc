@@ -6,6 +6,7 @@ import { decodeGoalResumePhase } from './goal-lifecycle'
 
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
+import { asTrustDisposition } from '../lib/trust-disposition'
 import { get } from './core'
 import { decodeKeeperApprovalQueueState } from './dashboard-gate'
 import { goalStoreUnavailableSummary } from '../lib/goal-store-unavailable-labels'
@@ -277,7 +278,7 @@ function decodeGoalKeeperTrustSummary(raw: unknown): GoalKeeperTrustSummary | nu
   return {
     snapshot_status: asNullableString(raw.snapshot_status),
     snapshot_error: asNullableString(raw.snapshot_error),
-    disposition: asNullableString(raw.disposition),
+    disposition: asTrustDisposition(raw.disposition),
     disposition_reason: asNullableString(raw.disposition_reason),
     operator_disposition: asNullableString(raw.operator_disposition),
     operator_disposition_reason: asNullableString(raw.operator_disposition_reason),

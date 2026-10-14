@@ -50,7 +50,12 @@ let is_eio_context_error (err : Agent_core.Error.t) : bool =
   match err with
   | Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })
     when String.equal field eio_context_field -> true
-  | Agent_core.Error.Config _ -> false
+  | Agent_core.Error.Config
+      ( Agent_core.Error.MissingEnvVar _
+      | Agent_core.Error.UnsupportedProvider _
+      | Agent_core.Error.CredentialUnavailable _
+      | Agent_core.Error.InvalidConfig _
+      | Agent_core.Error.SensitiveValueInConfig _ ) -> false
   | Agent_core.Error.Provider _ -> false
   | Agent_core.Error.Api _ -> false
   | Agent_core.Error.Agent _ -> false

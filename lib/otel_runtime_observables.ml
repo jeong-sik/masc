@@ -64,7 +64,7 @@ let walk_dir_totals root =
           | exception _ -> ()  (* cancel-guard-ok: guards Sys.readdir: no Eio cancellation point *)
           | entries ->
             Array.iter (fun e -> go (Filename.concat path e)) entries)
-       | _ -> ())
+       | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> ())
   in
   go root;
   (!bytes, !files)

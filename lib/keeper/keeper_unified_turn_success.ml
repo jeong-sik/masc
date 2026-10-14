@@ -428,26 +428,15 @@ let emit_resolved_cost_event
     ()
 ;;
 
-type decision_outcome =
-  | Decision_success
-  | Decision_checkpoint
-  | Decision_input_required
-
 let decision_outcome_of_terminal_outcome = function
-  | Terminal_done -> Decision_success
-  | Terminal_checkpoint -> Decision_checkpoint
-  | Terminal_input_required -> Decision_input_required
-
-let decision_outcome_to_label = function
-  | Decision_success -> "success"
-  | Decision_checkpoint -> "checkpoint"
-  | Decision_input_required -> "input_required"
+  | Terminal_done -> Keeper_decision_outcome.Success
+  | Terminal_checkpoint -> Keeper_decision_outcome.Checkpoint
+  | Terminal_input_required -> Keeper_decision_outcome.Input_required
 
 let terminal_reason_of_result (result : Keeper_agent_run.run_result) =
   match Keeper_execution_receipt.disposition_of_stop_reason result.stop_reason with
   | Keeper_turn_disposition.Success -> Keeper_turn_terminal.success ()
-  | disposition ->
-    Keeper_turn_terminal.of_disposition ~source:"runtime_stop_reason" disposition
+  | (Keeper_turn_disposition.Checkpoint | Keeper_turn_disposition.External_cancel | Keeper_turn_disposition.Input_required | Keeper_turn_disposition.Runtime_attempts_exhausted | Keeper_turn_disposition.Provider_error _ | Keeper_turn_disposition.Unknown _) as disposition -> Keeper_turn_terminal.of_disposition ~source:"runtime_stop_reason" disposition
 
 exception Owner_meta_commit_failed of string
 
@@ -725,9 +714,7 @@ let handle
       ~turn_ctx_cell
       ~observation
       ~latency_ms
-      ~outcome:
-        (decision_outcome_to_label
-           (decision_outcome_of_terminal_outcome terminal_outcome))
+      ~outcome:(decision_outcome_of_terminal_outcome terminal_outcome)
       ~channel
       ~execution_path:
         (match Keeper_execution_outcome.lane execution_outcome with

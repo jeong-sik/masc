@@ -142,7 +142,7 @@ let%test "last_tool_results_from routes through canonical projection (with json)
   | [ Ok { content = "ok payload"; _ }
     ; Error { message = "boom"; recoverable = false; error_class = None }
     ] -> true
-  | _ -> false
+  | [] | [ (Ok _ | Error _) ] | _ :: _ :: _ -> false
 ;;
 
 let prepare_turn_for_agent agent ~turn_params =

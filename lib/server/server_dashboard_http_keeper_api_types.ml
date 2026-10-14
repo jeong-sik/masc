@@ -51,14 +51,14 @@ let cache_key_int_opt_segment = function
 let keeper_config_cache_key (config : Workspace.config) name =
   Printf.sprintf
     "keeper:config:%s:%s"
-    (cache_key_string_segment (Workspace.masc_root_dir config))
+    (cache_key_string_segment (Workspace.masc_dir config))
     (cache_key_string_segment name)
 ;;
 
 let keeper_composite_cache_key (config : Workspace.config) name =
   Printf.sprintf
     "keeper:composite:%s:%s"
-    (cache_key_string_segment (Workspace.masc_root_dir config))
+    (cache_key_string_segment (Workspace.masc_dir config))
     (cache_key_string_segment name)
 ;;
 
@@ -67,7 +67,7 @@ let keeper_runtime_trace_cache_key (config : Workspace.config) name ?trace_id
   =
   Printf.sprintf
     "keeper:runtime-trace:%s:%s:%s:%s:%d"
-    (cache_key_string_segment (Workspace.masc_root_dir config))
+    (cache_key_string_segment (Workspace.masc_dir config))
     (cache_key_string_segment name)
     (cache_key_string_opt_segment trace_id)
     (cache_key_int_opt_segment turn_id)

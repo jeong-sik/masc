@@ -415,7 +415,8 @@ let find_worker cdp ~extension_id =
            match Browser_cdp.target_info_of_json info with
            | Ok { Browser_cdp.target_id; kind = Browser_cdp.Service_worker; url } when belongs_to ~extension_id url ->
              Some target_id
-           | Ok _ | Error _ -> None)
+           | Ok { Browser_cdp.kind = Browser_cdp.(Page | Service_worker | Other_kind _); _ }
+           | Error _ -> None)
          infos)
   | Some _ | None -> Error (Malformed_reply { method_ = "Target.getTargets"; detail = "targetInfos is not a list" })
 ;;

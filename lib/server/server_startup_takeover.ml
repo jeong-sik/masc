@@ -280,7 +280,7 @@ let process_stat pid =
     Process_eio.run_argv_with_status [ "ps"; "-p"; string_of_int pid; "-o"; "stat=" ]
   with
   | Unix.WEXITED 0, output -> Some output
-  | _ -> None
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
 ;;
 
 let process_state pid =
@@ -417,7 +417,7 @@ let ps_lstart pid =
     (match String.trim output with
      | "" -> None
      | started -> Some started)
-  | _ -> None
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
 ;;
 
 (* starttime counts from boot, and the lock outlives a reboot, so the token

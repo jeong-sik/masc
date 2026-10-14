@@ -70,10 +70,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
     (* DET-OK: fixed compile-time default, not random or clock-derived. *)
     |> Option.value ~default:Keeper_activation_mode.default
   in
-  (* Two ways to have no usable profile, kept apart because they send the
-     operator to different places: nobody named one, or someone named [local]
-     while the playground is gated off. Folding the first into the second is
-     what produced "local is disabled" for callers who never wrote "local". *)
   let sandbox_profile_res =
     match
       resolve_sandbox_profile

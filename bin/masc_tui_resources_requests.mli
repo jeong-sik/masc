@@ -1,15 +1,18 @@
 (** MCP resource requests. [launch] is the caller's workspace request boundary:
     it checks endpoint identity, owns cancellation and stamps completion. [check]
-    rechecks the same captured authority after obtaining an MCP session. *)
+    rechecks the same captured authority after obtaining an MCP session. The
+    list boundary carries the walk's stop alongside the rows, so a listing the
+    walk cut short is not mistaken for the whole one. *)
 
 val launch_list
   :  Masc_tui_types.state
   -> host:string
   -> launch:
        (deliver:
-          ((Masc_tui_mcp.resource list, string) result
+          ((Masc_tui_mcp.resource list * Masc_tui_mcp.resources_walk_stop, string) result
            -> Masc_tui_async_protocol.async_msg)
-        -> (unit -> (Masc_tui_mcp.resource list, string) result)
+        -> (unit
+            -> (Masc_tui_mcp.resource list * Masc_tui_mcp.resources_walk_stop, string) result)
         -> unit)
   -> check:(unit -> (unit, string) result)
   -> unit

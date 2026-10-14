@@ -727,7 +727,9 @@ let error_detail : 'callback_error execution_error -> string = fun error ->
        "invalid_domain_output: " ^ detail ^ "; cli tail: " ^ tail
      | Some (Provenance_mismatch detail) ->
        "execution_provenance_mismatch: " ^ detail ^ "; cli tail: " ^ tail
-     | Some _ | None -> "cli tail: " ^ tail)
+     | Some (Flow_already_started _) | None | Some (Before_dispatch_persistence_failed _)
+     | Some (Before_advance_persistence_failed _) | Some (Cli_slots_exhausted _)
+     | Some (Flow_bookkeeping_failed _) -> "cli tail: " ^ tail)
   | Provenance_mismatch detail -> "execution_provenance_mismatch: " ^ detail
   | Domain_output_invalid detail -> "invalid_domain_output: " ^ detail
   | Flow_already_started _

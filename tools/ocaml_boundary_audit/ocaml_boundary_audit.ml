@@ -228,7 +228,15 @@ let rec pattern_scope_name (pattern : pattern) =
     (match pattern_scope_name nested with
      | Some nested_name -> Some nested_name
      | None -> Some name.txt)
-  | _ -> None
+  | Tpat_any
+  | Tpat_constant _
+  | Tpat_tuple _
+  | Tpat_construct _
+  | Tpat_variant _
+  | Tpat_record _
+  | Tpat_array _
+  | Tpat_lazy _
+  | Tpat_or _ -> None
 ;;
 
 let compare_site (left : site) (right : site) =
@@ -318,7 +326,17 @@ let audit_structure ~path ~pure structure =
                   ~category:Effect_in_pure_module
                   ~callee
                   expression.exp_loc
-            | _ -> ());
+            | Texp_apply ({ exp_desc = (Texp_unreachable | (Texp_constant _ | (Texp_let (_, _, _) | (Texp_function (_, _) | (Texp_apply (_, _) | (Texp_match (_, _, _, _) | (Texp_try (_, _, _) | (Texp_tuple _ | (Texp_construct (_, _, _) | (Texp_variant (_, _) | (Texp_record _ | (Texp_atomic_loc (_, _, _) | (Texp_field (_, _, _) | (Texp_setfield (_, _, _, _) | (Texp_array (_, _) | (Texp_ifthenelse (_, _, _) | (Texp_sequence (_, _) | (Texp_while (_, _) | (Texp_for (_, _, _, _, _, _) | (Texp_send (_, _) | ( Texp_new (_, _, _) | ( Texp_instvar (_, _, _) | ( Texp_setinstvar (_, _, _, _) | ( Texp_override (_, _) | ( Texp_assert (_, _) | ( Texp_lazy _ | ( Texp_object (_, _) | ( Texp_pack _ | ( Texp_letop _ | ( Texp_extension_constructor (_, _) | Texp_struct_item (_, _)))))))))))))))))))))))))))))));_}, _)
+            | Texp_unreachable | Texp_ident (_, _, _) | Texp_constant _ | Texp_let (_, _, _)
+            | Texp_function (_, _) | Texp_match (_, _, _, _) | Texp_try (_, _, _) | Texp_tuple _
+            | Texp_construct (_, _, _) | Texp_variant (_, _) | Texp_record _
+            | Texp_atomic_loc (_, _, _) | Texp_field (_, _, _) | Texp_setfield (_, _, _, _)
+            | Texp_array (_, _) | Texp_ifthenelse (_, _, _) | Texp_sequence (_, _)
+            | Texp_while (_, _) | Texp_for (_, _, _, _, _, _) | Texp_send (_, _)
+            | Texp_new (_, _, _) | Texp_instvar (_, _, _) | Texp_setinstvar (_, _, _, _)
+            | Texp_override (_, _) | Texp_assert (_, _) | Texp_lazy _ | Texp_object (_, _)
+            | Texp_pack _ | Texp_letop _ | Texp_extension_constructor (_, _)
+            | Texp_struct_item (_, _) -> ());
            Tast_iterator.default_iterator.expr self expression)
     }
   in

@@ -1,10 +1,10 @@
-(** Hook accumulator + outputs for Agent_core.Agent.run hook callbacks,
-    extracted from keeper_run_tools.ml.
+(** Hook accumulator for Agent_core.Agent.run hook callbacks, extracted
+    from keeper_run_tools.ml.
 
     AGENT_CORE hooks (before_turn, on_tool_executed) cannot return values, so
     they write into a single mutable {!hook_accumulator} during
-    Agent.run execution.  After execution completes, {!freeze} produces
-    an immutable {!hook_outputs} snapshot. *)
+    Agent.run execution. After the run returns, the turn reads its fields
+    directly. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -62,17 +62,6 @@ type hook_accumulator =
        written by the after_turn hook. *)
   }
 
-type hook_outputs =
-  { out_meta : Keeper_meta_contract.keeper_meta
-  ; out_tool_calls : tool_call_detail list
-  ; out_tool_surface : tool_surface_metrics
-  ; out_requested_tool_names : string list
-  ; out_receipt_completion_contract_result :
-      Keeper_execution_receipt.completion_contract_result
-  ; out_receipt_actionable_signal :
-      Keeper_contract_classifier.actionable_signal option
-  }
-
 let create ~meta ~tool_surface ~historical_tool_calls ~historical_order ~history_pairs_at_setup =
   { meta
   ; tool_calls = []
@@ -102,16 +91,6 @@ let tool_calls_for_input_repetition (acc : hook_accumulator) =
   match acc.historical_order with
   | Ordered -> tool_calls_for_repetition acc
   | Unordered -> acc.tool_calls
-;;
-
-let freeze (acc : hook_accumulator) : hook_outputs =
-  { out_meta = acc.meta
-  ; out_tool_calls = acc.tool_calls
-  ; out_tool_surface = acc.tool_surface
-  ; out_requested_tool_names = acc.requested_tool_names
-  ; out_receipt_completion_contract_result = acc.receipt_completion_contract_result
-  ; out_receipt_actionable_signal = acc.receipt_actionable_signal
-  }
 ;;
 
 let record_requested_tool_names (acc : hook_accumulator) requested =

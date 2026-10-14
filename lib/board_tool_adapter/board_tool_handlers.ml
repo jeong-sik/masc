@@ -158,7 +158,7 @@ let resolve_board_post_kind (raw_kind : string option)
     (match Board.post_kind_of_string (String.lowercase_ascii (String.trim raw)) with
      | Some Board.System_post ->
        Error "system posts are reserved for platform/internal surfaces"
-     | Some kind -> Ok kind
+     | Some ((Board.Human_post | Board.Automation_post) as kind) -> Ok kind
      | None -> Error (Printf.sprintf "unknown post_kind: %s" raw))
   | None -> Ok Board.Human_post
 ;;
@@ -272,7 +272,14 @@ let handle_vote ~tool_name ~start_time args =
                ~start_time
                ~data:(`String "Already voted (idempotent). Score unchanged.")
                ())
-        | Error e ->
+        | Error
+            (( Board.Invalid_id _
+             | Board.Post_not_found _
+             | Board.Comment_not_found _
+             | Board.Io_error _
+             | Board.Validation_error _
+             | Board.Already_exists _
+             | Board.Unauthorized _ ) as e) ->
           Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
@@ -365,7 +372,14 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
                   "%s Already voted (idempotent)."
                   (if direction = Board.Down then "👎" else "👍")))
           ()
-      | Error e ->
+      | Error
+          (( Board.Invalid_id _
+           | Board.Post_not_found _
+           | Board.Comment_not_found _
+           | Board.Io_error _
+           | Board.Validation_error _
+           | Board.Already_exists _
+           | Board.Unauthorized _ ) as e) ->
         Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 

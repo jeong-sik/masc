@@ -750,6 +750,7 @@ let test_direct_turn_reuses_current_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:None
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:(Inputs.Current_task task)
@@ -781,6 +782,7 @@ let test_direct_turn_carries_held_task_skills () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:None
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:Inputs.No_current_task
@@ -810,6 +812,7 @@ let test_direct_turn_has_no_synthetic_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:None
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:Masc.Workspace_memory_ledger.Missing
       ~current_task:Inputs.No_current_task
@@ -845,6 +848,7 @@ let test_direct_turn_discovers_published_workspace_memory () =
       | _ -> fail "saved ledger is unavailable" in
     let render () = Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:(Some (direct_shared_reader ()))
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
       ~lane_updates:(Ok (`List []))
       ~workspace_memory:(Ledger.observe ~base_path)
       ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
@@ -923,6 +927,137 @@ let test_workspace_memory_observation_distinguishes_briefing_states () =
     check bool "readable ledger remains available without a briefing" true
       (contains ~needle:"briefing-sha" rendered
        && contains ~needle:"keeper_workspace_memory_read" rendered)) [pending; unavailable]
+
+(* RFC keepers-see-the-wiki-table-of-contents. These check what reaches the
+   request and which route was chosen, not the wording: the route is compared
+   against whatever the named prompt renders today. *)
+let wiki_reader ~offered ~deferred ~loader_alive =
+  shared_reader_access ~offered ~deferred ~loader_alive
+
+let direct_wiki_reader () =
+  wiki_reader ~offered:["keeper_wiki_read"] ~deferred:[] ~loader_alive:false
+
+let prompt_fragment name =
+  match Prompt_registry.render_prompt_template name [] with
+  | Ok text -> text
+  | Error detail -> fail detail
+
+let one_wiki_page =
+  Masc.Keeper_wiki_contents.Listed
+    [ Masc.Wiki_journal.Page
+        { file = "pm-setlist.md"; title = "Setlist"; summary = "Usual song order" } ]
+
+let test_wiki_contents_come_from_the_pages_not_index_md () =
+  let module Wiki = Masc.Tool_wiki in
+  let base_path = Filename.temp_dir "keeper-wiki-toc" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let ctx = { Wiki.base_path; agent_name = "wiki-fixture" } in
+    List.iter (fun page ->
+      ignore (Wiki.dispatch ctx ~name:"masc_wiki_create"
+        ~args:(`Assoc [ "page", `String page; "title", `String (page ^ " title");
+                        "summary", `String (page ^ " summary"); "source", `String "research";
+                        "body", `String "PAGE_BODY_STAYS_OUT" ]));
+      check bool ("fixture page written: " ^ page) true
+        (Sys.file_exists (Wiki.page_path ~base_path page)))
+      ["pm-setlist"; "rfc-map"];
+    let wiki_root = Wiki.wiki_root ~base_path in
+    (* The live wiki on 2026-10-14: index.md named one page of eleven. *)
+    Out_channel.with_open_text (Filename.concat wiki_root Masc.Wiki_journal.index_file)
+      (fun oc -> Out_channel.output_string oc
+         (Masc.Wiki_journal.render_index
+            [ Masc.Wiki_journal.Page
+                { file = "rfc-map.md"; title = "rfc-map title"; summary = "rfc-map summary" } ]));
+    Out_channel.with_open_text (Filename.concat wiki_root "broken.md")
+      (fun oc -> Out_channel.output_string oc "no frontmatter\n");
+    let wiki_contents = Masc.Keeper_wiki_contents.observe ~base_path in
+    let entries = match wiki_contents with
+      | Masc.Keeper_wiki_contents.Listed entries -> entries
+      | Unlisted detail -> fail detail
+      | Off -> fail "the wiki contents switch is on by default" in
+    check int "one entry per file, broken file included" 3 (List.length entries);
+    let direct = Turn.For_testing.direct_turn_dynamic_context
+      ~workspace_memory_access:(Some (direct_wiki_reader ()))
+      ~wiki_contents
+      ~lane_updates:(Ok (`List []))
+      ~workspace_memory:Masc.Workspace_memory_ledger.Missing
+      ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
+      ~approval_authority_text:"" ~recent_direct_conversation_text:"owner conversation"
+      ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" in
+    let paragraph =
+      Prompt.format_wiki_observation ~access:(direct_wiki_reader ()) wiki_contents |> Option.get in
+    check bool "direct reply uses the same wiki renderer" true (contains ~needle:paragraph direct);
+    List.iter (fun entry ->
+      check bool "every file has its line" true
+        (contains ~needle:(Masc.Wiki_journal.render_entry entry) direct)) entries;
+    check bool "a page index.md lost still reaches the turn" true
+      (contains ~needle:"pm-setlist.md" direct);
+    check bool "page bodies stay out" false (contains ~needle:"PAGE_BODY_STAYS_OUT" direct))
+
+let test_wiki_route_follows_actual_request_access () =
+  let routes =
+    [ Prompt_names.keeper_context_wiki_retrieval_direct;
+      Prompt_names.keeper_context_wiki_retrieval_discoverable;
+      Prompt_names.keeper_context_wiki_retrieval_unavailable;
+      Prompt_names.keeper_context_wiki_retrieval_preview ] in
+  let expect label expected rendered =
+    List.iter (fun name ->
+      check bool (label ^ " renders only " ^ expected ^ ": " ^ name)
+        (String.equal name expected) (contains ~needle:(prompt_fragment name) rendered))
+      routes in
+  let render ?access () = Prompt.format_wiki_observation ?access one_wiki_page |> Option.get in
+  expect "direct" Prompt_names.keeper_context_wiki_retrieval_direct
+    (render ~access:(direct_wiki_reader ()) ());
+  expect "discoverable" Prompt_names.keeper_context_wiki_retrieval_discoverable
+    (render ~access:(wiki_reader ~offered:["keeper_tool_search"] ~deferred:["keeper_wiki_read"]
+                       ~loader_alive:true) ());
+  List.iter (fun access ->
+    expect "unreachable" Prompt_names.keeper_context_wiki_retrieval_unavailable
+      (render ~access ()))
+    [ wiki_reader ~offered:[] ~deferred:["keeper_wiki_read"] ~loader_alive:true;
+      wiki_reader ~offered:["keeper_tool_search"] ~deferred:[] ~loader_alive:true;
+      wiki_reader ~offered:["keeper_tool_search"] ~deferred:["keeper_wiki_read"]
+        ~loader_alive:false ];
+  expect "preview" Prompt_names.keeper_context_wiki_retrieval_preview (render ())
+
+let test_wiki_paragraph_needs_pages_and_hides_listing_errors () =
+  check (option string) "no page, no paragraph" None
+    (Prompt.format_wiki_observation ~access:(direct_wiki_reader ())
+       (Masc.Keeper_wiki_contents.Listed []));
+  check (option string) "switched off, no paragraph" None
+    (Prompt.format_wiki_observation ~access:(direct_wiki_reader ()) Masc.Keeper_wiki_contents.Off);
+  let detail = "WIKI_LISTING_IO_DETAIL" in
+  let failed =
+    Prompt.format_wiki_observation ~access:(direct_wiki_reader ())
+      (Masc.Keeper_wiki_contents.Unlisted detail) |> Option.get in
+  check bool "a listing failure renders the unavailable prompt" true
+    (contains ~needle:(prompt_fragment Prompt_names.keeper_context_wiki_unavailable) failed);
+  check bool "the IO detail stays out of the model context" false (contains ~needle:detail failed)
+
+(* Checks the prompt builder, not the turn that calls it: [?wiki_contents]
+   defaults to [Off], so a turn that stopped passing it would still compile. *)
+let test_build_prompt_carries_the_wiki_layer () =
+  let decision = WO.keeper_cycle_decision ~meta base_observation in
+  let access = direct_wiki_reader () in
+  let wiki_layer_bytes ?wiki_contents () =
+    let { Prompt.world_partition; world_state; _ } =
+      Prompt.build_prompt ~turn_decision:decision ~current_task:Inputs.No_current_task
+        ~workspace_memory_access:access ?wiki_contents ~observation:base_observation () in
+    let bytes =
+      Masc.Keeper_context_layers.receipt_to_json world_partition
+      |> Yojson.Safe.Util.member "spans" |> Yojson.Safe.Util.to_list
+      |> List.filter_map (fun span ->
+        let open Yojson.Safe.Util in
+        match span |> member "source" |> member "layer" with
+        | `String "wiki" -> Some (span |> member "bytes" |> to_int)
+        | _ -> None) in
+    world_state, bytes in
+  let paragraph = Prompt.format_wiki_observation ~access one_wiki_page |> Option.get in
+  let world_state, bytes = wiki_layer_bytes ~wiki_contents:one_wiki_page () in
+  check bool "the wiki paragraph reaches the autonomous turn" true
+    (contains ~needle:paragraph world_state);
+  check (list int) "the context receipt counts the wiki layer" [String.length paragraph] bytes;
+  let _, absent = wiki_layer_bytes () in
+  check (list int) "no wiki contents, no wiki layer" [] absent
 
 let test_open_goal_store_keeps_one_stable_safety_contract () =
   let meta_with_goal =
@@ -1057,6 +1192,7 @@ let lane_notice =
 let direct_context ~lane_updates =
   Turn.For_testing.direct_turn_dynamic_context
       ~workspace_memory_access:None
+      ~wiki_contents:Masc.Keeper_wiki_contents.Off
     ~lane_updates
     ~workspace_memory:Masc.Workspace_memory_ledger.Missing
     ~current_task:Inputs.No_current_task
@@ -1337,6 +1473,14 @@ let () =
             test_workspace_memory_observation_distinguishes_briefing_states;
           test_case "shared retrieval follows actual request access" `Quick
             test_shared_retrieval_route_follows_actual_request_access;
+          test_case "wiki contents come from the pages, not index.md" `Quick
+            test_wiki_contents_come_from_the_pages_not_index_md;
+          test_case "wiki route follows actual request access" `Quick
+            test_wiki_route_follows_actual_request_access;
+          test_case "wiki paragraph needs pages and hides listing errors" `Quick
+            test_wiki_paragraph_needs_pages_and_hides_listing_errors;
+          test_case "build_prompt carries the wiki layer and its receipt span" `Quick
+            test_build_prompt_carries_the_wiki_layer;
           test_case "unresolved goal keeps one stable safety contract" `Quick
             test_open_goal_store_keeps_one_stable_safety_contract;
         ] );

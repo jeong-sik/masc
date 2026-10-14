@@ -17,9 +17,8 @@ type entry =
   ; kind : Provider_kind.t
   ; identity_kinds : Provider_kind.t list
   ; base_url : string
-  ; base_url_env : string option
   ; request_path : string
-  ; api_key_env : string
+  ; requires_api_key : bool
   ; default_model : string option
   ; capabilities_base : string option
   ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
@@ -108,9 +107,8 @@ let known_keys =
   ; "kind"
   ; "identity_kinds"
   ; "base_url"
-  ; "base_url_env"
   ; "request_path"
-  ; "api_key_env"
+  ; "auth"
   ; "default_model"
   ; "capabilities_base"
   ; "capabilities_base_by_identity_kind"
@@ -280,11 +278,28 @@ let parse_entry provider_toml =
   let* request_path =
     required_exact_string_allow_empty ~entry_id:id "request_path" provider_toml
   in
-  let* api_key_env =
-    required_exact_string_allow_empty ~entry_id:id "api_key_env" provider_toml
-  in
-  let* base_url_env =
-    exact_non_empty_string_field ~entry_id:id "base_url_env" provider_toml
+  let* requires_api_key =
+    let* raw =
+      match Otoml.find_opt provider_toml Otoml.get_string [ "auth" ] with
+      | Some raw -> Ok raw
+      | None ->
+        Error
+          (Printf.sprintf
+             "provider entry %S is missing field \"auth\": a row states whether its \
+              endpoint takes an API key (auth = \"api-key\" or auth = \"none\")"
+             id)
+      | exception Otoml.Type_error _ ->
+        Error (Printf.sprintf "provider entry %S field \"auth\" expected string" id)
+    in
+    match raw with
+    | "api-key" -> Ok true
+    | "none" -> Ok false
+    | other ->
+      Error
+        (Printf.sprintf
+           "provider entry %S field \"auth\" must be \"api-key\" or \"none\" exactly, \
+            without padding; got %S"
+           id other)
   in
   let* default_model =
     exact_non_empty_string_field ~entry_id:id "default_model" provider_toml
@@ -323,9 +338,8 @@ let parse_entry provider_toml =
     ; kind
     ; identity_kinds
     ; base_url
-    ; base_url_env
     ; request_path
-    ; api_key_env
+    ; requires_api_key
     ; default_model
     ; capabilities_base
     ; capabilities_base_by_identity_kind
@@ -356,19 +370,11 @@ let host_of_url value =
   | Some host -> Some (String.lowercase_ascii host)
 ;;
 
-let resolved_base_url ?getenv entry =
-  match entry.base_url_env with
-  | None -> entry.base_url
-  | Some env_name ->
-    (match Cli_common_env.get ?getenv env_name with
-     | Some value when String.trim value <> "" -> value
-     | Some _ | None -> entry.base_url)
+let resolved_base_url ?getenv:_ entry = entry.base_url
 ;;
 
-let base_url_matches ?getenv entry base_url =
-  let normalized = normalize_url base_url in
-  String.equal (normalize_url entry.base_url) normalized
-  || String.equal (normalize_url (resolved_base_url ?getenv entry)) normalized
+let base_url_matches ?getenv:_ entry base_url =
+  String.equal (normalize_url entry.base_url) (normalize_url base_url)
 ;;
 
 let host_matches entry base_url =

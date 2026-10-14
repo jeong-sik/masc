@@ -132,6 +132,35 @@ current process environment; it does not claim that a PDF has been inspected or
 accepted. If MASC runs as a service, make the tools available on that service's
 PATH before requesting PDF verification.
 
+### Browser tools (geckodriver and Firefox)
+
+The browser lanes start two host programs that the portable release does not
+include: geckodriver, which the automation lane starts together with the server,
+and Firefox, which geckodriver and the attached-Firefox lane drive.
+
+```bash
+masc prerequisite-actions geckodriver                       # state and actions
+masc prerequisite-actions geckodriver --execute geckodriver_brew_install
+masc prerequisite-actions firefox
+masc prerequisite-actions firefox --execute firefox_brew_install
+```
+
+On macOS the actions use an existing Homebrew: the
+[`geckodriver`](https://formulae.brew.sh/formula/geckodriver) formula and the
+[`firefox`](https://formulae.brew.sh/cask/firefox) cask. On Linux they open the
+project's own download or instruction page, because the package names differ by
+distribution. The default MASC bootstrap does not install Homebrew or these
+programs. Homebrew refuses the Firefox cask when `Firefox.app` is already in
+`/Applications`; the `firefox` result then reports that copy and no install is
+needed.
+
+The result says whether the program answers `--version` in the current process
+environment, and at which absolute path. The program runs with the same reduced
+environment the PDF check uses, so a program that needs a display variable to
+print its version is reported as not answering. It does not edit `runtime.toml`: naming
+the executable in `[browser.automation]` and restarting the server are separate
+steps.
+
 ## Install
 
 The quick start above covers a normal install. Name the workspace directly when
@@ -147,7 +176,7 @@ To install one specific release instead of the latest one, take that tag's
 installer and pin it. Check that the tag is listed on GitHub Releases first:
 
 ```bash
-TAG=v0.53.0
+TAG=v0.55.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"

@@ -466,7 +466,6 @@ let add_routes router =
          let workspace_state = Workspace.read_state config in
          let tempo = Tempo.get_tempo config in
          let json = `Assoc [
-           "cluster", `String (Env_config_core.cluster_name ());
            "project", `String workspace_state.project;
            "tempo_interval_s", `Float tempo.current_interval_s;
            "paused", `Bool workspace_state.paused;
@@ -680,7 +679,13 @@ let add_routes router =
                   (json_error ~code:"invalid_ask"
                      (Workspace_task.add_task_error_to_string error))
                   reqd
-              | Error error ->
+              | Error
+                  ((Workspace_task.Goal_source_unavailable _
+                   | Workspace_task.Goal_lock_failed _
+                   | Workspace_task.Backlog_read_failed _
+                   | Workspace_task.Goal_link_write_failed _
+                   | Workspace_task.Backlog_write_failed _
+                   | Workspace_task.Unexpected_error _) as error) ->
                 Http.Response.json_value
                   ~status:`Internal_server_error ~request:req
                   (json_error ~code:"ask_store_unavailable"

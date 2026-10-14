@@ -130,7 +130,6 @@ Phase 0·0b·1 이 머지된 빌드. 호스트는 오후의 load 80~300 상태�
 | durable directory chain 준비 | `keeper_fs_durable_directory.ml:359,485,534` | stat 걷기와 fsync 순서 결정 |
 | `Fs_compat.cleanup_atomic_orphans` | `fusion_delivery_obligation.ml:477`, `keeper_msg_async.ml:1845` | readdir + unlink 루프 |
 | `remove_tree_blocking` | `keeper_shutdown_finalize.ml:464`, `fs_compat.ml:1168` | 재귀 삭제 |
-| `Keeper_wire_capture.prune_expired` | `server_runtime_bootstrap.ml:1182` | readdir + 판정 + unlink |
 | `Store.store` / `Store.load` | `keeper_vision_tool.ml:123,126` | 바이트 쓰기/읽기 |
 | `detect_system_fd_snapshot_now` | `keeper_fd_pressure.ml:266` | 시스템 fd 스냅샷 |
 

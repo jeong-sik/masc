@@ -418,7 +418,7 @@ let test_candidate_admission_refusal_waits_for_change () =
   with_case (fun ~sw ~net ~clock ~base_path ->
     let server = F.start_server ~sw ~net ~clock (F.Reply (openai_text (Yojson.Safe.to_string valid_answer))) in
     let id = "candle-missing-credential" in
-    let snapshot = F.resolver_snapshot ~api_key_env:"MASC_TEST_CANDLE_MISSING_KEY"
+    let snapshot = F.resolver_snapshot ~requires_api_key:true
       ~source:base_path [{F.id; base_url=server.base_url}] in
     ignore (F.publish_registry ~lane_id:"candle_appraiser" ~slot_ids:[id] ~cli_slot_ids:[] snapshot
       : Runtime_exact_output_registry.t);

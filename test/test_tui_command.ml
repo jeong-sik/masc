@@ -525,6 +525,127 @@ let test_resource_catalog_keeps_explanatory_metadata () =
       check (option string) "missing purpose stays absent" None minimal.description
   | Ok rows -> failf "expected two resources, got %d" (List.length rows)
 
+let resources_page ~id ?next_cursor resources =
+  let fields = [ ("resources", `List resources) ] in
+  let fields =
+    match next_cursor with
+    | Some cursor -> fields @ [ ("nextCursor", `String cursor) ]
+    | None -> fields
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0"); ("id", `String id)
+      ; ("result", `Assoc fields)
+      ])
+
+let uri_row uri = `Assoc [ ("uri", `String uri) ]
+
+(* The server pages this listing and the wiki pages sort at its end, so a
+   client that keeps only the first answer loses them. This checks the page
+   reader hands back the cursor, and that the walk follows it to the last
+   page. *)
+let test_resources_page_reports_the_next_cursor () =
+  let body =
+    resources_page ~id:"res-1" ~next_cursor:"cur-2" [ uri_row "masc://a" ]
+  in
+  (match Mcp.resources_page_of_body ~request_id:"res-1" body with
+  | Error detail -> failf "expected a page, got %s" detail
+  | Ok (resources, next_cursor) ->
+      check int "one resource on the page" 1 (List.length resources);
+      check (option string) "the cursor is handed back" (Some "cur-2")
+        next_cursor);
+  (* A last page carries no cursor. *)
+  match
+    Mcp.resources_page_of_body ~request_id:"res-1"
+      (resources_page ~id:"res-1" [ uri_row "masc://b" ])
+  with
+  | Error detail -> failf "expected a page, got %s" detail
+  | Ok (_, next_cursor) ->
+      check (option string) "no cursor on the last page" None next_cursor
+
+let test_resources_list_all_walks_every_page () =
+  let pages =
+    [ (None, resources_page ~id:"res-1" ~next_cursor:"cur-2" [ uri_row "masc://a" ])
+    ; (Some "cur-2", resources_page ~id:"res-1" ~next_cursor:"cur-3" [ uri_row "masc://b" ])
+    ; (Some "cur-3", resources_page ~id:"res-1" [ uri_row "masc://c" ])
+    ]
+  in
+  let asked = ref [] in
+  let fetch ~cursor =
+    asked := cursor :: !asked;
+    match List.assoc_opt cursor pages with
+    | Some body -> Ok body
+    | None -> Error "asked for an unexpected cursor"
+  in
+  match Mcp.resources_list_all ~request_id:"res-1" ~fetch () with
+  | Error detail -> failf "expected every page, got %s" detail
+  | Ok (resources, stop) ->
+      check (list string) "every page in server order"
+        [ "masc://a"; "masc://b"; "masc://c" ]
+        (List.map (fun (r : Mcp.resource) -> r.uri) resources);
+      check (list (option string)) "the cursors asked, in order"
+        [ None; Some "cur-2"; Some "cur-3" ]
+        (List.rev !asked);
+      check bool "the walk reports a complete listing" true
+        (stop = `Complete)
+
+(* A cursor that never advances must not spin, and the caller must be told the
+   listing it gets is not the whole listing. *)
+let test_resources_list_all_stops_on_a_repeated_cursor () =
+  let calls = ref 0 in
+  let fetch ~cursor:_ =
+    incr calls;
+    Ok (resources_page ~id:"res-1" ~next_cursor:"cur-2" [ uri_row "masc://a" ])
+  in
+  match Mcp.resources_list_all ~request_id:"res-1" ~fetch () with
+  | Error detail -> failf "expected a stop, got %s" detail
+  | Ok (resources, stop) ->
+      check int "the repeated page is kept once per call" 2 (List.length resources);
+      check int "and the walk stops" 2 !calls;
+      check bool "the stop names the cursor that repeated" true
+        (stop = `Repeated_cursor "cur-2")
+
+(* The page bound is reachable with a small MASC_LIST_PAGE_SIZE, and a walk
+   that hits it must not answer as though it read the whole listing. *)
+let test_resources_list_all_reports_the_page_bound () =
+  let pages =
+    [ (None, resources_page ~id:"res-1" ~next_cursor:"cur-2" [ uri_row "masc://a" ])
+    ; (Some "cur-2", resources_page ~id:"res-1" ~next_cursor:"cur-3" [ uri_row "masc://b" ])
+    ; (Some "cur-3", resources_page ~id:"res-1" [ uri_row "masc://c" ])
+    ]
+  in
+  let calls = ref 0 in
+  let fetch ~cursor =
+    incr calls;
+    match List.assoc_opt cursor pages with
+    | Some body -> Ok body
+    | None -> Error "asked for an unexpected cursor"
+  in
+  match Mcp.resources_list_all ~request_id:"res-1" ~max_pages:2 ~fetch () with
+  | Error detail -> failf "expected a bounded walk, got %s" detail
+  | Ok (resources, stop) ->
+      check int "only the bound's pages are read" 2 !calls;
+      check (list string) "and they are the first pages"
+        [ "masc://a"; "masc://b" ]
+        (List.map (fun (r : Mcp.resource) -> r.uri) resources);
+      check bool "the stop names the bound it hit" true
+        (stop = `Page_limit_reached 2)
+
+let test_resources_list_request_carries_the_cursor () =
+  let params_of body =
+    match Yojson.Safe.from_string body with
+    | `Assoc fields -> List.assoc_opt "params" fields
+    | _ -> None
+  in
+  check (option string) "the first page asks for no cursor" (Some "{}")
+    (Option.map Yojson.Safe.to_string
+       (params_of (Mcp.resources_list_request_body ~request_id:"res-2" ())));
+  check (option string) "a later page asks for its cursor"
+    (Some {|{"cursor":"cur-2"}|})
+    (Option.map Yojson.Safe.to_string
+       (params_of
+          (Mcp.resources_list_request_body ~cursor:"cur-2" ~request_id:"res-2" ())))
+
 let describe_hint = function
   | Command.No_command -> "none"
   | Command.Chosen entry -> "chosen:" ^ entry.Command.word
@@ -919,5 +1040,15 @@ let () =
             test_resource_catalog_keeps_explanatory_metadata
         ; test_case "read keeps each part type" `Quick
             test_resource_read_keeps_each_part_type
+        ; test_case "list request carries the cursor" `Quick
+            test_resources_list_request_carries_the_cursor
+        ; test_case "a page hands back its next cursor" `Quick
+            test_resources_page_reports_the_next_cursor
+        ; test_case "the walk follows every page" `Quick
+            test_resources_list_all_walks_every_page
+        ; test_case "a repeated cursor ends the walk" `Quick
+            test_resources_list_all_stops_on_a_repeated_cursor
+        ; test_case "a bounded walk reports the bound" `Quick
+            test_resources_list_all_reports_the_page_bound
         ] )
     ]

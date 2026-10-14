@@ -84,12 +84,7 @@ open Result.Syntax
 let default_elevenlabs_base_url = "https://api.elevenlabs.io/v1"
 
 let voice_config_file_in root =
-  let masc_dir =
-    Workspace_utils.masc_root_dir_from
-      ~base_path:root
-      ~cluster_name:(Env_config_core.cluster_name ())
-  in
-  Filename.concat masc_dir "voice_config.json"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:root) "voice_config.json"
 
 let base_path_voice_config_path_opt () =
   (Host_config.from_env ()).base_path
@@ -323,7 +318,8 @@ let parse_endpoint ~ctx json =
   let base_url =
     match kind, base_url with
     | Elevenlabs_direct, None -> Some default_elevenlabs_base_url
-    | _ -> base_url
+    | (Elevenlabs_direct, Some _)
+    | ((Openai_compat | (Voice_mcp | (Macos_say | (Espeak_ng | Whisper_cli)))), _) -> base_url
   in
   let* () =
     match kind with

@@ -1,6 +1,7 @@
 (** Date and segment naming are a pure contract shared by scans, rotation,
     pruning and strict layout validation. Filesystem effects stay here. *)
 open Dated_jsonl_layout
+module Store = Dated_jsonl_store
 
 (** Date-split JSONL storage.
 
@@ -20,11 +21,10 @@ open Dated_jsonl_layout
 *)
 
 type t = {
+  location : Store.location;
   base_dir : string;
   mutex : Eio.Mutex.t Atomic.t;
-  retention_days : int option;
   max_bytes : int option;
-  last_prune_day : string option Atomic.t;
 }
 
 type read_operation =
@@ -152,16 +152,12 @@ let mutex_for_base_dir ~base_dir =
         Hashtbl.add mutex_registry key cell;
         cell)
 
-let create ~base_dir ?mutex ?retention_days ?max_bytes () =
+let open_store ?mutex ?max_bytes location =
+  let base_dir = Store.dir location in
   let mutex =
     match mutex with
     | Some mutex -> Atomic.make mutex
     | None -> mutex_for_base_dir ~base_dir
-  in
-  let retention_days =
-    match retention_days with
-    | Some days when days > 0 -> Some days
-    | _ -> None
   in
   let max_bytes =
     match max_bytes with
@@ -169,11 +165,10 @@ let create ~base_dir ?mutex ?retention_days ?max_bytes () =
     | _ -> None
   in
   {
+    location;
     base_dir;
     mutex;
-    retention_days;
     max_bytes;
-    last_prune_day = Atomic.make None;
   }
 
 let base_dir t = t.base_dir
@@ -738,6 +733,14 @@ let find_latest_entry_in_file_result path f =
            Error (Io_error { operation = Read_file; path; detail }))
 ;;
 
+(* Only a removal that happened counts. A day file someone else already
+   removed is not counted; one that cannot be removed stays for the next
+   pass and is not counted either. *)
+let remove_day_file path =
+  match Unix.unlink path with
+  | () -> true
+  | exception Unix.Unix_error (_, _, _) -> false
+
 let prune_unlocked t ~days =
   if days <= 0 then 0
   else begin
@@ -746,9 +749,9 @@ let prune_unlocked t ~days =
     (* The cutoff has to name directories the same way the writer named them.
        Rebuilding the format here is what lets prune delete by one calendar
        while the writer files by another (#27143). *)
-    let cutoff_path = Jsonl_writer.dated_path ~base_dir:t.base_dir ~ts:cutoff in
-    let cutoff_month = cutoff_path.Jsonl_writer.month_dir in
-    let cutoff_day = Filename.remove_extension cutoff_path.Jsonl_writer.day_file in
+    let cutoff_path = Store.dated_path t.location ~ts:cutoff in
+    let cutoff_month = cutoff_path.Store.month_dir in
+    let cutoff_day = Filename.remove_extension cutoff_path.Store.day_file in
     let deleted = ref 0 in
     let months = list_month_dirs t.base_dir in
     List.iter (fun m ->
@@ -757,18 +760,16 @@ let prune_unlocked t ~days =
         (* Entire month is before cutoff — remove all files *)
         let day_files = list_day_files month_path in
         List.iter (fun d ->
-          (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
-          incr deleted
+          if remove_day_file (Filename.concat month_path d) then incr deleted
         ) day_files;
         (try Unix.rmdir month_path with Unix.Unix_error _ -> ())
       end else if m = cutoff_month then begin
         let day_files = list_day_files month_path in
         List.iter (fun d ->
           let day_num = Filename.remove_extension d in
-          if String.compare day_num cutoff_day < 0 then begin
-            (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
-            incr deleted
-          end
+          if String.compare day_num cutoff_day < 0
+             && remove_day_file (Filename.concat month_path d)
+          then incr deleted
         ) day_files
       end
     ) months;
@@ -804,24 +805,12 @@ type append_outcome =
   | Skipped_rotation_exhausted of { sequence_limit : int }
   | Skipped_by_append_guard
 
-(* Shared post-append maintenance for every append entry point:
-   opportunistic once-per-process-day retention prune, then best-effort
-   byte-budget prune that never touches the current day file. Divergence
-   between append paths here would give the same store two different
-   retention behaviours, so both call this one helper. *)
-let run_post_append_pruning_unlocked t ~(dated : Jsonl_writer.dated_path) =
-  (match t.retention_days with
-   | None -> ()
-   | Some days ->
-     let today = dated.month_dir ^ "/" ^ dated.day_file in
-     if
-       not
-         (Option.equal String.equal (Atomic.get t.last_prune_day) (Some today))
-     then begin
-       (* See retention pruning is opportunistic after append durability. *)
-       ignore (prune_unlocked t ~days : int);
-       Atomic.set t.last_prune_day (Some today)
-     end);
+(* Shared post-append maintenance for every append entry point: a
+   best-effort byte-budget prune that never touches the current day file.
+   Divergence between append paths here would give the same store two
+   different size limits, so both call this one helper. Removing day files
+   by age is the prune pass's job ([prune_listed_stores]). *)
+let run_post_append_pruning_unlocked t ~(dated : Store.dated_path) =
   match t.max_bytes with
   | None -> ()
   | Some max_bytes ->
@@ -839,7 +828,7 @@ let append_unlocked ~on_committed t json =
      and fresh-fd-per-call. The PR-5 (#15928) inline [atomic_append_jsonl]
      was a pre-emptive duplicate of that guarantee — removed here. *)
   Eio.Mutex.use_ro mutex (fun () ->
-    let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
+    let dated = Store.dated_path_now t.location in
     Jsonl_writer.append_jsonl ~path:dated.path json;
     on_committed ();
     run_post_append_pruning_unlocked t ~dated)
@@ -1346,7 +1335,7 @@ let file_count_cache : (string, file_count_entry) Hashtbl.t = Hashtbl.create 64
 let file_count_cache_mu = Stdlib.Mutex.create ()
 
 let prepare_for_directory_removal t =
-  let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
+  let dated = Store.dated_path_now t.location in
   Fs_compat.invalidate_cached_writer dated.path;
   Fs_compat.invalidate_mkdir_memo (Filename.dirname dated.path);
   Stdlib.Mutex.protect file_count_cache_mu (fun () ->
@@ -1539,7 +1528,7 @@ let load_count_cache ~path =
 let append_rotating_unlocked t ~max_current_file_bytes json =
   let mutex = Atomic.get t.mutex in
   Eio.Mutex.use_ro mutex (fun () ->
-    let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
+    let dated = Store.dated_path_now t.location in
     let row_bytes = String.length (Yojson.Safe.to_string json) + 1 in
     let current_bytes = file_size dated.path in
     let placement =
@@ -1905,9 +1894,35 @@ let read_range_recent ?offset t ~since ~until n =
   filter_map_range_recent ?offset t ~since ~until n ~f:(fun json -> Some json)
 ;;
 
+(* The store's lock is taken on the fiber; the directory reads and unlinks
+   run on a system thread, so a pass over large day files does not hold the
+   domain (#42935). *)
 let prune t ~days =
   let mutex = Atomic.get t.mutex in
-  Eio.Mutex.use_ro mutex (fun () -> prune_unlocked t ~days)
+  Eio.Mutex.use_ro mutex (fun () ->
+    Eio_guard.run_in_systhread ~label:"dated-jsonl-prune" (fun () ->
+      prune_unlocked t ~days))
+
+let days_to_keep ~operator_window_days store =
+  match Store.retention store with
+  | Store.Operator_window ->
+    if operator_window_days > 0 then Some operator_window_days else None
+  | Store.Fixed_days days -> Some days
+  | Store.Own_days read -> Some (read ())
+  | Store.Kept -> None
+
+let prune_listed_stores root ~operator_window_days =
+  List.fold_left
+    (fun pruned store ->
+       match days_to_keep ~operator_window_days store with
+       | None -> pruned
+       | Some days ->
+         List.fold_left
+           (fun pruned location -> pruned + prune (open_store location) ~days)
+           pruned
+           (Store.locations_on_disk root store))
+    0
+    Store.all
 
 (* Test hooks declared in the .mli — implementation lives in this
    module so tests can verify mutex-registry sharing without

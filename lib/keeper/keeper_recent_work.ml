@@ -36,8 +36,11 @@ let project ~base_path ~audience work =
     | Error detail -> `Assoc ["unavailable", `String detail] in
   match work.conversation, work.autonomous_reply with
   | Ok {messages=[];prefix_omitted=false}, Ok {messages=[];prefix_omitted=false} -> Absent
-  | _ ->
-    let bytes = Yojson.Safe.to_string (`Assoc
+  | (Ok { messages = []; prefix_omitted = false }, Ok { messages = []; prefix_omitted = true })
+  | (Ok { messages = []; prefix_omitted = false }, Ok { messages = _::_; prefix_omitted = _ })
+  | (Ok { messages = []; prefix_omitted = false }, Error _)
+  | (Ok { messages = []; prefix_omitted = true }, _)
+  | (Ok { messages = _::_; prefix_omitted = _ }, _) | (Error _, _) -> let bytes = Yojson.Safe.to_string (`Assoc
         ["recent_conversation", observed_json work.conversation;
          "latest_autonomous_reply", observed_json work.autonomous_reply]) in
     (* The existing artifact preview envelope is already safe to carry inline.

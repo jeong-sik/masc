@@ -796,7 +796,11 @@ let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
   match task_cache_signal with
   | None -> Ok (content, msg_type)
   | Some signal ->
-    if not (String.equal msg_type "broadcast")
+    if
+      (match msg_type with
+       | Msg_broadcast -> false
+       | Msg_session_bound | Msg_session_rebound | Msg_session_ended
+       | Msg_cache_invalidated -> true)
     then
       (* Only a broadcast carries the invalidation replacement, so accepting a
          signal here would drop it after the caller was told it was applied. *)
@@ -804,7 +808,7 @@ let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
         (Broadcast_policy_rejected
            (Printf.sprintf
               "task cache signal is carried by a broadcast, not by %s"
-              msg_type))
+              (message_kind_to_string msg_type)))
     else (
       match
         Workspace_task_cache_invariant.rewrite_signal
@@ -814,7 +818,7 @@ let rewrite_task_cache_signal config ~msg_type ~task_cache_signal ~content =
           ~content
       with
       | Unchanged content -> Ok (content, msg_type)
-      | Invalidated content -> Ok (content, "cache_invalidated")
+      | Invalidated content -> Ok (content, Msg_cache_invalidated)
       | Rejected detail -> Error (Broadcast_policy_rejected detail)
       | Dependency_unavailable detail ->
         Error (Broadcast_dependency_unavailable detail))
@@ -853,11 +857,7 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_deliv
      same reason the content is. *)
   let stored_content = content in
   let stored_agent = from_agent in
-  let stored_msg_type =
-    match String.trim msg_type with
-    | "" -> "broadcast"
-    | value -> value
-  in
+  let stored_msg_type = message_kind_to_string msg_type in
   let msg = {
     request_id;
     seq;
@@ -957,7 +957,7 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_deliv
        | Immediate_fleet -> Fanout_finished
        | Deferred_fleet | Deferred_passive_fleet -> Fanout_not_started) })
 
-let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery=Immediate_fleet) ?(msg_type = "broadcast") ?task_cache_signal
+let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery=Immediate_fleet) ?(msg_type = Msg_broadcast) ?task_cache_signal
       ~audience config ~from_agent ~content =
   ensure_initialized config;
   (* Preserve original content and extract mention tokens before any
@@ -1081,7 +1081,7 @@ let find_broadcast_message ~request_id config ~from_agent ~content =
         if not (String.equal message.request_id request_id
           && String.equal message.from_agent from_agent
           && String.equal message.content content
-          && String.equal message.msg_type "broadcast") then
+          && message_kind_of_string message.msg_type = Some Msg_broadcast) then
           Error (Broadcast_policy_rejected "Broadcast request identity already names different content")
         else
           let delivery = delivery_of_message ~audience message in

@@ -197,7 +197,16 @@ let compatible selection state = match selection,state with
       List.for_all (fun (item : instance) -> Option.is_some item.applied_revision) instances
   | Manual_instance {instance_id;incarnation},Package_state {declaration=None;instances=[item]} ->
       item.instance_id=instance_id && item.incarnation=incarnation && item.applied_revision=None
-  | _ -> false
+  | Exact _,(Browser_clients _ | Browser_executor _ | Machine_state _ | Package_state _)
+  | Browser Browser_lane.Lane_name.Live,(Exact_state _ | Browser_executor _ | Machine_state _ | Package_state _)
+  | Browser (Browser_lane.Lane_name.Automation | Browser_lane.Lane_name.Stagehand),
+    (Exact_state _ | Browser_clients _ | Machine_state _ | Package_state _)
+  | Machine _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Package_state _)
+  | Declaration _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _
+                  | Package_state {declaration=None;_})
+  | Manual_instance _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _
+                      | Package_state {declaration=Some _;_}
+                      | Package_state {declaration=None;instances=([] | _ :: _ :: _)}) -> false
 let row json =
   let* f = fields ["id";"label";"purpose";"selection";"state"] json in
   let* id = get nonblank "id" f in let* label = get nonblank "label" f in let* purpose = get string "purpose" f in
@@ -237,8 +246,13 @@ let exact_matches snapshot (row : row) = match row.selection,row.state with
                && item.sl_cli_slots=c.cli_slots && item.sl_declared_slots=c.declared_slots
                && item.sl_declared_cli_slots=c.declared_cli_slots && item.sl_dropped_slots=c.dropped_slots
                && item.sl_admission_error=c.admission_error)
-  | (Browser _ | Machine _ | Declaration _ | Manual_instance _),_ -> true
-  | Exact _,_ -> false
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Exact_state _)
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_clients (_, _))
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_executor (_, _))
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Machine_state (_, _))
+  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Package_state _) -> true
+  | (Exact _, Browser_clients (_, _)) | (Exact _, Browser_executor (_, _))
+  | (Exact _, Machine_state (_, _)) | (Exact _, Package_state _) -> false
 
 let decode json =
   let* () = unique_keys json in

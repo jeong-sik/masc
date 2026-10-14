@@ -31,6 +31,15 @@ let to_core_error failure =
 
 let of_core_error = function
   | Agent_core.Error.Internal_carried {carrier=Required_tools_unavailable failure;_} -> Some failure
-  | _ -> None
+  | Agent_core.Error.Api _
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> None
 
 let should_try_next error = Option.is_some (of_core_error error)

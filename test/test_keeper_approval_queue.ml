@@ -6474,6 +6474,106 @@ let test_partial_log_tail_is_dropped_and_the_snapshot_rewritten () =
          (List.sort String.compare (snapshot_file_ids ~base_path "pending")))
 ;;
 
+(* The queue reads recover a torn log tail for exactly the errors this
+   predicate accepts. [expected] has no wildcard, so a new transaction error
+   constructor fails to compile here until its recovery status is decided. *)
+let test_incomplete_tail_predicate_matches_the_recovered_errors () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let path = Filename.concat base_path "cursor-source.jsonl" in
+       Out_channel.with_open_bin path (fun channel -> output_string channel "{\"row\":1}\n");
+       let cursor =
+         match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+         | Ok snapshot -> snapshot.Fs_compat.cursor
+         | Error error ->
+           Alcotest.fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       in
+       let failure =
+         { Fs_compat.operation = Fs_compat.Close_stable_lock
+         ; exception_ = Failure "close"
+         ; backtrace = Printexc.get_callstack 0
+         }
+       in
+       let bare : (string * Fs_compat.private_jsonl_transaction_error) list =
+         [ "Stable_lock_contended", Fs_compat.Stable_lock_contended { lock_path = "lock" }
+         ; ( "Unexpected_stable_lock_permissions"
+           , Fs_compat.Unexpected_stable_lock_permissions { path = "lock"; actual = 0o644 } )
+         ; ( "Invalid_stable_lock_state"
+           , Fs_compat.Invalid_stable_lock_state { path = "lock"; observed_length = 3 } )
+         ; ( "Cursor_mismatch"
+           , Fs_compat.Cursor_mismatch { expected = cursor; actual = cursor } )
+         ; ( "Unexpected_transaction_file_kind"
+           , Fs_compat.Unexpected_transaction_file_kind Unix.S_DIR )
+         ; ( "Ambiguous_transaction_file_identity"
+           , Fs_compat.Ambiguous_transaction_file_identity { path = "p"; link_count = 2 } )
+         ; ( "Transaction_path_binding_changed"
+           , Fs_compat.Transaction_path_binding_changed { path = "p" } )
+         ; "Incomplete_transaction_tail", Fs_compat.Incomplete_transaction_tail { end_offset = 7 }
+         ; "Invalid_transaction_suffix", Fs_compat.Invalid_transaction_suffix
+         ; ( "Private_jsonl_operation_failed"
+           , Fs_compat.Private_jsonl_operation_failed failure )
+         ; ( "Rewrite_stage_failed"
+           , Fs_compat.Rewrite_stage_failed { failure; cleanup_failures = [ failure ] } )
+         ; ( "Rewrite_published_durability_unknown"
+           , Fs_compat.Rewrite_published_durability_unknown
+               { cursor = Some cursor; failure } )
+         ; ( "Transaction_settlement_failed (succeeded)"
+           , Fs_compat.Transaction_settlement_failed
+               { primary =
+                   Fs_compat.Transaction_succeeded (Fs_compat.Cursor_succeeded cursor)
+               ; cleanup_failures = [ failure ]
+               } )
+         ; ( "Transaction_append_failed"
+           , Fs_compat.Transaction_append_failed
+               { append_failure = Fs_compat.No_write_progress; rollback_failures = [] } )
+         ]
+       in
+       Alcotest.(check int) "every bare constructor is listed" 14 (List.length bare);
+       let expected : Fs_compat.private_jsonl_transaction_error -> bool = function
+         | Fs_compat.Incomplete_transaction_tail _ -> true
+         | Fs_compat.Stable_lock_contended _
+         | Fs_compat.Unexpected_stable_lock_permissions _
+         | Fs_compat.Invalid_stable_lock_state _
+         | Fs_compat.Cursor_mismatch _
+         | Fs_compat.Unexpected_transaction_file_kind _
+         | Fs_compat.Ambiguous_transaction_file_identity _
+         | Fs_compat.Transaction_path_binding_changed _
+         | Fs_compat.Invalid_transaction_suffix
+         | Fs_compat.Private_jsonl_operation_failed _
+         | Fs_compat.Rewrite_stage_failed _
+         | Fs_compat.Rewrite_published_durability_unknown _
+         | Fs_compat.Transaction_settlement_failed _
+         | Fs_compat.Transaction_append_failed _ -> false
+       in
+       let settle error =
+         Fs_compat.Transaction_settlement_failed
+           { primary = Fs_compat.Transaction_failed error
+           ; cleanup_failures = [ failure ]
+           }
+       in
+       List.iter
+         (fun (name, error) ->
+            let check label error expected_value =
+              Alcotest.(check bool)
+                (name ^ " " ^ label)
+                expected_value
+                (Fs_compat.private_jsonl_transaction_error_is_incomplete_tail error)
+            in
+            check "bare" error (expected error);
+            (* A tail error with one failed descriptor settlement is still a
+               tail error; every other error stays what it was. *)
+            check "settled once" (settle error) (expected error);
+            (* Two settlement layers are not followed. *)
+            check "settled twice" (settle (settle error)) false)
+         bare;
+       Alcotest.(check int)
+         "exactly one bare constructor is recovered"
+         1
+         (List.length (List.filter (fun (_, error) -> expected error) bare)))
+;;
+
 let () =
   Alcotest.run
     "Keeper_approval_queue"
@@ -6784,6 +6884,10 @@ let () =
             "an observation survives the row round trip"
             `Quick
             test_an_observation_survives_the_row_round_trip
+        ; Alcotest.test_case
+            "incomplete tail predicate matches the recovered errors"
+            `Quick
+            test_incomplete_tail_predicate_matches_the_recovered_errors
         ] )
     ]
 ;;

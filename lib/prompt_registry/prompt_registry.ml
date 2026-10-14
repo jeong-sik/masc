@@ -1028,7 +1028,7 @@ let prompts_json () =
 
 (** Persist overrides to JSON file *)
 let save_override_entries base_path entries =
-  let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
   try
     Fs_compat.mkdir_p masc_dir;
     let path = Filename.concat masc_dir "prompt_overrides.json" in
@@ -1136,7 +1136,7 @@ let record_override_restore_failure () =
 let restore_overrides base_path =
   let path =
     Filename.concat
-      (Workspace_utils.masc_dir_from_base_path ~base_path)
+      (Common.masc_dir_from_base_path ~base_path)
       "prompt_overrides.json"
   in
   with_override_mutation_lock (fun () ->
@@ -1248,7 +1248,7 @@ let promote_file_edit ~base_path ~file ~embedded ~edited =
           | [] ->
               let path =
                 Filename.concat
-                  (Workspace_utils.masc_dir_from_base_path ~base_path)
+                  (Common.masc_dir_from_base_path ~base_path)
                   "prompt_overrides.json"
               in
               with_override_mutation_lock (fun () ->

@@ -57,22 +57,65 @@ let classify_string s =
   else if any_match s timeout_needles then Timeout
   else Other s
 
-(* Use the [try raise exn with] idiom — matching on [Unix.Unix_error]
-   directly under `function` trips masc_core's `-w +4` (fragile match)
-   because [Unix.error] is a closed sum that warning 4 watches.  The
-   exception-handler form sidesteps that: exception constructors are
-   extensible, so warning 4 does not apply, and the typed errno arms
-   stay one-per-line for clarity. *)
+type errno =
+  | Emfile
+  | Enfile
+  | Enospc
+  | Eacces
+  | Eperm
+  | Enoent
+  | Econnrefused
+  | Etimedout
+  | Epipe
+  | Eaddrinuse
+  | Eaddrnotavail
+  | Other_errno of Unix.error
+
+(* The only match in the tree that lists every [Unix.error] constructor.  It
+   has no catch-all arm, so an OCaml release that adds a constructor fails to
+   compile here and nowhere else. *)
+let errno_of_unix_error (code : Unix.error) =
+  match code with
+  | Unix.EMFILE -> Emfile
+  | Unix.ENFILE -> Enfile
+  | Unix.ENOSPC -> Enospc
+  | Unix.EACCES -> Eacces
+  | Unix.EPERM -> Eperm
+  | Unix.ENOENT -> Enoent
+  | Unix.ECONNREFUSED -> Econnrefused
+  | Unix.ETIMEDOUT -> Etimedout
+  | Unix.EPIPE -> Epipe
+  | Unix.EADDRINUSE -> Eaddrinuse
+  | Unix.EADDRNOTAVAIL -> Eaddrnotavail
+  | ( Unix.E2BIG | Unix.EAGAIN | Unix.EBADF | Unix.EBUSY | Unix.ECHILD
+    | Unix.EDEADLK | Unix.EDOM | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG
+    | Unix.EINTR | Unix.EINVAL | Unix.EIO | Unix.EISDIR | Unix.EMLINK
+    | Unix.ENAMETOOLONG | Unix.ENODEV | Unix.ENOEXEC | Unix.ENOLCK
+    | Unix.ENOMEM | Unix.ENOSYS | Unix.ENOTDIR | Unix.ENOTEMPTY | Unix.ENOTTY
+    | Unix.ENXIO | Unix.ERANGE | Unix.EROFS | Unix.ESPIPE
+    | Unix.ESRCH | Unix.EXDEV | Unix.EWOULDBLOCK | Unix.EINPROGRESS
+    | Unix.EALREADY | Unix.ENOTSOCK | Unix.EDESTADDRREQ | Unix.EMSGSIZE
+    | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT
+    | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT
+    | Unix.EAFNOSUPPORT
+    | Unix.ENETDOWN | Unix.ENETUNREACH | Unix.ENETRESET | Unix.ECONNABORTED
+    | Unix.ECONNRESET | Unix.ENOBUFS | Unix.EISCONN | Unix.ENOTCONN
+    | Unix.ESHUTDOWN | Unix.ETOOMANYREFS | Unix.EHOSTDOWN | Unix.EHOSTUNREACH
+    | Unix.ELOOP | Unix.EOVERFLOW | Unix.EUNKNOWNERR _ ) as other ->
+    Other_errno other
+
+let errno_of_exn = function
+  | Unix.Unix_error (code, _, _) -> Some (errno_of_unix_error code)
+  | _ -> None
+
 let classify_exn exn =
-  try raise exn with
-  | Unix.Unix_error (Unix.EMFILE, _, _) -> Fd_exhaustion
-  | Unix.Unix_error (Unix.ENFILE, _, _) -> Fd_exhaustion
-  | Unix.Unix_error (Unix.ENOSPC, _, _) -> Disk_exhaustion
-  | Unix.Unix_error (Unix.EACCES, _, _) -> Permission_denied
-  | Unix.Unix_error (Unix.EPERM, _, _) -> Permission_denied
-  | Unix.Unix_error (Unix.ECONNREFUSED, _, _) -> Connection_refused
-  | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> Timeout
-  | _ -> classify_string (Printexc.to_string exn) (* cancel-guard-ok: classify_string performs no Eio operation *)
+  match errno_of_exn exn with
+  | Some (Emfile | Enfile) -> Fd_exhaustion
+  | Some Enospc -> Disk_exhaustion
+  | Some (Eacces | Eperm) -> Permission_denied
+  | Some Econnrefused -> Connection_refused
+  | Some Etimedout -> Timeout
+  | Some (Enoent | Epipe | Eaddrinuse | Eaddrnotavail | Other_errno _) | None -> classify_string (Printexc.to_string exn)
 
 let to_short_tag = function
   | Fd_exhaustion -> "fd_exhaustion"

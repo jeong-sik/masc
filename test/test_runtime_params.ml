@@ -696,20 +696,22 @@ let () =
     let clock = Eio.Stdenv.clock env in
     Eio.Switch.run @@ fun sw ->
     Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
-    let keepers_dir = Filename.concat tmp_dir "keepers" in
+    let store_root = Dated_jsonl.Store.root_of_masc_dir tmp_dir in
     Keeper_crash_persistence.enqueue_record
-      ~keepers_dir ~name:"test-keeper"
+      ~store_root ~name:"test-keeper"
       ~ts:1000.0 ~reason:"heartbeat_failures" ~restart_count:1;
     Keeper_crash_persistence.enqueue_record
-      ~keepers_dir ~name:"test-keeper"
+      ~store_root ~name:"test-keeper"
       ~ts:1010.0 ~reason:"exception" ~restart_count:2;
     (* Wait for drain fiber to flush (drain interval = 2s) *)
     Eio.Time.sleep clock 3.0;
     let crashes =
       Keeper_crash_persistence.recent_crashes
-        ~keepers_dir ~name:"test-keeper" ~max_entries:10
+        ~store_root ~name:"test-keeper" ~max_entries:10
     in
     Alcotest.(check bool) "has crash events" true (List.length crashes >= 2);
+    Alcotest.(check bool) "rows are under the keeper's crash-events folder" true
+      (Sys.is_directory (Filename.concat tmp_dir "keepers/test-keeper/crash-events"));
     (match crashes with
      | first :: _ ->
          let open Yojson.Safe.Util in
@@ -725,7 +727,7 @@ let () =
     with_eio_guard @@ fun () ->
     let tmp_dir = Filename.temp_dir "masc_crash_tail_" "" in
     let clock = Eio.Stdenv.clock env in
-    let keepers_dir = Filename.concat tmp_dir "keepers" in
+    let store_root = Dated_jsonl.Store.root_of_masc_dir tmp_dir in
     (* No sleep. The record is enqueued inside the drain interval and the
        switch closes before the fiber's next wake -- which is what a server
        shutdown looks like from here, and when a crash record is most likely
@@ -733,11 +735,11 @@ let () =
     Eio.Switch.run (fun sw ->
       Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
       Keeper_crash_persistence.enqueue_record
-        ~keepers_dir ~name:"tail-keeper"
+        ~store_root ~name:"tail-keeper"
         ~ts:2000.0 ~reason:"shutdown" ~restart_count:7);
     let crashes =
       Keeper_crash_persistence.recent_crashes
-        ~keepers_dir ~name:"tail-keeper" ~max_entries:10
+        ~store_root ~name:"tail-keeper" ~max_entries:10
     in
     Alcotest.(check int) "the queued tail reached the store" 1 (List.length crashes);
     rm_rf tmp_dir

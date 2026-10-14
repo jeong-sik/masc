@@ -27,11 +27,27 @@ type node_acc = {
     out of the table before a later event keeps the values it was read
     with. *)
 
+(** What an edge records the actor did to the subject. Only
+    {!reduce_event} makes edges, so these are every kind the graph holds. *)
+type edge_kind =
+  | Works_on
+  | Calls_tool
+  | Creates
+  | Broadcasts
+  | Mentions
+  | Posts
+  | Comments_on
+  | Votes_on
+
+val edge_kind_to_wire : edge_kind -> string
+(** The [kind] of the edge in the graph JSON and the middle part of its
+    [edge_id]. *)
+
 type edge_acc = {
   edge_id : string;
   source : string;
   target : string;
-  edge_kind : string;
+  edge_kind : edge_kind;
   weight : int;
   active : bool;
   last_event_at : string;
@@ -60,4 +76,4 @@ val reduce_event :
     + If [value.subject = Some subject], same with fallback status
       [Observed].
     + Apply event-kind-specific edges between actor / subject /
-      workspace (e.g. [task.assigned] -> actor->subject [assigned] edge). *)
+      workspace (e.g. [task.claimed] -> actor->subject [Works_on] edge). *)

@@ -18,6 +18,7 @@ type proactive_cycle_outcome =
   | Proactive_tool_use
   | Proactive_mixed_response
   | Proactive_error
+[@@deriving enumerate]
 
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
@@ -57,112 +58,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
 let runtime_exhaustion_reason_retryable (reason : runtime_exhaustion_reason) : bool =
   Keeper_internal_error.runtime_exhaustion_reason_retryable reason
 ;;
-
-type blocker_class =
-  | Runtime_exhausted of runtime_exhaustion_reason
-  | Fiber_unresolved
-    (** 2026-05-05: turn fiber finished without invoking [resolve_done]
-        (cancelled mid-turn, raised an exception not handled by the
-        body, or the AGENT_CORE request returned but the keeper switch tore
-        down before completion bookkeeping ran).  Maps 1:1 to the
-        supervisor's [Keeper_registry.Fiber_unresolved] observation key, so
-        blocker_class stamping mirrors the same diagnosis on keeper_meta. *)
-  | Agent_core_context_window_exceeded
-  | Agent_core_unrecognized_stop_reason
-  | Agent_core_guardrail_violation
-  | Agent_core_tripwire_violation
-  | Agent_core_input_required
-  | Internal_unhandled_exception
-    (** An unhandled internal exception escaped the turn driver. It has its own
-        [blocker_class] so dashboards and operators can tell it from a clean
-        turn. *)
-  | Internal_bridge_exception
-    (** Internal bridge (AGENT_CORE/stream) exception escaped the turn driver. *)
-  | Internal_contract_rejected
-    (** Internal contract was rejected by the turn driver. *)
-  | Incomplete_tool_transcript
-    (** Tool transcript was quarantined as incomplete. *)
-  | Terminal_effect_failed
-    (** A terminal tool effect failed after the turn's terminal outcome. *)
-  | Provider_attempt_effect_fenced
-    (** A provider failure cannot be retried without risking a duplicate effect. *)
-  | Tool_correction_lost
-    (** The fenced turn also carried typed pre_tool_use rejections: the
-        model's correction round-trip was the casualty (masc#28885). *)
-  | Receipt_persistence_failed
-    (** Execution receipt persistence failed. *)
-  | Gate_replay_repair_required
-    (** Gate replay repair was required for an approval/effect. *)
-
-let blocker_class_to_string = function
-  | Runtime_exhausted _ -> "runtime_exhausted"
-  | Fiber_unresolved -> "fiber_unresolved"
-  | Agent_core_context_window_exceeded -> "agent_core_context_window_exceeded"
-  | Agent_core_unrecognized_stop_reason -> "agent_core_unrecognized_stop_reason"
-  | Agent_core_guardrail_violation -> "agent_core_guardrail_violation"
-  | Agent_core_tripwire_violation -> "agent_core_tripwire_violation"
-  | Agent_core_input_required -> "agent_core_input_required"
-  | Internal_unhandled_exception -> "internal_unhandled_exception"
-  | Internal_bridge_exception -> "internal_bridge_exception"
-  | Internal_contract_rejected -> "internal_contract_rejected"
-  | Incomplete_tool_transcript -> "incomplete_tool_transcript"
-  | Terminal_effect_failed -> "terminal_effect_failed"
-  | Provider_attempt_effect_fenced -> "provider_attempt_effect_fenced"
-  | Tool_correction_lost -> "tool_correction_lost"
-  | Receipt_persistence_failed -> "receipt_persistence_failed"
-  | Gate_replay_repair_required -> "gate_replay_repair_required"
-;;
-
-let blocker_class_of_serialized_string = function
-  | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
-  | "fiber_unresolved" -> Some Fiber_unresolved
-  | "agent_core_context_window_exceeded" -> Some Agent_core_context_window_exceeded
-  | "agent_core_unrecognized_stop_reason" -> Some Agent_core_unrecognized_stop_reason
-  | "agent_core_guardrail_violation" -> Some Agent_core_guardrail_violation
-  | "agent_core_tripwire_violation" -> Some Agent_core_tripwire_violation
-  | "agent_core_input_required" -> Some Agent_core_input_required
-  | "internal_unhandled_exception" -> Some Internal_unhandled_exception
-  | "internal_bridge_exception" -> Some Internal_bridge_exception
-  | "internal_contract_rejected" -> Some Internal_contract_rejected
-  | "incomplete_tool_transcript" -> Some Incomplete_tool_transcript
-  | "terminal_effect_failed" -> Some Terminal_effect_failed
-  | "provider_attempt_effect_fenced" -> Some Provider_attempt_effect_fenced
-  | "tool_correction_lost" -> Some Tool_correction_lost
-  | "receipt_persistence_failed" -> Some Receipt_persistence_failed
-  | "gate_replay_repair_required" -> Some Gate_replay_repair_required
-  | _ -> None
-;;
-
-let runtime_exhaustion_summary = function
-  | Connection_refused ->
-    "Runtime exhausted after provider failures; local runtime connection refused."
-  | Dns_failure ->
-    "Runtime exhausted; hostname resolution failed (DNS)."
-  | No_providers_available -> "Runtime exhausted; no providers were available."
-  | All_providers_failed ->
-    "Runtime exhausted after all configured providers failed; inspect per-attempt root causes."
-  | Candidates_filtered_after_cycles ->
-    "Runtime exhausted after provider candidates were filtered; inspect candidate filter reasons."
-  | Session_conflict ->
-    "Runtime exhausted because another process owns the provider session lease."
-  | Other_detail _ ->
-    "Runtime exhausted; inspect runtime attempts for the dominant root cause."
-;;
-
-(* ── Unified blocker_info: typed klass + free-form detail ───────
-   Replaces the historic split blocker fields. The string-only field was used
-   by substring classifiers to recover a typed class — exactly the workaround
-   pattern called out in CLAUDE.md
-   "워크어라운드 거부 기준 #2 String/Substring 분류기 보강". Making
-   [blocker_class] the only authoritative class eliminates that recovery path;
-   [detail] carries free-form context for UI / Otel_metric_store labels (no
-   classification semantics). *)
-type blocker_info = {
-  klass : blocker_class;
-  detail : string;
-}
-
-let blocker_info_of_class ?(detail = "") klass = { klass; detail }
 
 type runtime_attempt_record =
   { provider_id : string
@@ -370,13 +265,8 @@ let effective_meta_of_profile_defaults
   let target_sandbox_profile =
     match defaults.sandbox_profile, defaults.manifest_path with
     | Some profile, _ -> Ok profile
-    (* No manifest and no declared profile used to fall through to
-       [meta.sandbox_profile], which the JSON decoder fills with a
-       placeholder it documents as never-decoded. That placeholder was
-       [Local], and the thing that stopped it from becoming host execution
-       was a feature flag defaulting to off. With no host arm left there is
-       nothing to fall through to: a keeper with no profile source has no
-       profile, and that is the answer. *)
+    (* [meta.sandbox_profile] is the JSON decoder's placeholder, not a
+       declaration, so a keeper with no declared profile has no profile. *)
     | None, None | None, Some _ ->
       Error
         (missing_required_sandbox_profile_error
@@ -418,7 +308,7 @@ let effective_meta_of_profile_defaults
             one of: %s, or declare a sandbox_profile this host can serve"
            meta.name
            (String.concat ", " Keeper_microvm_backend.valid_strings))
-  | Ok sandbox_profile ->
+  | Ok ((Docker | Micro_vm | Remote_ssh) as sandbox_profile) ->
     match
       missing_required_sandbox_image_error ~keeper_name:meta.name
         sandbox_profile defaults
@@ -537,52 +427,15 @@ let proactive_cycle_outcome_to_string = function
   | Proactive_error -> "error"
 ;;
 
+(* The inverse of [proactive_cycle_outcome_to_string] over every variant, so
+   a new variant is parsed as soon as it has a label. *)
 let proactive_cycle_outcome_of_string raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "never_started" -> Proactive_never_started
-  | "unknown" -> Proactive_unknown
-  | "silent" -> Proactive_silent
-  | "text_response" -> Proactive_text_response
-  | "tool_use" -> Proactive_tool_use
-  | "mixed_response" -> Proactive_mixed_response
-  | "error" -> Proactive_error
-  | _ -> Proactive_unknown
+  List.find_opt
+    (fun outcome -> String.equal raw (proactive_cycle_outcome_to_string outcome))
+    all_of_proactive_cycle_outcome
 ;;
 
-(* Round-trip guard: [proactive_cycle_outcome_to_string] already fails to
-   compile when a new variant is added (its match has no wildcard).  This
-   assertion enforces the other direction — if a new variant's label is
-   not wired through [proactive_cycle_outcome_of_string], the round-trip
-   silently collapses the new case to [Proactive_unknown] and leaks it at
-   runtime.  The exhaustive pattern inside [assert_roundtrip] makes
-   adding a variant a compile error until the parser is extended too. *)
-let () =
-  let assert_roundtrip v =
-    (match v with
-     | Proactive_never_started
-     | Proactive_unknown
-     | Proactive_silent
-     | Proactive_text_response
-     | Proactive_tool_use
-     | Proactive_mixed_response
-     | Proactive_error -> ());
-    let s = proactive_cycle_outcome_to_string v in
-    if proactive_cycle_outcome_of_string s <> v
-    then
-      invalid_arg
-        (Printf.sprintf "keeper_types: proactive round-trip broken for label %S" s)
-  in
-  List.iter
-    assert_roundtrip
-    [ Proactive_never_started
-    ; Proactive_unknown
-    ; Proactive_silent
-    ; Proactive_text_response
-    ; Proactive_tool_use
-    ; Proactive_mixed_response
-    ; Proactive_error
-    ]
-;;
+let all_proactive_cycle_outcomes = all_of_proactive_cycle_outcome
 
 (* -- Updater helpers -- *)
 

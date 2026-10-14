@@ -373,7 +373,7 @@ and handle_transition ~tool_name ~start_time ctx args =
           ; "requested_agent", `String ctx.agent_name
           ]
         (Printf.sprintf "Invalid task state: %s" message)
-    | result -> result_to_response ~tool_name ~start_time result
+    | (Error (Masc_error.Task (Masc_error.Task_error.NotFound _ | (Masc_error.Task_error.AlreadyClaimed _ | (Masc_error.Task_error.NotClaimed _ | (Masc_error.Task_error.InvalidId _ | Masc_error.Task_error.VerificationSuperseded _))))) | Error (Masc_error.Agent _ | (Masc_error.Auth _ | Masc_error.System _)) | Ok _) as result -> result_to_response ~tool_name ~start_time result
   in
   transition_result_to_response result
 
@@ -427,17 +427,32 @@ let handle_update_priority ~tool_name ~start_time ctx args =
 let handle_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in
   let include_cancelled = get_bool args "include_cancelled" false in
-  let status =
-    match args |> Json_util.assoc_member_opt "status" |> Option.value ~default:`Null with
-    | `String s when not (String.equal s "") -> Some s
-    | _ -> None
+  let list ?status () =
+    Tool_result.ok ~tool_name ~start_time
+      (Workspace.list_tasks
+         ctx.config
+         ~include_done
+         ~include_cancelled
+         ?status)
   in
-  Tool_result.ok ~tool_name ~start_time
-    (Workspace.list_tasks
-       ctx.config
-       ~include_done
-       ~include_cancelled
-       ?status)
+  let refuse message =
+    Tool_result.error
+      ~failure_class:Tool_result.Workflow_rejection
+      ~tool_name ~start_time message
+  in
+  match args |> Json_util.assoc_member_opt "status" |> Option.value ~default:`Null with
+  | `Null -> list ()
+  | `String raw ->
+    (match Masc_domain.Task_status_tag.of_string raw with
+     | Some status -> list ~status ()
+     | None ->
+       (* RFC-0189: caller passed an unknown status enum value. Answering
+          "No tasks." would read as an empty board. *)
+       refuse
+         (Printf.sprintf "unknown status %S; expected one of: %s" raw
+            (String.concat ", " Masc_domain.valid_task_status_strings)))
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+    refuse "status must be a string"
 
 (* Walks newest-first and stops once [limit] events satisfy [keep], so [limit]
    counts the events a caller asked for. Counting raw lines instead made the

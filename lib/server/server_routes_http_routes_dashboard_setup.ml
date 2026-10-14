@@ -86,7 +86,7 @@ let handle_telemetry request reqd =
   with_public_read (fun state req reqd ->
     let config = (Mcp_server.workspace_config state) in
     let base_path = config.base_path in
-    let masc_root = Workspace.masc_root_dir config in
+    let masc_root = Workspace.masc_dir config in
     let float_query_param req key =
       match Server_utils.query_param req key with
       | None -> None
@@ -185,7 +185,7 @@ let handle_telemetry request reqd =
     let compute () =
       let result =
         Server_timing.measure timing Telemetry_query (fun () ->
-          Telemetry_unified.read_unified_result ~base_path ~masc_root
+          Telemetry_unified.read_unified_result ~masc_root
             ~sources ?keeper_name ?session_id ?operation_id
             ?worker_run_id ?since_ts ?until_ts ~limit ~offset ())
       in

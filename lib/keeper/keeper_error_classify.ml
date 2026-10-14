@@ -65,7 +65,17 @@ let is_transient_network_error (err : Agent_core.Error.t) : bool =
       { kind = Llm_provider.Http_client.Tls_error
              | Llm_provider.Http_client.Local_resource_exhaustion; _ }) ->
       false
-  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _) -> true
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError
+         { kind =
+             ( Llm_provider.Http_client.Connection_refused
+             | Llm_provider.Http_client.Dns_failure
+             | Llm_provider.Http_client.Timeout
+             | Llm_provider.Http_client.Connection_reset
+             | Llm_provider.Http_client.End_of_file
+             | Llm_provider.Http_client.Unknown )
+         ; _
+         }) -> true
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> true
   | Agent_core.Error.Api (Overloaded _) -> true
   | Agent_core.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
@@ -81,7 +91,18 @@ let is_transient_network_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Api (ContextOverflow _)
   | Agent_core.Error.Api (InputCapacity _) -> false
   (* Non-API error families are by definition not transient network errors. *)
-  | Agent_core.Error.Provider _
+  | Agent_core.Error.Provider
+      ( Llm_provider.Error.MissingApiKey _ | Llm_provider.Error.InvalidConfig _
+      | Llm_provider.Error.ParseError _ | Llm_provider.Error.ProviderWireError _
+      | Llm_provider.Error.ProviderReportedError _
+      | Llm_provider.Error.UnknownVariant _
+      | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.EmptyCompletion _
+      | Llm_provider.Error.RepeatingGeneration _ | Llm_provider.Error.RateLimit _
+      | Llm_provider.Error.HardQuota _ | Llm_provider.Error.CapacityExhausted _
+      | Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _
+      | Llm_provider.Error.InvalidRequest _ | Llm_provider.Error.NotFound _
+      | Llm_provider.Error.ProviderTerminal _ )
   | Agent_core.Error.Agent _
   | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _
@@ -137,7 +158,18 @@ let is_provider_rejected_parse_error (err : Agent_core.Error.t) : bool =
 let is_provider_wire_error (err : Agent_core.Error.t) : bool =
   match err with
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _) -> true
-  | Agent_core.Error.Provider _
+  | Agent_core.Error.Provider
+      ( Llm_provider.Error.MissingApiKey _ | Llm_provider.Error.InvalidConfig _
+      | Llm_provider.Error.ParseError _ | Llm_provider.Error.ProviderReportedError _
+      | Llm_provider.Error.UnknownVariant _
+      | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.EmptyCompletion _
+      | Llm_provider.Error.RepeatingGeneration _ | Llm_provider.Error.RateLimit _
+      | Llm_provider.Error.HardQuota _ | Llm_provider.Error.CapacityExhausted _
+      | Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _
+      | Llm_provider.Error.ServerError _ | Llm_provider.Error.NetworkError _
+      | Llm_provider.Error.Timeout _ | Llm_provider.Error.InvalidRequest _
+      | Llm_provider.Error.NotFound _ | Llm_provider.Error.ProviderTerminal _ )
   | Agent_core.Error.Api _
   | Agent_core.Error.Agent _
   | Agent_core.Error.Mcp _
@@ -176,7 +208,25 @@ let is_empty_completion_error (err : Agent_core.Error.t) : bool =
      nothing. If a future Agent Core promotes empty completions to
      [ParseError], that pin update is the place to classify them — as a
      typed shape, not a message substring (RFC-0371 §3.7). *)
-  | Agent_core.Error.Provider _ -> false
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
+  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)
+  | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ServerError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidRequest _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NotFound _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal _) -> false
   | Agent_core.Error.Api _ -> false
   | Agent_core.Error.Agent _ -> false
   | Agent_core.Error.Mcp _ -> false
@@ -211,7 +261,20 @@ let is_server_rejected_parse_error (err : Agent_core.Error.t) : bool =
 let is_receipt_lost_error (err : Agent_core.Error.t) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> true
-  | Some _ | None -> false
+  | Some (Keeper_internal_error.Official_client_recovery_required _) | None
+  | Some (Keeper_internal_error.Runtime_exhausted _)
+  | Some (Keeper_internal_error.Resumable_cli_session _)
+  | Some (Keeper_internal_error.Accept_rejected _)
+  | Some (Keeper_internal_error.Internal_unhandled_exception _)
+  | Some (Keeper_internal_error.Internal_bridge_exception _)
+  | Some (Keeper_internal_error.Internal_contract_rejected _)
+  | Some (Keeper_internal_error.Incomplete_tool_transcript _)
+  | Some (Keeper_internal_error.Terminal_effect_failed _)
+  | Some (Keeper_internal_error.Provider_attempt_effect_fenced _)
+  | Some (Keeper_internal_error.Tool_correction_lost _)
+  | Some (Keeper_internal_error.Host_stopped_turn _)
+  | Some (Keeper_internal_error.Runtime_connection_closed _)
+  | Some (Keeper_internal_error.Gate_replay_repair_required _) -> false
 
 let is_provider_timeout_error (err : Agent_core.Error.t) : bool =
   Keeper_provider_runtime_boundary.is_provider_timeout_error err
@@ -222,7 +285,16 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : boo
       (Keeper_turn_driver.Runtime_exhausted
          { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
       true
-  | Some (Keeper_turn_driver.Runtime_exhausted _) ->
+  | Some
+      (Keeper_turn_driver.Runtime_exhausted
+         { reason =
+             ( Keeper_turn_driver.Connection_refused | Keeper_turn_driver.Dns_failure
+             | Keeper_turn_driver.No_providers_available
+             | Keeper_turn_driver.All_providers_failed
+             | Keeper_turn_driver.Session_conflict
+             | Keeper_turn_driver.Other_detail _ )
+         ; _
+         }) ->
       false
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
@@ -248,7 +320,9 @@ let is_accept_no_usable_progress_error (err : Agent_core.Error.t) : bool =
       (Keeper_turn_driver.Accept_rejected
          { reason_kind = Some Keeper_turn_driver.Accept_no_usable_progress; _ }) ->
     true
-  | Some (Keeper_turn_driver.Accept_rejected _) ->
+  | Some
+      (Keeper_turn_driver.Accept_rejected
+         { reason_kind = None | Some Keeper_turn_driver.Accept_predicate_rejected; _ }) ->
     false
   | Some
       ( Keeper_turn_driver.Runtime_exhausted _
@@ -328,7 +402,15 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
            { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
         Some Runtime_candidates_filtered
     | Some
-        (Keeper_turn_driver.Runtime_exhausted _) ->
+        (Keeper_turn_driver.Runtime_exhausted
+           { reason =
+             ( Keeper_turn_driver.Connection_refused | Keeper_turn_driver.Dns_failure
+             | Keeper_turn_driver.No_providers_available
+             | Keeper_turn_driver.All_providers_failed
+             | Keeper_turn_driver.Session_conflict
+             | Keeper_turn_driver.Other_detail _ )
+         ; _
+         }) ->
         (* Generic runtime exhaustion: all candidates failed without a more
            specific reason. It still names a reason, so a receipt does not
            end with a [(null)] fallback_reason: receipt-derived data on
@@ -468,7 +550,11 @@ let degraded_retry_of_deferred_lane
     carries no recovery authority. *)
 let is_invalid_request_error : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Api (InvalidRequest _) -> true
-  | _ -> false
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | (Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Timeout _))))))))))
+  | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
 
 (** [true] when a structured error indicates context overflow.
 
@@ -489,7 +575,11 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
   match err with
   | Agent_core.Error.Api (ContextOverflow _) -> true
   | Agent_core.Error.Api (InputCapacity _) -> false
-  | _ -> false
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Timeout _)))))))))
+  | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
 
 (* Classification-only predicate: does this failure class describe a
    condition a later turn could clear without operator action?
@@ -555,7 +645,11 @@ let extract_input_required (err : Agent_core.Error.t)
   =
   match err with
   | Agent_core.Error.Agent (Agent_core.Error.InputRequired ir) -> Some ir
-  | _ -> None
+  | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _ | (Agent_core.Error.ToolRoundLimitExceeded _ | (Agent_core.Error.HookExecutionFailed _ | (Agent_core.Error.TerminalToolEffectFailed _ | (Agent_core.Error.TerminalToolDurabilityFailed _ | (Agent_core.Error.GuardrailViolation _ | Agent_core.Error.TripwireViolation _))))))
+  | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> None
 ;;
 
 (** [true] when the error is an AGENT_CORE [InputRequired] — the agent paused

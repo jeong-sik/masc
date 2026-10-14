@@ -14,7 +14,7 @@ silent host-fallback bypass:
 | ID | Defect | Closed by |
 |----|--------|-----------|
 | A  | Native dispatch route ignored sandbox carrier | #11627 (PR-2) |
-| B  | `keeper_meta.json` parsing fell back to `local` on missing `sandbox_profile` | #11594 (PR-1) |
+| B  | `keeper_meta.json` parsing filled in a profile when `sandbox_profile` was missing | #11594 (PR-1) |
 | C  | Two profile resolvers (`meta.sandbox_profile` direct vs `effective_sandbox_profile`) disagreed | #11610 (PR-3) |
 | —  | `make_tool_bundle` cold-started a new container per tool call | #11679 (PR-3b) |
 
@@ -37,9 +37,11 @@ done
 Pass criteria:
 - Every keeper JSON declares both `sandbox_profile` and `network_mode`
   explicitly (no `<missing>`).
-- Profiles are one of `local` or `docker`.
-- `(profile, network)` pairs are consistent: `docker + none` (hard),
-  `docker + inherit` (soft), or `local + inherit`.
+- Profiles are one of `docker`, `microvm` or `remote_ssh`.
+- `(profile, network)` pairs are ones the profile accepts
+  (`Keeper_types_profile_sandbox.network_mode_rejection`): `docker` takes
+  `none` or `inherit`, `microvm` takes `none`, `inherit` or `policy`, and
+  `remote_ssh` takes `inherit` only.
 
 If any keeper reports `<missing>`, run
 `scripts/migrate-keeper-meta-sandbox.sh --apply` and restart that
@@ -75,14 +77,6 @@ The response should report a path under
 `Keeper_turn_sandbox_runtime.container_root` (e.g.
 `/keeper/<name>`), not the host playground root.
 
-## Negative test — Local keeper
-
-For one `sandbox_profile=local` keeper:
-1. Same probe (`Execute { "argv": ["cat", "/etc/hostname"] }`).
-2. Pass criteria — the response contains the host hostname and the
-   `via` field reads `host`.  This confirms PR-3 did not over-rotate
-   Local→Docker.
-
 ## Performance check (PR-3b)
 
 PR-3b memoizes per `(in_playground, cwd)`.  Two consecutive
@@ -102,8 +96,6 @@ Open a comment on the relevant root-fix PR (or a fresh issue if all
 four are closed) when:
 - Dynamic validation fails on any docker keeper after a fresh
   restart.
-- A local keeper unexpectedly reports a `masc-keeper-*` hostname
-  (Local→Docker over-rotation).
 - The performance check shows more than one `Created container` line
   per turn (factory cache miss).
 

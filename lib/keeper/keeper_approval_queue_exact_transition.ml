@@ -55,7 +55,15 @@ let bind ~(candidate : exact_attempt_binding) (entry : pending_approval) =
              ; summary_attempt_disposition = Summary_attempt_in_flight
              }
          }
-     | Exact_bound existing ->
+     | Exact_bound
+         ({ status =
+              ( Exact_dispatch_uncertain
+              | Exact_released_recovery_required
+              | Exact_quarantined _
+              | Exact_restart_quarantined
+              | Exact_completed )
+          ; _
+          } as existing) ->
        Error (Exact_attempt_rejected (Exact_attempt_identity_conflict existing)))
 ;;
 
@@ -176,12 +184,12 @@ let complete ~(candidate : exact_attempt_binding) ~summary (entry : pending_appr
                { entry with summary_attempt_disposition = Summary_attempt_settled }
            })
        else Error (Exact_attempt_rejected (Exact_attempt_content_conflict entry.id))
-     | ( ( Exact_released_before_dispatch
-         | Exact_released_recovery_required
-         | Exact_quarantined _
-         | Exact_restart_quarantined
-         | Exact_completed )
-       , _ ) -> Error (Exact_attempt_rejected (Exact_attempt_status_conflict existing))
-     | Exact_dispatch_uncertain, _ ->
+     | ((Exact_released_before_dispatch | Exact_released_recovery_required | Exact_quarantined _ | Exact_restart_quarantined | Exact_completed), Summary_not_requested)
+     | ((Exact_released_before_dispatch | Exact_released_recovery_required | Exact_quarantined _ | Exact_restart_quarantined | Exact_completed), Summary_pending)
+     | ((Exact_released_before_dispatch | Exact_released_recovery_required | Exact_quarantined _ | Exact_restart_quarantined), Summary_available _)
+     | ((Exact_released_before_dispatch | Exact_released_recovery_required | Exact_quarantined _ | Exact_restart_quarantined | Exact_completed), Summary_failed _) -> Error (Exact_attempt_rejected (Exact_attempt_status_conflict existing))
+     | (Exact_dispatch_uncertain, Summary_not_requested)
+     | (Exact_dispatch_uncertain, Summary_available _)
+     | (Exact_dispatch_uncertain, Summary_failed _) ->
        Error (Exact_attempt_rejected (Exact_attempt_summary_not_pending entry.id)))
 ;;

@@ -107,7 +107,7 @@ let test_a_body_path_outside_the_evidence_directory_is_not_read () =
     (* A real file next to the evidence directory and one at an absolute path:
        the paths that would reach them are refused, and the bytes never reach
        the response. *)
-    let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
+    let masc_dir = Common.masc_dir_from_base_path ~base_path in
     let data = png_of_length 100 in
     Fs_compat.mkdir_p masc_dir;
     Fs_compat.save_file (Filename.concat masc_dir "secret.bin") data;

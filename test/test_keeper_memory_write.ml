@@ -13,6 +13,13 @@ let ordinary_facts_for ~keepers_dir ~keeper_id () =
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
+let recall_history config ~keeper =
+  Dated_jsonl.open_store
+    (Dated_jsonl.Store.keeper
+       (Masc.Workspace.dated_store_root config)
+       ~keeper
+       Memory_recall_artifacts)
+
 let make_args ~title ~content =
   `Assoc [ "title", `String title; "content", `String content ]
 ;;
@@ -1069,9 +1076,7 @@ let test_recall_artifacts_follow_history_retention () =
   Alcotest.(check bool) "historical snapshot survives GC" true (present first);
   Alcotest.(check bool) "latest snapshot survives GC" true (present latest);
   let keeper_dir = Filename.concat (Masc.Workspace.keepers_runtime_dir config) meta.name in
-  let history_dir = Filename.concat keeper_dir
-      (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
-  ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+  ignore (Dated_jsonl.prune (recall_history config ~keeper:(Filename.basename keeper_dir)) ~days:1);
   sweep Tool_blob_maintenance.Observe_only;
   sweep Tool_blob_maintenance.Delete_previous_candidates;
   Alcotest.(check bool) "expired historical snapshot becomes collectable" false (present first);
@@ -1148,9 +1153,7 @@ let test_superseded_recall_pin_releases_only_after_history_retention () =
       | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error) in
     sweep ();
     Alcotest.(check bool) "retirement preserves dated historical artifact" true (present ());
-    let history_dir = Filename.concat keeper_dir
-        (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
-    ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+    ignore (Dated_jsonl.prune (recall_history config ~keeper:(Filename.basename keeper_dir)) ~days:1);
     sweep ();
     Alcotest.(check bool) "normal history retention makes retired artifact collectable" false (present ()))
     [true; false]
@@ -1181,9 +1184,7 @@ let test_late_pin_retirement_preserves_new_same_artifact_publication () =
   let newer = Fs_compat.load_file pin in
   ok (Pin.retire_current ~config ~keeper_id:"keeper" ~kind:Memory_os observed);
   Alcotest.(check string) "late retirement cannot release newer same-hash publication" newer (Fs_compat.load_file pin);
-  let history_dir = Filename.concat keeper_dir
-      (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
-  ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+  ignore (Dated_jsonl.prune (recall_history config ~keeper:(Filename.basename keeper_dir)) ~days:1);
   let sweep () = List.iter (fun mode -> match Tool_blob_maintenance.run ~base_path
         ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
     | Ok _ -> () | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error))

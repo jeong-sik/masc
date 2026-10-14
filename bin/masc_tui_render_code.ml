@@ -562,7 +562,8 @@ let render_code (state : state) =
                  match Masc_tui_fetched.current state.code_file with
                  | Some (_, Masc_tui_fetched.Ready file_rows) ->
                      Rows.of_array file_rows
-                 | Some (_, _) | None -> Rows.of_array [||]
+                 | Some (_, Masc_tui_fetched.Absent) | None | Some (_, Masc_tui_fetched.Loading)
+                 | Some (_, Masc_tui_fetched.Stale (_, _)) | Some (_, Masc_tui_fetched.Failed _) -> Rows.of_array [||]
                in
                let lexed_line index = Rows.at lexed_rows (index - 1) in
                for i = 0 to content_height - 1 do
@@ -582,7 +583,7 @@ let render_code (state : state) =
                        match row.gdr_kind, row.gdr_new_line with
                        | (Gd_added | Gd_context), Some line ->
                            lexed_line line
-                       | _ -> None
+                       | ((Gd_added | Gd_context), None) | (Gd_removed, _) -> None
                      in
                      let body =
                        match lexed with
@@ -689,7 +690,12 @@ let render_code (state : state) =
                          (file_change_ranges change)
                      | Hist_commit _ -> [])
                    listing.chl_entries
-             | _ -> []
+             | Some
+                 ( _,
+                   ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                   | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+                   | Masc_tui_fetched.Failed _ ) )
+             | None -> []
            in
            let covers line spans =
              List.exists (fun (a, b) -> line >= a && line <= b) spans
@@ -701,7 +707,12 @@ let render_code (state : state) =
              match Masc_tui_fetched.current state.code_blame with
              | Some (loaded_path, Masc_tui_fetched.Ready blocks)
                when matches_open_file loaded_path -> blocks
-             | Some _ | None -> []
+             | Some
+                 ( _,
+                   ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+                   | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+                   | Masc_tui_fetched.Failed _ ) )
+             | None -> []
            in
            let blame_now_s = Unix.gettimeofday () in
            (* One name per run, not one per line: the run boundary is the fact

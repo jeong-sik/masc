@@ -80,7 +80,17 @@ let retryable_execution = function
        | Agent_core.Llm_provider.Http_client.TimeoutError _
        | Agent_core.Llm_provider.Http_client.AcceptRejected _
        | Agent_core.Llm_provider.Http_client.ProviderTerminal _
-       | Agent_core.Llm_provider.Http_client.ProviderFailure _) ->
+       | Agent_core.Llm_provider.Http_client.ProviderFailure
+           {kind=(Agent_core.Llm_provider.Http_client.Capability_mismatch _
+                 | Agent_core.Llm_provider.Http_client.Cli_policy_invalid _
+                 | Agent_core.Llm_provider.Http_client.Cli_startup_failed _
+                 | Agent_core.Llm_provider.Http_client.Provider_parse_error _
+                 | Agent_core.Llm_provider.Http_client.Provider_wire_error _
+                 | Agent_core.Llm_provider.Http_client.Response_body_too_large _
+                 | Agent_core.Llm_provider.Http_client.Empty_completion _
+                 | Agent_core.Llm_provider.Http_client.Context_overflow _
+                 | Agent_core.Llm_provider.Http_client.Repeating_generation _
+                 | Agent_core.Llm_provider.Http_client.Unknown_provider_failure _);_}) ->
        Agent_core.Llm_provider.Error.is_retryable (Agent_core.Llm_provider.Error.of_http_error error))
   | Exact.Response_body_deadline_exceeded -> true
   | Exact.Output_limit_reached | Exact.Incomplete_output | Exact.Missing_output | Exact.Ambiguous_output _
@@ -300,7 +310,13 @@ let cli_error failures =
       | Keeper_lane_cli_oneshot.Execution_failed {cause = Fusion_official_client.Missing_reply; _}
       | Keeper_lane_cli_oneshot.Invalid_json_output _ | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
       | Keeper_lane_cli_oneshot.Unknown_runtime _ | Keeper_lane_cli_oneshot.Not_an_official_client _
-      | Keeper_lane_cli_oneshot.Execution_failed _ -> false) failures
+      | Keeper_lane_cli_oneshot.Execution_failed
+          {cause = (Fusion_official_client.Setup_failure _
+                   | Fusion_official_client.Codex_failure _
+                   | Fusion_official_client.Claude_failure _
+                   | Fusion_official_client.Claude_admission_failure _
+                   | Fusion_official_client.Antigravity_failure _
+                   | Fusion_official_client.Muse_failure _); _} -> false) failures
   then A.Invalid_response detail
   else match failures with
     | [] -> A.Execution_rejected "candle_appraiser CLI walk produced no execution evidence"

@@ -14,12 +14,10 @@ Browser는 사이트 구분 없이 페이지를 읽는 공통 도구다. Keeper�
 Live 호스트를 설치하고 Firefox 또는 Zen의 `about:debugging`에서 확장을 적재한다.
 
 ```sh
-bash connectors/browser/install-host.sh \
-  --binary /path/to/masc-browser-host \
-  --base-path /path/to/workspace
+masc browser-lane-setup --mode extension --base-path /path/to/workspace
 ```
 
-확장 manifest: `connectors/browser/extension/manifest.json`.
+확장 manifest: `<base-path>/.masc/browser-lane/extension/manifest.json`.
 Automation은 resolved configuration directory의 `runtime.toml`에 geckodriver
 실행 파일 경로를 적고 MASC를 재시작한다. 서버가 그 geckodriver를 빈 loopback
 포트로 직접 띄우고, 서버가 끝날 때 같이 내린다.
@@ -60,6 +58,10 @@ Live lane 의 BiDi 연결(hover·drag)을 쓰려면 `[browser.live.bidi]` 를 �
 설치된 launcher 로 BiDi host 를 붙인다. 이미 떠 있는 것은 다시 띄우지 않는다.
 `[browser.live] enabled = false` 이면 아무것도 띄우지 않는다.
 자세한 것은 [BiDi host](browser-bidi-live-host.md)에 있다.
+
+`masc browser-lane-setup --mode bidi --base-path /path/to/workspace` 가 lane 을
+설치하고 이 표를 쓴다. 표가 이미 있으면 값을 바꾸지 않고, 값을 지정한 옵션
+(`--firefox`, `--profile`, `--port`)만 바꾼다. 서버를 다시 띄워야 표를 읽는다.
 
 ```toml
 [browser.live.bidi]

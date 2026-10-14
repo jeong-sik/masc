@@ -296,7 +296,7 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
                 List.exists
                   (function
                     | Respond { content; _ } -> content = text
-                    | _ -> false)
+                    | Think _ | Act _ | Observe _ -> false)
                   st.p_steps
               in
               if not already_has_final
@@ -508,7 +508,7 @@ let total_tool_calls t =
     (List.filter
        (function
          | Act _ -> true
-         | _ -> false)
+         | Think _ | Observe _ | Respond _ -> false)
        t.steps)
 ;;
 
@@ -517,7 +517,7 @@ let tool_error_count t =
     (List.filter
        (function
          | Act { tool_call; _ } -> tool_call.is_error
-         | _ -> false)
+         | Think _ | Observe _ | Respond _ -> false)
        t.steps)
 ;;
 

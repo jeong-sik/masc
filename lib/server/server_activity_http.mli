@@ -2,10 +2,7 @@
     graph (events / graph / swimlane).
 
     Three JSON-bodied dispatchers (events / graph / swimlane) +
-    one helper ({!parse_since_ms}) for [since=...] query params.
-    The internal SSE streaming machinery (stream registration,
-    keepalive fiber, frame writer) stays private — operator-visible
-    surface is JSON only. *)
+    one helper ({!parse_since_ms}) for [since=...] query params. *)
 
 (** {1 Capability injection} *)
 
@@ -13,22 +10,9 @@ type deps = {
   query_param : Httpun.Request.t -> string -> string option;
   int_query_param :
     Httpun.Request.t -> string -> default:int -> int;
-  get_origin : Httpun.Request.t -> string;
-  cors_headers : string -> (string * string) list;
-  get_switch : unit -> Eio.Switch.t option;
-  get_clock :
-    unit -> float Eio.Time.clock_ty Eio.Resource.t option;
-  get_session_id_any : Httpun.Request.t -> string option;
 }
-(** Dependency record for the activity HTTP handlers.  Concrete
-    record because {!Server_routes_http_routes_activity}
-    constructs it field-by-field with closures binding [sw] /
-    [clock] from the route table.
-
-    [get_switch] and [get_clock] return [option] because the
-    activity routes are reachable before the runtime is fully
-    bootstrapped — the SSE handler degrades gracefully when
-    either is [None]. *)
+(** The query-parameter readers the activity handlers use, passed in by
+    {!Server_routes_http_routes_activity}. *)
 
 (** {1 Helpers} *)
 

@@ -19,14 +19,21 @@ let session_base_dir_ (config : Workspace.config) = Keeper_fs.session_base_dir c
 let metrics_store_cache : (string, Keeper_metrics_storage.t) Hashtbl.t = Hashtbl.create 8
 let metrics_store_mu = Eio.Mutex.create ()
 
+(* Where one of a keeper's date-split stores lives. The keepers directory is
+   made first, as every store accessor here has always done. *)
+let keeper_store_location config name store =
+  ignore (keeper_dir_ config : string);
+  Dated_jsonl.Store.keeper (Workspace.dated_store_root config) ~keeper:name store
+
 let keeper_metrics_storage config name =
-  let dir = Filename.concat (keeper_dir_ config) (name ^ "/metrics") in
+  let location = keeper_store_location config name Dated_jsonl.Store.Keeper.Metrics in
+  let dir = Dated_jsonl.Store.dir location in
   let lookup () =
     match Hashtbl.find_opt metrics_store_cache dir with
     | Some store -> store
     | None ->
       let store =
-        Keeper_metrics_storage.create ~base_dir:dir
+        Keeper_metrics_storage.create ~location
           ~max_bytes:(Env_config_keeper.KeeperMetrics.store_max_bytes ())
       in
       Hashtbl.replace metrics_store_cache dir store;
@@ -49,17 +56,18 @@ let execution_receipt_store_cache : (string, Dated_jsonl.t) Hashtbl.t =
 let execution_receipt_store_mu = Eio.Mutex.create ()
 
 let execution_receipt_schema = "keeper.execution_receipt.v1"
-let execution_receipts_dirname = "execution-receipts"
+let execution_receipts_dirname = Dated_jsonl.Store.Keeper.(dirname Execution_receipts)
 
 let keeper_execution_receipt_store config name : Dated_jsonl.t =
-  let dir =
-    Filename.concat (Filename.concat (keeper_dir_ config) name) execution_receipts_dirname
+  let location =
+    keeper_store_location config name Dated_jsonl.Store.Keeper.Execution_receipts
   in
+  let dir = Dated_jsonl.Store.dir location in
   let lookup () =
     match Hashtbl.find_opt execution_receipt_store_cache dir with
     | Some store -> store
     | None ->
-      let store = Dated_jsonl.create ~base_dir:dir () in
+      let store = Dated_jsonl.open_store location in
       Hashtbl.replace execution_receipt_store_cache dir store;
       store
   in
@@ -70,12 +78,13 @@ let turn_record_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create
 let turn_record_store_mu = Eio.Mutex.create ()
 
 let keeper_turn_record_store config name : Dated_jsonl.t =
-  let dir = Filename.concat (keeper_dir_ config) (name ^ "/turn-records") in
+  let location = keeper_store_location config name Dated_jsonl.Store.Keeper.Turn_records in
+  let dir = Dated_jsonl.Store.dir location in
   let lookup () =
     match Hashtbl.find_opt turn_record_store_cache dir with
     | Some store -> store
     | None ->
-      let store = Dated_jsonl.create ~base_dir:dir () in
+      let store = Dated_jsonl.open_store location in
       Hashtbl.replace turn_record_store_cache dir store;
       store
   in
@@ -87,15 +96,15 @@ let provider_input_store_cache : (string, Dated_jsonl.t) Hashtbl.t =
 let provider_input_store_mu = Eio.Mutex.create ()
 
 let keeper_provider_input_store config name : Dated_jsonl.t =
-  let dirname =
-    Common.keeper_runtime_store_dirname Common.Keeper_provider_inputs
+  let location =
+    keeper_store_location config name Dated_jsonl.Store.Keeper.Provider_inputs
   in
-  let dir = Filename.concat (keeper_dir_ config) (name ^ "/" ^ dirname) in
+  let dir = Dated_jsonl.Store.dir location in
   let lookup () =
     match Hashtbl.find_opt provider_input_store_cache dir with
     | Some store -> store
     | None ->
-      let store = Dated_jsonl.create ~base_dir:dir () in
+      let store = Dated_jsonl.open_store location in
       Hashtbl.replace provider_input_store_cache dir store;
       store
   in

@@ -1,8 +1,8 @@
 (** Telemetry_unified — Read-only aggregation of scattered telemetry stores.
 
     Provides a single, time-sorted view over independent telemetry stores.
-    Paths under [.masc/] are resolved via the cluster-aware [masc_root]
-    (use [Workspace.masc_root_dir config]):
+    Paths under [.masc/] are resolved via [masc_root]
+    (use [Workspace.masc_dir config]):
     - [<masc_root>/keepers/<name>/metrics/] — Per-keeper turn metrics
     - [<masc_root>/telemetry/]              — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]             — Full I/O for keeper tool calls
@@ -73,7 +73,6 @@ val read_limit_of_int : int -> read_limit
 val read_limit_to_int : read_limit -> int
 
 val read_unified :
-  base_path:string ->
   masc_root:string ->
   ?sources:source list ->
   ?keeper_name:string ->
@@ -86,7 +85,7 @@ val read_unified :
   ?offset:int ->
   unit ->
   Yojson.Safe.t list
-(** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
+(** [read_unified ~masc_root ?sources ?keeper_name ?session_id
       ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ()]
     reads entries from [sources] (default: all sources), optionally filtered
     by [keeper_name], generic correlation keys, and an optional unix-second
@@ -98,14 +97,12 @@ val read_unified :
     for more than [max_read_entries] receives that ceiling with
     [truncated = true] rather than a full-store scan (RFC-0372).
 
-    [masc_root] is the cluster-aware .masc directory (use
-    [Workspace.masc_root_dir config] to obtain it).  [base_path] is the
-    project root, used only for [data/] paths.
+    [masc_root] is the workspace's .masc directory (use
+    [Workspace.masc_dir config] to obtain it).
 
     Each entry is a JSON object with an added ["source"] field. *)
 
 val read_unified_result :
-  base_path:string ->
   masc_root:string ->
   ?sources:source list ->
   ?keeper_name:string ->
@@ -124,16 +121,15 @@ val read_unified_result :
 val summary_json :
   ?keeper_keepalive_interval_s:float ->
   ?keeper_metric_producer_active:bool ->
-  base_path:string ->
   masc_root:string ->
   unit ->
   Yojson.Safe.t
-(** [summary_json ~base_path ~masc_root ()] returns a JSON overview of
+(** [summary_json ~masc_root ()] returns a JSON overview of
     each source: path, entry count, whether the store directory exists,
     and freshness metadata ([latest_ts_unix], [latest_ts_iso],
     [latest_age_s]). A live Keeper metrics producer suppresses only
     age-derived staleness; missing, empty, read-error, and coverage-gap states
-    remain fail-visible. [masc_root] is the cluster-aware .masc directory. *)
+    remain fail-visible. [masc_root] is the workspace's .masc directory. *)
 
 val replay_retention_json :
   ?keeper_keepalive_interval_s:float ->

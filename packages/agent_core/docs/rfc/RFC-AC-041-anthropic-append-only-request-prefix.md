@@ -435,9 +435,9 @@ system·tools 가 라운드마다 바뀌는 경로를 없애는 일은 이 스�
 | 지문 재료 | system, tools, 메시지. thinking 블록은 뺀다(§3.4) | 해당 없음 | head(system 텍스트, tools 목록)와 모든 메시지 블록. 남아 있는 thinking 블록도 digest 에 든다(`reasoning_history_projection.ml:478-481`, `backend_anthropic.ml:421-435`) |
 | 생성 뒤 앞쪽 thinking 을 빼는 경우 | 문서가 유효하다고 적으므로 남은 블록을 재생한다(§3.4 서명 사슬 확인) | 해당 없음 | 앞쪽 thinking 이 뒤 블록의 digest 에 들어 있어, 빼면 뒤 블록의 digest 가 달라져 `Prefix_request_mismatch` 로 빠진다. 코드 읽기 결과이고 실행 확인은 못 했다 |
 | thinking 끼리의 순서(서명 사슬) | 있음(`thinking_predecessor`) | 해당 없음 | 없음 |
-| 이유 타입 | `prefix_change` 6종과 `Omit_*` 갈래(§3.4) | 해당 없음 | `Prefix_source_not_present`, `Prefix_digest_absent`, `Prefix_request_mismatch`, `Prefix_reasoning_mismatch` 4종(`reasoning_history_projection.ml:366-369`) |
+| 이유 타입 | `prefix_change` 6종과 `Omit_*` 갈래(§3.4) | 해당 없음 | `Prefix_source_not_present`, `Prefix_digest_absent`, `Prefix_entry_invalid`, `Prefix_entry_duplicate`, `Prefix_request_mismatch`, `Prefix_chain_broken_upstream`, `Prefix_reasoning_mismatch` 7종(`reasoning_history_projection.ml`) |
 | 계정 라벨 | `credential_scope`(§3.4) | 해당 없음 | 없음 |
-| 저장 태그가 손상된 경우 | 정하지 않았다 | 해당 없음 | `Malformed_prefix_entry` 면 `invalid_arg` 를 던진다(`backend_anthropic.ml:531-536`). 기존 `Reasoning_source` 투영 오류도 같은 방식이다(`backend_anthropic.ml:506-510`). 그 예외가 턴 전체를 실패시키는지는 따라가지 않았다 |
+| 저장 태그가 손상된 경우 | 정하지 않았다 | 해당 없음 | 그 메시지의 thinking 만 `Prefix_entry_invalid` 또는 `Prefix_entry_duplicate` 로 버리고 요청은 만든다. 버림은 Warn 으로 남는다. 기존 `Reasoning_source` 투영 오류는 여전히 `invalid_arg` 를 던진다(`backend_anthropic.ml`, #42713 의 공유 계약) |
 | tools 해시 | 정하지 않았다(Q16) | 해당 없음 | 순서 있는 목록 그대로 넣는다(`backend_anthropic.ml:421-435`). 문서는 tools 를 집합이라고 적는다. 순서가 바뀐 요청을 서버가 받아 주는지는 확인 못 함 |
 | 메타데이터 키 | `agent_core.prefix_binding.v1`(§3.4) | `agent_core.extra_system_context.v1` 의 값만 바꿈 | `agent_core.reasoning_prefix.v1`, 필드 `request_digest`, `message_digest`(`types.ml` 의 `Reasoning_prefix`) |
 

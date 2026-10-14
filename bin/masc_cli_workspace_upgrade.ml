@@ -11,7 +11,7 @@ let names path = try Ok (Sys.readdir path |> Array.to_list |> List.sort String.c
 let read base_path path =
   match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:(root base_path) path with
   | Ok (Some snapshot) when snapshot.snapshot.owner_uid = Unix.geteuid () -> Ok snapshot.content
-  | _ -> Error "The configuration must be an owned regular file."
+  | Ok (None) | Error _ | Ok (Some _) -> Error "The configuration must be an owned regular file."
 let emit json = print_endline (Yojson.Safe.to_string json)
 let inspect base_path =
   let* files = names (directory base_path) in

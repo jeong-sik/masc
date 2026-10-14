@@ -12,11 +12,31 @@ type node_acc = {
   meta : Yojson.Safe.t;
 }
 
+type edge_kind =
+  | Works_on
+  | Calls_tool
+  | Creates
+  | Broadcasts
+  | Mentions
+  | Posts
+  | Comments_on
+  | Votes_on
+
+let edge_kind_to_wire = function
+  | Works_on -> "works_on"
+  | Calls_tool -> "calls_tool"
+  | Creates -> "creates"
+  | Broadcasts -> "broadcasts"
+  | Mentions -> "mentions"
+  | Posts -> "posts"
+  | Comments_on -> "comments_on"
+  | Votes_on -> "votes_on"
+
 type edge_acc = {
   edge_id : string;
   source : string;
   target : string;
-  edge_kind : string;
+  edge_kind : edge_kind;
   weight : int;
   active : bool;
   last_event_at : string;
@@ -85,7 +105,7 @@ let ensure_entity_node (nodes : (string, node_acc) Hashtbl.t) value
 
 let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
     ~active ~ts_iso ~meta =
-  let edge_id = source ^ "|" ^ kind ^ "|" ^ target in
+  let edge_id = source ^ "|" ^ edge_kind_to_wire kind ^ "|" ^ target in
   match Hashtbl.find_opt edges edge_id with
   | Some edge ->
       Hashtbl.replace edges edge_id
@@ -158,91 +178,93 @@ let reduce_event ~nodes ~edges (value : event) =
     in
     match producer_id, subject_id with
     | Some source, Some target ->
-        ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
+        ensure_edge edges ~source ~target ~kind:Works_on ~active:false
           ~ts_iso:value.ts_iso ~meta:value.payload
     | None, _ | _, None -> ()
   in
-  (match tool_execution_event_kind_of_string value.kind with
-  | Some (External_tool_called | Keeper_in_turn_tool_executed) ->
+  match drawn_event_kind_of_string value.kind with
+  | Some (Tool_execution_event (External_tool_called | Keeper_in_turn_tool_executed)) ->
     (match actor_id, subject_id with
      | Some source, Some target ->
-       ensure_edge edges ~source ~target ~kind:"calls_tool" ~active:false
+       ensure_edge edges ~source ~target ~kind:Calls_tool ~active:false
          ~ts_iso:value.ts_iso ~meta:value.payload
      | None, _ | _, None -> ())
-  | None ->
-  (match value.kind with
-  | "agent.session_bound" -> set_subject_status Active
-  | "task.created" ->
+  | Some Agent_session_bound_event -> set_subject_status Active
+  | Some (Task_event Event_kind.Task.Created) ->
       set_subject_status Todo;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"creates" ~active:false
+          ensure_edge edges ~source ~target ~kind:Creates ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "task.claimed" ->
+  | Some (Task_event Event_kind.Task.Claimed) ->
       set_subject_status Claimed;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"works_on" ~active:true
+          ensure_edge edges ~source ~target ~kind:Works_on ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "task.started" ->
+  | Some (Task_event Event_kind.Task.Started) ->
       set_subject_status In_progress;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"works_on" ~active:true
+          ensure_edge edges ~source ~target ~kind:Works_on ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "task.released" ->
+  | Some (Task_event Event_kind.Task.Released) ->
       set_subject_status Todo;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
+          ensure_edge edges ~source ~target ~kind:Works_on ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "task.done" ->
+  | Some (Task_event Event_kind.Task.Done) ->
       set_subject_status Done;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"works_on" ~active:false
+          ensure_edge edges ~source ~target ~kind:Works_on ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "task.approved" -> finish_task Done
-  | "task.cancelled" -> finish_task Cancelled
-  | "message.broadcast" ->
+  | Some (Task_event Event_kind.Task.Approved) -> finish_task Done
+  | Some (Task_event Event_kind.Task.Cancelled) -> finish_task Cancelled
+  | Some (Message_event Event_kind.Message.Broadcast) ->
       (match actor_id with
       | Some source ->
           ensure_node nodes ~id:broadcast_anchor_node_id ~kind:"workspace"
             ~label:"default" ~status:Workspace ~ts_iso:value.ts_iso
             ~meta:default_meta;
           ensure_edge edges ~source ~target:broadcast_anchor_node_id
-            ~kind:"broadcasts"
+            ~kind:Broadcasts
             ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
       | None -> ())
-  | "message.mentioned" ->
+  | Some (Message_event Event_kind.Message.Mentioned) ->
       (match (actor_id, subject_id) with
       | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"mentions" ~active:false
+          ensure_edge edges ~source ~target ~kind:Mentions ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "board.posted" ->
+  | Some (Board_event Event_kind.Board.Posted) ->
       set_subject_status Posted;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"posts" ~active:false
+          ensure_edge edges ~source ~target ~kind:Posts ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "board.commented" ->
+  | Some (Board_event Event_kind.Board.Commented) ->
       set_subject_status Discussed;
       (match (actor_id, subject_id) with
       | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"comments_on" ~active:false
+          ensure_edge edges ~source ~target ~kind:Comments_on ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | "board.voted" ->
+  | Some (Board_event Event_kind.Board.Voted) ->
       (match (actor_id, subject_id) with
       | Some source, Some target ->
-          ensure_edge edges ~source ~target ~kind:"votes_on" ~active:false
+          ensure_edge edges ~source ~target ~kind:Votes_on ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | (None, _) | (_, None) -> ())
-  | _kind -> Log.Misc.debug "reduce_event: unhandled kind=%s" _kind))
+  (* Known kinds the graph gives no edge or status of their own. Their actor
+     and subject nodes were touched above, like those of any other event. *)
+  | Some (Task_event Event_kind.Task.(Submit_for_verification | Rejected | Linked))
+  | Some (Board_event Event_kind.Board.Deleted)
+  | None -> Log.Misc.debug "reduce_event: unhandled kind=%s" value.kind

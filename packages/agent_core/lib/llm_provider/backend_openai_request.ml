@@ -92,8 +92,19 @@ let warn_output_token_clamp ~model_id ~receipt =
       model_id)
 ;;
 
-let add_sampling_field dialect (config : Provider_config.t) parameter value body =
-  let field = Capabilities.sampling_parameter_to_string parameter in
+let add_sampling_field
+      ?wire_field
+      dialect
+      (config : Provider_config.t)
+      parameter
+      value
+      body
+  =
+  let field =
+    Option.value
+      wire_field
+      ~default:(Capabilities.sampling_parameter_to_string parameter)
+  in
   if
     Reasoning_dialect.ignores_sampling_param
       dialect
@@ -109,10 +120,13 @@ let add_sampling_field dialect (config : Provider_config.t) parameter value body
 
 let effective_tool_choice (config : Provider_config.t) =
   match config.kind, config.tool_choice with
-  | _, Some None_ | _, None -> None
+  | ( (Provider_config.Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm)
+    , (Some None_ | None) ) -> None
   | Provider_config.Glm, Some Any ->
     Some (Backend_openai_serialize.tool_choice_to_openai_json Any)
-  | _, Some choice ->
+  | ( (Anthropic | Kimi | OpenAI_compat | Ollama | Gemini)
+    , Some ((Auto | Any | Tool _) as choice) )
+  | Glm, Some ((Auto | Tool _) as choice) ->
     (match Provider_config.validate_tool_choice_request config with
      | Error reason ->
        invalid_arg
@@ -123,7 +137,7 @@ let effective_tool_choice (config : Provider_config.t) =
 let effective_tools (config : Provider_config.t) tools =
   match config.tool_choice with
   | Some None_ -> []
-  | _ -> tools
+  | Some (Auto | (Any | Tool _)) | None -> tools
 ;;
 
 let structured_schema_of_config (config : Provider_config.t) =

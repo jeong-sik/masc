@@ -1575,7 +1575,18 @@ let[@warning "-32"] test_input_json_delta = function
   | ContentBlockDelta { index; delta = InputJsonDelta s } -> Some (index, s)
   | MessageStart _
   | ContentBlockStart _
-  | ContentBlockDelta _
+  | ContentBlockDelta
+      { delta =
+          ( TextDelta _
+          | TextSnapshot _
+          | ThinkingDelta _
+          | ThinkingSignatureDelta _
+          | RedactedThinkingSnapshot _
+          | ReasoningDetailsDelta _
+          | InputJsonSnapshot _
+          | MediaDelta _ )
+      ; _
+      }
   | ContentBlockStop _
   | MessageDelta _
   | MessageStop
@@ -1633,12 +1644,20 @@ let%test
 (* Inline-test-only helpers for the inline-reasoning split. *)
 let[@warning "-32"] test_thinking_text = function
   | ContentBlockDelta { delta = ThinkingDelta s; _ } -> Some s
-  | _ -> None
+  | ContentBlockDelta { delta = (TextDelta _ | (TextSnapshot _ | (ThinkingSignatureDelta _ | (RedactedThinkingSnapshot _ | (ReasoningDetailsDelta _ | (InputJsonDelta _ | (InputJsonSnapshot _ | MediaDelta _)))))));_}
+  | MessageStop | Ping | Connected | MessageStart _ | ContentBlockStart _ | ContentBlockStop _
+  | MessageDelta _ | SSEError _ | NDJSONError _ | SSEParseFailed _ | NDJSONParseFailed _
+  | SSEUnknownEventType _ | SSEUnsupportedPart _ | SSEUnsupportedResponse _ | Timeout _
+  | StreamIncomplete _ | StreamRepeating _ -> None
 ;;
 
 let[@warning "-32"] test_reply_text = function
   | ContentBlockDelta { delta = TextDelta s; _ } -> Some s
-  | _ -> None
+  | ContentBlockDelta { delta = (TextSnapshot _ | (ThinkingDelta _ | (ThinkingSignatureDelta _ | (RedactedThinkingSnapshot _ | (ReasoningDetailsDelta _ | (InputJsonDelta _ | (InputJsonSnapshot _ | MediaDelta _)))))));_}
+  | MessageStop | Ping | Connected | MessageStart _ | ContentBlockStart _ | ContentBlockStop _
+  | MessageDelta _ | SSEError _ | NDJSONError _ | SSEParseFailed _ | NDJSONParseFailed _
+  | SSEUnknownEventType _ | SSEUnsupportedPart _ | SSEUnsupportedResponse _ | Timeout _
+  | StreamIncomplete _ | StreamRepeating _ -> None
 ;;
 
 let[@warning "-32"] test_content_chunk ?(finish_reason = None) content =
@@ -1818,14 +1837,59 @@ let%test
       (function
         | ContentBlockStart { index; content_type = "tool_use"; tool_name; _ } ->
           Some (index, tool_name)
-        | _ -> None)
+        | MessageStart _
+        | ContentBlockStart _
+        | ContentBlockDelta _
+        | ContentBlockStop _
+        | MessageDelta _
+        | MessageStop
+        | Ping
+        | SSEError _
+        | NDJSONError _
+        | SSEParseFailed _
+        | NDJSONParseFailed _
+        | SSEUnknownEventType _
+        | SSEUnsupportedPart _
+        | SSEUnsupportedResponse _
+        | Connected
+        | Timeout _
+        | StreamIncomplete _
+        | StreamRepeating _ -> None)
       events
   in
   let deltas =
     List.filter_map
       (function
         | ContentBlockDelta { index; delta = InputJsonDelta s } -> Some (index, s)
-        | _ -> None)
+        | MessageStart _
+        | ContentBlockStart _
+        | ContentBlockDelta
+            { delta =
+                ( TextDelta _
+                | TextSnapshot _
+                | ThinkingDelta _
+                | ThinkingSignatureDelta _
+                | RedactedThinkingSnapshot _
+                | ReasoningDetailsDelta _
+                | InputJsonSnapshot _
+                | MediaDelta _ )
+            ; _
+            }
+        | ContentBlockStop _
+        | MessageDelta _
+        | MessageStop
+        | Ping
+        | SSEError _
+        | NDJSONError _
+        | SSEParseFailed _
+        | NDJSONParseFailed _
+        | SSEUnknownEventType _
+        | SSEUnsupportedPart _
+        | SSEUnsupportedResponse _
+        | Connected
+        | Timeout _
+        | StreamIncomplete _
+        | StreamRepeating _ -> None)
       events
   in
   starts = [ 0, Some "list_tasks"; 1, Some "run_shell" ]
@@ -1865,9 +1929,55 @@ let%test "openai_chunk_to_events: id-less continuation on ambiguous index fails 
     && reason
        = "ambiguous_tool_call_index: id-less continuation follows multiple tool \
           identities"
-  | unexpected_events ->
-    let (_ : sse_event list) = unexpected_events in
-    false
+  | []
+  | [ ( MessageStart _
+      | ContentBlockStart _
+      | ContentBlockDelta
+          { delta =
+              ( TextDelta _
+              | TextSnapshot _
+              | ThinkingDelta _
+              | ThinkingSignatureDelta _
+              | RedactedThinkingSnapshot _
+              | ReasoningDetailsDelta _
+              | InputJsonDelta _
+              | InputJsonSnapshot _
+              | MediaDelta _ )
+          ; _
+          }
+      | ContentBlockStop _
+      | MessageDelta
+          { stop_reason =
+              ( None
+              | Some
+                  ( EndTurn
+                  | StopToolUse
+                  | MaxTokens
+                  | StopSequence
+                  | Refusal
+                  | ContentFilter
+                  | RepetitionTruncation
+                  | PauseTurn
+                  | Compaction
+                  | ContextWindowExceeded
+                  | UnmatchedToolCalls
+                  | Unknown _ ) )
+          ; _
+          }
+      | MessageStop
+      | Ping
+      | SSEError _
+      | NDJSONError _
+      | NDJSONParseFailed _
+      | SSEUnknownEventType _
+      | SSEUnsupportedPart _
+      | SSEUnsupportedResponse _
+      | Connected
+      | Timeout _
+      | StreamIncomplete _
+      | StreamRepeating _ )
+    ]
+  | _ :: _ :: _ -> false
 ;;
 
 (** {1 OpenAI Responses API SSE Streaming}
@@ -2776,7 +2886,7 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
   let gemini_optional_finish_reason ~path json =
     match gemini_optional_string ~path "finishReason" json with
     | Ok (Some "") -> Ok None
-    | result -> result
+    | (Ok None | Ok (Some _) | Error _) as result -> result
   in
   let gemini_required_string ~path key json =
     malformed (gemini_required_string ~path key json)
@@ -3714,9 +3824,56 @@ let%test "ollama_chunk_to_events: content delta emits Start+Delta" =
   | [ ContentBlockStart { index = 0; content_type = "text"; _ }
     ; ContentBlockDelta { index = 0; delta = TextDelta "hello" }
     ] -> true
-  | unexpected_events ->
-    let (_ : sse_event list) = unexpected_events in
-    false
+  | []
+  | [ ( MessageStart _
+      | ContentBlockStart _
+      | ContentBlockDelta
+          { delta =
+              ( TextDelta _
+              | TextSnapshot _
+              | ThinkingDelta _
+              | ThinkingSignatureDelta _
+              | RedactedThinkingSnapshot _
+              | ReasoningDetailsDelta _
+              | InputJsonDelta _
+              | InputJsonSnapshot _
+              | MediaDelta _ )
+          ; _
+          }
+      | ContentBlockStop _
+      | MessageDelta
+          { stop_reason =
+              ( None
+              | Some
+                  ( EndTurn
+                  | StopToolUse
+                  | MaxTokens
+                  | StopSequence
+                  | Refusal
+                  | ContentFilter
+                  | RepetitionTruncation
+                  | PauseTurn
+                  | Compaction
+                  | ContextWindowExceeded
+                  | UnmatchedToolCalls
+                  | Unknown _ ) )
+          ; _
+          }
+      | MessageStop
+      | Ping
+      | SSEError _
+      | NDJSONError _
+      | SSEParseFailed _
+      | NDJSONParseFailed _
+      | SSEUnknownEventType _
+      | SSEUnsupportedPart _
+      | SSEUnsupportedResponse _
+      | Connected
+      | Timeout _
+      | StreamIncomplete _
+      | StreamRepeating _ )
+    ]
+  | _ :: _ :: _ -> false
 ;;
 
 let%test "ollama_chunk_to_events: subsequent content delta reuses block" =
@@ -3737,9 +3894,56 @@ let%test "ollama_chunk_to_events: subsequent content delta reuses block" =
   (* Second chunk: only Delta, no new Start *)
   match events with
   | [ ContentBlockDelta { index = 0; delta = TextDelta "llo" } ] -> true
-  | unexpected_events ->
-    let (_ : sse_event list) = unexpected_events in
-    false
+  | []
+  | [ ( MessageStart _
+      | ContentBlockStart _
+      | ContentBlockDelta
+          { delta =
+              ( TextDelta _
+              | TextSnapshot _
+              | ThinkingDelta _
+              | ThinkingSignatureDelta _
+              | RedactedThinkingSnapshot _
+              | ReasoningDetailsDelta _
+              | InputJsonDelta _
+              | InputJsonSnapshot _
+              | MediaDelta _ )
+          ; _
+          }
+      | ContentBlockStop _
+      | MessageDelta
+          { stop_reason =
+              ( None
+              | Some
+                  ( EndTurn
+                  | StopToolUse
+                  | MaxTokens
+                  | StopSequence
+                  | Refusal
+                  | ContentFilter
+                  | RepetitionTruncation
+                  | PauseTurn
+                  | Compaction
+                  | ContextWindowExceeded
+                  | UnmatchedToolCalls
+                  | Unknown _ ) )
+          ; _
+          }
+      | MessageStop
+      | Ping
+      | SSEError _
+      | NDJSONError _
+      | SSEParseFailed _
+      | NDJSONParseFailed _
+      | SSEUnknownEventType _
+      | SSEUnsupportedPart _
+      | SSEUnsupportedResponse _
+      | Connected
+      | Timeout _
+      | StreamIncomplete _
+      | StreamRepeating _ )
+    ]
+  | _ :: _ :: _ -> false
 ;;
 
 let%test "ollama_chunk_to_events: done with stop_reason emits MessageDelta" =
@@ -3766,9 +3970,56 @@ let%test "ollama_chunk_to_events: done with stop_reason emits MessageDelta" =
   match events with
   | [ MessageDelta { stop_reason = Some EndTurn; usage = Some u }; MessageStop ] ->
     u.input_tokens = Some 10 && u.output_tokens = Some 20
-  | unexpected_events ->
-    let (_ : sse_event list) = unexpected_events in
-    false
+  | []
+  | [ ( MessageStart _
+      | ContentBlockStart _
+      | ContentBlockDelta
+          { delta =
+              ( TextDelta _
+              | TextSnapshot _
+              | ThinkingDelta _
+              | ThinkingSignatureDelta _
+              | RedactedThinkingSnapshot _
+              | ReasoningDetailsDelta _
+              | InputJsonDelta _
+              | InputJsonSnapshot _
+              | MediaDelta _ )
+          ; _
+          }
+      | ContentBlockStop _
+      | MessageDelta
+          { stop_reason =
+              ( None
+              | Some
+                  ( EndTurn
+                  | StopToolUse
+                  | MaxTokens
+                  | StopSequence
+                  | Refusal
+                  | ContentFilter
+                  | RepetitionTruncation
+                  | PauseTurn
+                  | Compaction
+                  | ContextWindowExceeded
+                  | UnmatchedToolCalls
+                  | Unknown _ ) )
+          ; _
+          }
+      | MessageStop
+      | Ping
+      | SSEError _
+      | NDJSONError _
+      | SSEParseFailed _
+      | NDJSONParseFailed _
+      | SSEUnknownEventType _
+      | SSEUnsupportedPart _
+      | SSEUnsupportedResponse _
+      | Connected
+      | Timeout _
+      | StreamIncomplete _
+      | StreamRepeating _ )
+    ]
+  | _ :: _ :: _ -> false
 ;;
 
 let%test "ollama_chunk_to_events: overflow reason stays typed" =
@@ -3788,7 +4039,14 @@ let%test "ollama_chunk_to_events: overflow reason stays typed" =
   | [ MessageDelta { stop_reason = Some ContextWindowExceeded; usage = None }
     ; MessageStop
     ] -> true
-  | _ -> false
+  | (MessageDelta { stop_reason = Some (ContextWindowExceeded); usage = None })::(MessageStop)::_::_
+  | (MessageDelta { stop_reason = Some (ContextWindowExceeded); usage = None })::(Ping | ( Connected | ( MessageStart _ | ( ContentBlockStart _ | ( ContentBlockDelta _ | ( ContentBlockStop _ | ( MessageDelta _ | ( SSEError _ | ( NDJSONError _ | ( SSEParseFailed _ | ( NDJSONParseFailed _ | ( SSEUnknownEventType _ | ( SSEUnsupportedPart _ | ( SSEUnsupportedResponse _ | ( Timeout _ | ( StreamIncomplete _ | StreamRepeating _))))))))))))))))::_
+  | (MessageDelta { stop_reason = Some (ContextWindowExceeded); usage = None })::[]
+  | (MessageDelta { stop_reason = Some (ContextWindowExceeded); usage = Some _ })::_
+  | (MessageDelta { stop_reason = Some (EndTurn | (StopToolUse | (MaxTokens | (StopSequence | (Refusal | (ContentFilter | (RepetitionTruncation | (PauseTurn | (Compaction | (UnmatchedToolCalls | Unknown _)))))))))); usage = _ })::_
+  | (MessageDelta { stop_reason = None; usage = _ })::_
+  | (MessageStop | (Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | (ContentBlockStop _ | (SSEError _ | (NDJSONError _ | (SSEParseFailed _ | (NDJSONParseFailed _ | (SSEUnknownEventType _ | (SSEUnsupportedPart _ | (SSEUnsupportedResponse _ | (Timeout _ | (StreamIncomplete _ | StreamRepeating _))))))))))))))))::_
+  | [] -> false
 ;;
 
 let%test "ollama_chunk_to_events: done with zero usage → usage=None" =
@@ -3807,8 +4065,7 @@ let%test "ollama_chunk_to_events: done with zero usage → usage=None" =
   let events, _tel = ollama_chunk_to_events state chunk in
   match events with
   | [ MessageDelta { stop_reason = Some EndTurn; usage = None }; MessageStop ] -> true
-  | unexpected_events ->
-    let (_ : sse_event list) = unexpected_events in
+  | ((MessageDelta { stop_reason = Some (EndTurn); usage = None })::(MessageStop)::_::_ | (MessageDelta { stop_reason = Some (EndTurn); usage = None })::(Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | ( ContentBlockStop _ | ( MessageDelta _ | ( SSEError _ | ( NDJSONError _ | ( SSEParseFailed _ | ( NDJSONParseFailed _ | ( SSEUnknownEventType _ | ( SSEUnsupportedPart _ | ( SSEUnsupportedResponse _ | ( Timeout _ | ( StreamIncomplete _ | StreamRepeating _))))))))))))))))::_ | (MessageDelta { stop_reason = Some (EndTurn); usage = None })::[] | (MessageDelta { stop_reason = Some (EndTurn); usage = Some _ })::_ | (MessageDelta { stop_reason = Some (StopToolUse | (MaxTokens | (StopSequence | (Refusal | (ContentFilter | (RepetitionTruncation | (PauseTurn | (Compaction | (ContextWindowExceeded | (UnmatchedToolCalls | Unknown _)))))))))); usage = _ })::_ | (MessageDelta { stop_reason = None; usage = _ })::_ | (MessageStop | (Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | (ContentBlockStop _ | (SSEError _ | (NDJSONError _ | (SSEParseFailed _ | (NDJSONParseFailed _ | (SSEUnknownEventType _ | (SSEUnsupportedPart _ | (SSEUnsupportedResponse _ | (Timeout _ | (StreamIncomplete _ | StreamRepeating _))))))))))))))))::_ | []) as unexpected_events -> let (_ : sse_event list) = unexpected_events in
     false
 ;;
 
@@ -3847,9 +4104,56 @@ let%test "ollama_chunk_to_events: tool_calls emit Start+InputJsonSnapshot" =
     ; MessageDelta { stop_reason = Some StopToolUse; _ }
     ; MessageStop
     ] -> String.starts_with ~prefix:"call_agent_core_" tool_id && args = {|{"q":"hello"}|}
-  | unexpected_events ->
-    let (_ : sse_event list) = unexpected_events in
-    false
+  | []
+  | [ ( MessageStart _
+      | ContentBlockStart _
+      | ContentBlockDelta
+          { delta =
+              ( TextDelta _
+              | TextSnapshot _
+              | ThinkingDelta _
+              | ThinkingSignatureDelta _
+              | RedactedThinkingSnapshot _
+              | ReasoningDetailsDelta _
+              | InputJsonDelta _
+              | InputJsonSnapshot _
+              | MediaDelta _ )
+          ; _
+          }
+      | ContentBlockStop _
+      | MessageDelta
+          { stop_reason =
+              ( None
+              | Some
+                  ( EndTurn
+                  | StopToolUse
+                  | MaxTokens
+                  | StopSequence
+                  | Refusal
+                  | ContentFilter
+                  | RepetitionTruncation
+                  | PauseTurn
+                  | Compaction
+                  | ContextWindowExceeded
+                  | UnmatchedToolCalls
+                  | Unknown _ ) )
+          ; _
+          }
+      | MessageStop
+      | Ping
+      | SSEError _
+      | NDJSONError _
+      | SSEParseFailed _
+      | NDJSONParseFailed _
+      | SSEUnknownEventType _
+      | SSEUnsupportedPart _
+      | SSEUnsupportedResponse _
+      | Connected
+      | Timeout _
+      | StreamIncomplete _
+      | StreamRepeating _ )
+    ]
+  | _ :: _ :: _ -> false
 ;;
 
 let%test "ollama_chunk_to_events: thinking delta emits thinking block first" =
@@ -3870,9 +4174,56 @@ let%test "ollama_chunk_to_events: thinking delta emits thinking block first" =
   | [ ContentBlockStart { index = 0; content_type = "thinking"; _ }
     ; ContentBlockDelta { index = 0; delta = ThinkingDelta "considering" }
     ] -> true
-  | unexpected_events ->
-    let (_ : sse_event list) = unexpected_events in
-    false
+  | []
+  | [ ( MessageStart _
+      | ContentBlockStart _
+      | ContentBlockDelta
+          { delta =
+              ( TextDelta _
+              | TextSnapshot _
+              | ThinkingDelta _
+              | ThinkingSignatureDelta _
+              | RedactedThinkingSnapshot _
+              | ReasoningDetailsDelta _
+              | InputJsonDelta _
+              | InputJsonSnapshot _
+              | MediaDelta _ )
+          ; _
+          }
+      | ContentBlockStop _
+      | MessageDelta
+          { stop_reason =
+              ( None
+              | Some
+                  ( EndTurn
+                  | StopToolUse
+                  | MaxTokens
+                  | StopSequence
+                  | Refusal
+                  | ContentFilter
+                  | RepetitionTruncation
+                  | PauseTurn
+                  | Compaction
+                  | ContextWindowExceeded
+                  | UnmatchedToolCalls
+                  | Unknown _ ) )
+          ; _
+          }
+      | MessageStop
+      | Ping
+      | SSEError _
+      | NDJSONError _
+      | SSEParseFailed _
+      | NDJSONParseFailed _
+      | SSEUnknownEventType _
+      | SSEUnsupportedPart _
+      | SSEUnsupportedResponse _
+      | Connected
+      | Timeout _
+      | StreamIncomplete _
+      | StreamRepeating _ )
+    ]
+  | _ :: _ :: _ -> false
 ;;
 
 let%test "ollama_chunk_to_events: inline think tags split across chunks stay out of the \
@@ -3945,7 +4296,10 @@ let%test "ollama_chunk_to_events: text resuming after a think block stays well-f
     List.filter_map
       (function
         | ContentBlockStart { index; content_type; _ } -> Some (index, content_type)
-        | _ -> None)
+        | MessageStop | Ping | Connected | MessageStart _ | ContentBlockDelta _ | ContentBlockStop _
+        | MessageDelta _ | SSEError _ | NDJSONError _ | SSEParseFailed _ | NDJSONParseFailed _
+        | SSEUnknownEventType _ | SSEUnsupportedPart _ | SSEUnsupportedResponse _ | Timeout _
+        | StreamIncomplete _ | StreamRepeating _ -> None)
       events
   in
   List.filter_map test_thinking_text events = [ "more" ]
@@ -3967,8 +4321,7 @@ let%test "parse_sse_event: unknown event type yields SSEUnknownEventType" =
   match parse_sse_event None raw with
   | Some (SSEUnknownEventType { event_type; raw = r }) ->
     event_type = "future_event_v3" && r = raw
-  | unexpected_event ->
-    let (_ : sse_event option) = unexpected_event in
+  | (Some (MessageStop | (Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | (ContentBlockStop _ | (MessageDelta _ | (SSEError _ | (NDJSONError _ | (SSEParseFailed _ | (NDJSONParseFailed _ | (SSEUnsupportedPart _ | (SSEUnsupportedResponse _ | (Timeout _ | (StreamIncomplete _ | StreamRepeating _)))))))))))))))) | None) as unexpected_event -> let (_ : sse_event option) = unexpected_event in
     false
 ;;
 
@@ -3976,8 +4329,7 @@ let%test "parse_sse_event: malformed JSON yields SSEParseFailed" =
   let raw = "{not valid json" in
   match parse_sse_event None raw with
   | Some (SSEParseFailed { raw = r; reason }) -> r = raw && String.length reason > 0
-  | unexpected_event ->
-    let (_ : sse_event option) = unexpected_event in
+  | (Some (MessageStop | (Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | (ContentBlockStop _ | (MessageDelta _ | (SSEError _ | (NDJSONError _ | (NDJSONParseFailed _ | (SSEUnknownEventType _ | (SSEUnsupportedPart _ | (SSEUnsupportedResponse _ | (Timeout _ | (StreamIncomplete _ | StreamRepeating _)))))))))))))))) | None) as unexpected_event -> let (_ : sse_event option) = unexpected_event in
     false
 ;;
 
@@ -3989,8 +4341,7 @@ let%test "parse_sse_event: type field missing yields SSEParseFailed" =
   match parse_sse_event None raw with
   | Some (SSEParseFailed { raw = observed_raw; reason }) ->
     observed_raw = raw && reason = "sse_event_type_missing"
-  | unexpected_event ->
-    let (_ : sse_event option) = unexpected_event in
+  | (Some (MessageStop | (Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | (ContentBlockStop _ | (MessageDelta _ | (SSEError _ | (NDJSONError _ | (NDJSONParseFailed _ | (SSEUnknownEventType _ | (SSEUnsupportedPart _ | (SSEUnsupportedResponse _ | (Timeout _ | (StreamIncomplete _ | StreamRepeating _)))))))))))))))) | None) as unexpected_event -> let (_ : sse_event option) = unexpected_event in
     false
 ;;
 
@@ -3999,8 +4350,7 @@ let%test "parse_sse_event: blank explicit event type yields SSEParseFailed" =
   match parse_sse_event (Some "  ") raw with
   | Some (SSEParseFailed { raw = observed_raw; reason }) ->
     observed_raw = raw && reason = "sse_event_type_blank"
-  | unexpected_event ->
-    let (_ : sse_event option) = unexpected_event in
+  | (Some (MessageStop | (Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | (ContentBlockStop _ | (MessageDelta _ | (SSEError _ | (NDJSONError _ | (NDJSONParseFailed _ | (SSEUnknownEventType _ | (SSEUnsupportedPart _ | (SSEUnsupportedResponse _ | (Timeout _ | (StreamIncomplete _ | StreamRepeating _)))))))))))))))) | None) as unexpected_event -> let (_ : sse_event option) = unexpected_event in
     false
 ;;
 
@@ -4009,8 +4359,7 @@ let%test "parse_sse_event: non-string payload type yields SSEParseFailed" =
   match parse_sse_event None raw with
   | Some (SSEParseFailed { raw = observed_raw; reason }) ->
     observed_raw = raw && reason = "sse_event_type_not_string"
-  | unexpected_event ->
-    let (_ : sse_event option) = unexpected_event in
+  | (Some (MessageStop | (Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | (ContentBlockStop _ | (MessageDelta _ | (SSEError _ | (NDJSONError _ | (NDJSONParseFailed _ | (SSEUnknownEventType _ | (SSEUnsupportedPart _ | (SSEUnsupportedResponse _ | (Timeout _ | (StreamIncomplete _ | StreamRepeating _)))))))))))))))) | None) as unexpected_event -> let (_ : sse_event option) = unexpected_event in
     false
 ;;
 
@@ -4019,8 +4368,7 @@ let%test "parse_sse_event: non-object payload yields SSEParseFailed" =
   match parse_sse_event (Some "ping") raw with
   | Some (SSEParseFailed { raw = observed_raw; reason }) ->
     observed_raw = raw && reason = "sse_payload_must_be_object"
-  | unexpected_event ->
-    let (_ : sse_event option) = unexpected_event in
+  | (Some (MessageStop | (Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | (ContentBlockStop _ | (MessageDelta _ | (SSEError _ | (NDJSONError _ | (NDJSONParseFailed _ | (SSEUnknownEventType _ | (SSEUnsupportedPart _ | (SSEUnsupportedResponse _ | (Timeout _ | (StreamIncomplete _ | StreamRepeating _)))))))))))))))) | None) as unexpected_event -> let (_ : sse_event option) = unexpected_event in
     false
 ;;
 
@@ -4029,9 +4377,49 @@ let%test "parse_sse_event: known event still parses normally" =
   let raw = "{\"type\":\"message_stop\"}" in
   match parse_sse_event None raw with
   | Some MessageStop -> true
-  | unexpected_event ->
-    let (_ : sse_event option) = unexpected_event in
+  | (Some (Ping | (Connected | (MessageStart _ | (ContentBlockStart _ | (ContentBlockDelta _ | (ContentBlockStop _ | (MessageDelta _ | (SSEError _ | (NDJSONError _ | (SSEParseFailed _ | (NDJSONParseFailed _ | (SSEUnknownEventType _ | (SSEUnsupportedPart _ | (SSEUnsupportedResponse _ | (Timeout _ | (StreamIncomplete _ | StreamRepeating _)))))))))))))))) | None) as unexpected_event -> let (_ : sse_event option) = unexpected_event in
     false
+;;
+
+let[@warning "-32"] test_block_starts (events : sse_event list) =
+  List.filter_map (function
+    | ContentBlockStart {index;content_type;_} -> Some (index,content_type)
+    | MessageStart _ | ContentBlockDelta _ | ContentBlockStop _ | MessageDelta _
+    | MessageStop | Ping | SSEError _ | NDJSONError _ | SSEParseFailed _
+    | NDJSONParseFailed _ | SSEUnknownEventType _ | SSEUnsupportedPart _
+    | SSEUnsupportedResponse _ | Connected | Timeout _ | StreamIncomplete _
+    | StreamRepeating _ -> None) events
+;;
+
+let[@warning "-32"] test_block_deltas (events : sse_event list) =
+  List.filter_map (function
+    | ContentBlockDelta {index;delta} -> Some (index,delta)
+    | MessageStart _ | ContentBlockStart _ | ContentBlockStop _ | MessageDelta _
+    | MessageStop | Ping | SSEError _ | NDJSONError _ | SSEParseFailed _
+    | NDJSONParseFailed _ | SSEUnknownEventType _ | SSEUnsupportedPart _
+    | SSEUnsupportedResponse _ | Connected | Timeout _ | StreamIncomplete _
+    | StreamRepeating _ -> None) events
+;;
+
+let[@warning "-32"] test_is_parse_failed : sse_event -> bool = function
+  | SSEParseFailed _ -> true
+  | MessageStart _ | ContentBlockStart _ | ContentBlockDelta _ | ContentBlockStop _
+  | MessageDelta _ | MessageStop | Ping | SSEError _ | NDJSONError _
+  | NDJSONParseFailed _ | SSEUnknownEventType _ | SSEUnsupportedPart _
+  | SSEUnsupportedResponse _ | Connected | Timeout _ | StreamIncomplete _
+  | StreamRepeating _ -> false
+;;
+
+let[@warning "-32"] test_thinking_text : content_delta -> string option = function
+  | ThinkingDelta text -> Some text
+  | TextDelta _ | TextSnapshot _ | ThinkingSignatureDelta _ | RedactedThinkingSnapshot _
+  | ReasoningDetailsDelta _ | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None
+;;
+
+let[@warning "-32"] test_visible_text : content_delta -> string option = function
+  | TextDelta text -> Some text
+  | TextSnapshot _ | ThinkingDelta _ | ThinkingSignatureDelta _ | RedactedThinkingSnapshot _
+  | ReasoningDetailsDelta _ | InputJsonDelta _ | InputJsonSnapshot _ | MediaDelta _ -> None
 ;;
 
 let%test "native details and inline reasoning retain distinct block payloads" =
@@ -4039,18 +4427,18 @@ let%test "native details and inline reasoning retain distinct block payloads" =
   let chunk = { (test_content_chunk "A<think>B</think>C") with
     delta_reasoning_details = Some {delta_reasoning_content = Some "native"; delta_details = []} } in
   let events, _ = openai_chunk_to_events state chunk in
-  let starts = List.filter_map (function ContentBlockStart {index;content_type;_} -> Some (index,content_type) | _ -> None) events in
-  let deltas = List.filter_map (function ContentBlockDelta {index;delta} -> Some (index,delta) | _ -> None) events in
+  let starts = test_block_starts events in
+  let deltas = test_block_deltas events in
   starts = [0,"reasoning_details";1,"text";2,"thinking";3,"text"]
-  && List.exists (function 2, ThinkingDelta "B" -> true | _ -> false) deltas
-  && not (List.exists (function 0, ThinkingDelta _ -> true | _ -> false) deltas)
+  && List.exists (fun (index, delta) -> index = 2 && test_thinking_text delta = Some "B") deltas
+  && not (List.exists (fun (index, delta) -> index = 0 && Option.is_some (test_thinking_text delta)) deltas)
 ;;
 
 let%test "inline answer emits incrementally after reasoning before terminal" =
   let state = create_openai_stream_state ~inline_reasoning:true () in
   let first, _ = openai_chunk_to_events state (test_content_chunk "<think>private</think>hel") in
   let second, _ = openai_chunk_to_events state (test_content_chunk "lo") in
-  let visible events = List.filter_map (function ContentBlockDelta {delta=TextDelta text;_} -> Some text | _ -> None) events in
+  let visible events = List.filter_map (fun (_, delta) -> test_visible_text delta) (test_block_deltas events) in
   visible first = ["hel"] && visible second = ["lo"]
 ;;
 
@@ -4069,11 +4457,12 @@ let%test "rejected tool chunk restores inline mode and held tag bytes" =
     let rejected_events, _ = openai_chunk_to_events state invalid in
     let after, _ = openai_chunk_to_events state
       { (test_content_chunk continuation) with finish_reason = Some "stop" } in
-    let payloads = List.filter_map (function
-      | ContentBlockDelta {delta = TextDelta text; _} -> Some (`Text text)
-      | ContentBlockDelta {delta = ThinkingDelta text; _} -> Some (`Thinking text)
-      | _ -> None) (before @ after) in
-    (match rejected_events with [SSEParseFailed _] -> true | _ -> false)
+    let payloads = List.filter_map (fun (_, delta) ->
+      match test_visible_text delta with
+      | Some text -> Some (`Text text)
+      | None -> Option.map (fun text -> `Thinking text) (test_thinking_text delta))
+      (test_block_deltas (before @ after)) in
+    List.length rejected_events = 1 && List.for_all test_is_parse_failed rejected_events
     && payloads = expected
   in
   check "<thi" "nk>discarded</think>" "nk>private</think>reply"

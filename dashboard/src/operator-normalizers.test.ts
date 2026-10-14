@@ -126,13 +126,11 @@ describe('normalizeOperatorDigest', () => {
     const result = normalizeOperatorDigest({
       root: {
         project: 'masc',
-        cluster: 'local',
         paused: true,
         pause_reason: 'maintenance',
       },
     })
     expect(result.root!.project).toBe('masc')
-    expect(result.root!.cluster).toBe('local')
     expect(result.root!.paused).toBe(true)
     expect(result.root!.pause_reason).toBe('maintenance')
   })

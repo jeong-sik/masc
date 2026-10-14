@@ -1,7 +1,12 @@
+; task-2245: the shared input table the TUI suite and the dashboard vitest
+; suite both assert on (lib/tool_display.ml / dashboard toolDisplayLabel).
+(copy_files# fixtures/tool-display-labels.json)
+
 (test
  (name test_tool_display)
  (modules test_tool_display)
- (libraries masc alcotest))
+ (deps fixtures/tool-display-labels.json)
+ (libraries masc alcotest yojson))
 
 (test
  (name test_eio_process_capture_pipe_close)
@@ -12,6 +17,9 @@
  (name test_tui_play_room)
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))
+(include stanzas/test_runtime_blocker_classification.inc)
+(include stanzas/test_keeper_trust_disposition.inc)
+(include stanzas/test_keeper_attention_reason.inc)
 (include stanzas/test_play_room.inc)
 (include stanzas/test_h2_play_room.inc)
 (test
@@ -267,6 +275,10 @@
 
 (env
  (_
+  ; Test assertions match the one case they check and fail on the rest, so
+  ; listing every other constructor would only bury the assertion.
+  (flags
+   (:standard -w -4))
   (env-vars
    ; Ignore shell-level workspace overrides so tests stay isolated in temp dirs.
    ; Prevent inherited shell MASC_BASE_PATH from binding tests to real
@@ -555,6 +567,7 @@
   test_keeper_tool_execute_typed_input
   test_keeper_sandbox_containment
   test_keeper_microvm_teardown_on_shutdown
+  test_keeper_bundle_worktrees
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
@@ -563,7 +576,6 @@
   test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
-  test_cap_blocker_structured_error
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
@@ -616,7 +628,6 @@
   test_run_local_script
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
-  test_keeper_state_machine_preconditions
   test_keeper_state_machine_tla_correspondence
   test_keeper_lifecycle_hooks
   test_keeper_subprocess_registry
@@ -647,7 +658,6 @@
   test_workspace_git_repo_owner
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
-  test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
   test_env_keeper_scrub
@@ -913,6 +923,7 @@
   test_keeper_tool_execute_typed_input
   test_keeper_sandbox_containment
   test_keeper_microvm_teardown_on_shutdown
+  test_keeper_bundle_worktrees
   test_keeper_sandbox_microvm
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
@@ -921,7 +932,6 @@
   test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
-  test_cap_blocker_structured_error
   test_keeper_fs_edit_patch
   test_keeper_sandbox_read_backend
   test_keeper_path_ssot
@@ -1004,7 +1014,6 @@
   test_workspace_git_repo_owner
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
-  test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
   test_keeper_wire_capture
@@ -2346,6 +2355,9 @@
 
 (include stanzas/coverage_tests.inc)
 (include stanzas/test_web_dashboard_coverage.inc)
+(include stanzas/test_wiki_core_purity.inc)
+(include stanzas/test_wiki_link.inc)
+(include stanzas/test_wiki_lint.inc)
 
 ; PR-MASC-3: SSE registration token+session validation.
 ; Runs with a tiny session max age so the expired-session regression case
@@ -2419,6 +2431,7 @@
 
 (include stanzas/test_keeper_census_outputs.inc)
 (include stanzas/test_keeper_shim_fleet.inc)
+(include stanzas/test_keeper_sqlite_observation_io.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
 (include stanzas/test_agent_transport_vocabulary.inc)
 (include stanzas/test_agent_api_query_params.inc)
@@ -2448,11 +2461,15 @@
 (include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 
+(include stanzas/test_tui_tools_pane_labels.inc)
+
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
 (include stanzas/test_exec_policy_containment.inc)
 (include stanzas/test_exec_policy_log_sanitize.inc)
 (include stanzas/test_lane_cli_probe_args.inc)
+
+(include stanzas/test_artifacts_upload.inc)
 
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
 (include stanzas/test_auth_oauth.inc)
@@ -2465,6 +2482,8 @@
 (include stanzas/test_base_path_prod_guard.inc)
 
 (include stanzas/test_persisted_default_base_path.inc)
+
+(include stanzas/test_board_attachment_kinds.inc)
 
 (include stanzas/test_board_api_e2e.inc)
 
@@ -2633,6 +2652,7 @@
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
+(include stanzas/test_dated_jsonl_store.inc)
 (include stanzas/test_play_role_permissions.inc)
 (include stanzas/test_play_screen.inc)
 (include stanzas/test_play_page.inc)
@@ -2650,6 +2670,20 @@
 (include stanzas/test_distributed_lock_backoff_jitter_9645.inc)
 
 (include stanzas/test_docker_playground_gc_script.inc)
+
+; nofile-status reads the process table: which finds scan the caller's home,
+; which lock waiters lost their parent, which dune runs outside a wrapper.
+(rule
+ (alias runtest-test_nofile_status)
+ (deps
+  test_nofile_status.py
+  ../scripts/nofile-status.sh)
+ (action
+  (run python3 %{dep:test_nofile_status.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_nofile_status)))
 
 (include stanzas/test_env_config_dashboard_compute_timeouts.inc)
 
@@ -2745,6 +2779,8 @@
 
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
+(include stanzas/test_keeper_phase_gate_plan.inc)
+
 (include stanzas/test_keeper_tool_name.inc)
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
@@ -2788,6 +2824,7 @@
 
 (include stanzas/test_keeper_turn_dispatch_authority.inc)
 (include stanzas/test_keeper_owner.inc)
+(include stanzas/test_keeper_owner_open_native_call.inc)
 (include stanzas/test_keeper_chat_operation_http.inc)
 
 (include stanzas/test_keeper_meta_current_keyset.inc)
@@ -2888,7 +2925,7 @@
 
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 
-(include stanzas/test_workspace_root_state_parity.inc)
+(include stanzas/test_workspace_init_state_parity.inc)
 
 (include stanzas/test_http_auth_strict_flag.inc)
 
@@ -2921,6 +2958,7 @@
 (include stanzas/test_runtime_agent_execution_restart.inc)
 (include stanzas/test_keeper_native_result_retention.inc)
 (include stanzas/test_keeper_native_context_resume.inc)
+(include stanzas/test_keeper_native_reconcile_after_dispatch.inc)
 (include stanzas/test_keeper_ingress_native_restart.inc)
 (include stanzas/test_keeper_native_repetition_recovery.inc)
 
@@ -2951,6 +2989,7 @@
 (include stanzas/test_runtime_claude_code.inc)
 (include stanzas/test_runtime_claude_input_attribution.inc)
 (include stanzas/test_runtime_antigravity.inc)
+(include stanzas/test_runtime_binding_auth_available.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
@@ -3893,7 +3932,7 @@
 (test
  (name test_tui_markdown)
  (modules test_tui_markdown)
- (libraries alcotest masc_tui_code_lexer masc_tui_markdown masc_tui_message_layout masc_tui_render_prim masc_tui_theme)
+ (libraries alcotest masc_tui_alphatex masc_tui_code_lexer masc_tui_markdown masc_tui_message_layout masc_tui_render_prim masc_tui_theme)
  (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
 
 (test
@@ -4351,7 +4390,7 @@
 (test
  (name test_operator_attention_summary)
  (modules test_operator_attention_summary)
- (libraries alcotest masc.operator))
+ (libraries alcotest masc masc.operator))
 
 (test
  (name test_tui_render_schedule)
@@ -4447,6 +4486,7 @@
 
 (include stanzas/test_keeper_prompt_capture.inc)
 (include stanzas/test_keeper_provider_input_snapshot.inc)
+(include stanzas/test_keeper_store_locations.inc)
 (include stanzas/test_keeper_projection_change.inc)
 
 (include stanzas/test_keeper_operator_note.inc)
@@ -4469,11 +4509,13 @@
 
 (include stanzas/test_tui_context_tokens.inc)
 (include stanzas/test_tui_next_request_band.inc)
+(include stanzas/test_tui_board_attachments.inc)
 (include stanzas/test_tui_board_list_reading.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
 
 (include stanzas/test_workspace_git_log.inc)
+(include stanzas/test_tui_alphatex.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_runtime_account_form.inc)
@@ -5195,8 +5237,7 @@
   test_install_local_build.py
   ../scripts/install-local-build.sh
   ../scripts/check-runtime-deployment-preflight.sh
-  ../scripts/dune-local.sh
-  ../connectors/browser/install-host.sh)
+  ../scripts/dune-local.sh)
  (action
   (run python3 %{dep:test_install_local_build.py})))
 
@@ -5314,6 +5355,8 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_sandbox_prerequisites.inc)
+(include stanzas/test_browser_lane_setup.inc)
+(include stanzas/test_browser_lane_bidi_setup.inc)
 
 (include stanzas/test_apple_container_install.inc)
 
@@ -5368,7 +5411,7 @@
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.browser_lane masc.msx_lane masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
+ (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.browser_lane masc.msx_lane masc.msx_tool masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)
@@ -5493,6 +5536,8 @@
 (test
  (name test_lane_addon_reconcile)
  (modules test_lane_addon_reconcile)
+ (deps
+  (glob_files fixtures/lane_addon_bindings_without_read_authority/*.json))
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
 
 ; Mock clock as the dashboard compute's clock: a payload computed as the
@@ -5511,8 +5556,7 @@
 
 ; Keeper practice summary: autonomous turn-mode/outcome mix folded from the
 ; decision-log tail. The vocabulary-coupling case builds probe rows from
-; the writer's own path/mode label functions; outcome labels stay pinned
-; (decision_outcome_to_label is not exposed) with writer-site citations.
+; the writer's own path, mode and outcome label functions.
 (test
  (name test_dashboard_keeper_practice)
  (modules test_dashboard_keeper_practice)
@@ -5956,6 +6000,8 @@
 (include stanzas/test_keeper_memory_select_provider_wire.inc)
 
 (include stanzas/test_keeper_event_genealogy_capture.inc)
+
+(include stanzas/test_keeper_librarian_admission_mode.inc)
 
 (test
  (name test_tui_keeper_call_evidence)

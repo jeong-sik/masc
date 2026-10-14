@@ -53,7 +53,6 @@ val restore_supervisor_state :
   base_path:string ->
   string ->
   restart_count:int ->
-  last_restart_ts:float ->
   crash_log:(float * string) list ->
   update_entry:(base_path:string -> string -> (registry_entry -> registry_entry) -> unit) ->
   unit

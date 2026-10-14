@@ -48,9 +48,12 @@ val output_token_receipt
 
 (** Prepend the sampling [(field, value)] to [body] unless the reasoning
     dialect suppresses that parameter, in which case the field is dropped with a
-    one-shot WARN per ([model_id], [field]). *)
+    one-shot WARN per ([model_id], [field]). [?wire_field] overrides the
+    serialized JSON key when an envelope uses camelCase (e.g. Gemini [topP],
+    [topK]). *)
 val add_sampling_field
-  :  Reasoning_dialect.t
+  :  ?wire_field:string
+  -> Reasoning_dialect.t
   -> Provider_config.t
   -> Capabilities.sampling_parameter
   -> Yojson.Safe.t

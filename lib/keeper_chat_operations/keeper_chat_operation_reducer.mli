@@ -20,25 +20,12 @@ type command =
       ; failure : Operation.failure
       }
 
-type persistence_intent =
-  | Persist_running
-  | Persist_continuation
-  | Persist_queued_edit
-  | Persist_queued_move
-  | Persist_terminal
-
-type post_commit_effect = Publish_operation
-
-type transition =
-  { operation : Operation.t
-  ; persistence : persistence_intent
-  ; post_commit : post_commit_effect
-  }
-
 type error =
   | Not_queued
   | Not_running
   | Invalid_input of string
 
-val apply : Operation.t -> command -> (transition, error) result
+val apply : Operation.t -> command -> (Operation.t, error) result
+(** The operation after [command]. The caller picks the statement that
+    stores it, since each caller issues one command. *)
 val error_to_string : error -> string

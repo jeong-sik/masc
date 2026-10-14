@@ -173,7 +173,12 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ?permit_wai
   match Complete_common.validate_all config with
   | Error (Http_client.AcceptRejected { reason }) ->
     Error (Count_tokens_sync.Invalid_completion_request reason)
-  | Error error -> transport_failure error
+  | Error
+      ( ( Http_client.HttpError _
+        | Http_client.NetworkError _
+        | Http_client.TimeoutError _
+        | Http_client.ProviderTerminal _
+        | Http_client.ProviderFailure _ ) as error ) -> transport_failure error
   | Ok () ->
     (match next_stage with
      | Completion { call_window } ->

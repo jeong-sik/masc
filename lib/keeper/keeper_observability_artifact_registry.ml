@@ -9,15 +9,19 @@ type artifact =
   | Activity_event
   | Metrics_snapshot
   | Raw_trace
+[@@deriving enumerate]
+
+type retention =
+  | Dated_jsonl_operator_window
+  | Startup_flat_file_mtime
+  | Raw_trace_reachability_window
 
 type entry =
-  { artifact : artifact
-  ; producer : string
+  { producer : string
   ; authority_source : string
   ; truth_role : truth_role
   ; consumers : string list
-  ; retention_owner : string
-  ; retention_policy : string
+  ; retention : retention
   }
 
 let artifact_label = function
@@ -34,9 +38,23 @@ let truth_role_label = function
   | Derived_projection -> "derived_projection"
 ;;
 
-let entries =
-  [ { artifact = Execution_receipt
-    ; producer = "Keeper_agent_run_receipt"
+let retention_owner = function
+  | Dated_jsonl_operator_window -> "Dated_jsonl.Store"
+  | Startup_flat_file_mtime -> "Server_runtime_startup_maintenance"
+  | Raw_trace_reachability_window -> "Keeper_raw_trace_retention"
+;;
+
+let retention_policy = function
+  | Dated_jsonl_operator_window ->
+    "Operator_window dated JSONL pruning (MASC_JSONL_RETENTION_DAYS)"
+  | Startup_flat_file_mtime -> "MASC_JSONL_RETENTION_DAYS flat-file mtime pruning"
+  | Raw_trace_reachability_window ->
+    "TurnRecord reachability window, plus MASC_JSONL_RETENTION_DAYS mtime fallback"
+;;
+
+let entry = function
+  | Execution_receipt ->
+    { producer = "Keeper_agent_run_receipt"
     ; authority_source = "exact provider/tool terminal result"
     ; truth_role = Execution_evidence
     ; consumers =
@@ -44,11 +62,10 @@ let entries =
         ; "Dashboard_http_keeper_execution_receipt"
         ; "Workspace_task_receipts"
         ]
-    ; retention_owner = "Server_runtime_startup_maintenance"
-    ; retention_policy = "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+    ; retention = Dated_jsonl_operator_window
     }
-  ; { artifact = Turn_record
-    ; producer = "Keeper_turn_record_writer"
+  | Turn_record ->
+    { producer = "Keeper_turn_record_writer"
     ; authority_source = "execution receipt cadence + admitted turn identity"
     ; truth_role = Derived_projection
     ; consumers =
@@ -56,30 +73,27 @@ let entries =
         ; "Keeper_context_observation_projection"
         ; "Keeper_raw_trace_retention"
         ]
-    ; retention_owner = "Server_runtime_startup_maintenance"
-    ; retention_policy = "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+    ; retention = Dated_jsonl_operator_window
     }
-  ; { artifact = Runtime_manifest
-    ; producer = "Keeper_runtime_manifest"
+  | Runtime_manifest ->
+    { producer = "Keeper_runtime_manifest"
     ; authority_source = "turn/provider/checkpoint event writers"
     ; truth_role = Derived_projection
     ; consumers =
         [ "Server_dashboard_http_keeper_runtime_manifest_scan"
         ; "Server_dashboard_http_keeper_runtime_lens_swimlane"
         ]
-    ; retention_owner = "Server_runtime_startup_maintenance"
-    ; retention_policy = "MASC_JSONL_RETENTION_DAYS flat-file mtime pruning"
+    ; retention = Startup_flat_file_mtime
     }
-  ; { artifact = Activity_event
-    ; producer = "Activity_graph.emit"
+  | Activity_event ->
+    { producer = "Activity_graph.emit"
     ; authority_source = "typed terminal/tool/board observations"
     ; truth_role = Derived_projection
     ; consumers = [ "Server_activity_http"; "Dashboard_snapshot" ]
-    ; retention_owner = "Server_runtime_startup_maintenance"
-    ; retention_policy = "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+    ; retention = Dated_jsonl_operator_window
     }
-  ; { artifact = Metrics_snapshot
-    ; producer = "Keeper_unified_metrics_snapshot"
+  | Metrics_snapshot ->
+    { producer = "Keeper_unified_metrics_snapshot"
     ; authority_source = "normalized execution outcome + lifecycle projection"
     ; truth_role = Derived_projection
     ; consumers =
@@ -87,51 +101,35 @@ let entries =
         ; "Keeper_status_metrics"
         ; "Telemetry_unified"
         ]
-    ; retention_owner = "Server_runtime_startup_maintenance"
-    ; retention_policy = "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+    ; retention = Dated_jsonl_operator_window
     }
-  ; { artifact = Raw_trace
-    ; producer = "Agent_core.Raw_trace"
+  | Raw_trace ->
+    { producer = "Agent_core.Raw_trace"
     ; authority_source = "exact provider request/event stream"
     ; truth_role = Execution_evidence
     ; consumers = [ "Turn_record.raw_trace_run_ref"; "Keeper_raw_trace_reader" ]
-    ; retention_owner = "Keeper_raw_trace_retention"
-    ; retention_policy =
-        "TurnRecord reachability window, plus MASC_JSONL_RETENTION_DAYS mtime fallback"
+    ; retention = Raw_trace_reachability_window
     }
-  ]
 ;;
 
 let nonblank value = String.trim value <> ""
 
 let validate () =
-  let seen = Hashtbl.create (List.length entries) in
-  List.fold_left
-    (fun errors row ->
-       let label = artifact_label row.artifact in
-       let errors =
-         if Hashtbl.mem seen label
-         then ("duplicate artifact: " ^ label) :: errors
-         else (
-           Hashtbl.add seen label ();
-           errors)
+  List.concat_map
+    (fun artifact ->
+       let row = entry artifact in
+       let label = artifact_label artifact in
+       let has_consumer =
+         match row.consumers with
+         | [] -> false
+         | _ :: _ as consumers -> List.for_all nonblank consumers
        in
-       let errors =
-         if row.consumers = [] || not (List.for_all nonblank row.consumers)
-         then ("artifact has no concrete consumer: " ^ label) :: errors
-         else errors
-       in
-       let errors =
-         if nonblank row.retention_owner && nonblank row.retention_policy
-         then errors
-         else ("artifact has no retention owner/policy: " ^ label) :: errors
-       in
+       (if has_consumer then [] else [ "artifact has no concrete consumer: " ^ label ])
+       @
        if nonblank row.producer && nonblank row.authority_source
-       then errors
-       else ("artifact has no producer/authority source: " ^ label) :: errors)
-    []
-    entries
-  |> List.rev
+       then []
+       else [ "artifact has no producer/authority source: " ^ label ])
+    all_of_artifact
 ;;
 
 let to_yojson () =
@@ -145,18 +143,19 @@ let to_yojson () =
     ; ( "artifacts"
       , `List
           (List.map
-             (fun row ->
+             (fun artifact ->
+                let row = entry artifact in
                 `Assoc
-                  [ "artifact", `String (artifact_label row.artifact)
+                  [ "artifact", `String (artifact_label artifact)
                   ; "producer", `String row.producer
                   ; "authority_source", `String row.authority_source
                   ; "truth_role", `String (truth_role_label row.truth_role)
                   ; "command_authority", `Bool false
                   ; ( "consumers"
                     , `List (List.map (fun consumer -> `String consumer) row.consumers) )
-                  ; "retention_owner", `String row.retention_owner
-                  ; "retention_policy", `String row.retention_policy
+                  ; "retention_owner", `String (retention_owner row.retention)
+                  ; "retention_policy", `String (retention_policy row.retention)
                   ])
-             entries) )
+             all_of_artifact) )
     ]
 ;;

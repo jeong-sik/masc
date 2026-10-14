@@ -4,6 +4,13 @@ module Editor = Server_skill_editor
 module Service = Skill_catalog_snapshot_service
 module Snapshot = Skill_catalog_snapshot
 
+(* The candidate's profile is an instruction, not a composition. *)
+let is_instruction (profile : Masc.Keeper_skill_observability.profile) =
+  match profile.surface with
+  | Masc.Keeper_skill_observability.Instruction_skill -> true
+  | Composition_skill _ -> false
+;;
+
 let rec remove_tree path =
   match (Unix.lstat path).Unix.st_kind with
   | Unix.S_DIR ->
@@ -122,7 +129,7 @@ let test_load_preview_and_publish () =
   (match Editor.preview ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path reference ~source_text:edited with
    | Error error -> fail (Editor.error_to_string error)
    | Ok preview ->
-     check string "instruction profile" "instruction" preview.profile.kind;
+     check bool "instruction profile" true (is_instruction preview.profile);
      check bool "candidate revision changes" false
        (Skill_reference.equal reference preview.profile.reference));
   (match Editor.save ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path ~reference ~source_text:edited ~refresh with
@@ -155,7 +162,7 @@ let test_near_miss_fence_is_diagnosed_in_preview () =
   match Editor.preview ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ())) ~base_path reference ~source_text:candidate with
   | Error error -> fail (Editor.error_to_string error)
   | Ok preview ->
-    check string "candidate stays an instruction" "instruction" preview.profile.kind;
+    check bool "candidate stays an instruction" true (is_instruction preview.profile);
     check (list string) "near-miss is diagnosed"
       [ "skill \"sample\": fence info \"TOML Composition\" reads like \"toml composition\" \
          but does not match it exactly, so the block stayed an ordinary code block and \
@@ -417,7 +424,7 @@ let test_create_publishes_without_host_path_input () =
        ~refresh
    with
    | Ok (Editor.Created_and_published { preview; _ }) ->
-     check string "generated profile" "instruction" preview.profile.kind
+     check bool "generated profile" true (is_instruction preview.profile)
    | Ok (Created_but_shadowed _) -> fail "the only source's Skill was shadowed"
    | Ok (Created_but_unpublished _) -> fail "generated Skill was not published"
    | Error error -> fail (Editor.error_to_string error));

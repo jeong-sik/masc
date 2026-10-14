@@ -4,14 +4,7 @@
     Included by {!Keeper_types} so existing [Keeper_types.*]
     callers keep their public API.  This module separates the
     type-heavy contract from JSON parsing
-    ({!Keeper_meta_json}) and store I/O.
-
-    Internal: ~3 helpers stay private —
-    [blocker_class_of_serialized_string] (deserializer used
-    only by JSON parsing), [map_proactive_rt]
-    (nested-record updaters that callers reach via the higher-level
-    {!map_usage}).  All consumed only via the runtime contract or the JSON
-    pipeline. *)
+    ({!Keeper_meta_json}) and store I/O. *)
 
 (** {1 Policy types} *)
 
@@ -23,12 +16,7 @@ type proactive_cycle_outcome =
   | Proactive_tool_use
   | Proactive_mixed_response
   | Proactive_error
-(** Outcome variants for a single proactive (autonomous) cycle.
-    Round-trip enforced at module load time
-    ([proactive_cycle_outcome_to_string] +
-    [proactive_cycle_outcome_of_string] must form a bijection)
-    via an [assert_roundtrip] block — adding a variant fails
-    compile until both directions are wired. *)
+(** Outcome variants for a single proactive (autonomous) cycle. *)
 
 (** {1 Runtime state types} *)
 
@@ -71,7 +59,7 @@ val with_last_reported_usage :
     reported usage. Missing usage preserves the three token fields and their
     timestamp as one observation. *)
 
-(** {1 Blocker classification} *)
+(** {1 Runtime exhaustion} *)
 
 type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason =
   | Connection_refused
@@ -90,71 +78,12 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
           terminal for automatic retry and is never inferred from message text. *)
   | Other_detail of string
 
-type blocker_class =
-  | Runtime_exhausted of runtime_exhaustion_reason
-  | Fiber_unresolved
-  | Agent_core_context_window_exceeded
-  | Agent_core_unrecognized_stop_reason
-  | Agent_core_guardrail_violation
-  | Agent_core_tripwire_violation
-  | Agent_core_input_required
-  | Internal_unhandled_exception
-  | Internal_bridge_exception
-  | Internal_contract_rejected
-  | Incomplete_tool_transcript
-  | Terminal_effect_failed
-  | Provider_attempt_effect_fenced
-  | Tool_correction_lost
-  | Receipt_persistence_failed
-  | Gate_replay_repair_required
-
-val blocker_class_to_string : blocker_class -> string
-(** Canonical lowercase labels.  Pinned literals — operator
-    dashboards parse these for keeper supervisor alerting. *)
-
-val runtime_exhaustion_summary :
-  runtime_exhaustion_reason -> string
-(** Human-readable one-sentence summary per reason variant.
-    Used in keeper supervisor logs + dashboard tooltips. *)
-
 val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
 (** Total typed retryability per reason variant. Transient/connectivity
     reasons and candidate/capacity exhaustion are retryable;
     [Session_conflict] and [Other_detail] (unknown free-text) are not. Replaces
     a string-prefix reparse with a [_ -> false] catch-all that mis-biased
     transient faults to terminal. *)
-
-val blocker_class_of_serialized_string :
-  string -> blocker_class option
-(** [blocker_class_of_serialized_string label] is the inverse
-    of {!blocker_class_to_string}.  [Runtime_exhausted _]
-    maps from the bare ["runtime_exhausted"] string to
-    [Runtime_exhausted (Other_detail "runtime_exhausted")] —
-    the reason payload is not round-trippable through this
-    function alone (callers needing the reason use
-    [runtime_exhaustion_reason_of_json]).  Used by
-    {!Keeper_meta_json_parse} to decode persisted blocker
-    state. *)
-
-(** {1 Unified blocker_info} *)
-
-type blocker_info = {
-  klass : blocker_class;
-  detail : string;
-}
-(** Authoritative blocker representation: a typed [blocker_class]
-    paired with optional free-form [detail] (UI / Otel_metric_store label).
-    Replaces the deprecated split blocker fields, so substring
-    classification is no longer load-bearing for persisted keeper_meta.
-    When there is no
-    blocker, the runtime state holds [None]; when there is a blocker,
-    [klass] is always populated and [detail] may be ["" ]. *)
-
-val blocker_info_of_class :
-  ?detail:string -> blocker_class -> blocker_info
-(** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
-    for [klass].  [detail] defaults to [""]. *)
-
 
 (** {1 Runtime attempt provenance} *)
 
@@ -297,12 +226,13 @@ val proactive_cycle_outcome_to_string :
     ["mixed_response"], ["error"]. *)
 
 val proactive_cycle_outcome_of_string :
-  string -> proactive_cycle_outcome
-(** Permissive parser (case-insensitive after trim).  Unknown
-    labels fall back to [Proactive_unknown] — but module-load
-    [assert_roundtrip] guarantees every variant produced by
-    [_to_string] is parsed back identically, so unknown means
-    operator error, not silent variant drift. *)
+  string -> proactive_cycle_outcome option
+(** The variant whose {!proactive_cycle_outcome_to_string} label is
+    exactly [raw]. [None] for anything else, including a label in other
+    case or with surrounding whitespace. *)
+
+val all_proactive_cycle_outcomes : proactive_cycle_outcome list
+(** Every variant, in declaration order. *)
 
 (** {1 Updater helpers} *)
 

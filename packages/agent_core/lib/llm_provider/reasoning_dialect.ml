@@ -321,7 +321,28 @@ let validate_request_control_inputs request_wire dialect ~reasoning_effort =
   | None, _, _
   | Some _, (Chat_completions | Responses), Reasoning_effort
   | Some _, Chat_completions, Thinking_object { includes_reasoning_effort = true } -> Ok ()
-  | Some _, _, _ -> Error Reasoning_effort_unsupported
+  | ( Some _
+    , Chat_completions
+    , ( No_toggle
+      | Thinking_object _
+      | Thinking_object_adaptive
+      | Thinking_object_only
+      | Chat_template_kwargs
+      | Chat_template_token
+      | Ollama_think
+      | Anthropic_thinking
+      | Gemini_thinking_config ) )
+  | ( Some _
+    , Responses
+    , ( No_toggle
+      | Thinking_object _
+      | Thinking_object_adaptive
+      | Thinking_object_only
+      | Chat_template_kwargs
+      | Chat_template_token
+      | Ollama_think
+      | Anthropic_thinking
+      | Gemini_thinking_config ) ) -> Error Reasoning_effort_unsupported
 ;;
 
 let normalized_effort_for_request dialect = function
@@ -529,13 +550,21 @@ let base_for_provider_config (config : Provider_config.t) =
       ; sampling_policy = sampling_policy_of_capabilities caps
       }
   | Gemini ->
-    { default with
-      toggle_wire = Gemini_thinking_config
-    ; (* GenerateContent is stateless. Signed parts must remain attached to the
-         exact model response part and be returned unchanged. *)
-      replay_policy = All_assistant_messages
-    ; streaming = Delta_field "thought"
-    }
+    let caps =
+      match Provider_config.capabilities_for_config_model config with
+      | Some caps -> caps
+      | None -> provider_capabilities_of_kind config.kind
+    in
+    apply_replay_override
+      caps
+      { default with
+        toggle_wire = Gemini_thinking_config
+      ; (* GenerateContent is stateless. Signed parts must remain attached to the
+           exact model response part and be returned unchanged. *)
+        replay_policy = All_assistant_messages
+      ; streaming = Delta_field "thought"
+      ; sampling_policy = sampling_policy_of_capabilities caps
+      }
   | Ollama ->
     let caps =
       match Provider_config.capabilities_for_config_model config with

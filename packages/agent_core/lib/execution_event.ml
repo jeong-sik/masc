@@ -272,13 +272,6 @@ type t =
   ; payload : payload
   }
 
-let durable_content_to_yojson block =
-  try Ok (Checkpoint_codec.checkpoint_content_block_to_json block) with
-  | exn ->
-    Llm_provider.Reserved_exn.reraise_if_reserved exn;
-    Error ("durable content snapshot encoding failed: " ^ Printexc.to_string exn)
-;;
-
 let durable_content_of_yojson json =
   let decoded =
     try
@@ -290,7 +283,7 @@ let durable_content_of_yojson json =
       Error ("durable content snapshot decoding failed: " ^ Printexc.to_string exn)
   in
   let* block = decoded in
-  let* canonical = durable_content_to_yojson block in
+  let canonical = Checkpoint_codec.checkpoint_content_block_to_json block in
   if Yojson.Safe.equal json canonical
   then Ok block
   else Error "durable content snapshot is not in canonical closed form"
@@ -298,7 +291,7 @@ let durable_content_of_yojson json =
 
 let validate_content_block block =
   let open Llm_provider.Types in
-  let* json = durable_content_to_yojson block in
+  let json = Checkpoint_codec.checkpoint_content_block_to_json block in
   let* () = validate_json ~context:"canonical content snapshot" json in
   (* Losslessness is a property of the durable form, and
      [durable_content_of_yojson] already requires the block it decodes to

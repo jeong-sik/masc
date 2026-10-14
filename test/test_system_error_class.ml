@@ -114,6 +114,50 @@ let test_classify_exn_fallback_to_string () =
   check_tag "Failure falls through to other" "other"
     (S.classify_exn (Failure "unrelated"))
 
+(* ---- errno_of_unix_error / errno_of_exn ---- *)
+
+let errno = testable (fun fmt _ -> Fmt.string fmt "<errno>") ( = )
+
+let test_errno_of_unix_error_named () =
+  List.iter
+    (fun (code, expected) ->
+      check errno "named errno" expected (S.errno_of_unix_error code))
+    [ Unix.EMFILE, S.Emfile
+    ; Unix.ENFILE, S.Enfile
+    ; Unix.ENOSPC, S.Enospc
+    ; Unix.EACCES, S.Eacces
+    ; Unix.EPERM, S.Eperm
+    ; Unix.ENOENT, S.Enoent
+    ; Unix.ECONNREFUSED, S.Econnrefused
+    ; Unix.ETIMEDOUT, S.Etimedout
+    ; Unix.EPIPE, S.Epipe
+    ; Unix.EADDRINUSE, S.Eaddrinuse
+    ; Unix.EADDRNOTAVAIL, S.Eaddrnotavail
+    ]
+
+(* Every other constructor, including the payload-carrying EUNKNOWNERR, keeps
+   its code so a caller that wants it loses nothing. *)
+let test_errno_of_unix_error_other_keeps_code () =
+  List.iter
+    (fun code ->
+      check errno "other errno keeps its code" (S.Other_errno code)
+        (S.errno_of_unix_error code))
+    [ Unix.EAGAIN; Unix.EWOULDBLOCK; Unix.EXDEV; Unix.EUNKNOWNERR 4242 ]
+
+let test_errno_of_exn () =
+  check (option errno) "Unix_error is typed" (Some S.Enospc)
+    (S.errno_of_exn (Unix.Unix_error (Unix.ENOSPC, "write", "/tmp")));
+  check (option errno) "Sys_error text is not parsed" None
+    (S.errno_of_exn (Sys_error "No space left on device"));
+  check (option errno) "Failure is not an errno" None
+    (S.errno_of_exn (Failure "unrelated"))
+
+(* ENOENT has no class of its own in [t]; classify_exn reads the text, which
+   names no class, so the result is [Other]. *)
+let test_classify_exn_enoent_is_other () =
+  check_tag "ENOENT" "other"
+    (S.classify_exn (Unix.Unix_error (Unix.ENOENT, "open", "/missing")))
+
 (* ---- to_short_tag / to_raw_text contract ---- *)
 
 let test_to_short_tag_all_variants () =
@@ -161,6 +205,13 @@ let () =
             test_classify_exn_errno_priority_over_string
         ; test_case "fallback to classify_string" `Quick
             test_classify_exn_fallback_to_string
+        ; test_case "ENOENT is Other" `Quick test_classify_exn_enoent_is_other
+        ] )
+    ; ( "errno"
+      , [ test_case "named errnos" `Quick test_errno_of_unix_error_named
+        ; test_case "other errno keeps its code" `Quick
+            test_errno_of_unix_error_other_keeps_code
+        ; test_case "errno_of_exn" `Quick test_errno_of_exn
         ] )
     ; ( "wire format"
       , [ test_case "to_short_tag covers all variants" `Quick

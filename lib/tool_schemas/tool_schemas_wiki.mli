@@ -4,6 +4,7 @@ type operation =
   | Create_page
   | Update_page
   | Search_pages
+  | Lint_pages
 [@@deriving enumerate]
 
 type definition =

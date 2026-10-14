@@ -121,11 +121,9 @@ let transcript_files_under dir =
           |> List.map (Filename.concat dir)))
 ;;
 
-(* The runtime writes keeper stores under the cluster's keepers directory; reading
-   the default cluster's instead finds nothing on any other cluster and passes
-   without having read a row. *)
+(* The keepers directory the runtime writes keeper stores under. *)
 let runtime_keepers_dir ~base_path =
-  Workspace.keepers_runtime_dir_for_base_path base_path
+  Common.keepers_runtime_dir_of_base ~base_path
 ;;
 
 let keeper_meta_store =
@@ -518,11 +516,14 @@ let store_directories root =
          match Fs_compat.exact_path_kind ~follow:false path with
          | Fs_compat.Exact_kind Unix.S_DIR -> Ok (path :: paths)
          | Fs_compat.Exact_kind Unix.S_REG -> Ok paths
-         | Fs_compat.Exact_missing | Fs_compat.Exact_unknown
-         | Fs_compat.Exact_kind _ -> Error ("store entry cannot be inspected safely: " ^ path))
+         | Fs_compat.Exact_missing | Fs_compat.Exact_unknown | Fs_compat.Exact_kind (Unix.S_CHR)
+         | Fs_compat.Exact_kind (Unix.S_BLK) | Fs_compat.Exact_kind (Unix.S_LNK)
+         | Fs_compat.Exact_kind (Unix.S_FIFO) | Fs_compat.Exact_kind (Unix.S_SOCK) -> Error ("store entry cannot be inspected safely: " ^ path))
          (Ok [])
        |> Result.map List.rev)
-  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ ->
+  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind (Unix.S_REG) | Fs_compat.Exact_kind (Unix.S_CHR)
+  | Fs_compat.Exact_kind (Unix.S_BLK) | Fs_compat.Exact_kind (Unix.S_LNK)
+  | Fs_compat.Exact_kind (Unix.S_FIFO) | Fs_compat.Exact_kind (Unix.S_SOCK) ->
     Error ("store directory cannot be inspected safely: " ^ root)
 ;;
 
@@ -656,7 +657,10 @@ let turn_fragment_store =
                                 | Ok _ -> count_row report (Ok ())
                                 | Error Keeper_turn_fragments.Incomplete_line ->
                                   report
-                                | Error error ->
+                                | Error
+                                    (( Keeper_turn_fragments.Not_json _
+                                     | Keeper_turn_fragments.Malformed _
+                                     | Keeper_turn_fragments.Message_rejected _ ) as error) ->
                                   count_row
                                     report
                                     (Error

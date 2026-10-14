@@ -242,26 +242,6 @@ let test_config_dir_does_not_chmod_ancestor () =
   Alcotest.(check int) "workspace mode is unchanged" 0o755 mode
 ;;
 
-let test_config_dir_is_cluster_scoped () =
-  with_temp_base @@ fun base_path default_config ->
-  let config =
-    { default_config with
-      backend_config = { Workspace.cluster_name = "identity-cluster" }
-    }
-  in
-  mkdir_p (Workspace.keepers_runtime_dir config);
-  let keeper_name = "same-name" in
-  let cluster_path = Github.config_dir ~config ~keeper_name in
-  let default_path = Github.config_dir ~config:default_config ~keeper_name in
-  Alcotest.(check bool) "cluster identity is not the default identity" true
-    (not (String.equal cluster_path default_path));
-  (match Github.ensure_config_dir ~config ~keeper_name with
-   | Error message -> Alcotest.fail message
-   | Ok path -> Alcotest.(check string) "cluster path is authoritative" cluster_path path);
-  Alcotest.(check bool) "default cluster identity remains absent" false
-    (Sys.file_exists default_path)
-;;
-
 let test_config_dir_rejects_symlink () =
   with_temp_base @@ fun base_path config ->
   let keeper_name = "directory-symlink-test" in
@@ -710,26 +690,17 @@ let test_stored_token_follows_a_relogin () =
   | Ok token -> Alcotest.(check string) "second login is what is read" "gho_second" token
 ;;
 
-(* The login writes through the cluster-aware [config_dir]. The token read and
-   the redaction file list have to name that same directory, or a non-default
-   cluster's login reads as absent and its token goes unredacted. *)
-let test_stored_token_reads_the_cluster_directory () =
-  with_temp_base @@ fun base_path default_config ->
-  let cluster_name = "token-cluster" in
-  let config =
-    { default_config with backend_config = { Workspace.cluster_name } }
-  in
+(* The token read and the redaction file list name the directory the login
+   wrote through [config_dir], or the login reads as absent and its token
+   goes unredacted. *)
+let test_stored_token_reads_the_login_directory () =
+  with_temp_base @@ fun base_path config ->
   mkdir_p (Workspace.keepers_runtime_dir config);
-  let keeper_name = "token-cluster-keeper" in
-  write_hosts ~config ~keeper_name "github.com:\n  oauth_token: gho_cluster\n";
+  let keeper_name = "token-keeper" in
+  write_hosts ~config ~keeper_name "github.com:\n  oauth_token: gho_login\n";
   (match Github.stored_token ~config ~keeper_name ~hostname:"github.com" with
    | Error message -> Alcotest.fail message
-   | Ok token -> Alcotest.(check string) "the cluster's login is read" "gho_cluster" token);
-  (match Github.stored_token ~config:default_config ~keeper_name ~hostname:"github.com" with
-   | Ok token -> Alcotest.fail ("the default cluster answered with " ^ token)
-   | Error _ -> ());
-  Unix.putenv "MASC_CLUSTER_NAME" cluster_name;
-  Fun.protect ~finally:(fun () -> Unix.putenv "MASC_CLUSTER_NAME" "") @@ fun () ->
+   | Ok token -> Alcotest.(check string) "the login is read" "gho_login" token);
   Alcotest.(check (list string)) "the redaction file is the one the login wrote"
     [ Filename.concat (Github.config_dir ~config ~keeper_name) "hosts.yml" ]
     (Github.secret_files_of_base_path ~base_path ~keeper_name)
@@ -883,10 +854,6 @@ let () =
             `Quick
             test_config_dir_does_not_chmod_ancestor
         ; Alcotest.test_case
-            "config directory is cluster scoped"
-            `Quick
-            test_config_dir_is_cluster_scoped
-        ; Alcotest.test_case
             "config directory rejects symlink"
             `Quick
             test_config_dir_rejects_symlink
@@ -963,9 +930,9 @@ let () =
             `Quick
             test_stored_token_follows_a_relogin
         ; Alcotest.test_case
-            "stored_token reads the cluster directory"
+            "stored_token reads the login directory"
             `Quick
-            test_stored_token_reads_the_cluster_directory
+            test_stored_token_reads_the_login_directory
         ; Alcotest.test_case
             "persistent container commits under the keeper name without login"
             `Quick

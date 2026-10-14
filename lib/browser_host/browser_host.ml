@@ -222,11 +222,10 @@ let resolve_config ~base_path ~server ~token_file =
 
 let read_token path =
   try
-    let token = In_channel.with_open_bin path In_channel.input_all |> String.trim in
-    if String.length token < 16
-       || not (String.for_all (fun c -> Char.code c >= 33 && Char.code c <= 126) token)
-    then Error "lane token file is empty or invalid"
-    else Ok token
+    match Browser_lane.Lane_token.of_text (In_channel.with_open_bin path In_channel.input_all) with
+    | Ok token -> Ok (Browser_lane.Lane_token.to_string token)
+    | Error (Browser_lane.Lane_token.Too_short | Browser_lane.Lane_token.Not_printable) ->
+      Error "lane token file is empty or invalid"
   with Sys_error _ -> Error "cannot read lane token file"
 
 let endpoint server path =
@@ -514,7 +513,11 @@ let rec publish ?(resent = false) link payload =
   | Delivered -> Ok ()
   | Undelivered (Refused_by_server error) when resent -> Error (Refused_on_resend error)
   | Undelivered (Token_unreadable detail) when resent -> Error (Token_unreadable_on_resend detail)
-  | Undelivered why -> Error why
+  | Undelivered
+      (( Refused_by_server _ | Not_acknowledged | Issuer_moved
+       | Token_unreadable _ | Token_unreadable_on_resend _
+       | Refused_on_resend _ | Unacknowledged_as_host_ended _
+       | Browser_left_first | Stopped_first ) as why) -> Error why
   | Unreached error ->
       Log.Transport.warn "browser-host: result delivery failed: %s" (http_error_message error);
       Eio.Time.sleep link.clock reconnect_delay_sec;
@@ -563,7 +566,9 @@ let rec next_command link =
              | Some Browser_lane.Client_retired -> Client_retired
              | Some Browser_lane.Client_identity_changed | None -> Client_rejected (Some code))
         | Http_status 400 -> Client_rejected None
-        | error -> Poll_unanswered error) in
+        | (Http_status _ | Lane_refused _ | Transport_failed | No_response
+          | Response_invalid | Response_too_large | Request_timed_out) as error ->
+            Poll_unanswered error) in
     decode_poll response |> Result.map_error (fun detail -> Poll_failed detail)
   in
   match asked with

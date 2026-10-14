@@ -26,26 +26,20 @@ let browser_goto = schema_of_name "masc_browser_goto"
 let browser_act = schema_of_name "masc_browser_act"
 let browser_interact = schema_of_name "masc_browser_interact"
 let browser_instruct = schema_of_name "masc_browser_instruct"
-let msx_load = schema_of_name "masc_msx_load"
-let msx_eject = schema_of_name "masc_msx_eject"
-let msx_export_disk = schema_of_name "masc_msx_export_disk"
-let msx_save = schema_of_name "masc_msx_save"
-let msx_restore = schema_of_name "masc_msx_restore"
-let msx_change_disk = schema_of_name "masc_msx_change_disk"
-let msx_screen = schema_of_name "masc_msx_screen"
-let msx_meta = schema_of_name "masc_msx_meta"
-let msx_checkpoint_info = schema_of_name "masc_msx_checkpoint_info"
+(* Every MSX tool's definition is read here, at module initialization, so a
+   tool added to [Msx_tool] without its TOML refuses the boot. The table holds
+   every tool by construction, so [List.assoc] finds each one. *)
+let msx_schema =
+  let table = List.map (fun tool -> tool, schema_of_name (Msx_tool.name tool)) Msx_tool.all in
+  fun tool -> List.assoc tool table
+;;
+
 let portrait_read = schema_of_name "keeper_portrait_read"
 let candle_balance = schema_of_name "keeper_candle_balance"
 let candle_catalog = schema_of_name "keeper_candle_catalog"
 let candle_purchase = schema_of_name "keeper_candle_purchase"
 let candle_equip = schema_of_name "keeper_candle_equip"
 let candle_gift = schema_of_name "keeper_candle_gift"
-let msx_press = schema_of_name "masc_msx_press"
-let msx_step = schema_of_name "masc_msx_step"
-let msx_step_until_change = schema_of_name "masc_msx_step_until_change"
-let msx_peek = schema_of_name "masc_msx_peek"
-let msx_ram_diff = schema_of_name "masc_msx_ram_diff"
 
 let dos_load = schema_of_name "masc_dos_load"
 let dos_meta = schema_of_name "masc_dos_meta"

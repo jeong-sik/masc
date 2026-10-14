@@ -10,9 +10,9 @@ val summary_json :
     [operator_disposition_reason] are [null]. The fields are the ones every
     trust projection writes, from the same serializer. *)
 val unread_keeper_json :
-  disposition:string ->
-  disposition_reason:string ->
-  attention_reason:string ->
+  disposition:Keeper_trust_disposition.t ->
+  disposition_reason:Keeper_runtime_trust_snapshot_core.disposition_reason ->
+  attention_reason:Keeper_runtime_trust_snapshot_core.attention_reason ->
   next_human_action:string ->
   Yojson.Safe.t
 

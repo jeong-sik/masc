@@ -122,6 +122,12 @@ Operational meaning:
 - `max_concurrent_panels` and `max_concurrent_judges` are retired. They never
   controlled execution and must be removed from authored TOML; configured
   model identities define the exact Fusion fan-out set.
+- `[maintenance]` is also read from this file, by
+  `Server_maintenance_toml_config.resolve_retention_days` at each JSONL
+  prune. Retention edits therefore take effect on the next prune without a
+  restart; process env still wins over the key, and a broken table falls
+  back to the default with a warning instead of blocking the prune.
+  (Tool-metrics hydration reads a different store and stays env-only.)
 
 ## Rules for New TOML Files
 

@@ -471,8 +471,6 @@ module For_testing : sig
     Agent_core.Agent.t option ->
     Agent_core.Checkpoint.t option
 
-  val success_selected_model_raw : Runtime_candidate.t -> string option
-
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_core.Types.api_response -> bool) ->

@@ -119,11 +119,17 @@ let board_attention_quarantine_requeue_result
 ;;
 
 let task_recovery_failure_class = function
-  | Masc_domain.Task _ | Masc_domain.Agent _ -> Tool_result.Workflow_rejection
-  | Masc_domain.Auth _ -> Tool_result.Policy_rejection
+  | Masc_domain.Task (Task_error.NotFound _) | Masc_domain.Agent _
+  | Masc_domain.Task (Task_error.AlreadyClaimed _) | Masc_domain.Task (Task_error.NotClaimed _)
+  | Masc_domain.Task (Task_error.InvalidState _) | Masc_domain.Task (Task_error.InvalidId _)
+  | Masc_domain.Task (Task_error.VerificationSuperseded _) -> Tool_result.Workflow_rejection
+  | Masc_domain.Auth (Auth_error.Unauthorized _) | Masc_domain.Auth (Auth_error.Forbidden _)
+  | Masc_domain.Auth (Auth_error.SameOriginBlocked) | Masc_domain.Auth (Auth_error.TokenExpired _)
+  | Masc_domain.Auth (Auth_error.InvalidToken _) -> Tool_result.Policy_rejection
   | Masc_domain.System (Masc_domain.System_error.LockContention _) ->
     Tool_result.Dependency_unavailable
-  | Masc_domain.System _ -> Tool_result.Runtime_failure
+  | Masc_domain.System (System_error.NotInitialized) | Masc_domain.System (System_error.IoError _)
+  | Masc_domain.System (System_error.ValidationError _) -> Tool_result.Runtime_failure
 ;;
 
 let task_recovery_result ~tool_name ~start_time (ctx : _ context) args =

@@ -28,21 +28,17 @@ val browser_lane_dirname : string
 (** The browser lane's directory under the MASC directory: its token, the
     BiDi host's record and lock, the launcher, the automation drivers'
     records and profiles. Value is ["browser-lane"].
-    [connectors/browser/install-host.sh] writes the token and the launcher
-    under the same name, so the two change together. *)
+    [masc browser-lane-setup] writes the token and the launcher under the same
+    name in every mode, so the two change together. *)
 
 val browser_lane_token_name : string
 (** The lane token's file name in {!browser_lane_dirname}. Value is
-    ["token"]. [install-host.sh] writes it under the same name. *)
+    ["token"]. [masc browser-lane-setup] writes it under the same name. *)
 
 val masc_dir_from_base_path : base_path:string -> string
 (** [masc_dir_from_base_path ~base_path] is
     [Filename.concat base_path masc_dirname]. Canonical way to spell
     [<base_path>/.masc]. *)
-
-val clusters_dir_from_base_path : base_path:string -> string
-(** [<base>/.masc/clusters], the directory whose entries are the non-default
-    clusters' workspace roots. The single place that names it. *)
 
 val keepers_runtime_dirname : string
 (** OUTPUT root segment for server-written keeper runtime state. Single literal
@@ -77,9 +73,9 @@ val fresh_config_root_keeper_seed_target : string -> string option
     and embedded roots agree on the roster. *)
 
 val keepers_runtime_dir_of_base : base_path:string -> string
-(** [<base_path>/.masc/keepers] for callers holding only a [base_path]
-    (default cluster). Low-level SSOT that avoids the Workspace dependency cycle
-    the cluster-aware [Workspace.keepers_runtime_dir] would impose. *)
+(** [<base_path>/.masc/keepers] for callers holding only a [base_path].
+    Low-level SSOT that avoids the Workspace dependency cycle
+    [Workspace.keepers_runtime_dir] would impose. *)
 
 type keeper_runtime_store =
   | Keeper_tool_usage

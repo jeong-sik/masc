@@ -18,7 +18,6 @@ type deletion_failure =
 type summary =
   { removed : int
   ; retained_references : int
-  ; candidate_files : int
   ; deletion_failures : deletion_failure list
   }
 
@@ -114,7 +113,11 @@ let regular_trace_files dir =
            let path = Filename.concat dir entry in
            (match Unix.lstat path with
             | { Unix.st_kind = Unix.S_REG; _ } -> Some path
-            | _ -> None
+            | { Unix.st_kind =
+                  ( Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+                  | Unix.S_SOCK )
+              ; _
+              } -> None
             | exception Unix.Unix_error _ -> None)
          else None))
 ;;
@@ -147,7 +150,6 @@ let prune ~config ~keeper_name () =
          Ok
            { removed
            ; retained_references = String_set.cardinal references
-           ; candidate_files = List.length candidates
            ; deletion_failures = List.rev deletion_failures
            }))
 ;;

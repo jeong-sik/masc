@@ -119,7 +119,7 @@ let can_transition_to from to_ =
   else (
     match to_ with
     | Abandoned _ -> not (is_terminal_status from)
-    | other -> List.mem other (valid_plan_transitions from))
+    | (Planning | Executing | Replanning | Completed) as other -> List.mem other (valid_plan_transitions from))
 ;;
 
 let transition_plan t new_status =
@@ -177,7 +177,7 @@ let current_step t =
     (fun (s : step) ->
        match s.status with
        | Running -> true
-       | _ -> false)
+       | Pending | Done | Skipped | Failed _ -> false)
     ordered
   |> function
   | Some _ as r -> r
@@ -186,7 +186,7 @@ let current_step t =
       (fun (s : step) ->
          match s.status with
          | Pending -> true
-         | _ -> false)
+         | Running | Done | Skipped | Failed _ -> false)
       ordered
 ;;
 
@@ -222,7 +222,7 @@ let deps_satisfied t step_id =
       (fun dep_id ->
          match find_step t dep_id with
          | Some { status = Done; _ } -> true
-         | _ -> false)
+         | Some { status = (Pending | (Running | (Skipped | Failed _)));_} | None -> false)
       step.depends_on
 ;;
 

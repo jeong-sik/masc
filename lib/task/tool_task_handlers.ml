@@ -74,7 +74,8 @@ let log_task_transition_failed ~agent_name err =
   match err with
   | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
       task_agent_log_warn ~agent_name "task transition failed: %s" message
-  | _ -> task_agent_log_error ~agent_name "task transition failed: %s" message
+  | Masc_error.Task (Masc_error.Task_error.NotFound _ | (Masc_error.Task_error.AlreadyClaimed _ | (Masc_error.Task_error.NotClaimed _ | (Masc_error.Task_error.InvalidId _ | Masc_error.Task_error.VerificationSuperseded _))))
+  | Masc_error.Agent _ | Masc_error.Auth _ | Masc_error.System _ -> task_agent_log_error ~agent_name "task transition failed: %s" message
 
 include Tool_task_payloads
 
@@ -437,7 +438,15 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
              ()
          | Error (Workspace.Goal_source_unavailable unavailable) ->
            Goal_unavailable_envelope.tool_result ~tool_name ~start_time unavailable
-         | Error err ->
+         | Error
+             (( Workspace.Goal_lock_failed _
+              | Workspace.Unknown_goal _
+              | Workspace.Backlog_read_failed _
+              | Workspace.Goal_link_write_failed _
+              | Workspace.Backlog_write_failed _
+              | Workspace.Unexpected_error _
+              | Workspace.Unknown_predecessor _
+              | Workspace.Predecessor_not_terminal _ ) as err) ->
            Tool_result.error
              ~failure_class:(match err with
                | Workspace.Unknown_goal _ | Workspace.Unknown_predecessor _
@@ -492,7 +501,14 @@ let handle_set_goal ~tool_name ~start_time ctx args =
           ()
       | Error (Task_goal_assignment.Goal_source_unavailable unavailable) ->
         Goal_unavailable_envelope.tool_result ~tool_name ~start_time unavailable
-      | Error err ->
+      | Error
+          (( Task_goal_assignment.Goal_lock_failed _
+           | Task_goal_assignment.Backlog_read_failed _
+           | Task_goal_assignment.Unknown_task _
+           | Task_goal_assignment.Unknown_goal _
+           | Task_goal_assignment.Task_finished _
+           | Task_goal_assignment.Already_assigned _
+           | Task_goal_assignment.Link_write_failed _ ) as err) ->
         Tool_result.error
           ~failure_class:(match err with
             | Task_goal_assignment.Unknown_task _ | Task_goal_assignment.Unknown_goal _
@@ -596,7 +612,13 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
          ()
      | Error (Workspace.Batch_goal_source_unavailable unavailable) ->
        Goal_unavailable_envelope.tool_result ~tool_name ~start_time unavailable
-     | Error err ->
+     | Error
+         (( Workspace.Batch_goal_lock_failed _
+          | Workspace.Batch_unknown_goal _
+          | Workspace.Batch_backlog_read_failed _
+          | Workspace.Batch_goal_link_write_failed _
+          | Workspace.Batch_backlog_write_failed _
+          | Workspace.Batch_unexpected_error _ ) as err) ->
        Tool_result.error
          ~failure_class:(match err with
            | Workspace.Batch_unknown_goal _ -> Tool_result.Workflow_rejection

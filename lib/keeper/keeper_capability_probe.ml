@@ -124,7 +124,24 @@ let detail_of_http_error (err : Llm_provider.Http_client.http_error) : string =
       ; message
       } ->
     Printf.sprintf "provider failure: %s (%s)" message reason
-  | Llm_provider.Http_client.ProviderFailure { message; _ } ->
+  | Llm_provider.Http_client.ProviderFailure
+      { kind =
+          ( Llm_provider.Http_client.Capacity_exhausted _
+          | Llm_provider.Http_client.Hard_quota _
+          | Llm_provider.Http_client.Capability_mismatch _
+          | Llm_provider.Http_client.Cli_policy_invalid _
+          | Llm_provider.Http_client.Cli_startup_failed _
+          | Llm_provider.Http_client.Provider_parse_error _
+          | Llm_provider.Http_client.Provider_wire_error _
+          | Llm_provider.Http_client.Provider_reported_error _
+          | Llm_provider.Http_client.Provider_interrupted
+          | Llm_provider.Http_client.Response_body_too_large _
+          | Llm_provider.Http_client.Empty_completion _
+          | Llm_provider.Http_client.Context_overflow _
+          | Llm_provider.Http_client.Repeating_generation _
+          | Llm_provider.Http_client.Unknown_provider_failure { reason = None } )
+      ; message
+      } ->
     Printf.sprintf "provider failure: %s" message
 ;;
 
@@ -696,5 +713,13 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
            | Ok turn -> Ok (classify_official_client_turn ~model_facing_name ~seen
                ~elapsed_s:(now () -. started) ~text:turn.text
                ~dynamic_tool_calls:(List.length !seen))))
-     | Some runtime -> Error (Not_muse_lane (Runtime_execution.label runtime.execution)))
+     | Some
+         ({ Runtime_instance.execution =
+              ( Runtime_execution.Agent_core _
+              | Runtime_execution.Codex_app_server _
+              | Runtime_execution.Antigravity_cli _
+              | Runtime_execution.Claude_code _ )
+          ; _
+          } as runtime) ->
+       Error (Not_muse_lane (Runtime_execution.label runtime.execution)))
 ;;

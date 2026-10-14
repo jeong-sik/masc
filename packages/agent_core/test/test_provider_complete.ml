@@ -48,25 +48,48 @@ let content_has_reasoning =
     | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
 ;;
 
+(* A replayed assistant message carries both the reasoning source and the
+   request-prefix digest of the request that produced it. The digest is what
+   [Backend_anthropic.transmitted_reasoning_prefix] records for the messages
+   that precede it, so each assistant message is stamped over its stamped
+   predecessors, the way the record side does. Non-Anthropic kinds record no
+   prefix and keep the source alone. *)
 let stamp_reasoning_history config messages =
   let source =
     match Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config config with
     | Ok source -> source
     | Error detail -> Alcotest.fail ("invalid reasoning source fixture: " ^ detail)
   in
-  List.map
-    (fun (message : message) ->
-       match message.role, content_has_reasoning message.content with
-       | Assistant, true ->
-         let metadata =
-           match Reasoning_source.add source message.metadata with
-           | Ok metadata -> metadata
-           | Error detail -> Alcotest.fail ("invalid reasoning fixture: " ^ detail)
-         in
-         { message with metadata }
-       | (Assistant | System | User | Tool), false | (System | User | Tool), true ->
-         message)
-    messages
+  let stamped_rev =
+    List.fold_left
+      (fun preceding (message : message) ->
+         match message.role, content_has_reasoning message.content with
+         | Assistant, true ->
+           let metadata =
+             match Reasoning_source.add source message.metadata with
+             | Ok metadata -> metadata
+             | Error detail -> Alcotest.fail ("invalid reasoning fixture: " ^ detail)
+           in
+           let prefix =
+             BA.transmitted_reasoning_prefix
+               ~config
+               ~messages:(List.rev preceding)
+               ~tools:[]
+               ~response_content:message.content
+               ()
+           in
+           let metadata =
+             match prefix with
+             | Some prefix -> Reasoning_prefix.metadata prefix @ metadata
+             | None -> metadata
+           in
+           { message with metadata } :: preceding
+         | (Assistant | System | User | Tool), false | (System | User | Tool), true ->
+           message :: preceding)
+      []
+      messages
+  in
+  List.rev stamped_rev
 ;;
 
 (* ── Anthropic build_request ─────────────────────────── *)

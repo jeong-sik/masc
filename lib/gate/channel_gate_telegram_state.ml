@@ -22,6 +22,4 @@ include
       (* The sidecar long-polls getUpdates rather than sleeping between
          passes, so it reports no interval. *)
       let default_poll_interval_sec = 0.0
-
-      let extra_status_fields _live_status = []
     end)

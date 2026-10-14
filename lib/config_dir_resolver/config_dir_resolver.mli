@@ -214,18 +214,6 @@ val wiki_dir : base_path:string -> string
 (** [<base_path>/.masc/wiki/]. The wiki's pages with its [index.md] and
     [log.md]. *)
 
-val tool_events_dir : base_path:string -> string
-(** [<base_path>/.masc/tool-events/]. The dated tool assignment and tool
-    call events of [Tool_assignment_telemetry]. *)
-
-val keeper_wake_payload_dir : base_path:string -> string
-(** [<base_path>/.masc/keeper-wake-payload/]. The dated wake payload rows
-    of [Dashboard_harness_health]. *)
-
-val verdicts_dir : base_path:string -> string
-(** [<base_path>/.masc/verdicts/]. The dated verdict and human-label rows
-    of [Eval_calibration]. *)
-
 val event_queue_bulk_backups_dir : base_path:string -> string
 (** [<base_path>/.masc/event-queue-bulk-backups/]. One backup file per
     bulk event-queue operation, written before the rows change. *)

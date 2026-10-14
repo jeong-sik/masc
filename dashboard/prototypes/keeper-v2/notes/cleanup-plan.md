@@ -94,7 +94,7 @@
 - Internal Agents = Exact lane(librarian_exact · hitl_auto_judge · board_attention_exact) + verification + fusion run, 필터 5종 · 펼치면 input/result 증거 · verification 은 도구 disposition/ms/IO.
 - 감사 무결성 = keeper별 hash-chain verify(엔트리 수 · 정상/실패 · 첫 단절 index · 상세).
 - 비용 원장 = date-split `.masc/costs/YYYY-MM/DD.jsonl`, 정확 신원 병합, `state`(구 status), 다중 모델 집계엔 model 미표기, dup/malformed 진단.
-- Settings paths 에 **상태 스토어 레이아웃** 블록(root-state.json · costs · telemetry · gate · keepers · audit-approvals) + FD 압박 오버라이드 단일화 고지.
+- Settings paths 에 **상태 스토어 레이아웃** 블록(state.json · costs · telemetry · gate · keepers · audit-approvals) + FD 압박 오버라이드 단일화 고지.
 - Settings runtime 에 `turn.stream_idle_timeout_sec` floor 600s · 모델 카탈로그(`agent_core/models.toml` / `AGENT_CORE_MODEL_CATALOG`).
 - 프롬프트북: 챕터별 `rev` (본문+변수계약 SHA256) + override envelope 설명(contract drift = fail-closed).
 

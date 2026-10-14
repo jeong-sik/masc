@@ -130,7 +130,7 @@ let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~becaus
            timeout measurement counts as a timeout. *)
         t.timed_out_total <- t.timed_out_total + 1;
         Timed_out
-      | outcome -> outcome)
+      | (Displaced | Answered _) as outcome -> outcome)
 
 let settle t ~keeper_name ~tool_call_id decision =
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in

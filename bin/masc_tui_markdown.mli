@@ -187,7 +187,7 @@ val render_lexed_line_with_spans :
     gutters, styling and band padding have no semantic range. The document
     caller retains the source fence and logical-line identity. *)
 
-type generated_field = Fence_language | Mermaid_diagnostic
+type generated_field = Fence_language | Mermaid_diagnostic | Alphatex_diagnostic
 
 type semantic_origin =
   | Original of source_range

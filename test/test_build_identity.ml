@@ -371,19 +371,17 @@ let test_executable_provenance_requires_exact_identity () =
       ; build_input_file_count = 12
       ; build_input_matches_head = true
       ; build_lock_sha256 = String.make 64 'b'
-      ; build_mode = "production"
       ; build_environment_path = "/verified"
       ; build_environment_path_identity_sha256 = String.make 64 '4'
       ; build_environment_path_executable_sha256 = String.make 64 '5'
       ; build_environment_path_executable_count = 73
       ; build_environment_profile_sha256 = String.make 64 'c'
-      ; build_producer = "scripts/build-dashboard-if-needed.sh --prepare-exact + --build-exact"
       ; build_node_executable = "/verified/node"
       ; build_node_executable_sha256 = String.make 64 '1'
       ; build_node_version = "v24.0.0"
       ; build_node_platform = "darwin"
       ; build_node_arch = "arm64"
-      ; build_package_manager_kind = "pnpm"
+      ; build_package_manager_kind = Build_identity.Pnpm
       ; build_package_manager_executable = "/verified/pnpm"
       ; build_package_manager_executable_sha256 = String.make 64 '2'
       ; build_pnpm_version = "10.0.0"
@@ -494,7 +492,46 @@ let test_executable_provenance_rejects_mismatches () =
     "executable provenance has unsupported fields"
     (map_top_fields
        (fun fields -> ("binary_commit", `String commit) :: fields)
-       exact)
+       exact);
+  (* The build receipt names one producer, one build mode and one of two
+     package managers. The parser reads the package manager into a type and
+     keeps neither of the other two, so a refusal here is the only place their
+     spelling is checked. *)
+  let map_receipt_field name value raw =
+    let replace_in (fields : (string * Yojson.Safe.t) list) key f =
+      List.map (fun (field, v) -> if String.equal field key then field, f v else field, v) fields
+    in
+    map_top_fields
+      (fun fields ->
+        replace_in fields "dashboard_assets" (function
+          | `Assoc asset_fields ->
+            `Assoc
+              (replace_in asset_fields "build_receipt" (function
+                 | `Assoc receipt_fields -> `Assoc (replace_in receipt_fields name (fun _ -> value))
+                 | _ -> Alcotest.fail "fixture build receipt is not an object"))
+          | _ -> Alcotest.fail "fixture dashboard assets is not an object"))
+      raw
+  in
+  check_error
+    "unknown package manager"
+    "executable provenance dashboard package-manager kind is invalid"
+    (map_receipt_field "package_manager_kind" (`String "npm") exact);
+  check_error
+    "non-production build"
+    "executable provenance dashboard build mode is unsupported"
+    (map_receipt_field "build_mode" (`String "development") exact);
+  check_error
+    "other producer"
+    "executable provenance dashboard build producer is unsupported"
+    (map_receipt_field "producer" (`String "make dashboard") exact);
+  match parse (map_receipt_field "package_manager_kind" (`String "corepack") exact) with
+  | Ok { Build_identity.dashboard_assets = Some assets; _ } ->
+    (match assets.build_package_manager_kind with
+     | Build_identity.Corepack -> ()
+     | Build_identity.Pnpm -> Alcotest.fail "a corepack receipt was read as pnpm")
+  | Ok { Build_identity.dashboard_assets = None; _ } ->
+    Alcotest.fail "a corepack receipt lost its dashboard assets"
+  | Error message -> Alcotest.fail ("a corepack receipt was refused: " ^ message)
 ;;
 
 let test_executable_provenance_binding_rejects_replacement_and_forgery () =

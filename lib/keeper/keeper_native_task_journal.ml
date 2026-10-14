@@ -120,31 +120,35 @@ let objects = ["metadata",metadata_sql;"observations",observations_sql;
   "immutable_observations",immutable_rows_sql;"no_delete_observations",no_delete_sql;
   "immutable_scope",immutable_scope_sql] |> List.sort compare
 let corrupt ?(line=0) detail = Error (Corrupt {line;detail})
-let sqlite_failure db operation rc = Store_unavailable
-  {operation;detail=Sqlite3.Rc.to_string rc ^ ": " ^ Sqlite3.errmsg db}
 let sql_error ~operation ~detail = Store_unavailable {operation;detail}
 let cleanup_report cleanup ~operation ~detail = cleanup := {operation;detail} :: !cleanup
+let sqlite_failure db operation rc =
+  Keeper_sqlite_observation_io.failure ~error:sql_error db ~operation rc
 let exec db operation sql = Keeper_sqlite_observation_io.exec ~error:sql_error db ~operation sql
 let statement db cleanup operation sql f =
   Keeper_sqlite_observation_io.statement ~error:sql_error
     ~on_cleanup:(cleanup_report cleanup) db ~operation sql f
 let bind db stmt values = Keeper_sqlite_observation_io.bind ~error:sql_error db stmt values
-let done_ db stmt operation =
-  match Sqlite3.step stmt with Sqlite3.Rc.DONE -> Ok () | rc -> Error (sqlite_failure db operation rc)
-let scalar db cleanup sql = statement db cleanup "scalar" sql (fun stmt ->
-  match Sqlite3.step stmt with
-  | Sqlite3.Rc.ROW -> let value = Sqlite3.column stmt 0 in let* () = done_ db stmt "scalar end" in Ok value
-  | rc -> Error (sqlite_failure db "scalar" rc))
-let integer = function Sqlite3.Data.INT value -> Ok value | _ -> corrupt "expected integer"
-let text = function Sqlite3.Data.TEXT value -> Ok value | _ -> corrupt "expected text"
+let step = Keeper_sqlite_observation_io.step
+let done_ db stmt operation = Keeper_sqlite_observation_io.done_ ~error:sql_error db stmt ~operation
+let scalar db cleanup sql =
+  Keeper_sqlite_observation_io.scalar ~error:sql_error ~on_cleanup:(cleanup_report cleanup) db sql
+let integer = function
+  | Sqlite3.Data.INT value -> Ok value
+  | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.FLOAT _ | Sqlite3.Data.TEXT _
+  | Sqlite3.Data.BLOB _ -> corrupt "expected integer"
+let text = function
+  | Sqlite3.Data.TEXT value -> Ok value
+  | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _
+  | Sqlite3.Data.BLOB _ -> corrupt "expected text"
 let schema_objects db cleanup = statement db cleanup "schema"
     "SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name" (fun stmt ->
-  let rec loop acc = match Sqlite3.step stmt with
-    | Sqlite3.Rc.DONE -> Ok (List.rev acc)
-    | Sqlite3.Rc.ROW ->
+  let rec loop acc = match step stmt with
+    | Done -> Ok (List.rev acc)
+    | Row ->
         let* name = text (Sqlite3.column stmt 0) in
         let* sql = text (Sqlite3.column stmt 1) in loop ((name,sql)::acc)
-    | rc -> Error (sqlite_failure db "schema" rc) in loop [])
+    | Failed rc -> Error (sqlite_failure db "schema" rc) in loop [])
 let validate_schema db cleanup =
   let* id = scalar db cleanup "PRAGMA application_id" |> fun result -> Result.bind result integer in
   let* version = scalar db cleanup "PRAGMA user_version" |> fun result -> Result.bind result integer in
@@ -180,8 +184,8 @@ let initialize db cleanup scope =
       done_ db stmt "initialize scope")
 let metadata db cleanup expected = statement db cleanup "scope"
     "SELECT singleton,schema,store_id,base_path,keeper_name,receiver_generation,session_id,next_sequence FROM metadata" (fun stmt ->
-  match Sqlite3.step stmt with
-  | Sqlite3.Rc.ROW ->
+  match step stmt with
+  | Row ->
       let* singleton = integer (Sqlite3.column stmt 0) in
       let* identity = text (Sqlite3.column stmt 1) in
       let* store_id = text (Sqlite3.column stmt 2) in
@@ -196,8 +200,8 @@ let metadata db cleanup expected = statement db cleanup "scope"
         corrupt "store belongs to another receiver scope or has invalid identity"
       else if next<1L || next>Int64.succ max_sequence then corrupt "invalid next sequence"
       else Ok (store_id,next)
-  | Sqlite3.Rc.DONE -> corrupt "missing store metadata"
-  | rc -> Error (sqlite_failure db "scope" rc))
+  | Done -> corrupt "missing store metadata"
+  | Failed rc -> Error (sqlite_failure db "scope" rc))
 let decode_row scope stmt =
   let* seq64 = integer (Sqlite3.column stmt 0) in
   let* seq =
@@ -209,7 +213,8 @@ let decode_row scope stmt =
   let* event_uuid = text (Sqlite3.column stmt 1) in
   let* recorded_at = match Sqlite3.column stmt 2 with
     | Sqlite3.Data.FLOAT f when Float.is_finite f -> Ok f
-    | _ -> corrupt ~line:seq "invalid timestamp" in
+    | Sqlite3.Data.NONE | Sqlite3.Data.NULL | Sqlite3.Data.INT _ | Sqlite3.Data.TEXT _
+    | Sqlite3.Data.BLOB _ | FLOAT _ -> corrupt ~line:seq "invalid timestamp" in
   let* payload = text (Sqlite3.column stmt 3) in
   let* observation =
     try Task.of_json (Yojson.Safe.from_string payload)
@@ -227,15 +232,15 @@ let full_audit db cleanup scope next =
   statement db cleanup "audit history"
     "SELECT seq,event_uuid,recorded_at,payload FROM observations ORDER BY seq" (fun stmt ->
       let uuids = Hashtbl.create 16 in
-      let rec loop expected acc = match Sqlite3.step stmt with
-        | Sqlite3.Rc.DONE ->
+      let rec loop expected acc = match step stmt with
+        | Done ->
             if expected=next then Ok (List.rev acc) else corrupt "metadata does not follow history"
-        | Sqlite3.Rc.ROW ->
+        | Row ->
             let* row = decode_row scope stmt in
             if Int64.of_int row.seq<>expected || Hashtbl.mem uuids row.observation.uuid then
               corrupt ~line:row.seq "noncontiguous sequence or duplicate UUID"
             else (Hashtbl.add uuids row.observation.uuid (); loop (Int64.succ expected) (row::acc))
-        | rc -> Error (sqlite_failure db "audit history" rc) in loop 1L [])
+        | Failed rc -> Error (sqlite_failure db "audit history" rc) in loop 1L [])
 let tail_boundary db cleanup next =
   let* highest = scalar db cleanup "SELECT COALESCE(MAX(seq),0) FROM observations" |> fun result -> Result.bind result integer in
   if Int64.succ highest=next then Ok () else corrupt "metadata does not follow last row"
@@ -257,7 +262,7 @@ let protect_io f =
 let regular_file ~create path =
   match Unix.lstat path with
   | {Unix.st_kind=Unix.S_REG;_} -> Ok ()
-  | _ -> corrupt "store path is not a regular file"
+  | {Unix.st_kind=Unix.(S_DIR|S_CHR|S_BLK|S_LNK|S_FIFO|S_SOCK);_} -> corrupt "store path is not a regular file"
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> if create then Ok () else Error Missing_store
 let with_database ?(io=sqlite_io) ~create reader f = protect_io (fun () ->
   let cleanup = ref [] in
@@ -291,11 +296,11 @@ let append_with_io io publication = protect_io (fun () ->
         let* previous = statement db cleanup "lookup UUID"
           "SELECT seq,event_uuid,recorded_at,payload FROM observations WHERE event_uuid=?" (fun stmt ->
             let* () = bind db stmt [Sqlite3.Data.TEXT publication.observation.uuid] in
-            match Sqlite3.step stmt with
-            | Sqlite3.Rc.DONE -> Ok None
-            | Sqlite3.Rc.ROW -> let* record = decode_row reader.scope stmt in
+            match step stmt with
+            | Done -> Ok None
+            | Row -> let* record = decode_row reader.scope stmt in
                 let* () = done_ db stmt "UUID uniqueness" in Ok (Some record)
-            | rc -> Error (sqlite_failure db "lookup UUID" rc)) in
+            | Failed rc -> Error (sqlite_failure db "lookup UUID" rc)) in
         let* result = match previous with
           | Some record when record.observation=publication.observation -> Ok (Replayed record)
           | Some _ -> Error (Conflicting_uuid publication.observation.uuid)

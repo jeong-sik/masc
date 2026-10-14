@@ -2380,7 +2380,9 @@ let masc_wiki_descriptor (definition : Tool_schemas_wiki.definition) =
       Transport_alias { projected_by = "keeper_wiki_read" }
     | Tool_schemas_wiki.Search_pages ->
       Transport_alias { projected_by = "keeper_wiki_search" }
-    | Tool_schemas_wiki.Create_page | Tool_schemas_wiki.Update_page -> Internal_name
+    | Tool_schemas_wiki.Create_page
+    | Tool_schemas_wiki.Update_page
+    | Tool_schemas_wiki.Lint_pages -> Internal_name
   in
   let input_schema_source, description, input_schema =
     match definition.keeper_projection with
@@ -2396,7 +2398,8 @@ let masc_wiki_descriptor (definition : Tool_schemas_wiki.definition) =
     match (definition : Tool_schemas_wiki.definition).operation with
     | Tool_schemas_wiki.List_pages
     | Tool_schemas_wiki.Read_page
-    | Tool_schemas_wiki.Search_pages -> Concurrent
+    | Tool_schemas_wiki.Search_pages
+    | Tool_schemas_wiki.Lint_pages -> Concurrent
     | Tool_schemas_wiki.Create_page | Tool_schemas_wiki.Update_page -> Serial
   in
   cluster_descriptor_with_schema_source

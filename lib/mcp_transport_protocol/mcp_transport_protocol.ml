@@ -111,10 +111,10 @@ let get_id req = match req.id with Some id -> id | None -> `Null
 
 let is_valid_request_id value = Result.is_ok (request_id_of_yojson value)
 
-let validate_initialize_params params =
+let initialize_protocol_version params =
   let ( let* ) = Result.bind in
   let require_string label = function
-    | Some (`String _) -> Ok ()
+    | Some (`String value) -> Ok value
     | None | Some `Null -> Error ("Missing " ^ label)
     | Some _ -> Error ("Invalid " ^ label)
   in
@@ -126,12 +126,12 @@ let validate_initialize_params params =
   match params with
   | None -> Error "Missing params"
   | Some (`Assoc _ as p) ->
-      let* () = require_string "protocolVersion" (get_field "protocolVersion" p) in
+      let* requested = require_string "protocolVersion" (get_field "protocolVersion" p) in
       let* client_info = require_assoc "clientInfo" (get_field "clientInfo" p) in
-      let* () = require_string "clientInfo.name" (get_field "name" client_info) in
-      let* () = require_string "clientInfo.version" (get_field "version" client_info) in
+      let* _ = require_string "clientInfo.name" (get_field "name" client_info) in
+      let* _ = require_string "clientInfo.version" (get_field "version" client_info) in
       let* _ = require_assoc "capabilities" (get_field "capabilities" p) in
-      Ok ()
+      Ok requested
   | Some _ -> Error "Invalid params: expected object"
 
 (* ── JSON-RPC response builders ──────────────────────────── *)

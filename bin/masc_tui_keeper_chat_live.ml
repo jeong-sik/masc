@@ -265,7 +265,29 @@ let custom_deltas_unvalidated fields =
       | Some value -> (
           match Projection.decode_acceptance value with
           | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
-          | Error error ->
+          | Error
+              (( Projection.Request_id_mismatch _
+               | Projection.Duplicate_acceptance
+               | Projection.Duplicate_reply_details
+               | Projection.Duplicate_terminal
+               | Projection.Event_before_acceptance _
+               | Projection.Event_identity_mismatch _
+               | Projection.Unknown_event_type _
+               | Projection.Unknown_custom_event _
+               | Projection.Tool_event_without_start _
+               | Projection.Tool_result_without_start _
+               | Projection.Quarantined_tool_result _
+               | Projection.Conflicting_tool_result _
+               | Projection.Reused_tool_execution_id _
+               | Projection.Duplicate_run_start
+               | Projection.Missing_run_start _
+               | Projection.Missing_acceptance
+               | Projection.Stream_interrupted _
+               | Projection.Missing_reply_details
+               | Projection.Missing_text_end
+               | Projection.Run_failed _
+               | Projection.Replayed_failed
+               | Projection.Replayed_cancelled ) as error) ->
               [ Undecodable (Projection.stream_error_to_string error) ]
           | Ok acceptance ->
               let admission =
@@ -496,8 +518,7 @@ let custom_deltas_unvalidated fields =
                   { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope }
               ]
           | _, _, _, Error detail -> [Undecodable detail]
-          | _ ->
-              [ Undecodable
+          | (Some _, Some _, None, Ok _) | (Some _, None, _, Ok _) | (None, _, _, Ok _) -> [ Undecodable
                   "KEEPER_REPLY_DETAILS needs reply, a known turn_outcome and \
                    a well-formed turn_ref"
               ]))
@@ -522,7 +543,30 @@ let custom_deltas fields =
        (match Projection.validate_custom_value ~name value with
         | Ok () -> custom_deltas_unvalidated fields
         | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
-        | Error error ->
+        | Error
+            (( Projection.Request_id_mismatch _
+             | Projection.Duplicate_acceptance
+             | Projection.Duplicate_reply_details
+             | Projection.Duplicate_terminal
+             | Projection.Event_before_acceptance _
+             | Projection.Event_identity_mismatch _
+             | Projection.Unknown_event_type _
+             | Projection.Unknown_custom_event _
+             | Projection.Tool_event_without_start _
+             | Projection.Tool_result_without_start _
+             | Projection.Quarantined_tool_result _
+             | Projection.Conflicting_tool_result _
+             | Projection.Reused_tool_execution_id _
+             | Projection.Duplicate_run_start
+             | Projection.Missing_run_start _
+             | Projection.Missing_acceptance
+             | Projection.Stream_interrupted _
+             | Projection.Missing_reply_details
+             | Projection.Missing_text_end
+             | Projection.Run_failed _
+             | Projection.Replayed_failed
+             | Projection.Replayed_cancelled
+             ) as error) ->
           [ Undecodable (Projection.stream_error_to_string error) ]))
   | None, _ | Some _, None -> custom_deltas_unvalidated fields
 

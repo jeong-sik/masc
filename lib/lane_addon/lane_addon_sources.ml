@@ -188,8 +188,12 @@ let interested sources activity = List.exists (function
    browser source, instead of joining the generic arm without a word. Reads
    (screen, peek, ram_diff, tabs, read) do not move a source. *)
 let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = function
-  | Misc_msx_load | Misc_msx_eject | Misc_msx_restore | Misc_msx_change_disk
-  | Misc_msx_press | Misc_msx_step | Misc_msx_step_until_change -> Machine_changed Machine_lane.Msx
+  | Misc_msx tool ->
+    (match tool with
+     | Msx_tool.(Load | Eject | Restore | Change_disk | Press | Step | Step_until_change) ->
+       Machine_changed Machine_lane.Msx
+     | Msx_tool.(Export_disk | Save | Screen | Meta | Checkpoint_info | Peek | Ram_diff) ->
+       Tool_completed)
   | Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_press
   | Misc_dos_click | Misc_dos_type
   (* Handing the controller on changes no pixel, but the capture carries the
@@ -202,8 +206,6 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   (* BrowserInstruct acts only on the stagehand lane, which no lane addon
      observes, so no browser source it could move exists. *)
   | Misc_browser_instruct
-  | Misc_msx_export_disk | Misc_msx_save | Misc_msx_screen | Misc_msx_meta | Misc_msx_checkpoint_info
-  | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
   | Misc_dos_meta | Misc_dos_inventory | Misc_dos_screen | Misc_dos_peek | Misc_dos_save
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
@@ -251,7 +253,7 @@ let refresh_fingerprint interest captured =
 let dependencies binding =
   let* sources = parse binding in
   Ok (List.filter_map (function Lane_output {installation_id;_} -> Some installation_id
-    | _ -> None) sources |> List.sort_uniq String.compare)
+    | Fusion_run _ | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> None) sources |> List.sort_uniq String.compare)
 let validate binding =
   let* sources = parse binding in
   let ids = List.map source_id sources in

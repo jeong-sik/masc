@@ -889,6 +889,14 @@ val unlink_if_exists : string -> bool
     Missing paths are ignored.  Symlinks are unlinked, not followed. *)
 val remove_tree : string -> unit
 
+(** [subdirectory_names dir] names the entries of [dir] that are directories,
+    following symbolic links, in [String.compare] order. A missing [dir], or
+    one that is not a directory, has none. An entry that disappears while it
+    is read, or a symbolic link whose target is missing, is not a directory.
+    Other failures raise: [Unix.Unix_error] from a stat, [Sys_error] from
+    reading [dir]. *)
+val subdirectory_names : string -> string list
+
 (** Get realpath. *)
 val realpath : string -> string
 
@@ -1275,6 +1283,15 @@ val private_jsonl_cursor_success_receipt :
 
 val private_jsonl_transaction_error_to_string :
   private_jsonl_transaction_error -> string
+
+(** [true] for [Incomplete_transaction_tail _], and for
+    [Transaction_settlement_failed { primary = Transaction_failed
+    (Incomplete_transaction_tail _); _ }] (the tail error plus a descriptor
+    settlement failure). Every other error is [false], including a
+    [Transaction_settlement_failed] nested inside another one. A reader may
+    call {!recover_private_jsonl_durable_locked_result} for the [true] cases. *)
+val private_jsonl_transaction_error_is_incomplete_tail :
+  private_jsonl_transaction_error -> bool
 
 (** Stable sibling lock owned by the private JSONL transaction protocol. It is
     created with mode [0600] and must never be renamed or removed while the

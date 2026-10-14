@@ -24,8 +24,15 @@ open Tool_args
 
 let ( let* ) = Result.bind
 
+(* A refusal happens before the machine is touched: a malformed argument, a
+   machine someone else holds, a slot that does not exist. Left undeclared, a
+   failure reads as effect-outcome-unknown, and a Keeper turn that called this
+   tool ends over a slot name with a dot in it instead of reading the refusal
+   and trying again. The MSX tools declare the same (msx_machine_tools.ml,
+   [refuse]). *)
 let reject ?(data = `Null) ~tool_name ~start_time message =
-  Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection ~start_time ~data message
+  Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect ~start_time ~data message
 ;;
 
 let observation_fields (o : Dos_lane.observation) =
@@ -289,7 +296,7 @@ let entry_kind path =
     match (Unix.stat path).Unix.st_kind with
     | Unix.S_DIR -> Directory
     | Unix.S_REG -> Regular
-    | _ -> Other
+    | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> Other
   with
   | Unix.Unix_error _ | Sys_error _ -> Unavailable
 ;;
@@ -666,7 +673,7 @@ let inventory_entry_kind inventory_root path =
     (match Fs_compat.owned_inventory_entry_kind inventory_root real with
      | Ok Unix.S_DIR -> Directory
      | Ok Unix.S_REG -> Regular
-     | Ok _ -> Other
+     | Ok (Unix.S_CHR) | Ok (Unix.S_BLK) | Ok (Unix.S_LNK) | Ok (Unix.S_FIFO) | Ok (Unix.S_SOCK) -> Other
      | Error _ -> Unavailable)
 ;;
 
@@ -969,7 +976,17 @@ let handle_peek ~tool_name ~start_time ~base_path args =
           [ ("address", `String (Printf.sprintf "%05x" address)); ("hex", `String hex) ])
       ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
-  | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+  | Error
+      (( Dos_lane.Activity_disabled
+       | Dos_lane.Activity_unobserved
+       | Dos_lane.Invalid_request _
+       | Dos_lane.Unreadable _
+       | Dos_lane.Held_by _
+       | Dos_lane.Guest_fault _
+       | Dos_lane.Unsaveable _
+       | Dos_lane.Checkpoint_refused _
+       | Dos_lane.Other_program _ ) as e) ->
+    reject ~tool_name ~start_time (Dos_lane.error_to_string e)
 ;;
 
 (* ---------- checkpoints ---------- *)
@@ -1042,23 +1059,24 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
       (of_lane ~base_path ~extra:[ slot_field slot; core_field ] ~tool_name ~start_time restored)
 ;;
 
-let dispatch ~base_path ~agent ~name ~arguments =
-  let tool_name = name and start_time = Tool_timing.start () in
-  match name with
-  | "masc_dos_load" -> Some (handle_load ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
-  | "masc_dos_eject" -> Some (handle_eject ~tool_name ~start_time ~agent_name:agent arguments)
-  | "masc_dos_pass" -> Some (handle_pass ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
-  | "masc_dos_meta" -> Some (handle_meta ~tool_name ~start_time)
-  | "masc_dos_inventory" -> Some (handle_inventory ~tool_name ~start_time ~base_path)
-  | "masc_dos_step" -> Some (handle_step ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_press" -> Some (handle_press ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_click" -> Some (handle_click ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_type" -> Some (handle_type ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_peek" -> Some (handle_peek ~tool_name ~start_time ~base_path arguments)
-  | "masc_dos_save" -> Some (handle_save ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_restore" -> Some (handle_restore ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
-  | "masc_dos_screen" -> Some (handle_screen ~tool_name ~start_time ~base_path arguments)
-  | _ -> None
+let dispatch ~base_path ~agent ~(tool : Machine_controller_contract.dos_tool) ~arguments =
+  let module C = Machine_controller_contract in
+  let tool_name = C.dos_tool_name tool
+  and start_time = Tool_timing.start () in
+  match tool with
+  | C.Dos_load -> handle_load ~tool_name ~start_time ~base_path ~agent_name:agent arguments
+  | C.Dos_eject -> handle_eject ~tool_name ~start_time ~agent_name:agent arguments
+  | C.Dos_pass -> handle_pass ~tool_name ~start_time ~base_path ~agent_name:agent arguments
+  | C.Dos_meta -> handle_meta ~tool_name ~start_time
+  | C.Dos_inventory -> handle_inventory ~tool_name ~start_time ~base_path
+  | C.Dos_step -> handle_step ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_press -> handle_press ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_click -> handle_click ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_type -> handle_type ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_peek -> handle_peek ~tool_name ~start_time ~base_path arguments
+  | C.Dos_save -> handle_save ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_restore -> handle_restore ~tool_name ~start_time ~base_path ~agent_name:agent arguments
+  | C.Dos_screen -> handle_screen ~tool_name ~start_time ~base_path arguments
 
 
 end

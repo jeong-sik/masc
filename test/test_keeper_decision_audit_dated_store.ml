@@ -43,10 +43,12 @@ let record ~keeper_name ~wall_clock =
     ()
 ;;
 
+let audit_location ~base_path ~keeper_name =
+  Dated_jsonl.Store.(decision_audit (root_of_base_path ~base_path)) ~keeper_dirname:keeper_name
+;;
+
 let audit_base_dir ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "decision_audit")
-    keeper_name
+  Dated_jsonl.Store.dir (audit_location ~base_path ~keeper_name)
 ;;
 
 (* Every [YYYY-MM/DD.jsonl] below the store root, as a month/day pair. *)
@@ -79,7 +81,7 @@ let test_flush_lands_where_the_store_reads () =
   let base_dir = audit_base_dir ~base_path ~keeper_name in
   let after_flush = day_files base_dir in
   check int "the flush wrote exactly one day file" 1 (List.length after_flush);
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store (audit_location ~base_path ~keeper_name) in
   Dated_jsonl.append store (`Assoc [ "probe", `Bool true ]);
   check
     (list string)
@@ -97,7 +99,7 @@ let test_flushed_records_are_store_readable () =
     Audit.append ~keeper_name (record ~keeper_name ~wall_clock:(float_of_int i))
   done;
   Audit.flush_if_needed ~base_path ~keeper_name;
-  let store = Dated_jsonl.create ~base_dir:(audit_base_dir ~base_path ~keeper_name) () in
+  let store = Dated_jsonl.open_store (audit_location ~base_path ~keeper_name) in
   check int "every buffered record is readable back" 12 (Dated_jsonl.count_entries store)
 ;;
 

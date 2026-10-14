@@ -419,9 +419,9 @@ let test_misc_tools_name_the_source_they_move () =
     | Sources.Tool_completed -> "tool" in
   let activity operation = label (Sources.activity_of_misc_operation operation) in
   check string "stepping the MSX moves its capture" "msx"
-    (activity Tool_schemas_misc.Misc_msx_step);
+    (activity (Tool_schemas_misc.Misc_msx Msx_tool.Step));
   check string "reading the MSX screen moves nothing" "tool"
-    (activity Tool_schemas_misc.Misc_msx_screen);
+    (activity (Tool_schemas_misc.Misc_msx Msx_tool.Screen));
   check string "pressing on the DOS machine moves its capture" "dos"
     (activity Tool_schemas_misc.Misc_dos_press);
   check string "reading the DOS screen moves nothing" "tool"

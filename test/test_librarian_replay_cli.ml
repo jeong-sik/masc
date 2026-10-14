@@ -75,7 +75,7 @@ let write_metadata config ~trace_id =
 
 let run_cli ?(all_keepers = false) ?base_argument ?env_base_path
     ?(from_cwd = false)
-    env ~base_path ~config_root ~cluster_name ~extent =
+    env ~base_path ~config_root ~extent =
   let base_args, base_env =
     if from_cwd then [], []
     else
@@ -86,7 +86,6 @@ let run_cli ?(all_keepers = false) ?base_argument ?env_base_path
     ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
     ~env:(Array.of_list
       ([ "MASC_CONFIG_DIR=" ^ config_root
-       ; "MASC_CLUSTER_NAME=" ^ cluster_name
        ; "HOME=" ^ base_path
        ; "XDG_CONFIG_HOME=" ^ base_path
        ] @ base_env))
@@ -115,8 +114,8 @@ let rec files_under dir =
 type base_argument =
   | Absolute | Relative | Linked_worktree | Conflicting_environment | Default_cwd
 
-let test_workspace_checkpoint_is_replayed ?(shared_config = false)
-    ?(argument = Absolute) cluster_name () =
+let test_workspace_checkpoint_is_replayed ?(damaged_inputs = false)
+    ?(argument = Absolute) () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -144,13 +143,10 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
         | Absolute | Relative | Linked_worktree | Default_cwd -> base_path
       in
       let config = Masc.Workspace.default_config base_path in
-      let config =
-        { config with backend_config = { config.backend_config with cluster_name } }
-      in
       let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
       let metadata_path = write_metadata config ~trace_id in
       let config_root =
-        Filename.concat (Masc.Workspace.masc_root_dir config) "config"
+        Filename.concat (Masc.Workspace.masc_dir config) "config"
       in
       let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
       Fs_compat.mkdir_p config_root;
@@ -169,33 +165,6 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
       List.iter (fun turn ->
         write_boundary ~keepers_dir ~trace_id ~turn
           (List.filteri (fun index _ -> index < turn * 2) messages)) [ 1; 2; 3 ];
-      if shared_config then (
-        let other_trace = "replay-other-cluster-trace" in
-        let other_config =
-          { config with
-            backend_config = { config.backend_config with cluster_name = "Other/Cluster" }
-          }
-        in
-        let other_keepers_dir = Masc.Workspace.keepers_runtime_dir other_config in
-        ignore (write_metadata other_config ~trace_id:other_trace : string);
-        let other_messages = List.filteri (fun index _ -> index < 2) messages in
-        (match Store.save_agent_core_classified
-           ~session_dir:(Masc.Keeper_fs.keeper_session_dir other_config other_trace)
-           ~history_retained:0 (checkpoint ~trace_id:other_trace other_messages) with
-         | Ok (Store.Saved _) -> ()
-         | Ok (Store.Stale_noop _) -> fail "other cluster checkpoint was not saved"
-         | Error error -> failf "other cluster checkpoint: %s" error);
-        let restarted : Boundaries.record =
-          { recorded_at = 4.0
-          ; event = Boundaries.History_restarted { trace_id = other_trace }
-          }
-        in
-        (match Boundaries.append ~keepers_dir:other_keepers_dir ~keeper_id restarted with
-         | Ok () -> ()
-         | Error error -> failf "other cluster restart: %s"
-             (Boundaries.append_error_to_string error));
-        write_boundary
-          ~keepers_dir:other_keepers_dir ~trace_id:other_trace ~turn:1 other_messages);
       let before = files_under base_path in
       let enumerated =
         run_cli
@@ -204,17 +173,17 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
           ~env_base_path
           ~from_cwd:(argument = Default_cwd)
           env
-          ~base_path ~config_root ~cluster_name ~extent:"all"
+          ~base_path ~config_root ~extent:"all"
         |> keeper_result
       in
       check string "default enumeration selects the runtime Keeper" keeper_id
         (enumerated |> U.member "keeper" |> U.to_string);
-      check int "enumeration reads the selected cluster" 6
+      check int "enumeration reads the workspace's checkpoint" 6
         (enumerated |> U.member "reached_atom" |> U.to_int);
       List.iter (fun (extent, expected_ranges) ->
           let output =
             run_cli ~base_argument ~env_base_path ~from_cwd:(argument = Default_cwd)
-              env ~base_path ~config_root ~cluster_name ~extent
+              env ~base_path ~config_root ~extent
           in
           check string "resolved fixture keepers" keepers_dir
             (output |> U.member "keepers_dir" |> U.to_string);
@@ -237,16 +206,16 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
           check (list (pair string string)) "replay leaves workspace files unchanged"
             before (files_under base_path))
           [ "all", [ 0, 6 ]; "cut-points", [ 0, 2; 2, 4; 4, 6 ] ];
-      if shared_config then (
+      if damaged_inputs then (
         let boundary_path = Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id in
         let oc = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 boundary_path in
         output_string oc "not-json\n";
         close_out oc;
         let before_bad_line = files_under base_path in
         let result =
-          run_cli env ~base_path ~config_root ~cluster_name ~extent:"all" |> keeper_result
+          run_cli env ~base_path ~config_root ~extent:"all" |> keeper_result
         in
-        check string "unreadable shared boundary is not filtered away" "unreadable_line"
+        check string "unreadable boundary is not filtered away" "unreadable_line"
           (result |> U.member "stopped_by" |> U.member "kind" |> U.to_string);
         check int "unreadable boundary carries no atoms" 0
           (result |> U.member "reached_atom" |> U.to_int);
@@ -255,16 +224,16 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
         Sys.remove metadata_path;
         let before_absent = files_under base_path in
         let result =
-          run_cli env ~base_path ~config_root ~cluster_name ~extent:"all" |> keeper_result
+          run_cli env ~base_path ~config_root ~extent:"all" |> keeper_result
         in
-        check string "archived log does not choose another cluster" "metadata_absent"
+        check string "absent metadata is explicitly skipped" "metadata_absent"
           (result |> U.member "skipped" |> U.to_string);
         check (list (pair string string)) "absent metadata is not created"
           before_absent (files_under base_path);
         Yojson.Safe.to_file metadata_path (`Assoc []);
         let before_invalid = files_under base_path in
         let result =
-          run_cli env ~base_path ~config_root ~cluster_name ~extent:"all" |> keeper_result
+          run_cli env ~base_path ~config_root ~extent:"all" |> keeper_result
         in
         check bool "invalid metadata is explicitly skipped" true
           (String.starts_with ~prefix:"metadata_not_current:"
@@ -276,7 +245,7 @@ let test_workspace_checkpoint_is_replayed ?(shared_config = false)
         close_out oc;
         let before_unreadable = files_under base_path in
         let result =
-          run_cli env ~base_path ~config_root ~cluster_name ~extent:"all" |> keeper_result
+          run_cli env ~base_path ~config_root ~extent:"all" |> keeper_result
         in
         check bool "unreadable metadata is explicitly skipped" true
           (String.starts_with ~prefix:"metadata_unreadable:"
@@ -302,20 +271,18 @@ let test_missing_store_is_not_an_empty_replay keeper_argument () =
 let () =
   run "librarian replay CLI"
     [ "workspace",
-        [ test_case "default cluster: producer checkpoint, both extents, no writes" `Quick
-            (test_workspace_checkpoint_is_replayed "default")
-        ; test_case "named cluster: producer checkpoint, both extents, no writes" `Quick
-            (test_workspace_checkpoint_is_replayed "Replay/Cluster")
-        ; test_case "shared config: active cluster trace, unreadable log, metadata required" `Quick
-            (test_workspace_checkpoint_is_replayed ~shared_config:true "Replay/Cluster")
+        [ test_case "producer checkpoint, both extents, no writes" `Quick
+            (fun () -> test_workspace_checkpoint_is_replayed ())
+        ; test_case "unreadable boundary and metadata are skipped, not repaired" `Quick
+            (fun () -> test_workspace_checkpoint_is_replayed ~damaged_inputs:true ())
         ; test_case "relative base: producer checkpoint, both extents, no writes" `Quick
-            (test_workspace_checkpoint_is_replayed ~argument:Relative "Replay/Cluster")
+            (fun () -> test_workspace_checkpoint_is_replayed ~argument:Relative ())
         ; test_case "linked worktree: producer checkpoint, both extents, no writes" `Quick
-            (test_workspace_checkpoint_is_replayed ~argument:Linked_worktree "Replay/Cluster")
+            (fun () -> test_workspace_checkpoint_is_replayed ~argument:Linked_worktree ())
         ; test_case "explicit base wins over a different environment base" `Quick
-            (test_workspace_checkpoint_is_replayed ~argument:Conflicting_environment "Replay/Cluster")
+            (fun () -> test_workspace_checkpoint_is_replayed ~argument:Conflicting_environment ())
         ; test_case "no base or recorded default uses current workspace" `Quick
-            (test_workspace_checkpoint_is_replayed ~argument:Default_cwd "Replay/Cluster")
+            (fun () -> test_workspace_checkpoint_is_replayed ~argument:Default_cwd ())
         ; test_case "missing store fails instead of reporting no Keepers" `Quick
             (test_missing_store_is_not_an_empty_replay [])
         ; test_case "named Keeper cannot hide a missing store" `Quick

@@ -59,18 +59,43 @@ type route =
       ; retry_after : float option
       }
   | Rotate_now of { rotate : rotate_class }
-  | Exhausted_visible_alive of
-      { terminal : terminal_class
-      ; detail : string
-      }
+  | Exhausted_visible_alive of { terminal : terminal_class }
 
 let core_error_is_hard_quota (err : Agent_core.Error.t) =
   match err with
   | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
   | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
     true
-  | Agent_core.Error.Api _
-  | Agent_core.Error.Provider _
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
+  | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
+  | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ServerError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidRequest _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NotFound _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal _)
   | Agent_core.Error.Agent _
   | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _
@@ -85,8 +110,36 @@ let core_error_is_model_absent : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)
   | Agent_core.Error.Provider (Llm_provider.Error.NotFound _) ->
     true
-  | Agent_core.Error.Api _
-  | Agent_core.Error.Provider _
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.AuthorizationError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.UnknownVariant _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)
+  | Agent_core.Error.Provider (Llm_provider.Error.EmptyCompletion _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _)
+  | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _)
+  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)
+  | Agent_core.Error.Provider (Llm_provider.Error.CapacityExhausted _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ServerError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.InvalidRequest _)
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal _)
   | Agent_core.Error.Agent _
   | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _
@@ -102,14 +155,9 @@ let observe_retry ?retry_after retry_class =
 
 let rotate rotate_class = Rotate_now { rotate = rotate_class }
 
-let failure_detail err =
-  Keeper_internal_error.cap_blocker_detail (Agent_core.Error.to_string err)
+let exhaust terminal_class = Exhausted_visible_alive { terminal = terminal_class }
 
-let exhaust ~err terminal_class =
-  Exhausted_visible_alive { terminal = terminal_class; detail = failure_detail err }
-
-let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_error) =
-  let exhaust_failure = exhaust ~err in
+let route_of_masc_internal (internal : Keeper_internal_error.masc_internal_error) =
   match internal with
   | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
   | Keeper_internal_error.Runtime_exhausted { reason; _ } ->
@@ -129,14 +177,14 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      | Some `Empty_no_progress -> rotate No_progress_empty
      | Some `Thinking_only_no_progress -> rotate No_progress_thinking_only
      | Some `Truncated_no_progress -> rotate No_progress_truncated
-     | None -> exhaust_failure Internal_opaque)
+     | None -> exhaust Internal_opaque)
   | Keeper_internal_error.Internal_contract_rejected _
   | Keeper_internal_error.Receipt_persistence_failed _
   | Keeper_internal_error.Gate_replay_repair_required _ ->
-    exhaust_failure Internal_opaque
+    exhaust Internal_opaque
   (* The host stopped this turn on purpose. Nothing about the provider failed,
      so there is no other candidate that would do better. *)
-  | Keeper_internal_error.Host_stopped_turn _ -> exhaust_failure Internal_opaque
+  | Keeper_internal_error.Host_stopped_turn _ -> exhaust Internal_opaque
   (* The runtime's transport closed. [route_of_provider_error] answers
      [observe_retry Server_error] for agent-core's [ProviderUnavailable]; the
      typed value must not change which runtime is tried next, so it answers
@@ -146,52 +194,52 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   (* A local claim refuses the durable session before a provider attempt.
      Keep the turn exhausted without implying a response or attempted effect. *)
   | Keeper_internal_error.Official_client_recovery_required _ ->
-    exhaust_failure Session_claim_refused
+    exhaust Session_claim_refused
   (* The admission check refuses the history before provider dispatch
      ([Keeper_agent_run.provider_transcript_admission]): no request carried
      the turn's input. *)
   | Keeper_internal_error.Incomplete_tool_transcript _ ->
-    exhaust_failure Transcript_refused
+    exhaust Transcript_refused
   | Keeper_internal_error.Terminal_effect_failed
       { failure_class; effect_disposition; _ } ->
     (match effect_disposition with
      | Tool_result.Proven_pre_effect ->
        (* A proven pre-effect rejection must remain correction-capable inside
           the provider turn and must never reach this terminal boundary. *)
-       exhaust_failure Contract_violation
+       exhaust Contract_violation
      | Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown ->
        (match failure_class with
         | Tool_result.Dependency_unavailable ->
-          exhaust_failure Terminal_effect_dependency_unavailable
+          exhaust Terminal_effect_dependency_unavailable
         | Tool_result.Policy_rejection ->
-          exhaust_failure Terminal_effect_policy_rejection
+          exhaust Terminal_effect_policy_rejection
         | Tool_result.Runtime_failure ->
-          exhaust_failure Terminal_effect_runtime_failure
+          exhaust Terminal_effect_runtime_failure
         | Tool_result.Workflow_rejection ->
-          exhaust_failure Terminal_effect_workflow_rejection
+          exhaust Terminal_effect_workflow_rejection
         | Tool_result.Operator_cancelled ->
-          exhaust_failure Terminal_effect_operator_cancelled))
+          exhaust Terminal_effect_operator_cancelled))
   | Keeper_internal_error.Provider_attempt_effect_fenced
       { effect_disposition; _ } ->
     (match effect_disposition with
      | Keeper_provider_attempt_effect_core.No_effect_observed ->
-       exhaust_failure Contract_violation
+       exhaust Contract_violation
      | Keeper_provider_attempt_effect_core.Effect_attempted ->
-       exhaust_failure (Provider_attempt_effect_fenced Fenced_effect_attempted)
+       exhaust (Provider_attempt_effect_fenced Fenced_effect_attempted)
      | Keeper_provider_attempt_effect_core.Observation_unavailable ->
-       exhaust_failure
+       exhaust
          (Provider_attempt_effect_fenced Fenced_observation_unavailable))
   | Keeper_internal_error.Tool_correction_lost { effect_disposition; _ } ->
     (match effect_disposition with
      | Keeper_provider_attempt_effect_core.No_effect_observed ->
-       exhaust_failure Contract_violation
+       exhaust Contract_violation
      | Keeper_provider_attempt_effect_core.Effect_attempted ->
-       exhaust_failure (Tool_correction_lost Fenced_effect_attempted)
+       exhaust (Tool_correction_lost Fenced_effect_attempted)
      | Keeper_provider_attempt_effect_core.Observation_unavailable ->
-       exhaust_failure (Tool_correction_lost Fenced_observation_unavailable))
+       exhaust (Tool_correction_lost Fenced_observation_unavailable))
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
-    exhaust_failure Internal_opaque
+    exhaust Internal_opaque
 
 (* [api_error_retry_after] extracts the provider's wait hint from the typed
    [Retry.api_error] when one exists. It is the only reason the route still
@@ -281,8 +329,7 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
        observation it did when the match was hand-written. *)
     observe Network_transient
 
-let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
-  let exhaust_failure = exhaust ~err in
+let route_of_provider_error (p : Llm_provider.Error.provider_error) =
   match p with
   | Llm_provider.Error.RateLimit { retry_after; _ } -> observe_retry ?retry_after Rate_limited
   | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after Hard_quota
@@ -302,7 +349,7 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
     (match Llm_provider.Retry.server_status_class_of_code code with
      | Some (Llm_provider.Retry.Overloaded_status | Llm_provider.Retry.Server_error_status)
        -> rotate Server_error_not_transient
-     | None -> exhaust_failure Provider_integration)
+     | None -> exhaust Provider_integration)
   | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
   | Llm_provider.Error.Timeout _ -> observe_retry Provider_timeout
   | Llm_provider.Error.AuthError _ -> rotate Auth_failed
@@ -325,9 +372,9 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
      is a different provider attempt that may not repeat this provider's own
      report. *)
   | Llm_provider.Error.ProviderReportedError _ -> rotate Provider_reported_failure
-  | Llm_provider.Error.MissingApiKey _ -> exhaust_failure Config_mismatch
-  | Llm_provider.Error.InvalidConfig _ -> exhaust_failure Config_mismatch
-  | Llm_provider.Error.InvalidRequest _ -> exhaust_failure Deterministic_request
+  | Llm_provider.Error.MissingApiKey _ -> exhaust Config_mismatch
+  | Llm_provider.Error.InvalidConfig _ -> exhaust Config_mismatch
+  | Llm_provider.Error.InvalidRequest _ -> exhaust Deterministic_request
   (* The stream ended before the completion contract's stop reason. The
      provider accepted the request and the bytes that would have said why the
      generation stopped never arrived, which is what a dropped transport looks
@@ -354,21 +401,20 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.ParseError _
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.ProviderTerminal _ ->
-    exhaust_failure Provider_integration
+    exhaust Provider_integration
 
 let route_of_error_family (err : Agent_core.Error.t) : route =
-  let exhaust_failure = exhaust ~err in
   match err with
   | Agent_core.Error.Api api -> route_of_api_error api
-  | Agent_core.Error.Provider p -> route_of_provider_error ~err p
-  | Agent_core.Error.Mcp _ -> exhaust_failure Protocol_error
-  | Agent_core.Error.Config _ -> exhaust_failure Config_mismatch
+  | Agent_core.Error.Provider p -> route_of_provider_error p
+  | Agent_core.Error.Mcp _ -> exhaust Protocol_error
+  | Agent_core.Error.Config _ -> exhaust Config_mismatch
   | Agent_core.Error.Agent _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
-    exhaust_failure Internal_opaque
+    exhaust Internal_opaque
 ;;
 
 let route_of_error ~boundary (err : Agent_core.Error.t) : route =
@@ -381,10 +427,23 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
   | Some
       (( Keeper_internal_error.Terminal_effect_failed _
        | Keeper_internal_error.Runtime_connection_closed _ ) as internal) ->
-    route_of_masc_internal ~err internal
-  | Some internal ->
+    route_of_masc_internal internal
+  | Some
+      (( Keeper_internal_error.Official_client_recovery_required _
+       | Keeper_internal_error.Runtime_exhausted _
+       | Keeper_internal_error.Resumable_cli_session _
+       | Keeper_internal_error.Accept_rejected _
+       | Keeper_internal_error.Internal_unhandled_exception _
+       | Keeper_internal_error.Internal_bridge_exception _
+       | Keeper_internal_error.Internal_contract_rejected _
+       | Keeper_internal_error.Incomplete_tool_transcript _
+       | Keeper_internal_error.Provider_attempt_effect_fenced _
+       | Keeper_internal_error.Tool_correction_lost _
+       | Keeper_internal_error.Host_stopped_turn _
+       | Keeper_internal_error.Receipt_persistence_failed _
+       | Keeper_internal_error.Gate_replay_repair_required _ ) as internal) ->
     (match boundary with
-     | Masc_execution -> route_of_masc_internal ~err internal
+     | Masc_execution -> route_of_masc_internal internal
      | Agent_core_execution -> route_of_error_family err)
   | None -> route_of_error_family err
 
@@ -486,7 +545,7 @@ let terminal_class_label = function
 let route_class_label = function
   | Retry_after_observed { retry_class; _ } -> retry_class_label retry_class
   | Rotate_now { rotate } -> rotate_class_label rotate
-  | Exhausted_visible_alive { terminal; _ } -> terminal_class_label terminal
+  | Exhausted_visible_alive { terminal } -> terminal_class_label terminal
 
 (* Whether the provider answered the request that carried the turn's input.
    Read by the heartbeat to settle a Gate continuation that failed on this
@@ -564,7 +623,7 @@ let response_observed = function
        (* the model answered and kept repeating one unit; the client ended
           the stream, so the input was seen. *)
        true)
-  | Exhausted_visible_alive { terminal; detail = _ } ->
+  | Exhausted_visible_alive { terminal } ->
     (match terminal with
      | Deterministic_request
      (* invalid request or input capacity: refused before any generation. *)
@@ -692,7 +751,7 @@ let route_resumes_on_same_path = function
           the provider's wire or its own non-transient answer: the same path
           answers the same way after any wait. *)
        false)
-  | Exhausted_visible_alive { terminal; detail = _ } ->
+  | Exhausted_visible_alive { terminal } ->
     (match terminal with
      | Deterministic_request
      | Session_claim_refused

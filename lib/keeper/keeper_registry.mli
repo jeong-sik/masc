@@ -412,7 +412,7 @@ module For_testing : sig
   (** Clear the registry. For testing only. *)
   val clear : unit -> unit
 
-  (** Record a restart. Increments restart_count and updates last_restart_ts. *)
+  (** Record a restart. Increments restart_count. *)
   val record_restart : base_path:string -> string -> unit
 
   (** Test-only: override [started_at] for registry fixtures that need to
@@ -492,7 +492,7 @@ val fiber_health_of : base_path:string -> string -> fiber_health
 (** Restore supervisor state on a freshly registered entry (used by restart). *)
 val restore_supervisor_state :
   base_path:string -> string ->
-  restart_count:int -> last_restart_ts:float ->
+  restart_count:int ->
   crash_log:(float * string) list -> unit
 
 (** Reset tracking state (agent count + board wakeups) for a keeper. *)

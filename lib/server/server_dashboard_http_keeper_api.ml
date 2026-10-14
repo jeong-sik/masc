@@ -86,10 +86,12 @@ let keeper_tool_call_lookup_response ~config ~keeper_name req =
     if not (Keeper_config.validate_name keeper_name) then
       error `Bad_request "invalid_keeper_name" "invalid keeper name"
     else
-      let ledger_dir =
-        Filename.concat (Workspace.masc_root_dir config) "tool_calls"
+      let store =
+        Dated_jsonl.open_store
+          (Dated_jsonl.Store.at
+             (Workspace.dated_store_root config)
+             Dated_jsonl.Store.Root.Tool_calls)
       in
-      let store = Dated_jsonl.create ~base_dir:ledger_dir () in
       (match
          Keeper_tool_call_index.by_execution_ids
            ~store ~keeper_name ~execution_ids:[ execution_id ]
@@ -671,7 +673,7 @@ let keeper_chat_history_page_json ?max_total config name ~before =
 let cached_keeper_chat_history_json config name =
   let cache_key =
     Printf.sprintf "keeper:chat-history:%s:%s"
-      (Workspace.masc_root_dir config) name
+      (Workspace.masc_dir config) name
   in
   let current = keeper_chat_history_freshness config name in
   (match Dashboard_cache.peek cache_key with
@@ -1002,7 +1004,7 @@ let handle_keeper_get_subroutes state req request reqd =
       | Error detail -> respond_error reqd detail
       | Ok window_hours ->
       let config = Mcp_server.workspace_config state in
-      let masc_root = Workspace.masc_root_dir config in
+      let masc_root = Workspace.masc_dir config in
       let cache_key =
         keeper_file_changes_cache_key ~masc_root ~keeper_name:name ~window_hours
       in
@@ -1096,7 +1098,7 @@ let handle_keeper_get_subroutes state req request reqd =
         reqd
     else
       let config = (Mcp_server.workspace_config state) in
-      let masc_root = Workspace.masc_root_dir config in
+      let masc_root = Workspace.masc_dir config in
       let window_hours =
         Server_utils.int_query_param req "window_hours"
           ~default:24
@@ -1211,7 +1213,7 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min tool_calls_limit_max
       in
       let config = (Mcp_server.workspace_config state) in
-      let masc_root = Workspace.masc_root_dir config in
+      let masc_root = Workspace.masc_dir config in
       (* The durable index selects this Keeper before limiting rows. A fleet
          tail cannot bound the requested Keeper's history when others are busy.
          Keep ledger/index I/O off the request domain and preserve chronological
@@ -1587,7 +1589,9 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
          reqd
-     | Error error ->
+     | Error
+         ((Keeper_operator_note.Read_unknown_keeper _
+          | Keeper_operator_note.Malformed _) as error) ->
        Http.Response.json_value ~status:`Bad_request
          (`Assoc
             [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
@@ -1637,7 +1641,9 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
          reqd
-     | Error error ->
+     | Error
+         ((Keeper_prompt_capture.Unknown_keeper _
+          | Keeper_prompt_capture.Malformed _) as error) ->
        Http.Response.json_value ~status:`Bad_request
          (`Assoc
             [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
@@ -1706,7 +1712,15 @@ let handle_keeper_get_subroutes state req request reqd =
                         (Keeper_provider_input_snapshot.read_error_to_string error)
                     ])
                  reqd
-             | Error error ->
+             | Error
+                 ((Keeper_provider_input_snapshot.Unknown_keeper _
+                  | Keeper_provider_input_snapshot.Store_read_failed _
+                  | Keeper_provider_input_snapshot.Malformed_snapshot _
+                  | Keeper_provider_input_snapshot.Invalid_artifact_reference _
+                  | Keeper_provider_input_snapshot.Artifact_read_failed _
+                  | Keeper_provider_input_snapshot.Artifact_missing _
+                  | Keeper_provider_input_snapshot.Artifact_length_mismatch _
+                  | Keeper_provider_input_snapshot.Artifact_json_invalid _) as error) ->
                Http.Response.json_value
                  ~status:`Service_unavailable
                  (`Assoc
@@ -1775,7 +1789,11 @@ let handle_keeper_get_subroutes state req request reqd =
          (`Assoc
             [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])
          reqd
-     | Error error ->
+     | Error
+         ((Keeper_raw_trace_reader.Unknown_keeper _
+          | Keeper_raw_trace_reader.Invalid_file_name _
+          | Keeper_raw_trace_reader.Invalid_trace_record _
+          | Keeper_raw_trace_reader.Read_failed _) as error) ->
        Http.Response.json_value ~status:`Bad_request
          (`Assoc
             [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])
@@ -1888,7 +1906,7 @@ let handle_keeper_get_subroutes state req request reqd =
         ( "durable_store",
           `String
             (Filename.concat
-               (Workspace.masc_root_dir config)
+               (Workspace.masc_dir config)
                (Printf.sprintf "keepers/%s/turn-records" name)) );
         ("dashboard_surface", `String "/api/v1/keepers/:name/turn-records");
         ("freshness_slo_s", `Float turn_record_freshness_slo_s);
@@ -2007,7 +2025,7 @@ let handle_keeper_get_subroutes state req request reqd =
          let cache_key =
            Printf.sprintf
              "keeper:trajectory:%s:%s:%s:%d:%d:%b:%d"
-             (Workspace.masc_root_dir config)
+             (Workspace.masc_dir config)
              name
              trace_id
              limit
@@ -2018,7 +2036,7 @@ let handle_keeper_get_subroutes state req request reqd =
          let payload =
            Dashboard_cache.get_or_compute_payload cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               let masc_root = Workspace.masc_root_dir config in
+               let masc_root = Workspace.masc_dir config in
                let trajectory_lines =
                  Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name
                    ~trace_id ~max_lines:tail_scan_lines

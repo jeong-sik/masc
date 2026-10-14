@@ -40,10 +40,10 @@ let valid binding =
 let schema_objects db =
   statement db "SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name" []
     (fun stmt ->
-      let rec rows acc = match Sqlite3.step stmt with
-        | Sqlite3.Rc.ROW -> rows ((Sqlite3.column_text stmt 0,Sqlite3.column_text stmt 1)::acc)
-        | DONE -> Ok (List.rev acc)
-        | _ -> Error (sql_error db) in
+      let rec rows acc = match Keeper_sqlite_observation_io.step stmt with
+        | Row -> rows ((Sqlite3.column_text stmt 0,Sqlite3.column_text stmt 1)::acc)
+        | Done -> Ok (List.rev acc)
+        | Failed _ -> Error (sql_error db) in
       rows [])
 let expected_schema = List.sort compare
   ["receipts",schema;"terminal_immutable",immutable;"receipt_retained",no_delete;"binding_immutable",binding_immutable]
@@ -88,9 +88,10 @@ let read db binding =
   statement db
     "SELECT action,slot,epoch,state,detail,incarnation,change_count,checkpoint_sha256 FROM receipts WHERE operation_id=?"
     [text (Keeper_operation_id.to_string binding.operation_id)] (fun stmt ->
-      match Sqlite3.step stmt with
-      | Sqlite3.Rc.DONE -> Ok None
-      | ROW ->
+      match Keeper_sqlite_observation_io.step stmt with
+      | Done -> Ok None
+      | Failed _ -> Error (sql_error db)
+      | Row ->
           if Sqlite3.column_text stmt 0 <> action_name binding.action
              || Sqlite3.column_text stmt 1 <> binding.slot then Error Binding_conflict
           else
@@ -110,8 +111,8 @@ let read db binding =
              | None -> Error (Store_unavailable "invalid checkpoint receipt state")
              | Some (Committed completed) when not (valid_completion completed) ->
                  Error (Store_unavailable "invalid persisted checkpoint completion evidence")
-             | Some state -> Ok (Some {binding;epoch=Sqlite3.column_text stmt 2;state}))
-      | _ -> Error (sql_error db))
+             | Some ((Pending | Committed _ | Refused _ | Unknown _) as state) ->
+                 Ok (Some {binding;epoch=Sqlite3.column_text stmt 2;state})))
 let admit ~path ~epoch binding =
   let* () = valid binding in
   if String.trim epoch = "" then Error (Invalid_binding "checkpoint epoch is blank") else
@@ -151,7 +152,8 @@ let settle_once ~path ~epoch binding state =
         statement db
           "UPDATE receipts SET state=?,detail=?,incarnation=?,change_count=?,checkpoint_sha256=? WHERE operation_id=?"
           [text state_name;detail;incarnation;count;digest;text (Keeper_operation_id.to_string binding.operation_id)] (done_ db)
-    | Some _ | None -> Error (Store_unavailable "checkpoint receipt is not pending in this server epoch"))
+    | Some {state=(Pending | Committed _ | Refused _ | Unknown _);_} | None ->
+        Error (Store_unavailable "checkpoint receipt is not pending in this server epoch"))
 
 
 (* The effect worker has finished, but SQLite may temporarily refuse its

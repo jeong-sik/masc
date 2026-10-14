@@ -714,3 +714,9 @@
  (names test_public_tool_schedule test_public_pre_execution_gate)
  (modules test_public_tool_schedule test_public_pre_execution_gate)
  (libraries masc.agent_core))
+
+; Test assertions match the one case they check; see warning 4 in the root dune.
+(env
+ (_
+  (flags
+   (:standard -w -4))))

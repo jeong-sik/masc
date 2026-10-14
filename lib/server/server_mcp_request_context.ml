@@ -64,4 +64,5 @@ let decide_post_body ~request ~context ~session_is_known body_str =
               with
               | Mcp_transport_protocol.Http_negotiation.Rejected ->
                   Error (Invalid_accept invalid_accept_message)
-              | accept_mode -> Ok { body_str; accept_mode })))
+              | Mcp_transport_protocol.Http_negotiation.Streamable as accept_mode ->
+                  Ok { body_str; accept_mode })))

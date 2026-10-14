@@ -170,6 +170,26 @@ let test_remove_tree_unlinks_symlink_without_following () =
   check string "target content preserved" "kept" (Fs_compat.load_file (Filename.concat target "kept.txt"))
 ;;
 
+(* A directory, a link to one, a file, a broken link: only the first two are
+   directories. A missing folder and a file have no entries. *)
+let test_subdirectory_names_keeps_only_directories () =
+  with_tmp_dir
+  @@ fun base ->
+  let path name = Filename.concat base name in
+  Unix.mkdir (path "keeper-b") 0o755;
+  Unix.mkdir (path "target") 0o755;
+  Unix.symlink (path "target") (path "keeper-a");
+  Fs_compat.save_file (path "stray.txt") "x";
+  Unix.symlink (path "gone") (path "ghost");
+  check
+    (list string)
+    "directories and links to them, sorted"
+    [ "keeper-a"; "keeper-b"; "target" ]
+    (Fs_compat.subdirectory_names base);
+  check (list string) "missing folder" [] (Fs_compat.subdirectory_names (path "absent"));
+  check (list string) "a file is not a folder" [] (Fs_compat.subdirectory_names (path "stray.txt"))
+;;
+
 let test_save_file_atomic_leaves_no_tmp_on_success () =
   Fs_compat.clear_fs ();
   with_tmp_dir
@@ -1024,6 +1044,18 @@ let () =
     ; ( "mkdir_p"
       , [ test_case "creates nested dirs" `Quick test_mkdir_p_creates_nested_dirs
         ; test_case "no shell injection" `Quick test_mkdir_p_does_not_shell_inject
+        ] )
+    ; ( "subdirectory_names"
+      , [ test_case
+            "keeps only directories, fallback"
+            `Quick
+            (with_optional_read_fs None test_subdirectory_names_keeps_only_directories)
+        ; test_case
+            "keeps only directories, Eio"
+            `Quick
+            (with_optional_read_fs
+               (Some (Eio.Stdenv.fs env))
+               test_subdirectory_names_keeps_only_directories)
         ] )
     ; ( "remove_tree"
       , [ test_case "no shell injection" `Quick test_remove_tree_does_not_shell_inject

@@ -55,12 +55,17 @@ let default_workspace_state config = {
    a reader paging in sequence order. It took someone editing state.json by
    hand.
 
-   Boot is where that is noticed, because it is the one moment the store and
-   the counter are both at rest. Raising the counter loses nothing: the
+   [Workspace.init] runs this at boot. Raising the counter loses nothing: the
    numbers between are simply never issued, and the store, not the counter,
    is what says which messages exist. A counter already at or above the store
-   is left exactly as it is. *)
+   is left exactly as it is.
+
+   It holds the state lock that [next_seq] takes, from reading the store to
+   writing the counter. Without it a message numbered in between could have
+   its number written over by an older read, and the counter would step
+   back. *)
 let reconcile_message_seq config path =
+  with_file_lock config path @@ fun () ->
   let filed = resume_message_seq config in
   if filed > 0 then
     match read_json config path with
@@ -90,38 +95,6 @@ let reconcile_message_seq config path =
     | _ -> ()
 ;;
 
-let ensure_workspace_bootstrap config =
-  let root_dir = masc_root_dir config in
-  let root_agents_dir = Filename.concat root_dir "agents" in
-  let root_keepers_dir = Filename.concat root_dir Common.keepers_runtime_dirname in
-  let root_traces_dir = Filename.concat root_dir "traces" in
-  let root_tasks_dir = Filename.concat root_dir "tasks" in
-  let root_messages_dir = Filename.concat root_dir "messages" in
-  let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
-  List.iter mkdir_p
-    [
-      root_agents_dir;
-      root_keepers_dir;
-      root_traces_dir;
-      root_tasks_dir;
-      root_messages_dir;
-    ];
-  if not (path_exists_root config (root_state_path config)) then
-    write_json_root config (root_state_path config)
-      (workspace_state_to_yojson (default_workspace_state config));
-  if not (path_exists_root config root_backlog_path) then
-    write_json_root config root_backlog_path
-      (backlog_to_yojson { tasks = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 });
+(* The backlog a workspace starts with. *)
+let empty_backlog () = { tasks = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 }
 
-  let scoped_agents = agents_dir config in
-  let scoped_tasks = tasks_dir config in
-  let scoped_messages = messages_dir config in
-  let scoped_state = state_path config in
-  let scoped_backlog = backlog_path config in
-  List.iter mkdir_p [ masc_dir config; scoped_agents; scoped_tasks; scoped_messages ];
-  if not (path_exists config scoped_state) then
-    write_json config scoped_state (workspace_state_to_yojson (default_workspace_state config))
-  else reconcile_message_seq config scoped_state;
-  if not (path_exists config scoped_backlog) then
-    write_json config scoped_backlog
-      (backlog_to_yojson { tasks = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 })

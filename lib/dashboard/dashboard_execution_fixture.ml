@@ -34,7 +34,6 @@ let execution_smoke_fixture_json () =
         `Assoc
           [
             ("workspace_root", `String "/tmp/masc-execution-fixture");
-            ("cluster", `String "fixture");
             ("project", `String "execution-smoke");
             ("tempo_interval_s", `Float 300.0);
             ("paused", `Bool false);

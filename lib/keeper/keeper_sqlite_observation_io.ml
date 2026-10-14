@@ -1,5 +1,15 @@
 let sqlite_error error db operation rc =
   error ~operation ~detail:(Sqlite3.Rc.to_string rc ^ ": " ^ Sqlite3.errmsg db)
+type step = Row | Done | Failed of Sqlite3.Rc.t
+let step stmt =
+  let rc = Sqlite3.step stmt in
+  if rc = Sqlite3.Rc.ROW then Row
+  else if rc = Sqlite3.Rc.DONE then Done
+  else Failed rc
+let failure ~error db ~operation rc = sqlite_error error db operation rc
+let done_ ~error db stmt ~operation =
+  let rc = Sqlite3.step stmt in
+  if rc = Sqlite3.Rc.DONE then Ok () else Error (sqlite_error error db operation rc)
 let exec ~error db ~operation sql =
   match Sqlite3.exec db sql with
   | rc when Sqlite3.Rc.is_success rc -> Ok ()
@@ -46,3 +56,11 @@ let commit ~error ~unconfirmed ~show_error ~commit db =
   | rc when Sqlite3.Rc.is_success rc -> Ok ()
   | rc -> Error (unconfirmed (show_error (sqlite_error error db "commit" rc)))
   | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) -> Error (unconfirmed detail)
+let scalar ~error ~on_cleanup db sql =
+  statement ~error ~on_cleanup db ~operation:"scalar" sql (fun stmt ->
+    match step stmt with
+    | Row ->
+        let value = Sqlite3.column stmt 0 in
+        Result.map (fun () -> value) (done_ ~error db stmt ~operation:"scalar end")
+    | Done -> Error (sqlite_error error db "scalar" Sqlite3.Rc.DONE)
+    | Failed rc -> Error (sqlite_error error db "scalar" rc))

@@ -469,8 +469,7 @@ let sandbox_pipeline_specs stages =
                Option.value sandbox_target ~default:simple.sandbox
              in
              loop (Some pipeline_runner) (Some sandbox_target) (stage :: acc) rest
-         | _ -> None)
-        [@warning "-4"]
+         | Host | Delegated _ | Docker _ | Micro_vm _ | Ssh _ -> None)
     (* A stage that is itself a pipeline or a sequence needs a subshell,
        which this dispatcher does not spawn. *)
     | (Shell_ir.Pipeline _ | Shell_ir.Sequence _) :: _ -> None

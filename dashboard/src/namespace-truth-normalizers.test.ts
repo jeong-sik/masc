@@ -72,7 +72,6 @@ describe('normalizeNamespaceTruth', () => {
           workspace_root: '/path/to/root',
           workspace_path: '/path/to/ws',
           workspace_differs: true,
-          cluster: 'local',
           project: 'masc',
           paused: false,
           version: '1.0.0',

@@ -21,14 +21,7 @@ let status config =
   let max_active_tasks_display = 30 in
 
   let buf = Buffer.create 256 in
-  let cluster_name =
-    match config.backend_config.Backend_types.cluster_name with
-    | "" -> state.project
-    | name -> name
-  in
-  Printf.bprintf buf "🏢 Cluster: %s\n" cluster_name;
-  if cluster_name <> state.project then
-    Printf.bprintf buf "Project: %s\n" state.project;
+  Printf.bprintf buf "Project: %s\n" state.project;
   Buffer.add_string buf "📍 Workspace: root\n";
   Printf.bprintf buf "📁 Path: %s\n" config.base_path;
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";

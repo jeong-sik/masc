@@ -75,7 +75,9 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
            ~tool_name
            ~start_time
            ("Broadcast rejected: " ^ detail))
-    | Error error ->
+    | Error
+        (( Workspace_broadcast.Broadcast_not_persisted _
+         | Workspace_broadcast.Broadcast_dependency_unavailable _ ) as error) ->
       Some
         (Tool_result.error
            ~failure_class:Tool_result.Runtime_failure

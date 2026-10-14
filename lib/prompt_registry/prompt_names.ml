@@ -703,6 +703,12 @@ let keeper_context_workspace_memory_briefing_current = "keeper.context.workspace
 let keeper_context_workspace_memory_briefing_stale = "keeper.context.workspace_memory.briefing_stale"
 let keeper_context_workspace_memory_briefing_pending = "keeper.context.workspace_memory.briefing_pending"
 let keeper_context_workspace_memory_briefing_unavailable = "keeper.context.workspace_memory.briefing_unavailable"
+let keeper_context_wiki_available = "keeper.context.wiki.available"
+let keeper_context_wiki_retrieval_direct = "keeper.context.wiki.retrieval_direct"
+let keeper_context_wiki_retrieval_discoverable = "keeper.context.wiki.retrieval_discoverable"
+let keeper_context_wiki_retrieval_unavailable = "keeper.context.wiki.retrieval_unavailable"
+let keeper_context_wiki_retrieval_preview = "keeper.context.wiki.retrieval_preview"
+let keeper_context_wiki_unavailable = "keeper.context.wiki.unavailable"
 
 let candle_appraiser_grade = "candle_appraiser_grade"
 

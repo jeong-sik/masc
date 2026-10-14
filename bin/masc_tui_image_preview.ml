@@ -42,7 +42,9 @@ let output_image ~name ~src =
 let inline_svg ~name svg = Output_image { name; source = Inline_svg svg }
 
 let in_message ~text ~attachments =
-  match List.find_opt (function No_image -> false | _ -> true) (List.rev attachments) with
+  match List.find_opt (function
+    | No_image -> false
+    | Named_path _ | Staged _ | Stored_attachment _ | Output_image _ | Unavailable_image _ -> true) (List.rev attachments) with
   | Some image -> image
   | None ->
       match List.rev (Masc_tui_image_ref.paths text) with
@@ -52,9 +54,13 @@ let in_message ~text ~attachments =
 let choose_preview ~conversation ~staged ~order =
   match conversation, List.rev staged with
   | No_image, [] -> No_image
-  | image, [] -> image
+  | ( ( Named_path _ | Staged _ | Stored_attachment _ | Output_image _
+      | Unavailable_image _ ) as image )
+    , [] -> image
   | No_image, newest :: _ -> Staged newest
-  | image, newest :: _ ->
+  | ( ( Named_path _ | Staged _ | Stored_attachment _ | Output_image _
+      | Unavailable_image _ ) as image )
+    , newest :: _ ->
       match order with
       | Staged_is_newer -> Staged newest
       | Named_is_newer | Unordered -> image

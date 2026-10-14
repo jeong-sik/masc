@@ -6102,10 +6102,10 @@ let with_deferred_store f =
   Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
 ;;
 
-(* Named clusters keep their keeper runtime state under separate directories
-   of one base path ([Workspace.keepers_runtime_dir]). *)
-let cluster_keepers_dir base_path cluster =
-  Filename.concat (Filename.concat base_path cluster) "keepers"
+(* A workspace keeps its keeper runtime state under [<base>/.masc/keepers]
+   ([Workspace.keepers_runtime_dir]). *)
+let workspace_keepers_dir base_path =
+  Filename.concat (Filename.concat base_path ".masc") "keepers"
 ;;
 
 (* The configured lane each restore sees, unchanged across the restart. *)
@@ -6128,9 +6128,9 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
         ~later_runtime_ids:[ "runtime.c" ]
         ~failure:(accept_empty_no_progress_error "runtime.a")
     in
-    let before = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    let before = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(workspace_keepers_dir base_path) ~keeper_name:"backend" in
     Loop.record_deferred_lane before hint;
-    let after = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    let after = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(workspace_keepers_dir base_path) ~keeper_name:"backend" in
     (match Loop.deferred_lane_for_assignment after ~assignment_id:"lane.restart" with
      | Some restored ->
        Alcotest.(check (list string))
@@ -6150,7 +6150,7 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
        before the cycle settles, must still start from runtime.b. *)
     (match
        Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
-         (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend")
+         (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(workspace_keepers_dir base_path) ~keeper_name:"backend")
      with
      | Some mid_run ->
        Alcotest.(check (list string))
@@ -6164,9 +6164,9 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
       true
       (Option.is_none
          (Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
-            (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend")));
+            (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(workspace_keepers_dir base_path) ~keeper_name:"backend")));
     Loop.record_deferred_lane after hint;
-    let reassigned = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    let reassigned = Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(workspace_keepers_dir base_path) ~keeper_name:"backend" in
     Alcotest.(check bool)
       "changed assignment gets no suffix"
       true
@@ -6177,7 +6177,7 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
       true
       (Option.is_none
          (Loop.deferred_lane_for_assignment ~assignment_id:"lane.restart"
-            (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend"))))
+            (Loop.restore_deferred_lane_slot ~lane_now:unchanged_lane ~base_path ~keepers_dir:(workspace_keepers_dir base_path) ~keeper_name:"backend"))))
 ;;
 
 (* A cycle that raises after its dispatch consumed the suffix leaves no
@@ -6187,7 +6187,7 @@ let test_heartbeat_restart_resumes_deferred_suffix () =
 let test_crashing_cycle_settles_no_suffix () =
   with_deferred_store (fun base_path ->
     let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
-    let keepers_dir = cluster_keepers_dir base_path "alpha" in
+    let keepers_dir = workspace_keepers_dir base_path in
     let hint =
       Driver.For_testing.make_deferred_runtime_lane
         ~assignment_id:"lane.restart"
@@ -6237,10 +6237,11 @@ let test_completed_cycle_settles_its_hint () =
     !settled
 ;;
 
-(* Two named clusters with the same keeper name and assignment: recording or
+(* Two workspaces with the same keeper name and assignment: recording or
    clearing a suffix in one leaves the other's untouched. *)
-let test_deferred_suffix_is_isolated_between_clusters () =
-  with_deferred_store (fun base_path ->
+let test_deferred_suffix_is_isolated_between_workspaces () =
+  with_deferred_store (fun alpha_base ->
+    with_deferred_store (fun beta_base ->
     let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
     let hint next =
       Driver.For_testing.make_deferred_runtime_lane
@@ -6250,30 +6251,30 @@ let test_deferred_suffix_is_isolated_between_clusters () =
         ~later_runtime_ids:[]
         ~failure:(accept_empty_no_progress_error "runtime.a")
     in
-    let slot cluster =
+    let slot base_path =
       Loop.restore_deferred_lane_slot
         ~lane_now:unchanged_lane
         ~base_path
-        ~keepers_dir:(cluster_keepers_dir base_path cluster)
+        ~keepers_dir:(workspace_keepers_dir base_path)
         ~keeper_name:"backend"
     in
-    let next_of cluster =
+    let next_of base_path =
       Option.map
         (fun (h : Driver.deferred_runtime_lane) -> h.next_runtime_id)
-        (Loop.deferred_lane_for_assignment ~assignment_id:"lane.shared" (slot cluster))
+        (Loop.deferred_lane_for_assignment ~assignment_id:"lane.shared" (slot base_path))
     in
-    let alpha = slot "alpha" in
+    let alpha = slot alpha_base in
     Loop.record_deferred_lane alpha (hint "runtime.b");
     Alcotest.(check (option string))
       "recording in alpha leaves beta without a suffix"
       None
-      (next_of "beta");
-    let beta = slot "beta" in
+      (next_of beta_base);
+    let beta = slot beta_base in
     Loop.record_deferred_lane beta (hint "runtime.c");
     Alcotest.(check (option string))
       "alpha keeps its own successor"
       (Some "runtime.b")
-      (next_of "alpha");
+      (next_of alpha_base);
     Alcotest.(check bool)
       "beta drops its suffix for a changed assignment"
       true
@@ -6281,7 +6282,7 @@ let test_deferred_suffix_is_isolated_between_clusters () =
     Alcotest.(check (option string))
       "clearing beta leaves alpha's suffix"
       (Some "runtime.b")
-      (next_of "alpha"))
+      (next_of alpha_base)))
 ;;
 
 (* An operator edits the lane to [A; D] and restarts. The frozen suffix names
@@ -6290,7 +6291,7 @@ let test_deferred_suffix_is_isolated_between_clusters () =
 let test_restored_suffix_yields_to_edited_lane () =
   with_deferred_store (fun base_path ->
     let module Loop = Masc.Keeper_heartbeat_loop.For_testing in
-    let keepers_dir = cluster_keepers_dir base_path "alpha" in
+    let keepers_dir = workspace_keepers_dir base_path in
     let restore lane_now =
       Loop.restore_deferred_lane_slot ~lane_now ~base_path ~keepers_dir ~keeper_name:"backend"
     in
@@ -6329,11 +6330,11 @@ let test_restored_suffix_yields_to_edited_lane () =
 
 let test_deferred_store_rejects_unknown_schema_without_fallback () =
   with_deferred_store (fun base_path ->
-    let path = Deferred_store.path_for ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" in
+    let path = Deferred_store.path_for ~keepers_dir:(workspace_keepers_dir base_path) ~keeper_name:"backend" in
     let dir = Filename.dirname path in
     Fs_compat.mkdir_p dir;
     write_file path {|{"schema":"keeper.deferred_runtime_lane.v0"}|};
-    match Deferred_store.load ~keepers_dir:(cluster_keepers_dir base_path "alpha") ~keeper_name:"backend" with
+    match Deferred_store.load ~keepers_dir:(workspace_keepers_dir base_path) ~keeper_name:"backend" with
     | Error (Deferred_store.Malformed _) -> ()
     | Error error ->
       Alcotest.failf
@@ -6452,7 +6453,7 @@ let test_initial_lane_exhaustion_cannot_escape_declared_candidates () =
       .Declared_runtime_lane_exhausted ->
     ()
   | Masc.Keeper_unified_turn_execution.For_testing
-      .Provider_context_overflow _ ->
+      .Provider_context_overflow ->
     Alcotest.fail "network exhaustion must not enter an outer catalog fallback"
 
 let access_error_from_http code =
@@ -7096,9 +7097,9 @@ let () =
             `Quick
             test_completed_cycle_settles_its_hint;
           Alcotest.test_case
-            "deferred suffix is isolated between clusters"
+            "deferred suffix is isolated between workspaces"
             `Quick
-            test_deferred_suffix_is_isolated_between_clusters;
+            test_deferred_suffix_is_isolated_between_workspaces;
           Alcotest.test_case
             "restored suffix yields to an edited lane"
             `Quick

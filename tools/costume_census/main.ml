@@ -110,7 +110,7 @@ let () =
                           written. *)
                        incr advised;
                        bump rewrites (Rewrite.tag (Rewrite.of_reason reason))
-                     | _ -> ())))
+                     | Costume.Representable | Costume.Refused_by_policy _ | Costume.Unparsable _ -> ())))
             | exception Yojson.Json_error _ -> incr unreadable
           done
         with

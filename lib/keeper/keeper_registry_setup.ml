@@ -108,7 +108,11 @@ let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
        | Error repair_reason ->
            record_invalid_registry_entry ~operation ~name repair_reason;
            meta)
-  | Error reason ->
+  | Error
+      (( Healthy
+       | Lifecycle_transaction_reserved _
+       | Required_field_missing _
+       | Base_path_mismatch _ ) as reason) ->
       record_invalid_registry_entry ~operation ~name reason;
       meta
 ;;
@@ -473,7 +477,6 @@ let register_with_state_result
     ; done_p
     ; done_r
     ; restart_count = 0
-    ; last_restart_ts = 0.0
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = initial_failure_reason
@@ -524,7 +527,13 @@ let register_with_state_result
            | Ok () -> Ok ()
            | Error (Lifecycle_transaction_reserved owner) ->
              Error (Registration_lifecycle_reserved owner)
-           | Error validation_error -> Error (Registration_invalid validation_error))
+           | Error
+            (( Healthy
+             | Meta_validation_failed _
+             | Required_field_missing _
+             | Base_path_mismatch _
+             | Name_mismatch _ ) as validation_error) ->
+            Error (Registration_invalid validation_error))
         | Some _ | None -> Error Registration_intake_token_not_live)
       else if respect_shutdown_fence
       then (
@@ -548,11 +557,23 @@ let register_with_state_result
            | Ok () -> Ok ()
            | Error (Lifecycle_transaction_reserved owner) ->
              Error (Registration_lifecycle_reserved owner)
-           | Error validation_error -> Error (Registration_invalid validation_error))
+           | Error
+            (( Healthy
+             | Meta_validation_failed _
+             | Required_field_missing _
+             | Base_path_mismatch _
+             | Name_mismatch _ ) as validation_error) ->
+            Error (Registration_invalid validation_error))
         | Keeper_shutdown_intake_fence.Registration_committed
             (Error (Lifecycle_transaction_reserved owner)) ->
           Error (Registration_lifecycle_reserved owner)
-        | Keeper_shutdown_intake_fence.Registration_committed (Error validation_error) ->
+        | Keeper_shutdown_intake_fence.Registration_committed
+            (Error
+              (( Healthy
+               | Meta_validation_failed _
+               | Required_field_missing _
+               | Base_path_mismatch _
+               | Name_mismatch _ ) as validation_error)) ->
           Error (Registration_invalid validation_error)
         | Keeper_shutdown_intake_fence.Registration_committed (Ok ()) -> Ok ())
       else (
@@ -560,7 +581,13 @@ let register_with_state_result
         | Ok () -> Ok ()
         | Error (Lifecycle_transaction_reserved owner) ->
           Error (Registration_lifecycle_reserved owner)
-        | Error validation_error -> Error (Registration_invalid validation_error)))
+        | Error
+            (( Healthy
+             | Meta_validation_failed _
+             | Required_field_missing _
+             | Base_path_mismatch _
+             | Name_mismatch _ ) as validation_error) ->
+            Error (Registration_invalid validation_error)))
   in
   match commit_result with
   | Error _ as error -> error
@@ -752,7 +779,6 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; done_p
     ; done_r
     ; restart_count = 0
-    ; last_restart_ts = 0.0
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = initial_failure_reason
@@ -1013,7 +1039,13 @@ let get ~base_path name =
   match get_with_health ~base_path name with
   | None -> None
   | Some (entry, Healthy) -> Some entry
-  | Some (_, reason) ->
+  | Some
+      ( _
+      , (( Lifecycle_transaction_reserved _
+         | Meta_validation_failed _
+         | Required_field_missing _
+         | Base_path_mismatch _
+         | Name_mismatch _ ) as reason) ) ->
       record_invalid_registry_entry ~operation:"get" ~name reason;
       None
 ;;

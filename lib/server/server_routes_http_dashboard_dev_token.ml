@@ -141,7 +141,26 @@ let classify_dashboard_dev_token_candidate ~base_path raw =
            | Masc_domain.Auth_error.TokenExpired _
            | Masc_domain.Auth_error.Unauthorized _)) ->
       Ok Rotate
-    | Error error -> Error (Credential_lookup_failed error)
+    | Error
+        (( Masc_domain.Task
+             ( Masc_domain.Task_error.NotFound _
+             | Masc_domain.Task_error.AlreadyClaimed _
+             | Masc_domain.Task_error.NotClaimed _
+             | Masc_domain.Task_error.InvalidState _
+             | Masc_domain.Task_error.InvalidId _
+             | Masc_domain.Task_error.VerificationSuperseded _ )
+         | Masc_domain.Agent
+             ( Masc_domain.Agent_error.NotFound _
+             | Masc_domain.Agent_error.InvalidName _ )
+         | Masc_domain.Auth
+             ( Masc_domain.Auth_error.Forbidden _
+             | Masc_domain.Auth_error.SameOriginBlocked )
+         | Masc_domain.System
+             ( Masc_domain.System_error.NotInitialized
+             | Masc_domain.System_error.IoError _
+             | Masc_domain.System_error.ValidationError _
+             | Masc_domain.System_error.LockContention _ ) ) as error) ->
+      Error (Credential_lookup_failed error)
 ;;
 
 let read_dashboard_dev_token ~load ~base_path =

@@ -440,7 +440,9 @@ let rec validate operation =
          || ack.finalization.completion <> Completion_not_requested
          || (match operation.join_evidence with
              | Some { terminal = Terminal_stopped; cleanup_error = None; _ } -> false
-             | None | Some _ -> true)
+             | None
+             | Some { terminal = Terminal_crashed _; _ }
+             | Some { terminal = Terminal_stopped; cleanup_error = Some _; _ } -> true)
          || List.exists (fun id -> not (List.exists (Keeper_id.Task_id.equal id)
                ack.finalization.cleanup.settled_task_ids)) operation.owned_task_ids
          || ack.prior_revision < 0 || operation.revision <> ack.prior_revision + 1
@@ -501,7 +503,11 @@ let rec validate operation =
          | Some expected, Completion_delivery_failed { action = actual; _ }
          | Some expected, Completion_delivered actual
            when completion_action_equal expected actual -> Ok ()
-         | (None | Some _), completion ->
+         | ( (None | Some _)
+           , (( Completion_not_requested
+              | Completion_pending _
+              | Completion_delivery_failed _
+              | Completion_delivered _ ) as completion) ) ->
            Error
              (Finalized_completion_mismatch
                 (operation.cleanup_intent.reason, completion)))
@@ -627,7 +633,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_memory_journal_lock_artifact
   ; Keeper_memory_absorbed_artifact
   ; Keeper_memory_events_artifact
-    (* The turn boundary log and progress sit in the selected cluster's
+    (* The turn boundary log and progress sit in the workspace's
        per-Keeper runtime directory. Left behind,
        a later keeper with the same name would read the atom positions of
        another history as its own. *)
@@ -655,7 +661,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_librarian_official_progress_artifact
     (* A Keeper can change sandbox profiles across lifetimes. Remove every
        backend-scoped root for the exact name so a same-name successor cannot
-       inherit files from an earlier Local, Docker, microVM, or SSH lane. *)
+       inherit files from an earlier Docker, microVM, or SSH lane. *)
   ; Keeper_playground_bundles_artifact
   ; Keeper_runtime_configuration_artifact
   ; Keeper_configuration_artifact

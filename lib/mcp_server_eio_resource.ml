@@ -10,6 +10,11 @@ let wiki_index_id = "wiki"
 let wiki_index_json_id = "wiki.json"
 let wiki_topic_prefix = "wiki/"
 
+(* The wiki's append-only log is one of its two own files, so it is not in
+   [Tool_wiki.list_pages]. It is read as [masc://wiki/log]. [log] is a
+   reserved page name, so no page can take that URI. *)
+let wiki_log_topic = Filename.chop_suffix Wiki_journal.log_file ".md"
+
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
 
@@ -34,6 +39,128 @@ module For_testing = struct
   let blocking_io_execution_context () =
     run_blocking_resource_io Eio_guard.execution_context
 end
+
+(* A page's header sits at the top, so the listing reads only this many bytes
+   of a page to find it, not the whole file (task-2309). A page larger than
+   this whose header still does not read from the prefix falls back to the
+   whole file, so a header longer than the bound is listed exactly as before. *)
+let frontmatter_read_limit = 8192
+
+let read_listing_header ~path ~size =
+  if size <= frontmatter_read_limit
+  then Fs_compat.load_file path
+  else begin
+    let prefix = Fs_compat.read_slice ~path ~from:0 ~len:frontmatter_read_limit in
+    match Tool_wiki.parse_frontmatter prefix with
+    | Ok _ -> prefix
+    | Error _ -> Fs_compat.load_file path
+  end
+;;
+
+(* The log is append-only and grows without bound, so an explicit read returns
+   its tail rather than the whole file (task-2309). The read is the last
+   [log_read_limit] bytes, starting at a line boundary so the first line is
+   whole; a log at or below the bound is returned as written. The listing's
+   size is the whole file, so a client can tell a tail from the whole.
+
+   When the last [log_read_limit] bytes hold no newline the file is a single
+   line longer than the bound; the slice is then returned as read, and its
+   first byte may sit inside a UTF-8 code point. Real logs add one short line
+   per event, so this is a guard, not a path taken. *)
+let log_read_limit = 65536
+
+let read_log_tail ~path ~size =
+  if size <= log_read_limit
+  then Fs_compat.load_file path
+  else begin
+    let from = size - log_read_limit in
+    let text = Fs_compat.read_slice ~path ~from ~len:log_read_limit in
+    match String.index_opt text '\n' with
+    | Some i -> String.sub text (i + 1) (String.length text - i - 1)
+    | None -> text
+  end
+;;
+
+(* One listed resource per page, or [None] when the name is not a valid page
+   topic or the file vanished. The URI comes from the validated topic, never
+   from concatenating the file name. The size is a stat, so a page's body is
+   not read to list it. *)
+let page_resource path : Mcp_server.mcp_resource option =
+  let file = Filename.basename path in
+  let topic = Filename.chop_suffix file ".md" in
+  match Tool_wiki.validate_page_name topic with
+  | Error _ -> None
+  | Ok _ ->
+    (match Fs_compat.file_size path with
+     | None -> None
+     | Some size ->
+       (match read_listing_header ~path ~size with
+        | exception Sys_error _ -> None
+        | content ->
+          let uri = "masc://" ^ wiki_topic_prefix ^ topic in
+          (match Tool_wiki.parse_frontmatter content with
+           | Ok (fm : Tool_wiki.frontmatter) ->
+             Some
+               (Mcp_server.make_resource
+                  ~title:(fm.title :> string)
+                  ~size
+                  ~uri
+                  ~name:topic
+                  ~description:(fm.summary :> string)
+                  ~mime_type:"text/markdown"
+                  ())
+           | Error error ->
+             Some
+               (Mcp_server.make_resource
+                  ~size
+                  ~uri
+                  ~name:file
+                  ~description:(Tool_wiki.frontmatter_error_to_string error)
+                  ~mime_type:"text/markdown"
+                  ()))))
+;;
+
+(* One listed resource per wiki page. The pages are otherwise reachable only
+   through the [masc://wiki/{topic}] template, which a client that lists
+   resources cannot expand, so it could not open a page. A page whose header
+   does not read is listed by file name with the reason, as the index resource
+   does. A file whose name is not a valid page topic is not listed: its URI
+   would not read back as the same file ([notes.json.md] reads as a JSON
+   request for [notes]; [?] and [#] fall to URI parsing), and the index
+   resource still shows it with its reason. The log is listed once it exists.
+
+   Read cost (task-2309): the listing no longer reads page bodies. Each page
+   contributes a stat and, at most, a bounded header prefix, and the log is
+   sized by stat. The TUI Resources screen follows [nextCursor], so a listing
+   longer than one page is no longer cut off at its end, where the wiki entries
+   sort. An explicit [masc://wiki/log] read now returns the log's tail
+   ([log_read_limit]) instead of the whole file. *)
+let wiki_resources ~base_path : Mcp_server.mcp_resource list =
+  run_blocking_resource_io (fun () ->
+    let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in
+    let pages = Tool_wiki.list_pages ~base_path |> List.filter_map page_resource in
+    let log_path =
+      Filename.concat (Tool_wiki.wiki_root ~base_path) Wiki_journal.log_file
+    in
+    let log =
+      match Fs_compat.file_size log_path with
+      | None -> []
+      | Some size ->
+        [ Mcp_server.make_resource
+            ~title:"Wiki log"
+            ~size
+            ~uri:(uri_of_topic wiki_log_topic)
+            ~name:wiki_log_topic
+            ~description:
+              "One line per wiki page creation or update, oldest first. Lines \
+               are only appended. A read returns the tail: the last 65536 bytes, \
+               starting at a line boundary; the size below is the whole file."
+            ~mime_type:"text/markdown"
+            ()
+        ]
+    in
+    log @ pages)
+;;
 
 let handle_read_resource_eio state id params =
   match params with
@@ -301,26 +428,46 @@ let handle_read_resource_eio state id params =
                   ("application/json", Some (Yojson.Safe.to_string json))
                 end else if is_json then begin
                   match wiki_page_path topic with
-                  | Some path -> begin
-                    let raw = Fs_compat.load_file path in
-                    let described =
-                      match Tool_wiki.parse_frontmatter raw with
-                      | Ok fm -> metadata_fields fm
-                      | Error error -> unreadable_fields error
-                    in
-                    let json =
-                      `Assoc
-                        ((("topic", `String topic) :: described)
-                         @ [ ("content", `String (strip_frontmatter raw)) ])
-                    in
-                    ("application/json", Some (Yojson.Safe.to_string json))
-                  end
+                  | Some path ->
+                    (* A page can be listed and then become unreadable before
+                       this read: deleted, or its permissions changed. Answer
+                       with an error envelope rather than letting [Sys_error]
+                       escape the handler, as the index and log branches
+                       already do (the [.mli] promises [Never raises]). *)
+                    (match Fs_compat.load_file path with
+                     | exception Sys_error _ -> ("application/json", None)
+                     | raw ->
+                       let described =
+                         match Tool_wiki.parse_frontmatter raw with
+                         | Ok fm -> metadata_fields fm
+                         | Error error -> unreadable_fields error
+                       in
+                       let json =
+                         `Assoc
+                           ((("topic", `String topic) :: described)
+                            @ [ ("content", `String (strip_frontmatter raw)) ])
+                       in
+                       ("application/json", Some (Yojson.Safe.to_string json)))
                   | None -> ("application/json", None)
                 end else begin
                   match wiki_page_path topic with
                   | Some path ->
-                    let content = Fs_compat.load_file path in
-                    ("text/markdown", Some content)
+                    (match Fs_compat.load_file path with
+                     | content -> ("text/markdown", Some content)
+                     | exception Sys_error _ -> ("text/markdown", None))
+                  | None when String.equal topic wiki_log_topic ->
+                    (* The log is not a page, so the listing above has no
+                       entry for it. The path is the constant file name, never
+                       the client's topic. The log is append-only and grows
+                       without bound, so the read returns its tail rather than
+                       the whole file (task-2309). *)
+                    let log_path = Filename.concat wiki_dir Wiki_journal.log_file in
+                    (match Fs_compat.file_size log_path with
+                     | None -> ("text/markdown", None)
+                     | Some size ->
+                       (match read_log_tail ~path:log_path ~size with
+                        | text -> ("text/markdown", Some text)
+                        | exception Sys_error _ -> ("text/markdown", None)))
                   | None -> ("text/markdown", None)
                 end
               end)

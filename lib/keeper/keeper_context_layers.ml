@@ -7,6 +7,7 @@ type layer_id =
   | Connected_surfaces
   | Namespace_state
   | Workspace_memory
+  | Wiki
   | Lane_updates
   | Repository_freshness
   | Autonomous_trigger
@@ -38,6 +39,7 @@ let ordered =
   ; Connected_surfaces
   ; Namespace_state
   ; Workspace_memory
+  ; Wiki
   ; Lane_updates
   ; Repository_freshness
   ; Autonomous_trigger
@@ -64,19 +66,20 @@ let order_index = function
   | Connected_surfaces -> 3
   | Namespace_state -> 4
   | Workspace_memory -> 5
-  | Lane_updates -> 6
-  | Repository_freshness -> 7
-  | Autonomous_trigger -> 8
-  | Scheduled_automation -> 9
-  | Completion_authority -> 10
-  | Task_cancellations -> 11
-  | Pending_mentions -> 12
-  | Scope_messages -> 13
-  | Own_board_posts -> 14
-  | Board_activity -> 15
-  | Own_recent_actions -> 16
-  | Recent_work -> 17
-  | Fleet_messages -> 18
+  | Wiki -> 6
+  | Lane_updates -> 7
+  | Repository_freshness -> 8
+  | Autonomous_trigger -> 9
+  | Scheduled_automation -> 10
+  | Completion_authority -> 11
+  | Task_cancellations -> 12
+  | Pending_mentions -> 13
+  | Scope_messages -> 14
+  | Own_board_posts -> 15
+  | Board_activity -> 16
+  | Own_recent_actions -> 17
+  | Recent_work -> 18
+  | Fleet_messages -> 19
 ;;
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
@@ -115,6 +118,7 @@ let layer_name = function
   | Connected_surfaces -> "connected_surfaces"
   | Namespace_state -> "namespace_state"
   | Workspace_memory -> "workspace_memory"
+  | Wiki -> "wiki"
   | Lane_updates -> "lane_updates"
   | Repository_freshness -> "repository_freshness"
   | Autonomous_trigger -> "autonomous_trigger"

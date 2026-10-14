@@ -161,10 +161,6 @@ function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
   return acc
 }
 
-// `trustDispositionLabel` moved to `../fsm-hub-types` to deduplicate the
-// 4-entry inline label literal that also lived in
-// `keeper-detail-alert-strip.ts:201-205`. Same map, single SSOT.
-
 function goalFsmStateLabel(state: GoalFsmProjection['state']): string {
   return goalPhaseLabel(state)
 }
@@ -199,7 +195,7 @@ function keeperTrustDispositionClass(
 ): string {
   const disposition = trust?.disposition
   if (disposition === 'Alert') return 'border-bad/25 bg-bad/10 text-bad'
-  if (disposition === 'Blocked' || disposition === 'Pause' || trust?.needs_attention) {
+  if (disposition === 'Blocked' || trust?.needs_attention) {
     return 'border-warn/25 bg-warn/10 text-warn'
   }
   if (disposition === 'Pass') return 'border-ok/25 bg-ok/10 text-ok'

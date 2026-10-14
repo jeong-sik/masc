@@ -86,7 +86,7 @@ let get_tasks_raw config =
     initialized — safe for dashboard and display contexts.
     Replaces the former [get_tasks_raw_in_workspace]. *)
 let get_tasks_safe config =
-  if not (root_is_initialized config) then []
+  if not (is_initialized config) then []
   else (read_backlog config).tasks
 
 let safe_yield () =
@@ -207,7 +207,7 @@ let get_agents_raw config =
     answer, so a caller that shows the roster to a person can say so instead of
     presenting a short list as a complete one. *)
 let get_active_agents_observed config =
-  if not (root_is_initialized config)
+  if not (is_initialized config)
   then [], []
   else (
     let agents_path = agents_dir config in
@@ -226,7 +226,7 @@ let get_active_agents config = fst (get_active_agents_observed config)
     instead of raising.  Includes inactive agents.
     Useful for keeper backlog-triage enrollment. *)
 let get_all_agents config =
-  if not (root_is_initialized config) then []
+  if not (is_initialized config) then []
   else
     let agents_path = agents_dir config in
     load_agents_from_dir config agents_path ~include_inactive:true
@@ -311,7 +311,7 @@ let is_agent_active_at_path config path =
 
 (** Check if an agent has session-bound *)
 let is_agent_session_bound config ~agent_name =
-  if not (root_is_initialized config) then false
+  if not (is_initialized config) then false
   else
     let actual_name = resolve_agent_name config agent_name in
     let filename = safe_filename actual_name ^ ".json" in
@@ -431,7 +431,7 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_labe
 (** Get raw message list (for dashboard).
     Returns [[]] when MASC is not initialized. *)
 let get_messages_raw config ~since_seq ~limit =
-  if not (root_is_initialized config) then []
+  if not (is_initialized config) then []
   else
     let msgs_path = messages_dir config in
     collect_recent_messages
@@ -443,7 +443,7 @@ let get_messages_raw config ~since_seq ~limit =
       ~warn_label:"message"
 
 let get_messages_matching config ~since_seq ~limit ~keep =
-  if not (root_is_initialized config) then []
+  if not (is_initialized config) then []
   else
     let msgs_path = messages_dir config in
     collect_recent_messages
@@ -455,7 +455,7 @@ let get_messages_matching config ~since_seq ~limit ~keep =
       ~warn_label:"message"
 
 let get_all_messages_raw config ~since_seq =
-  if not (root_is_initialized config) then []
+  if not (is_initialized config) then []
   else
     let msgs_path = messages_dir config in
     if not (Sys.file_exists msgs_path) then []
@@ -495,7 +495,9 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
     match status with
     | Some status_filter ->
         List.filter (fun (task : task) ->
-          String.equal status_filter (string_of_task_status task.task_status)
+          Masc_domain.Task_status_tag.equal
+            (Masc_domain.task_status_tag task.task_status)
+            status_filter
         ) backlog.tasks
     | None ->
         List.filter (fun (task : task) ->

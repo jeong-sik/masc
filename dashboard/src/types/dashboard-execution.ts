@@ -1,5 +1,5 @@
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
-import type { GoalProof, Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
+import type { GoalProof, Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore, TrustDisposition } from './core'
 import type {
   BoardMonitoring,
   KeeperApprovalQueueState,
@@ -607,7 +607,7 @@ export interface GoalKeeperTrustTerminalReason {
 export interface GoalKeeperTrustSummary {
   snapshot_status?: string | null
   snapshot_error?: string | null
-  disposition?: string | null
+  disposition?: TrustDisposition | null
   disposition_reason?: string | null
   operator_disposition?: string | null
   operator_disposition_reason?: string | null
@@ -749,7 +749,6 @@ export interface ServerStatus {
   workspace_root?: string
   workspace_path?: string
   workspace_differs?: boolean
-  cluster?: string
   project?: string
   paused?: boolean
   version?: string

@@ -74,6 +74,7 @@ let producer_authorization_owner descriptor =
   | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
   | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
   | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_job_dispatch
   | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_status

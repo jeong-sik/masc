@@ -212,6 +212,30 @@ end
     without an enclosing Keeper turn. *)
 
 module For_testing : sig
+  val async_worker_result :
+    composition_execution:Keeper_tool_composition_catalog.execution_mode ->
+    tool_kind:Keeper_tool_descriptor.tool_kind ->
+    ?skill_reference:Skill_reference.t ->
+    ?nested_calls:Keeper_composition_nested.call list ->
+    ?nested_activation:Keeper_skill_activation_recorder.bound_context ->
+    ?continuation:Keeper_tool_execution_journal.continuation ->
+    plan:Keeper_tool_plan.t ->
+    ?journal:Keeper_tool_execution_journal.worker ->
+    tool_name:string -> request_id:string ->
+    composition_run_id:Keeper_tool_plan.Composition_run_id.t ->
+    source_invocation:Agent_core.Tool_contract.Invocation.t ->
+    request_sw:Eio.Switch.t -> config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    capability_authority:Keeper_tool_runtime.capability_authority ->
+    publication_recovery:Keeper_publication_recovery_availability.turn_context ->
+    ctx_snapshot:Keeper_types.working_context ->
+    turn_context:Keeper_tool_call_log_context.turn_context option ->
+    ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+    unit -> Keeper_msg_async.worker_outcome
+  (** The actual production worker, so a fixture can bind a real broker request
+      and replace activation authority precisely after acceptance, before the
+      worker restores it. No fabricated worker/journal or global fault hook. *)
+
   val node_result_to_json : Keeper_tool_plan_executor.node_result -> Yojson.Safe.t
   (** The canonical settlement representation used by the production surface
       when it persists Skill composition evidence. *)

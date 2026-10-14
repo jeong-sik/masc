@@ -199,7 +199,7 @@ let a_missing_launcher_message_names_the_command_for_that_workspace () =
     check bool ("says it is " ^ standing) true (String_util.contains_substring message standing);
     check bool "names the command for this workspace" true
       (String_util.contains_substring message
-         ("masc browser-lane-setup --mode extension --base-path " ^ Filename.quote base_path)))
+         ("masc browser-lane-setup --mode bidi --base-path " ^ Filename.quote base_path)))
     [ Keeper_firefox.Not_installed, "not installed"
     ; Keeper_firefox.Needs_reinstall, "not as its installation wrote it" ]
 

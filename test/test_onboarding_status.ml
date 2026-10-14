@@ -451,6 +451,42 @@ let a_bidi_host_that_met_another_profile_names_both_profiles () =
   says (ended_on (Some found)) [ found; expected; next_host ];
   says (ended_on None) [ expected; next_host ]
 
+(* The installation a paragraph asks for follows who starts the Firefox. Where
+   MASC does, the table is in runtime.toml already and the BiDi installation
+   leaves it. Where the operator does there is no table, and the BiDi
+   installation would write one and hand the start to MASC, so the paragraph
+   names the extension's, which writes no runtime.toml. *)
+let the_installation_a_paragraph_names_follows_who_starts_the_firefox () =
+  let masc =
+    Status.Masc_starts
+      { port = 9444; profile = "/keeper/profile"; last_start = Masc.Browser_keeper_firefox_start_record.Absent } in
+  let ended =
+    Record.Ended
+      ( host_entry
+      , { at = 1_791_000_060.; reason = "stopped"; session = Record.No_session_left
+        ; because = Record.Reason_only } ) in
+  (* Every state of the record whose paragraph closes with the installation
+     step, for each way the Firefox is started. *)
+  let records =
+    [ "never started", Record.Never_started
+    ; "ended", ended
+    ; "died", Record.Died host_entry
+    ; "unreadable and unlocked", Record.Unreadable { detail = "torn by this test"; held = Some false } ] in
+  let install route = "masc browser-lane-setup --mode " ^ route ^ " --base-path '/workspace'" in
+  List.iter (fun (launcher, lead) ->
+      List.iter (fun (state, record) ->
+          let said keeper = Status.message (observation ~launcher ~keeper record) in
+          has (said masc) [ lead ^ install "bidi" ];
+          lacks (said masc) [ "--mode extension" ];
+          List.iter (fun keeper ->
+              check bool (state ^ ": names the extension installation where the operator starts it")
+                true (String_util.contains_substring (said keeper) (lead ^ install "extension"));
+              lacks (said keeper) [ "--mode bidi" ])
+            [ Status.Not_configured; Status.Not_known ])
+        records)
+    [ Launcher.Not_installed, "the operator first installs the lane by running "
+    ; Launcher.Undeclared, "the operator first installs the lane again by running " ]
+
 module Start_record = Masc.Browser_keeper_firefox_start_record
 module Starter = Masc.Browser_keeper_firefox_starter
 
@@ -1331,6 +1367,8 @@ let () = run "Onboarding observations"
                    a_bidi_host_that_met_another_profile_names_both_profiles;
                  test_case "where MASC starts the Firefox, the status says so" `Quick
                    where_masc_starts_the_firefox_the_status_says_so;
+                 test_case "the installation a paragraph names follows who starts the Firefox" `Quick
+                   the_installation_a_paragraph_names_follows_who_starts_the_firefox;
                  test_case "where MASC does not start the Firefox, the status says why" `Quick
                    where_masc_does_not_start_the_firefox_the_status_says_why;
                  test_case "a host address is on a port or not" `Quick a_host_address_is_on_a_port_or_not;

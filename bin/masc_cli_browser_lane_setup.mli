@@ -1,20 +1,28 @@
 (** [masc browser-lane-setup]: connect this workspace's browser lane to
-    Firefox through the MASC extension.
+    Firefox, by either route or both.
 
-    Without a mode it writes nothing and says what is installed. With
-    [--mode extension] it installs the native host, its launcher and manifest,
-    and writes the extension for Firefox to load. It starts no browser and
-    edits no runtime.toml. *)
+    Without a mode it writes nothing and says what is installed. [--mode
+    extension] installs the native host, its launcher and manifest, and writes
+    the extension for Firefox to load. [--mode bidi] installs the host and its
+    launcher and writes the [\[browser.live.bidi\]] table of runtime.toml, so
+    the MASC server starts a Firefox of its own. It starts no browser and loads
+    no extension.
 
-type mode = Extension
+    An option that the chosen modes do not use is refused, not ignored. *)
+
+type mode = Masc.Browser_lane_launcher.route
 
 val run
   :  base_path:string
-  -> mode:mode option
+  -> runtime_config_path:string
+  -> modes:mode list
   -> binary:string option
   -> token_file:string option
   -> manifest_dir:string option
   -> host_name:string option
+  -> firefox:string option
+  -> profile:string option
+  -> port:int option
   -> int
 (** The process exit code: [0] when it printed the state or finished the
     install, [1] when it refused and said why on stderr. *)

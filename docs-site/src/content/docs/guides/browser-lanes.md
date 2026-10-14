@@ -40,7 +40,21 @@ file again and moves to the port it names only when the current server no
 longer answers and the new port does, so a server restarted on another port is
 found without reinstalling.
 
-The command supports macOS and Linux and registers a Mozilla native-messaging
+To connect without the extension, let the MASC server start a Firefox of its own
+and attach the host to it:
+
+```bash
+masc browser-lane-setup --mode bidi --base-path /path/to/workspace
+```
+
+This installs the host and writes `[browser.live.bidi]` into the workspace's
+`runtime.toml`. `--firefox`, `--profile` and `--port` name its values. A table
+that is already there keeps its values. Restart the MASC server so it reads the
+table, then log in once in that Firefox: its profile keeps the login. The port
+has no authentication, so any program on the computer can drive that Firefox.
+Give `--mode` twice for both routes.
+
+The `--mode extension` command supports macOS and Linux and registers a Mozilla native-messaging
 manifest. `--manifest-dir` selects a different manifest directory when needed.
 It also writes the extension to `<base-path>/.masc/browser-lane/extension/`. In
 Firefox or Zen, open `about:debugging` → **Load Temporary Add-on** and select

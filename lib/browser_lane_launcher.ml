@@ -110,14 +110,19 @@ let verdict t =
   | Serving { port; polling = [] }, Follows_workspace, Ok workspace when workspace = port -> Aligned
   | Serving { polling = []; _ }, Follows_workspace, Ok _ -> Misconfigured
 
-let install ~base_path =
-  Printf.sprintf "masc browser-lane-setup --mode extension --base-path %s"
+type route = Extension | Bidi
+
+let routes = [ Extension; Bidi ]
+let route_name = function Extension -> "extension" | Bidi -> "bidi"
+
+let install ~route ~base_path =
+  Printf.sprintf "masc browser-lane-setup --mode %s --base-path %s" (route_name route)
     (Filename.quote base_path)
 
 let reinstall ~base_path =
   Printf.sprintf
     "The operator runs %s, then reloads the browser extension so a new host starts."
-    (install ~base_path)
+    (install ~route:Extension ~base_path)
 
 let environment_note =
   "An exported MASC_HTTP_BASE_URL or MASC_HTTP_PORT in the browser's environment fixes the \
@@ -130,7 +135,7 @@ let launcher_problem t =
       Some (Printf.sprintf
         "No browser lane host is installed in this workspace. The operator runs %s and loads \
          the MASC extension in the browser."
-        (install ~base_path))
+        (install ~route:Extension ~base_path))
   | Undeclared ->
       Some (Printf.sprintf
         "The browser lane launcher in %s has no %s beside it, so where that host polls is \

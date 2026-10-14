@@ -30,6 +30,7 @@
  (package masc)
  (libraries
   masc.workspace_connection
+  masc.browser_configuration
   masc.voice_config
   masc.voice_setup
   masc

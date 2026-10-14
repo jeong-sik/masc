@@ -22,12 +22,22 @@ module Host_name = struct
   let to_string name = name
 end
 
+type extension_route =
+  { manifest_dir : string
+  ; host_name : Host_name.t
+  }
+
 type request =
   { base_path : string
   ; binary : string option
   ; token_file : string option
-  ; manifest_dir : string
-  ; host_name : Host_name.t
+  ; extension : extension_route option
+  }
+
+type extension_installed =
+  { native_manifest : string
+  ; directory : string
+  ; load : string
   }
 
 type installed =
@@ -35,10 +45,8 @@ type installed =
   ; host_source : string
   ; launcher : string
   ; declaration : string
-  ; manifest : string
   ; token : string
-  ; extension_directory : string
-  ; extension_manifest : string
+  ; extension : extension_installed option
   }
 
 type error =
@@ -367,7 +375,7 @@ let launcher_script ~host ~base_path ~token_file =
     (Filename.quote base_path)
     (Filename.quote token_file)
 
-let native_manifest ~host_name ~launcher ~extension_id =
+let native_manifest_text ~host_name ~launcher ~extension_id =
   Yojson.Safe.pretty_to_string ~std:true
     (`Assoc
        [ "name", `String (Host_name.to_string host_name)
@@ -378,34 +386,81 @@ let native_manifest ~host_name ~launcher ~extension_id =
        ])
   ^ "\n"
 
+(* What the extension route adds to the host and the launcher: the files of the
+   extension this build carries and the manifest that lets Firefox start the
+   host for it. Read and checked before the first write, like the rest. *)
+type extension_plan =
+  { route : extension_route
+  ; id : string
+  ; files : (string * string) list
+  ; directory : string
+  }
+
+let plan_extension ~lane = function
+  | None -> Ok None
+  | Some route ->
+    let* id, files = embedded_extension () in
+    Ok (Some { route; id; files; directory = Filename.concat lane "extension" })
+
+let prepare_extension = function
+  | None -> Ok ()
+  | Some plan ->
+    let* () = prepare_directory plan.directory in
+    let* () = prepare_directory plan.route.manifest_dir in
+    List.fold_left
+      (fun previous (name, _) ->
+         let* () = previous in
+         prepare_directory (Filename.dirname (Filename.concat plan.directory name)))
+      (Ok ())
+      plan.files
+
+let write_extension ~launcher = function
+  | None -> Ok None
+  | Some plan ->
+    let* () =
+      List.fold_left
+        (fun previous (name, contents) ->
+           let* () = previous in
+           write_replacing ~mode:0o644 (Filename.concat plan.directory name) contents)
+        (Ok ())
+        plan.files
+    in
+    let native_manifest =
+      Filename.concat
+        plan.route.manifest_dir
+        (Host_name.to_string plan.route.host_name ^ ".json")
+    in
+    let* () =
+      write_replacing
+        ~mode:0o644
+        native_manifest
+        (native_manifest_text ~host_name:plan.route.host_name ~launcher ~extension_id:plan.id)
+    in
+    Ok
+      (Some
+         { native_manifest
+         ; directory = plan.directory
+         ; load = Filename.concat plan.directory extension_manifest_name
+         })
+
 let install request =
   let base_path = request.base_path in
   if Filename.is_relative base_path
   then Error (Base_path_not_absolute base_path)
   else
-    let* extension_id, extension_files = embedded_extension () in
-    let* source = host_source request.binary in
     let lane =
       List.fold_left
         Filename.concat
         base_path
         [ Common.masc_dirname; Common.browser_lane_dirname ]
     in
+    let* extension = plan_extension ~lane request.extension in
+    let* source = host_source request.binary in
     let* plan = plan_token ~base_path ~lane ~given:request.token_file in
     let host_directory = Browser_lane_launcher.host_directory_path ~base_path in
-    let extension_directory = Filename.concat lane "extension" in
     let* () = prepare_directory lane in
     let* () = prepare_directory host_directory in
-    let* () = prepare_directory extension_directory in
-    let* () = prepare_directory request.manifest_dir in
-    let* () =
-      List.fold_left
-        (fun previous (name, _) ->
-           let* () = previous in
-           prepare_directory (Filename.dirname (Filename.concat extension_directory name)))
-        (Ok ())
-        extension_files
-    in
+    let* () = prepare_extension extension in
     let* host_bytes = io ~step:"read" ~path:source (fun () -> read_file source) in
     let* () = provision_token ~lane plan in
     let host = Filename.concat host_directory host_executable_name in
@@ -413,25 +468,7 @@ let install request =
     let launcher = Browser_lane_launcher.launcher_path ~base_path in
     let script = launcher_script ~host ~base_path ~token_file:plan.token_file in
     let* () = write_replacing ~mode:0o755 launcher script in
-    let* () =
-      List.fold_left
-        (fun previous (name, contents) ->
-           let* () = previous in
-           write_replacing ~mode:0o644 (Filename.concat extension_directory name) contents)
-        (Ok ())
-        extension_files
-    in
-    let manifest =
-      Filename.concat
-        request.manifest_dir
-        (Host_name.to_string request.host_name ^ ".json")
-    in
-    let* () =
-      write_replacing
-        ~mode:0o644
-        manifest
-        (native_manifest ~host_name:request.host_name ~launcher ~extension_id)
-    in
+    let* extension = write_extension ~launcher extension in
     (* Last: the declaration is what makes the launcher count as installed. *)
     let declaration = Browser_lane_launcher.declaration_path ~base_path in
     let* () =
@@ -445,8 +482,6 @@ let install request =
       ; host_source = source
       ; launcher
       ; declaration
-      ; manifest
       ; token = plan.canonical
-      ; extension_directory
-      ; extension_manifest = Filename.concat extension_directory extension_manifest_name
+      ; extension
       }

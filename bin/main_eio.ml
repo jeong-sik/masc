@@ -2206,17 +2206,24 @@ let voice_local_setup_exit base_path speak_voice hear_model =
               0
 
 let browser_lane_setup_cmd =
-  let mode =
+  let modes =
     Arg.(
       value
-      & opt (some (enum [ "extension", Masc_cli_browser_lane_setup.Extension ])) None
+      & opt_all
+          (enum
+             (List.map
+                (fun route -> Masc.Browser_lane_launcher.route_name route, route)
+                Masc.Browser_lane_launcher.routes))
+          []
       & info
           [ "mode" ]
           ~docv:"MODE"
           ~doc:
-            "How to connect Firefox. extension installs the native host and writes the \
-             MASC extension for Firefox to load. Without a mode nothing is written and \
-             the current state is printed.")
+            "How to connect Firefox: extension installs the native host and writes the \
+             MASC extension for Firefox to load; bidi installs the host and writes the \
+             [browser.live.bidi] table so the MASC server starts a Firefox of its own. \
+             Give it twice for both. Without a mode nothing is written and the current \
+             state is printed.")
   in
   let binary =
     Arg.(
@@ -2262,6 +2269,43 @@ let browser_lane_setup_cmd =
              share the default host. Lowercase letters, digits and underscores, in segments \
              separated by dots. Default: masc_browser_host.")
   in
+  let firefox =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "firefox" ]
+          ~docv:"FILE"
+          ~doc:
+            "With --mode bidi, the Firefox executable, an absolute path. By default the \
+             first Firefox that answers --version, on PATH or in the macOS application \
+             bundle. An existing table keeps its value unless this is given.")
+  in
+  let profile =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "profile" ]
+          ~docv:"DIR"
+          ~doc:
+            "With --mode bidi, the profile directory that Firefox opens, an absolute path. \
+             It keeps the logins Keepers use. By default masc-keeper-firefox-profile in \
+             the home directory, made when it is missing. An existing table keeps its \
+             value unless this is given.")
+  in
+  let port =
+    Arg.(
+      value
+      & opt (some int) None
+      & info
+          [ "port" ]
+          ~docv:"PORT"
+          ~doc:
+            "With --mode bidi, the port Firefox answers BiDi on. By default none is \
+             written and the server uses 9222. An existing table keeps its value unless \
+             this is given.")
+  in
   Cmd.v
     (Cmd.info
        "browser-lane-setup"
@@ -2276,18 +2320,30 @@ let browser_lane_setup_cmd =
          ; `P
              "Installing again replaces the host, launcher, manifest and extension files \
               and keeps the workspace's lane token."
+         ; `P
+             "--mode bidi writes [browser.live.bidi] into runtime.toml without touching \
+              its comments or other tables. A table that is already there keeps its \
+              values, because its profile holds the logins; a value changes only when it \
+              is named. The server reads the table when it starts."
          ])
     Term.(
-      const (fun base_path mode binary token_file manifest_dir host_name ->
+      const (fun base_path modes binary token_file manifest_dir host_name firefox profile port ->
+        let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
-          ~base_path:(Env_config.normalize_masc_base_path_input base_path)
-          ~mode ~binary ~token_file ~manifest_dir ~host_name)
+          ~base_path
+          (* The file the server and masc doctor read: it honors MASC_CONFIG_DIR,
+             which the helper the other setup commands use does not. *)
+          ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+          ~modes ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile ~port)
       $ base_path
-      $ mode
+      $ modes
       $ binary
       $ token_file
       $ manifest_dir
-      $ host_name)
+      $ host_name
+      $ firefox
+      $ profile
+      $ port)
 
 let voice_local_setup_cmd =
   let voice =

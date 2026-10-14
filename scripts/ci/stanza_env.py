@@ -15,13 +15,20 @@ not run, because its verdicts look real.
     stanza_env.py <suite>          KEY=VALUE per line, for `env`
     stanza_env.py --deps <suite>   dune targets to build first, from the root
 
-Build targets include literal files in the stanza's (deps ...) as well as
-%{dep:...} environment values. This is not a Dune dependency-expression
-evaluator: glob, alias and deps under any variable other than
-%{project_root}/ and %{workspace_root}/ remain owned by Dune's runtest action. A (source_tree DIR) dep is passed through as the target
-`dune build DIR` accepts from the root -- building it is a normal build, not
-the runtest action, and a targeted run without it misses the tree the suite
-reads.
+Build targets include literal files in the stanza's (deps ...), the files a
+(glob_files ...)/(glob_files_rec ...) dep matches, and %{dep:...} environment
+values. This is not a Dune dependency-expression evaluator: alias deps and
+deps under any variable other than %{project_root}/ and %{workspace_root}/
+remain owned by Dune's runtest action. A (source_tree DIR) dep is passed
+through as the target `dune build DIR` accepts from the root -- building it is
+a normal build, not the runtest action, and a targeted run without it misses
+the tree the suite reads.
+
+A glob dep is expanded here for the same reason. Dune materialises a stanza's
+deps inside its runtest action; a targeted run builds the executable instead,
+so a suite whose only fixture dep was a glob stood in _build/default/<dir>
+with the fixture directory absent and died on the first read
+("No such file or directory") -- a FAIL the nightly lane never sees.
 
 The two forms spell the same file differently on purpose. A stanza writes a
 path relative to test/, which is where the runner stands
@@ -31,6 +38,7 @@ takes its targets from the repo root, so --deps normalises them there.
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import sys
@@ -175,6 +183,34 @@ def literal_target(path: str, suite_dir: str) -> str | None:
     return None
 
 
+def glob_files_targets(patterns: list, suite_dir: str, recursive: bool) -> list[str]:
+    """The files a (glob_files ...)/(glob_files_rec ...) dep names.
+
+    Dune expands the pattern inside its runtest action, whose sandbox holds
+    the matches; a targeted run builds the executable instead, so the files
+    are never copied into _build and the suite reads a directory that is not
+    there. Expanding the same pattern against the checkout produces the file
+    targets that copy them.
+
+    Paths come back relative to SUITE_DIR, the spelling main() expects, and a
+    pattern only Dune can resolve contributes nothing rather than a guess.
+    """
+    root = os.path.join(REPO_ROOT, suite_dir)
+    found: list[str] = []
+    for pattern in patterns:
+        if not isinstance(pattern, str):
+            continue
+        target = literal_target(pattern, suite_dir)
+        if target is None:
+            continue
+        for match in sorted(
+            glob.glob(os.path.join(root, target), recursive=recursive)
+        ):
+            if os.path.isfile(match):
+                found.append(os.path.relpath(match, root))
+    return found
+
+
 def collect_literal_deps(form, suite_dir: str) -> list[str]:
     """Literal file targets required by a directly executed test action.
 
@@ -190,12 +226,16 @@ def collect_literal_deps(form, suite_dir: str) -> list[str]:
                 paths = [item]
             elif item and item[0] == "source_tree":
                 # A list dep is a dependency expression: (source_tree DIR),
-                # (glob_files ...), (alias ...). Only source_tree names a
-                # target `dune build` accepts from the root -- the directory
-                # itself, which copies the tree into _build. The others name
-                # nothing a build target can be, so they stay with Dune's
-                # runtest action.
+                # (glob_files ...), (alias ...). source_tree names a target
+                # `dune build` accepts from the root -- the directory itself,
+                # which copies the tree into _build. (alias ...) names nothing
+                # a build target can be, so it stays with Dune's runtest
+                # action.
                 paths = [d for d in item[1:] if isinstance(d, str)]
+            elif item and item[0] in ("glob_files", "glob_files_rec"):
+                paths = glob_files_targets(
+                    item[1:], suite_dir, recursive=item[0] == "glob_files_rec"
+                )
             else:
                 continue
             for path in paths:

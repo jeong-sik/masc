@@ -177,7 +177,16 @@ let application config id =
     |> List.find (fun item -> text "id" item = id) in
   member "application" declaration
 let check_application config id expected =
-  check string "observed declaration application" expected (application config id |> text "kind")
+  (* `Unknown` has three causes in the product -- an incomplete inventory, two
+     workers claiming the same declaration, and no operator access at all --
+     and they are told apart only by `application.messages`. Alcotest prints
+     Expected/Received and drops the rest, so a failure used to say `"unknown"`
+     and nothing about which one fired. *)
+  let observed = application config id in
+  let actual = text "kind" observed in
+  if actual <> expected then
+    failf "observed declaration application: expected %S, got %S (application: %s)"
+      expected actual (Yojson.Safe.to_string observed)
 let await clock predicate =
   let rec loop () =
     if predicate () then () else (Eio.Time.sleep clock 0.001; loop ())

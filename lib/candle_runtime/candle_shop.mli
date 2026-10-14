@@ -4,6 +4,9 @@
 type account =
   { keeper : string
   ; balance_milli : int
+  ; decayed_milli : Z.t
+  ; half_life : Candle_decay.half_life
+  ; last_event_at : Candle_time.t option
   ; owned_items : Keeper_portrait_item.t list
   }
 
@@ -16,6 +19,17 @@ val catalog_entry_to_yojson : catalog_entry -> Yojson.Safe.t
 (** One catalog row as the Keeper tool and the dashboard both send it:
     [id], [slot], [price_status], and [price_milli] when priced. *)
 
+val effective_price_for_balance
+  :  Candle_config.policy
+  -> Candle_balance.t
+  -> Keeper_portrait_item.t
+  -> Candle_config.price
+(** Effective item price under [policy.pricing] using the circulating supply
+    and active keeper count of [balance]. *)
+
+val catalog_for_balance : Candle_config.policy -> Candle_balance.t -> catalog_entry list
+(** Canonical catalog priced at the effective prices for [balance]. *)
+
 type receipt =
   { account : account
   ; item : Keeper_portrait_item.t
@@ -27,6 +41,11 @@ type error =
   | Off
   | Disabled of string
   | Unpriced of Keeper_portrait_item.t
+  | Price_changed of
+      { item : Keeper_portrait_item.t
+      ; expected_milli : int
+      ; actual_milli : int
+      }
   | Account_invalid of Candle_balance.error
   | Purchase_refused of Candle_balance.error
   | Ledger_unavailable of string
@@ -43,15 +62,18 @@ val account
     a changed half-life before answering. Read-only surfaces read
     {!Candle_status.observed_view} instead. *)
 
-val catalog : base_path:string -> (catalog_entry list, error) result
+val catalog : now:(unit -> float) -> base_path:string -> (catalog_entry list, error) result
 
 (** The caller supplies its trusted Keeper identity. A single cursor-checked
     ledger update recomputes funds and ownership before appending one purchase.
     A competing append reruns that decision with the new ledger. The price
     recorded is the explicit policy re-read within each cursor attempt; an
-    item that becomes unpriced is refused before any debit. *)
+    item that becomes unpriced is refused before any debit. When
+    [expected_price_milli] is given and the effective price at the purchase
+    instant exceeds it, the purchase is refused with [Price_changed]. *)
 val purchase
-  :  now:(unit -> float)
+  :  ?expected_price_milli:int
+  -> now:(unit -> float)
   -> base_path:string
   -> keeper:Keeper_id.Keeper_name.t
   -> item:Keeper_portrait_item.t

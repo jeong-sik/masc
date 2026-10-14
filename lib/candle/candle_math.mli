@@ -1,6 +1,7 @@
 type share_rounding = Largest_remainder | Down
 type tie_break = Name_ascending | Name_descending
 type deduction_rounding = Floor | Ceil
+type rounding = deduction_rounding = Floor | Ceil
 type distribution = {
   share_rounding : share_rounding;
   tie_break : tie_break;
@@ -49,3 +50,7 @@ val deduct : rounding:deduction_rounding -> coefficient:int -> int -> (int, erro
 (** [deduct ~coefficient share] is [share * coefficient / 1000], rounded by the explicit policy.
     [coefficient] must lie in [0, 1000]. A negative share is refused before any
     multiplication, including when the coefficient is zero. *)
+
+val round_div : rounding:rounding -> Z.t -> Z.t -> Z.t
+(** Exact integer division of a nonnegative numerator by a positive denominator,
+    rounded down ([Floor]) or up ([Ceil]). *)

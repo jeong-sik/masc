@@ -38,6 +38,30 @@ val set_half_life : t -> at:Candle_time.t -> Candle_decay.half_life -> (t, error
     policy does not create a new rounding interval. Money requires an explicit
     first policy record; no initial decay policy is invented. *)
 val balance : t -> keeper:string -> int
+val decayed_milli : t -> keeper:string -> Z.t
+(** Cumulative milli-Candles lost to exponential decay by [keeper] across all
+    closed decay intervals in this projection. *)
+val last_event_at : t -> keeper:string -> Candle_time.t option
+(** The latest monetary or item-transfer timestamp recorded for [keeper], or
+    [None] if [keeper] has no wallet history. *)
+
+type supply_summary =
+  { total_supply_milli : Z.t
+  ; active_keepers : int
+  }
+
+val supply_summary : ?min_active_balance_milli:int -> t -> supply_summary
+(** Exact sum of positive wallet balances and count of keepers whose balance is
+    at least [max 1 min_active_balance_milli] (default [1]) in this
+    projection. *)
+
+val supply_summary_at
+  :  ?min_active_balance_milli:int
+  -> t
+  -> now:Candle_time.t
+  -> (supply_summary, error) result
+(** Advance all wallets to [now] and return their aggregate supply and active
+    keeper count under [min_active_balance_milli]. *)
 
 (** Exact nonnegative decimal milli-Candle amounts. Aggregate issuance can
     exceed a machine integer even when every individual wallet is valid. *)

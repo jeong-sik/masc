@@ -15,16 +15,59 @@ type payout_policy = private {
 
 val grade_amount_milli : payout_policy -> Candle_grade.t -> int option
 
+type pricing_policy =
+  | Fixed
+  | Supply_scaled of
+      { target_per_keeper_milli : int
+      ; min_permille : int
+      ; max_permille : int
+      ; rounding : Candle_math.rounding
+      }
+
 type policy = private
   { payout : payout_policy
   ; prices : (Keeper_portrait_item.t * int) list
+  ; pricing : pricing_policy
   ; half_life : Candle_decay.half_life
   }
 
+val pricing : policy -> pricing_policy
+
+val max_permille_limit : int
+(** Upper bound ([10_000], i.e. 10x base price) accepted for [max_permille] in
+    [shop.pricing]. *)
+
+val min_active_balance_milli : pricing_policy -> int
+(** Minimum positive wallet balance (in milli-Candles) for a keeper to count
+    toward [active_keepers] under [pricing_policy]: [1] under [Fixed], and
+    [max 1 (target_per_keeper_milli / 10)] under [Supply_scaled]. *)
+
 type price = Unpriced | Priced of int
 val price : policy -> Keeper_portrait_item.t -> price
-(** The explicit current milli-Candle price. A missing entry is [Unpriced],
-    including when the optional [shop] table is absent. *)
+(** The explicit configured base milli-Candle price. A missing entry is
+    [Unpriced], including when the optional [shop] table is absent. *)
+
+val scale_price
+  :  pricing:pricing_policy
+  -> total_supply_milli:Z.t
+  -> active_keepers:int
+  -> base_price_milli:int
+  -> int
+(** Exact Zarith supply-scaled price calculation. Under [Fixed] or when
+    [active_keepers <= 0], returns [base_price_milli]. Under [Supply_scaled],
+    scales [base_price_milli] by the clamped permille ratio of
+    [total_supply_milli] to [active_keepers * target_per_keeper_milli]. An
+    explicit zero base price stays zero; a positive base price scales to at
+    least [1] milli-Candle. *)
+
+val effective_price
+  :  policy
+  -> total_supply_milli:Z.t
+  -> active_keepers:int
+  -> Keeper_portrait_item.t
+  -> price
+(** Effective milli-Candle price for [item] under [policy.pricing] at the given
+    circulating supply and active keeper count. *)
 
 type t =
   | Off  (** There is no [candle.toml]. Nothing is recorded, paid or sold. *)

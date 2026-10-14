@@ -220,6 +220,7 @@
   masc_candle
   masc_candle_config
   masc_candle_runtime
+  zarith
   masc_turn
   masc.masc_tool_dispatch
   masc.masc_tool_surface

@@ -203,14 +203,3 @@ val extract_path_param : prefix:string -> string -> string option
 val path_parts : string -> string list
 (** [path_parts rest] splits [rest] on ['/'] and drops the
     segments that are empty after trimming. *)
-
-(** {1 Standard pagination} *)
-
-val standard_limit : Httpun.Request.t -> int
-(** [standard_limit request] reads the [limit] query param,
-    defaulting to [50], and clamps to [\[1, 200\]]. *)
-
-(** [standard_offset request] reads the [offset] query param,
-    defaulting to [0], with a non-negative floor.  No upper
-    clamp — pagination over very large windows is the caller's
-    responsibility. *)

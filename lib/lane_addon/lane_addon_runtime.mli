@@ -37,12 +37,11 @@ val notify_fusion_run : run_id:string -> unit
 (** Capture hints for exact-run bindings against the process-wide Fusion registry.
     No I/O or package callback; work is carried to the owner domain. *)
 val authorize_retained_read : bindings:Yojson.Safe.t list -> access:Lane_addon_sources.access -> Yojson.Safe.t -> (unit, string) result
-(** Pure read authorization against one authoritative full binding snapshot.
-    Explicit durable visibility remains required for current records. The exact
-    published v0.48.0 envelope is readable only after its complete retained
-    producer graph proves shared visibility. Cycles, absent or ambiguous
-    incarnations and private dependencies fail closed. The supplied access is
-    host-owned; no request field can set it. No stored bytes are changed. *)
+(** Pure read authorization of one retained record against the full binding
+    snapshot. The record's own durable [visibility] and [source_access] decide;
+    a record that carries neither, or an incarnation that is absent or ambiguous
+    in the snapshot, is refused. The supplied access is host-owned; no request
+    field can set it. No stored bytes are changed. *)
 
 val register_tool_change_handler : (unit -> unit) -> unit
 (** Server notification bridge. Callbacks signal clients to refresh their
@@ -114,10 +113,33 @@ type inventory_instance = {
   configuration : configuration_owner option;
   presence : inventory_presence; phase : Lane_addon_types.phase;
 }
+(** Why one retained binding record cannot be read. [Store_unreadable] is a
+    file or directory the store could not read; the others describe a record
+    that was read and does not parse. *)
+type retained_fault_reason =
+  | Store_unreadable of string
+  | Read_authority_absent
+  | Visibility_invalid
+  | Source_access_invalid
+  | Record_invalid of string
+val retained_fault_message : retained_fault_reason -> string
+type retained_owner = Owned_by of configuration_owner | Unowned | Owner_unreadable
+(** Whose record it is. [Unowned] is a manual attach, which belongs to no
+    declaration. [Owner_unreadable] is a record whose configuration cannot be
+    read, so it could belong to any declaration. *)
+type inventory_issue = {
+  issue_path : string;
+  issue_owner : retained_owner;
+  issue_terminal : bool;
+  issue_reason : retained_fault_reason;
+}
+(** One retained record the inventory could not list. [issue_owner] is the
+    owner the record names. [issue_terminal] is true for a detached record that
+    names its declaration: it holds no worker, so nothing waits on it. *)
 type inventory = {
   owner_present : bool;
   instances : inventory_instance list;
-  issues : (string * string) list;
+  issues : inventory_issue list;
   complete : bool;
 }
 val inventory : config:Workspace.config -> inventory

@@ -5535,6 +5535,8 @@
 (test
  (name test_lane_addon_reconcile)
  (modules test_lane_addon_reconcile)
+ (deps
+  (glob_files fixtures/lane_addon_bindings_without_read_authority/*.json))
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
 
 ; Mock clock as the dashboard compute's clock: a payload computed as the

@@ -51,6 +51,9 @@ type errno =
   | Enoent  (** No such file or directory. *)
   | Econnrefused  (** Connection refused. *)
   | Etimedout  (** Connection or operation timed out. *)
+  | Epipe  (** The reader of a pipe or socket has closed it. *)
+  | Eaddrinuse  (** The address is already in use. *)
+  | Eaddrnotavail  (** The address is not available on this host. *)
   | Other_errno of Unix.error
       (** Any other errno, carried unchanged so no information is lost. *)
 

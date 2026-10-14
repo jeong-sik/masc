@@ -532,8 +532,15 @@ export interface KeeperTrustTerminalReason {
   next_action?: string | null
 }
 
+// The values Keeper_trust_disposition.to_wire sends, in its declaration
+// order. trust-disposition.test.ts and test_keeper_trust_disposition
+// each check this against api/fixtures/trust-dispositions.json.
+export const TRUST_DISPOSITIONS = ['Pass', 'Alert', 'Blocked', 'Degraded'] as const
+
+export type TrustDisposition = (typeof TRUST_DISPOSITIONS)[number]
+
 export interface KeeperTrustSummary {
-  disposition?: string | null
+  disposition?: TrustDisposition | null
   disposition_reason?: string | null
   operator_disposition?: string | null
   operator_disposition_reason?: string | null

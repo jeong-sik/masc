@@ -18,6 +18,7 @@
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))
 (include stanzas/test_runtime_blocker_classification.inc)
+(include stanzas/test_keeper_trust_disposition.inc)
 (include stanzas/test_play_room.inc)
 (include stanzas/test_h2_play_room.inc)
 (test

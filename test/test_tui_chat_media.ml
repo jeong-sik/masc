@@ -76,9 +76,84 @@ let test_image_attachment_and_svg () =
     check string "newest SVG retained" svg markup
   | _ -> fail "SVG did not replace the older image"
 
-let () = run "TUI retained output" [ "history", [
+let attach ?src ?data name : Blocks.attach_block =
+  { name; dims = None; src; svg = None; ph = None; via = None; size = None
+  ; data; mime_type = None; size_bytes = None; kind = None }
+
+let attach_media ?src ?data name = Media.Attach (attach ?src ?data name)
+let voice_media ?src () =
+  Media.Voice { secs = None; wave = None; via = None; size = None
+              ; transcript = None; src }
+
+let playable_testable = Alcotest.testable
+  (fun ppf (p : Media.playable) ->
+     let kind = match p.kind with `Audio -> "audio" | `Midi -> "midi" in
+     let source = match p.source with
+       | `Data _ -> "data"
+       | `Server_path path -> "server " ^ path
+       | `Local_path path -> "local " ^ path
+     in
+     Format.fprintf ppf "%s %s (%s)" kind p.name source)
+  ( = )
+
+let check_playable label media expected =
+  check (option playable_testable) label expected (Media.newest_playable media)
+
+let test_newest_audio_wins () =
+  check_playable "the last audio attach is the pick"
+    [ attach_media "notes.txt"; attach_media ~src:"/api/v1/media/aaa" "take1.mid"
+    ; attach_media ~src:"/api/v1/media/bbb" "riff.mp3" ]
+    (Some { name = "riff.mp3"; kind = `Audio
+          ; source = `Server_path "/api/v1/media/bbb" })
+
+let test_midi_is_playable () =
+  check_playable "a midi extension classifies as midi"
+    [ attach_media ~src:"/api/v1/media/aaa" "take1.MID" ]
+    (Some { name = "take1.MID"; kind = `Midi
+          ; source = `Server_path "/api/v1/media/aaa" })
+
+let test_unplayable_blocks_are_skipped () =
+  check_playable "images and plain files are skipped, the older audio still plays"
+    [ attach_media ~src:"/api/v1/media/aaa" "riff.mp3"
+    ; attach_media "chart.png"; attach_media "setup.terminal" ]
+    (Some { name = "riff.mp3"; kind = `Audio
+          ; source = `Server_path "/api/v1/media/aaa" });
+  check_playable "nothing playable gives none"
+    [ attach_media "chart.png"; attach_media "notes.txt" ] None
+
+let test_block_data_preferred_over_src () =
+  check_playable "inline bytes beat a remote source"
+    [ attach_media ~src:"/api/v1/media/aaa" ~data:"QUJD" "riff.mp3" ]
+    (Some { name = "riff.mp3"; kind = `Audio; source = `Data "QUJD" })
+
+let test_voice_is_audio_with_resolvable_src () =
+  check_playable "a voice block on the server plays"
+    [ voice_media ~src:"/api/v1/media/voice1" () ]
+    (Some { name = "voice1"; kind = `Audio
+          ; source = `Server_path "/api/v1/media/voice1" });
+  check_playable "a voice block on a local path plays"
+    [ voice_media ~src:"/tmp/voice/clip.mp3" () ]
+    (Some { name = "clip.mp3"; kind = `Audio
+          ; source = `Local_path "/tmp/voice/clip.mp3" });
+  check_playable "a voice block without a source does not"
+    [ voice_media () ] None
+
+let test_remote_http_src_is_not_played () =
+  check_playable "an external http source is out of scope for now"
+    [ attach_media ~src:"https://example.com/x.mp3" "x.mp3" ] None
+
+let () = run "TUI retained output and playback" [ "history", [
   test_case "media-only autonomous turn" `Quick test_media_only_autonomous;
   test_case "failure retains completed outputs" `Quick test_failure_retains_outputs;
   test_case "prose and unknown block" `Quick test_prose_and_unknown_block;
   test_case "source authority" `Quick test_sources;
-  test_case "image attachment and SVG" `Quick test_image_attachment_and_svg ] ]
+  test_case "image attachment and SVG" `Quick test_image_attachment_and_svg ];
+  "playable", [
+  test_case "the newest audio wins" `Quick test_newest_audio_wins;
+  test_case "midi is playable" `Quick test_midi_is_playable;
+  test_case "unplayable blocks are skipped" `Quick test_unplayable_blocks_are_skipped;
+  test_case "block data preferred over src" `Quick test_block_data_preferred_over_src;
+  test_case "voice is audio with a resolvable src" `Quick
+    test_voice_is_audio_with_resolvable_src;
+  test_case "remote http src is not played" `Quick test_remote_http_src_is_not_played;
+] ]

@@ -14,6 +14,7 @@ type t =
   | Play_invite of { name : string; hours : int }
   | Play_revoke of string
   | Play_invalid of string
+  | Listen
   | Open_metrics
   | Account_login of string
   | Open_settings
@@ -115,6 +116,11 @@ let catalog =
     ; aliases = []
     ; args = "[invites|invite <name> <hours>|link [name]|revoke <name>]"
     ; summary = "list, issue or revoke shared DOS play links"
+    }
+  ; { word = "listen"
+    ; aliases = []
+    ; args = ""
+    ; summary = "play the newest audio or MIDI attachment in this conversation"
     }
   ; { word = "settings"
     ; aliases = []
@@ -380,6 +386,7 @@ let parse text =
             | _ -> Play_invalid "use /play revoke <name>")
         | _ -> Play_invalid "use /play invites, /play invite <name> <hours>, /play link [name], or /play revoke <name>")
     | "metrics", _ | "telemetry", _ -> Open_metrics
+    | "listen", _ -> Listen
     | "login", client -> Account_login client
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff

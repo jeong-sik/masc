@@ -181,6 +181,21 @@ let trailing_tool_result_receipts messages =
   |> List.map (fun (tool_use_id,content) -> receipt_of_tool_result ~tool_use_id ~content)
 ;;
 
+let composition_result_lifecycle_hook delivery = function
+  | Agent_core.Hooks.PreToolUse {invocation;tool_name;_} ->
+    (* Compare the canonical tool identity. A different tool that reuses a
+       provider ID cannot carry that ID's previous status-result authority. *)
+    if not (String.equal tool_name Keeper_tool_composition_catalog.status_tool_name)
+    then Keeper_composition_result_delivery.discard_status delivery ~invocation;
+    Agent_core.Hooks.Continue
+  | Agent_core.Hooks.PostToolUseFailure {invocation;_} ->
+    (* SDK schema rejection happens before the MASC handler is entered. *)
+    Keeper_composition_result_delivery.discard_status delivery ~invocation;
+    Agent_core.Hooks.Continue
+  | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | PostToolUse _
+  | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue
+;;
+
 module Skill_delivery_state = struct
   type staged =
     { runtime_id : string
@@ -852,6 +867,7 @@ let assemble_hooks
             (fun event ->
               match event with
               | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
+                ignore (composition_result_lifecycle_hook ctx.composition_result_delivery event);
                 (* A pre-hook observes a request, before validation/approval.
                    Include Skill without claiming the handler has started. *)
                 Keeper_turn_preview.note_tool ~writer:preview
@@ -887,7 +903,8 @@ let assemble_hooks
               | OnToolError _ ->
                 Agent_core.Hooks.Continue)
       ;
-        before_turn_params =
+        post_tool_use_failure = Some (composition_result_lifecycle_hook ctx.composition_result_delivery)
+      ; before_turn_params =
           Some
             (guard_repetition_before_turn_params repetition_execution (fun event ->
               match event with

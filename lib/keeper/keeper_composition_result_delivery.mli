@@ -29,6 +29,11 @@ val original_recorder : binding -> Keeper_skill_activation_recorder.bound_contex
 val request_id : binding -> string
 val status_invocation : binding -> Agent_core.Tool_contract.Invocation.t
 val observation_to_json : observation -> Yojson.Safe.t
+val status_payload : ?invocation:Agent_core.Tool_contract.Invocation.t ->
+  Keeper_msg_async.entry -> Yojson.Safe.t
+(** Canonical status fields plus the actual SDK occurrence, when executing
+    through that boundary. The sealed manifest and wire content distinguish
+    repeated lookups even if their request, ID and terminal data are identical. *)
 
 type t
 val create : base_path:string -> physical_turn_ref:Ids.Turn_ref.t -> t
@@ -49,6 +54,10 @@ val record_status : t ->
 val clear_pending : t -> unit
 (** Drop the pending provider request on a new turn or runtime attempt.
     Producer bindings remain available for their exact retained ToolResults. *)
+
+val discard_status : t -> invocation:Agent_core.Tool_contract.Invocation.t -> unit
+(** A typed status lookup refused before recording a canonical result. Remove
+    this ID's current slot without changing already staged provider results. *)
 
 val stage_provider : t -> runtime_id:string -> agent_core_turn:int ->
   tool_results:(string * string) list -> unit

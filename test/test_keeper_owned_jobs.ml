@@ -2849,6 +2849,11 @@ pointer = "/content"
   stage_response (); commit 2;
   check int "restored original authority correlates without new work" 5 (List.length !observed);
   let reused_wire = lookup ~turn:3 status_id in
+  check bool "SDK occurrence seal distinguishes otherwise identical terminal status lookups" false
+    (String.equal wire reused_wire);
+  stage_response ~content:wire ~turn:4 (); commit 4;
+  stage_response ~content:marker ~turn:4 (); commit 4;
+  check int "unstaged old inline and marker results cannot borrow the latest occurrence" 5 (List.length !observed);
   stage_response ~content:reused_wire ~turn:4 ();
   let later_wire = lookup ~turn:5 status_id in
   commit 4;
@@ -2864,6 +2869,8 @@ pointer = "/content"
     ~invocation:(invocation ~turn:5 status_id) ~content:later_wire ~observe ~on_error;
   check int "reused ID supports the fresh occurrence's first handoff" 7 (List.length !observed);
   let replanned_wire = lookup ~turn:5 ~planned_index:7 status_id in
+  check bool "planned occurrence is sealed even when ID and SDK turn are reused" false
+    (String.equal later_wire replanned_wire);
   Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
     ~invocation:(invocation ~turn:5 status_id) ~content:later_wire ~observe ~on_error;
   check int "same SDK turn with another planned occurrence cannot borrow authority" 7 (List.length !observed);
@@ -2900,6 +2907,51 @@ pointer = "/content"
   Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
     ~invocation:(invocation ~turn:7 status_id) ~content:restored_wire ~observe ~on_error;
   check int "valid later occurrence can bind again without a permanent ID tombstone" 10 (List.length !observed);
+  let failed_lookup ~turn input = with_bundle fixture (fun bundle ->
+    match invoke_raw bundle ~tool_use_id:status_id ~turn "keeper_composition_status" input with
+    | Error _ -> () | Ok _ -> fail "invalid actual status lookup unexpectedly succeeded") in
+  stage_response ~content:restored_wire ~turn:8 ();
+  failed_lookup ~turn:8 (`Assoc ["request_id",`String "missing-canonical-request"]);
+  commit 8;
+  check int "absent status request does not revoke an already staged original handoff" 11 (List.length !observed);
+  stage_response ~content:restored_wire ~turn:9 (); commit 9;
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation ~turn:7 status_id) ~content:restored_wire ~observe ~on_error;
+  check int "absent actual lookup revokes the old slot for future delivery" 11 (List.length !observed);
+  let valid_again = lookup ~turn:9 status_id in
+  failed_lookup ~turn:10 (`Assoc []);
+  stage_response ~content:valid_again ~turn:11 (); commit 11;
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation ~turn:9 status_id) ~content:valid_again ~observe ~on_error;
+  check int "public input validation refusal also revokes the old producer slot" 11 (List.length !observed);
+  let final_wire = lookup ~turn:11 status_id in
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation ~turn:11 status_id) ~content:final_wire ~observe ~on_error;
+  check int "valid reused ID recovers after canonical and input refusals" 12 (List.length !observed);
+  let lifecycle = Masc.Keeper_run_tools_hooks.composition_result_lifecycle_hook delivery in
+  let sdk_hooks = {Agent_core.Hooks.empty with pre_tool_use=Some lifecycle;post_tool_use_failure=Some lifecycle} in
+  let execute_sdk ~turn tools name input =
+    Agent_core.Agent_tools.execute_tools ~context:(Agent_core.Context.create ()) ~tools ~hooks:sdk_hooks
+      ~event_bus:None ~tracer:Agent_core.Tracing.null ~agent_name:keeper ~turn_count:turn
+      ~usage:Agent_core.Types.empty_usage
+      [Agent_core.Types.ToolUse {id=status_id;name;input}]
+    |> require "real SDK status input and tool occurrence boundary" in
+  let invalid = with_bundle fixture (fun bundle ->
+    execute_sdk ~turn:12 bundle.Masc.Keeper_tools_agent_core.tools "keeper_composition_status" (`Assoc [])) in
+  (match invalid.completed_results with
+   | [result] -> check bool "SDK rejects malformed status before handler execution" true
+       (result.outcome = Agent_core.Types.Tool_failed {failure_kind=Validation_error;error_class=Some Deterministic})
+   | [] | _::_::_ -> fail "SDK validation did not produce one exact result");
+  stage_response ~content:final_wire ~turn:13 (); commit 13;
+  check int "actual SDK validation failure revokes the prior status slot" 12 (List.length !observed);
+  let non_status_wire = lookup ~turn:13 status_id in
+  let other = Agent_core.Tool.create ~name:"fixture_other_tool" ~description:"Return saved status bytes as unrelated tool data"
+      ~parameters:[] (fun _ -> Ok {Agent_core.Types.content=non_status_wire;content_blocks=None;_meta=None}) in
+  let other_result = execute_sdk ~turn:14 [other] "fixture_other_tool" (`Assoc []) in
+  let other_wire = match other_result.completed_results with
+    | [result] -> result.content | [] | _::_::_ -> fail "actual other tool did not execute once" in
+  stage_response ~content:other_wire ~turn:15 (); commit 15;
+  check int "real SDK reuse by another tool cannot inherit status result authority" 12 (List.length !observed);
   check int "all result correlation performs zero backend operations" ready_backend (List.length (calls fixture));
   check int "result correlation creates no program" 1 (effect_count fixture "create");
   check int "result correlation starts no program" 1 (effect_count fixture "start");

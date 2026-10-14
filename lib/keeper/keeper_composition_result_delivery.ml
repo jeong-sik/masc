@@ -61,6 +61,24 @@ let equal_invocation left right =
   && Invocation.schedule left = Invocation.schedule right
   && Invocation.completion left = Invocation.completion right
 
+let invocation_to_json invocation =
+  let schedule = Invocation.schedule invocation in
+  `Assoc ["tool_use_id",`String (Invocation.tool_use_id invocation);
+    "turn",`Int (Invocation.turn invocation);
+    "schedule",`Assoc ["planned_index",`Int schedule.planned_index;
+      "batch_index",`Int schedule.batch_index;"batch_size",`Int schedule.batch_size;
+      "execution_mode",Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode];
+    "completion",Agent_core.Tool_contract.completion_to_yojson (Invocation.completion invocation)]
+
+let status_payload ?invocation entry =
+  (* The canonical entry serializer owns this object shape. This is generated
+     data, not a wire parser or a fallback for malformed external input. *)
+  let fields = Async.entry_to_json entry |> Yojson.Safe.Util.to_assoc in
+  let fields = fields @ Option.to_list (Option.map (fun invocation ->
+    "status_invocation",invocation_to_json invocation) invocation) in
+  Keeper_tool_composition_projection.with_tool_kind_field
+    Keeper_tool_composition_catalog.status_tool_kind (`Assoc fields)
+
 let error_to_string = function
   | Invalid_context detail -> "invalid prepared result context: " ^ detail
   | Canonical_request_failed error -> Async.canonical_terminal_error_to_string error
@@ -146,8 +164,7 @@ let resolve ~base_path ~entry ~invocation ~result =
       match activation with
       | None -> Ok None
       | Some activation ->
-        let expected = Keeper_tool_composition_projection.with_tool_kind_field
-          Keeper_tool_composition_catalog.status_tool_kind (Async.entry_to_json entry) in
+        let expected = status_payload ~invocation entry in
         let* () = match result with
           | Tool_result.Completed payload
             when String.equal payload.tool_name Keeper_tool_composition_catalog.status_tool_name
@@ -160,13 +177,17 @@ let resolve ~base_path ~entry ~invocation ~result =
         Ok (Some {entry;source;activation;invocation;manifest;
           inline_bytes=String.length inline;inline_sha256=sha256 inline})
 
+let discard_status state ~invocation =
+  state.bindings <- List.filter (fun known -> not (String.equal
+    (Invocation.tool_use_id invocation) (Invocation.tool_use_id known.invocation))) state.bindings
+
 let record_status state ~entry ~invocation ~result =
   let id = Invocation.tool_use_id invocation in
   let previous = List.find_opt (fun known -> String.equal id (Invocation.tool_use_id known.invocation)) state.bindings in
   (* The typed producer owns a new occurrence even when the provider reuses
      its ID. An ineligible or failed new lookup cannot inherit an older seal.
      There is no tombstone: a later valid occurrence may bind the same ID. *)
-  state.bindings <- List.filter (fun known -> not (String.equal id (Invocation.tool_use_id known.invocation))) state.bindings;
+  discard_status state ~invocation;
   let* binding = resolve ~base_path:state.base_path ~entry ~invocation ~result in
   match binding with
   | None -> Ok ()
@@ -261,7 +282,7 @@ let observation_to_json observation =
     "transport_tool_use_id",`String observation.transport_receipt.tool_use_id;
     "transport_bytes",`Int observation.transport_receipt.content_bytes;
     "transport_sha256",`String observation.transport_receipt.content_sha256;
-    "status_invocation_turn",`Int (Invocation.turn binding.invocation);
+    "status_invocation",invocation_to_json binding.invocation;
     "boundary",(match observation.boundary with
       | Ledger.Model_response {agent_core_turn} -> `Assoc ["kind",`String "model_response";"agent_core_turn",`Int agent_core_turn]
       | Official_client_result_handoff {agent_core_turn} -> `Assoc ["kind",`String "official_client_result_handoff";"agent_core_turn",`Int agent_core_turn]);

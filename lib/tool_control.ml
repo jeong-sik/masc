@@ -33,78 +33,84 @@ let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
     text_ok ~tool_name ~start_time "Default project scope is not paused"
 ;;
 
+(* What [masc_pause_status] answers, before it becomes JSON. Every case fills
+   the same fields and [pause_status_reply_json] writes them as one object, so
+   the cases can differ only in values, never in keys. *)
+type pause_status_reply =
+  { initializing : bool
+  ; status : string
+  ; paused : bool option
+  ; paused_by : string option
+  ; pause_reason : string option
+  ; paused_at : string option
+  ; any_pause_active : bool option
+  ; message : string
+  }
+
+let pause_status_reply_json ~keeper_pause reply =
+  `Assoc
+    [ ("ok", `Bool true)
+    ; ("initializing", `Bool reply.initializing)
+    ; ("status", `String reply.status)
+    ; ("paused", Json_util.bool_opt_to_json reply.paused)
+    ; ("paused_by", Json_util.string_opt_to_json reply.paused_by)
+    ; ("pause_reason", Json_util.string_opt_to_json reply.pause_reason)
+    ; ("paused_at", Json_util.string_opt_to_json reply.paused_at)
+    ; ("any_pause_active", Json_util.bool_opt_to_json reply.any_pause_active)
+    ; ("keeper_pause", keeper_pause)
+    ; ("message", `String reply.message)
+    ]
+
 let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
   match Pause_status_backend.keeper_pause_status ctx.config with
   | Error detail ->
     Tool_result.error ~failure_class:Tool_result.Runtime_failure
       ~tool_name ~start_time detail
   | Ok keeper_pause_status ->
-  let keeper_paused =
+  (* The census already says whether the workspace is initialised; asking
+     [Workspace] again could answer differently within one call. *)
+  let reply =
     match keeper_pause_status with
-    | Pause_status_backend.Census { paused_names; _ } -> paused_names <> []
-    | Pause_status_backend.Workspace_not_initialized -> false
-  in
-  let keeper_pause = Pause_status_backend.keeper_pause_status_to_json keeper_pause_status in
-  let pause_state =
-    if not (Workspace.is_initialized ctx.config) then `Initializing
-    else
+    | Pause_status_backend.Workspace_not_initialized ->
+      { initializing = true
+      ; status = "initializing"
+      ; paused = None
+      ; paused_by = None
+      ; pause_reason = None
+      ; paused_at = None
+      ; any_pause_active = None
+      ; message = "Server is initializing; pause state is not available yet"
+      }
+    | Pause_status_backend.Census { paused_names; _ } ->
       let state = Workspace.read_state ctx.config in
       if state.paused then
-        `Paused (state.paused_by, state.pause_reason, state.paused_at)
-      else `Running
+        { initializing = false
+        ; status = "paused"
+        ; paused = Some true
+        ; paused_by = state.paused_by
+        ; pause_reason = state.pause_reason
+        ; paused_at = state.paused_at
+        ; any_pause_active = Some true
+        ; message = "Server is paused"
+        }
+      else
+        let keeper_paused = paused_names <> [] in
+        { initializing = false
+        ; status = "running"
+        ; paused = Some false
+        ; paused_by = None
+        ; pause_reason = None
+        ; paused_at = None
+        ; any_pause_active = Some keeper_paused
+        ; message =
+            (if keeper_paused
+             then "Server is running, but one or more keepers are paused"
+             else "Server is running (not paused)")
+        }
   in
-  let payload =
-    match pause_state with
-    | `Paused (by, reason, at) ->
-        `Assoc
-          [
-            ("ok", `Bool true);
-            ("initializing", `Bool false);
-            ("status", `String "paused");
-            ("paused", `Bool true);
-            ("paused_by", Json_util.string_opt_to_json by);
-            ("pause_reason", Json_util.string_opt_to_json reason);
-            ("paused_at", Json_util.string_opt_to_json at);
-            ("any_pause_active", `Bool true);
-            ("keeper_pause", keeper_pause);
-            ("message", `String "Server is paused");
-          ]
-    | `Running ->
-        `Assoc
-          [
-            ("ok", `Bool true);
-            ("initializing", `Bool false);
-            ("status", `String "running");
-            ("paused", `Bool false);
-            ("paused_by", `Null);
-            ("pause_reason", `Null);
-            ("paused_at", `Null);
-            ("any_pause_active", `Bool keeper_paused);
-            ("keeper_pause", keeper_pause);
-            ( "message",
-              `String
-                (if keeper_paused
-                 then "Server is running, but one or more keepers are paused"
-                 else "Server is running (not paused)") );
-          ]
-    | `Initializing ->
-        `Assoc
-          [
-            ("ok", `Bool true);
-            ("initializing", `Bool true);
-            ("status", `String "initializing");
-            ("paused", `Null);
-            ("paused_by", `Null);
-            ("pause_reason", `Null);
-            ("paused_at", `Null);
-            ("any_pause_active", `Null);
-            ("keeper_pause", keeper_pause);
-            ( "message",
-              `String
-                "Server is initializing; pause state is not available yet" );
-          ]
-  in
-  Tool_result.make_ok ~tool_name ~start_time ~data:payload ()
+  let keeper_pause = Pause_status_backend.keeper_pause_status_to_json keeper_pause_status in
+  Tool_result.make_ok ~tool_name ~start_time
+    ~data:(pause_status_reply_json ~keeper_pause reply) ()
 ;;
 
 (* Schemas are generated from the RFC-0057 specs and projected through

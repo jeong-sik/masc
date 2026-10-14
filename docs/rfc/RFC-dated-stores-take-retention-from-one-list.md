@@ -226,7 +226,7 @@ val dated_path_now : Store.location -> Jsonl_writer.dated_path
 - `top_level_dated_stores`, placement 로 뽑던 두 목록, `decision_audit` 줄, `wire-capture` 의 시작 정리를 지운다.
 - `Dated_jsonl.create` 에서 `?retention_days` 를 지운다. append 마다 handle 을 새로 만드는 곳이 5곳 있는데, 거기에 이 인자를 넘기면 append 마다 정리가 돈다. 하루에 한 번이라는 표시가 handle 안에 있기 때문이다. 정리를 한 곳으로 모으면 이 문제가 생기지 않는다.
 - 용량 한도(`?max_bytes`)는 `create` 의 인자로 그대로 둔다. append 하는 handle 만 쓰는 값이라 읽는 handle 과 어긋나지 않는다. 용량 정리 테스트도 지금처럼 작은 값을 넘긴다.
-- `Keeper_observability_artifact_registry` 의 다섯 행이 `retention_owner = "Server_runtime_startup_maintenance"` 를 문자열로 들고 있다. 정리의 자리가 바뀌면 이 문자열도 같이 고친다.
+- `Keeper_observability_artifact_registry.retention_owner` 가 정리의 주인을 글자로 적는다. 날짜별 store 넷은 `Dated_jsonl_operator_window`(`"Dated_jsonl.Store"`), runtime manifest 는 `Startup_flat_file_mtime`(`"Server_runtime_startup_maintenance"`)이다. 정리의 자리가 바뀌면 이 함수의 글자도 같이 고친다.
 - 날짜별이 아닌 폴더(`logs`, `trajectories`, `keeper_chat_events`, `keeper_turn_events`, `messages`, `raw-traces`, `runtime-manifests`)는 지금 줄 그대로 둔다(§6).
 
 ### 4.4 지금 있는 store 의 규칙 (D4)

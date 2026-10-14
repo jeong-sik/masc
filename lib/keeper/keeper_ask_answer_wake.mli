@@ -18,9 +18,13 @@ val deliver :
 (** Read the canonical first answer and its original continuation/time. Exact
     positive turn-entry or accepted terminal (including cancellation/transfer)
     source evidence suppresses both enqueue and wake hint; it does not prove
-    answer consumption or task completion. Incomplete
-    evidence cannot authorize absence. The one-shot queue commit rechecks under
-    the owner lock and honors the existing lifecycle intake fence. *)
+    answer consumption or task completion. Every delivery-evidence read is
+    bounded to rows at/after the canonical answer time: a delivery cannot
+    predate the answer, so older corruption (e.g. a torn pre-answer write)
+    cannot make the evidence incomplete or block a fresh answer. Incomplete
+    evidence inside that window still cannot authorize absence. The one-shot
+    queue commit rechecks under the owner lock, with the same bound, and
+    honors the existing lifecycle intake fence. *)
 
 type failure = { keeper_name : string option; ask_id : string option; error : error }
 type report =
@@ -32,6 +36,7 @@ type report =
   }
 
 val reconcile : base_path:string -> (report, Keeper_ask_store.read_error) result
-(** Startup/maintenance recovery. Reads the strict ask rows and one canonical
-    source-evidence snapshot per Keeper, then only unresolved sources reach
-    owner-lock enqueue. No timer, history cap, second answer store or outbox. *)
+(** Startup/maintenance recovery. Reads the strict ask rows and, per answered
+    ask, one delivery-evidence read bounded to rows at/after that answer's
+    canonical time, then only unresolved sources reach owner-lock enqueue.
+    No timer, history cap, second answer store or outbox. *)

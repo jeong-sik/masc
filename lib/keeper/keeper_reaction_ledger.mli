@@ -233,11 +233,16 @@ type strict_source_delivery_snapshot
 val strict_source_delivery_snapshot_result :
   base_path:string ->
   keeper_name:string ->
+  since:float ->
   (strict_source_delivery_snapshot, strict_delivery_evidence_error) result
-(** One owned canonical read for a batch of recovery identities. The immutable
-    snapshot retains exact typed positive sources and incomplete-row evidence;
-    it never retains raw answer or reaction bodies. It is an observation, not
-    permission to enqueue without the queue owner's fresh once-only check. *)
+(** One owned canonical read for a batch of recovery identities, bounded to
+    rows recorded at/after [since] (unix seconds, UTC-day granularity): a
+    delivery cannot predate the answer it delivers, so corruption before
+    [since] can never be evidence about the sources this snapshot judges.
+    The immutable snapshot retains exact typed positive sources and
+    incomplete-row evidence; it never retains raw answer or reaction bodies.
+    It is an observation, not permission to enqueue without the queue
+    owner's fresh once-only check. *)
 
 val source_delivery_seen_in_snapshot :
   strict_source_delivery_snapshot ->
@@ -245,7 +250,8 @@ val source_delivery_seen_in_snapshot :
   stimulus_kind:stimulus_kind ->
   (bool, strict_delivery_evidence_error) result
 (** Pure lookup: exact positive proof survives unrelated invalid rows; absence
-    requires a complete valid snapshot. Later ledger writes do not change it. *)
+    requires a snapshot whose own window was read completely valid. Later
+    ledger writes do not change it. *)
 
 val event_queue_delivery_seen_for_source_strict_result :
   not_before:float ->

@@ -59,8 +59,12 @@ let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
       |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
   if consumed then Ok Already_delivered
   else
+    (* Delivery evidence cannot predate the answer it delivers: bound every
+       evidence read by the canonical answer time so a torn write from
+       before the answer cannot reject this delivery. *)
+    let evidence_since = stimulus.Keeper_event_queue.arrived_at in
     match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result
-        ~base_path keeper_name stimulus with
+        ~not_before:evidence_since ~base_path keeper_name stimulus with
     | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error (Queue_storage_failed detail)
     | Keeper_registry_event_queue.Stimulus_enqueued ->
         wake_hint ~base_path ~keeper_name ~ask_id:ask.Keeper_ask.ask_id;
@@ -69,8 +73,7 @@ let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
         (* The owner-lock recheck may have observed consumption after our
            snapshot. Check again before sending even a live wake hint. *)
         let* consumed = Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-            ~not_before:stimulus.arrived_at
-            ~base_path ~keeper_name ~post_id:stimulus.post_id
+            ~base_path ~keeper_name ~not_before:evidence_since ~post_id:stimulus.post_id
             ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
             |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
         if consumed then Ok Already_delivered
@@ -88,8 +91,8 @@ let deliver ~base_path ~keeper_name ~ask_id =
   | Some (ask, resolution) ->
       deliver_row ~base_path ~keeper_name ~already_delivered:(fun stimulus ->
         Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-          ~not_before:stimulus.Keeper_event_queue.arrived_at
-          ~base_path ~keeper_name ~post_id:stimulus.Keeper_event_queue.post_id
+          ~base_path ~keeper_name ~not_before:stimulus.Keeper_event_queue.arrived_at
+          ~post_id:stimulus.Keeper_event_queue.post_id
           ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)) ask resolution
 
 type failure = { keeper_name : string option; ask_id : string option; error : error }
@@ -114,21 +117,18 @@ let reconcile ~base_path =
           let answered = List.filter (fun (_, (_, resolution)) ->
             match resolution with Keeper_ask.Answered_by _ -> true
             | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> false) rows in
-          if answered = [] then report else
-          match Keeper_reaction_ledger.strict_source_delivery_snapshot_result ~base_path ~keeper_name with
-          | Error error -> { report with failures = { keeper_name = Some keeper_name;
-              ask_id = None; error = Delivery_evidence_unavailable error } :: report.failures }
-          | Ok evidence ->
-              List.fold_left (fun report (ask_id, (ask, resolution)) ->
-                let report = { report with inspected = report.inspected + 1 } in
-                match deliver_row ~base_path ~keeper_name ~already_delivered:(fun stimulus ->
-                    Keeper_reaction_ledger.source_delivery_seen_in_snapshot evidence
-                      ~post_id:stimulus.Keeper_event_queue.post_id
-                      ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)) ask resolution with
-                | Ok Enqueued -> { report with enqueued = report.enqueued + 1 }
-                | Ok Already_pending -> { report with already_pending = report.already_pending + 1 }
-                | Ok Already_delivered -> { report with already_delivered = report.already_delivered + 1 }
-                | Error error -> { report with failures = { keeper_name = Some keeper_name;
-                    ask_id = Some ask_id; error } :: report.failures }) report answered)
+          List.fold_left (fun report (ask_id, (ask, resolution)) ->
+            let report = { report with inspected = report.inspected + 1 } in
+            match deliver_row ~base_path ~keeper_name ~already_delivered:(fun stimulus ->
+                Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+                  ~base_path ~keeper_name ~not_before:stimulus.Keeper_event_queue.arrived_at
+                  ~post_id:stimulus.Keeper_event_queue.post_id
+                  ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus))
+                ask resolution with
+            | Ok Enqueued -> { report with enqueued = report.enqueued + 1 }
+            | Ok Already_pending -> { report with already_pending = report.already_pending + 1 }
+            | Ok Already_delivered -> { report with already_delivered = report.already_delivered + 1 }
+            | Error error -> { report with failures = { keeper_name = Some keeper_name;
+                ask_id = Some ask_id; error } :: report.failures }) report answered)
     initial logs in
   Ok { report with failures = List.rev report.failures }

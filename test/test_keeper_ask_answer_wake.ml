@@ -295,7 +295,7 @@ let with_persistence f =
     (fun () -> f config ensure_keeper)
 ;;
 
-let persist_answer ~base_path ~keeper_name ~ask_id =
+let persist_answer ~base_path ~keeper_name ~ask_id ?(answered_at = 200.) () =
   let continuation = Keeper_continuation_channel.dashboard ~thread_id:"original-ask-thread" |> Result.get_ok in
   let ask = Keeper_ask.ask ~ask_id ~keeper_name
       ~questions:[ question ~id:"q1" ~header:"deploy" ~choices:[ choice ~id:"c1" ~label:"yes" ] ]
@@ -303,9 +303,18 @@ let persist_answer ~base_path ~keeper_name ~ask_id =
   (match Keeper_ask_store.record_ask ~base_path ask with
    | Ok () -> () | Error error -> fail error);
   (match Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id
-      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ] ~responder ~now:200. with
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ] ~responder ~now:answered_at with
    | Ok _ -> () | Error error -> fail (Keeper_ask_store.answer_failure_to_string error));
   ask
+;;
+
+(* A torn write from before the answer: predating the canonical answer time,
+   it must be outside every delivery-evidence window. *)
+let write_preanswer_corruption ~base_path ~keeper_name =
+  let dir = Filename.concat
+      (Keeper_reaction_ledger.store_dir ~base_path ~keeper_name) "2020-01" in
+  Fs_compat.mkdir_p dir;
+  Fs_compat.save_file (Filename.concat dir "01.jsonl") "{torn pre-answer write}\n"
 ;;
 
 let pending_asks ~base_path ~keeper_name =
@@ -344,7 +353,7 @@ let test_recorded_answer_recovers_once_on_original_continuation () =
   let base_path = config.Workspace.base_path in
   let keeper_name = "alpha" in
   ensure_keeper keeper_name;
-  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"answer-recovery" in
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"answer-recovery" () in
   let log_path = Keeper_ask_store.log_path ~base_path ~keeper_name in
   let original_log = Fs_compat.load_file log_path in
   let queue_path = Filename.concat
@@ -391,7 +400,7 @@ let test_durable_write_failure_is_recovered_from_the_answer_record () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path in
   ensure_keeper "alpha";
-  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"write-failure" in
+  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"write-failure" () in
   let payload = { Keeper_event_queue.ask_id = ask.ask_id; channel = ask.continuation } in
   let source = { Keeper_event_queue.post_id = Keeper_event_queue.ask_answered_post_id payload;
     urgency = Keeper_event_queue.Normal; arrived_at = 200.; payload = Keeper_event_queue.Ask_answered payload } in
@@ -399,7 +408,7 @@ let test_durable_write_failure_is_recovered_from_the_answer_record () =
   (match Keeper_event_queue_persistence.For_testing.enqueue_stimulus_once_with_confirmation
       ~base_path ~keeper_name:"alpha"
       ~already_delivered:(fun () -> Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-        ~base_path ~keeper_name:"alpha" ~post_id:source.post_id
+        ~base_path ~keeper_name:"alpha" ~since:source.arrived_at ~post_id:source.post_id
         ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
         |> Result.map_error Keeper_reaction_ledger.strict_delivery_evidence_error_to_string)
       ~confirm_snapshot:(fun _path _state -> Error "injected durable snapshot confirmation failure") source with
@@ -415,16 +424,15 @@ let test_corrupt_delivery_evidence_cannot_recreate_an_accepted_source () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path in
   ensure_keeper "alpha";
-  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"evidence-recovery" in
+  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"evidence-recovery" () in
   (match Wake.deliver ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id with
    | Ok Wake.Enqueued -> () | Ok _ -> fail "fresh answer was not enqueued"
    | Error error -> fail (Wake.error_to_string error));
   let source = match pending_asks ~base_path ~keeper_name:"alpha" with
     | [ source, _ ] -> source | _ -> fail "answer source is missing" in
   terminalize_answer ~base_path ~keeper_name:"alpha" source;
-  let dir = Keeper_reaction_ledger.store_dir
-      ~masc_root:(Common.masc_dir_from_base_path ~base_path) ~keeper_name:"alpha" in
-  let paths = Dated_jsonl.range_day_file_paths_result (Dated_jsonl.create ~base_dir:dir ())
+  let paths = Dated_jsonl.range_day_file_paths_result
+      (Dated_jsonl.open_store (Keeper_reaction_ledger.location ~base_path ~keeper_name:"alpha"))
       ~since:"1970-01-01" ~until:"9999-12-31" |> Result.get_ok in
   check bool "real accepted-source ledger files exist" true (paths <> []);
   let originals = List.map (fun path -> path, Fs_compat.load_file path) paths in
@@ -439,11 +447,52 @@ let test_corrupt_delivery_evidence_cannot_recreate_an_accepted_source () =
   check int "restoration never recreates that source" 0 restored.enqueued
 ;;
 
+(* A torn ledger write from before the answer predates every delivery this
+   answer can produce: it must not make the evidence incomplete, must not
+   reject enqueue, and must not hide delivery evidence written after the
+   answer. *)
+let test_fresh_answer_delivers_past_preanswer_corruption () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  write_preanswer_corruption ~base_path ~keeper_name:"alpha";
+  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"post-corruption-answer"
+      ~answered_at:(Unix.gettimeofday ()) () in
+  (match Wake.deliver ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id with
+   | Ok Wake.Enqueued -> ()
+   | Ok _ -> fail "fresh answer after pre-answer corruption was not enqueued"
+   | Error error -> fail (Wake.error_to_string error));
+  let source = match pending_asks ~base_path ~keeper_name:"alpha" with
+    | [ source, _ ] -> source | _ -> fail "answer source is missing" in
+  terminalize_answer ~base_path ~keeper_name:"alpha" source;
+  let repeated = reconcile_or_fail ~base_path in
+  check int "in-window delivery evidence suppresses re-enqueue" 0 repeated.enqueued;
+  check int "in-window delivery evidence recognizes the delivered source" 1 repeated.already_delivered;
+  check int "corruption before the answer never blocks this keeper again" 0
+    (List.length repeated.failures)
+;;
+
+(* The maintenance pulse takes the same bounded evidence path, so a fresh
+   answer recorded after old corruption recovers on the next pulse. *)
+let test_reconcile_delivers_past_preanswer_corruption () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  write_preanswer_corruption ~base_path ~keeper_name:"alpha";
+  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"pulse-corruption-answer"
+      ~answered_at:(Unix.gettimeofday ()) ());
+  let report = reconcile_or_fail ~base_path in
+  check int "recovery enqueues the fresh answer past pre-answer corruption" 1 report.enqueued;
+  check int "recovery has no retained failures" 0 (List.length report.failures);
+  check int "one exact answer source is pending" 1
+    (List.length (pending_asks ~base_path ~keeper_name:"alpha"))
+;;
+
 let test_lifecycle_fence_defers_delivery_until_recovery () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path in
   ensure_keeper "alpha";
-  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fenced-answer");
+  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fenced-answer" ());
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   ignore (Keeper_shutdown_intake_fence.begin_shutdown ~base_path ~keeper_name:"alpha" ~operation_id);
   Fun.protect ~finally:(fun () ->
@@ -462,7 +511,7 @@ let test_canonical_owner_survives_a_nonidentity_filename () =
   let base_path = config.Workspace.base_path in
   let keeper_name = "alpha.one" in
   ensure_keeper keeper_name;
-  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"owner-spelling" in
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"owner-spelling" () in
   let path = Keeper_ask_store.log_path ~base_path ~keeper_name in
   let stem = Filename.chop_suffix (Filename.basename path) ".jsonl" in
   check bool "fixture crosses a nonidentity sanitizer" false (String.equal keeper_name stem);
@@ -509,6 +558,10 @@ let () =
             test_durable_write_failure_is_recovered_from_the_answer_record
         ; test_case "corrupt delivery evidence cannot recreate accepted source" `Quick
             test_corrupt_delivery_evidence_cannot_recreate_an_accepted_source
+        ; test_case "fresh answer delivers past pre-answer corruption" `Quick
+            test_fresh_answer_delivers_past_preanswer_corruption
+        ; test_case "reconcile delivers past pre-answer corruption" `Quick
+            test_reconcile_delivers_past_preanswer_corruption
         ; test_case "lifecycle fence defers answer delivery" `Quick
             test_lifecycle_fence_defers_delivery_until_recovery
         ; test_case "canonical owner survives nonidentity filename" `Quick

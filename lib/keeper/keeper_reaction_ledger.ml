@@ -1084,7 +1084,7 @@ type strict_source_delivery_snapshot = {
   incomplete : strict_delivery_evidence_error option;
 }
 
-let strict_source_delivery_snapshot_result ~base_path ~keeper_name =
+let strict_source_delivery_snapshot_result ~base_path ~keeper_name ~since =
   let delivered_sources = ref Delivery_source_set.empty in
   let malformed_row_count = ref 0 in
   let semantic_invalid_row_count = ref 0 in
@@ -1099,7 +1099,13 @@ let strict_source_delivery_snapshot_result ~base_path ~keeper_name =
     note_reason reason
   in
   let store = store_for_base_path ~base_path ~keeper_name in
-  match Dated_jsonl.iter_all_entries_result store (function
+  (* The window cannot start before the answer: delivery evidence predating
+     [since] cannot exist for a source created by that answer, so a damaged
+     row from before it must not make this snapshot incomplete. Day-file
+     granularity keeps the read bounded by the answer's window. *)
+  let since_date = Log.format_utc_date_of since in
+  let until_date = Log.format_utc_date_of (Float.max since (Time_compat.now ())) in
+  match Dated_jsonl.iter_range_entries_result store ~since:since_date ~until:until_date (function
     | Dated_jsonl.Malformed_json _ ->
         incr malformed_row_count;
         note_reason Malformed_json_row

@@ -675,7 +675,8 @@ let test_fresh_presence_clears_only_the_heartbeat_failure_reason () =
          (match (Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
              ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason with
           | Some surface -> check string "public blocker follows remaining turn debt"
-              "turn_failures" surface.blocker_class
+              "turn_failures"
+              (Masc.Keeper_status_bridge.runtime_blocker_class_to_string surface.blocker_class)
           | None -> fail "remaining turn debt has no public blocker")
        | Some reason ->
          failf "heartbeat recovery left the wrong reason: %s"

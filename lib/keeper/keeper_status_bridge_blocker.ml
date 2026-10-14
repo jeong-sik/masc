@@ -13,62 +13,37 @@ open Keeper_types_profile
 
 (* ── Runtime blocker surface ───────────────────────────────── *)
 
+type runtime_blocker_class =
+  | Blocked_by_heartbeat_failures
+  | Blocked_by_turn_failures
+  | Blocked_by_runtime_exhaustion
+  | Blocked_by_provider_runtime_error
+  | Blocked_by_official_client_recovery
+  | Blocked_by_turn_configuration_error
+  | Blocked_by_unresolved_fiber
+  | Blocked_by_exception
+  | Blocked_by_operator_interrupt
+
+(* The two classes [Keeper_meta_contract.blocker_class_of_serialized_string]
+   also reads take its spelling, so the trust-snapshot decoder and this
+   producer cannot drift on them. *)
+let runtime_blocker_class_to_string = function
+  | Blocked_by_heartbeat_failures -> "heartbeat_failures"
+  | Blocked_by_turn_failures -> "turn_failures"
+  | Blocked_by_runtime_exhaustion ->
+    blocker_class_to_string (Runtime_exhausted (Other_detail ""))
+  | Blocked_by_provider_runtime_error -> "provider_runtime_error"
+  | Blocked_by_official_client_recovery -> "official_client_recovery_required"
+  | Blocked_by_turn_configuration_error -> "turn_configuration_error"
+  | Blocked_by_unresolved_fiber -> blocker_class_to_string Fiber_unresolved
+  | Blocked_by_exception -> "exception"
+  | Blocked_by_operator_interrupt -> "operator_interrupt"
+;;
+
 type runtime_blocker_surface =
-  { blocker_class : string
+  { blocker_class : runtime_blocker_class
   ; summary : string Lazy.t
   }
-
-let runtime_blocker_surface_class cls = cls
-
-let runtime_blocker_class_label cls =
-  blocker_class_to_string (runtime_blocker_surface_class cls)
-
-let is_runtime_exhausted_blocker_class blocker_class =
-  String.equal
-    blocker_class
-    (blocker_class_to_string (Runtime_exhausted (Other_detail "")))
-;;
-
-let is_provider_runtime_blocker_class blocker_class =
-  String.equal blocker_class "provider_runtime_error"
-;;
-
-let is_fiber_unresolved_blocker_class blocker_class =
-  String.equal blocker_class (blocker_class_to_string Fiber_unresolved)
-;;
-
-let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
-  : runtime_blocker_surface
-  =
-  let str = runtime_blocker_class_label cls in
-  let summary =
-    match cls with
-    | Runtime_exhausted reason ->
-      if summary = "" then runtime_exhaustion_summary reason else summary
-    | Fiber_unresolved ->
-      if summary = ""
-      then
-        "Keeper turn fiber ended without completion bookkeeping; inspect liveness/finalization wrapper and preserve the original root cause."
-      else summary
-    (* All remaining blocker_class variants carry no class-specific summary
-       transformation — fall back to the live summary or the typed name. *)
-    | Agent_core_context_window_exceeded
-    | Agent_core_unrecognized_stop_reason
-    | Agent_core_guardrail_violation
-    | Agent_core_tripwire_violation
-    | Agent_core_input_required
-    | Internal_unhandled_exception
-    | Internal_bridge_exception
-    | Internal_contract_rejected
-    | Incomplete_tool_transcript
-    | Terminal_effect_failed
-    | Provider_attempt_effect_fenced
-    | Tool_correction_lost
-    | Receipt_persistence_failed
-    | Gate_replay_repair_required -> if summary = "" then str else summary
-  in
-  { blocker_class = str; summary = Lazy.from_val summary }
-;;
 
 (* The streak is a count and survives a restart without its cause (the
    registry is rebuilt from [Keeper_turn_failure_streak_store], which stores
@@ -140,7 +115,7 @@ let runtime_blocker_surface_of_failure_reason
   match reason with
   | Keeper_registry.Heartbeat_consecutive_failures count ->
     Some
-      { blocker_class = "heartbeat_failures"
+      { blocker_class = Blocked_by_heartbeat_failures
       ; summary = lazy (
           Printf.sprintf
             "Heartbeat failed %d consecutive cycle(s); supervisor recovery is required."
@@ -148,7 +123,7 @@ let runtime_blocker_surface_of_failure_reason
       }
   | Keeper_registry.Turn_consecutive_failures count ->
     Some
-      { blocker_class = "turn_failures"
+      { blocker_class = Blocked_by_turn_failures
       ; summary = lazy (turn_failures_summary ~count (latest_receipt ()))
       }
   (* The registry wraps runtime exhaustion in [Provider_runtime_error] with the
@@ -158,14 +133,13 @@ let runtime_blocker_surface_of_failure_reason
      "provider_runtime_error" (#30447). *)
   | Keeper_registry.Provider_runtime_error { reason = Some reason; code; detail; _ } ->
     Some
-      (runtime_blocker_surface_of_typed_class
-         ~summary:
-           (Printf.sprintf
-              "Runtime attempts exhausted (%s): %s; inspect the attempt chain before \
-               retry."
-              code
-              detail)
-         (Runtime_exhausted reason))
+      { blocker_class = Blocked_by_runtime_exhaustion
+      ; summary = lazy (
+          Printf.sprintf
+            "Runtime attempts exhausted (%s): %s; inspect the attempt chain before retry."
+            code
+            detail)
+      }
   | Keeper_registry.Provider_runtime_error { code; detail; agent_core_timeout; _ } ->
     (match
        Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
@@ -187,7 +161,7 @@ let runtime_blocker_surface_of_failure_reason
            " during " ^ Keeper_provider_runtime_boundary.timeout_phase_label phase
        in
        Some
-         { blocker_class = "provider_runtime_error"
+         { blocker_class = Blocked_by_provider_runtime_error
          ; summary = lazy (
              Printf.sprintf
                "%s timeout%s (%s): %s; keeper can soft-fail and retry with provider cooldown."
@@ -204,17 +178,17 @@ let runtime_blocker_surface_of_failure_reason
           used to call this a catch-all and tell the operator to go and find
           a typed cause, which was wrong whenever the code was typed. *)
        Some
-         { blocker_class = "provider_runtime_error"
+         { blocker_class = Blocked_by_provider_runtime_error
          ; summary = lazy (Printf.sprintf "Provider runtime error (%s): %s" code detail)
          })
   | Keeper_registry.Official_client_recovery_required recovery ->
     Some
-      { blocker_class = "official_client_recovery_required"
+      { blocker_class = Blocked_by_official_client_recovery
       ; summary = lazy (Keeper_internal_error.official_client_recovery_summary recovery)
       }
   | Keeper_registry.Turn_configuration_error { code; field; detail } ->
     Some
-      { blocker_class = "turn_configuration_error"
+      { blocker_class = Blocked_by_turn_configuration_error
       ; summary = lazy (
           Printf.sprintf
             "Keeper configuration error (%s%s): %s; operator configuration change is required."
@@ -224,19 +198,20 @@ let runtime_blocker_surface_of_failure_reason
       }
   | Keeper_registry.Fiber_unresolved _ ->
     Some
-      (runtime_blocker_surface_of_typed_class
-         ~summary:
-           "Keeper fiber did not resolve a terminal outcome; supervisor cleanup is \
-            required."
-         Fiber_unresolved)
+      { blocker_class = Blocked_by_unresolved_fiber
+      ; summary =
+          Lazy.from_val
+            "Keeper fiber did not resolve a terminal outcome; supervisor cleanup is \
+             required."
+      }
   | Keeper_registry.Exception detail ->
     Some
-      { blocker_class = "exception"
+      { blocker_class = Blocked_by_exception
       ; summary = lazy (Printf.sprintf "Keeper runtime exception: %s" detail)
       }
   | Keeper_registry.Operator_interrupt ->
     Some
-      { blocker_class = "operator_interrupt"
+      { blocker_class = Blocked_by_operator_interrupt
       ; summary = lazy ("Current turn was cancelled by explicit operator request.")
       }
 ;;

@@ -36,11 +36,8 @@ let keeper_toml_path ~base_path ~agent_name =
        "keepers")
     (keeper_name ^ ".toml")
 
-(* No default.  A keeper whose profile is absent used to become [Local], which
-   was host execution, and the boundary that stopped it was a feature flag
-   defaulting to off -- so the missing declaration was answered twice, once
-   permissively and once not.  Absence is now the error it always described:
-   there is no profile under which this keeper may run. *)
+(* No default.  A keeper whose profile is absent has no profile under which
+   it may run, so the absence is an error. *)
 let undeclared_message ~path ~what =
   Printf.sprintf
     "%s: %s. Set keeper.sandbox_profile to one of: %s"

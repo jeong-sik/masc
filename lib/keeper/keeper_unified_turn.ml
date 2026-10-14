@@ -16,9 +16,6 @@ include Keeper_turn_helpers
 include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
-
-include Keeper_unified_turn_phase_plan
-
 type source_disposition =
   | Follow_failure_route
 
@@ -1522,7 +1519,7 @@ let run_keeper_cycle
                     ~turn_ctx_cell
                     ~observation
                     ~latency_ms
-                    ~outcome:"error"
+                    ~outcome:Keeper_decision_outcome.Failed
                     ~execution_path
                     ~degraded_retry_applied
                     ~degraded_retry_deferred

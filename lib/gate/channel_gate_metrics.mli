@@ -14,29 +14,32 @@ type outcome =
   | Dispatch_unavailable
   | Internal_error of string
 
-(** Connector error-kind labels. Closed set mirroring the in-module
-    producer surface: validation / keeper / dispatch_unavailable /
-    internal, plus [Ek_none] as the marker used by [Success]
-    outcomes (previously the empty-string [Error_kind ""]).
+val outcome_to_string : outcome -> string
+(** The status-surface label: [success], [validation_error], [keeper_error],
+    [dispatch_unavailable] or [internal_error]. *)
 
-    JSON/status surfaces render via [error_kind_to_string]; wire output
-    is byte-compatible with the prior [private Error_kind of string]
-    wrapper. *)
+(** The kind of a failed attempt. A successful attempt has no failure, so
+    there is no kind for it; the status JSON writes [""] in that place. *)
 type error_kind =
-  | Ek_none
   | Ek_validation
   | Ek_keeper
   | Ek_dispatch_unavailable
   | Ek_internal
 
 val error_kind_of_string : string -> error_kind option
-(** Parse a wire label. [None] on unknown so JSON read paths fail
-    closed (CLAUDE.md anti-pattern #2 — Unknown → Permissive Default
-    forbidden). *)
+(** Parse one of the four labels {!error_kind_to_string} writes. Anything
+    else is [None], including [""]: the status JSON writes [""] when there is
+    no failure, and that is not a kind. *)
 
 val error_kind_to_string : error_kind -> string
-(** Render to the JSON/status wire label (byte-compatible with the
-    pre-typing private-string wrapper). *)
+(** The JSON/status label: [validation], [keeper], [dispatch_unavailable]
+    or [internal]. *)
+
+(** What a failed attempt carries. *)
+type failure = {
+  kind : error_kind;
+  message : string;
+}
 
 (** Per-channel statistics snapshot (immutable). *)
 type channel_stats = {
@@ -53,9 +56,12 @@ type channel_stats = {
   last_error_ts : float;
   last_keeper : string;
   last_workspace_id : string;
-  last_error : string;
-  last_error_kind : error_kind;
-  last_outcome : string;
+  last_error : failure option;
+      (** The latest failure, kept after later successful attempts.
+          [None] until an attempt fails. *)
+  last_outcome : outcome;
+      (** The latest attempt. Only its label reaches the status JSON; a
+          failure's message goes out through [last_error]. *)
   total_duration_ms : int;
   timed_count : int;
   max_duration_ms : int;
@@ -74,24 +80,26 @@ type binding_stats = {
   last_activity_ts : float;
   last_success_ts : float;
   last_error_ts : float;
-  last_error : string;
-  last_error_kind : error_kind;
-  last_outcome : string;
+  last_error : failure option;
+      (** The latest failure, kept after later successful attempts.
+          [None] until an attempt fails. *)
+  last_outcome : outcome;
+      (** The latest attempt. Only its label reaches the status JSON; a
+          failure's message goes out through [last_error]. *)
   total_duration_ms : int;
   timed_count : int;
   max_duration_ms : int;
 }
 
-(** Recent connector event snapshot. *)
+(** Recent connector event snapshot. The JSON [outcome], [error_kind] and
+    [error] are all read off [outcome]. *)
 type gate_event = {
   seq : int;
   timestamp : float;
   channel : string;
   workspace_id : string;
   keeper : string;
-  outcome : string;
-  error_kind : error_kind;
-  error : string;
+  outcome : outcome;
   duration_ms : int;
 }
 

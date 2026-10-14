@@ -5,7 +5,7 @@ type page_key =
   }
 
 type filter =
-  { status : string option
+  { status : Masc_domain.Task_status_tag.t option
   ; include_done : bool
   ; projection : string
   ; selection : Keeper_tasks_list_query.t
@@ -34,7 +34,10 @@ let compare_key left right =
 
 let filter_to_yojson filter =
   `Assoc
-    [ "status", (match filter.status with None -> `Null | Some status -> `String status)
+    [ ( "status"
+      , match filter.status with
+        | None -> `Null
+        | Some status -> `String (Masc_domain.Task_status_tag.to_string status) )
     ; "include_done", `Bool filter.include_done
     ; "projection", `String filter.projection
     ; "selection", Keeper_tasks_list_query.to_yojson filter.selection
@@ -74,7 +77,10 @@ let filter_of_yojson json =
   | Some status, Some (`Bool include_done), Some (`String projection), Some selection ->
     (match status with
      | `Null -> Some { status = None; include_done; projection; selection }
-     | `String status -> Some { status = Some status; include_done; projection; selection }
+     | `String raw ->
+       Option.map
+         (fun status -> { status = Some status; include_done; projection; selection })
+         (Masc_domain.Task_status_tag.of_string raw)
      | _ -> None)
   | _ -> None
 ;;
@@ -87,7 +93,7 @@ let page_key_of_yojson json =
 ;;
 
 let filter_equal left right =
-  Option.equal String.equal left.status right.status
+  Option.equal Masc_domain.Task_status_tag.equal left.status right.status
   && Bool.equal left.include_done right.include_done
   && String.equal left.projection right.projection
   && Keeper_tasks_list_query.equal left.selection right.selection

@@ -2552,9 +2552,10 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
         match Mark.sandbox_of_profile row.kr_sandbox_profile, row.kr_sandbox_profile with
         | Some (Mark.Docker as known), _ ->
           (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Mark.sandbox_letter known ^ Ansi.reset
-        | Some (Mark.Microvm as known), _ ->
+        | Some (Mark.Micro_vm as known), _ ->
           (Theme.category Theme.Slot_2) ^ Mark.sandbox_letter known ^ Ansi.reset
-        | Some (Mark.Local as known), _ -> Ansi.dim ^ Mark.sandbox_letter known ^ Ansi.reset
+        | Some (Mark.Remote_ssh as known), _ ->
+          (Theme.category Theme.Slot_1) ^ Mark.sandbox_letter known ^ Ansi.reset
         | None, other when String.length other > 0 ->
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
         | None, _ -> Ansi.dim ^ "?" ^ Ansi.reset

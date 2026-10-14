@@ -49,7 +49,10 @@ val legend : (string * string) list
 val activation_letter : Masc.Tui_decode.keeper_activation_mode -> string
 (** The Mode letter the roster draws for how a keeper is started. *)
 
-type sandbox = Docker | Microvm | Local
+type sandbox = Masc.Keeper_types_profile.sandbox_profile =
+  | Docker
+  | Micro_vm
+  | Remote_ssh
 
 val sandbox_of_profile : string -> sandbox option
 (** The sandbox a roster row's profile names, or [None] for a profile this

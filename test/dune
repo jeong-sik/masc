@@ -1,7 +1,12 @@
+; task-2245: the shared input table the TUI suite and the dashboard vitest
+; suite both assert on (lib/tool_display.ml / dashboard toolDisplayLabel).
+(copy_files# fixtures/tool-display-labels.json)
+
 (test
  (name test_tool_display)
  (modules test_tool_display)
- (libraries masc alcotest))
+ (deps fixtures/tool-display-labels.json)
+ (libraries masc alcotest yojson))
 
 (test
  (name test_eio_process_capture_pipe_close)
@@ -2457,6 +2462,8 @@
 (include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)
 
+(include stanzas/test_tui_tools_pane_labels.inc)
+
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
 (include stanzas/test_exec_policy_containment.inc)
@@ -2772,6 +2779,8 @@
 (include stanzas/test_keeper_decision_audit_dated_store.inc)
 
 (include stanzas/test_keeper_terminal_reason_typed.inc)
+
+(include stanzas/test_keeper_phase_gate_plan.inc)
 
 (include stanzas/test_keeper_tool_name.inc)
 
@@ -5545,8 +5554,7 @@
 
 ; Keeper practice summary: autonomous turn-mode/outcome mix folded from the
 ; decision-log tail. The vocabulary-coupling case builds probe rows from
-; the writer's own path/mode label functions; outcome labels stay pinned
-; (decision_outcome_to_label is not exposed) with writer-site citations.
+; the writer's own path, mode and outcome label functions.
 (test
  (name test_dashboard_keeper_practice)
  (modules test_dashboard_keeper_practice)

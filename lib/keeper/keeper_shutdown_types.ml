@@ -661,7 +661,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_librarian_official_progress_artifact
     (* A Keeper can change sandbox profiles across lifetimes. Remove every
        backend-scoped root for the exact name so a same-name successor cannot
-       inherit files from an earlier Local, Docker, microVM, or SSH lane. *)
+       inherit files from an earlier Docker, microVM, or SSH lane. *)
   ; Keeper_playground_bundles_artifact
   ; Keeper_runtime_configuration_artifact
   ; Keeper_configuration_artifact

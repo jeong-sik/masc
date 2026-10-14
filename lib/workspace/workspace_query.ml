@@ -495,7 +495,9 @@ let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status conf
     match status with
     | Some status_filter ->
         List.filter (fun (task : task) ->
-          String.equal status_filter (string_of_task_status task.task_status)
+          Masc_domain.Task_status_tag.equal
+            (Masc_domain.task_status_tag task.task_status)
+            status_filter
         ) backlog.tasks
     | None ->
         List.filter (fun (task : task) ->

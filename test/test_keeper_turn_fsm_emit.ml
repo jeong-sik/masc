@@ -237,12 +237,14 @@ let test_transition_actions_cover_tla_next () =
 let test_invalid_transition_rejected () =
   match F.assert_transition_allowed ~from_state:F.Idle ~to_state:F.Done () with
   | Error violation ->
-    Alcotest.(check string) "invalid edge from state" "idle" violation.from_state;
-    Alcotest.(check string) "invalid edge to state" "done" violation.to_state;
     Alcotest.(check string)
-      "invalid edge reason"
-      "not_in_keeper_turn_fsm_next"
-      violation.reason
+      "invalid edge from state"
+      "idle"
+      (F.any_state_tla_symbol violation.from_state);
+    Alcotest.(check string)
+      "invalid edge to state"
+      "done"
+      (F.any_state_tla_symbol violation.to_state)
   | Ok action ->
     Alcotest.failf
       "Idle -> Done unexpectedly classified as %s"
@@ -265,15 +267,18 @@ let test_invalid_emit_transition_fails_closed_and_bumps_counter () =
           ~turn_id:13457
           ~prev:F.Idle
           F.Done);
-      false
+      None
     with
-    | Invalid_argument _ -> true
-    | Assert_failure _ -> true
+    | Invalid_argument message -> Some message
   in
   let after = read_fsm_guard_count ~stage in
-  Alcotest.(check bool)
-    "invalid emit_transition re-raises"
-    true
+  (* The message an operator reads in a crash dump: the edge as TLA symbols
+     and the reason, built from the typed violation at this point. *)
+  Alcotest.(check (option string))
+    "invalid emit_transition re-raises with the edge and reason"
+    (Some
+       "fsm:transition:violation keeper=alice turn=13457 from=idle to=done \
+        reason=not_in_keeper_turn_fsm_next")
     raised;
   Alcotest.(check (float 0.0001))
     "invalid emit_transition bumps fsm guard counter"

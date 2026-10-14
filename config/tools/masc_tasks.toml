@@ -11,9 +11,10 @@ Look for status='todo' tasks to claim."""
 [[params]]
 name = "status"
 type = "string"
-description = """
-Optional status filter: \
-todo|claimed|in_progress|awaiting_verification|done|cancelled"""
+# Kept identical to Masc_domain.valid_task_status_strings, the values the tool
+# accepts. test_task_tool_toml_parity pins this list against that value.
+enum = ["todo", "claimed", "in_progress", "awaiting_verification", "done", "cancelled"]
+description = "Optional status filter"
 
 [[params]]
 name = "include_done"

@@ -916,8 +916,8 @@ let complete_cleanup
         | Ok registry_unregistered ->
           (* Docker and microVM keep one runtime per keeper across turns, so
              turn teardown deliberately leaves it running; this is the only
-             place that knows the keeper is gone for good. Local and remote
-             SSH own no local container and must not probe either runtime.
+             place that knows the keeper is gone for good. Remote SSH owns
+             no local container and must not probe either runtime.
 
              After the unregister, not before: a failed unregister leaves the
              keeper registered, and a keeper that is still registered must

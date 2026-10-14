@@ -523,7 +523,8 @@ let test_failed_ticks_preserve_current_runtime_cause () =
     (match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
         ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt))
              (failure_reason ~base_path ~keeper_name:meta.name) with
-     | Some surface -> Alcotest.(check string) "public blocker" "runtime_exhausted" surface.blocker_class
+     | Some surface -> Alcotest.(check string) "public blocker" "runtime_exhausted"
+        (Masc.Keeper_status_bridge.runtime_blocker_class_to_string surface.blocker_class)
      | None -> Alcotest.fail "missing public blocker");
     record_failed_turn ~config ~meta
       (raw_provider_timeout_error

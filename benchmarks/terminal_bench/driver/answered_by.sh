@@ -7,12 +7,13 @@
 # `outcome` is what the turn ended as, and provider_context.executed_runtime_id
 # is the runtime the lane walk reported:
 #
-# - success, checkpoint, input_required (keeper_unified_turn_success.ml
-#   decision_outcome_to_label): the model answered, and the id is the
-#   candidate that answered.
-# - error (keeper_unified_turn.ml): the turn failed. The id is the last
-#   candidate the walk dispatched, which failed, or null when no candidate was
-#   dispatched (masc#35043).
+# The labels are Keeper_decision_outcome.to_string (lib/types):
+#
+# - success, checkpoint, input_required (keeper_unified_turn_success.ml): the
+#   model answered, and the id is the candidate that answered.
+# - error (keeper_unified_turn.ml, Keeper_decision_outcome.Failed): the turn
+#   failed. The id is the last candidate the walk dispatched, which failed, or
+#   null when no candidate was dispatched (masc#35043).
 #
 # The log is <keeper>.decisions.jsonl in the keepers runtime directory, rotated
 # to <keeper>.decisions.jsonl.<n> (keeper_runtime_root_entry.ml).

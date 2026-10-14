@@ -15,10 +15,23 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+type runtime_blocker_class = Keeper_status_bridge_blocker.runtime_blocker_class =
+  | Blocked_by_heartbeat_failures
+  | Blocked_by_turn_failures
+  | Blocked_by_runtime_exhaustion
+  | Blocked_by_provider_runtime_error
+  | Blocked_by_official_client_recovery
+  | Blocked_by_turn_configuration_error
+  | Blocked_by_unresolved_fiber
+  | Blocked_by_exception
+  | Blocked_by_operator_interrupt
+
+val runtime_blocker_class_to_string : runtime_blocker_class -> string
+
 (** [summary] is lazy: the [turn_failures] summary reads the receipt store,
     and callers that only need [blocker_class] never force it. *)
 type runtime_blocker_surface = {
-  blocker_class : string;
+  blocker_class : runtime_blocker_class;
   summary : string Lazy.t;
 }
 

@@ -148,7 +148,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            runtime_model_attribution provider_context_fields
          in
          let outcome_opt = json_string_field_opt "outcome" tfields in
-         (* Check if this is an error turn (telemetry.outcome = "error") *)
+         (* An error turn has telemetry.outcome = "error". The writer takes
+            Keeper_decision_outcome.t; reading the label back into it here is
+            #42997. *)
          let is_error =
            match outcome_opt with
            | Some "error" -> true

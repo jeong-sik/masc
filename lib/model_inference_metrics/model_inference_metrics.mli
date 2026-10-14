@@ -75,6 +75,15 @@ type cached_input = {
   ci_sample_count : int;
 }
 
+(** See {!Model_inference_metrics_entry.coverage_status}. *)
+type coverage_status = Model_inference_metrics_entry.coverage_status =
+  | Coverage_error_only
+  | Coverage_full
+  | Coverage_none
+  | Coverage_partial
+
+val coverage_status_to_string : coverage_status -> string
+
 type model_stats = {
   model_id : string;
   entry_count : int;
@@ -107,7 +116,7 @@ type model_stats = {
   telemetry_sample_count : int;
   usage_missing_count : int;
   telemetry_missing_count : int;
-  coverage_status : string;
+  coverage_status : coverage_status;
   primary_coverage_stage : string option;
   primary_coverage_reason : string option;
   coverage_reason_counts : coverage_reason_count list;

@@ -9,8 +9,8 @@
 
 type phase_gate_outcome =
   | Phase_gate_proceed
-    (** Registry phase is executable (or unknown but recoverable); the
-        caller may proceed to runtime routing. *)
+    (** Registry phase is executable; the caller may proceed to runtime
+        routing. *)
   | Phase_gate_cancelled of Keeper_meta_contract.keeper_meta
     (** Cooperative early-exit after a supervisor stop. The caller must retain
         this cancellation as a typed outcome; it is not completed work. *)
@@ -48,7 +48,6 @@ val decide_and_record
     @param config Workspace configuration passed through to observability.
     @param meta Current keeper metadata. Returned unchanged on
       [Phase_gate_cancelled] and [Phase_gate_skipped] outcomes.
-    @param generation Current generation counter.
     @param keeper_turn_id Turn identifier assigned at function entry.
     @param append_phase_gate_decision Callback closing over the
       caller's [runtime_manifest_context]; takes the current

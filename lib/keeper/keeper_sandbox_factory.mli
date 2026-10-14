@@ -80,7 +80,7 @@ val resolve_opt :
   cwd:string ->
   resolve_result
 (** [No_factory] when [t option] is [None]. Otherwise delegates to {!resolve}.
-    Lets call sites distinguish "factory missing" from "Local profile". *)
+    Lets call sites distinguish "factory missing" from [Remote_ssh_profile]. *)
 
 val cleanup : t -> unit
 (** Tears down every runtime created via {!resolve}.  Idempotent. *)

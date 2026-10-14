@@ -136,7 +136,7 @@ let bundle_relative_repo_path ~repo_id relative_path =
 
    Layout matched (relative to [base_path]):
 
-     .masc/playground/<keeper>/repos/<repo_id>/<rel>           — Local
+     .masc/playground/<keeper>/repos/<repo_id>/<rel>           — microvm, remote_ssh
      .masc/playground/docker/<keeper>/repos/<repo_id>/<rel>    — Docker
 
    The function is structural: it only accepts paths anchored at the
@@ -165,13 +165,12 @@ let parse_playground_repo_path ~base_path ~abs_path =
          "repos", and repository working trees may legitimately contain
          nested ".masc/playground" directories.
          Layouts accepted:
-           .masc/playground/<keeper>/repos/<id>/<rel>          (Local)
+           .masc/playground/<keeper>/repos/<id>/<rel>          (microvm, remote_ssh)
            .masc/playground/docker/<keeper>/repos/<id>/<rel>   (Docker) *)
-      (* The Docker reading is tried first and the Local one is the fallback,
-         which is what the two ordered patterns used to do. It matters for a
-         keeper actually named "docker": [.masc/playground/docker/repos/<id>/x]
-         is that keeper's file, and reading the name as the Docker marker would
-         lose it. *)
+      (* The Docker reading is tried first and the plain [<keeper>] one is the
+         fallback. It matters for a keeper actually named "docker":
+         [.masc/playground/docker/repos/<id>/x] is that keeper's file, and
+         reading the name as the Docker marker would lose it. *)
       let after_keeper = function _keeper :: rest -> Some rest | [] -> None in
       let repo_path segments =
         Option.bind (after_keeper segments) parse_bundle_relative_repo_path_segments

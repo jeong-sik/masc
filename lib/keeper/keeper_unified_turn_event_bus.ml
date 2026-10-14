@@ -140,9 +140,9 @@ let emit_fsm_transition ~keeper_name ~turn_id ~pending_count transition =
       Log.Keeper.debug
         "%s: event-bus FSM transition dropped: %s -> %s (reason=%s; pending_count=%d)"
         keeper_name
-        violation.from_state
-        violation.to_state
-        violation.reason
+        (Keeper_turn_fsm.any_state_tla_symbol violation.from_state)
+        (Keeper_turn_fsm.any_state_tla_symbol violation.to_state)
+        Keeper_turn_fsm.transition_violation_reason
         pending_count;
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string EventBusDrain)

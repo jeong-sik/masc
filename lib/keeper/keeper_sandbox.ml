@@ -1,8 +1,8 @@
 (** Keeper sandbox contract.
 
-    Keeper-facing tools expose exactly one logical sandbox.  The current
-    local storage implementation is still under [.masc/playground/], but
-    that path is an implementation detail of the local/docker backends. *)
+    Keeper-facing tools expose exactly one logical sandbox.  Its host side
+    lives under [.masc/playground/], and that path is an implementation
+    detail of the backends. *)
 
 type backend = Keeper_types_profile_sandbox.sandbox_profile =
   | Docker
@@ -83,7 +83,7 @@ let backend_of_config_agent ~(config : Workspace.config) ~(agent_name : string) 
 let sandbox_id_of_name name =
   "keeper:" ^ Playground_paths.sanitize_keeper_name name
 
-(* The Local/Docker split of the playground root is spelled once, in
+(* The playground root of each profile is spelled once, in
    [Keeper_sandbox_config] (#21837). *)
 let host_root_rel_of_profile = Keeper_sandbox_config.host_root_rel_of_profile
 
@@ -177,11 +177,11 @@ let keeper_visible_root_abs (t : t) : string =
    this replaces, and both hand the keeper a plausible string it then acts on
    as if the directory existed.
 
-   Projection is not containment. For a Local backend the keeper runs on the
-   host filesystem, so every host path is already visible and the answer is
-   the input — that this returns an out-of-sandbox path unchanged is correct
-   here and is decided elsewhere, by Keeper_alerting_path. For Docker the two
-   coordinate systems are disjoint, so an out-of-root path has no visible
+   Projection is not containment. For a tree the endpoint owns, the visible
+   spelling on this side is the host bookkeeping path, so the answer is the
+   input — that this returns an out-of-sandbox path unchanged is correct here
+   and is decided elsewhere, by Keeper_alerting_path. For a shared mount the
+   two coordinate systems are disjoint, so an out-of-root path has no visible
    spelling at all and must be an error. *)
 let visible_path_of_host (t : t) (p : Path.host Path.t)
   : (Path.visible Path.t, Path.conversion_error) result

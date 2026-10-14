@@ -91,11 +91,78 @@ let registry_is_injective () =
       Alcotest.fail
         ("label collisions: " ^ String.concat "; " (List.map show cs))
 
+(* task-2325 (P3 follow-up to #42979): the dashboard port mirrors this rule
+   with JS [toUpperCase], which lifts any Unicode cased letter where
+   [capitalize_ascii] lifts ASCII [a-z] only. The two implementations stay a
+   faithful mirror as long as the names that reach the label are ASCII — so
+   assert that on the same registered-name universe the injectivity check
+   walks. A non-ASCII registration turns this red at build time and asks for
+   an explicit mirror-rule change on both sides instead of drifting silently. *)
+let registry_names_are_ascii () =
+  let module Descriptor = Masc.Keeper_tool_descriptor in
+  let not_ascii name =
+    let rec check i =
+      if i >= String.length name then false
+      else Char.code (String.get name i) >= 0x80 || check (i + 1)
+    in
+    check 0
+  in
+  let bad = ref [] in
+  List.iter
+    (fun (d : Descriptor.t) ->
+      if not_ascii d.Descriptor.public_name then
+        bad := ("public_name", d.Descriptor.public_name) :: !bad;
+      if not_ascii d.Descriptor.internal_name then
+        bad := ("internal_name", d.Descriptor.internal_name) :: !bad)
+    (Descriptor.all_descriptors ());
+  match !bad with
+  | [] -> ()
+  | xs ->
+      let show (kind, name) = Printf.sprintf "%s %S contains non-ASCII bytes" kind name in
+      Alcotest.fail
+        ( "tool names must stay ASCII for the JS port mirror "
+        ^ "(dashboard/src/lib/tool-display-label.ts): "
+        ^ String.concat "; " (List.map show xs))
+
+(* task-2245 (leader's term: the two implementations assert the same input
+   table in one PR). The dashboard reads this exact file from its vitest suite
+   (dashboard/src/lib/tool-display-label.shared-table.test.ts), so a mapping
+   change landing on only one side fails the other side's test too — the same
+   togetherness promise as the sync rule (task-2258). *)
+let shared_table_rows name =
+  let json = Yojson.Safe.from_file ("fixtures/" ^ name) in
+  match json with
+  | `List rows ->
+      List.map
+        (fun row ->
+          match row with
+          | `Assoc fields ->
+              let find key =
+                match List.assoc_opt key fields with
+                | Some (`String value) -> value
+                | _ -> Alcotest.failf "the shared table row misses %s" key
+              in
+              (find "name", find "label")
+          | _ -> Alcotest.fail "the shared table row is not an object")
+        rows
+  | _ -> Alcotest.fail "the shared table is not a list"
+
+let shared_table () =
+  let rows = shared_table_rows "tool-display-labels.json" in
+  Alcotest.(check bool) "the shared table is not empty" true (List.length rows > 0);
+  List.iter
+    (fun (name, expected) ->
+      Alcotest.(check string) ("shared table: " ^ name) expected
+        (Masc.Tool_display.list_label name))
+    rows
+
 let () =
   Alcotest.run "tool_display"
     [
       ("label", tests);
       ("list label", list_tests);
       ("gate row", [ ("non-identity row shows the label", `Quick, gate_row_shows_the_display_label) ]);
-      ("registry", [ ("labels are injective", `Quick, registry_is_injective) ]);
+      ("registry", [ ("labels are injective", `Quick, registry_is_injective); ("names are ascii", `Quick, registry_names_are_ascii) ]);
+      ( "shared table"
+      , [ ("the dashboard port maps the shared table identically", `Quick, shared_table) ] );
     ]

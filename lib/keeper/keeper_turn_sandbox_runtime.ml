@@ -1846,7 +1846,7 @@ let start_microvm_container ?timeout_sec t =
 ;;
 
 (* Shutdown finalization retains the typed backend through registry removal.
-   A Local or remote-SSH keeper owns no local container, while Docker and
+   A remote-SSH keeper owns no local container, while Docker and
    microVM names project to different runtimes and must not probe each other. *)
 let teardown_keeper_sandbox_by_name
       ?timeout_sec

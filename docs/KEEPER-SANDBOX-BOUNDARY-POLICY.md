@@ -33,7 +33,7 @@ failure just because a keeper uses the Docker backend.
 
 ## Deterministic Rules
 
-- Canonical sandbox profiles are only `local` and `docker`.
+- Canonical sandbox profiles are `docker`, `microvm` and `remote_ssh`.
 - Legacy aliases are rejected, not warned and reinterpreted.
 - Keeper TOML is parsed with `Otoml`, not ad hoc string parsing.
 - Docker container roots are path projections from the config contract,
@@ -64,8 +64,8 @@ failure just because a keeper uses the Docker backend.
   keeper meta via `Keeper_meta_store.read_effective_meta*`, not raw persisted
   JSON, before displaying `sandbox_profile`, `network_mode`, `tool_access`, or
   sandbox live state. Persisted runtime JSON intentionally omits TOML-owned
-  fields; raw reads can otherwise report `local` while receipts and tool
-  execution correctly use `docker`.
+  fields, so a raw read returns the decoder's placeholder profile (`docker`)
+  whatever profile the keeper TOML declares.
 - Runtime/provider attribution for status surfaces must come from explicit
   runtime observations and execution receipts. `Runtime_agent.run` must attach
   terminal runtime observation to completed or partial-completed turns, receipts

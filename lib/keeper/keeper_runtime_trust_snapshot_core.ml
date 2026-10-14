@@ -34,10 +34,8 @@ let fallback_disposition raw =
        "Alert", "runtime_exhausted"
      | Some Keeper_status_bridge_blocker.Blocked_by_unresolved_fiber ->
        "Alert", "critical_block"
-     (* These seven read as unknown because the class used to reach this
-        module as a string decoded against [Keeper_meta_contract.blocker_class],
-        which spells only the two above. The reason they should show is a
-        display decision of its own (#43018); this keeps what operators see. *)
+     (* These seven show as unknown_runtime_blocker. Which reason each should
+        show is a display decision of its own (#43018). *)
      | Some
          ( Keeper_status_bridge_blocker.Blocked_by_heartbeat_failures
          | Keeper_status_bridge_blocker.Blocked_by_turn_failures

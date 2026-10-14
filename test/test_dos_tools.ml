@@ -429,6 +429,44 @@ let test_inventory_skips_subdirectories_like_load () =
        = Some (`List [`String (String.uppercase_ascii "game.com")])))
 ;;
 
+(* Swap a directory out during enumeration, then restore it before final
+   validation. Pathname before/after checks alone would accept the outside
+   names; descriptor enumeration returns only the original inventory names. *)
+let test_inventory_temporary_swap_cannot_publish_foreign_names () =
+  List.iter (fun nested ->
+    with_workspace (fun base_path ->
+      let root = programs_dir ~base_path in
+      install_program_file ~base_path "game" "game.com" hello_com;
+      let target = Unix.realpath (if nested then Filename.concat root "game" else root) in
+      let moved = target ^ ".moved" in
+      let outside = Filename.temp_dir "masc-dos-outside-swap-" "" in
+      Fun.protect ~finally:(fun () -> Fs_compat.remove_tree outside) (fun () ->
+        write_file (Filename.concat outside "private-outside.exe") "private";
+        let swapped = ref false in
+        let result = Dos_tools.handle_inventory_with_read_hooks
+            ~before_program:(fun _ -> ())
+          ~before_read:(fun directory ->
+            if String.equal directory target then begin
+              Unix.rename target moved;
+              Unix.symlink outside target;
+              swapped := true
+            end)
+          ~after_read:(fun directory ->
+            if String.equal directory target then begin
+              Unix.unlink target;
+              Unix.rename moved target
+            end)
+          ~tool_name:"masc_dos_inventory" ~start_time:(Tool_timing.start ()) ~base_path in
+        check bool "the actual enumeration crossed the swap" true !swapped;
+        check bool "bound original inventory remains readable" true (is_completed result);
+        let response = Tool_result.message result ^ Yojson.Safe.to_string (Tool_result.data result) in
+        check bool "outside names never enter the response" false
+          (contains "private-outside.exe" response);
+        check bool "host root is never serialized" false (contains base_path response);
+        check bool "original executable is still advertised" true (contains "game.com" response))))
+    [false; true]
+;;
+
 (* The root identity remains owned after enumeration. A replacement between
    that read and per-program inspection cannot become a new authority merely
    because it contains a matching game name. *)
@@ -2097,6 +2135,8 @@ let () =
         ; test_case "inventory describes assets" `Quick
             test_inventory_describes_mountable_assets_without_a_machine
         ; test_case "inventory mount parity" `Quick test_inventory_skips_subdirectories_like_load
+        ; test_case "inventory temporary directory swap" `Quick
+            test_inventory_temporary_swap_cannot_publish_foreign_names
         ; test_case "inventory root authority across reads" `Quick
             test_inventory_root_replacement_between_reads_is_refused
         ; test_case "inventory special files" `Quick

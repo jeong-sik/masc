@@ -181,17 +181,6 @@ type docker_preflight =
   ; next_actions : string list
   }
 
-(* P2c: literals lifted to Env_config_sandbox.Preflight (#10426 P2c).
-   Today the SSOT getters return the same hardcoded values; future env
-   wiring (per Env_config_sandbox.Preflight doc) tunes these without
-   touching this file. *)
-type cleanup_result =
-  { scanned : int
-  ; removed : int
-  ; already_absent : int
-  ; errors : string list
-  }
-
 let sandbox_component_label_key = "masc.mcp.component"
 let sandbox_component_label_value = "keeper-sandbox"
 let sandbox_base_path_hash_label_key = "masc.mcp.base_path_hash"

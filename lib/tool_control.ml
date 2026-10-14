@@ -42,8 +42,6 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
           ("paused", `Null);
           ("paused_count", `Null);
           ("paused_names", `List []);
-          ("meta_paused_count", `Null);
-          ("phase_paused_count", `Null);
           ("read_errors", `List []);
         ])
     else Pause_status_backend.keeper_pause_status_json ctx.config

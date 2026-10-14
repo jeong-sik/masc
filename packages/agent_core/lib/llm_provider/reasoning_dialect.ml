@@ -550,13 +550,21 @@ let base_for_provider_config (config : Provider_config.t) =
       ; sampling_policy = sampling_policy_of_capabilities caps
       }
   | Gemini ->
-    { default with
-      toggle_wire = Gemini_thinking_config
-    ; (* GenerateContent is stateless. Signed parts must remain attached to the
-         exact model response part and be returned unchanged. *)
-      replay_policy = All_assistant_messages
-    ; streaming = Delta_field "thought"
-    }
+    let caps =
+      match Provider_config.capabilities_for_config_model config with
+      | Some caps -> caps
+      | None -> provider_capabilities_of_kind config.kind
+    in
+    apply_replay_override
+      caps
+      { default with
+        toggle_wire = Gemini_thinking_config
+      ; (* GenerateContent is stateless. Signed parts must remain attached to the
+           exact model response part and be returned unchanged. *)
+        replay_policy = All_assistant_messages
+      ; streaming = Delta_field "thought"
+      ; sampling_policy = sampling_policy_of_capabilities caps
+      }
   | Ollama ->
     let caps =
       match Provider_config.capabilities_for_config_model config with

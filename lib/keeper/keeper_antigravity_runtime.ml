@@ -754,32 +754,6 @@ let run_without_lifecycle ~official_task_reference ~composed_context ~accepts_im
              (if item.resent_every_resume then " always_resent" else ""))
          |> String.concat "; ");
     let terminal_error = ref None in
-    let* dynamic_tools =
-      Host.dynamic_tools
-        ~base_path
-        ~content_transport:Runtime_official_client_tool.Mcp
-        ~accepts_image_input
-        (* These lanes drive a provider CLI that has no place to show an
-           operator prompt mid-turn, so a decision asking for one is rejected
-           rather than admitted. *)
-        ~tool_approval:None
-        ~runtime_label
-        ~keeper_name
-        ~turn_count:hook_turn_count
-        ~tools:prepared.tools
-        ~loading_plan
-        ~hooks
-        ~event_bus
-        ~context_injector
-        ~context
-        ~terminal_effect_state
-        ~terminal_error
-        ~pre_tool_rejects
-        ~raw_trace_run:None
-        ?on_tool_boundary:on_official_client_tool_boundary
-        ~on_result_handoff:on_official_client_result_handoff
-        ()
-    in
     let* () =
       match native_workspace, sandbox_profile with
       | Runtime_antigravity_home.Shared_workspace _, Some profile ->

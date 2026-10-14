@@ -141,7 +141,7 @@ Memory backend(`backend_setup.ml:354-355`)는 이름이 아니라 backend root �
 
 ## 6. 하지 않는 것
 
-- root 를 문자열로 넘기는 인자(`~masc_root`)를 타입으로 바꾸는 일: §9 Q2 에 따라 따로 한다.
+- root 를 문자열로 넘기는 인자(`~masc_root`)를 타입으로 바꾸는 일: §9 Q2 에 따라 #43005 에서 따로 한다.
 - base path 자체를 정하는 일(`.gate/runtime`, `.masc-ide` 가 `.masc` 밖에 있는 #42809 등)은 따로 한다.
 - 다른 뜻의 "cluster"(글자 묶음, 도구 묶음, 실패 이유 묶음)는 건드리지 않는다.
 
@@ -165,7 +165,7 @@ Memory backend(`backend_setup.ml:354-355`)는 이름이 아니라 backend root �
 
 - Q1. JSON `cluster` 칸을 모든 응답에서 지운다. 대시보드 연결 표시(`dashboard/src/components/ide/ide-presence-strip.ts:43-53`)는 status 응답을 받았는지로 연결을 판단하고, `runtime_id` 에는 `project` 를 쓴다.
   - 같이 고칠 소비처: `keeper-detail-runtime.ts:1438-1448` 은 값이 `default`/`unknown`/`N/A` 가 아닐 때만 "클러스터" 줄을 보인다. `mission-normalizers.ts:62`, `operator-normalizers.ts:46` 과 타입 파일 둘(`types/dashboard-execution.ts:752`, `types/dashboard-mission.ts:14, :214`)은 이 칸을 선택 칸으로 다룬다. 테스트 `test_dashboard_namespace_truth.ml:256` 이 이 칸을 확인한다.
-- Q2. 이 스택은 root 값만 하나로 맞춘다. `~masc_root` 는 문자열로 둔다. root 가 하나가 되면 그 자리에 잘못 들어갈 수 있는 값은 base path 하나로 준다. root 를 타입으로 바꾸는 일(lib/bin 160곳쯤, 테스트 300곳쯤)은 이 RFC 밖에서 따로 한다.
+- Q2. 이 스택은 root 값만 하나로 맞춘다. `~masc_root` 는 문자열로 둔다. root 가 하나가 되면 그 자리에 잘못 들어갈 수 있는 값은 base path 하나로 준다. root 를 타입으로 바꾸는 일(lib/bin 160곳쯤, 테스트 300곳쯤)은 이 RFC 밖에서 따로 한다(#43005).
 
 ## 10. 구현 순서
 

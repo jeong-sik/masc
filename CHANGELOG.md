@@ -6,7 +6,6 @@
 
 ### Upgrade notes
 
-- After upgrading, every Keeper request carries a "Workspace wiki" paragraph: one line per wiki page, built at the start of the turn. Its size grows with the number of pages. Set `enabled = false` under `[wiki_contents]` in runtime.toml (or `MASC_KEEPER_WIKI_CONTENTS_ENABLED=false`) and restart to turn it off. Add the table to a live runtime.toml only after this version is running; earlier versions do not know it (#42961).
 - `MASC_CLUSTER_NAME` is no longer read. All state lives under `<base>/.masc`;
   nothing creates or reads `<base>/.masc/clusters`. A workspace that used a
   named cluster keeps that folder untouched and unread, but tool blob cleanup
@@ -19,23 +18,32 @@
 - `.masc/root-state.json` is no longer written or read; `.masc/state.json`
   alone says a workspace is initialized. An existing `root-state.json` is
   left in place and can be deleted (#43074).
+- `connectors/browser/install-host.sh` is removed. Scripts or docs that call it
+  should run `masc browser-lane-setup --mode extension` instead (#42867).
+- `resources/read` on `masc://wiki/log` returns only the last 64 KiB of the log,
+  starting at a line boundary. A client that read the whole log through this
+  resource must read `log.md` directly (#43124).
+- After upgrading, every Keeper request carries a "Workspace wiki" paragraph: one line per wiki page, built at the start of the turn. Its size grows with the number of pages. Set `enabled = false` under `[wiki_contents]` in runtime.toml (or `MASC_KEEPER_WIKI_CONTENTS_ENABLED=false`) and restart to turn it off. Add the table to a live runtime.toml only after this version is running; earlier versions do not know it (#42961).
 
 ### Added
 
-- `masc web-search-setup` prints each web search provider's state and the
+Items marked Experimental have no recorded run on a user's path yet. Each is
+promoted in a later release once a live run on that path is recorded.
+
+- Experimental: `masc web-search-setup` prints each web search provider's state and the
   search order a call would use, and writes the `[web_search]` section of
   runtime.toml when given options. It never writes an API key, and it refuses a
   SearXNG address that is not an http or https URL (#42821).
-- `masc prerequisite-actions geckodriver` and `masc prerequisite-actions firefox`
+- Experimental: `masc prerequisite-actions geckodriver` and `masc prerequisite-actions firefox`
   show whether the program the browser lanes start answers `--version`, and at
   which absolute path, and offer an install action: a Homebrew step on macOS, the
   project's own page on Linux. Neither action edits `runtime.toml` (#42843).
-- `masc browser-lane-setup --mode extension` installs the browser lane for a
+- Experimental: `masc browser-lane-setup --mode extension` installs the browser lane for a
   workspace: the lane token, the native messaging host and its launcher, the
   Firefox native messaging manifest, and the MASC extension, which the binary
   now carries. It starts no browser. Without `--mode` it prints the lane's state
   and changes nothing (#42866).
-- `masc browser-lane-setup --mode bidi` installs the browser lane host and its
+- Experimental: `masc browser-lane-setup --mode bidi` installs the browser lane host and its
   launcher and writes the `[browser.live.bidi]` table of `runtime.toml`, so the
   MASC server starts a Firefox of its own and attaches the host to it. It writes
   no extension and no native messaging manifest. A table that is already there
@@ -43,20 +51,19 @@
   they name. `--mode` can be given twice to connect both routes, and an option
   the chosen modes do not use is refused (#42941).
 - Experimental: each Keeper turn carries the wiki table of contents: one line per wiki file (title, file, one-line summary), built from the pages at the start of the turn rather than read from `index.md`, followed by the request's route to `keeper_wiki_read` (direct, through `keeper_tool_search`, or unavailable). A wiki listing failure shows a fixed line without the IO error. Autonomous turns record the paragraph as the `wiki` layer of the dynamic-context receipt. `[wiki_contents] enabled` in runtime.toml (default `true`) turns it off (#42961).
-- `masc browser-lane-setup --mode host` installs the browser lane host and its
+- Experimental: `masc browser-lane-setup --mode host` installs the browser lane host and its
   launcher and nothing else: no extension, no native messaging manifest, no
   `runtime.toml`. It is for a browser the operator attaches by hand and for
   bringing an installed lane's host up to the running build (#42976).
-- Propose a keyless last-resort web-search provider (`Duckduckgo` over DuckDuckGo lite HTML, no API key) in `docs/rfc/RFC-keyless-web-search.md`, so `masc_web_search` keeps working on installs with zero search credentials (#43085).
-- `masc browser-lane-setup --mode automation` writes the geckodriver path of the
+- Experimental: `masc browser-lane-setup --mode automation` writes the geckodriver path of the
   automation lane into the `runtime.toml` the server reads. It names the
   `geckodriver` that `PATH` finds first when that file answers `--version`
   (`--geckodriver` names another); `--browser` writes `binary`, only when named.
   Keys already in the file keep their values and are edited where they are, in
   `[browser.automation]` or directly in `[browser]`. It installs no host,
   extension or manifest (#43093).
-- ```alphatex 펜스에 `rhythm` 단어를 붙이면 가장 낮은 줄 아래에 리듬 줄이 그려진다: 박 길이마다 w/h/q/e/s 글자 하나를 그 박의 첫 칸에 찍는다. 조용한 ```alphatex 펜스는 예전과 칸까지 같은 탭을 그린다. (#43118)
-- The install journey asks "5 · Give imp tools (optional)" after the sandbox
+- Experimental: adding the word `rhythm` to an ```alphatex fence draws a rhythm row under the lowest string: one w/h/q/e/s letter in the first cell of each beat. A fence without it draws the same tab as before, cell for cell (#43118).
+- Experimental: The install journey asks "5 · Give imp tools (optional)" after the sandbox
   step, as one checklist whose rows start marked. The browser row finds
   geckodriver and Firefox, offers the install menu for what is missing, and runs
   `masc browser-lane-setup --mode automation` before `masc setup` starts the
@@ -66,11 +73,10 @@
   standard input; without a login it runs the one-time code login. Nothing is
   installed or written until the list is confirmed, unmarking every row skips
   the step, and quick setup only prints the rows with their commands (#43119).
-- Add `gemini-4-argon` to the embedded model catalog (`packages/agent_core/models.toml`) and bind the current Antigravity CLI models (`antigravity-gemini-4-argon-{high,medium,low}`, `antigravity-claude-opus-5-5-{high,medium,low}`, `antigravity-claude-sonnet-5-5-{high,medium,low}`) in `config/runtime.toml` (#43120).
-- Keeper compositions can declare typed output exports and preserve complete node inputs/results in a durable execution artifact. TOML and structured JSON plans expose the existing independent-branch failure policy and retain both contracts when parameters are bound (#43137).
-- Keepers can prepare and inspect a task-specific read-only composition without publishing a shared Skill, then run the exact Keeper-bound draft inline or asynchronously. Drafts bind inputs, mode and frozen tool contracts, and record the source invocation before dispatch (#43137).
-- Independent named inline Skill compositions can overlap when every leaf permits concurrent reads. Each invocation keeps its own causal history, run identity, observations and activation evidence while the owning turn continues to collect all completions (#43137).
-- The install journey's "5 · Give imp tools" checklist gains two rows that
+- Experimental: Keeper compositions can declare typed output exports and preserve complete node inputs/results in a durable execution artifact. TOML and structured JSON plans expose the existing independent-branch failure policy and retain both contracts when parameters are bound (#43137).
+- Experimental: Keepers can prepare and inspect a task-specific read-only composition without publishing a shared Skill, then run the exact Keeper-bound draft inline or asynchronously. Drafts bind inputs, mode and frozen tool contracts, and record the source invocation before dispatch (#43137).
+- Experimental: Independent named inline Skill compositions can overlap when every leaf permits concurrent reads. Each invocation keeps its own causal history, run identity, observations and activation evidence while the owning turn continues to collect all completions (#43137).
+- Experimental: The install journey's "5 · Give imp tools" checklist gains two rows that
   connect a Firefox: BiDi (MASC starts a Firefox of its own on a local debugging
   port, with a notice that the port has no authentication) and the MASC add-on
   (through your everyday Firefox, with a notice that Firefox removes the add-on
@@ -78,9 +84,9 @@
   found. The chosen routes go to one `masc browser-lane-setup` call, which plans
   all of them before writing any, and run before `masc setup` starts the server.
   Quick setup marks each row `[x]` or `[ ]` in its list and runs nothing (#43138).
-- Add `scripts/migrate-lane-addon-bindings.py`, which classifies lane add-on binding records written by v0.48.0 or earlier using the container's own rules, and can move the records that are safe to move out of the read path (#43139).
+- Experimental: Add `scripts/migrate-lane-addon-bindings.py`, which classifies lane add-on binding records written by v0.48.0 or earlier using the container's own rules, and can move the records that are safe to move out of the read path (#43139).
   - Usage: `python3 scripts/migrate-lane-addon-bindings.py --base-path <masc base path> [--write-out <archive dir>]`. The default run is classify-only and changes nothing; it prints one line per record and the before/after counts. `--write-out DIR` (run with the server stopped) additionally archives every detached legacy record byte-identically to `DIR/<name>.json.legacy` (hash-verified) and renames the store file to `<name>.json.migrated`, which the store skips because `read_bindings` reads only files ending in `.json`. Records that are not detached are never moved or rewritten: repairing one means adding top-level `visibility` and `source_access`, which is an authority decision, and the tool reports those instead.
-- The install journey's "5 · Give imp tools" checklist gains a web search
+- Experimental: The install journey's "5 · Give imp tools" checklist gains a web search
   check, marked from the start. Confirmed, it runs `masc web-search-setup` with
   only the workspace, which writes nothing: it shows which providers have a key
   and which variable to export for one that has none. It runs in the
@@ -88,7 +94,7 @@
   `MASC_CONFIG_DIR`. A refused or unstartable command says how to look again
   and does not end the journey. Quick setup lists the row and runs nothing
   (#43145).
-- `masc_web_search` gains a `zai` provider over z.ai's Web Search MCP server
+- Experimental: `masc_web_search` gains a `zai` provider over z.ai's Web Search MCP server
   (GLM Coding Plan). It reads `ZAI_API_KEY`, the variable the `glm-coding`
   model provider already uses, and joins the chain only when named in
   `provider`, `provider_order` or `fallbacks`: a key that is present on every
@@ -178,6 +184,7 @@
 - `masc_wiki_lint` now reads `log.md` as well: it reports a new `revision_log_gap` finding when the log records an `r<N>` a page never reached (with `log_revision` and `page_revision`), and two counts of its own, `log_unknown_action` and `log_unreadable_line`, for log lines whose action word it does not know and lines it cannot read. The log parser is pure and never fails; the finding kind enum, the guide and the RFC table move with it (#43149).
 - `masc_wiki_lint` reports a new `revision_log_hole` finding when `log.md` skips an `r<N>` below the highest revision it records for a page; `missing` carries the skipped number. A page's lines run `r1`, `r2`, … with no skips, so the missing value is a line that reached the page and never reached the log — what an `append_log` that failed leaves. A write in flight only leaves the top of the column empty, so that is not a hole. The check refuses rather than guesses twice: it reports no hole at all when the log has any dropped line, and it starts the column at the lowest revision the log records for the page (#43155).
 - `masc_wiki_lint` adds `revision_log_hole_suppressed` (boolean) to its response so callers can distinguish "no revision holes found" from "the `revision_log_hole` check was turned off because `log.md` has at least one unknown action or unreadable line" (#43169).
+- Add `gemini-4-argon` to the embedded model catalog (`packages/agent_core/models.toml`) and bind the current Antigravity CLI models (`antigravity-gemini-4-argon-{high,medium,low}`, `antigravity-claude-opus-5-5-{high,medium,low}`, `antigravity-claude-sonnet-5-5-{high,medium,low}`) in `config/runtime.toml` (#43120).
 
 ### Removed
 
@@ -277,6 +284,7 @@
   cluster are corrected (#43126).
 - RFC any-runtime-serves-an-exact-lane: correct the origin of the verifier admission function. `verifier_runtime_admission` predates #37382, which is an issue; #37395 merged the two verifier judgements into it and moved the refusal ahead of dispatch. The reference list now names issues and PRs separately (#43128).
 - New guide `docs/guides/alphatex-tab.md` for the experimental alphaTex tab renderer: how the TUI picks up a ` ```alphatex ` fence (first tag word `alphatex`, with an optional `rhythm` word on the tag line to draw the rhythm row), the seven supported directives (`\title \tempo \ts \tuning \ro \rc \ae`), `fret.string` note pairs (1 = high e), what the drawn box and the fallback box look like on screen, failure lines such as `alphatex: the \subtitle directive is not in the subset` and `alphatex: one measure needs N cells and this pane has M`, and how to turn it off (rename the tag) (#43133). The Board section of `docs/TUI-GUIDE.md` and the glossary's alphaTex entry now link to the guide.
+- RFC: propose a keyless last-resort web-search provider (`Duckduckgo` over DuckDuckGo lite HTML, no API key) in `docs/rfc/RFC-keyless-web-search.md`, so `masc_web_search` keeps working on installs with zero search credentials (#43085).
 
 ### Internal
 

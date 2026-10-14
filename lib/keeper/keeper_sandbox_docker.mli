@@ -19,8 +19,8 @@ val docker_private_workspace_cwd :
   string
 
 (** Resolve [(sandbox_profile, network_mode)] from the keeper's declared
-    profile. The declared sandbox profile is the execution contract:
-    [sandbox_profile=local] never becomes Docker because of call-site cwd. *)
+    profile. The declared sandbox profile is the execution contract: the
+    call site's cwd never changes it. *)
 val effective_sandbox_profile :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode

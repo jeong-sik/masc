@@ -791,7 +791,8 @@ let continuation_child_admission continuation ~node_ids =
       | Some (Attempting _) -> Admission_unconfirmed
       | Some (Settled (_,completed,effect_disposition,wait)) ->
         (match completed.result,effect_disposition,wait with
-         | Tool_result.Completed _,_,_ | Tool_result.Deferred _,_,Some _ -> Admitted_child
+         | Tool_result.Completed _,_,_ | Tool_result.Deferred _,_,Some _
+         | Tool_result.Failed _,Some Tool_result.Proven_post_effect,_ -> Admitted_child
          | Tool_result.Failed _,Some Tool_result.Proven_pre_effect,_ -> Untouched_child
          | Tool_result.Failed _,(None | Some Tool_result.Effect_outcome_unknown),_
          | Tool_result.Deferred _,_,None -> Admission_unconfirmed) in

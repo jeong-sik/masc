@@ -191,7 +191,8 @@ let test_trust_relays_only_a_shown_receipt_operator_disposition () =
   Alcotest.check receipt_disposition
     "a shown receipt's operator disposition is relayed as written"
     (Some fenced_receipt) shown.receipt_operator_disposition;
-  Alcotest.(check string) "an effect review shows as an alert" "Alert" shown.disposition;
+  Alcotest.(check string) "an effect review shows as an alert" "Alert"
+    (Masc.Keeper_trust_disposition.to_wire shown.disposition);
   Alcotest.(check bool) "an effect review needs attention" true shown.needs_attention;
   let pending = decide (Core.Approval_queue_available 2) in
   Alcotest.(check string) "a pending approval takes the display"
@@ -776,7 +777,8 @@ let test_operator_disposition_display_reads_the_kind () =
     let disposition, reason =
       Masc.Keeper_operator_disposition_display.of_kind ~operator_disposition_reason kind
     in
-    Alcotest.(check string) (label ^ " disposition") expected_disposition disposition;
+    Alcotest.(check string) (label ^ " disposition") expected_disposition
+      (Masc.Keeper_trust_disposition.to_wire disposition);
     Alcotest.(check string) (label ^ " reason") expected_reason reason
   in
   check_case Receipt.Disp_pass_next_model ~operator_disposition_reason:""

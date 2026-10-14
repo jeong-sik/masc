@@ -288,7 +288,7 @@ let trust_model_json_fields (model : Trust_core.t) =
         `String reason )
     | None -> `Null, `Null
   in
-  [ "disposition", `String model.disposition
+  [ "disposition", `String (Keeper_trust_disposition.to_wire model.disposition)
   ; "disposition_reason", `String model.disposition_reason
   ; "operator_disposition", operator_disposition
   ; "operator_disposition_reason", operator_disposition_reason

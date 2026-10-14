@@ -99,7 +99,7 @@ let keeper_trust_json ?(include_receipt = false)
 
 let degraded_keeper_trust_json ~site ~attention_reason =
   Keeper_runtime_trust_snapshot.unread_keeper_json
-    ~disposition:"Degraded"
+    ~disposition:Keeper_trust_disposition.Degraded
     ~disposition_reason:site
     ~attention_reason
     ~next_human_action:"inspect_keeper_dashboard_worker"

@@ -20,7 +20,7 @@ type raw =
   }
 
 type t =
-  { disposition : string
+  { disposition : Keeper_trust_disposition.t
   ; disposition_reason : string
   ; receipt_operator_disposition :
       (Keeper_execution_receipt.operator_disposition_kind * string) option

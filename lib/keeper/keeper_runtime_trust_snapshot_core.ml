@@ -14,7 +14,7 @@ type raw =
   }
 
 type t =
-  { disposition : string
+  { disposition : Keeper_trust_disposition.t
   ; disposition_reason : string
   ; receipt_operator_disposition :
       (Keeper_execution_receipt.operator_disposition_kind * string) option
@@ -25,15 +25,15 @@ type t =
 
 let fallback_disposition raw =
   match raw.approval_queue with
-  | Approval_queue_unavailable -> "Alert", "approval_queue_unavailable"
+  | Approval_queue_unavailable -> Keeper_trust_disposition.Alert, "approval_queue_unavailable"
   | Approval_queue_available pending_approval_count when pending_approval_count > 0 ->
-    "Alert", "pending_operator_decision"
+    Keeper_trust_disposition.Alert, "pending_operator_decision"
   | Approval_queue_available _ ->
     (match raw.runtime_blocker_class with
      | Some Keeper_status_bridge_blocker.Blocked_by_runtime_exhaustion ->
-       "Alert", "runtime_exhausted"
+       Keeper_trust_disposition.Alert, "runtime_exhausted"
      | Some Keeper_status_bridge_blocker.Blocked_by_unresolved_fiber ->
-       "Alert", "critical_block"
+       Keeper_trust_disposition.Alert, "critical_block"
      (* These seven show as unknown_runtime_blocker. Which reason each should
         show is a display decision of its own (#43018). *)
      | Some
@@ -44,13 +44,8 @@ let fallback_disposition raw =
          | Keeper_status_bridge_blocker.Blocked_by_turn_configuration_error
          | Keeper_status_bridge_blocker.Blocked_by_exception
          | Keeper_status_bridge_blocker.Blocked_by_operator_interrupt ) ->
-       "Alert", "unknown_runtime_blocker"
-     | None -> "Pass", "healthy")
-;;
-
-let display_disposition_requires_attention = function
-  | "Blocked" | "Pause" | "Alert" -> true
-  | _ -> false
+       Keeper_trust_disposition.Alert, "unknown_runtime_blocker"
+     | None -> Keeper_trust_disposition.Pass, "healthy")
 ;;
 
 (* Only a shown receipt has an operator disposition to relay. The snapshot's
@@ -80,7 +75,7 @@ let decide raw =
   in
   let needs_attention =
     raw.attention_needs_attention
-    || display_disposition_requires_attention disposition
+    || Keeper_trust_disposition.requires_attention disposition
   in
   let attention_reason =
     match raw.attention_reason with

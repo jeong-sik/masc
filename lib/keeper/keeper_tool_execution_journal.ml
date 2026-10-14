@@ -261,13 +261,16 @@ type node_record =
   | Attempting of occurrence
   | Settled of occurrence * completed * Tool_result.failure_effect_disposition option
       * Keeper_owned_job_store.Job_id.t option
-type state = {source : source; source_sha : string; owner : binding option; nodes : node_record Nodes.t}
+type state =
+  { source : source; source_sha : string; owner : binding option
+  ; prior_owners : (binding * node_record Nodes.t) list; nodes : node_record Nodes.t }
 type t = {base_path : string; root : string; path : string; immutable_source : source; source_sha : string}
 type worker = {journal : t; binding : binding}
 type attempt = {worker : worker; occurrence : occurrence}
 type continuation =
   { journal : t; expected_owner : binding
-  ; waiting_entry : Async.entry
+  ; terminal_entry : Async.entry
+  ; predecessor_terminals : Async.entry list
   ; suspended_nodes : node_record Nodes.t
   ; job_ids : Keeper_owned_job_identity.Job_id.t list }
 type readiness = Waiting_for_results | Results_ready
@@ -387,7 +390,9 @@ let decode_state bytes = decode (fun () ->
       require (same_owner state.owner expected) "binding predecessor mismatch";
       require (owner.generation = (match expected with None -> 1 | Some prior -> prior.generation + 1)) "binding generation mismatch";
       require (match expected with None -> true | Some prior -> prior.request_id <> owner.request_id) "duplicate binding event";
-      {state with owner = Some owner}
+      {state with owner = Some owner;
+        prior_owners = Option.to_list (Option.map (fun prior -> prior, state.nodes) expected)
+          @ state.prior_owners}
     | "attempting" | "settled" ->
       let occurrence = occurrence_of_json (field "occurrence" fields) in
       require (same_owner state.owner (Some occurrence.owner)) "node event outside current owner";
@@ -415,7 +420,8 @@ let decode_state bytes = decode (fun () ->
           "owned job wait does not match the exact read-only result leaf") job_wait;
         Settled (occurrence, completed, phase, job_wait)) in
       {state with nodes = Nodes.add key record state.nodes}
-    | _ -> refuse "unknown journal event") {source; source_sha; owner = None; nodes = Nodes.empty} events)
+    | _ -> refuse "unknown journal event")
+    {source; source_sha; owner = None; prior_owners = []; nodes = Nodes.empty} events)
 
 let source journal = journal.immutable_source
 let path_for ~base_path ~keeper_name ~composition_run_id =
@@ -689,12 +695,24 @@ let bind_request journal ~request_id =
   let* expected = update_existing journal (fun state -> None, Ok state.owner) in
   bind_expected_owner journal ~request_id ~expected ~expected_terminal:None ~expected_nodes:None
 
+let validate_predecessor_terminals (continuation : continuation) =
+  let journal = continuation.journal in
+  List.fold_left (fun prior (expected : Async.entry) ->
+    let* () = prior in
+    let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
+        ~caller:journal.immutable_source.keeper_name expected.request_id
+      |> Result.map_error (fun error -> Prior_owner_not_terminal
+          {request_id=expected.request_id;reason=Async.canonical_terminal_error_to_string error}) in
+    if Async.same_entry_record expected (Async.durable_terminal_entry proof) then Ok ()
+    else Error Ownership_changed) (Ok ()) continuation.predecessor_terminals
+
 let bind_continuation (continuation : continuation) ~request_id =
   let journal = continuation.journal in
   let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
+  let* () = validate_predecessor_terminals continuation in
   let* () = canonical_queued journal request_id in
   bind_expected_owner journal ~request_id ~expected:(Some continuation.expected_owner)
-    ~expected_terminal:(Some continuation.waiting_entry)
+    ~expected_terminal:(Some continuation.terminal_entry)
     ~expected_nodes:(Some continuation.suspended_nodes)
 
 let continuation_base_path (continuation : continuation) = continuation.journal.base_path
@@ -705,6 +723,64 @@ let continuation_job_ids (continuation : continuation) = continuation.job_ids
 let normalize_job_ids = List.sort_uniq (fun left right ->
   String.compare (Keeper_owned_job_identity.Job_id.to_string left)
     (Keeper_owned_job_identity.Job_id.to_string right))
+
+let exact_waiting_jobs ~expected_owner nodes job_ids =
+  let* recorded = Nodes.fold (fun _ record prior ->
+    let* ids = prior in
+    match record with
+    | Settled (_, {result=Tool_result.Completed _;_}, _, None) -> Ok ids
+    | Settled (occurrence, completed, phase, Some job_id)
+        when same_binding occurrence.owner expected_owner
+          && valid_job_wait occurrence completed.result phase job_id -> Ok (job_id :: ids)
+    | Attempting _ | Settled _ ->
+      Error (Invalid_result "waiting owner has an unsettled or non-job-wait journal node")) nodes (Ok []) in
+  let recorded = normalize_job_ids recorded in
+  if recorded = [] || recorded <> normalize_job_ids job_ids
+  then Error (Invalid_result "canonical waiting jobs differ from the current journal occurrences")
+  else Ok recorded
+
+let prior_owned_job_wait journal prior_owners =
+  let rec read terminals = function
+    | [] -> Ok None
+    | ((prior : binding), nodes) :: rest ->
+      let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
+          ~caller:journal.immutable_source.keeper_name prior.request_id
+        |> Result.map_error (fun error -> Prior_owner_not_terminal
+            {request_id=prior.request_id;reason=Async.canonical_terminal_error_to_string error}) in
+      let entry = Async.durable_terminal_entry proof in
+      let* () = entry_matches_source journal.immutable_source entry
+        |> Result.map_error (fun reason -> Prior_owner_not_terminal
+            {request_id=prior.request_id;reason}) in
+      match entry.status with
+      | Async.Waiting_for_owned_jobs {job_ids;_} ->
+        let* job_ids = exact_waiting_jobs ~expected_owner:prior nodes job_ids in
+        Ok (Some (job_ids,List.rev (entry :: terminals)))
+      | Lost _ -> read (entry :: terminals) rest
+      | Cancelled _ | Persistence_failed _ | Done _ -> Ok None
+      | Queued | Running | Cancelling _ ->
+        Error (Prior_owner_not_terminal {request_id=prior.request_id;
+          reason="predecessor terminal proof has an active status"})
+  in read [] prior_owners
+
+let recoverable_lost_nodes nodes job_ids =
+  let* recorded_jobs = Nodes.fold (fun _ record prior ->
+    let* jobs = prior in
+    let occurrence = occurrence_of_record record in
+    let job = result_read_job occurrence in
+    let replay_proven = match record with
+      | Settled (_, {result=Tool_result.Completed _;_}, _, None) -> true
+      | Settled (occurrence, completed, phase, Some job_id) ->
+        valid_job_wait occurrence completed.result phase job_id
+      | Attempting occurrence -> occurrence.readonly
+      | Settled (occurrence, {result=Tool_result.Failed _;_},
+          Some Tool_result.Proven_pre_effect, None) -> occurrence.readonly
+      | Settled _ -> false in
+    if not replay_proven then Error (Invalid_result
+        "lost continuation has a deferred or unproven node that cannot replay")
+    else Ok (Option.to_list job @ jobs)) nodes (Ok []) in
+  let recorded_jobs = normalize_job_ids recorded_jobs in
+  if List.for_all (fun job_id -> List.mem job_id recorded_jobs) job_ids then Ok ()
+  else Error (Invalid_result "original waiting jobs are absent from the lost journal")
 
 let waiting_continuation journal = filesystem (fun () ->
   let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
@@ -724,22 +800,18 @@ let waiting_continuation journal = filesystem (fun () ->
         |> Result.map_error (fun reason -> Prior_owner_not_terminal {request_id=expected_owner.request_id;reason}) in
       match entry.status with
       | Async.Waiting_for_owned_jobs {job_ids;_} ->
-        let* recorded = Nodes.fold (fun _ record prior ->
-          let* ids = prior in
-          match record with
-          | Settled (_, {result=Tool_result.Completed _;_}, _, None) -> Ok ids
-          | Settled (occurrence, completed, phase, Some job_id)
-              when same_binding occurrence.owner expected_owner
-                && valid_job_wait occurrence completed.result phase job_id -> Ok (job_id :: ids)
-          | Attempting _ | Settled _ ->
-            Error (Invalid_result "waiting owner has an unsettled or non-job-wait journal node")) state.nodes (Ok []) in
-        let recorded = normalize_job_ids recorded in
-        if recorded = [] || List.map Keeper_owned_job_identity.Job_id.to_string recorded
-            <> List.map Keeper_owned_job_identity.Job_id.to_string (normalize_job_ids job_ids)
-        then Error (Invalid_result "canonical waiting jobs differ from the current journal occurrences")
-        else Ok (Some {journal;expected_owner;waiting_entry=entry;
-          suspended_nodes=state.nodes;job_ids=recorded})
-      | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+        let* job_ids = exact_waiting_jobs ~expected_owner state.nodes job_ids in
+        Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals=[];
+          suspended_nodes=state.nodes;job_ids})
+      | Lost _ ->
+        let* original_wait = prior_owned_job_wait journal state.prior_owners in
+        (match original_wait with
+         | None -> Ok None
+         | Some (job_ids,predecessor_terminals) ->
+           let* () = recoverable_lost_nodes state.nodes job_ids in
+           Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals;
+             suspended_nodes=state.nodes;job_ids}))
+      | Queued | Running | Cancelling _ | Cancelled _
       | Persistence_failed _ | Done _ -> Ok None)
 
 let continuation_readiness (continuation : continuation) = filesystem (fun () ->
@@ -749,11 +821,12 @@ let continuation_readiness (continuation : continuation) = filesystem (fun () ->
   if not (same_owner state.owner (Some continuation.expected_owner))
       || state.nodes <> continuation.suspended_nodes then Error Ownership_changed
   else
+  let* () = validate_predecessor_terminals continuation in
   let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
       ~caller:journal.immutable_source.keeper_name continuation.expected_owner.request_id
     |> Result.map_error (fun error -> Prior_owner_not_terminal
         {request_id=continuation.expected_owner.request_id;reason=Async.canonical_terminal_error_to_string error}) in
-  if not (Async.same_entry_record continuation.waiting_entry (Async.durable_terminal_entry proof))
+  if not (Async.same_entry_record continuation.terminal_entry (Async.durable_terminal_entry proof))
   then Error Ownership_changed
   else List.fold_left (fun prior job_id ->
     let* readiness = prior in
@@ -843,9 +916,10 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
           | Some current when current.request_id <> marker.request_id -> retire ()
           | Some _ ->
             match entry.status with
-            | Async.Waiting_for_owned_jobs _ ->
+            | Async.Waiting_for_owned_jobs _ | Lost _ ->
               let* candidate = waiting_continuation journal in
               (match candidate with
+               | None when (match entry.status with Async.Lost _ -> true | _ -> false) -> retire ()
                | None -> Error Ownership_changed
                | Some continuation when continuation_request_id continuation <> marker.request_id -> Error Ownership_changed
                | Some continuation ->
@@ -853,7 +927,7 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
                  match readiness with
                  | Waiting_for_results -> Ok Still_waiting
                  | Results_ready -> Ok (Ready continuation))
-            | Lost _ | Cancelled _ | Persistence_failed _ | Done _ -> retire ()
+            | Cancelled _ | Persistence_failed _ | Done _ -> retire ()
             | Queued | Running | Cancelling _ -> Error (Invalid_continuation_marker "terminal proof has an active status")) in
   let empty = {inspected=0;ready=[];waiting=0;retired=0;failures=[]} in
   let report = List.fold_left (fun report name ->

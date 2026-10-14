@@ -1186,13 +1186,77 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check string "schema drift never recaptures original owner" (Journal.continuation_request_id discovered)
     (Journal.continuation_request_id (continuation ()));
   check int "contract refusal has no backend operation" before_completed_resume (List.length (calls fixture));
+  let lost_worker_calls = ref 0 in
+  let lose_after_binding candidate =
+    (* A closed target switch makes the real broker fail after durable Queued
+       acceptance and Journal binding, before any worker can run. No canonical
+       owner or terminal record is manufactured by the fixture. *)
+    let stopped_switch = Eio.Switch.run (fun sw -> sw) in
+    let lost = Async.submit_worker_with_request_id ?request_context:first_entry.request_context
+        ~background_sw:stopped_switch ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+        ~on_accepted:(fun request_id ->
+          Journal.bind_continuation candidate ~request_id
+          |> Result.map (fun _ -> ()) |> Result.map_error Journal.error_to_string)
+        ~f:(fun ~request_id:_ _ ->
+          incr lost_worker_calls;
+          Async.worker_finished (Tool_result.make_ok ~tool_name:"unstarted-continuation"
+            ~start_time:(Tool_timing.start ()) ())) () in
+    let request_id = match lost with
+      | Error (Async.Background_fork_failed {request_id;_}) -> request_id
+      | Error _ | Ok _ -> fail "closed worker switch did not publish post-binding Lost" in
+    let proof = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+        ~caller:keeper request_id |> require "canonical post-binding Lost" in
+    let entry = Async.durable_terminal_entry proof in
+    (match entry.status with Lost _ -> () | _ -> fail "unstarted bound worker did not remain Lost");
+    check string "Lost successor remains the exact journal owner" request_id
+      (Journal.continuation_request_id (continuation ()));
+    check int "post-binding loss starts no worker" 0 !lost_worker_calls;
+    check int "post-binding loss has no backend operation" before_completed_resume (List.length (calls fixture));
+    let report = pending () in
+    check int "post-binding Lost remains discoverable" 1 (List.length report.ready);
+    check int "post-binding Lost keeps readable original authority" 0 (List.length report.failures);
+    List.hd report.ready, entry in
+  let after_first_loss, first_lost_entry = lose_after_binding discovered in
+  (match Journal.continuation_readiness discovered with
+   | Error Journal.Ownership_changed -> ()
+   | Ok _ | Error _ -> fail "prior waiting candidate recaptured its Lost successor");
+  let after_second_loss, second_lost_entry = lose_after_binding after_first_loss in
+  (match Journal.continuation_readiness after_first_loss with
+   | Error Journal.Ownership_changed -> ()
+   | Ok _ | Error _ -> fail "first Lost candidate recaptured its second successor");
+  let first_lost_path = Async.For_testing.terminal_record_path ~base_path:fixture.base_path
+      ~request_id:first_lost_entry.request_id
+    |> function Some path -> path | None -> fail "first Lost terminal path" in
+  let first_lost_bytes = read first_lost_path in
+  Fun.protect ~finally:(fun () -> write first_lost_path first_lost_bytes) (fun () ->
+    let changed = match Yojson.Safe.from_string first_lost_bytes with
+      | `Assoc fields -> `Assoc (("reason",`String "changed predecessor terminal evidence")
+          :: List.remove_assoc "reason" fields)
+      | _ -> fail "canonical Lost record is not an object" in
+    write first_lost_path (Yojson.Safe.to_string changed);
+    match Journal.continuation_readiness after_second_loss with
+    | Error Journal.Ownership_changed -> ()
+    | Ok _ | Error _ -> fail "changed canonical predecessor authorized the sealed continuation");
+  (match Journal.continuation_readiness after_second_loss with
+   | Ok Journal.Results_ready -> ()
+   | Ok Waiting_for_results | Error _ -> fail "restored original wait cannot recover repeated Lost successors");
+  let discovered = after_second_loss in
+  let recovery_started = Mtime_clock.counter () in
   let resumed = resume_candidate changed_surface discovered |> Tool_result.data in
   let ok, completed, completed_entry = await_composition env fixture resumed in
+  let recovery_ms = Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000. in
   if not ok then
     failf "original completed job resume failed: %s" (Yojson.Safe.to_string completed);
   check bool "original complete job continues the remaining DAG" true ok;
   check string "run identity survives resumption" run_id (resumed |> member "composition_run_id" |> to_string);
   check int "completed result read has no backend operation" before_completed_resume (List.length (calls fixture));
+  Printf.printf "OWNED_CONTINUATION_RECOVERY %s\n%!" (Yojson.Safe.to_string
+    (`Assoc ["post_binding_losses",`Int (List.length [first_lost_entry;second_lost_entry]);
+      "original_result_to_continuation_completion_ms",`Float recovery_ms;
+      "backend_calls",`Int (List.length (calls fixture) - before_completed_resume);
+      "unstarted_worker_calls",`Int !lost_worker_calls;
+      "program_creates",`Int (effect_count fixture "create");
+      "program_starts",`Int (effect_count fixture "start")]));
   check string "continuation does not rewrite original preparation evidence" draft_bytes
     (Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.base_path) ~sha256
       |> require "original preparation evidence after continuation"

@@ -758,7 +758,7 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
 
 (* ── Unified read ───────────────────────────────────── *)
 
-let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
+let read_unified_result ~masc_root ?(sources = all_sources)
     ?keeper_name ?session_id ?operation_id ?worker_run_id ?since_ts ?until_ts
     ?(limit = default_read_limit) ?(offset = 0) () : read_result =
   (* [n] is positive by construction ([read_limit]), so the former
@@ -814,7 +814,7 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
       (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
          Agent_core_event use directory-based storage. *)
       | Agent_event | Tool_call_io | Tool_usage | Agent_core_event ->
-        match fixed_store_location ~masc_root ~base_path source with
+        match fixed_store_location ~masc_root source with
         | Some location ->
           read_fixed_source location source ~n:per_source ?since_ts ?until_ts ()
         | None -> [])
@@ -834,16 +834,16 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   let entries = sorted |> List.drop offset |> take_first n in
   { entries; total_matching_entries; truncated = total_matching_entries > offset + n }
 
-let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
+let read_unified ~masc_root ?sources ?keeper_name ?session_id
     ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ?offset () :
     Yojson.Safe.t list =
-  (read_unified_result ~base_path ~masc_root ?sources ?keeper_name ?session_id
+  (read_unified_result ~masc_root ?sources ?keeper_name ?session_id
      ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ?offset ()).entries
 
 (* ── Summary ────────────────────────────────────────── *)
 
-let count_fixed_source_entries ~masc_root ~base_path source : int =
-  match fixed_store_location ~masc_root ~base_path source with
+let count_fixed_source_entries ~masc_root source : int =
+  match fixed_store_location ~masc_root source with
   | None -> 0
   | Some location ->
     match
@@ -1132,7 +1132,7 @@ let goal_event_summary_stats ~masc_root =
     (List.length entries, latest_ts_of_entries entries)
 
 let summary_json ?keeper_keepalive_interval_s
-    ?(keeper_metric_producer_active = false) ~base_path ~masc_root ()
+    ?(keeper_metric_producer_active = false) ~masc_root ()
   : Yojson.Safe.t
   =
   let now = Unix.gettimeofday () in
@@ -1170,7 +1170,6 @@ let summary_json ?keeper_keepalive_interval_s
     let metadata_fields =
       source_metadata_fields
         ?keeper_keepalive_interval_s
-        ~base_path
         ~masc_root
         source
     in
@@ -1358,7 +1357,7 @@ let summary_json ?keeper_keepalive_interval_s
     (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage, and
        Agent_core_event use directory-based storage. *)
     | Agent_event | Tool_call_io | Tool_usage | Agent_core_event ->
-      let dir = match fixed_store_dir ~masc_root ~base_path source with
+      let dir = match fixed_store_dir ~masc_root source with
         | Some d -> d | None -> "" in
       let dir_state =
         if dir = "" then Store_missing
@@ -1374,11 +1373,11 @@ let summary_json ?keeper_keepalive_interval_s
       in
       let count =
         if dir_state = Store_directory then
-          count_fixed_source_entries ~masc_root ~base_path source
+          count_fixed_source_entries ~masc_root source
         else 0
       in
       let latest_ts =
-        match dir_state, fixed_store_location ~masc_root ~base_path source with
+        match dir_state, fixed_store_location ~masc_root source with
         | Store_directory, Some location ->
           latest_store_ts source location (source_to_string source)
         | (Store_directory | Store_missing | Store_invalid), _ -> None

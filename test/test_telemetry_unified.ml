@@ -114,14 +114,14 @@ let test_empty_returns_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_empty" in
-  let entries = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir) () in
+  let entries = Telemetry_unified.read_unified ~masc_root:(masc_root dir) () in
   Alcotest.(check int) "no entries" 0 (List.length entries)
 
 let test_summary_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_sum_empty" in
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let json = Telemetry_unified.summary_json ~masc_root:(masc_root dir) () in
   match json with
   | `Assoc fields ->
     let total = match List.assoc_opt "total_entries" fields with
@@ -143,7 +143,7 @@ let test_agent_event_source () =
     `Assoc [("timestamp", `Float 2000.0); ("event", `String "test2")];
   ];
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event] ()
   in
   Alcotest.(check int) "two entries" 2 (List.length entries);
@@ -183,7 +183,7 @@ let test_agent_core_event_source_and_scope_filter () =
       ];
   ];
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_core_event]
       ~session_id:"sess-2" ~worker_run_id:"run-2" ()
   in
@@ -228,7 +228,7 @@ let test_keeper_tool_called_scope_promoted_for_filters () =
         ];
     ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Agent_event ]
       ~session_id:"mcp-session-1" ~operation_id:"op-1"
       ~worker_run_id:"worker-1" ()
@@ -289,7 +289,7 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
       ];
   ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
       ()
@@ -301,7 +301,7 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
   Alcotest.(check string) "full tool call row preserved" "tool_call_io"
     (json_string_field "source" (List.hd result.entries));
   let raw_agent_entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event ] ()
   in
   Alcotest.(check int) "source-filtered agent event remains available" 1
@@ -359,7 +359,7 @@ let test_distinct_calls_within_the_old_window_are_both_kept () =
   (* Only the first call reached the durable tool_calls store. *)
   write_jsonl tool_calls_location [ io_row ~ts:1000.0 ~execution_id:"exec-1" ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
       ()
@@ -408,7 +408,7 @@ let test_agent_event_without_execution_id_is_kept () =
         ]
     ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
       ()
@@ -437,11 +437,11 @@ let test_keeper_metrics_per_keeper () =
             ("channel", `String "turn")];
   ];
   (* All keepers *)
-  let all = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+  let all = Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Keeper_metric] () in
   Alcotest.(check int) "two keeper entries" 2 (List.length all);
   (* Filter by keeper *)
-  let beta_only = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+  let beta_only = Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Keeper_metric]
       ~keeper_name:"beta" () in
   Alcotest.(check int) "one beta entry" 1 (List.length beta_only)
@@ -473,7 +473,7 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
              ("i", `Int i);
            ]));
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
       ~limit:(Telemetry_unified.read_limit_of_int 100) ()
   in
@@ -509,7 +509,7 @@ let test_keeper_metrics_fast_path_sets_truncated_with_marker () =
   write_keeper "beta" 2_000.0;
   write_keeper "gamma" 1_000.0;
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
       ~limit:(Telemetry_unified.read_limit_of_int 2) ()
   in
@@ -535,7 +535,7 @@ let test_sorted_newest_first () =
     `Assoc [("timestamp", `Float 2000.0); ("event", `String "mid")];
   ];
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event] ()
   in
   Alcotest.(check int) "three entries" 3 (List.length entries);
@@ -560,7 +560,7 @@ let test_n_limits_output () =
       `Assoc [("timestamp", `Float (Float.of_int (i * 100))); ("i", `Int i)])
   );
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event] ~limit:(Telemetry_unified.read_limit_of_int 10) ()
   in
   Alcotest.(check int) "limited to 10" 10 (List.length entries)
@@ -577,7 +577,6 @@ let test_offset_windows_final_page () =
        `Assoc [ "timestamp", `Float (Float.of_int i); "i", `Int i ]));
   let read offset =
     Telemetry_unified.read_unified_result
-      ~base_path:dir
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event ]
       ~limit:(Telemetry_unified.read_limit_of_int 2)
@@ -608,7 +607,7 @@ let test_time_window_reports_total_before_limit () =
     `Assoc [("timestamp", `Float (now -. 60.0)); ("event", `String "within_3")];
   ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified_result ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
       ~since_ts:(now -. 3_600.0) ~until_ts:now ~limit:(Telemetry_unified.read_limit_of_int 2) ()
   in
@@ -641,7 +640,7 @@ let test_time_window_reads_matching_day_files () =
   append_jsonl_entry_for_ts telemetry_dir now
     (`Assoc [("timestamp", `Float now); ("event", `String "today")]);
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
       ~since_ts:(yesterday -. 60.0) ~until_ts:(now +. 60.0) ()
   in
@@ -670,7 +669,7 @@ let test_time_window_n_zero_is_bounded () =
     `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
   ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified_result ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
       ~since_ts:(now -. 3_600.0) ~until_ts:now ~limit:(Telemetry_unified.read_limit_of_int 0) ()
   in
@@ -704,7 +703,7 @@ let test_n_zero_no_window_returns_bounded () =
     `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
   ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event ] ~limit:(Telemetry_unified.read_limit_of_int 0) ()
   in
@@ -740,7 +739,7 @@ let test_summary_with_data () =
   write_jsonl telemetry_location [
     `Assoc [("timestamp", `Float 1000.0); ("event", `String "test")];
   ];
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let json = Telemetry_unified.summary_json ~masc_root:(masc_root dir) () in
   match json with
   | `Assoc fields ->
     let total = match List.assoc_opt "total_entries" fields with
@@ -758,7 +757,7 @@ let test_summary_includes_freshness_metadata () =
   let recent_ts = Unix.gettimeofday () -. 42.0 in
   write_jsonl telemetry_location
     [ `Assoc [ ("timestamp", `Float recent_ts); ("event", `String "fresh") ] ];
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let json = Telemetry_unified.summary_json ~masc_root:(masc_root dir) () in
   let source_fields =
     match json with
     | `Assoc fields -> (
@@ -827,7 +826,6 @@ let test_keeper_metric_summary_freshness_tracks_runtime_cadence () =
   let json =
     Telemetry_unified.summary_json
       ~keeper_keepalive_interval_s:300.0
-      ~base_path:dir
       ~masc_root:(masc_root dir)
       ()
   in
@@ -866,7 +864,6 @@ let test_keeper_metric_summary_stays_healthy_while_producer_active () =
     Telemetry_unified.summary_json
       ~keeper_keepalive_interval_s:300.0
       ~keeper_metric_producer_active:producer_active
-      ~base_path:dir
       ~masc_root:(masc_root dir)
       ()
     |> source_summary "keeper_metric"
@@ -902,7 +899,6 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
            });
       let json =
         Telemetry_unified.summary_json
-          ~base_path:dir
           ~masc_root:(masc_root dir)
           ()
       in
@@ -917,7 +913,6 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
         (json_int_field "entry_count" summary);
       let rows =
         Telemetry_unified.read_unified
-          ~base_path:dir
           ~masc_root:(masc_root dir)
           ~sources:[ Tool_metric ]
           ()
@@ -975,7 +970,7 @@ let test_summary_includes_trajectory_and_execution_receipt_sources () =
           ("trace_id", `String "trace-1");
           ("outcome", `String "completed");
         ] ];
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let json = Telemetry_unified.summary_json ~masc_root:root () in
   let trajectory_summary = source_summary "trajectory_tool_call" json in
   let receipt_summary = source_summary "execution_receipt" json in
   Alcotest.(check int) "trajectory count" 1
@@ -1045,7 +1040,6 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
         ] ];
   let entries =
     Telemetry_unified.read_unified
-      ~base_path:dir
       ~masc_root:root
       ~sources:
         [
@@ -1103,7 +1097,6 @@ let test_scope_filter_matches_runtime_contract_fields () =
      ^ "\n");
   let result =
     Telemetry_unified.read_unified_result
-      ~base_path:dir
       ~masc_root:root
       ~sources:[ Telemetry_unified.Trajectory_tool_call ]
       ~session_id:"sess-nested"
@@ -1153,7 +1146,6 @@ let test_goal_event_source_and_summary () =
      ^ "\n");
   let entries =
     Telemetry_unified.read_unified
-      ~base_path:dir
       ~masc_root:root
       ~sources:[ Telemetry_unified.Goal_event ]
       ~limit:(Telemetry_unified.read_limit_of_int 10)
@@ -1165,7 +1157,7 @@ let test_goal_event_source_and_summary () =
   Alcotest.(check string) "newest event" "transition_completed"
     (List.hd entries |> json_string_field "event_type");
   let summary =
-    Telemetry_unified.summary_json ~base_path:dir ~masc_root:root ()
+    Telemetry_unified.summary_json ~masc_root:root ()
   in
   let goal_summary = source_summary "goal_event" summary in
   Alcotest.(check int) "goal event count" 2
@@ -1188,7 +1180,7 @@ let test_goal_event_missing_reports_not_yet () =
   let root = masc_root dir in
   Fs_compat.mkdir_p root;
   (* Intentionally do NOT create goal_events.jsonl. *)
-  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let summary = Telemetry_unified.summary_json ~masc_root:root () in
   let goal_summary = source_summary "goal_event" summary in
   Alcotest.(check int) "no goal events yet" 0
     (json_int_field "entry_count" goal_summary);
@@ -1210,7 +1202,7 @@ let test_tool_call_io_missing_still_reports_missing () =
   let root = masc_root dir in
   Fs_compat.mkdir_p root;
   (* Intentionally do NOT create tool_calls/. *)
-  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let summary = Telemetry_unified.summary_json ~masc_root:root () in
   let tool_summary = source_summary "tool_call_io" summary in
   Alcotest.(check string) "non-optional missing source stays loud"
     "missing"
@@ -1229,14 +1221,14 @@ let test_fixed_source_bad_store_type_is_observed () =
   Fs_compat.append_file telemetry_path "not a directory\n";
   let before = source_read_failure_metric "agent_event" "read_fixed_source_dir" in
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+    Telemetry_unified.read_unified ~masc_root:root
       ~sources:[ Telemetry_unified.Agent_event ] ()
   in
   Alcotest.(check int) "bad store reads as empty" 0 (List.length entries);
   Alcotest.(check (float 0.001)) "read failure counter increments"
     (before +. 1.0)
     (source_read_failure_metric "agent_event" "read_fixed_source_dir");
-  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let summary = Telemetry_unified.summary_json ~masc_root:root () in
   let agent_summary = source_summary "agent_event" summary in
   Alcotest.(check string) "bad store is an error, not empty"
     "error"
@@ -1256,7 +1248,7 @@ let test_keeper_discovery_bad_root_is_observed () =
     source_read_failure_metric "keeper_metric" "discover_keeper_metric_root"
   in
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+    Telemetry_unified.read_unified ~masc_root:root
       ~sources:[ Telemetry_unified.Keeper_metric ] ()
   in
   Alcotest.(check int) "bad keeper root reads as empty" 0 (List.length entries);
@@ -1290,7 +1282,7 @@ let test_trajectory_parse_errors_are_aggregated_per_file () =
       "read_trajectory_file_parse"
   in
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+    Telemetry_unified.read_unified ~masc_root:root
       ~sources:[ Telemetry_unified.Trajectory_tool_call ] ()
   in
   Alcotest.(check int) "valid trajectory row still read" 1
@@ -1316,7 +1308,7 @@ let test_summary_bad_trajectory_root_observed_once () =
     source_read_failure_metric "trajectory_tool_call"
       "discover_trajectory_root"
   in
-  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let summary = Telemetry_unified.summary_json ~masc_root:root () in
   let trajectory_summary = source_summary "trajectory_tool_call" summary in
   Alcotest.(check string) "bad trajectory root is error"
     "error"
@@ -1360,7 +1352,7 @@ let test_summary_surfaces_coverage_gaps () =
     "coverage gap Otel_metric_store counter increments" (before +. 1.0)
     (Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_telemetry_coverage_gap
        ~labels ());
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let json = Telemetry_unified.summary_json ~masc_root:root () in
   match json with
   | `Assoc fields ->
     let gaps =
@@ -1411,7 +1403,7 @@ let test_summary_ignores_recovered_coverage_gap () =
           ("success", `Bool true);
         ];
     ];
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let json = Telemetry_unified.summary_json ~masc_root:root () in
   let tool_summary = source_summary "tool_call_io" json in
   Alcotest.(check string) "recovered gap health" "ok"
     (json_string_field "health" tool_summary);
@@ -1439,7 +1431,7 @@ let test_summary_counts_all_entries_beyond_recent_cap () =
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   write_raw_jsonl_rows telemetry_dir 10_050;
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let json = Telemetry_unified.summary_json ~masc_root:(masc_root dir) () in
   match json with
   | `Assoc fields ->
     let total = match List.assoc_opt "total_entries" fields with

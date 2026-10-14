@@ -137,7 +137,8 @@ let retention_source_label = function
 (* One prune at the workspace's resolved window. The startup pass and the
    24h periodic pass both call this, so the window comes from the same
    env -> runtime.toml -> default order in both. *)
-let prune_jsonl_at_resolved_window ~base_path ~masc_root =
+let prune_jsonl_at_resolved_window ~base_path =
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
   let config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
   let days, source, diagnostics =
     Server_maintenance_toml_config.resolve_retention_days ~config_path
@@ -152,7 +153,6 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
      let config = Mcp_server.workspace_config state in
      let outcome =
        prune_jsonl_at_resolved_window ~base_path:config.base_path
-         ~masc_root:(Workspace.masc_dir config)
      in
      List.iter
        (fun diagnostic ->

@@ -185,7 +185,7 @@ let handle_telemetry request reqd =
     let compute () =
       let result =
         Server_timing.measure timing Telemetry_query (fun () ->
-          Telemetry_unified.read_unified_result ~base_path ~masc_root
+          Telemetry_unified.read_unified_result ~masc_root
             ~sources ?keeper_name ?session_id ?operation_id
             ?worker_run_id ?since_ts ?until_ts ~limit ~offset ())
       in

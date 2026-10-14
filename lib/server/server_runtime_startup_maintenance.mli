@@ -35,11 +35,10 @@ type jsonl_prune_outcome = {
 val retention_source_label : Server_maintenance_toml_config.source -> string
 (** ["env"], ["runtime.toml"] or ["default"], for prune log lines. *)
 
-val prune_jsonl_at_resolved_window :
-  base_path:string -> masc_root:string -> jsonl_prune_outcome
-(** One prune of {!prune_shared_jsonl_stores} at the window
-    {!Server_maintenance_toml_config.resolve_retention_days} gives for the
-    workspace runtime.toml under [base_path]. The startup pass and the 24h
+val prune_jsonl_at_resolved_window : base_path:string -> jsonl_prune_outcome
+(** One prune of {!prune_shared_jsonl_stores} under [<base_path>/.masc] at
+    the window {!Server_maintenance_toml_config.resolve_retention_days} gives
+    for the workspace runtime.toml under [base_path]. The startup pass and the 24h
     periodic pass both call this, so neither can read a different window. *)
 
 val startup_prune_jsonl : Mcp_server.server_state -> unit

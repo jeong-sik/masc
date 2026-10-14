@@ -2307,7 +2307,6 @@ let run_turn
                                     MASC_KEEPER_WIRE_CAPTURE. *)
                                  Keeper_wire_capture.capture_response
                                    ~base_path:config.base_path
-                                   ~masc_root:(Workspace.masc_dir config)
                                    ~keeper_name:meta.name
                                    ~turn_id:manifest_keeper_turn_id
                                    ~agent_core_turn:result.turns

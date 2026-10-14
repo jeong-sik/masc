@@ -152,11 +152,12 @@ let rec redact_json_strings
     `List (List.map (redact_json_strings redaction) values)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
 
-let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
+let capture_request ~base_path ~keeper_name ~turn_id ~agent_core_turn
     ~system_prompt ~extra_system_context ~user_message ~history_messages ~tools
     ?trace_id () =
   if not (enabled ()) then ()
   else
+    let masc_root = Common.masc_dir_from_base_path ~base_path in
     best_effort ~site:Request_capture ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let raw_tools =
@@ -227,10 +228,11 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
       in
       write_payload ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) payload)
 
-let capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
+let capture_response ~base_path ~keeper_name ~turn_id ~agent_core_turn
     ~response_text ?trace_id () =
   if not (enabled ()) then ()
   else
+    let masc_root = Common.masc_dir_from_base_path ~base_path in
     best_effort ~site:Response_capture ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
       let payload : Yojson.Safe.t =
@@ -326,10 +328,11 @@ let reasoning_text_of_response (response : Agent_core.Types.api_response) =
     | Agent_core.Types.Audio _ -> None)
   |> String.concat ""
 
-let capture_rejected_reasoning ~base_path ~masc_root ~keeper_name ?turn_id ?trace_id
+let capture_rejected_reasoning ~base_path ~keeper_name ?turn_id ?trace_id
     ~runtime_id (response : Agent_core.Types.api_response) =
   if not (enabled ()) then ()
   else
+    let masc_root = Common.masc_dir_from_base_path ~base_path in
     let summary = Agent_core.Response_shape.summarize response in
     match Agent_core.Response_shape.content_shape response summary with
     | Agent_core.Response_shape.Empty

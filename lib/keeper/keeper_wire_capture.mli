@@ -61,7 +61,6 @@ val enabled : unit -> bool
 
 val capture_request :
   base_path:string ->
-  masc_root:string ->
   keeper_name:string ->
   turn_id:int ->
   agent_core_turn:int ->
@@ -73,7 +72,7 @@ val capture_request :
   ?trace_id:Keeper_id.Trace_id.t ->
   unit ->
   unit
-(** [capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn ~system_prompt
+(** [capture_request ~base_path ~keeper_name ~turn_id ~agent_core_turn ~system_prompt
     ~extra_system_context ~user_message ~history_messages ~tools ~trace_id ()]
     appends one redacted request record ([kind:"request"]). No-op unless
     {!enabled}.
@@ -81,7 +80,7 @@ val capture_request :
     multiple AGENT_CORE/provider calls inside that keeper turn. [trace_id] is the
     keeper runtime trace id passed to AGENT_CORE as [session_id] for raw-trace
     correlation. [base_path] selects the exact Keeper secret projection
-    snapshot; [masc_root] must already be the workspace's MASC root. [tool_schema_bytes] records the byte length of the exact unredacted
+    snapshot, and the record goes under [<base_path>/.masc]. [tool_schema_bytes] records the byte length of the exact unredacted
     compact JSON schema array while [tools_ref] points at its recursively
     redacted content in the shared blob store (see the module header).
     [history_messages] is consumed for [history_message_count] and
@@ -90,7 +89,6 @@ val capture_request :
 
 val capture_response :
   base_path:string ->
-  masc_root:string ->
   keeper_name:string ->
   turn_id:int ->
   agent_core_turn:int ->
@@ -98,7 +96,7 @@ val capture_response :
   ?trace_id:Keeper_id.Trace_id.t ->
   unit ->
   unit
-(** [capture_response ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn ~response_text
+(** [capture_response ~base_path ~keeper_name ~turn_id ~agent_core_turn ~response_text
     ~trace_id ()] appends one redacted response record ([kind:"response"])
     paired with the request of the same [turn_id]. [agent_core_turn] is the 1-based
     AGENT_CORE/provider turn index inside the keeper turn, matching the request record.
@@ -146,7 +144,6 @@ val capture_request_projection_change :
 
 val capture_rejected_reasoning :
   base_path:string ->
-  masc_root:string ->
   keeper_name:string ->
   ?turn_id:int ->
   ?trace_id:string ->

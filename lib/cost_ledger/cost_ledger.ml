@@ -370,11 +370,6 @@ let store_of_masc_root masc_root =
     Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Costs)
 ;;
 
-(* The raw rows are written under the cluster's root, while this reader and
-   the settlement rows use [<base>/.masc]. The two are one directory in the
-   default cluster and two under MASC_CLUSTER_NAME. Which root the ledger
-   belongs to is not settled here; this keeps every caller where it was
-   (#42837). *)
 let store_of_base_path ~base_path =
   store_of_masc_root (Common.masc_dir_from_base_path ~base_path)
 ;;

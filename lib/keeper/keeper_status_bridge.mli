@@ -30,7 +30,7 @@ val runtime_blocker_class_to_string : runtime_blocker_class -> string
 
 (** [summary] is lazy: the [turn_failures] summary reads the receipt store,
     and callers that only need [blocker_class] never force it. *)
-type runtime_blocker_surface = {
+type runtime_blocker_surface = Keeper_status_bridge_blocker.runtime_blocker_surface = {
   blocker_class : runtime_blocker_class;
   summary : string Lazy.t;
 }
@@ -60,8 +60,20 @@ val runtime_keepalive_running :
 val runtime_keepalive_started_at :
   Workspace_utils.config -> keeper_meta -> float option
 
+val runtime_blocker_surface_opt :
+  Workspace_utils.config -> keeper_meta -> runtime_blocker_surface option
+(** The blocker the registry holds for this Keeper, read once. A reader that
+    needs the class or the summary takes them from here, not back out of the
+    JSON {!runtime_blocker_fields_json_of_surface} writes. *)
+
+val runtime_blocker_fields_json_of_surface :
+  keeper_meta -> runtime_blocker_surface option -> (string * Yojson.Safe.t) list
+(** The status JSON fields for a blocker already read with
+    {!runtime_blocker_surface_opt}. Forces [summary]. *)
+
 val runtime_blocker_fields_json :
   Workspace_utils.config -> keeper_meta -> (string * Yojson.Safe.t) list
+(** {!runtime_blocker_fields_json_of_surface} of {!runtime_blocker_surface_opt}. *)
 
 type approval_queue_attention =
   | Approval_queue_ready of int

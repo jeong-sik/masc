@@ -374,47 +374,6 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
         (latest_tool_names ()))
 ;;
 
-(* Every failure_reason the registry can hold, so a new variant lands here
-   rather than reaching the trust snapshot as an undecodable string. The
-   producer writes runtime_blocker_class_to_string and the consumer parses it
-   with Keeper_meta_contract.blocker_class_of_serialized_string; the two
-   vocabularies are not the same set (#25797). *)
-let every_failure_reason : Keeper_registry.failure_reason list =
-  [ Keeper_registry.Heartbeat_consecutive_failures 3
-  ; Keeper_registry.Turn_consecutive_failures 2
-  ; Keeper_registry.Provider_runtime_error
-      { code = "api_error_500"
-      ; detail = "boom"
-      ; provider_id = None
-      ; http_status = Some 500
-      ; runtime_id = None
-      ; agent_core_timeout = None
-      ; reason = None
-      }
-  ; (* The same constructor with the typed reason present. The registry wraps
-       runtime exhaustion this way ([keeper_unified_turn_types.ml:100-112]), and
-       reading only [code] made the status bridge's runtime_exhausted arm
-       unreachable — every exhaustion arrived labelled provider_runtime_error
-       (#30447). *)
-    Keeper_registry.Provider_runtime_error
-      { code = "connection_refused"
-      ; detail = "boom"
-      ; provider_id = None
-      ; http_status = None
-      ; runtime_id = Some "r1"
-      ; agent_core_timeout = None
-      ; reason = Some Keeper_meta_contract.Connection_refused
-      }
-  ; Keeper_registry.Turn_configuration_error
-      { code = "missing_env_var"
-      ; field = Some "OLLAMA_CLOUD_API_KEY"
-      ; detail = "required environment variable is missing"
-      }
-  ; Keeper_registry.Operator_interrupt
-  ; Keeper_registry.Exception "boom"
-  ]
-;;
-
 (* The arm this reaches is [keeper_status_bridge.ml]'s runtime_attempts_exhausted
    label, which nothing could reach before: the producer stamped the string
    "provider_runtime_error" for exhaustion too. *)
@@ -461,74 +420,6 @@ let test_provider_error_without_reason_stays_provider_error () =
       "a provider error without an exhaustion reason keeps its own class"
       "provider_runtime_error"
       (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
-
-let test_undecodable_blocker_classes_are_named_not_counted () =
-  let undecodable =
-    List.filter_map
-      (fun reason ->
-        match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
-            ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason with
-        | None -> None
-        | Some surface ->
-          (match
-             Keeper_meta_contract.blocker_class_of_serialized_string
-               (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
-           with
-           | Some _ -> None
-           | None -> Some (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)))
-      every_failure_reason
-  in
-  (* This is the gap the issue reports, pinned as a list rather than a count:
-     when a class is taught to the decoder it leaves this list, and when a new
-     producer class appears it joins it. Either way the diff names it. *)
-  Alcotest.(check (slist string String.compare))
-    "classes the trust-snapshot decoder does not know"
-    [ "exception"
-    ; "heartbeat_failures"
-    ; "operator_interrupt"
-    ; "provider_runtime_error"
-    ; "turn_failures"
-    ; "turn_configuration_error"
-    ]
-    undecodable
-;;
-
-let test_decodable_blocker_classes_stay_decodable () =
-  let decodable =
-    List.filter_map
-      (fun reason ->
-        match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
-            ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason with
-        | None -> None
-        | Some surface ->
-          (match
-             Keeper_meta_contract.blocker_class_of_serialized_string
-               (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
-           with
-           | Some _ -> Some (Keeper_status_bridge.runtime_blocker_class_to_string surface.Keeper_status_bridge.blocker_class)
-           | None -> None))
-      every_failure_reason
-  in
-  (* One producer class decodes: runtime_exhausted, since #30447 stopped
-     flattening a typed exhaustion reason into "provider_runtime_error". The
-     rest are still the two-vocabulary gap this suite pins.
-
-     This number is the point of the test — it was 0 when every producer class
-     was undecodable, and the comment then said a class taught to the decoder
-     "has to appear here". Raising it is that happening, not a regression. *)
-  Alcotest.(check (list string))
-    "producer classes that decode today"
-    [ "runtime_exhausted" ]
-    (List.sort_uniq String.compare decodable);
-  Alcotest.(check bool)
-    "the producer does emit classes"
-    true
-    (List.exists
-       (fun reason ->
-         (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
-             ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason <> None)
-       every_failure_reason)
-;;
 
 (* A turn_failures blocker is a count; the registry rebuilds it from the
    durable streak on boot and the typed cause is gone. The summary reads the
@@ -731,14 +622,6 @@ let () =
         ] );
     ( "blocker_class_vocabulary"
     , [ Alcotest.test_case
-          "undecodable producer classes are named"
-          `Quick
-          test_undecodable_blocker_classes_are_named_not_counted
-      ; Alcotest.test_case
-          "decodable classes still decode"
-          `Quick
-          test_decodable_blocker_classes_stay_decodable
-      ; Alcotest.test_case
           "typed exhaustion reaches runtime_exhausted"
           `Quick
           test_exhaustion_reaches_the_runtime_exhausted_class

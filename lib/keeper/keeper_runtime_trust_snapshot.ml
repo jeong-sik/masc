@@ -92,88 +92,53 @@ let terminal_reason_from_receipt receipt =
     (Keeper_turn_terminal.of_code ~source:"execution_receipt")
     (json_string_opt_member "terminal_reason_code" receipt)
 
-(* JSON-deserialization boundary: maps a runtime_blocker_class wire
-   string into a typed [Keeper_turn_disposition.t]. The previous
-   variant returned a [terminal_reason_code] wire string that the
-   caller then passed back through [Keeper_turn_terminal.of_code]
-   for a wire→typed roundtrip; emitting the typed value here removes
-   that detour and lets the consumer use [of_disposition] directly.
-   The provider-runtime classes preserve their originating blocker
-   string in the typed payload instead of collapsing to a single
-   "provider_error" literal. *)
-let disposition_of_typed_runtime_blocker_class blocker_class =
-  let raw_blocker_class =
-    Keeper_meta_contract.blocker_class_to_string blocker_class
-  in
+(* The provider-runtime class keeps its blocker label in the typed payload
+   instead of collapsing to a single "provider_error" literal. A class with no
+   disposition of its own keeps its label in [Unknown]: replacing it with
+   "unknown_error" made every such blocker look alike on the alert and in the
+   operator broadcast (#25797). [Unknown] carries no typed authority; what it
+   carries is the label a reader needs to see. *)
+let disposition_of_runtime_blocker_class
+      (blocker_class : Keeper_status_bridge.runtime_blocker_class)
+  =
+  let label = Keeper_status_bridge.runtime_blocker_class_to_string blocker_class in
   match blocker_class with
-  | Keeper_meta_contract.Agent_core_input_required ->
-      Keeper_turn_disposition.Input_required
-  | Keeper_meta_contract.Runtime_exhausted _ ->
-      Keeper_turn_disposition.Provider_error
-        (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
-  | Keeper_meta_contract.Fiber_unresolved ->
-      Keeper_turn_disposition.Provider_error
-        Keeper_turn_terminal_code.Fiber_unresolved
-  | Keeper_meta_contract.Agent_core_context_window_exceeded
-  | Keeper_meta_contract.Agent_core_unrecognized_stop_reason
-  | Keeper_meta_contract.Agent_core_guardrail_violation
-  | Keeper_meta_contract.Agent_core_tripwire_violation
-  | Keeper_meta_contract.Internal_unhandled_exception
-  | Keeper_meta_contract.Internal_bridge_exception
-  | Keeper_meta_contract.Internal_contract_rejected
-  | Keeper_meta_contract.Incomplete_tool_transcript
-  | Keeper_meta_contract.Terminal_effect_failed
-  | Keeper_meta_contract.Provider_attempt_effect_fenced
-  | Keeper_meta_contract.Tool_correction_lost
-  | Keeper_meta_contract.Receipt_persistence_failed
-  | Keeper_meta_contract.Gate_replay_repair_required ->
+  | Keeper_status_bridge.Blocked_by_runtime_exhaustion ->
     Keeper_turn_disposition.Provider_error
-      (Keeper_turn_terminal_code.of_core_error_wire raw_blocker_class)
+      (Keeper_turn_terminal_code.Provider_runtime_error label)
+  | Keeper_status_bridge.Blocked_by_unresolved_fiber ->
+    Keeper_turn_disposition.Provider_error Keeper_turn_terminal_code.Fiber_unresolved
+  | Keeper_status_bridge.Blocked_by_heartbeat_failures
+  | Keeper_status_bridge.Blocked_by_turn_failures
+  | Keeper_status_bridge.Blocked_by_provider_runtime_error
+  | Keeper_status_bridge.Blocked_by_official_client_recovery
+  | Keeper_status_bridge.Blocked_by_turn_configuration_error
+  | Keeper_status_bridge.Blocked_by_exception
+  | Keeper_status_bridge.Blocked_by_operator_interrupt ->
+    Keeper_turn_disposition.Unknown { raw_error = label }
 
-let disposition_of_runtime_blocker_class raw_blocker_class =
-  match Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class with
-  | Some blocker_class -> disposition_of_typed_runtime_blocker_class blocker_class
-  | None ->
-    (* Keep the class that did not decode. Replacing it with "unknown_error"
-       made every unrecognised blocker look alike on the alert and in the
-       operator broadcast, and [Keeper_status_bridge_blocker] emits classes
-       this decoder does not know -- heartbeat_failures, turn_failures --
-       so the erasure is what production hits, not a
-       corrupt-state edge (#25797). [Unknown] carries no typed authority either
-       way; what it carries is the string a reader needs to see. *)
-    Keeper_turn_disposition.Unknown { raw_error = raw_blocker_class }
+let terminal_reason_of_runtime_blocker
+      (blocker : Keeper_status_bridge.runtime_blocker_surface)
+  =
+  Keeper_turn_terminal.of_disposition
+    ~source:"runtime_blocker"
+    ~summary:(Lazy.force blocker.summary)
+    (disposition_of_runtime_blocker_class blocker.blocker_class)
 
-let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
-  match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
-  | None -> None
-  | Some blocker_class ->
-      let disposition = disposition_of_runtime_blocker_class blocker_class in
-      let summary = assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields in
-      Some
-        (Keeper_turn_terminal.of_disposition
-           ~source:"runtime_blocker"
-           ?summary
-           disposition)
+let current_receipt_for_runtime_state ~runtime_blocker latest_receipt =
+  match runtime_blocker with
+  | Some _ -> None
+  | None -> latest_receipt
 
-let has_runtime_blocker runtime_blocker_fields =
-  Option.is_some (assoc_string_opt "runtime_blocker_class" runtime_blocker_fields)
-
-let current_receipt_for_runtime_state ~runtime_blocker_fields
-    latest_receipt =
-  if has_runtime_blocker runtime_blocker_fields
-  then None
-  else latest_receipt
-
-let latest_terminal_reason_opt ~runtime_blocker_fields ~latest_decision
-    ~latest_receipt =
+let latest_terminal_reason_opt ~runtime_blocker ~latest_decision ~latest_receipt =
   (* Registry failure is current state, including failures after the last turn.
      A historical success cannot clear it; only the registry owner can. *)
-  if has_runtime_blocker runtime_blocker_fields then
-    terminal_reason_from_runtime_blocker_fields runtime_blocker_fields
-  else
-    match Option.bind latest_decision terminal_reason_from_decision with
-    | Some _ as value -> value
-    | None -> Option.bind latest_receipt terminal_reason_from_receipt
+  match runtime_blocker with
+  | Some blocker -> Some (terminal_reason_of_runtime_blocker blocker)
+  | None ->
+    (match Option.bind latest_decision terminal_reason_from_decision with
+     | Some _ as value -> value
+     | None -> Option.bind latest_receipt terminal_reason_from_receipt)
 
 let terminal_reason_timeline_event ~latest_decision ~latest_receipt =
   let source_json, ts_unix_opt, reason_opt =
@@ -295,19 +260,16 @@ let approval_queue_state_of_projection
 ;;
 
 let trust_model_of_observations ~pending_approval_projection
-    ~runtime_blocker_fields ~latest_receipt ~latest_next_action
-    ~attention_fields =
+    ~(runtime_blocker : Keeper_status_bridge.runtime_blocker_surface option)
+    ~latest_receipt ~latest_next_action ~attention_fields =
   Trust_core.decide
     { approval_queue =
         approval_queue_state_of_projection pending_approval_projection
     ; runtime_blocker_class =
-        (assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
-         |> Option.map (fun serialized ->
-              match
-                Keeper_meta_contract.blocker_class_of_serialized_string serialized
-              with
-              | Some blocker -> Ok blocker
-              | None -> Error serialized))
+        Option.map
+          (fun (blocker : Keeper_status_bridge.runtime_blocker_surface) ->
+             blocker.blocker_class)
+          runtime_blocker
     ; receipt_operator_disposition =
         Option.bind latest_receipt receipt_operator_disposition
     ; attention_needs_attention =
@@ -642,7 +604,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
 
 let latest_causal_event_summary ~observed_at_unix ~meta ~latest_decision
     ~latest_receipt ~latest_tool_call ~latest_approval_audit
-    ~runtime_blocker_fields ~next_human_action =
+    ~runtime_blocker ~next_human_action =
   let task_id = Keeper_runtime_contract.current_task_id_opt meta in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   [
@@ -653,7 +615,7 @@ let latest_causal_event_summary ~observed_at_unix ~meta ~latest_decision
     Option.bind latest_approval_audit approval_event_timeline_event;
     blocker_timeline_event ~ts_unix:observed_at_unix
       ~observed_at_unix
-      ~runtime_blocker_fields ?task_id
+      ~runtime_blocker ?task_id
       ~trace_id ~next_human_action
       ~observation_only:true ();
   ]
@@ -675,7 +637,7 @@ type raw_observations =
   ; latest_receipt : Yojson.Safe.t option
   ; latest_approval_audit : Yojson.Safe.t option
   ; pending_approval_projection : pending_approval_projection
-  ; runtime_blocker_fields : (string * Yojson.Safe.t) list
+  ; runtime_blocker : Keeper_status_bridge.runtime_blocker_surface option
   ; attention_fields : (string * Yojson.Safe.t) list
   ; observed_at_unix : float
   }
@@ -712,9 +674,7 @@ let collect_raw_observations_with_pending_reader
     pending_approval_projection_with_reader ~read_pending
       ~base_path:config.base_path ~keeper_name:meta.name
   in
-  let runtime_blocker_fields =
-    Keeper_status_bridge.runtime_blocker_fields_json config meta
-  in
+  let runtime_blocker = Keeper_status_bridge.runtime_blocker_surface_opt config meta in
   let attention_fields =
     Keeper_status_bridge.attention_fields_json_with_approval_queue
       config
@@ -729,7 +689,7 @@ let collect_raw_observations_with_pending_reader
     ; latest_receipt
     ; latest_approval_audit
     ; pending_approval_projection
-    ; runtime_blocker_fields
+    ; runtime_blocker
     ; attention_fields
     ; observed_at_unix
     }
@@ -747,11 +707,11 @@ let collect_summary_raw ~(config : Workspace.config) ~(meta : keeper_meta) =
 let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
   let latest_receipt_for_runtime_state =
     current_receipt_for_runtime_state
-      ~runtime_blocker_fields:raw.runtime_blocker_fields raw.latest_receipt
+      ~runtime_blocker:raw.runtime_blocker raw.latest_receipt
   in
   let latest_terminal_reason =
     latest_terminal_reason_opt
-      ~runtime_blocker_fields:raw.runtime_blocker_fields
+      ~runtime_blocker:raw.runtime_blocker
       ~latest_decision:raw.latest_decision ~latest_receipt:raw.latest_receipt
   in
   let latest_terminal_reason_json =
@@ -765,7 +725,7 @@ let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
   let trust_model =
     trust_model_of_observations
       ~pending_approval_projection:raw.pending_approval_projection
-      ~runtime_blocker_fields:raw.runtime_blocker_fields
+      ~runtime_blocker:raw.runtime_blocker
       ~latest_receipt:latest_receipt_for_runtime_state
       ~latest_next_action ~attention_fields:raw.attention_fields
   in
@@ -790,7 +750,7 @@ let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
           ~latest_receipt:raw.latest_receipt
           ~latest_tool_call:raw.latest_tool_call
           ~latest_approval_audit:raw.latest_approval_audit
-          ~runtime_blocker_fields:raw.runtime_blocker_fields
+          ~runtime_blocker:raw.runtime_blocker
           ~next_human_action:trust_model.next_human_action
   in
   `Assoc
@@ -810,7 +770,7 @@ let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
 let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows
     ~recent_approval_audit_rows ~recent_transition_rows ~meta
     ~latest_decision ~latest_receipt ~latest_tool_call
-    ~latest_approval_audit ~runtime_blocker_fields ~next_human_action
+    ~latest_approval_audit ~runtime_blocker ~next_human_action
     ~pending_approval_projection =
   let tool_events =
     List.filter_map tool_call_timeline_event recent_tool_call_rows
@@ -843,7 +803,7 @@ let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows
     [
       blocker_timeline_event ~ts_unix:observed_at_unix
         ~observed_at_unix
-        ~runtime_blocker_fields ?task_id
+        ~runtime_blocker ?task_id
         ~trace_id ~next_human_action
         ~observation_only:true ()
     ]
@@ -932,12 +892,12 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   let observations = raw.observations in
   let latest_receipt_for_runtime_state =
     current_receipt_for_runtime_state
-      ~runtime_blocker_fields:observations.runtime_blocker_fields
+      ~runtime_blocker:observations.runtime_blocker
       observations.latest_receipt
   in
   let latest_terminal_reason =
     latest_terminal_reason_opt
-      ~runtime_blocker_fields:observations.runtime_blocker_fields
+      ~runtime_blocker:observations.runtime_blocker
       ~latest_decision:observations.latest_decision
       ~latest_receipt:observations.latest_receipt
   in
@@ -961,7 +921,7 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   let trust_model =
     trust_model_of_observations
       ~pending_approval_projection:observations.pending_approval_projection
-      ~runtime_blocker_fields:observations.runtime_blocker_fields
+      ~runtime_blocker:observations.runtime_blocker
       ~latest_receipt:latest_receipt_for_runtime_state ~latest_next_action
       ~attention_fields:observations.attention_fields
   in
@@ -992,7 +952,7 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
       ~latest_receipt:observations.latest_receipt
       ~latest_tool_call:observations.latest_tool_call
       ~latest_approval_audit:observations.latest_approval_audit
-      ~runtime_blocker_fields:observations.runtime_blocker_fields
+      ~runtime_blocker:observations.runtime_blocker
       ~next_human_action:trust_model.next_human_action
       ~pending_approval_projection:observations.pending_approval_projection
   in
@@ -1018,7 +978,11 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
      ; ("active_model", Json_util.string_opt_to_json selected_model)
      ; ("selected_model", Json_util.string_opt_to_json selected_model)
      ; ("runtime_contract", raw.runtime_contract)
-     ; ("runtime_blockers", `Assoc observations.runtime_blocker_fields)
+     ; ( "runtime_blockers"
+       , `Assoc
+           (Keeper_status_bridge.runtime_blocker_fields_json_of_surface
+              meta
+              observations.runtime_blocker) )
      ; ("recent_tool_calls_unavailable", recent_tool_calls_unavailable)
      ]
      @ trust_model_json_fields trust_model

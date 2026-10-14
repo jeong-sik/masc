@@ -4,8 +4,7 @@ type approval_queue =
 
 type raw =
   { approval_queue : approval_queue
-  ; runtime_blocker_class :
-      (Keeper_meta_contract.blocker_class, string) result option
+  ; runtime_blocker_class : Keeper_status_bridge_blocker.runtime_blocker_class option
   ; receipt_operator_disposition :
       (Keeper_execution_receipt.operator_disposition_kind * string) option
   ; attention_needs_attention : bool
@@ -31,24 +30,23 @@ let fallback_disposition raw =
     "Alert", "pending_operator_decision"
   | Approval_queue_available _ ->
     (match raw.runtime_blocker_class with
-     | Some (Ok (Keeper_meta_contract.Runtime_exhausted _)) ->
+     | Some Keeper_status_bridge_blocker.Blocked_by_runtime_exhaustion ->
        "Alert", "runtime_exhausted"
-     | Some (Ok (Keeper_meta_contract.Fiber_unresolved))
-     | Some (Ok (Keeper_meta_contract.Agent_core_context_window_exceeded))
-     | Some (Ok (Keeper_meta_contract.Agent_core_unrecognized_stop_reason))
-     | Some (Ok (Keeper_meta_contract.Agent_core_guardrail_violation))
-     | Some (Ok (Keeper_meta_contract.Agent_core_tripwire_violation))
-     | Some (Ok (Keeper_meta_contract.Agent_core_input_required))
-     | Some (Ok (Keeper_meta_contract.Internal_unhandled_exception))
-     | Some (Ok (Keeper_meta_contract.Internal_bridge_exception))
-     | Some (Ok (Keeper_meta_contract.Internal_contract_rejected))
-     | Some (Ok (Keeper_meta_contract.Incomplete_tool_transcript))
-     | Some (Ok (Keeper_meta_contract.Terminal_effect_failed))
-     | Some (Ok (Keeper_meta_contract.Provider_attempt_effect_fenced))
-     | Some (Ok (Keeper_meta_contract.Tool_correction_lost))
-     | Some (Ok (Keeper_meta_contract.Receipt_persistence_failed))
-     | Some (Ok (Keeper_meta_contract.Gate_replay_repair_required)) -> "Alert", "critical_block"
-     | Some (Error _) -> "Alert", "unknown_runtime_blocker"
+     | Some Keeper_status_bridge_blocker.Blocked_by_unresolved_fiber ->
+       "Alert", "critical_block"
+     (* These seven read as unknown because the class used to reach this
+        module as a string decoded against [Keeper_meta_contract.blocker_class],
+        which spells only the two above. The reason they should show is a
+        display decision of its own (#43018); this keeps what operators see. *)
+     | Some
+         ( Keeper_status_bridge_blocker.Blocked_by_heartbeat_failures
+         | Keeper_status_bridge_blocker.Blocked_by_turn_failures
+         | Keeper_status_bridge_blocker.Blocked_by_provider_runtime_error
+         | Keeper_status_bridge_blocker.Blocked_by_official_client_recovery
+         | Keeper_status_bridge_blocker.Blocked_by_turn_configuration_error
+         | Keeper_status_bridge_blocker.Blocked_by_exception
+         | Keeper_status_bridge_blocker.Blocked_by_operator_interrupt ) ->
+       "Alert", "unknown_runtime_blocker"
      | None -> "Pass", "healthy")
 ;;
 

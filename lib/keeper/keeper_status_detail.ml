@@ -553,8 +553,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
              ~verbose:false ()
          in
+         let runtime_blocker = runtime_blocker_surface_opt config m in
          let runtime_blocker_fields =
-          runtime_blocker_fields_json config m
+          runtime_blocker_fields_json_of_surface m runtime_blocker
          in
          let attention_fields =
            attention_fields_json config m
@@ -569,7 +570,10 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let model_observability =
            model_observability_json
              ~current_runtime_id:(runtime_id_of_meta m)
-             ~runtime_blocker_fields
+             ~runtime_blocker_class:
+               (Option.map
+                  (fun (blocker : runtime_blocker_surface) -> blocker.blocker_class)
+                  runtime_blocker)
              ~runtime_trust
              latest_metrics
          in

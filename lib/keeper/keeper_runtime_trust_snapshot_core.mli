@@ -10,8 +10,7 @@ type approval_queue =
 
 type raw =
   { approval_queue : approval_queue
-  ; runtime_blocker_class :
-      (Keeper_meta_contract.blocker_class, string) result option
+  ; runtime_blocker_class : Keeper_status_bridge_blocker.runtime_blocker_class option
   ; receipt_operator_disposition :
       (Keeper_execution_receipt.operator_disposition_kind * string) option
   ; attention_needs_attention : bool

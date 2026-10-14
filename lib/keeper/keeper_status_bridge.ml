@@ -158,8 +158,7 @@ let runtime_blocker_facts_json (meta : keeper_meta) =
     ]
 ;;
 
-let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
-  match runtime_blocker_surface_opt config meta with
+let runtime_blocker_fields_json_of_surface (meta : keeper_meta) = function
   | Some blocker ->
     [ "runtime_blocker_class", `String (runtime_blocker_class_to_string blocker.blocker_class)
     ; "runtime_blocker_summary", `String (Lazy.force blocker.summary)
@@ -170,6 +169,10 @@ let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper
     ; "runtime_blocker_summary", `Null
     ; "runtime_blocker_facts", `Null
     ]
+;;
+
+let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
+  runtime_blocker_fields_json_of_surface meta (runtime_blocker_surface_opt config meta)
 ;;
 
 let runtime_state_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =

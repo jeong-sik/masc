@@ -24,9 +24,9 @@ type runtime_blocker_class =
   | Blocked_by_operator_interrupt
 
 val runtime_blocker_class_to_string : runtime_blocker_class -> string
-(** The [runtime_blocker_class] label the status JSON carries. The two that
-    [Keeper_meta_contract.blocker_class_of_serialized_string] also reads,
-    ["runtime_exhausted"] and ["fiber_unresolved"], are spelled as it does. *)
+(** The [runtime_blocker_class] label the status JSON carries. Readers in
+    this process take the variant from {!Keeper_status_bridge.runtime_blocker_surface_opt}
+    instead of parsing this label back. *)
 
 (** [summary] is lazy: the [turn_failures] summary reads the receipt store,
     and callers that only need [blocker_class] never force it. *)

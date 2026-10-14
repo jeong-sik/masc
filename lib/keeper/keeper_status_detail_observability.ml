@@ -4,11 +4,6 @@ let nonempty_trimmed raw =
   let trimmed = String.trim raw in
   if trimmed = "" then None else Some trimmed
 
-let assoc_string_opt key fields =
-  match List.assoc_opt key fields with
-  | Some (`String value) -> nonempty_trimmed value
-  | _ -> None
-
 let latest_metrics_json ~metrics_store =
   let lines = Dated_jsonl.read_recent_lines metrics_store 8 in
   let parsed, _ =
@@ -155,7 +150,7 @@ let latest_runtime_for_current_config ~current_runtime_id latest_metrics =
         in
         None, scope
 
-let model_observability_json ~current_runtime_id ~runtime_blocker_fields
+let model_observability_json ~current_runtime_id ~runtime_blocker_class
     ~runtime_trust latest_metrics =
   let latest_runtime, runtime_observation_scope =
     latest_runtime_for_current_config ~current_runtime_id latest_metrics
@@ -163,7 +158,8 @@ let model_observability_json ~current_runtime_id ~runtime_blocker_fields
   let selected_model = selected_model_of_runtime_trust runtime_trust in
   let runtime_verified = Option.is_some latest_runtime in
   let runtime_blocker_class =
-    assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
+    Option.map Keeper_status_bridge.runtime_blocker_class_to_string
+      runtime_blocker_class
   in
   let runtime_id =
     Option.value ~default:"" (nonempty_trimmed current_runtime_id)

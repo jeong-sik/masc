@@ -8,7 +8,6 @@
     @since God file decomposition *)
 
 open Keeper_types
-open Keeper_meta_contract
 open Keeper_types_profile
 
 (* ── Runtime blocker surface ───────────────────────────────── *)
@@ -24,18 +23,14 @@ type runtime_blocker_class =
   | Blocked_by_exception
   | Blocked_by_operator_interrupt
 
-(* The two classes [Keeper_meta_contract.blocker_class_of_serialized_string]
-   also reads take its spelling, so the trust-snapshot decoder and this
-   producer cannot drift on them. *)
 let runtime_blocker_class_to_string = function
   | Blocked_by_heartbeat_failures -> "heartbeat_failures"
   | Blocked_by_turn_failures -> "turn_failures"
-  | Blocked_by_runtime_exhaustion ->
-    blocker_class_to_string (Runtime_exhausted (Other_detail ""))
+  | Blocked_by_runtime_exhaustion -> "runtime_exhausted"
   | Blocked_by_provider_runtime_error -> "provider_runtime_error"
   | Blocked_by_official_client_recovery -> "official_client_recovery_required"
   | Blocked_by_turn_configuration_error -> "turn_configuration_error"
-  | Blocked_by_unresolved_fiber -> blocker_class_to_string Fiber_unresolved
+  | Blocked_by_unresolved_fiber -> "fiber_unresolved"
   | Blocked_by_exception -> "exception"
   | Blocked_by_operator_interrupt -> "operator_interrupt"
 ;;

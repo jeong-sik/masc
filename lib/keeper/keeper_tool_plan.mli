@@ -244,6 +244,7 @@ type error =
       ; error : Json_pointer.schema_error
       }
   | Unknown_descriptor_id of string
+  | Compiled_child_conflict of Node_id.t
   | Duplicate_node_id of Node_id.t
   | Duplicate_tool_name of string
   | Unknown_tool of
@@ -304,6 +305,56 @@ val create
   -> ?exports:export list
   -> node list
   -> (t, error) result
+
+type async_child
+(** A fixed native compiler operand. Its exact reference, arguments and bound
+    child plan are immutable. It grants neither Skill nor broker admission. *)
+
+val fixed_async_child : alias:Node_id.t -> reference:Skill_reference.t ->
+  tool_name:string -> args:Yojson.Safe.t -> input_schema:Yojson.Safe.t ->
+  bound_plan:t -> async_child
+val child_alias : async_child -> Node_id.t
+val child_reference : async_child -> Skill_reference.t
+val child_tool_name : async_child -> string
+val child_args : async_child -> Yojson.Safe.t
+val child_input_schema : async_child -> Yojson.Safe.t
+val child_plan : async_child -> t
+
+type child_nodes = private
+  { child : async_child
+  ; submission : node
+  ; result : node
+  ; output_schema : Yojson.Safe.t
+  }
+
+val child_nodes : child:async_child -> submission_id:Node_id.t -> result_id:Node_id.t ->
+  ?after:Node_id.t list -> unit -> child_nodes
+(** Submission is Serial and effectful; its acknowledgement is opaque. The
+    readonly Concurrent result depends on submission and exposes only the
+    child plan's validated named exports. No descriptor is copied or invented. *)
+
+val create_compiled : descriptors:Keeper_tool_descriptor.t list ->
+  children:child_nodes list -> ?branch_failure_policy:branch_failure_policy ->
+  ?exports:export list -> node list -> (t, error) result
+(** Native compiler entry. Every compiled node must exactly match its operand;
+    a plain node or model JSON cannot acquire a child route by tool name. *)
+val compiled_children : t -> child_nodes list
+
+type execution_target =
+  | Descriptor_target of Keeper_tool_descriptor.t
+  | Child_submission of child_nodes
+  | Child_result of child_nodes
+
+type contract = private
+  { target : execution_target
+  ; input_schema : Yojson.Safe.t
+  ; composable_output : Keeper_tool_descriptor.composable_output
+  ; execution : Keeper_tool_descriptor.execution
+  }
+val contract : t -> Node_id.t -> contract option
+val readonly_for_input : t -> node_id:Node_id.t -> input:Yojson.Safe.t -> bool option
+(** Resolve the exact per-node contract, including distinct export schemas for
+    different children. [descriptor] below returns [None] for compiled nodes. *)
 
 val nodes : t -> node list
 val exports : t -> export list

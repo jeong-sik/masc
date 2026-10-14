@@ -1,6 +1,6 @@
 type scheduled_node =
   { node : Keeper_tool_plan.node
-  ; descriptor : Keeper_tool_descriptor.t
+  ; contract : Keeper_tool_plan.contract
   ; schedule : Agent_core.Tool_contract.schedule
   }
 
@@ -9,24 +9,24 @@ type batch =
   | Concurrent_batch of scheduled_node list
 
 type unscheduled_batch =
-  | Unscheduled_serial of Keeper_tool_plan.node * Keeper_tool_descriptor.t
-  | Unscheduled_concurrent of (Keeper_tool_plan.node * Keeper_tool_descriptor.t) list
+  | Unscheduled_serial of Keeper_tool_plan.node * Keeper_tool_plan.contract
+  | Unscheduled_concurrent of (Keeper_tool_plan.node * Keeper_tool_plan.contract) list
 
-let execution_mode_of_descriptor descriptor =
-  match descriptor.Keeper_tool_descriptor.execution with
+let execution_mode_of_contract (contract : Keeper_tool_plan.contract) =
+  match contract.execution with
   | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
     Agent_core.Tool_contract.Concurrent
   | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
   | Keeper_tool_descriptor.Terminal -> Agent_core.Tool_contract.Serial
 ;;
 
-let descriptor_exn plan node =
-  match Keeper_tool_plan.descriptor plan node.Keeper_tool_plan.id with
-  | Some descriptor -> descriptor
+let contract_exn plan node =
+  match Keeper_tool_plan.contract plan node.Keeper_tool_plan.id with
+  | Some contract -> contract
   | None ->
     invalid_arg
       (Printf.sprintf
-         "validated composition plan lost descriptor for node %s"
+         "validated composition plan lost contract for node %s"
          (Keeper_tool_plan.Node_id.to_string node.id))
 ;;
 
@@ -38,14 +38,14 @@ let unscheduled_layer plan nodes =
   let rec build batches concurrent = function
     | [] -> List.rev (flush_concurrent batches concurrent)
     | node :: rest ->
-      let descriptor = descriptor_exn plan node in
-      (match descriptor.Keeper_tool_descriptor.execution with
+      let contract = contract_exn plan node in
+      (match contract.Keeper_tool_plan.execution with
        | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
-         build batches ((node, descriptor) :: concurrent) rest
+         build batches ((node, contract) :: concurrent) rest
        | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
        | Keeper_tool_descriptor.Terminal ->
          let batches = flush_concurrent batches concurrent in
-         build (Unscheduled_serial (node, descriptor) :: batches) [] rest)
+         build (Unscheduled_serial (node, contract) :: batches) [] rest)
   in
   build [] [] nodes
 ;;
@@ -67,20 +67,20 @@ let schedule plan =
   Keeper_tool_plan.dependency_layers plan
   |> List.concat_map (unscheduled_layer plan)
   |> List.mapi (fun batch_index batch ->
-    let scheduled_node ~batch_size (node, descriptor) =
+    let scheduled_node ~batch_size (node, contract) =
       { node
-      ; descriptor
+      ; contract
       ; schedule =
           { Agent_core.Tool_contract.planned_index = planned_index node
           ; batch_index
           ; batch_size
-          ; execution_mode = execution_mode_of_descriptor descriptor
+          ; execution_mode = execution_mode_of_contract contract
           }
       }
     in
     match batch with
-    | Unscheduled_serial (node, descriptor) ->
-      Serial_batch (scheduled_node ~batch_size:1 (node, descriptor))
+    | Unscheduled_serial (node, contract) ->
+      Serial_batch (scheduled_node ~batch_size:1 (node, contract))
     | Unscheduled_concurrent nodes ->
       let batch_size = List.length nodes in
       Concurrent_batch (List.map (scheduled_node ~batch_size) nodes))
@@ -90,8 +90,8 @@ let outer_completion plan =
   if
     List.exists
       (fun node ->
-         match Keeper_tool_plan.descriptor plan node.Keeper_tool_plan.id with
-         | Some { Keeper_tool_descriptor.execution = Keeper_tool_descriptor.Terminal; _ } ->
+         match Keeper_tool_plan.contract plan node.Keeper_tool_plan.id with
+         | Some { Keeper_tool_plan.execution = Keeper_tool_descriptor.Terminal; _ } ->
            true
          | Some
              { execution =
@@ -277,6 +277,12 @@ module Exclusive_gate = struct
   ;;
 end
 
+type compiled_dispatch =
+  attempt:Keeper_tool_execution_journal.attempt ->
+  target:Keeper_tool_plan.execution_target ->
+  tool_use_id:string -> node:Keeper_tool_plan.node ->
+  schedule:Agent_core.Tool_contract.schedule -> input:Yojson.Safe.t -> dispatch_result
+
 let execute_one
       ~plan
       ~run_id
@@ -285,6 +291,7 @@ let execute_one
       ~tool_use_id_for_node
       ~dispatch
       ?launch_invocation_of
+      ?dispatch_compiled
       ?journal
       ?observe_node_result
       scheduled
@@ -354,7 +361,12 @@ let execute_one
            "composition launch leaf lacks complete invocation identity (trace_id, turn_ref, tool_use_id); \
             refusing dispatch instead of launching a job that interruption cannot re-prove")
     in
-    let dispatch_fresh ~tool_use_id ?launch_replay () =
+    let dispatch_fresh ?attempt ~tool_use_id ?launch_replay () =
+      let refuse detail =
+        dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
+          (Tool_result.make_err ~class_:Tool_result.Workflow_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect ~tool_name:node.tool_name
+            ~start_time detail) in
       Cancel_safe.protect
         ~on_exn:(fun exn ->
           dispatch_result
@@ -363,8 +375,15 @@ let execute_one
                ~class_:Tool_result.Runtime_failure
                ~tool_name:node.tool_name ~start_time exn))
         (fun () ->
-           dispatch ?launch_replay ~tool_use_id ~node ~descriptor:scheduled.descriptor
-             ~schedule:scheduled.schedule ~input ())
+          match scheduled.contract.target with
+          | Keeper_tool_plan.Descriptor_target descriptor ->
+            dispatch ?launch_replay ~tool_use_id ~node ~descriptor ~schedule:scheduled.schedule ~input ()
+          | (Keeper_tool_plan.Child_submission _ | Keeper_tool_plan.Child_result _) as target ->
+            match attempt,dispatch_compiled with
+            | Some attempt,Some dispatch ->
+              dispatch ~attempt ~target ~tool_use_id ~node ~schedule:scheduled.schedule ~input
+            | None,_ -> refuse "Compiled child execution requires the canonical parent journal occurrence."
+            | Some _,None -> refuse "Compiled child execution requires the original child producer authority.")
     in
     let execution_id, tool_use_id, execution_origin, result, journal_error =
       match journal with
@@ -388,9 +407,11 @@ let execute_one
                  stored.execution_id, stored.tool_use_id
              | Keeper_tool_execution_journal.Dispatch
              | Keeper_tool_execution_journal.Reuse_completed _ -> execution_id, tool_use_id in
-           let launch_leaf =
-             Keeper_tool_descriptor.prepared_leaf_admission scheduled.descriptor
-             = Keeper_tool_descriptor.Owned_job_launch_leaf in
+           let launch_leaf = match scheduled.contract.target with
+             | Keeper_tool_plan.Descriptor_target descriptor ->
+               Keeper_tool_descriptor.prepared_leaf_admission descriptor
+               = Keeper_tool_descriptor.Owned_job_launch_leaf
+             | Keeper_tool_plan.Child_submission _ | Keeper_tool_plan.Child_result _ -> false in
            let launch_invocation, launch_replay = match replay with
              | Keeper_tool_execution_journal.Recheck_launch stored ->
                  Some stored.invocation, Some stored
@@ -407,7 +428,7 @@ let execute_one
                 execution_id, tool_use_id, Dispatch_refused, launch_identity_refusal (), None
             | _ ->
            let readonly =
-             Keeper_tool_descriptor.readonly_for_input scheduled.descriptor ~input
+             Keeper_tool_plan.readonly_for_input plan ~node_id ~input
              = Some true
            in
            match Keeper_tool_execution_journal.begin_attempt worker
@@ -416,7 +437,7 @@ let execute_one
            | Error error ->
              execution_id, tool_use_id, Dispatch_refused, journal_failure error, None
            | Ok attempt ->
-             let result = dispatch_fresh ~tool_use_id ?launch_replay () in
+             let result = dispatch_fresh ~attempt ~tool_use_id ?launch_replay () in
              let result_bytes = match result.result_bytes with
                | Some bytes -> bytes
                | None -> String.length (Tool_result.message result.result)
@@ -459,7 +480,7 @@ let execute_one
       | Tool_result.Deferred _ | Tool_result.Failed _ ->
         None, Some (Tool_did_not_complete node_result), None
       | Tool_result.Completed _ ->
-        match scheduled.descriptor.Keeper_tool_descriptor.composable_output with
+        match scheduled.contract.composable_output with
         | Keeper_tool_descriptor.Opaque_output -> None, None, None
         | Keeper_tool_descriptor.Json_output _ ->
           match Keeper_tool_plan.validate_output plan ~run_id ~node_id
@@ -499,6 +520,7 @@ let execute_with_tool_use_id
       ~tool_use_id_for_node
       ~dispatch
       ?launch_invocation_of
+      ?dispatch_compiled
       ?journal
       ?observe_node_result
       ()
@@ -510,12 +532,9 @@ let execute_with_tool_use_id
         ~default:Tool_result.Effect_outcome_unknown
         result.failure_effect_disposition
     | Tool_result.Completed _ ->
-      (match Keeper_tool_plan.descriptor plan result.node_id with
-       | Some descriptor
-         when Keeper_tool_descriptor.readonly_for_input descriptor ~input:result.input
-              = Some true ->
-         Tool_result.Proven_pre_effect
-       | Some _ | None -> Tool_result.Proven_post_effect)
+      (match Keeper_tool_plan.readonly_for_input plan ~node_id:result.node_id ~input:result.input with
+       | Some true -> Tool_result.Proven_pre_effect
+       | Some false | None -> Tool_result.Proven_post_effect)
   in
   let aggregate_effect_disposition settled =
     List.fold_left
@@ -739,6 +758,7 @@ let execute_with_tool_use_id
                 ~tool_use_id_for_node
                 ~dispatch
                 ?launch_invocation_of
+                ?dispatch_compiled
                 ?journal
                 ?observe_node_result
                 scheduled
@@ -840,7 +860,7 @@ let execute_with_tool_use_id
 
 (* TEL-OK: forwards to [execute_with_tool_use_id] below; no new effect
    originates here, so there is nothing local to instrument. *)
-let execute ~plan ~run_id ~dispatch ?launch_invocation_of ?journal ?observe_node_result () =
+let execute ~plan ~run_id ~dispatch ?launch_invocation_of ?dispatch_compiled ?journal ?observe_node_result () =
   let tool_use_id_for_node ~execution_id _node =
     "composition-node:" ^ Ids.Execution_id.to_string execution_id
   in
@@ -850,6 +870,7 @@ let execute ~plan ~run_id ~dispatch ?launch_invocation_of ?journal ?observe_node
     ~tool_use_id_for_node
     ~dispatch
     ?launch_invocation_of
+    ?dispatch_compiled
     ?journal
     ?observe_node_result
     ()
@@ -917,6 +938,7 @@ let execute_keeper_with_authority
       ?on_external_effect_deferred
       ?on_failed
       ?admit_node
+      ?dispatch_compiled
       ?journal
       ?observe_node_result
       ()
@@ -1072,6 +1094,14 @@ let execute_keeper_with_authority
       Some { Keeper_tool_execution_journal.trace_id; turn_ref }
     | Some _, Some _ | Some _, None | None, _ -> None
   in
+  let dispatch_compiled = Option.map (fun dispatch ~attempt ~target ~tool_use_id ~node ~schedule ~input ->
+    match (match admit_node with None -> Ok () | Some admit -> admit ~node) with
+    | Ok () -> dispatch ~attempt ~target ~tool_use_id ~node ~schedule ~input
+    | Error rejection ->
+      dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err ~tool_name:node.Keeper_tool_plan.tool_name
+          ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
+          ~start_time:(Tool_timing.start ()) ~data:rejection.data rejection.detail)) dispatch_compiled in
   let tool_use_id_for_node ~execution_id:_ node =
     nested_tool_use_id ~composition_run_id parent_invocation node.Keeper_tool_plan.id
   in
@@ -1081,6 +1111,7 @@ let execute_keeper_with_authority
     ~tool_use_id_for_node
     ~dispatch
     ~launch_invocation_of
+    ?dispatch_compiled
     ?journal
     ?observe_node_result
     ()

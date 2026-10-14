@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Add native compiled child submission/result targets with separate execution
+  modes and frozen per-child export contracts. Their owned plan evidence cannot
+  be submitted as public compiler authority. Public async-child compilation
+  remains refused until the original admission and parent recovery path lands.
+
 ## [0.56.0] - 2026-10-14
 
 ### Upgrade notes

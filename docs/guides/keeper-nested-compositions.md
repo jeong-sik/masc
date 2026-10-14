@@ -50,6 +50,23 @@ extra fields. This API admits fixed arguments only. Feeding upstream output into
 a child parameter requires a runtime contract barrier before any child leaf runs;
 that separate integration is pending.
 
+The native compiler now has distinct fixed child-submission and child-result
+operands. Submission is effectful and Serial, with an opaque acknowledgement;
+result observation is readonly and Concurrent, with the bound child's exact
+named-export schema. Schemas are frozen per child, so two result nodes using
+the same tool name cannot borrow each other's output contract. Owned plan
+evidence retains the exact child reference, fixed arguments, bound plan and
+recursive contracts. Copying that private evidence into a public request does
+not create a compiler capability.
+
+This internal representation does not yet enable async children in public
+prepare/run. The executor requires an actual canonical parent journal attempt
+and an original child producer; absent authority refuses before effects, never
+through an ordinary tool-name fallback. The compiler's existing async-child
+refusal stays until the original Nested receipt, accepted-child parent owner
+transition and canonical result-wait journal path are connected. Private
+contract tests are not evidence that an end-to-end async child has executed.
+
 Call `keeper_composition_prepare` with `execution: "inline"` or `"async"`, the ordinary outer
 `nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of
 the form above. Pass the returned `draft.sha256` to `keeper_composition_run`.

@@ -335,13 +335,24 @@ let node_to_yojson (node : Plan.node) =
        @ [ "input", input ]))
 ;;
 
-let to_yojson plan =
+let contract_exn plan id = match Plan.contract plan id with
+  | Some contract -> contract
+  | None -> invalid_arg "validated plan lost its node contract"
+
+let rec to_yojson plan =
   let* nodes =
     List.fold_left
       (fun encoded node ->
          let* encoded = encoded in
-         let* node = node_to_yojson node in
-         Ok (node :: encoded))
+         let* json = node_to_yojson node in
+         let* json = match (contract_exn plan node.Plan.id).target with
+           | Plan.Descriptor_target _ -> Ok json
+           | (Plan.Child_submission _ | Plan.Child_result _) as target ->
+             let* operand = compiled_operand_to_yojson target in
+             (match json with
+              | `Assoc fields -> Ok (`Assoc (fields @ ["compiled_child",operand]))
+              | _ -> invalid_arg "encoded node is not an object") in
+         Ok (json :: encoded))
       (Ok [])
       (Plan.nodes plan)
   in
@@ -362,6 +373,39 @@ let to_yojson plan =
       [ "branch_failure_policy", `String (Plan.branch_failure_policy_to_string Plan.Continue_independent) ]
   in
   Ok (`Assoc ([ "nodes", `List (List.rev nodes) ] @ exports @ policy))
+and compiled_operand_to_yojson = function
+  | Plan.Descriptor_target _ -> invalid_arg "ordinary descriptor is not a compiled child operand"
+  | (Plan.Child_submission nodes | Plan.Child_result nodes) as target ->
+    let child = nodes.Plan.child in
+    let* bound_plan = to_yojson (Plan.child_plan child) in
+    let* bound_contracts = contracts_to_yojson (Plan.child_plan child) in
+    let kind = match target with
+      | Plan.Child_submission _ -> "submission"
+      | Plan.Child_result _ -> "result"
+      | Plan.Descriptor_target _ -> invalid_arg "compiled target changed during encoding" in
+    Ok (`Assoc ["kind",`String kind;"alias",`String (Plan.Node_id.to_string (Plan.child_alias child));
+      "reference",Skill_reference.to_yojson (Plan.child_reference child);
+      "tool_name",`String (Plan.child_tool_name child);"args",Plan.child_args child;
+      "input_schema_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort (Plan.child_input_schema child)));
+      "submission_node",`String (Plan.Node_id.to_string nodes.submission.id);
+      "result_node",`String (Plan.Node_id.to_string nodes.result.id);
+      "bound_plan",bound_plan;
+      "bound_contracts_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort bound_contracts))])
+and contracts_to_yojson plan =
+  let* contracts = List.fold_left (fun prior (node : Plan.node) ->
+    let* contracts = prior in
+    let contract = contract_exn plan node.id in
+    let* route = match contract.target with
+      | Plan.Descriptor_target descriptor -> Ok (Keeper_tool_descriptor.route_evidence_json descriptor)
+      | (Plan.Child_submission _ | Plan.Child_result _) as target -> compiled_operand_to_yojson target in
+    let output_schema = match contract.composable_output with
+      | Keeper_tool_descriptor.Opaque_output -> `Null
+      | Keeper_tool_descriptor.Json_output {schema} -> schema in
+    let frozen = `Assoc ["route",route;"input_schema",contract.input_schema;"output_schema",output_schema] in
+    Ok (`Assoc ["node_id",`String (Plan.Node_id.to_string node.id);
+      "contract_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort frozen))] :: contracts))
+    (Ok []) (Plan.nodes plan) in
+  Ok (`List (List.rev contracts))
 ;;
 
 let first_duplicate fields =

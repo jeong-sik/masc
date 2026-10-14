@@ -3000,7 +3000,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job () = with_fixture @@ f
     { keeper_name = keeper; composition_run_id
     ; draft_reference = Draft.reference draft; run_reference
     ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation
-    ; source_turn = 41; source_task_id = Some "task-A" } in
+    ; source_turn = 41; source_task_id = Some "task-A"; producer=Journal.Prepared } in
   let journal = Journal.prepare ~base_path:fixture.base_path source |> require "interrupted launch journal" in
   let request_context = Some
       [ "composition_tool", `String Draft.run_tool_name

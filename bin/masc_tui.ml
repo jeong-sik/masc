@@ -24273,6 +24273,12 @@ and is loaded on demand through keeper_skill.
            in
            (match k with
             | "@" | "esc" -> close ()
+            (* The footer stamps the help door on this row, so the key has
+               to answer; the sheet is read-only and may cover the overlay,
+               the way the activity overlays allow it to. *)
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
             | "j" | "down" | "k" | "up" ->
                 let lines = Masc_tui_render_prim.answering_lines state in
                 let targets = Masc_tui_answering.target_indexes lines in
@@ -24336,6 +24342,11 @@ and is loaded on demand through keeper_skill.
            in
            (match k with
             | "esc" | "q" | "Q" -> close ()
+            (* Same door the footer stamps on this row; read-only over a
+               reader modal. *)
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
             | "j" | "down" ->
                 state.link_modal_scroll <-
                   Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:1
@@ -26264,6 +26275,13 @@ and is loaded on demand through keeper_skill.
                      launch_keeper_history_load state ~mailbox:async_messages
                        ~keeper_name:keeper.k_name;
                      state.view <- Keepers Keeper_message)
+            (* The row this overlay draws names the door on Overview, and
+               the chat's minimal rows name it too -- while navigation is
+               open this arm owns the key, so both rows need it to answer
+               here rather than in the surface under them. *)
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
             | _ -> ())
        | Some "left"
          when state.view = Overview

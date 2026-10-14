@@ -5120,6 +5120,13 @@ let render_keeper_message (state : state) =
       | Some _ -> Some "↑/↓:select  Tab/Enter:insert  Esc:close"
       | None -> slash_hint_text ~restore:Ansi.default_fg (Masc_tui_message_input.contents state.msg_input)
     in
+    (* [?] opens the sheet only while the draft is empty, so the row says so
+       exactly while it is true -- a typing row that named the door would
+       advertise a key the draft owns. *)
+    let help_hint =
+      if Masc_tui_message_input.length state.msg_input = 0 then "  ?:help"
+      else ""
+    in
     let footer_hints =
       if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
       else
@@ -5195,10 +5202,10 @@ let render_keeper_message (state : state) =
           if scroll = 0 then "PgUp:history" else "PgDn:newest"
         in
         Masc_tui_footer.compact_chat_hints ~enter_hint:compact_enter_hint
-          ~scroll_hint:compact_scroll_hint ~escape_hint
+          ~scroll_hint:compact_scroll_hint ~escape_hint ~help_hint
       else
         Masc_tui_footer.chat_hints ~enter_hint ~scroll_hint ~switch_hint
-          ~escape_hint ~leave_hint
+          ~escape_hint ~leave_hint ~help_hint
     in
     let input_column =
       Message_layout.input_cursor_column ~terminal_cols:chat_cols

@@ -751,19 +751,25 @@ let voice_bar ~width ~db =
 
 let voice_bar_width = 16
 
-let chat_hints ~enter_hint ~scroll_hint ~switch_hint ~escape_hint ~leave_hint =
+(* [help_hint] carries the door item -- "  ?:help" or "" -- because in a
+   chat [?] opens the sheet only while the draft is empty, and the wide and
+   compact rows are drawn in both states. The caller, which can see the
+   draft, decides; the minimal rows below always carry the item because the
+   empty-draft state they are drawn for is the state where it answers. *)
+let chat_hints ~enter_hint ~scroll_hint ~switch_hint ~escape_hint ~leave_hint
+    ~help_hint =
   Printf.sprintf
     "%s  Ctrl-J:newline  /:commands  %s%s  %s%s  Ctrl-R:reasoning  \
-     Ctrl-D:tools  Ctrl-N:journal  Ctrl-F:metadata  Ctrl-O:image  Ctrl-U:clear  Ctrl-W:word"
-    enter_hint escape_hint leave_hint scroll_hint switch_hint
+     Ctrl-D:tools  Ctrl-N:journal  Ctrl-F:metadata  Ctrl-O:image  Ctrl-U:clear  Ctrl-W:word%s"
+    enter_hint escape_hint leave_hint scroll_hint switch_hint help_hint
 
 (** Below 120 columns the fixed set drops to what leaves room for the message
     itself; {!line}'s fitting machinery trims from the tail beyond that. *)
-let compact_chat_hints ~enter_hint ~scroll_hint ~escape_hint =
+let compact_chat_hints ~enter_hint ~scroll_hint ~escape_hint ~help_hint =
   Printf.sprintf
     "%s  Ctrl-J:NL  /:commands  %s  %s  Ctrl-R:reasoning  Ctrl-D:tools  \
-     Ctrl-N:journal  Ctrl-F:metadata"
-    enter_hint escape_hint scroll_hint
+     Ctrl-N:journal  Ctrl-F:metadata%s"
+    enter_hint escape_hint scroll_hint help_hint
 
 (* Keep discoverability whole before optional editing hints. This projection
    fits the framed inner row, so box_line never cuts a key label in half. *)

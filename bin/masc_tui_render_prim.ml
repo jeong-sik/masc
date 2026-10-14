@@ -548,11 +548,13 @@ let footer_line ?(status = []) ?position (state : state) ~max_cells ~hints =
      a setting instead of per-screen behaviour. *)
   (* The same seam names the sheet while the keys are visible. The item is
      stamped only where [?] answers: a text field holding printable keys
-     takes [?] as a character, a modal owns its own row, and the chat
-     composer owns its footer outright -- its minimal rows already carry
-     the item and its typing rows rightly do not. [compact_viewport] is
-     false because a footer row on screen is itself the frame's word that
-     it had room. *)
+     takes [?] as a character, and a modal that swallows [?] owns its own
+     row -- the overlays that answer [?] in their dispatch arms (answering,
+     link modal, keeper navigation) keep the stamped door. The chat composer
+     owns its footer outright: its rows carry the item exactly while the
+     draft is empty, which is when the key answers there.
+     [compact_viewport] is false because a footer row on screen is itself
+     the frame's word that it had room. *)
   let help_key_answers =
     state.view <> Keepers Keeper_message
     && Option.is_none (text_input_target state ~compact_viewport:false)

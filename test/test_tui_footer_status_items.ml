@@ -219,6 +219,53 @@ let test_help_item_waits_when_keys_are_claimed () =
   check_bool "a modal row is not stamped" false
     (contains ~needle:"?:help" modal_row)
 
+(* The overlays that answer [?] in their own dispatch arms: the stamp on
+   their rows is true, and it has to stay true -- an overlay moved into the
+   exclusion lists instead would hide a door that works. *)
+let test_overlays_that_answer_keep_the_stamped_door () =
+  List.iter
+    (fun open_overlay ->
+      let state = plain_surface_state Masc_tui_types.Tools in
+      open_overlay state;
+      (* A row with room spells the item even under the overlay -- these
+         three are not in the exclusion lists, unlike the modals that
+         swallow the key. *)
+      let roomy =
+        Masc_tui_render_prim.footer_line state ~max_cells:140
+          ~hints:"r:refresh  q:quit"
+        |> Masc_tui_theme.strip_sgr
+      in
+      check_bool "an overlay that answers ? keeps the stamped door" true
+        (contains ~needle:"?:help" roomy))
+    [ (fun s -> s.Masc_tui_types.answering_open <- true)
+    ; (fun s -> s.Masc_tui_types.link_modal_open <- true)
+    ; (fun s -> s.Masc_tui_types.keeper_navigation_open <- true) ]
+
+(* The chat's wide and compact rows carry the door exactly while the empty
+   draft lets [?] answer; the caller passes the item, so both spellings have
+   to ride the row without breaking their separators. *)
+let test_chat_rows_carry_the_door_only_while_the_draft_is_empty () =
+  let wide = Masc_tui_footer.chat_hints ~enter_hint:"Enter:send" ~scroll_hint:""
+      ~switch_hint:"" ~escape_hint:"" ~leave_hint:"" ~help_hint:"  ?:help" in
+  check_bool "an empty draft's wide row names the door" true
+    (contains ~needle:"?:help" wide);
+  check_bool "the item keeps its two-space separation" true
+    (contains ~needle:"Ctrl-W:word  ?:help" wide);
+  check_bool "a typing wide row names no door" false
+    (contains ~needle:"?:help"
+       (Masc_tui_footer.chat_hints ~enter_hint:"Enter:send" ~scroll_hint:""
+          ~switch_hint:"" ~escape_hint:"" ~leave_hint:"" ~help_hint:""));
+  let compact =
+    Masc_tui_footer.compact_chat_hints ~enter_hint:"Enter:send"
+      ~scroll_hint:"PgUp:history" ~escape_hint:"Esc:quiet" ~help_hint:"  ?:help"
+  in
+  check_bool "an empty draft's compact row names the door" true
+    (contains ~needle:"?:help" compact);
+  check_bool "a typing compact row names no door" false
+    (contains ~needle:"?:help"
+       (Masc_tui_footer.compact_chat_hints ~enter_hint:"Enter:send"
+          ~scroll_hint:"PgUp:history" ~escape_hint:"Esc:quiet" ~help_hint:""))
+
 let test_ensure_help_item_appends_once () =
   check_string "a row with no help item gains one at the end"
     "j/k:move  q:quit  ?:help"
@@ -241,6 +288,10 @@ let tests =
           test_help_item_yields_to_a_full_row_but_the_door_stays
       ; Alcotest.test_case "help item waits when keys are claimed" `Quick
           test_help_item_waits_when_keys_are_claimed
+      ; Alcotest.test_case "overlays that answer keep the stamped door" `Quick
+          test_overlays_that_answer_keep_the_stamped_door
+      ; Alcotest.test_case "chat rows carry the door only while the draft is empty" `Quick
+          test_chat_rows_carry_the_door_only_while_the_draft_is_empty
       ; Alcotest.test_case "ensure_help_item appends once" `Quick
           test_ensure_help_item_appends_once
       ;] )

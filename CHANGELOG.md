@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-10-14
+
 ### Upgrade notes
 
 - After upgrading, every Keeper request carries a "Workspace wiki" paragraph: one line per wiki page, built at the start of the turn. Its size grows with the number of pages. Set `enabled = false` under `[wiki_contents]` in runtime.toml (or `MASC_KEEPER_WIKI_CONTENTS_ENABLED=false`) and restart to turn it off. Add the table to a live runtime.toml only after this version is running; earlier versions do not know it (#42961).
@@ -311,13 +313,15 @@
 - Normalized the hook target path with `Unix.realpath` in `test_dos_tools`'s `inventory temporary directory swap` test so the hook matches `Fs_compat`'s resolved path on macOS (`/var` -> `/private/var`) and continues testing enumeration across temporary directory swaps and restorations (#43122).
 - `masc_msx_meta` now reports `core.pinned_commit` (the commit MASC pins) and `core.linked_commit` (the exact linked core commit, `None` when unknown), and `checkpoint_info` adds `exists` and `mtime_utc` (ISO 8601) (#43152).
 
-## [0.56.0] - 2026-10-14
+### Known issues
 
-### Changed
-- TBD
-
-### Deprecated
-- TBD
+- Three suites of the full regression run on the release candidate head were
+  failing when this version was cut: `wiki_lint` case 6 (a test fixture that
+  creates `log.md` twice, #43153), `Keeper_tool_dispatch_runtime` case 95 (an
+  async composition status manifest with a null string field), and
+  `keeper_skill_catalog` case 23 (the expected model tool names always include
+  the transient draft controls since #43156). None of them changes a released
+  tool surface; they are tracked for the next release.
 
 ## [0.55.0] - 2026-10-14
 

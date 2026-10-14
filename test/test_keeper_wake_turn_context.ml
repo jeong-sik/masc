@@ -1033,7 +1033,9 @@ let test_wiki_paragraph_needs_pages_and_hides_listing_errors () =
     (contains ~needle:(prompt_fragment Prompt_names.keeper_context_wiki_unavailable) failed);
   check bool "the IO detail stays out of the model context" false (contains ~needle:detail failed)
 
-let test_autonomous_turn_carries_the_wiki_layer () =
+(* Checks the prompt builder, not the turn that calls it: [?wiki_contents]
+   defaults to [Off], so a turn that stopped passing it would still compile. *)
+let test_build_prompt_carries_the_wiki_layer () =
   let decision = WO.keeper_cycle_decision ~meta base_observation in
   let access = direct_wiki_reader () in
   let wiki_layer_bytes ?wiki_contents () =
@@ -1477,8 +1479,8 @@ let () =
             test_wiki_route_follows_actual_request_access;
           test_case "wiki paragraph needs pages and hides listing errors" `Quick
             test_wiki_paragraph_needs_pages_and_hides_listing_errors;
-          test_case "autonomous turn carries the wiki layer" `Quick
-            test_autonomous_turn_carries_the_wiki_layer;
+          test_case "build_prompt carries the wiki layer and its receipt span" `Quick
+            test_build_prompt_carries_the_wiki_layer;
           test_case "unresolved goal keeps one stable safety contract" `Quick
             test_open_goal_store_keeps_one_stable_safety_contract;
         ] );

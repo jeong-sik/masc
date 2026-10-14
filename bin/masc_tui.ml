@@ -13665,11 +13665,16 @@ let step_board_read state ~mailbox ~delta =
           (List.nth_opt state.board_posts next)
       end
 
+(* The MIDI soundfont read at boot from [tui].midi_soundfont (the same load
+   that applies the theme and the saved sort). The numbered attachment keys
+   answer from this snapshot instead of re-reading runtime.toml per press. *)
+let boot_midi_soundfont : string option ref = ref None
+
 (* The numbered attachment keys: the pane names each entry [1..9] (broken
    entries included), and this resolves the same number to the same entry,
    then lets the action module save/play/open it. What happened, or why it
    could not, lands on the read pane's status line. *)
-let open_board_attachment state ~base_path ~digit ~host ~port =
+let open_board_attachment state ~digit ~host ~port =
   match state.board_mode with
   | Board_list | Board_compose -> ()
   | Board_read post_id ->
@@ -13701,11 +13706,9 @@ let open_board_attachment state ~base_path ~digit ~host ~port =
                   | Ok (status_code, body) ->
                       Error (Masc_tui_http.refusal ~status_code ~body)
                 in
-                let midi_soundfont =
-                  (Masc_tui_config.load ~base_path).midi_soundfont
-                in
                 let outcome =
-                  Masc_tui_attachment_action.run ~fetch attachment ~midi_soundfont
+                  Masc_tui_attachment_action.run ~fetch attachment
+                    ~midi_soundfont:!boot_midi_soundfont
                 in
                 state.board_attachment_status <-
                   Some (Masc_tui_attachment_action.describe_outcome outcome)))
@@ -19671,6 +19674,7 @@ let main
      Theme_choice.apply returns false for a name no scheme carries, and the
      [when] guard then leaves theme_choice unset. *)
   let tui_settings = Masc_tui_config.load ~base_path in
+  boot_midi_soundfont := tui_settings.midi_soundfont;
   (match tui_settings.last_chat_keeper with
    | Ok None -> ()
    | Ok (Some keeper) -> state.home_last_chat <- Recorded_chat keeper
@@ -26987,8 +26991,7 @@ and is loaded on demand through keeper_skill.
               && digit <= "9" ->
            (* The ATTACHMENTS block numbers entries [1..9]; the number opens
               the same entry, whatever its kind wants done with it. *)
-           open_board_attachment state ~base_path ~digit:(int_of_string digit)
-             ~host ~port
+           open_board_attachment state ~digit:(int_of_string digit) ~host ~port
        | Some "o" when state.view = Board ->
            (match state.board_mode with
             | Board_read post_id

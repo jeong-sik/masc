@@ -291,6 +291,20 @@ let read_score source =
   | Ok score -> score
   | Error failure -> Alcotest.fail (Score.failure_text failure)
 
+(* %S-style quoting escapes every byte past ASCII into decimal escapes, so
+   a Korean title would render as numbers: the header must show the title
+   the author wrote, quotes included, bytes intact. *)
+let test_header_line_keeps_a_non_ascii_title () =
+  match Alphatex.render_tab ~max_width:80 "\\title \"리프\" \\tempo 90 :4 0.6" with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+      let headers = List.filter (fun line -> contains_substring line "♩=90") lines in
+      (match headers with
+       | [ header ] ->
+           Alcotest.(check bool) "the title shows as written" true
+             (contains_substring header "\"리프\"")
+       | _ -> Alcotest.fail "expected exactly one header line")
+
 let test_directives_are_kept () =
   let score = read_score "\\title \"Riff\" \\tempo 92 \\ts 6 8 :4 0.6" in
   Alcotest.(check (option string)) "the title" (Some "Riff") score.title;
@@ -528,6 +542,8 @@ let () =
             test_directives_absent_are_none
         ; Alcotest.test_case "the header line is drawn" `Quick
             test_header_line_drawn
+        ; Alcotest.test_case "a non-ascii title shows as written" `Quick
+            test_header_line_keeps_a_non_ascii_title
         ; Alcotest.test_case "no header line without directives" `Quick
             test_header_line_absent_when_no_directives
         ; Alcotest.test_case "measure numbers climb with the measures" `Quick

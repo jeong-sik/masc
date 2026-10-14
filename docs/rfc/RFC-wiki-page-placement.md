@@ -44,6 +44,9 @@ related: ["library-becomes-a-wiki", "wiki-lint-and-page-contracts", "keepers-see
 - 이름 고정: `masc_wiki_update` 는 이름, 작성자, 생성일, 출처를 바꾸지 않는다(`lib/tool_wiki.mli`). `masc_wiki_create` 설명이 "The page name stays fixed" 라고 적는다. 옮기기, 이름 바꾸기, 삭제 도구는 없다(`RFC-wiki-lint-and-page-contracts.md` §2 "없는 것").
 - 쓰는 길: 위키에 쓰는 도구를 부르는 곳은 둘이다. Keeper 턴 디스패치(`lib/keeper/keeper_tag_dispatch.ml:147`)와 MCP 서버 디스패치(`lib/mcp_server_eio_execute.ml:537`). 주기로 도는 담당은 없다.
 - 라이브 위키(2026-10-14): 페이지 11장. 입구 `political-maladies` 1장, `pm-` 접두어 곡 페이지 9장, `rfc-map` 1장. 묶음은 접두어와 링크로만 있다. `log.md` 의 작성자는 `claude-mcp-client` 10건, `masc-productor-owner` 1건이다.
+- 태그: 입구와 `pm-` 곡 페이지 10장이 모두 `tags` 에 `political-maladies` 를 갖고 있다. 태그 목록은 `[band, political-maladies, song]` 처럼 층이 다른 것을 한 목록에 섞는다(직독, `~/me/.masc/wiki/*.md` 의 `tags:` 줄).
+- 읽기: `keeper_wiki_read` 는 `topic` 을 `list_pages` 가 돌려준 파일 이름과 제목에서 부분 문자열로 찾는다(`lib/tool_wiki.ml:139-170`). `list_pages` 는 `index.md` 와 `log.md` 를 빼므로, Keeper 는 이 도구로 `log.md` 를 읽을 수 없다. 다른 길로 읽을 수 있는지는 확인하지 못했다.
+- 아픔: 측정한 아픔은 없다. 11장이고 목차는 2.7KB 다. 이 RFC 의 이유는 운영자 요청과, `pm-` 접두어와 태그로 이미 묶음을 흉내 내는 관행이다.
 - `index.md`: 1줄(`rfc-map` 만)이다. 나머지 10장은 `docs/wiki` 에서 파일째 옮겨 와서, 그 뒤 쓰기가 없었다. 서버는 쓰기 직후에만 `index.md` 를 다시 만든다(`lib/wiki_journal.mli`).
 - Keeper 목차: 턴마다 전체 목차를 싣는다. 11장에서 2,665~2,762 바이트였다(옮김: 2026-10-14 배포 뒤 receipt 22건. 이번에 다시 세지 않았다).
 - 헤더 읽기: `Wiki_page.parse_frontmatter` 는 일곱 키를 이름으로 찾고 모르는 키는 무시한다. update 는 읽은 레코드로 헤더를 다시 만든다(`lib/tool_wiki.ml:476` 의 `render_page { current with ... }`). 그래서 `parent` 를 모르는 옛 바이너리가 그 페이지를 update 하면 `parent` 가 사라진다.
@@ -59,7 +62,21 @@ related: ["library-becomes-a-wiki", "wiki-lint-and-page-contracts", "keepers-see
 | 옮길 때 쓰는 파일 | 해당 없음 | 1장 + 그 페이지를 링크한 모든 페이지 | 1장 |
 | 바뀌는 코드 | 없음 | 이름 검증, 재귀 목록, 리소스 URI, 링크 규칙(lint RFC D3 과 부딪힌다) | 헤더 선택 키, move 도구, 들여쓰기 출력, lint 규칙 둘 |
 
+### D. 태그를 그룹으로 읽는다 (코드 변경 없음)
+
+라이브 데이터가 이미 이 모양이다(§2). 태그 가운데 다른 페이지 이름과 같은 것을 부모로 읽으면 `political-maladies` 아래 9장이 묶인다. 코드도 헤더도 바꾸지 않는다. 약점은 셋이다.
+
+1. 어느 태그가 그룹인지는 "이름이 같다"는 관례로만 남는다. 문자열 관례를 분류기로 쓰는 셈이라 컴파일러와 읽기 코드가 틀린 쪽을 잡지 못한다.
+2. 한 페이지가 입구 이름과 같은 태그를 둘 가질 수 있다. 그러면 부모가 둘이다.
+3. 옮기려면 `masc_wiki_update` 로 본문 전체를 다시 보내야 한다(`body` 가 필수다).
+
+C 는 같은 일을 `parent` 라는 이름 있는 칸으로 하고, 옮길 때 본문을 건드리지 않는다. 대가는 헤더 키 하나, 도구 하나, 그리고 지금 있는 곡 페이지 9장을 한 번씩 옮기는 일이다.
+
+### 제안
+
 제안은 C 다. 이유는 하나다. 페이지 이름은 이미 "바뀌지 않는다"는 계약이고 밖에서 인용된다. B 는 그 계약을 깨고 인용을 전부 끊는다. C 는 계약을 지키고 한 장만 쓴다. C 의 약점은 디스크에서 폴더가 안 보인다는 것이다. 운영자가 `ls ~/me/.masc/wiki` 에서 폴더를 보고 싶다면 C 로는 못 채운다.
+
+지금 11장에서 C 의 이득은 측정하지 못했다. 관례에 기대도 되는 동안은 D 로 두고, 페이지가 늘어 관례가 깨질 때 C 로 가는 길도 있다. C 로 갈 때 `parent` 값을 태그에서 그대로 옮겨 적으면 되므로(태그 이름이 곧 부모 페이지 이름이다) 이 순서가 막히지 않는다. 지금 할지는 운영자가 정한다(§8 Q6).
 
 ## 4. 설계 (C 안)
 
@@ -115,10 +132,13 @@ Keeper 한 명이다. 후보는 `glossary-maniac` 이다. 활성이고 자율 �
 
 기존 예약 깨움을 쓴다(`masc_schedule_create` 의 반복 깨움). 깨울 때 보내는 글은 다음 일을 시킨다.
 
-1. `log.md` 에서 지난번 이후 줄을 읽는다.
-2. `masc_wiki_lint` 를 돌린다.
-3. 맨 위에 쌓인 페이지의 자리를 잡고, 필요하면 입구 페이지를 쓴다.
-4. 마지막으로 본 줄을 예약 노트에 남긴다(`masc_schedule_note_add`. 이 도구를 Keeper 가 쓸 수 있는지 확인하지 못했다).
+1. `masc_wiki_lint` 를 돌린다.
+2. 목차에서 부모가 없고 입구도 아닌 페이지를 찾아 자리를 잡는다. 필요하면 입구 페이지를 쓴다.
+3. 할 일이 없으면 빈 답으로 끝낸다.
+
+이 일은 몇 번을 돌려도 결과가 같다. 자리가 잡힌 페이지는 건드리지 않기 때문이다. 그래서 "지난번에 어디까지 봤는지"를 남기지 않는다. 담당 Keeper 는 `log.md` 를 읽을 수 없고(§2), 읽게 하려면 `keeper_wiki_read` 를 바꿔야 한다. 이 RFC 는 거기까지 가지 않는다.
+
+대가는 일이 없어도 주기마다 한 턴을 쓰는 것이다. 페이지가 쓰일 때 담당을 깨우는 길은 지금 없다.
 
 이유는 하나다. 새 페이지는 쓰는 사람이 자리까지 정하기 어렵다. 그 판단을 쓰는 순간에서 떼어 따로 한다. 새 페이지를 쓰는 Keeper 는 지금처럼 `masc_wiki_create` 만 한다.
 
@@ -150,16 +170,36 @@ Keeper 한 명이다. 후보는 `glossary-maniac` 이다. 활성이고 자율 �
 - Q3. 정리 담당 Keeper 는 누구이고 얼마마다 깨울까?
 - Q4. `parent` 없이 만든 새 페이지를 맨 위에 두고 담당이 나중에 옮겨도 되나?
 - Q5. lint RFC 에 걸린 "v0.54.0 컷 전에는 구현 PR 을 시작하지 않는다"를 이 RFC 에도 적용할까?
+- Q6. 지금 11장에서 C 를 하나, 아니면 D(태그 관례)로 두고 페이지가 늘 때 하나? 담당 Keeper 와 주기(Q3)는 어느 쪽이든 필요하다.
 
 ## 9. 구현 순서 (RFC 가 받아들여진 뒤)
 
-1. 헤더 `parent` 읽기와 쓰기, `masc_wiki_move`, 테스트와 변이.
+1. 헤더 `parent` 읽기와 쓰기, `masc_wiki_move`, 테스트와 변이. `move` 는 `Tool_schemas_wiki` 의 새 operation 이므로 `keeper_tool_descriptor.ml` 의 닫힌 match 둘(`masc_wiki_descriptor` 의 projection 과 실행 방식)이 컴파일 때 빠짐없이 정하게 만든다.
 2. `index.md` 와 Keeper 목차의 들여쓰기.
 3. lint 종류 둘.
 4. 담당 Keeper 의 예약 깨움. 설정만 하고 코드는 없다.
 
 ## 10. 확신도
 
-- 문제(§2): 높음. 코드와 라이브 파일을 직접 읽었다.
-- C 안 제안(§3): 중간. 디스크 가시성이 필요한지 모른다.
+- 문제(§2): 높음. 코드와 라이브 파일을 직접 읽었다. 다만 측정한 아픔은 없다.
+- C 안 제안(§3): 중간. 디스크 가시성이 필요한지 모르고, 11장에서 D 와의 차이를 재지 못했다.
 - 담당 후보(§5.2): 낮음. 도구 접근을 확인하지 못했다.
+- 담당이 `log.md` 를 못 읽는다는 것(§2): 중간. `keeper_wiki_read` 의 경로만 읽었고 Keeper 의 다른 읽기 길은 보지 않았다.
+
+## 11. llm-wiki 와의 대응
+
+원문은 Karpathy 의 gist `llm-wiki.md` 다(2026-10-14 에 읽음. 앞 10만 자만 읽었고 인용은 읽기 도구가 뽑아 준 발췌다). 원문은 구조를 정하지 않고 "도메인에 맞게" 두라고 한다.
+
+| 원문 | masc 위키 | 다른 점 |
+|---|---|---|
+| 원문 층: LLM 이 고치지 않는다 | 정해진 곳이 없다. lint RFC §3 이 `## Sources` 참조를 제안한다 | 아직 없다 |
+| 위키 층: "The LLM owns this layer entirely" | Keeper 와 코딩 세션이 `masc_wiki_create`, `masc_wiki_update` 로 쓴다 | 쓰는 쪽이 여럿이라 `revision` 으로 충돌을 막는다 |
+| 스키마 층: CLAUDE.md 같은 규칙 문서 | `config/tools/masc_wiki_*.toml` 의 도구 설명 | 위키 안에 규칙 문서가 따로 없다 |
+| ingest: 소스 하나가 "10-15 wiki pages" 를 건드린다 | 한 번에 한 장 | 여러 장은 호출 여러 번이다 |
+| `index.md`: 카테고리별 목록 | 한 줄씩 평면 목록. 이 RFC 가 들여쓰기로 묶는다 | |
+| `log.md`: append-only, 접두어를 붙여 grep 한다 | 같은 모양(`## [시각] 동작 r<N> \| 페이지 \| 작성자 \| 노트`) | Keeper 는 못 읽는다(§2) |
+| lint: "Periodically, ask the LLM" | `masc_wiki_lint`(읽기 전용)와 담당 Keeper 의 주기 깨움 | 원문은 주기를 정하지 않는다. Q3 은 우리가 정한다 |
+| 폴더 구조: 정의하지 않는다 | 평면. 이 RFC 는 `parent` 를 제안한다 | 원문은 폴더를 요구하지 않는다 |
+| 옮기기, 이름 바꾸기: 말이 없다 | `masc_wiki_move` | 원문에 없다 |
+
+원문에서는 쓰는 쪽이 곧 정리하는 쪽이다. 한 LLM 이 ingest 때 관련 페이지를 한꺼번에 고친다. masc 는 쓰는 쪽이 여럿이고 한 번에 한 장만 쓴다. 이 차이가 정리 담당을 따로 두는 이유다(§5). 원문을 따르는 것이 아니라 일부러 다르게 가는 자리다.

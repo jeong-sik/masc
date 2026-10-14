@@ -33,6 +33,7 @@ const currentWire = {
     paused: false,
     next_action: 'direct_message',
     runtime_blocker_summary: null,
+    runtime_blocker_signature: null,
     keepalive_running: true,
     activation_mode: 'on_demand',
     runtime_id: 'runtime-planner',

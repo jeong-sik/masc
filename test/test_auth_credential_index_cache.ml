@@ -229,7 +229,8 @@ let test_requests_that_miss_together_rebuild_once () =
         check (float 0.0) "one rebuild" (before +. 1.0) (index_rebuilds ())))
 
 (* Real clock and file times: the first lookup follows the write within the
-   same step, the second waits the step out. *)
+   same step, the second waits the step out, and the index it lists outlives
+   a further step because nothing changed after its step. *)
 let test_index_listed_inside_a_time_step_is_rebuilt_once_the_step_ends () =
   let dir = setup_test_workspace () in
   Fun.protect
@@ -252,10 +253,15 @@ let test_index_listed_inside_a_time_step_is_rebuilt_once_the_step_ends () =
           Float.max stats.Unix.st_mtime stats.Unix.st_ctime
           +. Auth.Credential_index_expiry_for_testing.time_step_sec
         in
+        let step = Auth.Credential_index_expiry_for_testing.time_step_sec in
         Unix.sleepf (Float.max 0.0 (step_end -. Unix.gettimeofday ()) +. 0.1);
         lookup "after the step";
         lookup "after the step, again";
         check (float 0.0) "one rebuild after the step, then the index serves"
+          (before +. 2.0) (index_rebuilds ());
+        Unix.sleepf (step +. 0.1);
+        lookup "a step later";
+        check (float 0.0) "an index listed after the step outlives the next step"
           (before +. 2.0) (index_rebuilds ())))
 
 let test_time_step_never_outlasts_the_ttl () =
@@ -268,6 +274,12 @@ let test_time_step_never_outlasts_the_ttl () =
   check (float 0.0) "listed inside the step: the step's end"
     (stamped_at -. 0.5 +. Expiry.time_step_sec)
     (expires_at (Some (stamped_at -. 0.5)));
+  check (float 0.0) "listed exactly at the step's end: the TTL"
+    (stamped_at +. Expiry.ttl_sec)
+    (expires_at (Some (stamped_at -. Expiry.time_step_sec)));
+  check (float 0.0) "a file clock ahead by less than the TTL: the step's end"
+    (stamped_at +. 10.0 +. Expiry.time_step_sec)
+    (expires_at (Some (stamped_at +. 10.0)));
   check (float 0.0) "a file clock far ahead: still the TTL"
     (stamped_at +. Expiry.ttl_sec) (expires_at (Some (stamped_at +. 3600.0)));
   check (float 0.0) "no agents directory: the TTL"

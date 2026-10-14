@@ -61,7 +61,12 @@ let read_listing_header ~path ~size =
    its tail rather than the whole file (task-2309). The read is the last
    [log_read_limit] bytes, starting at a line boundary so the first line is
    whole; a log at or below the bound is returned as written. The listing's
-   size is the whole file, so a client can tell a tail from the whole. *)
+   size is the whole file, so a client can tell a tail from the whole.
+
+   When the last [log_read_limit] bytes hold no newline the file is a single
+   line longer than the bound; the slice is then returned as read, and its
+   first byte may sit inside a UTF-8 code point. Real logs add one short line
+   per event, so this is a guard, not a path taken. *)
 let log_read_limit = 65536
 
 let read_log_tail ~path ~size =
@@ -147,7 +152,9 @@ let wiki_resources ~base_path : Mcp_server.mcp_resource list =
             ~uri:(uri_of_topic wiki_log_topic)
             ~name:wiki_log_topic
             ~description:
-              "One line per wiki page creation or update, oldest first. Lines are only appended."
+              "One line per wiki page creation or update, oldest first. Lines \
+               are only appended. A read returns the tail: the last 65536 bytes, \
+               starting at a line boundary; the size below is the whole file."
             ~mime_type:"text/markdown"
             ()
         ]

@@ -175,6 +175,20 @@ end
     without an enclosing Keeper turn. *)
 
 module For_testing : sig
+  val node_result_to_json : Keeper_tool_plan_executor.node_result -> Yojson.Safe.t
+  (** The canonical settlement representation used by the production surface
+      when it persists Skill composition evidence. *)
+
+  val project_execution_result :
+    base_path:string ->
+    plan:Keeper_tool_plan.t ->
+    execution:(Keeper_tool_plan_executor.node_result list,
+               Keeper_tool_plan_executor.failure) result ->
+    Tool_result.result ->
+    (Tool_result.result, Tool_bridge.externalization_error) result
+  (** The production export selection and durable-manifest boundary shared by
+      inline and asynchronous composition results. *)
+
   val result_of_execution :
     tool_name:string ->
     tool_kind:Keeper_tool_descriptor.tool_kind ->

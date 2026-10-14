@@ -448,6 +448,17 @@ let result_of_execution ~tool_name ~tool_kind ~start_time = function
       (Yojson.Safe.to_string data)
 ;;
 
+let project_execution_result ~base_path ~plan ~execution result =
+  let projection =
+    match Keeper_tool_plan.exports plan with
+    | [] -> Tool_output.Reference_only
+    | _ :: _ -> Tool_output.Inline_with_reference
+  in
+  Result.bind
+    (Keeper_composition_result.project ~base_path ~plan ~execution result)
+    (Tool_bridge.attach_artifact_manifest ~projection ~base_path)
+;;
+
 let record_skill_composition_evidence
       ~on_publication_failure
       ~config
@@ -599,6 +610,13 @@ let async_worker_result
       ~tool_kind
       ~start_time
       execution
+  in
+  let result =
+    match project_execution_result ~base_path:config.base_path ~plan ~execution result with
+    | Ok result -> result
+    | Error { message; _ } ->
+      Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time message
   in
   Option.iter
     (fun reference ->
@@ -812,7 +830,8 @@ let status_result
         ~ok:true
         (with_kind (Keeper_msg_async.entry_to_json entry))
     in
-    (match Tool_bridge.attach_artifact_manifest ~base_path:config.base_path result with
+    (match Tool_bridge.attach_artifact_manifest
+             ~projection:Tool_output.Inline_with_reference ~base_path:config.base_path result with
      | Ok result -> result
      | Error { message; _ } ->
        Tool_result.make_err
@@ -1348,6 +1367,8 @@ let make_instruction_skill_tool
 ;;
 
 module For_testing = struct
+  let node_result_to_json = node_result_to_json
+  let project_execution_result = project_execution_result
   let result_of_execution = result_of_execution
   let observe_node_result = observe_node_result
   let failure_payload = failure_payload
@@ -1782,9 +1803,8 @@ let make_tools_with_authority
              in
              let result =
                match
-                 Tool_bridge.attach_artifact_manifest
-                   ~base_path:config.base_path
-                   executor_result
+                 project_execution_result
+                   ~base_path:config.base_path ~plan ~execution executor_result
                with
                | Ok result -> result
                | Error { message; _ } ->
@@ -1803,7 +1823,7 @@ let make_tools_with_authority
                    ~tool_name
                    ~class_:Tool_result.Runtime_failure
                    ~start_time
-                   "composition result manifest persistence failed"
+                   message
              in
              record_skill_composition_evidence
                ~on_publication_failure:(fun detail ->

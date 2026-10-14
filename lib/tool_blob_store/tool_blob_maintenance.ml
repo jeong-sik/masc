@@ -276,6 +276,10 @@ let durable_consumer_basenames =
   (* The bounded diagnostic store owns every blob reference for as long as
      its dated JSONL row remains inside wire-capture retention. *)
   ; "wire-capture"
+  (* These stores can be the sole durable owners of a completed composition,
+     independently of a surviving Keeper transcript or tool-call row. *)
+  ; "skill-composition-evidence-v1"
+  ; "keeper_msg_requests"
   ]
 ;;
 

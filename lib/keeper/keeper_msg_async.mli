@@ -427,6 +427,12 @@ val entry_to_json : entry -> Yojson.Safe.t
 module For_testing : sig
   type request_ops
 
+  val persist_terminal_record : entry -> (unit, string) result
+  (** Seed an offline terminal fixture through the production owned persistence
+      transaction, canonical durable codec and terminal partition. Nonterminal
+      entries are rejected. This creates no worker or process-local request
+      index, so exact lookup and retention can exercise the disk as sole owner. *)
+
   val make_request_ops
     :  ?before_durable_write:(Keeper_fs.durable_write_stage -> unit)
     -> ?before_durable_remove:(Keeper_fs.durable_remove_stage -> unit)

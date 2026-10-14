@@ -52,6 +52,9 @@ type error =
       { index : int
       ; field : string
       }
+  | Request_invalid_field of { field : string; found : string }
+  | Export_invalid_field of { index : int; field : string; found : string }
+  | Export_template_error of { index : int; error : template_error }
   | Plan_rejected of Keeper_tool_plan.error
 
 type encode_error = Unsubstituted_param of { name : string }
@@ -125,7 +128,18 @@ let input_schema =
   `Assoc
     [ "$id", `String "urn:masc:schema:keeper-tool-plan-request:v1"
     ; "type", `String "object"
-    ; "properties", `Assoc [ "nodes", `Assoc [ "type", `String "array"; "minItems", `Int 1; "items", node_schema ] ]
+    ; "properties", `Assoc
+        [ "nodes", `Assoc [ "type", `String "array"; "minItems", `Int 1; "items", node_schema ]
+        ; "exports", `Assoc
+            [ "type", `String "array"
+            ; "items", closed_object
+                [ "name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+                ; "node", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+                ; "pointer", `Assoc [ "type", `String "string" ] ]
+                [ "name"; "node"; "pointer" ] ]
+        ; "branch_failure_policy", `Assoc
+            [ "type", `String "string"
+            ; "enum", `List [ `String "fail_fast"; `String "continue_independent" ] ] ]
     ; "required", `List [ `String "nodes" ]
     ; "additionalProperties", `Bool false
     ; "$defs", `Assoc [ "template", template_schema ]
@@ -170,11 +184,17 @@ let error_message = function
   | Node_template_error { index; error } ->
     Printf.sprintf "node %d input: %s" index (template_error_message error)
   | Unknown_request_field { field } ->
-    Printf.sprintf "unknown plan request field %S (only \"nodes\" is accepted)" field
+    Printf.sprintf "unknown plan request field %S (expected nodes, exports, or branch_failure_policy)" field
   | Duplicate_request_field { field } ->
     Printf.sprintf "plan request declares field %S twice" field
   | Node_duplicate_field { index; field } ->
     Printf.sprintf "node %d declares field %S twice" index field
+  | Request_invalid_field { field; found } ->
+    Printf.sprintf "plan field %S has invalid value: %s" field found
+  | Export_invalid_field { index; field; found } ->
+    Printf.sprintf "export %d field %S has invalid value: %s" index field found
+  | Export_template_error { index; error } ->
+    Printf.sprintf "export %d: %s" index (template_error_message error)
   | Plan_rejected error -> Plan.error_to_string error
 ;;
 
@@ -227,6 +247,12 @@ let error_to_json error =
     tag "duplicate_request_field" [ "field", `String field ]
   | Node_duplicate_field { index; field } ->
     tag "node_duplicate_field" [ "index", `Int index; "field", `String field ]
+  | Request_invalid_field { field; found } ->
+    tag "request_invalid_field" [ "field", `String field; "found", `String found ]
+  | Export_invalid_field { index; field; found } ->
+    tag "export_invalid_field" [ "index", `Int index; "field", `String field; "found", `String found ]
+  | Export_template_error { index; error } ->
+    tag "export_template_error" [ "index", `Int index; "error", template_error_to_json error ]
   | Plan_rejected plan_error ->
     tag
       "plan_rejected"
@@ -319,7 +345,23 @@ let to_yojson plan =
       (Ok [])
       (Plan.nodes plan)
   in
-  Ok (`Assoc [ "nodes", `List (List.rev nodes) ])
+  let exports =
+    match Plan.exports plan with
+    | [] -> []
+    | exports ->
+      [ "exports", `List
+          (List.map (fun (export : Plan.export) ->
+             `Assoc [ "name", `String export.name
+                    ; "node", `String (Plan.Node_id.to_string export.node_id)
+                    ; "pointer", `String (Plan.Json_pointer.to_string export.pointer) ]) exports) ]
+  in
+  let policy =
+    match Plan.branch_failure_policy plan with
+    | Plan.Fail_fast -> []
+    | Plan.Continue_independent ->
+      [ "branch_failure_policy", `String (Plan.branch_failure_policy_to_string Plan.Continue_independent) ]
+  in
+  Ok (`Assoc ([ "nodes", `List (List.rev nodes) ] @ exports @ policy))
 ;;
 
 let first_duplicate fields =
@@ -548,6 +590,29 @@ let node_of_json ~index json =
   | other -> Error (Node_not_an_object { index; found = kind_name other })
 ;;
 
+let export_of_json ~index = function
+  | `Assoc fields ->
+    let* name =
+      match List.assoc_opt "name" fields with
+      | Some (`String name) -> Ok name
+      | None -> Error (Export_invalid_field { index; field = "name"; found = "missing" })
+      | Some value -> Error (Export_invalid_field { index; field = "name"; found = kind_name value })
+    in
+    let* () =
+      match first_duplicate fields with
+      | None -> Ok ()
+      | Some field -> Error (Export_template_error
+          { index; error = Template_duplicate_field { kind = "export"; field } })
+    in
+    let reference = `Assoc (("kind", `String "output") :: List.filter (fun (field, _) -> not (String.equal field "name")) fields) in
+    (match template_of_json reference with
+     | Ok (Plan.Json_template.Output { node_id; pointer }) -> Ok (Plan.export ~name ~node_id ~pointer)
+     | Ok (Plan.Json_template.Literal _ | Plan.Json_template.Object _ | Plan.Json_template.Array _ | Plan.Json_template.Param _) ->
+       Error (Export_invalid_field { index; field = "export"; found = "expected output reference" })
+     | Error error -> Error (Export_template_error { index; error }))
+  | value -> Error (Export_invalid_field { index; field = "export"; found = kind_name value })
+;;
+
 let plan_of_json ~descriptors json =
   match json with
   | `Assoc fields ->
@@ -561,10 +626,30 @@ let plan_of_json ~descriptors json =
         (fun acc (field, _) ->
            let* () = acc in
            match field with
-           | "nodes" -> Ok ()
+           | "nodes" | "exports" | "branch_failure_policy" -> Ok ()
            | other -> Error (Unknown_request_field { field = other }))
         (Ok ())
         fields
+    in
+    let* branch_failure_policy =
+      match List.assoc_opt "branch_failure_policy" fields with
+      | None -> Ok Plan.default_branch_failure_policy
+      | Some (`String policy) ->
+        (match Plan.branch_failure_policy_of_string policy with
+         | Some policy -> Ok policy
+         | None -> Error (Request_invalid_field { field = "branch_failure_policy"; found = policy }))
+      | Some value -> Error (Request_invalid_field { field = "branch_failure_policy"; found = kind_name value })
+    in
+    let* exports =
+      match List.assoc_opt "exports" fields with
+      | None -> Ok []
+      | Some (`List values) ->
+        List.fold_left (fun acc (index, value) ->
+          let* acc = acc in
+          let* export = export_of_json ~index value in
+          Ok (export :: acc)) (Ok []) (List.mapi (fun index value -> index, value) values)
+        |> Result.map List.rev
+      | Some value -> Error (Request_invalid_field { field = "exports"; found = kind_name value })
     in
     (match List.assoc_opt "nodes" fields with
      | None -> Error Missing_nodes
@@ -578,7 +663,7 @@ let plan_of_json ~descriptors json =
            (Ok [])
            (List.mapi (fun index node_json -> index, node_json) node_jsons)
        in
-       (match Plan.create ~descriptors (List.rev nodes) with
+       (match Plan.create ~descriptors ~branch_failure_policy ~exports (List.rev nodes) with
         | Ok plan -> Ok plan
         | Error error -> Error (Plan_rejected error))
      | Some other -> Error (Nodes_not_an_array { found = kind_name other }))

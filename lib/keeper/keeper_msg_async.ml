@@ -2272,6 +2272,13 @@ let cancel = cancel_with_ops production_request_ops
 module For_testing = struct
   type nonrec request_ops = request_ops
 
+  let persist_terminal_record (entry : entry) =
+    if is_terminal_status entry.status
+    then persist_entry ~ops:production_request_ops entry
+         |> Result.map_error persist_error_to_string
+    else Error "offline request fixture must have a terminal status"
+  ;;
+
   let make_request_ops ?before_durable_write ?before_durable_remove
       ?(generate_request_id = production_request_ops.generate_request_id)
       ?(before_integrity_projection =

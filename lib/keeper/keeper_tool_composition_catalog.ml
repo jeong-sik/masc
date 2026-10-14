@@ -49,6 +49,7 @@ type error =
       { path : string list
       ; mode : string
       }
+  | Invalid_branch_failure_policy of { path : string list; policy : string }
   | Async_tool_not_statically_read_only of
       { name : string
       ; node_id : Plan.Node_id.t
@@ -630,6 +631,46 @@ let parse_node ~path value =
                           | Ok input -> Ok (Plan.node ~id ~tool_name ~after ~input ())))))))))
 ;;
 
+let plan_of_fields ~descriptors ~path ~name fields nodes =
+  let ( let* ) = Result.bind in
+  let* raw_policy = optional_string ~path "branch_failure_policy" fields in
+  let* branch_failure_policy =
+    match raw_policy with
+    | None -> Ok Plan.default_branch_failure_policy
+    | Some policy ->
+      match Plan.branch_failure_policy_of_string policy with
+      | Some policy -> Ok policy
+      | None -> Error (Invalid_branch_failure_policy { path; policy })
+  in
+  let* raw_exports =
+    match List.assoc_opt "exports" fields with
+    | None -> Ok []
+    | Some value -> table_array ~path ~field:"exports" value
+  in
+  let* exports =
+    List.fold_left
+      (fun acc (index, value) ->
+         let* acc = acc in
+         let path = path @ [ "exports"; string_of_int index ] in
+         let* fields = table_fields ~path ~field:"export" value in
+         let* () = validate_fields ~path ~allowed:[ "name"; "node"; "pointer" ] fields in
+         let* name = required_nonempty_string ~path "name" fields in
+         let* source = required_string ~path "node" fields in
+         let* node_id = node_id ~path source in
+         let* raw_pointer = required_string ~path "pointer" fields in
+         let* pointer =
+           match Plan.Json_pointer.of_string raw_pointer with
+           | Ok pointer -> Ok pointer
+           | Error error -> Error (Invalid_json_pointer { path; error })
+         in
+         Ok (Plan.export ~name ~node_id ~pointer :: acc))
+      (Ok []) (List.mapi (fun index value -> index, value) raw_exports)
+  in
+  match Plan.create ~descriptors ~branch_failure_policy ~exports:(List.rev exports) nodes with
+  | Ok plan -> Ok plan
+  | Error error -> Error (Plan_rejected { name; error })
+;;
+
 let parse_composition ~descriptors ~index value =
   let path = [ "compositions"; string_of_int index ] in
   match table_fields ~path ~field:"composition" value with
@@ -638,7 +679,7 @@ let parse_composition ~descriptors ~index value =
     (match
        validate_fields
          ~path
-         ~allowed:[ "name"; "description"; "execution"; "params"; "nodes"; "defer_loading" ]
+         ~allowed:[ "name"; "description"; "execution"; "params"; "nodes"; "defer_loading"; "exports"; "branch_failure_policy" ]
          fields
      with
      | Error _ as error -> error
@@ -704,11 +745,9 @@ let parse_composition ~descriptors ~index value =
                     | Error _ as error -> error
                     | Ok nodes ->
                       (match
-                         Plan.create
-                           ~descriptors
-                           nodes
+                         plan_of_fields ~descriptors ~path ~name fields nodes
                        with
-                       | Error error -> Error (Plan_rejected { name; error })
+                       | Error _ as error -> error
                        | Ok plan ->
                          (match validate_declared_params ~name ~params plan with
                           | Error _ as error -> error
@@ -794,6 +833,9 @@ let error_to_string = function
       "invalid execution mode %S at %s (expected inline or async)"
       mode
       (String.concat "." path)
+  | Invalid_branch_failure_policy { path; policy } ->
+    Printf.sprintf "invalid branch failure policy %S at %s (expected fail_fast or continue_independent)"
+      policy (String.concat "." path)
   | Async_tool_not_statically_read_only { name; node_id; tool_name } ->
     Printf.sprintf
       "async composition %S node %S tool %S is not statically read-only"
@@ -929,7 +971,9 @@ let instantiate ~descriptors ~args entry =
   in
   let rec rebuild rebuilt = function
     | [] ->
-      (match Plan.create ~descriptors (List.rev rebuilt) with
+      (match Plan.create ~descriptors
+               ~branch_failure_policy:(Plan.branch_failure_policy entry.plan)
+               ~exports:(Plan.exports entry.plan) (List.rev rebuilt) with
        | Ok plan -> Ok plan
        | Error error -> Error (Instantiated_plan_rejected error))
     | (node : Plan.node) :: rest ->

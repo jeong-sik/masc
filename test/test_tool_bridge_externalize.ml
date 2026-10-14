@@ -197,6 +197,46 @@ let test_typed_artifact_result_becomes_durable_manifest () =
           | O.Not_artifact_manifest -> Alcotest.fail "manifest schema is absent"
           | O.Invalid_artifact_manifest { detail } -> Alcotest.fail detail)))
 
+let test_opt_in_artifact_inline_respects_projection () =
+  with_temp_base_path (fun base_path ->
+    let child = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+        ~bytes:"selected artifact original" ~mime:"text/plain" in
+    let data = `Assoc [ "selected", `String "ready"
+                      ; "original", O.normalized_artifact_ref_to_json child ] in
+    let result = Tool_result.make_ok ~tool_name:"composition-preview"
+        ~start_time:(Tool_timing.start ()) ~data ()
+      |> B.attach_artifact_manifest ~projection:O.Inline_with_reference ~base_path
+      |> Result.get_ok in
+    let content = match B.to_agent_core_typed_result ~base_path result with
+      | Ok output -> output.content | Error error -> Alcotest.fail error.message in
+    let envelope = Yojson.Safe.from_string content in
+    Alcotest.(check string) "selected value survives with a durable reference" "ready"
+      Yojson.Safe.Util.(envelope |> member "structured_content" |> member "selected" |> to_string);
+    let manifest = Yojson.Safe.Util.(envelope |> member "artifact_manifest") in
+    let manifest = match O.normalized_artifact_ref_of_json manifest with
+      | O.Decoded_normalized_artifact_ref reference -> reference
+      | O.Not_normalized_artifact_ref | O.Invalid_normalized_artifact_ref _ ->
+        Alcotest.fail "inline envelope lost its durable root" in
+    let smaller = O.Inline_up_to { maximum_bytes = String.length content - 1 } in
+    (match B.to_agent_core_typed_result ~base_path ~model_projection:smaller result with
+     | Ok output ->
+       (match O.decode_from_agent_core output.content with
+        | O.Decoded reference -> Alcotest.(check string) "bounded fallback keeps the same identity"
+            manifest.sha256 reference.sha256
+        | O.Not_marker -> Alcotest.fail "over-ceiling inline envelope escaped"
+        | O.Invalid_marker { detail } -> Alcotest.fail detail)
+     | Error error -> Alcotest.fail error.message);
+    let captured = ref None in
+    (match B.to_agent_core_typed_result ~base_path
+             ~model_projection:(O.Inline_up_to { maximum_bytes = 0 })
+             ~on_externalization_error:(fun error -> captured := Some error) result with
+     | Ok _ -> Alcotest.fail "a zero-byte ceiling admitted a reference"
+     | Error _ -> ());
+    match !captured with
+    | Some { B.kind = B.Inline_budget_exceeded; _ } -> ()
+    | Some { B.kind = B.Artifact_storage_failure; _ } | None ->
+      Alcotest.fail "projection ceiling did not produce its typed refusal")
+
 let test_manifest_producer_rejects_mixed_malformed_reference () =
   with_temp_base_path (fun base_path ->
     let child =
@@ -894,6 +934,8 @@ let () =
             test_incident_sized_result_stays_inline;
           Alcotest.test_case "typed artifact result owns durable manifest" `Quick
             test_typed_artifact_result_becomes_durable_manifest;
+          Alcotest.test_case "opt-in artifact inline keeps the descriptor ceiling" `Quick
+            test_opt_in_artifact_inline_respects_projection;
           Alcotest.test_case "manifest producer rejects malformed child" `Quick
             test_manifest_producer_rejects_mixed_malformed_reference;
           Alcotest.test_case "bounded inline rejects oversize" `Quick

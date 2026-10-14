@@ -252,6 +252,28 @@ class BrowserLaneSetupCommand(unittest.TestCase):
         self.assertEqual(changed.returncode, 0, changed.stderr)
         self.assertIn(f'geckodriver = "{other}"', runtime_toml(base).read_text().splitlines())
 
+    def test_a_kept_geckodriver_that_is_gone_is_said_and_left_alone(self):
+        # A brew upgrade or a removed install leaves the old absolute path in
+        # runtime.toml while PATH finds a new geckodriver. The command keeps the
+        # value, and it used to say only that, with the server failing later.
+        root = self.scratch()
+        base = workspace(root)
+        gone = root / "removed" / "geckodriver"
+        fake_geckodriver(root, root / "new")
+        text = RUNTIME_TOML + f'\n[browser.automation]\ngeckodriver = "{gone}"\n'
+        runtime_toml(base).write_text(text)
+        result = masc(root, "--mode", "automation", "--base-path", str(base),
+                      path=f"{root / 'new'}:/usr/bin:/bin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("was already there and is left as it is", result.stdout)
+        self.assertIn(f"geckodriver = {gone} is not there now", result.stdout)
+        self.assertIn("name --geckodriver to change it", result.stdout)
+        self.assertEqual(runtime_toml(base).read_text(), text, "the value is not changed")
+        named = masc(root, "--mode", "automation", "--base-path", str(base),
+                     "--geckodriver", str(root / "new" / "geckodriver"))
+        self.assertEqual(named.returncode, 0, named.stderr)
+        self.assertNotIn("is not there now", named.stdout)
+
     def test_automation_beside_bidi_writes_both_tables_and_one_host(self):
         root = self.scratch()
         base = workspace(root)

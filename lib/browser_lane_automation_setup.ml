@@ -205,6 +205,37 @@ let named_programs ~request ~set =
   let* browser_note = check Browser request.browser in
   Ok (List.filter_map Fun.id [ driver_note; browser_note ])
 
+(* A value that is already there is kept, and the program it names can be gone
+   since it was written: a brew upgrade or a removed install. The server then
+   fails on it, while this command (and the install wizard, which found a
+   geckodriver on PATH) reports success. Keeping the value is the promise, so
+   it is not changed; this only says it is not there. Only a program that is
+   not there is said. One that exists and does not answer --version may need
+   variables the probe runs without, and saying so every run would be noise. *)
+let kept_programs ~set = function
+  | None -> []
+  | Some (current : Browser_configuration.automation) ->
+    let flag = function
+      | Geckodriver -> "--geckodriver"
+      | Browser -> "--browser"
+    in
+    let check key path =
+      if List.mem key set
+      then []
+      else (
+        match Browser_runtime_dependencies.probe path with
+        | Browser_runtime_dependencies.Missing _ ->
+          [ Printf.sprintf
+              "%s = %s is not there now. It is left as it is; name %s to change it."
+              (key_name key) path (flag key)
+          ]
+        | Browser_runtime_dependencies.Started _ | Browser_runtime_dependencies.Failed _ -> [])
+    in
+    check Geckodriver current.driver
+    @ (match current.binary with
+       | Some path -> check Browser path
+       | None -> [])
+
 type plan =
   { runtime_config_path : string
   ; revision : string
@@ -239,7 +270,7 @@ let plan ~find_geckodriver (request : request) =
     let* table, set, change =
       decide ~find_geckodriver request configuration.Browser_configuration.automation
     in
-    let* notes =
+    let* named =
       match set with
       | [] -> Ok []
       | set ->
@@ -250,6 +281,9 @@ let plan ~find_geckodriver (request : request) =
           |> Result.map_error (fun reason -> Configuration_refused reason)
         in
         Ok notes
+    in
+    let notes =
+      named @ kept_programs ~set configuration.Browser_configuration.automation
     in
     Ok
       { runtime_config_path = path

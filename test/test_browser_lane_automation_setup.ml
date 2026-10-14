@@ -177,6 +177,7 @@ let test_a_table_that_is_there_keeps_its_values_byte_for_byte () =
     let plan = plan_ok (request fixture) in
     check bool "where it was" true (A.location plan = A.Automation_table);
     check bool "nothing named" true (A.change plan = A.Unchanged);
+    check (list string) "programs that are there are not noted" [] (A.notes plan);
     apply_ok plan;
     check string "the file is as it was" config (read fixture.runtime))
 
@@ -478,6 +479,71 @@ let test_a_named_driver_that_does_not_answer_is_written_with_a_note () =
     check (list string) "one that answers has no note" []
       (A.notes (plan_ok (request ~geckodriver:fixture.driver fixture))))
 
+(* A value that is kept can name a program that is gone: a brew upgrade, a
+   removed install. The command and the install wizard both found a geckodriver
+   on PATH, and only the server would fail on the old path. The value is not
+   changed, which is what keeping it means, and the note says it is not there. *)
+let gone fixture = Filename.concat fixture.root "removed/geckodriver"
+
+let kept_note label ~flag ~path notes =
+  match notes with
+  | [ note ] ->
+    check bool (label ^ ": names the path") true (contains note path);
+    check bool (label ^ ": says it is left as it is") true (contains note "left as it is");
+    check bool (label ^ ": names the flag that changes it") true (contains note flag)
+  | notes -> fail (Printf.sprintf "%s: expected one note, got %d" label (List.length notes))
+
+let test_a_kept_driver_that_is_gone_is_said_and_not_changed () =
+  with_fixture (fun fixture ->
+    let config =
+      runtime_base ^ Printf.sprintf "\n[browser.automation]\ngeckodriver = \"%s\"\n" (gone fixture)
+    in
+    write fixture.runtime config;
+    let plan = plan_ok (request fixture) in
+    check bool "left alone" true (A.change plan = A.Unchanged);
+    kept_note "unchanged" ~flag:"--geckodriver" ~path:(gone fixture) (A.notes plan);
+    (* Said again by a plan made again: the command re-plans after the BiDi
+       table, and the note must not be lost there. *)
+    (match A.replan plan with
+     | Ok again -> kept_note "replanned" ~flag:"--geckodriver" ~path:(gone fixture) (A.notes again)
+     | Error error -> fail (A.error_message error));
+    apply_ok plan;
+    check string "the file is as it was" config (read fixture.runtime))
+
+let test_a_kept_browser_that_is_gone_is_said_beside_a_named_driver () =
+  with_fixture (fun fixture ->
+    let config =
+      runtime_base
+      ^ Printf.sprintf "\n[browser.automation]\ngeckodriver = \"%s\"\nbinary = \"%s\"\n"
+          fixture.driver (Filename.concat fixture.root "removed/zen")
+    in
+    write fixture.runtime config;
+    (* The driver is named and answers, so it is written and not noted; only
+       the browser that is kept and gone is. *)
+    let plan = plan_ok (request ~geckodriver:fixture.other_driver fixture) in
+    check bool "the driver is replaced" true (A.change plan = A.Updated [ A.Geckodriver ]);
+    kept_note "browser" ~flag:"--browser" ~path:(Filename.concat fixture.root "removed/zen")
+      (A.notes plan))
+
+let test_a_named_value_replaces_a_gone_one_and_is_not_noted () =
+  with_fixture (fun fixture ->
+    write fixture.runtime
+      (runtime_base ^ Printf.sprintf "\n[browser.automation]\ngeckodriver = \"%s\"\n" (gone fixture));
+    let plan = plan_ok (request ~geckodriver:fixture.driver fixture) in
+    check (list string) "the gone value is being replaced, so it is not said" [] (A.notes plan);
+    apply_ok plan;
+    check string "replaced" fixture.driver (configured fixture).C.driver)
+
+let test_a_kept_program_that_exists_and_does_not_answer_is_not_said () =
+  (* It may need variables the probe runs without. Saying so each run would be
+     noise, and the server starts it with its own environment. *)
+  with_fixture (fun fixture ->
+    let broken = Filename.concat fixture.root "broken driver" in
+    write ~mode:0o755 broken "#!/bin/sh\nexit 3\n";
+    write fixture.runtime
+      (runtime_base ^ Printf.sprintf "\n[browser.automation]\ngeckodriver = \"%s\"\n" broken);
+    check (list string) "no note" [] (A.notes (plan_ok (request fixture))))
+
 let test_a_lane_that_is_off_is_reported_and_still_written () =
   with_fixture ~config:(runtime_base ^ "\n[browser.automation]\nenabled = false\n")
     (fun fixture ->
@@ -538,5 +604,15 @@ let () =
             test_a_named_driver_that_does_not_answer_is_written_with_a_note
         ; test_case "a lane that is off is reported and written" `Quick
             test_a_lane_that_is_off_is_reported_and_still_written
+        ] )
+    ; ( "a value that is kept and gone"
+      , [ test_case "a kept driver that is gone is said, not changed" `Quick
+            test_a_kept_driver_that_is_gone_is_said_and_not_changed
+        ; test_case "a kept browser that is gone is said beside a named driver" `Quick
+            test_a_kept_browser_that_is_gone_is_said_beside_a_named_driver
+        ; test_case "a named value replaces a gone one" `Quick
+            test_a_named_value_replaces_a_gone_one_and_is_not_noted
+        ; test_case "one that exists and does not answer is not said" `Quick
+            test_a_kept_program_that_exists_and_does_not_answer_is_not_said
         ] )
     ]

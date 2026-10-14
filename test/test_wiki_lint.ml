@@ -384,6 +384,54 @@ let test_revision_log_hole_ignores_a_page_that_is_not_there () =
     (describe (Lint.run (G.of_nodes nodes) ~log))
 ;;
 
+(* A line the parser could not read might have carried an r<N> for this page,
+   in a place we cannot read, so the column is not one we can call complete. *)
+let test_revision_log_hole_is_silent_when_a_line_was_dropped () =
+  let nodes =
+    [ readable ~page:"alpha" ~revision:4 ("[beta](beta.md)\n" ^ sourced)
+    ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+    ]
+  in
+  let with_unreadable =
+    Log.parse
+      ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n\
+       ## [2026-10-13 20:01] update r2 | alpha | someone | b\n\
+       ## [2026-10-13 20:02] upd\n\
+       ## [2026-10-13 20:03] update r4 | alpha | someone | d\n")
+  in
+  let with_unknown_action =
+    Log.parse
+      ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n\
+       ## [2026-10-13 20:01] update r2 | alpha | someone | b\n\
+       ## [2026-10-13 20:02] publish r3 | alpha | someone | c\n\
+       ## [2026-10-13 20:03] update r4 | alpha | someone | d\n")
+  in
+  check (list string) "a torn line hides the column"
+    []
+    (describe (Lint.run (G.of_nodes nodes) ~log:with_unreadable));
+  check (list string) "an unknown action word hides the column"
+    []
+    (describe (Lint.run (G.of_nodes nodes) ~log:with_unknown_action))
+;;
+
+(* A page whose log starts at r3 (no create line) must not be reported as
+   hole r1 forever. The column starts where the log's own lowest line starts. *)
+let test_revision_log_hole_does_not_start_at_r1 () =
+  let nodes =
+    [ readable ~page:"alpha" ~revision:4 ("[beta](beta.md)\n" ^ sourced)
+    ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+    ]
+  in
+  let starts_at_three =
+    Log.parse
+      ("## [2026-10-13 20:00] update r3 | alpha | someone | c\n\
+       ## [2026-10-13 20:01] update r4 | alpha | someone | d\n")
+  in
+  check (list string) "no hole when the column starts above r1"
+    []
+    (describe (Lint.run (G.of_nodes nodes) ~log:starts_at_three))
+;;
+
 (* --- the report as the tool hands it back (RFC §4.2) -------------------- *)
 
 let member key json = Yojson.Safe.Util.member key json
@@ -495,6 +543,10 @@ let () =
             test_revision_log_hole_is_silent_on_a_contiguous_column
         ; test_case "no hole for a page that is not there" `Quick
             test_revision_log_hole_ignores_a_page_that_is_not_there
+        ; test_case "a dropped line hides the column" `Quick
+            test_revision_log_hole_is_silent_when_a_line_was_dropped
+        ; test_case "the column does not start at r1" `Quick
+            test_revision_log_hole_does_not_start_at_r1
         ] )
     ; ( "report"
       , [ test_case "the report carries the log counts and the gap" `Quick

@@ -111,7 +111,7 @@ finding 은 `kind` 로 갈리는 객체다.
 | `hearsay_only` | `page`: string | 참조 줄이 `said:` 뿐이다 |
 | `unreadable_page` | `file`: string, `reason`: string | 헤더가 읽히지 않거나, 파일이 있는데 열 수 없다. `reason` 은 앞의 경우 기존 `frontmatter_error_to_string` 의 문장이고, 뒤의 경우 `the file could not be opened: ` 로 시작한다 |
 | `revision_log_gap` | `page`: string, `log_revision`: int, `page_revision`: int | log 가 이 페이지에 기록한 가장 높은 `r<N>` 을 페이지가 닿지 못했다(§4.5). `log_revision` 이 그 `N`, `page_revision` 이 파일이 지닌 revision 이다. 반대 방향은 발견이 아니다 |
-| `revision_log_hole` | `page`: string, `missing`: int | log 가 이 페이지에 기록한 가장 높은 `r<N>` 아래에서 `r<missing>` 을 건너뛰었다(§4.5). 한 페이지의 줄은 `r1`, `r2`, … 로 건너뜀이 없으므로, 빠진 값은 페이지에는 닿고 log 에는 닿지 못한 줄이다 |
+| `revision_log_hole` | `page`: string, `missing`: int | log 가 이 페이지에 기록한 가장 높은 `r<N>` 아래에서 `r<missing>` 을 건너뛰었다(§4.5). 한 페이지의 줄은 `r1`, `r2`, … 로 건너뜀이 없으므로, 빠진 값은 페이지에는 닿고 log 에는 닿지 못한 줄이다. log 에 파서가 버린 줄이 하나라도 있으면(`unknown_action`·`unreadable_line` > 0) 구멍을 확정하지 않고, 열의 시작은 그 페이지 log 줄의 최저값으로 둔다 |
 
 대상이 읽히지 않는 페이지인 링크는 `broken_link` 가 아니다. 파일은 있으므로 그 페이지의 `unreadable_page` 한 번으로만 보고한다(옮김: ocaml-agent-ic).
 
@@ -146,7 +146,9 @@ finding 은 `kind` 로 갈리는 객체다.
 
 2단계의 구현은 이렇다. log 가 한 페이지에 기록한 가장 높은 `rN` 을 그 페이지가 닿지 못했으면 `revision_log_gap` 한 건을 내고, 페이지마다 최대 한 건이다(네 번 뒤진 페이지를 네 건으로 세지 않는다). 반대 방향 — 페이지가 log 보다 앞선 경우 — 은 발견으로 내지 않는다. 읽기가 잠금을 잡지 않으므로 쓰는 중인 페이지를 그 쓰기의 log 줄보다 먼저 볼 수 있고, 그것은 위 쓰기 순서의 정상적인 중간 상태다.
 
-그 중간 상태는 열의 끝만 비운다. `append_log` 가 실패하면 페이지는 `rN` 인데 log 에 그 줄이 없다. 그 뒤 성공한 쓰기가 `r(N+1)` 줄을 적으면, log 열에 `rN` 만 빠진 **중간 구멍**이 생긴다. 그래서 한 페이지의 줄이 `r1`, `r2`, … 로 건너뜀이 없다는 성질을 쓴다. log 가 그 페이지에 기록한 가장 높은 수 아래에서 빠진 수가 있으면 `revision_log_hole` 한 건을 내고 `missing` 에 그 수를 싣는다(옮김: context-reviewer `c-c1bc846252da35cb952ee816ced03a72`). 이 구멍은 쓰는 중인 상태와 구별되므로 잠금 없이도 오탐이 없다. task-2362 에서 구현했다.
+그 중간 상태는 열의 끝만 비운다. `append_log` 가 실패하면 페이지는 `rN` 인데 log 에 그 줄이 없다. 그 뒤 성공한 쓰기가 `r(N+1)` 줄을 적으면, log 열에 `rN` 만 빠진 **중간 구멍**이 생긴다. 그래서 한 페이지의 줄이 `r1`, `r2`, … 로 건너뜀이 없다는 성질을 쓴다. log 가 그 페이지에 기록한 가장 높은 수 아래에서 빠진 수가 있으면 `revision_log_hole` 한 건을 내고 `missing` 에 그 수를 싣는다(옮김: context-reviewer `c-c1bc846252da35cb952ee816ced03a72`). task-2362 에서 구현했다.
+
+이 규칙이 거짓이 되는 자리 둘은 추측하지 않고 거절한다(옮김: context-reviewer review 5517474527, code-reviewer FAIL 5517521234). 첫째, 파서가 버린 줄(모르는 동작 단어, 못 읽은 줄)은 그 페이지의 `r<N>` 을 실었을 수 있는데 그 페이지가 바로 읽을 수 없는 자리다. 그래서 log 에 그런 줄이 하나라도 있으면 구멍을 확정하지 않는다. 둘째, create 줄 없이 log 가 시작한 페이지는 `r1` 로 시작한다고 두면 영구히 `hole r1` 이 된다. 그래서 열의 시작은 그 페이지 log 줄의 최저값으로 둔다. 두 경우는 쓰는 중인 상태와 달리 잠금으로도 구별되지 않으므로, 모르는 것을 "없다" 로 채우지 않는 쪽을 택했다.
 
 ## 5. 링크 문법
 

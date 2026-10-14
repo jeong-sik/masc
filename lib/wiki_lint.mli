@@ -46,7 +46,14 @@ type finding =
           page. A page's lines are [r1], [r2], ... with no skips, so the missing
           value is a line that reached the page and never reached the log --
           what an [append_log] that failed leaves. A write in flight only
-          leaves the top of the column empty, so this is not that. *)
+          leaves the top of the column empty, so this is not that.
+
+          Refused rather than guessed in two cases: no hole is reported at all
+          when the log has any dropped line ([Wiki_log.t.unknown_action] or
+          [Wiki_log.t.unreadable_line] above zero), because such a line may
+          have carried a revision where it cannot be read; and the column is
+          taken to start at the lowest revision the log records for the page,
+          not at [r1], so a page with no create line is not reported forever. *)
 
 val kind : finding -> string
 (** The wire name: ["broken_link"], ["unsupported_link"], ["orphan"],

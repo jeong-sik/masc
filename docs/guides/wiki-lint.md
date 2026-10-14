@@ -19,7 +19,7 @@ lock and calls no model. The design is
 | `hearsay_only` | Its sources are only `said:` lines. |
 | `unreadable_page` | Its header does not read, or the file exists but cannot be opened; `reason` says why. |
 | `revision_log_gap` | `log.md` records an `r<N>` this page never reached. `log_revision` is the highest `N` the log records for the page and `page_revision` is the revision the file carries. The other direction is not a finding: a read takes no lock, so it can see the page of a write in flight before that write's log line. |
-| `revision_log_hole` | The log skips an `r<N>` below the highest one it records for this page; `missing` is the skipped `N`. A page's lines are `r1`, `r2`, … with no skips, so the missing value is a line that reached the page and never reached the log — what an `append_log` that failed leaves. A write in flight only leaves the top of the column empty, never a hole, so this needs no lock. |
+| `revision_log_hole` | The log skips an `r<N>` below the highest one it records for this page; `missing` is the skipped `N`. A page's lines are `r1`, `r2`, … with no skips, so the missing value is a line that reached the page and never reached the log — what an `append_log` that failed leaves. A write in flight only leaves the top of the column empty, never a hole. Two cases are refused rather than guessed: no hole is reported at all when the log has any dropped line (`log_unknown_action` or `log_unreadable_line` above zero), because such a line may carry a revision where it cannot be read; and the column is taken to start at the lowest revision the log records for the page, so a page with no `create` line is not reported forever. |
 
 Links inside code fences, code spans and images are not counted.
 

@@ -149,26 +149,42 @@ let log_gap_findings graph (log : Wiki_log.t) =
    every update writes one more. So a value missing below the highest one the
    log records for the page is a line that was written to the page and never
    made it to the log (an [append_log] that failed leaves exactly this). A
-   write in flight only leaves the top of the column empty, never a hole, so
-   this check needs no lock. *)
+   write in flight only leaves the top of the column empty, never a hole.
+
+   Two things would make this rule lie, and both are refused rather than
+   guessed at:
+   - A line the parser dropped (an unknown action word, or a line it could not
+     read) may have carried an r<N> for this page, in a place we cannot read,
+     so a log with any dropped line is not a log whose columns are complete.
+   - A page whose log starts at r3 and never had a create line would be
+     reported as hole r1 forever. The column starts where the log's own
+     lowest line for the page starts, not at 1. *)
 let log_hole_findings graph (log : Wiki_log.t) =
-  let seen = Hashtbl.create 16 in
-  List.iter
-    (fun (line : Wiki_log.line) ->
-       let revisions = Option.value (Hashtbl.find_opt seen line.page) ~default:[] in
-       Hashtbl.replace seen line.page (line.revision :: revisions))
-    log.lines;
-  Hashtbl.fold
-    (fun page revisions acc ->
-       let highest = List.fold_left max 0 revisions in
-       let rec first_missing k =
-         if k >= highest then None else if List.mem k revisions then first_missing (k + 1) else Some k
-       in
-       match (Wiki_graph.revision_of graph page, first_missing 1) with
-       | Some _, Some missing -> Revision_log_hole { page; missing } :: acc
-       | Some _, None | None, _ -> acc)
-    seen
-    []
+  if log.unknown_action > 0 || log.unreadable_line > 0
+  then []
+  else (
+    let seen = Hashtbl.create 16 in
+    List.iter
+      (fun (line : Wiki_log.line) ->
+         let revisions = Option.value (Hashtbl.find_opt seen line.page) ~default:[] in
+         Hashtbl.replace seen line.page (line.revision :: revisions))
+      log.lines;
+    Hashtbl.fold
+      (fun page revisions acc ->
+         let lowest = List.fold_left min max_int revisions in
+         let highest = List.fold_left max 0 revisions in
+         let rec first_missing k =
+           if k >= highest
+           then None
+           else if List.mem k revisions
+           then first_missing (k + 1)
+           else Some k
+         in
+         match (Wiki_graph.revision_of graph page, first_missing lowest) with
+         | Some _, Some missing -> Revision_log_hole { page; missing } :: acc
+         | Some _, None | None, _ -> acc)
+      seen
+      [])
 ;;
 
 let run graph ~log =

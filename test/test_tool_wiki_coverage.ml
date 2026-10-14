@@ -1432,6 +1432,9 @@ let test_lint_reports_an_unreadable_log () =
   with_temp_base_path (fun ctx ->
     add_page ctx ~page:"alpha" ~body:"x";
     let path = Filename.concat (Tool_wiki.wiki_root ~base_path:ctx.base_path) "log.md" in
+    (* The create above already wrote log.md (#43149); replace it with a
+       directory to make the read fail. *)
+    Unix.unlink path;
     Unix.mkdir path 0o755;
     let ok, message = dispatch_exn ctx ~name:"masc_wiki_lint" ~args:(`Assoc []) in
     Alcotest.(check bool) "an unreadable log is an error" false ok;

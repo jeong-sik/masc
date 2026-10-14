@@ -45,9 +45,9 @@ Tracks briefing size and classified ledger claim count to prevent unbounded memo
 - **Activation**: Automatically collected at the `Workspace_memory_ledger.observe` boundary during both direct owner turns and unified wake turns. No configuration needed.
 
 ### Key Code & Module Coordinates
-- `lib/keeper_config.ml`: HITL configuration parser and validation clamping.
+- `lib/keeper/keeper_config.ml:129-140` and `lib/keeper/keeper_config.mli:79-86`: HITL configuration parser and validation clamping (`tool_approval_timeout_sec`).
 - `lib/typesafeai/typesafeai_config.ml:140` & `lib/runtime/runtime_schema.ml:478`: `workspace_memory_selection_enabled` flag.
-- `lib/keeper_metrics/keeper_workspace_memory_observation_metrics.ml:1-39`: Unlabeled gauge series definitions and update logic.
+- `lib/keeper/keeper_workspace_memory_observation_metrics.ml:1-26`: Unlabeled gauge series definitions and update logic (`record`).
 - `lib/keeper/keeper_turn.ml` & `lib/keeper/keeper_unified_turn.ml`: Turn observation hook boundaries.
 - PR references: #41768 (`36db387f`), #42075 (`917cc096`), #42276 (`bfbb23bc`), #42298 (`c0ed3b7b`).
 

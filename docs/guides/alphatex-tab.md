@@ -132,8 +132,8 @@ Board 본문과 채팅 양쪽에서 실제로 그려진 화면(소스의 `\tempo
 
 - 근거: task-2335 실측 `evidence/task-2335-alphatex-guide/`(PTY 캡처 스크립트
   `capture.py`, 렌더 화면 `board-post.txt`·`chat-alphatex.txt`, 판정
-  `report.json` — 11 PASS(보드 7 + 채팅 4), report의 `binary_commit`이 캡처
-  빌드의 head 40자)
+  `report.json` — 13 PASS(보드 9 + 채팅 4, 이 중 `\title`·`\tempo` 미표기
+  부정 단언 2), report의 `binary_commit`이 캡처 빌드의 head 40자)
 - 용어: `docs/spec/00-glossary.md` "alphatex" 항목(#43108)
 - 렌더러: `bin/masc_tui_alphatex.ml`, `bin/masc_tui_alphatex_score.ml`,
   `bin/masc_tui_markdown.ml`(fence 분류)

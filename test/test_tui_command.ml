@@ -45,6 +45,7 @@ let describe = function
       Printf.sprintf "play-invite:%s:%d" name hours
   | Command.Play_revoke name -> "play-revoke:" ^ name
   | Command.Play_invalid reason -> "play-invalid:" ^ reason
+  | Command.Listen -> "listen"
   | Command.Open_metrics -> "open-metrics"
   | Command.Account_login client -> "account-login:" ^ client
   | Command.Switch_keeper name -> "keeper:" ^ name

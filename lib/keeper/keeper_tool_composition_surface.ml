@@ -448,6 +448,7 @@ let result_of_execution ~tool_name ~tool_kind ~start_time = function
       ({ Executor.cause =
            ( Executor.Plan_execution_failed _
            | Executor.Node_observation_failed _
+           | Executor.Run_journal_rejected _
            | Executor.Outer_completion_mismatch _ )
        ; _
        } as failure) ->

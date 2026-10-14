@@ -138,9 +138,11 @@ review 를 판정할 수 있는가"를 답한다. 조건은 세 가지다.
 - 시스템 프롬프트를 받는 모델일 것 (`supports_system_prompt`)
 - 네이티브 도구를 억제할 수 있는 클라이언트일 것 (Claude Code 만, `tools-support` 필요)
 
-이 함수는 #37382 가 만들었다. 그 전에는 이 조건을 맞추지 못하는 binding 이 dispatch 까지 갔다가
-"리뷰마다 한 번씩 영원히" 거절됐다. 거절을 dispatch 앞으로 옮긴 것이다. 이 RFC 가 제안하는 `admits`
-는 새 발명이 아니라 이 모양을 모든 lane 으로 넓히는 것이다.
+지금 모양은 #37395 가 만들었다(이슈 #37382). 그 전에는 같은 질문에 함수 둘(`verifier_runtime_admission`,
+`verifier_api_slot_ready`)이 따로 답했고, 카탈로그 슬롯은 어느 쪽도 거치지 않았다. 그래서 판정을 못 하는
+binding 이 dispatch 까지 갔다가 "리뷰마다 한 번씩 영원히" 거절됐다. #37395 는 두 판정을 이 함수 하나로
+합치고 거절을 dispatch 앞으로 옮겼다. 이 RFC 가 제안하는 `admits` 는 새 발명이 아니라 이 모양을 모든
+lane 으로 넓히는 것이다.
 
 지금 admission 은 두 곳에 있다. verifier 는 이 함수로, 나머지 lane 은 `api_format` 에서
 (`exact_slot_list_admitting`, `runtime.ml`)다. 둘이 서로 모르는 채 따로 바뀌면 어긋난다.
@@ -454,7 +456,7 @@ lane 에서 빠지는 것이고, 운영자가 말한 "어떤 runtime 이든"과 
 - `bin/masc_tui_lane_inventory.ml`: admitted 계수.
 - `docs/rfc/RFC-cli-runtimes-as-lane-slots.md`, `docs/rfc/RFC-exact-lane-walks-one-slot-list.md`,
   `docs/rfc/RFC-workspace-curator-curates-changed-facts.md` (Q2).
-- Issue #41391, PR #39622, #39858, #37382, #37793.
+- Issue #41391, #37382, #37793. PR #39622, #39858, #37395.
 - 이 PR 의 리뷰 댓글: context-reviewer 의 상태 흐름 의견(`attempt` 루프, 크기 증거, 가장 작은 창의
   이유, publication 의 낡은 상태)과 ocaml-agent-ic 의 타입 설계 의견(admission 교체 목록,
   `Window_at_least`, `cli_slots` 영향 범위, 봉투 예약). 두 댓글 모두 판정이 아니고, 그들이 읽지 않았다고

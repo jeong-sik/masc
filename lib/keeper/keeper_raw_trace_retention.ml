@@ -18,7 +18,6 @@ type deletion_failure =
 type summary =
   { removed : int
   ; retained_references : int
-  ; candidate_files : int
   ; deletion_failures : deletion_failure list
   }
 
@@ -151,7 +150,6 @@ let prune ~config ~keeper_name () =
          Ok
            { removed
            ; retained_references = String_set.cardinal references
-           ; candidate_files = List.length candidates
            ; deletion_failures = List.rev deletion_failures
            }))
 ;;

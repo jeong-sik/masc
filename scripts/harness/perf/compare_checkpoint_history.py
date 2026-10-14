@@ -17,6 +17,20 @@ from compare_server_artifacts import run_child
 from server_artifact_session import write_json
 
 
+def scheduler_lag(scheduler):
+    """The /health scheduler block with its nested `lag` fields merged over the top level.
+
+    `lib/core/scheduler_lag.ml` `to_fields` puts the shape fields (`probe`,
+    `interval_ms`, `window_s`, `stall_threshold_ms`) at the top level and the
+    ring percentiles (`samples`, `p50_ms` .. `max_ms`) under `lag`. Servers from
+    before #43176 reported the percentiles at the top level, so this returns the
+    top-level block plus, for every key `lag` carries, the `lag` value. Same
+    merge as `scheduler_lag_probe.sh` reads the probe with.
+    """
+    lag = scheduler.get('lag')
+    return dict(scheduler) if not isinstance(lag, dict) else {**scheduler, **lag}
+
+
 def stats(values):
     values = sorted(values)
     require(bool(values), 'no measurements')
@@ -53,7 +67,7 @@ def validate(directory, identity, cycles, histories, noise):
                 'runtime-events window differs')
     after = json.loads((directory / 'health-after.json').read_text())
     scheduler = after['scheduler']
-    require(scheduler['samples'] > 0, 'scheduler probe has no observations')
+    require(scheduler_lag(scheduler).get('samples', 0) > 0, 'scheduler probe has no observations')
     return {'fixture_sha256': complete['fixture_sha256'], 'source': identity['source'],
             'histories': observed['histories'], 'noise': observed['noise'],
             'cycles': observed['cycles'], 'interval_s': observed['interval_s'],
@@ -131,7 +145,7 @@ def render_summary(results):
              '|---|---|---|---|---|']
     for row in results:
         def fmt(d): return '/'.join(f'{d[k]:.3f}' for k in ('p50_ms','p95_ms','max_ms'))
-        s = row['scheduler']
+        s = scheduler_lag(row['scheduler'])
         lines.append(f"| {row['pair']} | {row['role']} | {fmt(row['inventory'])} | {fmt(row['health'])} | {s.get('p99_ms')}/{s.get('max_ms')} |")
     lines += ['', '## Main-domain uninterrupted execution distribution', '',
               'Columns: domain, runs, run_ms, busy%, >=10ms, >=50ms, >=100ms, max_ms.', '', '```text']

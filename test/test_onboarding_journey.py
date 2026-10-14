@@ -1862,6 +1862,27 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
         self.assertIn(str(chosen), written)
         self.assertNotIn(str(tools / 'geckodriver'), written)
 
+    def test_a_kept_geckodriver_that_is_gone_is_said_on_the_wizards_screen(self):
+        # The wizard found a geckodriver on PATH and calls the command, which
+        # keeps the value the operator wrote. If that path is gone (a brew
+        # upgrade), the reader is told on this screen and not by the server
+        # failing later.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            gone = root / 'removed' / 'geckodriver'
+            tools, base = self.workspace(root, '[browser.automation]\ngeckodriver = "' + str(gone) + '"\n')
+            runtime = base / '.masc/config/runtime.toml'
+            before = runtime.read_text()
+            with open(root / 'stderr.txt', 'w') as sink, \
+                    patch.dict(os.environ, {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}), \
+                    contextlib.redirect_stderr(sink):
+                SETUP.prepare_browser_automation(BINARY, str(base))
+            printed = (root / 'stderr.txt').read_text()
+            self.assertEqual(runtime.read_text(), before, 'the value is kept')
+        self.assertIn('is not there now', printed)
+        self.assertIn(str(gone), printed)
+        self.assertIn('--geckodriver', printed)
+
     def test_the_github_hand_over_reaches_the_keeper_lookup_with_the_token_on_standard_input(self):
         # No imp exists in this scratch workspace, so the command ends at
         # "not found". It gets there only after its options parsed and the

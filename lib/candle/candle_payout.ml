@@ -175,7 +175,7 @@ let is_candidate ~goal_created_at ~confirmed_at = function
   | Candle_event.Deleted -> false
 ;;
 
-let validate_settlement (waiting : waiting) events body =
+let validate_durable_candidates_internal (waiting : waiting) events =
   let ( let* ) = Result.bind in
   let* pass = match pass_of waiting events with
     | Some pass -> Ok pass
@@ -220,6 +220,19 @@ let validate_settlement (waiting : waiting) events body =
       let classified = List.filter_map snd task_keepers |> List.sort_uniq String.compare in
       if List.sort String.compare keepers = classified then Ok ()
       else Error "candidate Keeper set differs from durable per-task eligibility" in
+  Ok (pass, tasks, ids, keepers, task_keepers)
+
+let validate_durable_candidates (waiting : waiting) events =
+  Result.map ignore (validate_durable_candidates_internal waiting events)
+
+let validate_settlement (waiting : waiting) events body =
+  let ( let* ) = Result.bind in
+  let matches goal_id request_id verification_run_id =
+    goal_id = waiting.goal_id && request_id = waiting.request_id
+    && verification_run_id = waiting.verification_run_id in
+  let* pass, tasks, ids, keepers, task_keepers =
+    validate_durable_candidates_internal waiting events
+  in
   let recipients relations =
     let actual = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) relations in
     if List.length actual <> List.length (List.sort_uniq String.compare actual)

@@ -73,9 +73,17 @@ let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : C
   let identity = identity waiting in
   match Candle_payout.pass_of waiting events, Candle_payout.candidates_of waiting events, candidate_tasks waiting events with
   | Some _, Some {candidate_keepers=[];_}, Some _ ->
+    let* () =
+      Candle_payout.validate_durable_candidates waiting events
+      |> Result.map_error (fun detail -> A.Invalid_response detail)
+    in
     Ok (E.Unattributed {goal_id=waiting.goal_id;request_id=waiting.request_id;
       verification_run_id=waiting.verification_run_id;reason=E.No_candidates})
   | Some pass, Some candidates, Some tasks ->
+    let* () =
+      Candle_payout.validate_durable_candidates waiting events
+      |> Result.map_error (fun detail -> A.Invalid_response detail)
+    in
     let hours = overdue_hours_of pass waiting in
     (match hours with
      | Error due_date ->

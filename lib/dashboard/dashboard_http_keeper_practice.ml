@@ -112,7 +112,7 @@ let empty_response =
    keeper is expected to hold no autonomous turns, while an Autonomous one
    that only noops practices nothing. *)
 type role =
-  { activation_mode : string
+  { activation_mode : Keeper_activation_mode.t
   ; paused : bool
   }
 
@@ -411,7 +411,7 @@ let summarize_rows ~keeper_name ?role rows =
 ;;
 
 let role_of_meta (meta : Keeper_meta_contract.keeper_meta) =
-  { activation_mode = Keeper_activation_mode.to_string meta.activation_mode
+  { activation_mode = meta.activation_mode
   ; paused = meta.paused
   }
 ;;
@@ -481,7 +481,9 @@ let role_json = function
   | None -> `Null
   | Some role ->
     `Assoc
-      [ "activation_mode", `String role.activation_mode; "paused", `Bool role.paused ]
+      [ "activation_mode", `String (Keeper_activation_mode.to_string role.activation_mode)
+      ; "paused", `Bool role.paused
+      ]
 ;;
 
 let to_json { keeper_name; role; acc } =

@@ -50,7 +50,7 @@ val affordance_of_string : string -> affordance option
 
 (** The keeper's declared stance, for reading the practice against. *)
 type role =
-  { activation_mode : string
+  { activation_mode : Keeper_activation_mode.t
   ; paused : bool
   }
 

@@ -1,5 +1,11 @@
 type distribution = Debian | Ubuntu | Other
-type searxng_container = Searxng_absent | Searxng_stopped | Searxng_running
+type searxng_container =
+  | Searxng_absent
+  | Searxng_stopped
+  | Searxng_running
+  | Searxng_paused
+  | Searxng_restarting
+  | Searxng_unusable of string
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
   | Geckodriver | Firefox | Searxng of { config_dir : string }
@@ -7,7 +13,8 @@ type action_effect = Open_official_installer of { url : string; argv : string li
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
   | Build_without_rosetta of { user_config : string }
-  | Start_searxng of { config_dir : string; container : searxng_container }
+  | Run_searxng of { config_dir : string }
+  | Start_existing_searxng
 type apple_builder = Builder_unchecked | Needs_missing_rosetta of { user_config : string option }
                    | Needs_default_kernel
 type action = { id : string; label : string; detail : string;
@@ -64,14 +71,17 @@ let whisper_model_url =
   "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" ^ whisper_model_file
 
 (* The container SearXNG runs in. One name, so a second run finds the first
-   rather than starting another, and so [scripts/searxng-local.sh], which
-   names its container the same, is the same container. The tag is dated and
-   fixed: [latest] is a different program each day this is run. It is the
-   build measured on 2026-10-14 (same digest as [latest] that day, answering
-   22 queries). GHCR rather than Docker Hub, whose anonymous pulls are rate
-   limited (docs.searxng.org, Docker installation). *)
+   rather than starting another; [scripts/searxng-local.sh] names its container
+   the same, so a stopped container that script made is the one a start
+   action would run, with the publish address and mount that script gave it.
+   The image is a dated tag and the digest the tag resolved to on 2026-10-14
+   (the digest [latest] had that day too, answering 22 queries): a tag can be
+   re-pointed and [latest] is a different program each day this is run, so
+   the digest is what is fixed. GHCR rather than Docker Hub, whose anonymous
+   pulls are rate limited (docs.searxng.org, Docker installation). *)
 let searxng_container_name = "masc-searxng"
-let searxng_image = "ghcr.io/searxng/searxng:2026.10.13-22c64b8d3"
+let searxng_image =
+  "ghcr.io/searxng/searxng:2026.10.13-22c64b8d3@sha256:9b61996edcc679fb6665290f95fda15389a14eda6060e41a25c63ab2758f2436"
 let searxng_container_port = 8080
 let searxng_settings_file = "settings.yml"
 let searxng_settings_path config_dir = Filename.concat config_dir searxng_settings_file
@@ -103,15 +113,18 @@ let searxng_pull = ["docker"; "pull"; searxng_image]
 let searxng_run ~config_dir =
   ["docker"; "run"; "--detach"; "--name"; searxng_container_name;
    "--restart"; "unless-stopped";
-   "--publish"; Printf.sprintf "127.0.0.1:%d:%d" searxng_published_port searxng_container_port;
+   "--publish"; Printf.sprintf "%s:%d:%d" Masc_network_defaults.searxng_published_host
+                  searxng_published_port searxng_container_port;
    "--volume"; config_dir ^ ":/etc/searxng:ro"; searxng_image]
 let searxng_start = ["docker"; "start"; searxng_container_name]
 
-(* Steps after the settings file is in place, by what the container is now. *)
-let searxng_steps ~config_dir = function
-  | Searxng_absent -> [searxng_pull; searxng_run ~config_dir]
-  | Searxng_stopped -> [searxng_start]
-  | Searxng_running -> []
+(* A stopped container keeps the publish address, mount and image it was
+   created with, so it is started and nothing about it is decided here. A
+   paused one is refused by [docker start], a restarting one is already
+   running as far as Docker says, and an unusable one cannot be started: they
+   have no effect, so none can be named. *)
+let searxng_run_steps ~config_dir = [searxng_pull; searxng_run ~config_dir]
+let searxng_start_steps = [searxng_start]
 
 let open_action ~host ~id ~label ~detail ~source_url url =
   let argv = match host with
@@ -300,17 +313,20 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked)
      is already running has nothing left to start. *)
   | Searxng {config_dir}, (Macos _ | Linux _) ->
     (match searxng_container with
-     | Searxng_running -> []
-     | Searxng_absent | Searxng_stopped ->
-       let existing = (match searxng_container with Searxng_stopped -> true | Searxng_absent | Searxng_running -> false) in
-       [{id = (if existing then "searxng_docker_start_existing" else "searxng_docker_run");
-         label = (if existing then "Start the SearXNG container" else "Run SearXNG in a Docker container");
-         detail = Printf.sprintf "Writes %s if it is not there (JSON output on, a generated secret key, no request limiter), then %s. The port is published on 127.0.0.1 only. Docker must be running."
-                    (searxng_settings_path config_dir)
-                    (if existing then "starts the existing " ^ searxng_container_name ^ " container"
-                     else Printf.sprintf "pulls %s and starts a container named %s on 127.0.0.1:%d" searxng_image searxng_container_name searxng_published_port);
+     | Searxng_running | Searxng_paused | Searxng_restarting | Searxng_unusable _ -> []
+     | Searxng_stopped ->
+       [{id = "searxng_docker_start_existing"; label = "Start the SearXNG container";
+         detail = Printf.sprintf "Starts the existing %s container as Docker created it: the address it is published on, the directory it mounts and the image it runs are the ones it already has, and nothing is written. Docker must be running." searxng_container_name;
          source_url = searxng_docker_source; requires_admin = false;
-         action_effect = Start_searxng {config_dir; container = searxng_container};
+         action_effect = Start_existing_searxng;
+         writes = None}]
+     | Searxng_absent ->
+       [{id = "searxng_docker_run"; label = "Run SearXNG in a Docker container";
+         detail = Printf.sprintf "Writes %s if it is not there (JSON output on, a generated secret key, no request limiter), then pulls %s and starts a container named %s that Docker restarts whenever it starts, until it is stopped (--restart unless-stopped). The port is published on %s:%d only, and the settings directory is mounted read-only. The image also declares a cache volume, which Docker creates anonymously. Docker must be running."
+                    (searxng_settings_path config_dir) searxng_image searxng_container_name
+                    Masc_network_defaults.searxng_published_host searxng_published_port;
+         source_url = searxng_docker_source; requires_admin = false;
+         action_effect = Run_searxng {config_dir};
          writes = Some (searxng_settings_path config_dir)}])
   | Pdf_tools, Macos _ ->
     [commands ~id:"poppler_install" ~label:"Install PDF inspection tools with Homebrew"
@@ -395,10 +411,13 @@ let effect_json = function
       "argv_steps",`List (List.map (fun argv -> `List (List.map (fun s -> `String s) argv)) container_restart)]
   (* The secret key is generated when the action runs and is not part of what
      the catalog prints; the file it lands in is [writes]. *)
-  | Start_searxng {config_dir; container} -> `Assoc ["kind",`String "start_searxng";
+  | Run_searxng {config_dir} -> `Assoc ["kind",`String "run_searxng";
       "settings_file",`String (searxng_settings_path config_dir);
       "argv_steps",`List (List.map (fun argv -> `List (List.map (fun s -> `String s) argv))
-                            (searxng_steps ~config_dir container))]
+                            (searxng_run_steps ~config_dir))]
+  | Start_existing_searxng -> `Assoc ["kind",`String "start_existing_searxng";
+      "argv_steps",`List (List.map (fun argv -> `List (List.map (fun s -> `String s) argv))
+                            searxng_start_steps)]
 let to_json actions = `Assoc ["schema",`String "masc.prerequisite_actions.v1";
   "actions",`List (List.map (fun action -> `Assoc [
     "id",`String action.id; "label",`String action.label; "detail",`String action.detail;
@@ -483,16 +502,19 @@ let write_build_without_rosetta user_config =
        | Ok true | Error _ ->
          Error ("The edit did not leave [build] rosetta = false in " ^ target ^ "; nothing was written."))
 
-(* The settings file is the operator's once it exists: a file that is there is
-   kept, so a hand edit (an engine turned off, a port changed) survives the
-   next run, and the generated secret key is not replaced under a running
-   container. Written with the key readable by this account only. *)
-let searxng_settings_permissions = 0o600
+(* The settings file is the operator's once it exists: a regular file that is
+   there is kept, so a hand edit (an engine turned off, a port changed)
+   survives the next run, and the generated secret key is not replaced under a
+   running container. Anything else at that path (a directory, or a link that
+   leads nowhere) is refused: kept, the container would exit on it, and
+   replaced, an operator's link would be overwritten. The file is created by
+   [Filename.open_temp_file], which gives it 0o600, so the key is readable by
+   this account only from the moment it lands. A file made between the look
+   and the rename is replaced; the look is not a lock. *)
 let searxng_secret_bytes = 32
 let write_searxng_settings config_dir =
   let path = searxng_settings_path config_dir in
-  if Sys.file_exists path then Ok ()
-  else
+  let write () =
     match Fs_compat.mkdir_p config_dir with
     | exception Unix.Unix_error (error, _, _) ->
       Error ("Could not create " ^ config_dir ^ ": " ^ Unix.error_message error)
@@ -500,11 +522,23 @@ let write_searxng_settings config_dir =
       let contents = searxng_settings ~secret_key:(Random_id.hex ~bytes:searxng_secret_bytes) in
       (match Fs_compat.save_file_atomic_strict path contents with
        | Error reason -> Error ("Could not write " ^ path ^ ": " ^ reason)
-       | Ok () ->
-         (match Unix.chmod path searxng_settings_permissions with
-          | () -> Ok ()
-          | exception Unix.Unix_error (error, _, _) ->
-            Error ("Wrote " ^ path ^ " but could not make it readable by this account only: " ^ Unix.error_message error)))
+       | Ok () -> Ok ()) in
+  match Unix.stat path with
+  | {Unix.st_kind = Unix.S_REG; _} -> Ok ()
+  | {Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _} ->
+    Error (path ^ " is not a regular file. Remove it or move it, then run the action again.")
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (* Absent, or a link whose target is. [lstat] tells the two apart. *)
+    (match Unix.lstat path with
+     | {Unix.st_kind = Unix.S_LNK; _} ->
+       Error (path ^ " is a link that leads nowhere. Remove it or point it at a file, then run the action again.")
+     | {Unix.st_kind = (Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK); _} ->
+       Error (path ^ " could not be read. Check its permissions, then run the action again.")
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> write ()
+     | exception Unix.Unix_error (error, _, _) ->
+       Error ("Could not look at " ^ path ^ ": " ^ Unix.error_message error))
+  | exception Unix.Unix_error (error, _, _) ->
+    Error ("Could not look at " ^ path ^ ": " ^ Unix.error_message error)
 
 let execute ~run action =
   let rec commands completed index = function
@@ -531,10 +565,14 @@ let execute ~run action =
     (match write_build_without_rosetta user_config with
      | Error reason -> Failed {step=1; reason}
      | Ok () -> commands Commands_completed_recheck_required 2 container_restart)
-  | Start_searxng {config_dir; container} ->
+  | Run_searxng {config_dir} ->
     (match write_searxng_settings config_dir with
      | Error reason -> Failed {step=1; reason}
-     | Ok () -> commands Commands_completed_recheck_required 2 (searxng_steps ~config_dir container))
+     | Ok () -> commands Commands_completed_recheck_required 2 (searxng_run_steps ~config_dir))
+  | Start_existing_searxng ->
+    (* No settings are written for a mount the container may not have, so its
+       one step is numbered from 1. *)
+    commands Commands_completed_recheck_required 1 searxng_start_steps
 let outcome_to_json outcome =
   let status, fields = match outcome with
     | External_step_pending -> "external_step_pending", []

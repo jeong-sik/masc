@@ -90,19 +90,21 @@ let id = function Standard action -> action.Prerequisites.id
   | Verified_apple_install -> "apple_container_verified_install"
   | Verified_docker_install -> "docker_desktop_verified_install"
   | Verified_docker_launch -> "docker_desktop_verified_launch"
-let actions host dependency =
+let actions ?searxng_container host dependency =
   let distribution = try
     In_channel.with_open_text "/etc/os-release" In_channel.input_all
     |> Prerequisites.distribution_of_os_release
     with Sys_error _ -> Prerequisites.Other in
   let apple_builder = apple_builder host dependency in
-  (* Docker is asked only for the dependency that is a container. *)
-  let searxng_container = match dependency with
-    | Prerequisites.Searxng _ -> Masc.Searxng_runtime_dependency.container ()
-    | Prerequisites.Sandbox _ | Prerequisites.Codex_cli | Prerequisites.Claude_cli
-    | Prerequisites.Antigravity_cli | Prerequisites.Muse_cli | Prerequisites.Pdf_tools
-    | Prerequisites.Presentation_tools _ | Prerequisites.Whisper_cli | Prerequisites.Geckodriver
-    | Prerequisites.Firefox -> Prerequisites.Searxng_absent in
+  (* Docker is asked only for the dependency that is a container, and not
+     again when the caller already looked. *)
+  let searxng_container = match dependency, searxng_container with
+    | Prerequisites.Searxng _, Some container -> container
+    | Prerequisites.Searxng _, None -> Masc.Searxng_runtime_dependency.container ()
+    | (Prerequisites.Sandbox _ | Prerequisites.Codex_cli | Prerequisites.Claude_cli
+      | Prerequisites.Antigravity_cli | Prerequisites.Muse_cli | Prerequisites.Pdf_tools
+      | Prerequisites.Presentation_tools _ | Prerequisites.Whisper_cli | Prerequisites.Geckodriver
+      | Prerequisites.Firefox), _ -> Prerequisites.Searxng_absent in
   let standard =
     Prerequisites.catalog ?model_dir:(model_dir ()) ~apple_builder ~searxng_container ~host ~distribution dependency
     |> List.map (fun action -> Standard action)
@@ -225,7 +227,18 @@ let run ~base_path ~dependency:name ~action =
   | None -> prerr_endline "Unknown prerequisite. Choose a dependency from the setup catalog."; 1
   | Some dependency ->
     let host = Sandbox.detect_host ~run:Sandbox.system_runner in
-    let actions = actions host dependency in
+    (* Printing the catalog looks at Docker once, for the plan and for the
+       readiness it carries. Executing an action asks only for the plan: its
+       receipt looks again after the steps. *)
+    let searxng_check = match dependency, action with
+      | Prerequisites.Searxng _, None -> Some (Masc.Searxng_runtime_dependency.observe ())
+      | (Prerequisites.Searxng _ | Prerequisites.Sandbox _ | Prerequisites.Codex_cli
+        | Prerequisites.Claude_cli | Prerequisites.Antigravity_cli | Prerequisites.Muse_cli
+        | Prerequisites.Pdf_tools | Prerequisites.Presentation_tools _ | Prerequisites.Whisper_cli
+        | Prerequisites.Geckodriver | Prerequisites.Firefox), _ -> None in
+    let actions =
+      actions ?searxng_container:(Option.map (fun (check : Masc.Searxng_runtime_dependency.check) -> check.container) searxng_check)
+        host dependency in
     match action with
     | None ->
       let catalog = to_json actions in
@@ -241,7 +254,10 @@ let run ~base_path ~dependency:name ~action =
           `Assoc (("dependency_readiness",
                    browser_readiness Masc.Browser_runtime_dependencies.Firefox) :: fields)
         | Prerequisites.Searxng _, `Assoc fields ->
-          `Assoc (("dependency_readiness", Masc.Searxng_runtime_dependency.(observe () |> to_json)) :: fields)
+          let check = match searxng_check with
+            | Some check -> check
+            | None -> Masc.Searxng_runtime_dependency.observe () in
+          `Assoc (("dependency_readiness", Masc.Searxng_runtime_dependency.to_json check) :: fields)
         | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Muse_cli | Whisper_cli), _ -> catalog
         | (Pdf_tools | Presentation_tools _ | Geckodriver | Firefox | Searxng _), _ ->
           invalid_arg "prerequisite catalog encoder must return an object" in

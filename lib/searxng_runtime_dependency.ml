@@ -6,15 +6,24 @@ type check = {
   endpoint : endpoint;
 }
 
-let default_url = Masc_network_defaults.searxng_default_url
+(* The address the container is published on, not [localhost]: a program
+   listening on [::1] at the same port answers [localhost] and the container
+   does not, which would read as a container that failed to start. *)
+let default_url = Masc_network_defaults.searxng_published_url
 
 (* A health probe, not a search worth reading: the query only has to be one a
    search accepts. *)
 let probe_query = "masc"
 let probe_timeout_sec = 5
 
+(* The same bound [Sandbox_readiness] puts on its own [docker info]: a Docker
+   that is wedged answers late or never, and a catalog print asks it up to four
+   times. *)
 let capture argv =
-  match Process_eio.run_argv_with_status_split_or_refusal argv with
+  let timeout_sec =
+    Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Env_config_sandbox.Shell_timeout.Read ()
+  in
+  match Process_eio.run_argv_with_status_split_or_refusal ~timeout_sec argv with
   | Ok (Unix.WEXITED 0, stdout, _) -> Ok stdout
   | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) | Error _ -> Error ()
 
@@ -32,13 +41,23 @@ let container_state ~run =
       ; Sandbox_prerequisites.searxng_container_name ]
   with
   | Ok output ->
+    (* Docker's [State.Status] words. Only [created] and [exited] can be
+       started; a status this code does not know is kept as Docker's word and
+       has no action, rather than being read as one that can. *)
     (match String.trim output with
      | "running" -> Sandbox_prerequisites.Searxng_running
-     | _ -> Sandbox_prerequisites.Searxng_stopped)
+     | "created" | "exited" -> Sandbox_prerequisites.Searxng_stopped
+     | "paused" -> Sandbox_prerequisites.Searxng_paused
+     | "restarting" -> Sandbox_prerequisites.Searxng_restarting
+     | other -> Sandbox_prerequisites.Searxng_unusable other)
   | Error () -> Sandbox_prerequisites.Searxng_absent
 
-let container ?(run = capture) () =
-  if docker_up ~run then container_state ~run else Sandbox_prerequisites.Searxng_absent
+(* Docker is asked about the container only when it answers at all. *)
+let look_at_docker ~run =
+  let docker = docker_up ~run in
+  docker, (if docker then container_state ~run else Sandbox_prerequisites.Searxng_absent)
+
+let container ?(run = capture) () = snd (look_at_docker ~run)
 
 let endpoint_of ~get url =
   let search =
@@ -53,10 +72,7 @@ let endpoint_of ~get url =
   | Ok _ | Error _ -> Unreachable
 
 let observe ?(run = capture) ?(get = get) ?(url = default_url) () =
-  let docker = docker_up ~run in
-  let container =
-    if docker then container_state ~run else Sandbox_prerequisites.Searxng_absent
-  in
+  let docker, container = look_at_docker ~run in
   { docker; container; endpoint = endpoint_of ~get url }
 
 let available check =
@@ -85,6 +101,9 @@ let container_label = function
   | Sandbox_prerequisites.Searxng_absent -> "absent"
   | Sandbox_prerequisites.Searxng_stopped -> "stopped"
   | Sandbox_prerequisites.Searxng_running -> "running"
+  | Sandbox_prerequisites.Searxng_paused -> "paused"
+  | Sandbox_prerequisites.Searxng_restarting -> "restarting"
+  | Sandbox_prerequisites.Searxng_unusable _ -> "unusable"
 
 let endpoint_label = function
   | Answers -> "answers"
@@ -97,6 +116,12 @@ let to_json check =
     ; ("status", `String (if available check then "ready" else "unavailable"))
     ; ("docker", `String (if check.docker then "ready" else "unavailable"))
     ; ("container", `String (container_label check.container))
+    ; ("docker_status",
+       (match check.container with
+        | Sandbox_prerequisites.Searxng_unusable status -> `String status
+        | Sandbox_prerequisites.Searxng_absent | Sandbox_prerequisites.Searxng_stopped
+        | Sandbox_prerequisites.Searxng_running | Sandbox_prerequisites.Searxng_paused
+        | Sandbox_prerequisites.Searxng_restarting -> `Null))
     ; ("endpoint", `String (endpoint_label check.endpoint))
     ; ("url", `String default_url)
     ]

@@ -22,7 +22,10 @@ type check = {
 }
 
 val default_url : string
-(** The address the container publishes: the SearXNG default URL. *)
+(** The address the container is published on, [127.0.0.1] and not
+    [localhost]: a program listening on [::1] at the same port answers
+    [localhost] and the container does not. A caller that points masc at the
+    instance names this address. *)
 
 val container :
   ?run:(string list -> (string, unit) result) ->
@@ -62,4 +65,7 @@ val wait_until_available :
 
 val to_json : check -> Yojson.Safe.t
 (** [{schema = "masc.searxng_readiness.v1", status, docker, container,
-    endpoint, url}]. [status] is ["ready"] or ["unavailable"]. *)
+    docker_status, endpoint, url}]. [status] is ["ready"] or ["unavailable"].
+    [container] is one of ["absent"], ["stopped"], ["running"], ["paused"],
+    ["restarting"] and ["unusable"]; [docker_status] is Docker's own word for
+    ["unusable"] and null otherwise. *)

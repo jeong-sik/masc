@@ -161,11 +161,14 @@ let runtime_blocker_fields_json_of_surface (meta : keeper_meta) = function
   | Some blocker ->
     [ "runtime_blocker_class", `String (runtime_blocker_class_to_string blocker.blocker_class)
     ; "runtime_blocker_summary", `String (Lazy.force blocker.summary)
+    ; "runtime_blocker_signature",
+      (match blocker.signature with Some s -> `String s | None -> `Null)
     ; "runtime_blocker_facts", runtime_blocker_facts_json meta
     ]
   | None ->
     [ "runtime_blocker_class", `Null
     ; "runtime_blocker_summary", `Null
+    ; "runtime_blocker_signature", `Null
     ; "runtime_blocker_facts", `Null
     ]
 ;;

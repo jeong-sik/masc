@@ -49,6 +49,16 @@ type failure_reason =
               [Keeper_meta_contract.runtime_exhaustion_reason_retryable]
               instead of reparsing [code]. [None] for non-exhaustion
               provider/runtime errors. *)
+      ; fenced_empty_turn_runtime : string option
+          (** Runtime id of a fenced provider attempt whose cause is the
+              typed empty assistant turn
+              ([Keeper_internal_error.fenced_cause_empty_no_progress = [Some true]]).
+              [Some] only on the fenced-empty-turn construction path
+              ([keeper_unified_turn_types.registry_failure_reason_of_internal_error]).
+              Lets the status bridge lead with the operator's next action
+              without re-parsing [detail]. [None] for every other
+              provider/runtime error, including fenced failures whose cause
+              is not an empty turn. *)
       }
   | Turn_configuration_error of
       { code : string

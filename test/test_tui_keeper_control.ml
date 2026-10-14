@@ -36,6 +36,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_phase = phase
   ; kr_sandbox_profile = sandbox_profile
   ; kr_runtime_blocker_summary = None
+  ; kr_runtime_blocker_signature = None
   }
 
 let complete rows = Control.Roster_complete rows

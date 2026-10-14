@@ -29,6 +29,7 @@ function keeperWire(name = 'planner') {
     paused: false,
     next_action: null,
     runtime_blocker_summary: null,
+    runtime_blocker_signature: null,
     keepalive_running: true,
     activation_mode: 'on_demand',
     runtime_id: `runtime-${name}`,
@@ -130,7 +131,11 @@ describe('decodeGateKeepers', () => {
     const data = Effect.runSync(decodeGateKeepers({
       candle: { status: 'off' },
       count: 1,
-      keepers: [{ ...keeperWire(), runtime_blocker_summary: 'current failure' }],
+      keepers: [{
+        ...keeperWire(),
+        runtime_blocker_summary: 'current failure',
+        runtime_blocker_signature: 'provider_runtime_error: fenced',
+      }],
       ...listingWire(1),
     }))
     expect(data.keepers).toEqual([{ name: 'planner', status: 'running' }])
@@ -191,6 +196,12 @@ describe('decodeGateKeepers', () => {
   it('rejects an omitted current failure field', () => {
     const wire: Record<string, unknown> = keeperWire()
     delete wire.runtime_blocker_summary
+    expectDrift({ candle: { status: 'off' }, count: 1, keepers: [wire], ...listingWire(1) })
+  })
+
+  it('rejects an omitted current failure signature field', () => {
+    const wire: Record<string, unknown> = keeperWire()
+    delete wire.runtime_blocker_signature
     expectDrift({ candle: { status: 'off' }, count: 1, keepers: [wire], ...listingWire(1) })
   })
 

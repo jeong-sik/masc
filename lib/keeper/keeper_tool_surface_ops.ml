@@ -229,13 +229,21 @@ let keeper_list_row_json ~runtime_class config name =
          reading. The last recorded error is a different observation. *)
       let registry_entry = Keeper_registry.get ~base_path:config.base_path meta.name in
       let registry_phase = Option.map (fun entry -> entry.Keeper_registry.phase) registry_entry in
-      let runtime_blocker_summary =
+      let runtime_blocker =
         Option.bind registry_entry (fun entry ->
           Option.bind entry.Keeper_registry.last_failure_reason
             (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
                ~latest_receipt:(fun () ->
                  Keeper_execution_receipt.read_latest_receipt config meta.name)))
-        |> Option.map (fun blocker -> Lazy.force blocker.Keeper_status_bridge.summary)
+      in
+      let runtime_blocker_summary =
+        Option.map (fun blocker -> Lazy.force blocker.Keeper_status_bridge.summary)
+          runtime_blocker
+      in
+      (* The machine wire a human-sentence summary replaced. The TUI draws it
+         dimmed under the sentence, so the row carries it beside the summary. *)
+      let runtime_blocker_signature =
+        Option.bind runtime_blocker (fun blocker -> blocker.Keeper_status_bridge.signature)
       in
       let keepalive_running =
         Keeper_status_runtime.keepalive_running_of_phase registry_phase
@@ -289,6 +297,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("paused", `Bool meta.paused);
             ("next_action", next_action);
             ("runtime_blocker_summary", Json_util.string_opt_to_json runtime_blocker_summary);
+            ("runtime_blocker_signature", Json_util.string_opt_to_json runtime_blocker_signature);
             ("keepalive_running", `Bool keepalive_running);
             ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));

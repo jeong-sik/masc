@@ -375,7 +375,10 @@ let check_roster_failure expected json =
     (match Tui_decode.decode_keeper_runtime_list json with
      | Ok ([decoded], [], false, 1, _) ->
        check (option string) "typed TUI projection retains the current failure"
-         expected decoded.kr_runtime_blocker_summary
+         expected decoded.kr_runtime_blocker_summary;
+       check (option string)
+         "the timeout blocker carries no replacement signature"
+         None decoded.kr_runtime_blocker_signature
      | Ok _ -> fail "the current roster must decode one complete reading"
      | Error detail -> failf "TUI rejected the actual roster: %s" detail)
   | other -> failf "expected one Keeper row: %s" (Yojson.Safe.to_string other)
@@ -413,6 +416,71 @@ let test_success_clears_current_failure_but_retains_last_error () =
         (Option.bind (Keeper_registry.get ~base_path "alpha")
            (fun entry -> entry.last_error)))
     (check_roster_failure None)
+;;
+
+(* A fenced empty assistant turn leads with a human sentence and keeps the
+   machine wire as its signature. The roster row is what the TUI reads, so
+   both must arrive through the real list tool and the TUI decoder. *)
+let fenced_empty_turn_reason () =
+  let scope = "openrouter" in
+  let fence =
+    Keeper_internal_error.Provider_attempt_effect_fenced
+      { runtime_id = scope
+      ; effect_disposition = Keeper_provider_attempt_effect_core.No_effect_observed
+      ; cause =
+          Keeper_internal_error.Fenced_masc
+            (Keeper_internal_error.Accept_rejected
+               { scope
+               ; model = None
+               ; reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+               ; response_shape = Some Keeper_internal_error.Accept_response_empty
+               ; stop_reason = None
+               ; reason = "empty assistant turn"
+               })
+      }
+  in
+  let err = Keeper_internal_error.core_error_of_masc_internal_error fence in
+  let raw_error = Agent_core.Error.to_string err in
+  let terminal = Keeper_turn_terminal.of_failure ~raw_error err in
+  match Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
+          ~core_error:err terminal ~raw_error with
+  | Some reason -> reason
+  | None -> fail "a fenced empty turn must record a failure reason"
+;;
+
+let test_fenced_empty_turn_row_carries_its_signature () =
+  let reason = fenced_empty_turn_reason () in
+  let summary, signature =
+    match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+        ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason with
+    | Some surface -> Lazy.force surface.summary, surface.signature
+    | None -> fail "a fenced empty turn must produce a status surface"
+  in
+  check bool "the fenced surface has a machine wire to carry" true
+    (Option.is_some signature);
+  failure_roster
+    ~before_list:(fun config ->
+      let base_path = config.Workspace.base_path in
+      ignore (Keeper_registry.For_testing.register ~base_path "alpha" (make_meta "alpha"));
+      Keeper_registry.set_failure_reason ~base_path "alpha" (Some reason))
+    (fun json ->
+      match Yojson.Safe.Util.member "keepers" json with
+      | `List [ row ] ->
+        check (option string) "the roster row carries the machine wire" signature
+          (match Json_util.assoc_member_opt "runtime_blocker_signature" row with
+           | Some (`String value) -> Some value
+           | Some `Null -> None
+           | Some other -> failf "invalid signature: %s" (Yojson.Safe.to_string other)
+           | None -> fail "roster omitted runtime_blocker_signature");
+        (match Tui_decode.decode_keeper_runtime_list json with
+         | Ok ([decoded], [], false, 1, _) ->
+           check (option string) "the TUI reads the human sentence"
+             (Some summary) decoded.kr_runtime_blocker_summary;
+           check (option string) "the TUI reads the machine wire"
+             signature decoded.kr_runtime_blocker_signature
+         | Ok _ -> fail "the current roster must decode one complete reading"
+         | Error detail -> failf "TUI rejected the actual roster: %s" detail)
+      | other -> failf "expected one Keeper row: %s" (Yojson.Safe.to_string other))
 ;;
 
 let test_missing_current_failure_is_not_clear () =
@@ -502,6 +570,8 @@ let () =
         ; test_case "last_error is separate" `Quick test_last_error_is_not_the_current_failure
         ; test_case "success clears current failure" `Quick test_success_clears_current_failure_but_retains_last_error
         ; test_case "missing is not clear" `Quick test_missing_current_failure_is_not_clear
+        ; test_case "fenced empty turn row carries its signature" `Quick
+            test_fenced_empty_turn_row_carries_its_signature
         ] )
     ; ( "lifecycle"
       , [ test_case "detailed row carries lifecycle phase" `Quick

@@ -39,6 +39,7 @@ let runtime_blocker_class_to_string = function
 type runtime_blocker_surface =
   { blocker_class : runtime_blocker_class
   ; summary : string Lazy.t
+  ; signature : string option
   }
 
 (* The streak is a count and survives a restart without its cause (the
@@ -104,6 +105,18 @@ let turn_failures_summary ~count (latest_receipt : Keeper_execution_receipt.late
       (Dated_jsonl.read_error_to_string err)
 ;;
 
+(* The one sentence the p-d8153cc02a535b82b6b1e3b5bca9add4 operator could
+   have acted on, plus the fact the empty-turn decision added
+   (c-ff6ec9f3168e1c677318c91bc0795c3b): the fence means this failure never
+   rotates to a fallback, so retrying means messaging the keeper again. The
+   machine wire stays on the row as the signature and in the receipt, so log
+   searches keep what they key on. *)
+let empty_turn_sentence runtime_id =
+  Printf.sprintf
+    "Model runtime %s returned an empty assistant turn, so this attempt made no progress; message the keeper again to retry. This runtime does not switch to another runtime automatically."
+    runtime_id
+;;
+
 let runtime_blocker_surface_of_failure_reason
       ~(latest_receipt : unit -> Keeper_execution_receipt.latest_receipt_reading)
       (reason : Keeper_registry.failure_reason)
@@ -116,11 +129,13 @@ let runtime_blocker_surface_of_failure_reason
           Printf.sprintf
             "Heartbeat failed %d consecutive cycle(s); supervisor recovery is required."
             count)
+      ; signature = None
       }
   | Keeper_registry.Turn_consecutive_failures count ->
     Some
       { blocker_class = Blocked_by_turn_failures
       ; summary = lazy (turn_failures_summary ~count (latest_receipt ()))
+      ; signature = None
       }
   (* The registry wraps runtime exhaustion in [Provider_runtime_error] with the
      typed reason alongside it ([keeper_unified_turn_types.ml:100-112]). Reading
@@ -135,6 +150,22 @@ let runtime_blocker_surface_of_failure_reason
             "Runtime attempts exhausted (%s): %s; inspect the attempt chain before retry."
             code
             detail)
+      ; signature = None
+      }
+  | Keeper_registry.Provider_runtime_error
+      { code; detail; agent_core_timeout = None
+      ; fenced_empty_turn_runtime = Some runtime_id; _ } ->
+    (* Marked at write time ([keeper_unified_turn_types]): the typed empty
+       assistant turn behind this fence. The timeout guard stays explicit:
+       a timeout tells the operator to retry with provider cooldown, and
+       that reading must not lose to this display arm, so a record carrying
+       both falls through to the timeout-first arm below. [signature]
+       carries the machine wire the summary replaced, so log searches keep
+       their key. *)
+    Some
+      { blocker_class = Blocked_by_provider_runtime_error
+      ; summary = lazy (empty_turn_sentence runtime_id)
+      ; signature = Some (code ^ ": " ^ detail)
       }
   | Keeper_registry.Provider_runtime_error { code; detail; agent_core_timeout; _ } ->
     (match
@@ -165,6 +196,7 @@ let runtime_blocker_surface_of_failure_reason
                phase_suffix
                code
                detail)
+         ; signature = None
          }
      | Keeper_provider_runtime_boundary.No_timeout_observed ->
        (* The record already says what happened: [code] is the typed wire
@@ -175,12 +207,15 @@ let runtime_blocker_surface_of_failure_reason
           a typed cause, which was wrong whenever the code was typed. *)
        Some
          { blocker_class = Blocked_by_provider_runtime_error
-         ; summary = lazy (Printf.sprintf "Provider runtime error (%s): %s" code detail)
+         ; summary =
+             lazy (Printf.sprintf "Provider runtime error (%s): %s" code detail)
+         ; signature = None
          })
   | Keeper_registry.Official_client_recovery_required recovery ->
     Some
       { blocker_class = Blocked_by_official_client_recovery
       ; summary = lazy (Keeper_internal_error.official_client_recovery_summary recovery)
+      ; signature = None
       }
   | Keeper_registry.Turn_configuration_error { code; field; detail } ->
     Some
@@ -191,6 +226,7 @@ let runtime_blocker_surface_of_failure_reason
             code
             (Option.fold field ~none:"" ~some:(Printf.sprintf " field=%s"))
             detail)
+      ; signature = None
       }
   | Keeper_registry.Fiber_unresolved _ ->
     Some
@@ -199,15 +235,18 @@ let runtime_blocker_surface_of_failure_reason
           Lazy.from_val
             "Keeper fiber did not resolve a terminal outcome; supervisor cleanup is \
              required."
+      ; signature = None
       }
   | Keeper_registry.Exception detail ->
     Some
       { blocker_class = Blocked_by_exception
       ; summary = lazy (Printf.sprintf "Keeper runtime exception: %s" detail)
+      ; signature = None
       }
   | Keeper_registry.Operator_interrupt ->
     Some
       { blocker_class = Blocked_by_operator_interrupt
       ; summary = lazy ("Current turn was cancelled by explicit operator request.")
+      ; signature = None
       }
 ;;

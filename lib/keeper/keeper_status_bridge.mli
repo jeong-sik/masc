@@ -29,10 +29,12 @@ type runtime_blocker_class = Keeper_status_bridge_blocker.runtime_blocker_class 
 val runtime_blocker_class_to_string : runtime_blocker_class -> string
 
 (** [summary] is lazy: the [turn_failures] summary reads the receipt store,
-    and callers that only need [blocker_class] never force it. *)
+    and callers that only need [blocker_class] never force it. [signature]
+    is the machine wire behind a human-sentence summary, [None] elsewhere. *)
 type runtime_blocker_surface = Keeper_status_bridge_blocker.runtime_blocker_surface = {
   blocker_class : runtime_blocker_class;
   summary : string Lazy.t;
+  signature : string option;
 }
 
 (** [latest_receipt] is read only for [Turn_consecutive_failures], whose
@@ -69,7 +71,10 @@ val runtime_blocker_surface_opt :
 val runtime_blocker_fields_json_of_surface :
   keeper_meta -> runtime_blocker_surface option -> (string * Yojson.Safe.t) list
 (** The status JSON fields for a blocker already read with
-    {!runtime_blocker_surface_opt}. Forces [summary]. *)
+    {!runtime_blocker_surface_opt}. Forces [summary]. Besides the class and
+    the summary the fields carry [runtime_blocker_signature]: the machine
+    wire behind a summary that replaced it with a human sentence, [null]
+    wherever the summary already leads with the machine wire. *)
 
 val runtime_blocker_fields_json :
   Workspace_utils.config -> keeper_meta -> (string * Yojson.Safe.t) list

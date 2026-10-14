@@ -55,6 +55,20 @@ let required_nullable_string_field json key =
         (Printf.sprintf "field '%s' must be a string or null (received %s)" key
            (Json_util.kind_name other))
 
+(* Like {!required_nullable_string_field}, but a missing member is [None]
+   rather than an error. For fields added to the status JSON after this
+   client shipped against an older server: the roster must still decode.
+   A present-but-wrong-typed member stays an error. *)
+let optional_nullable_string_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Ok None
+  | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some other ->
+      Error
+        (Printf.sprintf "field '%s' must be a string or null (received %s)" key
+           (Json_util.kind_name other))
+
 let required_nullable_bool_field json key =
   match Json_util.assoc_member_opt key json with
   | None -> Error (Printf.sprintf "missing required field '%s'" key)

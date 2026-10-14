@@ -761,6 +761,57 @@ let fenced_cause_label = function
      | None -> kind_of_masc_internal_error masc)
 ;;
 
+(* The empty assistant turn behind a fence, when the fence's cause is one.
+   The decision this supports (Board p-d8153cc02a535b82b6b1e3b5bca9add4,
+   c-ff6ec9f3168e1c677318c91bc0795c3b) keeps the fence — a host or subagent
+   may have run a tool MASC never saw, so "no tool call in this turn" is not
+   proof of "no effect anywhere" — but carries the already-typed
+   Accept_rejected empty/no-progress fact as a reason, so display layers and
+   receipts can say "empty turn" without parsing the wire kind out of text.
+   [None] for every other cause, including the fenced masc errors that are
+   not an empty turn and the projected agent-core causes, whose emptiness
+   this projection cannot vouch for. *)
+let fenced_cause_empty_no_progress = function
+  | Fenced_core _ -> None
+  | Fenced_masc
+      (Accept_rejected
+         { reason_kind; response_shape; _ }) ->
+    Some (accept_rejection_is_empty_no_progress ~reason_kind ~response_shape)
+  | Fenced_masc
+      (Official_client_recovery_required _
+      | Runtime_exhausted _
+      | Resumable_cli_session _
+      | Internal_unhandled_exception _
+      | Internal_bridge_exception _
+      | Internal_contract_rejected _
+      | Incomplete_tool_transcript _
+      | Terminal_effect_failed _
+      | Host_stopped_turn _
+      | Runtime_connection_closed _
+      | Provider_attempt_effect_fenced _
+      | Tool_correction_lost _
+      | Receipt_persistence_failed _
+      | Gate_replay_repair_required _) -> None
+;;
+
+let fenced_cause_of_masc_internal_error = function
+  | Provider_attempt_effect_fenced { cause; _ }
+  | Tool_correction_lost { cause; _ } -> Some cause
+  | Official_client_recovery_required _
+  | Runtime_exhausted _
+  | Resumable_cli_session _
+  | Accept_rejected _
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
+  | Terminal_effect_failed _
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
+  | Receipt_persistence_failed _
+  | Gate_replay_repair_required _ -> None
+;;
+
 let fenced_attempt_summary = function
   | Provider_attempt_effect_fenced { effect_disposition; cause; _ }
   | Tool_correction_lost { effect_disposition; cause; _ } ->

@@ -4148,8 +4148,8 @@ let update_private_file_tail_durable_locked_result path ~max_bytes decide =
     ~io:private_jsonl_transaction_unix_io path decide
 ;;
 
-let recover_and_update_private_jsonl_durable_locked_result path decide =
-  update_private_file_durable_locked_with_io ~recover_incomplete_tail:true
+let recover_and_update_private_jsonl_durable_locked_result ?(create=true) path decide =
+  update_private_file_durable_locked_with_io ~create ~recover_incomplete_tail:true
     ~io:private_jsonl_transaction_unix_io path decide
 ;;
 

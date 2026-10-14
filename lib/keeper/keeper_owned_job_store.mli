@@ -58,6 +58,11 @@ val create :
   preparation:Keeper_owned_job_backend.preparation -> inputs:input list ->
   (record, error) result
 val load : base_path:string -> keeper_name:string -> Job_id.t -> (record, error) result
+val recover : base_path:string -> keeper_name:string -> Job_id.t -> (record, error) result
+(** Existing-authority maintenance read. Under the journal's exact file lock,
+    remove only an incomplete append suffix before decoding the full committed
+    prefix. Complete malformed rows remain a refusal. A missing owner is never
+    created. Read-only tools continue to use strict [load]. *)
 val transition :
   record -> phase:phase -> cancel_requested:bool ->
   outputs:(Tool_output.artifact_ref * Tool_output.artifact_ref) option ->

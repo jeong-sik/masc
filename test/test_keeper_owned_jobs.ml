@@ -132,6 +132,11 @@ elif args[:2] == ["container", "create"]:
 elif args[:2] == ["container", "inspect"]:
     assert state["container"] is not None and args[2] == state["container"]["Id"]
     container = json.loads(json.dumps(state["container"]))
+    if (control.get("mode") == "inspect_blocked"
+            and container["Config"]["Labels"]["masc.mcp.owned_job"] == control.get("blocked_job_id")):
+        (root / "inspect-entered").write_text(args[2])
+        while not (root / "inspect-release").exists():
+            time.sleep(0.01)
     if control.get("corrupt") == "mount":
         container["Mounts"][0]["Source"] = "/different/unowned/workspace"
     elif control.get("corrupt") == "label":
@@ -1071,6 +1076,9 @@ let test_completion_delivery_failure_and_restart () =
     (Keeper_continuation_channel.to_yojson completion.oj_channel);
   check bool "the wake carries original routing" true
     (Keeper_event_queue.continuation_channel_of_payload selection.source.payload = Some channel);
+  check bool "actual single-source turn defaults route to the original conversation" true
+    (Masc.Keeper_unified_turn.continuation_channel_of_wake
+       (Masc.Keeper_registry.Woken [selection.source.payload]) = Some channel);
   let decoded = Keeper_event_queue.stimulus_of_yojson (Keeper_event_queue.stimulus_to_yojson selection.source)
     |> require "strict durable completion round trip" in
   check bool "typed completion survives the queue wire" true
@@ -1142,6 +1150,11 @@ let test_completion_consumed_before_producer_ack () = with_fixture @@ fun _env i
   let selection = only_selection fixture in
   Event_registry.ack_pending_result ~base_path:fixture.base_path keeper ~selection
     |> require "consumer commits before producer ACK";
+  let path = owner_path fixture id in
+  let complete_prefix = read path in
+  write path (complete_prefix ^ "{\"completion_delivered\":tr");
+  (match Store.load ~base_path:fixture.base_path ~keeper_name:keeper record.job_id with
+   | Error (Store.Corrupt _) -> () | _ -> fail "strict result read accepted a torn owner ACK");
   Process_eio.reset_for_testing (); initialize ();
   let before = List.length (calls fixture) in
   let report = recover_completions fixture in
@@ -1167,6 +1180,12 @@ let test_completion_retains_unknown_launch_and_owner () = with_fixture @@ fun _e
   check int "unconfirmed original job is never started" 0 (effect_count fixture "start");
   let path = owner_path fixture id in
   let original = read path in
+  let held = path ^ ".held" in
+  Unix.rename path held;
+  let missing = recover_completions fixture in
+  check int "missing original authority remains visible" 1 (List.length missing.failures);
+  check bool "recovery never creates a missing owner" false (Sys.file_exists path);
+  Unix.rename held path;
   write path "corrupt original owner\n";
   let before = List.length (calls fixture) in
   let corrupt = recover_completions fixture in
@@ -1179,6 +1198,55 @@ let test_completion_retains_unknown_launch_and_owner () = with_fixture @@ fun _e
   ignore (recover_completions fixture);
   check int "restored owner still cannot repeat original create" 1 (effect_count fixture "create");
   check int "restored owner still cannot authorize an absent start" 0 (effect_count fixture "start")
+
+
+let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let running = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  let blocked_id = job_id running in
+  let config = Workspace.default_config fixture.base_path in
+  let supervisor = Completion_wake.create ~config in
+  let entered = Filename.concat fixture.base_path "inspect-entered" in
+  let release = Filename.concat fixture.base_path "inspect-release" in
+  control fixture (`Assoc ["mode", `String "inspect_blocked"; "blocked_job_id", `String blocked_id]);
+  (* Fixture deadlock guard only. The production pulse has no deadline. *)
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. @@ fun () ->
+  Eio.Switch.run @@ fun job_sw ->
+  Completion_wake.pulse ~sw:job_sw supervisor |> store_value "actual nonblocking maintenance pulse";
+  let rec await_condition condition =
+    if condition () then () else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; await_condition condition) in
+  await_condition (fun () -> Sys.file_exists entered);
+  check bool "shared maintenance control returned while backend remains blocked" false (Sys.file_exists release);
+  (* The peer retains the blocked inspection's old container snapshot. Open a
+     separate original job while that process waits; durable completed output
+     recovery of this new job must not join the older inspection. *)
+  let state = daemon fixture |> to_assoc in
+  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
+    (List.map (fun (name,value) -> name,(if name="container" then `Null else value)) state)));
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  let later = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"start-independent" ~turn:52 "keeper_job_start"
+      (`Assoc ["argv", `List [`String "fixture-program"]])) in
+  let later_id = job_id later in
+  check bool "independent work owns a distinct original job" true (later_id <> blocked_id);
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0;
+      "mode", `String "inspect_blocked"; "blocked_job_id", `String blocked_id]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"collect-independent" ~turn:53 "keeper_job_status" (argument later_id)));
+  let calls_before = List.length (calls fixture) in
+  Completion_wake.pulse ~sw:job_sw supervisor |> store_value "next pulse admits independent recovery";
+  await_condition (fun () -> List.length (pending_completions fixture) = 1);
+  let completion = only_selection fixture |> completion_payload in
+  check string "new completed job delivers while older backend is blocked" later_id
+    (Store.Job_id.to_string completion.oj_job_id);
+  check int "active blocked worker is not duplicated by another pulse" calls_before (List.length (calls fixture));
+  check bool "pending first job has not been misclassified completed" false (load fixture blocked_id).completion_delivered;
+  write release "continue the original inspection\n";
+  Printf.printf "owned_job_completion_supervisor_measurement=%s\n%!"
+    (Yojson.Safe.to_string (`Assoc ["scope", `String "synthetic CLI actual maintenance supervisor";
+      "pulse_returned_before_backend_release", `Bool true;
+      "new_job_delivered_before_backend_release", `Bool true;
+      "duplicate_blocked_worker_backend_calls", `Int 0]))
 
 
 let () =
@@ -1201,4 +1269,5 @@ let () =
       ; test_case "job result rejects unavailable owner authority" `Quick test_job_result_rejects_unavailable_authority
       ; test_case "completion enqueue failure recovers original result after restart" `Quick test_completion_delivery_failure_and_restart
       ; test_case "consumed notification survives missing producer ACK" `Quick test_completion_consumed_before_producer_ack
-      ; test_case "completion recovery retains unknown launch and corrupt owner" `Quick test_completion_retains_unknown_launch_and_owner ]]
+      ; test_case "completion recovery retains unknown launch and corrupt owner" `Quick test_completion_retains_unknown_launch_and_owner
+      ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend ]]

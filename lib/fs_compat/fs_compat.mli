@@ -1491,9 +1491,10 @@ val update_private_file_tail_durable_locked_result :
     descriptor lock as the updater, truncate only the suffix after the last newline
     and fsync before calling [decide]. Complete malformed rows are preserved for
     the consumer decoder to refuse. Recovery/append/descriptor failures remain
-    explicit; no callback or success is returned after failed truncation/fsync. *)
+    explicit; no callback or success is returned after failed truncation/fsync.
+    [create=false] neither creates a missing journal nor prepares its parent. *)
 val recover_and_update_private_jsonl_durable_locked_result :
-  string -> (string -> string option * 'a) ->
+  ?create:bool -> string -> (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
 (** Existing-only sibling of {!update_private_file_durable_locked_result}.

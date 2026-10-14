@@ -335,6 +335,27 @@ let load ~base_path ~keeper_name job_id =
          then Ok record else Error (Invalid_authority "different job/base/Keeper"))
     |> existing_outcome)
 
+let recover ~base_path ~keeper_name job_id =
+  let* base_path = canonical_base_path base_path in
+  let* () = validate_owned_path ~base_path ~job_id ~create:false in
+  protect_io (fun () ->
+    (* Effects follow a confirmed full intent append, so an incomplete suffix
+       cannot own a backend effect or delivery ACK. Retain every complete row. *)
+    match Fs_compat.recover_and_update_private_jsonl_durable_locked_result
+        ~create:false (journal_path ~base_path job_id)
+        (fun bytes -> None,
+          let* () = validate_owned_path ~base_path ~job_id ~create:false in
+          let* record = decode_journal bytes in
+          if scope_matches ~base_path ~keeper_name ~job_id record then Ok record
+          else Error (Invalid_authority "different job/base/Keeper")) with
+    | Fs_compat.Private_file_succeeded result -> result
+    | Private_file_succeeded_with_cleanup_failure {cleanup_failure;_} ->
+        Error (Commit_unconfirmed (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+    | Private_file_failed error -> Error (Io_failed (Fs_compat.durable_append_error_to_string error))
+    | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+        Error (Io_failed (Fs_compat.durable_append_error_to_string error ^ "; " ^
+          Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
+
 let ensure_directory ~base_path path =
   match Keeper_fs_durable_directory.ensure ~before_prepare:(fun () -> ())
       ~before_directory_fsync:(fun _ -> ()) ~ownership_root:base_path path with

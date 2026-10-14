@@ -776,6 +776,7 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
   | WO.Task_cancelled _
   | WO.Delegate_completed _
   | WO.Ask_answered_row _
+  | WO.Owned_job_completed _
   | WO.Composition_completed ->
     fail "scheduled wake must project to Schedule_due"
 ;;

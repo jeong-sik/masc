@@ -138,6 +138,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_missing _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_job_unavailable _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_not_answered _ ->
      fail "Board source reported another source's read failure");
   let second_pass =
@@ -156,6 +157,7 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
    | Keeper_heartbeat_stimulus_intake.Stimulus_connector_missing _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_retry_later _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_missing _
+   | Keeper_heartbeat_stimulus_intake.Stimulus_job_unavailable _
    | Keeper_heartbeat_stimulus_intake.Stimulus_ask_not_answered _ ->
     fail "Board source reported another source's read failure"
 ;;

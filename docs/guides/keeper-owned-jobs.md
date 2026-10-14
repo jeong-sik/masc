@@ -83,7 +83,9 @@ retry authorization from this receipt. A direct pending result read lets the
 Keeper continue other work while the original job remains pending.
 
 The server reconciles pending jobs on startup and its existing maintenance
-pulse. Separate original jobs perform their recovery I/O concurrently. An
+pulse. Each job has its own lifecycle fiber; a blocked backend does not hold
+the shared maintenance pulse or newly pending jobs. Separate original jobs
+perform their recovery I/O concurrently. An
 unconfirmed create/start is observed, never replayed. Complete results already
 in the owner journal need no backend operation to recover delivery.
 
@@ -100,7 +102,9 @@ Pending discovery is committed before the owner and backend effects. Delivery
 is acknowledged in that same owner only after durable queue enqueue, then its
 discovery marker is retired. Failed enqueue, an interrupted acknowledgement or
 unreadable authority leaves recovery evidence. Queue consumption before the
-producer acknowledgement does not recreate the notification. If the canonical
+producer acknowledgement does not recreate the notification. Maintenance
+recovers only an incomplete final append under the journal lock; complete
+malformed rows remain a refusal, and missing owners are never created. If the canonical
 result cannot be read at intake, the source stays pending and its error remains
 visible; independent sources can continue. These notifications let the Keeper
 resume an original Composition explicitly; they do not start another worker

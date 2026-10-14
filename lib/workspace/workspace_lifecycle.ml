@@ -9,9 +9,6 @@ open Workspace_state
 open Workspace_broadcast
 open Workspace_identity
 
-(* Single-namespace: workspace_id/namespace_id concepts retired (#unify-namespace).
-   All workspace scoped by cluster basepath only. *)
-
 (** Bounded snapshot of a corrupt agent JSON file for error diagnostics.
     Reads at most 200 bytes to avoid OOM on large/corrupt files. *)
 let agent_parse_error_snapshot ~agent_name ~agent_file =

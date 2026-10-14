@@ -6,4 +6,4 @@
 (test
  (name test_workspace_bootstrap)
  (modules test_workspace_bootstrap)
- (libraries masc_test_deps str))
+ (libraries masc_test_deps eio_main str))

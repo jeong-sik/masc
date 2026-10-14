@@ -8,7 +8,7 @@
     - Shared string utilities (String_util.option_trim, normalized_string_list)
 
     Extracted owner modules:
-    - Workspace_bootstrap: default_workspace_state, ensure_workspace_bootstrap
+    - Workspace_bootstrap: default_workspace_state, reconcile_message_seq
     - Workspace_identity: generate_session_id, get_hostname, get_tty, resolve_agent_name
     - Workspace_task_id: task_id_to_int, archive management, next_task_number
     - Workspace_backlog: read_backlog, write_backlog
@@ -105,8 +105,7 @@ let read_state_strict config =
       |> Result.map Option.some
       |> Result.map_error (fun detail -> State_decode_error detail)
 
-let read_state config =
-  let json = read_json config (state_path config) in
+let read_present_state config json =
   match workspace_state_of_yojson json with
   | Ok state -> state
   | Error msg ->
@@ -126,6 +125,17 @@ let read_state config =
            Log.Misc.warn "read_state: failed to persist repaired state: %s"
              (Printexc.to_string exn));
       repaired
+
+(* [state.json] is what [is_initialized] reads, so a read never creates it:
+   a workspace without one gets the declared default, unwritten. A document
+   that is there but does not decode is repaired and written back. *)
+let read_state config =
+  match read_json_doc config (state_path config) with
+  | Ok None -> Workspace_bootstrap.default_workspace_state config
+  | Ok (Some json) -> read_present_state config json
+  | Error error ->
+      Log.Misc.warn "read_state: %s" (json_doc_error_to_string error);
+      read_present_state config (`Assoc [])
 
 let update_state config f =
   with_file_lock config (state_path config) (fun () ->

@@ -131,27 +131,27 @@ let test_boot_lifts_a_counter_that_fell_behind () =
   with_workspace (fun config messages ->
     List.iter (file_a_message messages) [ 1; 84; 2604 ];
     let path = write_state_with config 84 in
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check int "raised to the store" 2604 (recorded_seq config path))
 
 let test_boot_leaves_a_counter_that_is_ahead () =
   with_workspace (fun config messages ->
     List.iter (file_a_message messages) [ 12 ];
     let path = write_state_with config 900 in
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check int "untouched" 900 (recorded_seq config path))
 
 let test_boot_leaves_a_counter_that_matches () =
   with_workspace (fun config messages ->
     List.iter (file_a_message messages) [ 2604 ];
     let path = write_state_with config 2604 in
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check int "untouched" 2604 (recorded_seq config path))
 
 let test_boot_leaves_the_counter_when_nothing_is_filed () =
   with_workspace (fun config _messages ->
     let path = write_state_with config 7 in
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check int "an empty store says nothing about the counter" 7
       (recorded_seq config path))
 
@@ -163,7 +163,7 @@ let test_boot_does_not_touch_unreadable_state () =
     List.iter (file_a_message messages) [ 2604 ];
     let path = state_path config in
     Workspace_utils_ops.write_json config path (`String "not a state object");
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check string "left for the typed recovery" {|"not a state object"|}
       (Yojson.Safe.to_string (Workspace_utils_ops.read_json config path)))
 

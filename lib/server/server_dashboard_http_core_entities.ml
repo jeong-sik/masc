@@ -91,7 +91,7 @@ let active_agent_summary_json json =
 ;;
 
 let dashboard_general_agent_count_light config =
-  if not (Workspace.root_is_initialized config)
+  if not (Workspace.is_initialized config)
   then 0
   else
     Workspace.list_dir config (Workspace.agents_dir config)

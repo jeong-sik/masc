@@ -37,6 +37,6 @@
 - keeper failure reason: `fiber_unresolved(unexpected)` · `graceful_shutdown` · `cancelled_by_parent`.
 - recall injection ledger **schema v3** — 필수 typed `reset` 마커, keeper process 첫 행이 replay 상태 리셋. v2 거부.
 - host FD pressure override 는 `MASC_HOST_FD_PRESSURE_STATE_FILE` 하나 (+ `--base-path`).
-- workspace root marker = `.masc/root-state.json` 만.
+- workspace 초기화 표시 = `.masc/state.json`.
 - config 카탈로그: `agent_core/models.toml` 내장 catalog. 배포별 overlay는 없고 `AGENT_CORE_MODEL_CATALOG`만 명시적인 전체 교체 경로다.
 - README 신규 언급: `prompts/keeper.world.md` = 모든 keeper 에 주입되는 공용 **World prompt**; `personas/<name>/profile.json` overlay (replace-if-non-empty).

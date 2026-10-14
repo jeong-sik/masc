@@ -8,72 +8,43 @@ open Workspace_utils
 open Workspace_state
 open Workspace_broadcast
 
-(** Initialize MASC workspace state *)
+(* A backend that keeps its own copy (Memory) mirrors a document to the local
+   file so a filesystem fallback reads fresh data. On the filesystem backend
+   the document already is that file. *)
+let sync_local_mirror config ~label path =
+  if should_dual_write_local config
+  then
+    match write_json_local path (read_json config path) with
+    | Ok () -> ()
+    | Error msg -> Log.Workspace.warn "init: local sync of %s failed: %s" label msg
+;;
+
+(** Initialize MASC workspace state. On a workspace that is already
+    initialized, the server's boot path, it raises a message counter that
+    fell behind the filed messages. *)
 let init config ~agent_name =
   invalidate_initialized_cache ();
-  (* Ensure root .masc structure exists even when initializing a non-default workspace. *)
-  let root_dir = masc_dir config in
-  let root_agents_dir = Filename.concat root_dir "agents" in
-  let root_keepers_dir = Filename.concat root_dir Common.keepers_runtime_dirname in
-  let root_traces_dir = Filename.concat root_dir "traces" in
-  let root_tasks_dir = Filename.concat root_dir "tasks" in
-  let root_messages_dir = Filename.concat root_dir "messages" in
-  let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
   List.iter
     mkdir_p
-    [ root_agents_dir
-    ; root_keepers_dir
-    ; root_traces_dir
-    ; root_tasks_dir
-    ; root_messages_dir
+    [ agents_dir config
+    ; keepers_runtime_dir config
+    ; Filename.concat (masc_dir config) "traces"
+    ; tasks_dir config
+    ; messages_dir config
     ];
-  if not (path_exists_root config (root_state_path config))
-  then (
-    let root_state = Workspace_bootstrap.default_workspace_state config in
-    write_json_root config (root_state_path config) (workspace_state_to_yojson root_state))
-  else (
-    (* Sync PG state to local file on startup so filesystem fallback has fresh data *)
-    let root_json = read_json_root config (root_state_path config) in
-    match write_json_local (root_state_path config) root_json with
-    | Ok () -> ()
-    | Error msg -> Log.Workspace.warn "init: local sync of root state failed: %s" msg);
-  if not (path_exists_root config root_backlog_path)
-  then (
-    let root_backlog = { tasks = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; last_updated = now_iso (); version = 1 } in
-    write_json_root config root_backlog_path (backlog_to_yojson root_backlog))
-  else (
-    let root_backlog_json = read_json_root config root_backlog_path in
-    match write_json_local root_backlog_path root_backlog_json with
-    | Ok () -> ()
-    | Error msg -> Log.Workspace.warn "init: local sync of root backlog failed: %s" msg);
+  let backlog = backlog_path config in
+  if not (path_exists config backlog)
+  then
+    write_json config backlog
+      (backlog_to_yojson (Workspace_bootstrap.empty_backlog ()))
+  else sync_local_mirror config ~label:"backlog" backlog;
   if is_initialized config
   then (
-    (* Sync PG scoped state to local file so filesystem fallback has fresh data *)
-    let scoped_json = read_json config (state_path config) in
-    (match write_json_local (state_path config) scoped_json with
-     | Ok () -> ()
-     | Error msg -> Log.Workspace.warn "init: local sync of scoped state failed: %s" msg);
+    sync_local_mirror config ~label:"state" (state_path config);
+    Workspace_bootstrap.reconcile_message_seq config (state_path config);
     "MASC already initialized.")
   else (
-    (* Create directories *)
-    List.iter mkdir_p [ agents_dir config; tasks_dir config; messages_dir config ];
-    (* Create initial state *)
-    let state =
-      { protocol_version = "0.1.0"
-      ; project = Filename.basename config.base_path
-      ; started_at = now_iso ()
-      ; message_seq = 0
-      ; active_agents = []
-      ; paused = false
-      ; pause_reason = None
-      ; paused_by = None
-      ; paused_at = None
-      ; search_strategy_default = Some "best_first_v1"
-      ; speculation_enabled = false
-      ; speculation_budget = None
-      }
-    in
-    write_state config state;
+    write_state config (Workspace_bootstrap.default_workspace_state config);
     invalidate_initialized_cache ();
     let result = "MASC workspace created!" in
     (* Auto-join if agent specified — uses Workspace_lifecycle.join via the caller *)

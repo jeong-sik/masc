@@ -137,6 +137,143 @@ let contains ~needle haystack =
    the [Esc] that leaves it. Dropping from the back was written for the
    [r] / [Tab] / [q] tail, which every surface shares and the sheet holds;
    it kept going once the row was full enough. *)
+(* The help door (task-2361). An operator reading footers in 2026-10 could
+   not learn [?] existed: only the composer's rows named it. Every key row
+   [?] answers now names it, and a row too full for the item ends in the cut
+   marker, which names the same key. *)
+let plain_surface_state view =
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- view;
+  state
+
+let surface_row state view width =
+  Masc_tui_render_prim.footer_line state ~max_cells:width
+    ~hints:(Masc_tui_keys.footer_hints view)
+  |> Masc_tui_theme.strip_sgr
+
+let test_help_item_is_stamped_on_every_surface_row () =
+  (* A surface row with room spells the item out; one too full for it ends
+     in the cut marker, which names the same key. Either way the door is
+     named -- the state an operator could not find it in, before task-2361. *)
+  List.iter (fun view ->
+    List.iter (fun width ->
+      let row = surface_row (plain_surface_state view) view width in
+      check_bool "a row of any width names ?" true (contains ~needle:"?" row);
+      check_bool "the row names help or marks the cut" true
+        (contains ~needle:"?:help" row || contains ~needle:"…" row))
+      [ 60; 98; 140; 200 ])
+    [ Masc_tui_types.Tools; Masc_tui_types.Repositories; Masc_tui_types.Board
+    ; Masc_tui_types.Planning; Masc_tui_types.Clients ];
+  (* A row with room carries the item itself rather than only the marker. *)
+  let state = plain_surface_state Masc_tui_types.Tools in
+  let roomy =
+    Masc_tui_render_prim.footer_line state ~max_cells:120
+      ~hints:"r:refresh  q:quit"
+    |> Masc_tui_theme.strip_sgr
+  in
+  check_bool "a row with room spells the item out" true
+    (contains ~needle:"?:help" roomy)
+
+let test_help_item_yields_to_a_full_row_but_the_door_stays () =
+  let state = plain_surface_state Masc_tui_types.Tools in
+  List.iter (fun width ->
+    let row =
+      Masc_tui_render_prim.footer_line state ~max_cells:width
+        ~hints:"j/k:move  Enter:open  r:refresh"
+      |> Masc_tui_theme.strip_sgr
+    in
+    check_bool "a row of any width names ?" true (contains ~needle:"?" row);
+    if not (contains ~needle:"?:help" row) then
+      check_bool "a row that dropped the item marks the cut" true
+        (contains ~needle:"…" row))
+    [ 30; 45; 60; 80; 120 ]
+
+let test_help_item_waits_when_keys_are_claimed () =
+  (* The chat composer owns its footer: its minimal rows already carry the
+     item and its typing rows rightly omit it. *)
+  let chat =
+    plain_surface_state (Masc_tui_types.Keepers Masc_tui_types.Keeper_message)
+  in
+  let chat_row =
+    Masc_tui_render_prim.footer_line chat ~max_cells:140
+      ~hints:"Enter:send  PgUp:history"
+    |> Masc_tui_theme.strip_sgr
+  in
+  check_bool "the chat row is not stamped from outside" false
+    (contains ~needle:"?:help" chat_row);
+  (* A text field holding printable keys takes [?] as a character. *)
+  let typing = plain_surface_state Masc_tui_types.Config in
+  typing.config_pane <- Masc_tui_types.Config_presets;
+  typing.preset_save_draft <- Some "name";
+  let typing_row =
+    Masc_tui_render_prim.footer_line typing ~max_cells:140
+      ~hints:(Masc_tui_keys.footer_hints Masc_tui_types.Config)
+    |> Masc_tui_theme.strip_sgr
+  in
+  check_bool "a row whose keys a field holds is not stamped" false
+    (contains ~needle:"?:help" typing_row);
+  (* A modal owns its own row. *)
+  let modal = plain_surface_state Masc_tui_types.Tools in
+  modal.about_open <- true;
+  let modal_row = surface_row modal Masc_tui_types.Tools 140 in
+  check_bool "a modal row is not stamped" false
+    (contains ~needle:"?:help" modal_row)
+
+(* The overlays that answer [?] in their own dispatch arms: the stamp on
+   their rows is true, and it has to stay true -- an overlay moved into the
+   exclusion lists instead would hide a door that works. *)
+let test_overlays_that_answer_keep_the_stamped_door () =
+  List.iter
+    (fun open_overlay ->
+      let state = plain_surface_state Masc_tui_types.Tools in
+      open_overlay state;
+      (* A row with room spells the item even under the overlay -- these
+         three are not in the exclusion lists, unlike the modals that
+         swallow the key. *)
+      let roomy =
+        Masc_tui_render_prim.footer_line state ~max_cells:140
+          ~hints:"r:refresh  q:quit"
+        |> Masc_tui_theme.strip_sgr
+      in
+      check_bool "an overlay that answers ? keeps the stamped door" true
+        (contains ~needle:"?:help" roomy))
+    [ (fun s -> s.Masc_tui_types.answering_open <- true)
+    ; (fun s -> s.Masc_tui_types.link_modal_open <- true)
+    ; (fun s -> s.Masc_tui_types.keeper_navigation_open <- true) ]
+
+(* The chat's wide and compact rows carry the door exactly while the empty
+   draft lets [?] answer; the caller passes the item, so both spellings have
+   to ride the row without breaking their separators. *)
+let test_chat_rows_carry_the_door_only_while_the_draft_is_empty () =
+  let wide = Masc_tui_footer.chat_hints ~enter_hint:"Enter:send" ~scroll_hint:""
+      ~switch_hint:"" ~escape_hint:"" ~leave_hint:"" ~help_hint:"  ?:help" in
+  check_bool "an empty draft's wide row names the door" true
+    (contains ~needle:"?:help" wide);
+  check_bool "the item keeps its two-space separation" true
+    (contains ~needle:"Ctrl-W:word  ?:help" wide);
+  check_bool "a typing wide row names no door" false
+    (contains ~needle:"?:help"
+       (Masc_tui_footer.chat_hints ~enter_hint:"Enter:send" ~scroll_hint:""
+          ~switch_hint:"" ~escape_hint:"" ~leave_hint:"" ~help_hint:""));
+  let compact =
+    Masc_tui_footer.compact_chat_hints ~enter_hint:"Enter:send"
+      ~scroll_hint:"PgUp:history" ~escape_hint:"Esc:quiet" ~help_hint:"  ?:help"
+  in
+  check_bool "an empty draft's compact row names the door" true
+    (contains ~needle:"?:help" compact);
+  check_bool "a typing compact row names no door" false
+    (contains ~needle:"?:help"
+       (Masc_tui_footer.compact_chat_hints ~enter_hint:"Enter:send"
+          ~scroll_hint:"PgUp:history" ~escape_hint:"Esc:quiet" ~help_hint:""))
+
+let test_ensure_help_item_appends_once () =
+  check_string "a row with no help item gains one at the end"
+    "j/k:move  q:quit  ?:help"
+    (Masc_tui_footer.ensure_help_item "j/k:move  q:quit");
+  check_string "a row that already names help keeps its own spelling"
+    "?:help  q:quit"
+    (Masc_tui_footer.ensure_help_item "?:help  q:quit")
+
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "action text is not dropped as a key" `Quick
@@ -145,6 +282,18 @@ let tests =
           test_build_mismatch_names_the_older_side
       ; Alcotest.test_case "build mismatch is silent without testimony" `Quick
           test_build_mismatch_is_silent_without_testimony
+      ; Alcotest.test_case "help item is stamped on every surface row" `Quick
+          test_help_item_is_stamped_on_every_surface_row
+      ; Alcotest.test_case "help item yields to a full row but the door stays" `Quick
+          test_help_item_yields_to_a_full_row_but_the_door_stays
+      ; Alcotest.test_case "help item waits when keys are claimed" `Quick
+          test_help_item_waits_when_keys_are_claimed
+      ; Alcotest.test_case "overlays that answer keep the stamped door" `Quick
+          test_overlays_that_answer_keep_the_stamped_door
+      ; Alcotest.test_case "chat rows carry the door only while the draft is empty" `Quick
+          test_chat_rows_carry_the_door_only_while_the_draft_is_empty
+      ; Alcotest.test_case "ensure_help_item appends once" `Quick
+          test_ensure_help_item_appends_once
       ;] )
   ; ( "voice meter"
     , [] )

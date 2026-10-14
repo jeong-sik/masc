@@ -291,21 +291,23 @@ let global =
   ; b Meta "&"
       "Collab: watch MSX/DOS and manage play links (also `:` go Collab)"
   ; b Meta roster_toggle_key "show or hide the Keeper roster"
-      ~help:"the roster starts hidden; this choice persists \
-             across navigation and resizing"
+      ~help:"show or hide the Keeper roster; it starts hidden and the \
+             choice persists across navigation and resizing"
   ; b Meta "Ctrl-L"
       "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
        right now, and on its Changes tab the selected keeper's files (press the header to switch)"
-      ~help:"the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat; \
-             /activity order turns the order of its calls, /activity scroll moves it"
+      ~help:"cycle the Activity pane narrow, wide or hidden; the wheel over the pane \
+             scrolls the full list; a press picks a keeper, a second press opens its chat; \
+             /activity order turns the order of its calls, /activity scroll moves the pane"
   ; b Navigate "Ctrl-W" "focus the Activity pane"
-      ~help:"a cursor lands on its first row; j/k walk the rows a press acts on and scroll past the last, \
-             Enter opens or closes the call under it, Esc or Ctrl-W gives the keys back; \
-             the chat keeps Ctrl-W for its draft until the draft is empty"
+      ~help:"focus the Activity pane: a cursor lands on its first row, j/k walk the rows a press \
+             acts on and scroll past the last, Enter opens or closes the call under it, \
+             Esc or Ctrl-W gives the keys back; the chat keeps Ctrl-W for its draft until \
+             the draft is empty"
   ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
   ; b Navigate "Ctrl-]" "follow the reference under the cursor"
-      ~help:"and Esc on the surface it opens comes back here"
+      ~help:"follow the reference under the cursor; Esc on the surface it opens comes back here"
   ; b Meta "q" "quit"
   ]
 

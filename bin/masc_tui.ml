@@ -19675,6 +19675,10 @@ let main
      key, and a reader who never set it sees no change. *)
   state.hints_visible <-
     Option.value (tui_settings.hints_visible) ~default:true;
+  (* Absent reads as not shown: the door line exists for a first-time
+     reader, and a long-running operator still meets it once. *)
+  state.help_hint_shown <-
+    Option.value (tui_settings.help_hint_shown) ~default:false;
   state.coalesce_queued_input <-
     Option.value
       (tui_settings.coalesce_queued_input)
@@ -22611,6 +22615,27 @@ and is loaded on demand through keeper_skill.
         (not compact_viewport) && state.view = Keepers Keeper_message
         && not state.repository_changes_open
       in
+      (* The opening screen's help-door line retires on the first input of
+         any kind: the reader is driving now, and the doors it named -- the
+         footer item, the sheet -- stay on every screen without it. A paste
+         counts too; a wheel notch does not, because it can be a scroll
+         that never looked at the line. The write goes to the same
+         [tui] table the other one-time choices do, and a write that
+         cannot complete says so in the action slot rather than failing
+         the input it interrupted. *)
+      (match input with
+       | Some (Key _ | Pasted _) when not state.help_hint_shown ->
+           state.help_hint_shown <- true;
+           (match Masc_tui_config.set_help_hint_shown ~base_path with
+            | Ok () -> ()
+            | Error reason ->
+                report_action state "system"
+                  ("Could not store the help hint as shown: " ^ reason))
+       | Some (Key _ | Pasted _)
+       | Some (Graphics_reply _)
+       | Some (Mouse_left_press _ | Mouse_left_release _)
+       | Some (Mouse_wheel _)
+       | None -> ());
       let quit_key =
         match key with
         | Some k ->
@@ -24273,6 +24298,12 @@ and is loaded on demand through keeper_skill.
            in
            (match k with
             | "@" | "esc" -> close ()
+            (* The footer stamps the help door on this row, so the key has
+               to answer; the sheet is read-only and may cover the overlay,
+               the way the activity overlays allow it to. *)
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
             | "j" | "down" | "k" | "up" ->
                 let lines = Masc_tui_render_prim.answering_lines state in
                 let targets = Masc_tui_answering.target_indexes lines in
@@ -24336,6 +24367,11 @@ and is loaded on demand through keeper_skill.
            in
            (match k with
             | "esc" | "q" | "Q" -> close ()
+            (* Same door the footer stamps on this row; read-only over a
+               reader modal. *)
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
             | "j" | "down" ->
                 state.link_modal_scroll <-
                   Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:1
@@ -26264,6 +26300,13 @@ and is loaded on demand through keeper_skill.
                      launch_keeper_history_load state ~mailbox:async_messages
                        ~keeper_name:keeper.k_name;
                      state.view <- Keepers Keeper_message)
+            (* The row this overlay draws names the door on Overview, and
+               the chat's minimal rows name it too -- while navigation is
+               open this arm owns the key, so both rows need it to answer
+               here rather than in the surface under them. *)
+            | "?" ->
+                state.help_open <- true;
+                state.help_scroll <- 0
             | _ -> ())
        | Some "left"
          when state.view = Overview

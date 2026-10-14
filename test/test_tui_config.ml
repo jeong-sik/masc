@@ -159,6 +159,25 @@ let hints_cases =
   ]
 
 
+(* The one-time door line's flag, [tui].help_hint_shown. Absence reads as
+   "no" -- unlike hints_visible, whose default is the behaviour that predated
+   the key: nobody has met the line until the flag says so, and a long-running
+   operator meets it once too. *)
+let help_hint_of s = Config.help_hint_shown_of_doc (doc_of s)
+let check_help_hint = Alcotest.(check (option bool))
+
+let help_hint_cases =
+  [ Alcotest.test_case "reads [tui] help_hint_shown" `Quick (fun () ->
+        check_help_hint "true" (Some true)
+          (help_hint_of "[tui]\nhelp_hint_shown = true\n"))
+  ; Alcotest.test_case "explicit false stays false" `Quick (fun () ->
+        check_help_hint "false" (Some false)
+          (help_hint_of "[tui]\nhelp_hint_shown = false\n"))
+  ; Alcotest.test_case "absent key -> None (caller defaults to not shown)" `Quick
+      (fun () -> check_help_hint "none" None (help_hint_of "[tui]\ntheme = \"x\"\n"))
+  ]
+
+
 (* Whether a queued line absorbs the next one, [tui].coalesce_queued_input.
    Absence leaves the caller's default (off) in place, and an explicit true
    opts into joining locally waiting lines. *)
@@ -357,6 +376,20 @@ let store_cases =
             check_opt "none" None (Config.load ~base_path).theme))
   ]
 
+(* The one-time flag's write: written once by the first input, it has to be
+   there on the next start beside whatever else the table holds. *)
+let help_hint_store_cases =
+  [ Alcotest.test_case "a retired door line stays retired on the next read" `Quick
+      (fun () ->
+        with_storable_base (fun ~base_path ->
+            store_or_fail ~base_path (Some "gruvbox-dark");
+            (match Config.set_help_hint_shown ~base_path with
+             | Ok () -> () | Error message -> Alcotest.fail message);
+            let read = Config.load ~base_path in
+            check_opt "theme kept" (Some "gruvbox-dark") read.theme;
+            check_help_hint "flag stored" (Some true) read.help_hint_shown))
+  ]
+
 let board_sort_cases =
   [ Alcotest.test_case "last Board order survives a new read" `Quick (fun () ->
         with_storable_base (fun ~base_path ->
@@ -458,6 +491,8 @@ let () =
     ; ( "lift_colours", lift_cases )
     ; ("reduce_motion", reduce_motion_cases)
     ; ("hints_visible_of_doc", hints_cases)
+    ; ("help_hint_shown_of_doc", help_hint_cases)
+    ; ("set_help_hint_shown", help_hint_store_cases)
     ; ("coalesce_queued_input", coalesce_cases)
     ; ("send_on_stop", send_on_stop_cases)
     ; ("theme_io", io_cases)

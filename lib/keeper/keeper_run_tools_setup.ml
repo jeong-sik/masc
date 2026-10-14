@@ -118,6 +118,7 @@ let gate_causal_initial
 
 let expected_model_tool_names
       ?(deferred_names = [])
+      ?(transient_drafts = true)
       ~skill_catalog
       ~identity_names
       ~model_visible_descriptors
@@ -153,13 +154,26 @@ let expected_model_tool_names
     then [ Keeper_tool_composition_catalog.skill_tool_name ]
     else []
   in
-  (* The shared controls accompany an async composition and nothing else:
-     the same test the surface builds them under. *)
+  (* The shared controls accompany an async composition or the transient-draft
+     tools: the same test the surface builds them under
+     ([async_controls = draft_tools <> [] || requires_async_controls]). The
+     draft tools exist on a frozen capability surface, which is every Keeper
+     turn; only the legacy compatibility authority builds none. Leaving them
+     out reported [keeper_composition_prepare] and [keeper_composition_run] as
+     unexpected on every turn and failed the projection tests on main. *)
   let control_names =
-    if Keeper_tool_composition_catalog.requires_async_controls entries
+    (if transient_drafts
+        || Keeper_tool_composition_catalog.requires_async_controls entries
+     then
+       [ Keeper_tool_composition_catalog.status_tool_name
+       ; Keeper_tool_composition_catalog.cancel_tool_name
+       ]
+     else [])
+    @
+    if transient_drafts
     then
-      [ Keeper_tool_composition_catalog.status_tool_name
-      ; Keeper_tool_composition_catalog.cancel_tool_name
+      [ Keeper_tool_composition_catalog.prepare_tool_name
+      ; Keeper_tool_composition_catalog.run_tool_name
       ]
     else []
   in

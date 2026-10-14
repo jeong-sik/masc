@@ -1194,6 +1194,44 @@ let test_causal_forks_keep_invocation_owned_history () =
   check (list string) "parent retains its own continuation" [ "prior"; "later" ] (operations parent)
 ;;
 
+(* A provider that refuses recursive JSON Schemas rejects the whole request,
+   not only a call to the tool that carries one (Muse: 400 "Recursive JSON
+   schemas ..."). The advertised prepare schema therefore holds no [$ref] and no
+   [$defs] at any depth; the grammar is still checked by [plan_of_json]. *)
+let test_prepare_schema_has_no_recursive_references () =
+  let rec has_reference_keyword = function
+    | `Assoc fields ->
+      List.exists
+        (fun (key, value) ->
+           String.equal key "$ref" || String.equal key "$defs" || has_reference_keyword value)
+        fields
+    | `List items -> List.exists has_reference_keyword items
+    | _ -> false
+  in
+  let schema = Draft.prepare_schema.Masc_domain.input_schema in
+  Alcotest.(check bool)
+    "no $ref or $defs in the advertised prepare schema"
+    false
+    (has_reference_keyword schema);
+  let member key = function
+    | `Assoc fields -> List.assoc_opt key fields
+    | _ -> None
+  in
+  let input_type =
+    Option.bind (member "properties" schema) (member "nodes")
+    |> fun nodes -> Option.bind nodes (member "items")
+    |> fun items -> Option.bind items (member "properties")
+    |> fun properties -> Option.bind properties (member "input")
+    |> fun input -> Option.bind input (member "type")
+  in
+  Alcotest.(check (option string))
+    "a node input is still advertised as an object"
+    (Some "object")
+    (match input_type with
+     | Some (`String type_name) -> Some type_name
+     | _ -> None)
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
@@ -1283,6 +1321,10 @@ let () =
             "a failed composition keeps its cause when the row is truncated"
             `Quick
             test_failure_payload_keeps_cause_under_truncation
+        ; test_case
+            "prepare schema advertises no recursive references"
+            `Quick
+            test_prepare_schema_has_no_recursive_references
         ] )
     ]
 ;;

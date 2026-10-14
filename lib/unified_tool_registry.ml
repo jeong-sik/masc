@@ -177,6 +177,8 @@ let runtime_schema_for_descriptor
     match descriptor.runtime_handler with
     | Keeper_tool_descriptor.Tool_masc_control_dispatch ->
       Tool_schemas_misc.control_schemas
+    | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch ->
+      [ Tool_schemas_composition_control.result_schema ]
     | Keeper_tool_descriptor.Tool_execute | Keeper_tool_descriptor.Tool_search_files
     | Keeper_tool_descriptor.Tool_read_file | Keeper_tool_descriptor.Tool_edit_file
     | Keeper_tool_descriptor.Tool_write_file | Keeper_tool_descriptor.Tool_lane_status
@@ -207,7 +209,6 @@ let runtime_schema_for_descriptor
     | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
     | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
     | Keeper_tool_descriptor.Tool_keeper_job_dispatch
-    | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
     | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
     | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
     | Keeper_tool_descriptor.Tool_masc_fusion_status

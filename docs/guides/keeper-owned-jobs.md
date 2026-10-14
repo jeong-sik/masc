@@ -245,10 +245,8 @@ admitted by this layer. A binding identifies one accepted named request, not a
 logical chain of suspended child successors. The current request codec is v5
 and the prepared journal codec is v2; unknown versions are refused.
 
-`test_keeper_owned_jobs` exercises the actual named Tool, holds its synthetic CLI
-inspection, prepares a waiting parent with independent work, and resumes in a new
-turn. Success reads the original full result artifact and stdout; child transport
-failure keeps its diagnostic. Both scenarios reject changed bindings and a copied
+`test_keeper_owned_jobs` exercises the actual named Tool, holds the original owner transaction during its read, prepares a waiting parent with independent work, and resumes in a new
+turn. Success reads the original full result artifact and stdout; original-owner read failure keeps its diagnostic. Both scenarios reject changed bindings and a copied
 generic request, preserve occurrence IDs, and measure zero extra child backend
 calls during parent resume. Authored scenarios are not execution evidence until
 the selected head's run completes, and their component intervals do not measure

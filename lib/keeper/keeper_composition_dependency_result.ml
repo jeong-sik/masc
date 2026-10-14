@@ -53,7 +53,14 @@ let handle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_met
       let result = Tool_result.with_retained_artifacts references result in
       match Tool_bridge.attach_artifact_manifest
           ~projection:Tool_output.Inline_with_structured_diagnostic ~base_path:config.base_path result with
-      | Ok result -> Keeper_tool_execution.of_tool_result result
+      | Ok result ->
+        let execution = Keeper_tool_execution.of_tool_result result in
+        let manifest = match Tool_bridge.artifact_manifest_reference result with
+          | Ok (reference, _) -> [reference] | Error _ -> [] in
+        (* Failed Tool_result values have no retention field. Preserve the
+           validated references in the execution carrier that crosses SDK
+           projection and the per-call retention hook. *)
+        {execution with retained_artifacts = manifest @ references}
       | Error error -> Keeper_tool_execution.failure_data
           ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
           ~message:("canonical composition result remains available; reader manifest publication failed: " ^ error.message)
@@ -74,8 +81,11 @@ let handle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_met
       match entry.status with
       | Async.Done {ok = true; data = Some (`Assoc fields as data); body = _} ->
         let valid = Agent_core.Execution_json.validate ~context:"composition result exports" data in
-        (match valid, List.assoc_opt "composition_tool" fields with
-         | Ok (), Some (`String tool) when String.equal tool binding.composition_tool ->
+        (match valid with
+         | Error error -> terminal_failure entry (Agent_core.Execution_json.validation_error_to_string error)
+         | Ok () ->
+           match List.assoc_opt "composition_tool" fields with
+           | Some (`String tool) when String.equal tool binding.composition_tool ->
            let selected = `Assoc ["binding", Dependency.composition_to_json binding; "result", data] in
            let manifest = Tool_output.artifact_manifest_to_json
                ~content:(Yojson.Safe.to_string selected) ~structured_content:selected |> Yojson.Safe.to_string in
@@ -89,8 +99,8 @@ let handle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_met
                   "result_artifact",Tool_output.normalized_artifact_ref_to_json reference]) () |> publish
             | exception Sys_error detail ->
               failure ("canonical child result is retained; result artifact publication failed: " ^ detail))
-         | Error error, _ -> terminal_failure entry (Agent_core.Execution_json.validation_error_to_string error)
-         | Ok (), _ -> terminal_failure entry "successful composition has no matching canonical structured result")
+           | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
+             terminal_failure entry "successful composition has no matching canonical structured result")
       | Async.Done {ok = false; body; data = _} -> terminal_failure entry ("original composition failed: " ^ body)
       | Async.Done {ok = true; data = Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _); _}
       | Async.Done {ok = true; data = None; _} -> terminal_failure entry "successful composition has no structured canonical result"

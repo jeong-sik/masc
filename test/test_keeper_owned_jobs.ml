@@ -931,6 +931,13 @@ let test_named_async_result_parent ~child_fails () = with_fixture @@ fun env ini
   set_source fixture ~task_id:"task-A" ~turn:41;
   Call_log.init ~base_path:fixture.base_path ();
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  control fixture (`Assoc ["state",`String "exited"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-child-input"
+    ~turn:41 "keeper_job_status" (argument id)));
+  let owned_id = Store.Job_id.of_string id |> require "original child job" in
+  let owner = Filename.concat (Store.paths ~base_path:fixture.base_path owned_id).job_dir "owner.jsonl" in
+  let owner_bytes = read owner in
+  Fun.protect ~finally:(fun () -> write owner owner_bytes) @@ fun () ->
   let config = Workspace.default_config fixture.base_path in
   let skill_dir = Filename.concat fixture.base_path ".agents/skills/named-result-child" in
   Fs_compat.mkdir_p skill_dir;
@@ -945,7 +952,7 @@ name = "named-result-child"
 execution = "async"
 [[compositions.nodes]]
 id = "observe"
-tool = "keeper_job_status"
+tool = "keeper_job_result"
 [compositions.nodes.input]
 kind = "literal"
 value = { job_id = %S }
@@ -988,19 +995,32 @@ pointer = "/artifacts/0/_blob/sha256"
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"canonical child result fixture")
       ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
   let fixture = {fixture with make_bundle} in
-  let entered = Filename.concat fixture.base_path "inspect-entered"
-  and release = Filename.concat fixture.base_path "inspect-release" in
-  Fun.protect ~finally:(fun () -> if not (Sys.file_exists release) then write release "release fixture inspection\n") @@ fun () ->
-  control fixture (`Assoc ["state",`String "exited";"mode",`String "inspect_blocked";"blocked_job_id",`String id]);
+  let entered,notify_entered = Eio.Promise.create () in
+  let released,notify_released = Eio.Promise.create () in
+  let latch_mutex = Stdlib.Mutex.create () and latch_condition = Condition.create () in
+  let release_requested = ref false in
+  let release () =
+    Stdlib.Mutex.lock latch_mutex;
+    release_requested := true;
+    Condition.broadcast latch_condition;
+    Stdlib.Mutex.unlock latch_mutex in
+  Fun.protect ~finally:release @@ fun () ->
+  Eio.Fiber.fork ~sw:(Async.server_background_switch () |> require "original child lock holder scope") (fun () ->
+    let outcome = Eio_unix.run_in_systhread (fun () ->
+      Fs_compat.update_existing_private_file_durable_locked_result owner (fun _bytes ->
+        Eio.Promise.resolve notify_entered ();
+        Stdlib.Mutex.lock latch_mutex;
+        while not !release_requested do Condition.wait latch_condition latch_mutex done;
+        Stdlib.Mutex.unlock latch_mutex;
+        None, ())) in
+    Eio.Promise.resolve notify_released outcome);
+  Eio.Promise.await entered;
   let child = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"named-child-start"
       ~turn:41 "keeper_compose_named-result-child" (`Assoc [])) in
   let binding_json = child |> member "result_wait" in
   let binding = Dependency.composition_of_json binding_json |> require "producer-owned result binding" in
   check string "result binding retains actual accepted child" (child |> member "request_id" |> to_string) binding.request_id;
   check bool "result binding retains exact admitted revision" true (Skill_reference.equal reference binding.skill_reference);
-  let rec await_entered () = if Sys.file_exists entered then ()
-    else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; await_entered ()) in
-  await_entered ();
   let child_backend_calls = List.length (calls fixture) in
   let assert_wrong_binding () = List.iter (fun (field,value) ->
       let changed = match binding_json with `Assoc fields -> `Assoc ((field,value)::List.remove_assoc field fields)
@@ -1059,12 +1079,27 @@ pointer = "/artifacts/0/_blob/sha256"
   (match Journal.continuation_readiness continuation with
    | Ok Journal.Waiting_for_results -> () | Ok Results_ready | Error _ -> fail "active child result appeared ready");
   set_source fixture ~task_id:"task-B" ~turn:52;
-  Process_eio.reset_for_testing (); initialize ();
-  control fixture (`Assoc (["state",`String "exited"] @ if child_fails then ["mode",`String "logs_unknown"] else []));
-  write release "finish the original named child inspection\n";
+  if child_fails then write owner "corrupt-original-child-owner\n";
+  release ();
+  (match Eio.Promise.await released with
+   | Fs_compat.Private_file_succeeded (Some ()) -> ()
+   | _ -> fail "original owner read-lock fixture did not settle");
   let child_ok,child_result,child_entry = await_composition env fixture child in
   check bool "canonical named child preserves its actual success or failure" (not child_fails) child_ok;
+  write owner owner_bytes;
+  Process_eio.reset_for_testing (); initialize ();
   assert_wrong_binding ();
+  if child_fails then with_bundle fixture (fun bundle ->
+    let tool_use_id = "failed-child-reader" in
+    (match invoke_raw bundle ~tool_use_id ~turn:52 "keeper_composition_result" (`Assoc ["binding",binding_json]) with
+     | Error _ -> () | Ok _ -> fail "failed child read became success");
+    let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:52
+      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+    let retained = Call_log.peek_retained_artifacts ~invocation () in
+    let child_artifact = child_result |> member "execution_artifact" |> composition_reference "failed child execution" in
+    check bool "actual failed public read keeps original artifact in per-call carrier" true
+      (List.exists (fun (ref : Tool_output.artifact_ref) -> ref.sha256=child_artifact.sha256) retained));
   (match Journal.continuation_readiness continuation with
    | Ok Journal.Results_ready -> () | Ok Waiting_for_results | Error _ -> fail "canonical child completion did not ready its original parent");
   let copied = Async.submit_worker_with_request_id ?request_context:child_entry.request_context
@@ -1113,7 +1148,7 @@ pointer = "/artifacts/0/_blob/sha256"
   check int "named child never recreates the original program" 1 (effect_count fixture "create");
   check int "named child never restarts the original program" 1 (effect_count fixture "start");
   Printf.printf "composition_named_result_measurement=%s\n%!" (Yojson.Safe.to_string
-    (`Assoc ["scope",`String "public named producer to prepared parent wait and fresh-turn resume; synthetic CLI";
+    (`Assoc ["scope",`String "public named readonly producer held by original owner transaction; fresh-turn parent resume; synthetic CLI";
       "child_failed",`Bool child_fails;"prepare_to_wait_ms",`Float prepare_to_wait_ms;
       "resume_to_terminal_ms",`Float (Mtime.Span.to_float_ns (Mtime_clock.count resumed_started) /. 1_000_000.);
       "resume_backend_calls",`Int (List.length (calls fixture)-backend_before_resume)]))

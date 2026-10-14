@@ -671,6 +671,47 @@ let test_search_matches_a_short_ascii_word_at_word_boundaries () =
     Alcotest.(check bool) "leaves out a word that only contains it" false
       (msg_contains ~needle:"Decision Page" msg))
 
+(* Both pages hold the whole query, so name order would list "few" first. The
+   page that says it four times in a few words comes first by relevance. *)
+let test_search_lists_the_closest_page_first_inside_a_tier () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx
+      (create_args ~page:"few" ~title:"Few Page"
+         ~body:"박자는 한 번 나오고 나머지는 베이스와 근음 이야기가 길게 이어져요" ());
+    create_ok ctx
+      (create_args ~page:"many" ~title:"Many Page" ~body:"박자 박자 박자 박자" ());
+    let (ok, msg) =
+      dispatch_exn ctx ~name:"masc_wiki_search" ~args:(`Assoc [ "query", `String "박자" ])
+    in
+    Alcotest.(check bool) "search ok" true ok;
+    match position_of ~needle:"Many Page" msg, position_of ~needle:"Few Page" msg with
+    | Some many, Some few ->
+      Alcotest.(check bool) "the page that says it more comes first" true (many < few)
+    | _ -> Alcotest.fail ("both pages should match: " ^ msg))
+
+(* A reader asks about a subject. author, source and the other header lines
+   say who wrote the page and how, so they are not searched when the header
+   reads. Tags are. *)
+let test_search_reads_title_summary_tags_and_body_not_the_rest_of_the_header () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx
+      (create_args ~page:"band" ~title:"Band Page" ~body:"박자 이야기" ~tags:[ "groove" ] ());
+    let search query =
+      let (ok, msg) =
+        dispatch_exn ctx ~name:"masc_wiki_search" ~args:(`Assoc [ "query", `String query ])
+      in
+      Alcotest.(check bool) "search ok" true ok;
+      msg
+    in
+    Alcotest.(check bool) "the author line is not searched" true
+      (msg_contains ~needle:"No pages matching" (search "test-agent"));
+    Alcotest.(check bool) "the source line is not searched" true
+      (msg_contains ~needle:"No pages matching" (search "research"));
+    Alcotest.(check bool) "a tag is searched" true
+      (msg_contains ~needle:"**Band Page** band.md" (search "groove"));
+    Alcotest.(check bool) "the title is searched" true
+      (msg_contains ~needle:"**Band Page** band.md" (search "band page")))
+
 let test_create_schema_requires_what_the_handler_requires () =
   let schema = required_schema "masc_wiki_create" in
   Alcotest.(check (list string))
@@ -1459,6 +1500,8 @@ let () =
       Alcotest.test_case "lists whole-query matches before every-word matches" `Quick test_search_lists_whole_query_matches_before_every_word_matches;
       Alcotest.test_case "matches a short ASCII word at word boundaries" `Quick test_search_matches_a_short_ascii_word_at_word_boundaries;
       Alcotest.test_case "a query of only spaces matches no page" `Quick test_search_with_only_spaces_matches_no_page;
+      Alcotest.test_case "lists the closest page first inside a tier" `Quick test_search_lists_the_closest_page_first_inside_a_tier;
+      Alcotest.test_case "reads title, summary, tags and body, not the rest of the header" `Quick test_search_reads_title_summary_tags_and_body_not_the_rest_of_the_header;
     ]);
     ("index_and_log", [
       Alcotest.test_case "every write adds a log line and rebuilds the index" `Quick test_every_write_adds_a_log_line_and_rebuilds_the_index;

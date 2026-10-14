@@ -9,7 +9,9 @@
       [~timeout_sec].
     - Append [\\n%\{http_code\}] to capture the status code as the
       last line of the body (parsed by
-      {!split_http_body_and_status}).
+      {!split_http_body_and_status}), except
+      {!http_post_json_response_with_headers}, which asks for the response
+      headers with [-i] and reads the status from the status line.
 
     {b Include runtime:} starts with [include Tool_local_runtime_core]
     so siblings ({!Tool_local_runtime_verify}, {!Tool_local_runtime_probe})
@@ -178,7 +180,8 @@ type http_header_response =
 val split_http_response_with_headers : string -> http_header_response option
 (** The response in [curl -i] output: the status line and headers of the last
     non-interim block, then the body. [None] when the text does not open with
-    an HTTP status line or has no end of header block. A [1xx] block is skipped. *)
+    an HTTP status line or has no end of header block. A [1xx] block is
+    skipped. One pass over the text, whatever the number of blocks. *)
 
 val http_post_json_response_with_headers :
   timeout_sec:int ->

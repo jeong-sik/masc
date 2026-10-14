@@ -146,7 +146,10 @@ let curl_post_json_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
 (* [-i] puts the response's header block in front of its body, which the
    write-out form above cannot give: an MCP server returns the id of a new
    session in a header. There is no [-w] here because the status line the
-   block opens with already carries the status. *)
+   block opens with already carries the status. Through an HTTPS proxy curl
+   would print the proxy's [200 Connection established] block in front of the
+   real one under [-i]; [--suppress-connect-headers] is the option curl(1)
+   gives for exactly that pairing. *)
 let curl_post_json_response_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
   let timeout_sec = max 1 timeout_sec in
   [
@@ -160,7 +163,7 @@ let curl_post_json_response_argv ~timeout_sec ?(headers = []) ~url ~body_json ()
     "Content-Type: application/json";
   ]
   @ header_args headers
-  @ [ "-i"; "-d"; body_json; url ]
+  @ [ "-i"; "--suppress-connect-headers"; "-d"; body_json; url ]
 
 let curl_get_argv_for_test = curl_get_argv
 let curl_post_json_response_argv_for_test = curl_post_json_response_argv
@@ -280,21 +283,33 @@ type http_header_response =
   }
 
 (* The line that ends a header block is empty. Servers write CRLF; a proxy or
-   a test fixture may write bare LF, so both end it. *)
-let find_header_block_end text =
+   a test fixture may write bare LF, so both end it. The scan starts at [from]
+   and allocates nothing, so a reply made of many blocks is read in one pass. *)
+let find_header_block_end text ~from =
   let len = String.length text in
   let rec scan i =
     if i >= len then None
-    else if i + 3 < len && String.equal (String.sub text i 4) "\r\n\r\n" then Some (i, 4)
+    else if
+      i + 3 < len
+      && Char.equal text.[i] '\r'
+      && Char.equal text.[i + 1] '\n'
+      && Char.equal text.[i + 2] '\r'
+      && Char.equal text.[i + 3] '\n'
+    then Some (i, 4)
     else if i + 1 < len && Char.equal text.[i] '\n' && Char.equal text.[i + 1] '\n' then
       Some (i, 2)
     else scan (i + 1)
   in
-  scan 0
+  scan from
 
+(* Words, not single-space fields: "HTTP/1.1  200" is a status line too. *)
 let parse_status_line line =
-  match String.split_on_char ' ' (String.trim line) with
-  | version :: code :: _ when String.length version >= 5 && String.equal (String.sub version 0 5) "HTTP/" ->
+  let words =
+    String.split_on_char ' ' (String.trim line) |> List.filter (fun w -> not (String.equal w ""))
+  in
+  match words with
+  | version :: code :: _
+    when String.length version >= 5 && String.equal (String.sub version 0 5) "HTTP/" ->
       parse_int_opt code
   | _ -> None
 
@@ -306,28 +321,40 @@ let parse_header_line line =
       let value = String.trim (String.sub line (idx + 1) (String.length line - idx - 1)) in
       if String.equal name "" then None else Some (name, value)
 
-(* An interim [1xx] block (a [100 Continue], a proxy's [200 Connection
-   established] is a final status and is kept) is skipped: the response is the
+let rec drop_leading_blank_lines = function
+  | "" :: rest -> drop_leading_blank_lines rest
+  | lines -> lines
+
+(* An interim [1xx] block (a [100 Continue]) is skipped: the response is the
    last block before the body. A reply that does not open with a status line
-   is not a response and is refused rather than read as an empty one. *)
-let rec split_http_response_with_headers text =
-  match find_header_block_end text with
-  | None -> None
-  | Some (idx, sep_len) ->
-      let block = String.sub text 0 idx in
-      let rest_start = idx + sep_len in
-      let rest = String.sub text rest_start (String.length text - rest_start) in
-      let lines =
-        String.split_on_char '\n' block |> List.map (fun l -> String.trim l)
-      in
-      (match lines with
-       | [] -> None
-       | status_line :: header_lines ->
-           (match parse_status_line status_line with
-            | None -> None
-            | Some status when status >= 100 && status < 200 -> split_http_response_with_headers rest
-            | Some status ->
-                Some { status; headers = List.filter_map parse_header_line header_lines; body = rest }))
+   is not a response and is refused rather than read as an empty one. A header
+   line folded onto the next one is not joined (obs-fold is deprecated); its
+   continuation is read as a header of its own or dropped. *)
+let split_http_response_with_headers text =
+  let len = String.length text in
+  let rec block_from start =
+    match find_header_block_end text ~from:start with
+    | None -> None
+    | Some (idx, sep_len) ->
+        let next = idx + sep_len in
+        let lines =
+          String.split_on_char '\n' (String.sub text start (idx - start))
+          |> List.map String.trim |> drop_leading_blank_lines
+        in
+        (match lines with
+         | [] -> None
+         | status_line :: header_lines ->
+             (match parse_status_line status_line with
+              | None -> None
+              | Some status when status >= 100 && status < 200 -> block_from next
+              | Some status ->
+                  Some
+                    { status
+                    ; headers = List.filter_map parse_header_line header_lines
+                    ; body = String.sub text next (len - next)
+                    }))
+  in
+  block_from 0
 
 let http_post_json_response_with_headers ~timeout_sec ?(headers = []) ~url ~body_json () =
   let timeout_sec = max 1 timeout_sec in

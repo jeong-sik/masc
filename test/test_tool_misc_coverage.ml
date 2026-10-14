@@ -642,6 +642,97 @@ let () = test "search_via_zai names each failure without echoing the answer" (fu
    | _ -> failwith "expected a parse error")
 )
 
+(* A bad key is refused on the first request, not on the call: the failure has
+   to read as a refused key at initialize too. *)
+let () = test "search_via_zai reads a refusal at every stage" (fun () ->
+  let refusal ~code_json =
+    fun ~url:_ ~headers:_ ~body:_ ->
+      Ok
+        { Masc_http_client.status = 200
+        ; headers = [ ("content-type", "application/json") ]
+        ; body = Printf.sprintf {|{"code":%s,"msg":"nope","success":false}|} code_json
+        }
+  in
+  let run post =
+    Tool_misc_web_search.search_via_zai_for_test ~post ~api_key:"zai-test-key" ~query:"q"
+      ~limit:5
+  in
+  let is_server detail = function
+    | Error (Tool_misc_web_search.Server message) -> String.equal message detail
+    | _ -> false
+  in
+  (* At initialize, as the real server answers an invalid key. *)
+  assert (is_server "provider refused the key" (run (refusal ~code_json:"401")));
+  (* The code as a string. *)
+  assert (is_server "provider refused the key" (run (refusal ~code_json:{|"401"|})));
+  (* A business code is not an HTTP status: it is still a refusal, not an
+     answer nobody could read. *)
+  assert (is_server "provider refused the call (1113)" (run (refusal ~code_json:"1113")));
+  (* No success flag: nothing says this is z.ai's failure shape. *)
+  (match
+     run (fun ~url:_ ~headers:_ ~body:_ ->
+       Ok
+         { Masc_http_client.status = 200
+         ; headers = [ ("content-type", "application/json") ]
+         ; body = {|{"code":401}|}
+         })
+   with
+   | Error (Tool_misc_web_search.Parse _) -> ()
+   | _ -> failwith "expected a parse error without the success flag")
+)
+
+let () = test "the zai transport drops the content type and carries the answer" (fun () ->
+  let seen = ref [] in
+  let run ~timeout_sec ~headers ~url ~body_json () =
+    seen := (timeout_sec, headers, url, body_json) :: !seen;
+    Ok
+      { Tool_local_runtime_http.status = 202
+      ; headers = [ ("Mcp-Session-Id", "sess-1") ]
+      ; body = "ok"
+      }
+  in
+  let post = Tool_misc_web_search.curl_mcp_post_with_for_test ~run ~timeout_sec:9 in
+  (match
+     post ~url:"https://example.invalid/mcp"
+       ~headers:
+         [ ("Content-Type", "application/json")
+         ; ("content-type", "application/json")
+         ; ("Authorization", "Bearer k")
+         ]
+       ~body:"{}"
+   with
+   | Ok response ->
+     assert (response.Masc_http_client.status = 202);
+     assert (response.Masc_http_client.body = "ok");
+     assert (List.assoc_opt "Mcp-Session-Id" response.Masc_http_client.headers = Some "sess-1")
+   | Error detail -> failwith detail);
+  (match !seen with
+   | [ (9, headers, "https://example.invalid/mcp", "{}") ] ->
+     assert (headers = [ ("Authorization", "Bearer k") ])
+   | _ -> failwith "run was not given the request");
+  let failing ~timeout_sec:_ ~headers:_ ~url:_ ~body_json:_ () = Error "curl exit code 28" in
+  assert
+    (Tool_misc_web_search.curl_mcp_post_with_for_test ~run:failing ~timeout_sec:1
+       ~url:"https://example.invalid/mcp" ~headers:[] ~body:"{}"
+     = Error "curl exit code 28")
+)
+
+let () = test "dispatch names zai without a key and reaches no network" (fun () ->
+  with_env "ZAI_API_KEY" None (fun () ->
+    with_env "MASC_WEB_SEARCH_PROVIDER" (Some "zai") (fun () ->
+      with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+        with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+          with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" (Some "0") (fun () ->
+            let ctx = make_test_ctx () in
+            let args = `Assoc [ ("query", `String "zai without a key") ] in
+            match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+            | Some result ->
+              assert (not (Tool_result.is_success result));
+              assert (str_contains (Tool_result.message result) "zai");
+              assert (str_contains (Tool_result.message result) "missing ZAI_API_KEY")
+            | None -> failwith "masc_web_search was not dispatched")))))
+)
+
 let () = test "zai is a provider only when it is named" (fun () ->
   assert (Web_search_provider.of_label "ZAI" = Some Web_search_provider.Zai);
   assert (Web_search_provider.of_label " z.ai " = Some Web_search_provider.Zai);

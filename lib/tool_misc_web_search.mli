@@ -13,12 +13,15 @@
     grounded context envelope — [context_text] + [sources] — in
     place of result rows; its token budget is negotiated in the
     provider request, not re-truncated locally. [Zai] joins the same way,
-    through [provider] or [provider_order] only: its key is the one the
-    GLM model provider already reads, so the key being present says nothing
-    about wanting the plan's search allowance spent.
+    through [provider], [provider_order] or the fallbacks only: its key is
+    the one the GLM model provider already reads, so the key being present
+    says nothing about wanting the plan's search allowance spent. A [Zai]
+    search is three requests (session, notification, call), each under the
+    provider timeout, so it can take three times as long as another provider
+    and an answer streamed past the timeout is lost with its request.
 
     Internal: ~50+ helpers + internal types stay private —
-    [normalized_hit] / [provider] (7-variant) /
+    [normalized_hit] / [provider] (8-variant) /
     [grounded_source] / [grounded_context] / [search_payload] /
     [provider_response] / [cache_entry] (cache + provider data
     types kept internal so callers cannot construct half-formed
@@ -137,6 +140,21 @@ val parse_zai_search_text : string -> ((string * string * string) list, provider
     string whose content is [\[{title, link, content, refer}, ...\]], or that
     array itself. Entries without a title or an http(s) [link] are dropped; a
     non-empty array with no usable entry is [Error (Parse _)]. *)
+
+val curl_mcp_post_with_for_test :
+  run:
+    (timeout_sec:int ->
+     headers:(string * string) list ->
+     url:string ->
+     body_json:string ->
+     unit ->
+     (Tool_local_runtime_http.http_header_response, string) result) ->
+  timeout_sec:int ->
+  Mcp_client.post
+(** The MCP transport the [Zai] provider uses, over a caller-supplied [run]
+    (in production, {!Tool_local_runtime_http.http_post_json_response_with_headers}).
+    It drops any [Content-Type] the client lists, since the helper writes its
+    own, and turns the helper's answer into the client's response record. *)
 
 val search_via_zai_for_test :
   post:Mcp_client.post ->

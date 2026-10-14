@@ -326,6 +326,26 @@ let test_response_with_headers_splits_status_headers_and_body () =
    | Some r -> check string "bare lf body" "{\"ok\":true}" r.body
    | None -> fail "expected a response for bare lf")
 
+let test_response_with_headers_tolerates_odd_framing () =
+  let split = Masc.Tool_local_runtime_http.split_http_response_with_headers in
+  (match split "HTTP/1.1  200  OK\r\nX-A: b\r\n\r\nbody" with
+   | Some r -> check int "two spaces" 200 r.status
+   | None -> fail "expected a response with two spaces in the status line");
+  (match split "\r\nHTTP/1.1 200 OK\r\n\r\nbody" with
+   | Some r -> check string "leading blank line" "body" r.body
+   | None -> fail "expected a response after a leading blank line");
+  (* Read in one pass: 40k interim blocks and then a response. *)
+  let interim = Buffer.create (40_000 * 27) in
+  for _ = 1 to 40_000 do
+    Buffer.add_string interim "HTTP/1.1 100 Continue\r\n\r\n"
+  done;
+  Buffer.add_string interim "HTTP/1.1 200 OK\r\n\r\nx";
+  (match split (Buffer.contents interim) with
+   | Some r ->
+       check int "final status" 200 r.status;
+       check string "body" "x" r.body
+   | None -> fail "expected a response after many interim blocks")
+
 let test_response_with_headers_skips_an_interim_block () =
   let split = Masc.Tool_local_runtime_http.split_http_response_with_headers in
   (match split "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nX-A: b\r\n\r\nbody" with
@@ -349,6 +369,9 @@ let test_curl_post_response_argv_includes_headers_and_one_content_type () =
   check string "argv0" "curl" (List.hd argv);
   check string "-q first so ~/.curlrc is not read" "-q" (List.nth argv 1);
   check bool "response headers are asked for" true (List.mem "-i" argv);
+  (* Through an HTTPS proxy curl would print the CONNECT block first. *)
+  check bool "no proxy CONNECT block in the output" true
+    (List.mem "--suppress-connect-headers" argv);
   check bool "no write-out: the status line carries the status" false (List.mem "-w" argv);
   check int "one content type" 1
     (List.length (List.filter (fun a -> String.equal a "Content-Type: application/json") argv));
@@ -565,6 +588,8 @@ let () =
             test_response_with_headers_splits_status_headers_and_body;
           test_case "response with headers skips an interim block" `Quick
             test_response_with_headers_skips_an_interim_block;
+          test_case "response with headers tolerates odd framing" `Quick
+            test_response_with_headers_tolerates_odd_framing;
           test_case "response with headers refuses what is not a response" `Quick
             test_response_with_headers_refuses_what_is_not_a_response;
           test_case "curl post response argv asks for headers, one content type" `Quick

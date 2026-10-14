@@ -68,7 +68,8 @@ val in_default_order : t -> bool
     key is the one the [glm-coding] model provider already reads, so the key is
     present on every install that talks to GLM, and a search spends the plan's
     MCP allowance and not a model call. A search joins that allowance only when
-    the operator names the provider in [provider] or [provider_order]. *)
+    the operator names the provider in [provider], [provider_order] or
+    [fallbacks]. *)
 
 val default_order : t list
 (** The providers {!in_default_order} holds, in the order the chain tries them,

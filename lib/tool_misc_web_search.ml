@@ -668,9 +668,11 @@ let fetch_ollama ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 (* z.ai's Web Search MCP server: streamable HTTP, the key as a Bearer token,
-   one tool. [location] defaults to "cn" on the server, the Chinese-region
-   index; "us" is the non-Chinese one, which is what an operator outside
-   China wants.
+   one tool. The tool's own description (tools/list, measured 2026-10-14)
+   gives [location] as "cn" by default, the Chinese region, or "us", the
+   non-Chinese region, which is what an operator outside China wants. The
+   documentation page names the server and the plan but not these
+   arguments, and spells the tool [webSearchPrime].
    https://docs.z.ai/devpack/mcp/search-mcp-server *)
 let zai_mcp_url = "https://api.z.ai/api/mcp/web_search_prime/mcp"
 let zai_search_tool = "web_search_prime"
@@ -692,16 +694,28 @@ let zai_error_of_mcp : Mcp_client.error -> provider_error = function
    malformed. The code is the status the failure means, so it is put on the
    response: a refused key is then a refused key. Seen on 2026-10-14 with an
    invalid key; a streamed answer is not JSON and passes through. *)
-let lift_zai_failure_code (post : Mcp_client.post) : Mcp_client.post =
+let lift_zai_failure_code ~refused (post : Mcp_client.post) : Mcp_client.post =
  fun ~url ~headers ~body ->
   match post ~url ~headers ~body with
   | Error _ as error -> error
   | Ok ({ Masc_http_client.status = 200; body = reply; _ } as response) ->
       (match Yojson.Safe.from_string reply with
        | `Assoc fields ->
-           (match List.assoc_opt "success" fields, List.assoc_opt "code" fields with
-            | Some (`Bool false), Some (`Int code) when code >= 400 && code <= 599 ->
-                Ok { response with Masc_http_client.status = code }
+           let code =
+             match List.assoc_opt "code" fields with
+             | Some (`Int code) -> Some code
+             | Some (`String text) -> int_of_string_opt (String.trim text)
+             | _ -> None
+           in
+           (match List.assoc_opt "success" fields, code with
+            | Some (`Bool false), Some code ->
+                (* A business code (the balance or quota ones are not HTTP
+                   statuses) cannot be a status; it is kept for the error the
+                   transport will report as an unreadable answer. *)
+                refused := Some code;
+                if code >= 400 && code <= 599
+                then Ok { response with Masc_http_client.status = code }
+                else Ok response
             | _ -> Ok response)
        | _ -> Ok response
        | exception Yojson.Json_error _ -> Ok response)
@@ -710,10 +724,23 @@ let lift_zai_failure_code (post : Mcp_client.post) : Mcp_client.post =
 (* The session and the call, over a transport the caller supplies so a test can
    answer both. [initialize], the [initialized] notification and the
    [tools/call] are three requests; the session id the first returns rides on
-   the others. *)
+   the others. Each is its own request with the provider timeout, so a slow
+   server can take three times as long as the other providers. *)
 let search_via_zai ~post ~api_key ~query ~limit =
-  let post = lift_zai_failure_code post in
+  let refused = ref None in
+  let post = lift_zai_failure_code ~refused post in
   let search_url = zai_mcp_url in
+  (* An answer that is not JSON-RPC but is a refusal z.ai put a code on is a
+     refusal, not an unreadable answer. *)
+  let zai_error_of_mcp error =
+    match error with
+    | Mcp_client.Malformed _ ->
+        (match !refused with
+         | Some code -> Server (Printf.sprintf "provider refused the call (%d)" code)
+         | None -> zai_error_of_mcp error)
+    | Mcp_client.Transport _ | Mcp_client.Unauthorized _ | Mcp_client.Http _
+    | Mcp_client.Rpc _ -> zai_error_of_mcp error
+  in
   match Mcp_client.connect ~post ~url:zai_mcp_url ~access_token:api_key () with
   | Error error -> Error (zai_error_of_mcp error)
   | Ok session ->
@@ -739,21 +766,28 @@ let search_via_zai_for_test ~post ~api_key ~query ~limit =
          List.map (fun hit -> (hit.title, hit.url, hit.snippet)) response.hits)
 
 (* The same curl the other providers use, so the fetch runs wherever theirs do.
-   The one header the helper writes itself is dropped from the client's list. *)
-let curl_mcp_post ~timeout_sec : Mcp_client.post =
+   The one header the helper writes itself is dropped from the client's list.
+   [run] is the helper, passed in so a test sees what it is given. *)
+let curl_mcp_post_with ~run ~timeout_sec : Mcp_client.post =
  fun ~url ~headers ~body ->
   let headers =
     List.filter
       (fun (name, _) -> not (String.equal (String.lowercase_ascii name) "content-type"))
       headers
   in
-  match
-    Tool_local_runtime_http.http_post_json_response_with_headers ~timeout_sec ~headers ~url
-      ~body_json:body ()
-  with
+  match run ~timeout_sec ~headers ~url ~body_json:body () with
   | Error detail -> Error detail
   | Ok { Tool_local_runtime_http.status; headers; body } ->
       Ok { Masc_http_client.status; headers; body }
+
+let curl_mcp_post ~timeout_sec =
+  curl_mcp_post_with
+    ~run:(fun ~timeout_sec ~headers ~url ~body_json () ->
+      Tool_local_runtime_http.http_post_json_response_with_headers ~timeout_sec ~headers ~url
+        ~body_json ())
+    ~timeout_sec
+
+let curl_mcp_post_with_for_test = curl_mcp_post_with
 
 let fetch_zai ~timeout_sec ~query ~limit =
   match credential Zai with

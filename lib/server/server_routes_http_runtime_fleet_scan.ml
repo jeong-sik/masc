@@ -482,7 +482,6 @@ let keeper_phase_snapshot ?base_path () =
           match entry.phase with
           | Keeper_state_machine.Running when capacity_eligible ->
             {
-              acc with
               counts = { counts with running = counts.running + 1 };
               running_names = entry.name :: acc.running_names;
               recovering_names;

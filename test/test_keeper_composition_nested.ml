@@ -342,6 +342,12 @@ let test_nested_draft_freezes_and_revalidates_recipe () =
   with_base @@ fun base_path ->
   let surface, reference = fixture () in
   let recipe = request ~exports:[ exported "answer" "child" pointer ] [ nested "child" reference ] in
+  let dynamic_inline = request [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;
+    "input",`Assoc ["kind",`String "literal";"value",`Assoc ["query",`String "docker"]]]] in
+  (match Draft.prepare ~base_path ~capability_surface:surface ~keeper_name:"fixture"
+      ~execution:Masc.Keeper_tool_composition_catalog.Inline dynamic_inline with
+   | Error (Draft.Nested_rejected (Nested.Dynamic_inline_arguments _)) -> ()
+   | Error _ | Ok _ -> fail "unsupported inline input lost its typed draft refusal");
   let draft = prepare ~base_path surface recipe in
   let stored = read_document ~base_path (Draft.reference draft) in
   let open Yojson.Safe.Util in

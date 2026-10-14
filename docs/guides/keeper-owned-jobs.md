@@ -74,7 +74,7 @@ nodes wait while independent branches may complete. After the completion
 notification or `keeper_job_status` confirms complete outputs, pass the same draft sha256 and original
 `composition_run_id` as `resume_run_id` to `keeper_composition_run`. The previous
 worker must have canonically settled before another worker owns that run.
-When an async attempt has only producer-owned job waits, its status is
+When a prepared async attempt has only producer-owned job waits, its status is
 `waiting_for_owned_jobs`, with the original `job_ids` and execution artifact.
 The worker has released its scope; the prepared run is still waiting. This
 does not emit a failed composition notification. The original job completion

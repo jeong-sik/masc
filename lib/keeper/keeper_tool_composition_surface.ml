@@ -658,8 +658,8 @@ let async_worker_result
          ~execution
          ~result)
     skill_reference;
-  let waiting_job_ids = match execution with
-    | Error {Executor.cause=Executor.Tool_did_not_complete
+  let waiting_job_ids = match journal,execution with
+    | Some _, Error {Executor.cause=Executor.Tool_did_not_complete
         {deferred_kind=Some (Keeper_tool_execution.Owned_job_result_wait _);_};settled;_} ->
       let rec collect reversed = function
         | [] -> Some (List.rev reversed)
@@ -670,7 +670,7 @@ let async_worker_result
              collect (id :: reversed) rest
            | _ -> None) in
       collect [] settled
-    | Ok _ | Error _ -> None in
+    | (None | Some _), (Ok _ | Error _) -> None in
   match waiting_job_ids with
   | None -> Keeper_msg_async.worker_finished result
   | Some job_ids ->

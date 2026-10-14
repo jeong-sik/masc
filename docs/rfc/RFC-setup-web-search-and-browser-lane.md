@@ -119,7 +119,8 @@ SearXNG 는 키가 필요 없는 유일한 공급자이고, 그것을 로컬에 
 (`install_release_companion` 이 릴리즈 자산을 받아 체크섬을 확인하고 실행 권한을
 준다). 실행 파일은 있다. 없는 것은 그다음 절차다.
 
-`connectors/browser/install-host.sh` 가 하는 일은 다음과 같다.
+설치 절차는 `masc browser-lane-setup` 이 한다(#42866, #42867 이 `install-host.sh` 를
+지우고 그 일을 바이너리로 옮겼다). `--mode extension` 은 다음을 한다.
 
 1. `.masc/browser-lane/token` 을 0600 으로 만들거나 기존 것을 보존한다
 2. `masc-browser-host` 를 `.masc/browser-lane/host/` 로 복사한다
@@ -129,15 +130,15 @@ SearXNG 는 키가 필요 없는 유일한 공급자이고, 그것을 로컬에 
    (macOS `~/Library/Application Support/Mozilla/NativeMessagingHosts`,
    Linux `~/.mozilla/native-messaging-hosts`)
 
-확장 파일 두 개(`manifest.json`, `background.js`)는 이 스크립트가 건드리지 않는다.
-소스 체크아웃이 없으면 GitHub 에서 태그를 맞춰 curl 로 받아야 한다.
+확장 파일 두 개(`manifest.json`, `background.js`)는 바이너리에 들어 있고 같은 명령이
+`.masc/browser-lane/extension/` 에 쓴다.
 
-안내가 없지는 않다. `scripts/install.sh` 는 설치를 마치며 README 링크를 한 줄
-찍고(`browser registration: …`), 키퍼가 브라우저 도구를 부르면
-`lib/browser_lane_launcher.ml:113` 의 `Not_installed` 메시지가 `install-host.sh` 를
-이름으로 지목한다. `scripts/install-local-build.sh:57` 은 이미 등록된 manifest 를
-돌며 새 실행 파일로 다시 설치해준다. 다만 그것은 소스 체크아웃이 있는 사람의
-업그레이드 경로이고, 처음 설치를 대신하지 않는다.
+없는 것은 이 명령을 알려주는 쪽이다. `scripts/install.sh` 는 설치를 마치며 README
+링크를 한 줄 찍고(`browser registration: …`), 키퍼가 브라우저 도구를 부르면
+`Browser_lane_launcher` 의 `Not_installed` 메시지가 `masc browser-lane-setup --mode
+<길>` 을 이름으로 지목한다. `scripts/install-local-build.sh` 는 등록된 manifest 와
+`--mode bidi`·`--mode host` 로만 깐 작업공간의 host 를 새 빌드로 다시 설치한다. 다만
+그것은 소스 체크아웃이 있는 사람의 업그레이드 경로이고, 처음 설치를 대신하지 않는다.
 
 온보딩 체크만 침묵한다. `lib/operator/onboarding_status.ml:149` 의
 `browser_lane_check` 는 판정이 `Absent` 이면 체크를 만들지 않는다. 설치한 뒤에
@@ -296,9 +297,11 @@ cache_ttl_sec  = 900.0
 
 ### 4.2 `Browser_lane_setup` 과 `masc browser-lane-setup`
 
-`install-host.sh` 가 하는 다섯 가지를 바이너리로 옮기고, 브라우저를 연결하는 길을
+`install-host.sh` 가 하던 다섯 가지를 바이너리로 옮기고, 브라우저를 연결하는 길을
 고르게 한다. 길은 `--mode extension` 과 `--mode bidi` 이고, 둘 다 줄 수 있다.
-고르지 않으면 아무것도 쓰지 않고 지금 상태와 두 길의 차이를 보여준다.
+`--mode host` 는 host 만 깔고, `--mode automation` 은 연결이 아니라 automation 레인의
+geckodriver 설정이다(아래). 고르지 않으면 아무것도 쓰지 않고 지금 상태와 두 길의
+차이를 보여준다.
 
 **항상 하는 일**(1.3 의 표에서 두 길이 같이 필요한 것):
 
@@ -345,20 +348,25 @@ README 가 당부하는 것이 유일한 안전장치다.
 붙이는 운영자와, 설치된 레인의 host 를 지금 빌드로 맞추는 쪽(`install-local-build.sh`)이
 쓴다.
 
+**`--mode automation`**(#43093): `runtime.toml` 에 geckodriver 절대 경로를 쓴다. 이름을
+주지 않으면 PATH 가 처음 찾는 `geckodriver` 이고(카탈로그의 감지와 같은 함수다), 그
+파일이 `--version` 에 답할 때만 쓴다. `--browser` 는 `binary` 키를 쓰고 이름을 줄 때만
+쓴다. host, 확장, manifest, 토큰은 만들지 않는다. 키가 이미 있으면 값을 바꾸지 않고
+있던 자리(`[browser.automation]` 또는 `[browser]` 직속)에서 고친다. 점 키나 인라인 표로
+쓴 파일은 엄격한 TOML 판독기가 거절하는 모양이 되어서 편집하지 않는다(`--mode bidi` 도
+같다. `Runtime_table_edit` 가 둘을 같이 지킨다).
+
 **두 길 공통, 마지막에:** `Browser_lane_launcher.observe` 의 판정과 `masc doctor`
 의 `browser_bidi_host` 줄이 말하는 것을 그대로 낸다. RFC
 browser-live-one-connection 이 "설정 명령의 확인 단계"로 남겨 둔 일이 이것이다.
 둘 다 고른 경우에는 연결을 지정하지 않은 요청이 거절될 수 있다는 것도 적는다.
 
-`install-host.sh` 는 지운다. 같은 일을 두 곳이 하면 한쪽만 고쳐지는 날이 온다.
-그러면 부르는 쪽도 같이 바꾼다.
+`install-host.sh` 는 지웠다(#42867). 같은 일을 두 곳이 하면 한쪽만 고쳐지는 날이
+온다. 부르는 쪽도 같이 바꿨다.
 
-- `scripts/install-local-build.sh:57` 은 이미 등록된 manifest 를 돌며 이 스크립트를
-  실행한다. 같은 순회를 새 명령으로 옮긴다.
-- `lib/browser_lane_launcher.ml` 의 `install` / `reinstall` 문장이 스크립트 이름을
-  말한다. 새 명령 이름으로 바꾼다.
-- `connectors/browser/host/README.md` 의 curl 절차와 `scripts/install.sh` 마지막의
-  README 링크 한 줄을 새 명령으로 바꾼다.
+- `scripts/install-local-build.sh` 는 등록된 manifest 를 돌며 새 명령을 실행한다.
+- `Browser_lane_launcher` 의 `install` 문장이 새 명령 이름을 말한다.
+- `connectors/browser/host/README.md` 의 curl 절차가 새 명령으로 바뀌었다.
 
 ### 4.3 마법사
 
@@ -367,16 +375,25 @@ browser-live-one-connection 이 "설정 명령의 확인 단계"로 남겨 둔 �
 마법사에서 한 것과 나중에 손으로 한 것이 같은 코드를 지나야 결과가 갈리지 않는다.
 
 자리는 샌드박스 다음, 첫 대화 앞이다. 모델 연결이 끝난 뒤라야 의미가 있고, 첫
-대화 전이라야 첫 턴에서 쓸 수 있다.
+대화 전이라야 첫 턴에서 쓸 수 있다. 단계 번호는 5 이고 첫 대화가 6 이 된다(#43119).
+
+한 단계 안에서도 줄마다 때가 다르다. 서버가 브라우저 표를 시작할 때만 읽으므로
+브라우저 줄은 `masc setup` 앞에 실행한다(`masc setup` 은 서버가 이미 답하면 새로 띄우지
+않으므로, 그때는 재시작하라고 알린다). imp 는 `masc setup` 이 만들고 `keeper-github` 는
+없는 keeper 를 거절하므로, GitHub 줄은 `masc setup` 이 끝난 뒤에 실행한다. 사람이 확정한
+GitHub 줄은 `masc setup` 이 실패해 "Finish later" 로 나가도 잊히지 않게 나중에 할 명령을
+알려 준다.
 
 음성처럼 선택 단계이므로 여기서 실패해도 설치를 끝내지 않는다. `select_local_voice`
 가 그 이유를 적어두었다. 선택인 단계는 자기가 선택인 대상을 무너뜨릴 수 없다.
 
-빠른 설치 경로(대화형이 아닌 설치)에서는 체크된 항목을 실행하지 않는다. 목록과 항목마다
-명령 한 줄을 출력하고 끝낸다. 음성이 지금 그렇게 한다. "imp stays text only. Run masc
-voice-local-setup to give it a voice later." 실행하려면 `--yes` 같은 명시 플래그를
-준다(이름은 구현 때 정한다). 설치 파이프에는 고르는 사람이 없으므로 아무도 고르지 않은
-설치를 만들지 않는다.
+빠른 설치 경로에서는 체크된 항목을 실행하지 않는다. 목록과 항목마다 명령 한 줄을
+출력하고 끝낸다. 음성이 지금 그렇게 한다. "imp stays text only. Run masc
+voice-local-setup to give it a voice later." 빠른 설치에는 줄을 표시하는 화면이 없으므로
+아무도 고르지 않은 설치를 만들지 않는다. 목록을 만들려고 프로그램의 `--version` 과
+`gh auth status` 는 실행한다. 설치하거나 쓰는 것은 없다. 무인 실행 플래그(`--yes`)는
+만들지 않았다(#43119). 부르는 곳이 없고, GitHub 줄은 어느 경우에도 무인으로 실행하지
+않는다.
 
 브라우저 단계는 설치된 브라우저에 맞춰 보여준다.
 
@@ -400,7 +417,7 @@ voice-local-setup to give it a voice later." 실행하려면 `--yes` 같은 명�
 |---|---|---|
 | automation 레인(`Geckodriver`, `Firefox`, `[browser.automation]` 쓰기) | 체크 | 로그인도 포트도 필요 없다. imp 가 공개 페이지를 읽는 일은 이것만으로 된다 |
 | 웹 검색 점검(`masc web-search-setup`) | 체크 | 키가 없을 때 어느 공급자도 안 되는 이유를 보여준다. 키는 만들어 주지 않는다 |
-| imp 의 GitHub 로그인 | 체크 | 이 컴퓨터의 `gh` 로그인이 있으면 imp 가 그것을 쓰게 할지 한 번 묻는다(기본 예). 없으면 `masc keeper-github login imp` 의 기기 코드를 사람이 승인한다. 거절하거나 승인하지 않으면 아무것도 남지 않는다 |
+| imp 의 GitHub 로그인 | 체크 | 이 컴퓨터의 `gh` 로그인이 있으면 imp 가 그것을 쓰게 할지 한 번 묻는다(기본 예). 없으면 `masc keeper-github login --keeper imp` 의 기기 코드를 사람이 승인한다. 거절하거나 승인하지 않으면 아무것도 남지 않는다 |
 | BiDi 길 | 해제 | 인증 없는 디버깅 포트를 연다. 그 Firefox 에 사람이 한 번 로그인해야 쓸모가 있다 |
 | 확장 길 | 해제 | 브라우저를 켤 때마다 사람이 `about:debugging` 에서 불러야 한다 |
 
@@ -409,12 +426,18 @@ GitHub 로그인은 두 갈래다(운영자 결정, 2026-10-14).
 - 이 컴퓨터의 `gh` 에 로그인이 있으면 질문을 하나 한다. 계정, 호스트, scope, 토큰이 어디서
   왔는지(키체인인지 `GH_TOKEN` 인지)를 보여주고 "imp 가 이 로그인을 쓰게 할까요" 를
   묻는다. 기본은 예다. 예이면 `gh auth token` 으로 읽은 토큰을 `masc keeper-github
-  set-token imp` 와 같은 길로 imp 의 신원에 쓴다. 파일을 복사하지 않는다. 토큰이
+  set-token --keeper imp` 의 표준 입력으로 imp 의 신원에 쓴다. 인자로 넘기면 다른
+  프로세스가 읽을 수 있고 출력에도 쓰지 않는다. 파일을 복사하지 않는다. 토큰이
   키체인에 있으면 `hosts.yml` 에 토큰이 없기 때문이다(2026-10-14 이 컴퓨터에서 확인).
-- 로그인이 없으면 `masc keeper-github login imp` 의 기기 코드를 사람이 승인한다.
+  `masc setup` 이 몇 분 걸릴 수 있어서 읽을 때는 동의한 계정을 이름으로 부른다
+  (`gh auth token --user <계정>`). 환경 변수 토큰(`GH_TOKEN`)은 `--user` 로 찾지
+  못하므로 이름 없이 읽는다.
+- 로그인이 없으면 `masc keeper-github login --keeper imp` 의 기기 코드를 사람이
+  승인한다.
 
-묻는 사람이 없으면(대화형이 아니면) `--yes` 로도 어느 갈래도 실행하지 않고 명령 이름만
-알린다. 토큰을 넘기는 일은 사람이 화면을 보고 확정해야 한다.
+빠른 설치는 어느 갈래도 실행하지 않고 명령만 알린다. 토큰을 넘기는 일은 사람이 화면을
+보고 확정해야 한다. 활성 계정이고 GitHub 가 토큰을 받아들이는 경우만 로그인으로 내놓는다.
+`gh auth status --json hosts` 가 토큰 없이 계정, scope, 토큰이 있는 곳을 준다.
 
 이 질문에 scope 로 기본값을 가르지 않는다. 대신 알려 둔다. imp 는 그 토큰으로 이 계정의
 이름으로 push 와 PR 을 한다. scope 에 `workflow` 가 있으면 워크플로 파일을 바꿀 수
@@ -564,7 +587,7 @@ BiDi 길과 두 길 선택을 더한다.
   browser-live-one-connection)에 맡긴다.
 - BiDi 길의 로그인은 사람이 한다. 서버가 뜬 뒤라야 그 Firefox 가 생기므로 설치
   마법사 안에서는 끝낼 수 없다.
-- `--mode automation` 은 만든다(2026-10-14 결정). 카탈로그가 geckodriver 와 Firefox 를
+- `--mode automation` 은 만들었다(2026-10-14 결정, #43093). 카탈로그가 geckodriver 와 Firefox 를
   깔아도 서버는 `runtime.toml` 의 `[browser.automation]` 을 읽을 때만 쓰므로(§1.4),
   기본으로 체크된 automation 항목은 그 표를 써야 끝난다. 쓰는 키는 `geckodriver` 절대
   경로이고 `binary` 는 운영자가 이름을 줄 때만 쓴다. BiDi 와 같이 표가 이미 있으면
@@ -590,8 +613,14 @@ BiDi 길과 두 길 선택을 더한다.
    launcher 문장, README)도 같이 바꾼다. 구현됨(#42866, #42867).
 4. `--mode bidi`: `[browser.live.bidi]` 를 쓴다. Firefox 탐색과 프로필 기본값. 구현됨
    (#42941). 같은 스택에서 `--mode host` 를 더했다(#42976).
-4b. `--mode automation`: `[browser.automation]` 에 geckodriver 경로를 쓴다(§7).
+4b. `--mode automation`: `[browser.automation]` 에 geckodriver 경로를 쓴다(§7). 구현됨
+   (#43093).
 5. 마법사 단계: 미리 체크된 목록(§4.3), 카탈로그의 항목들(§4.5), 세 명령
    (`web-search-setup`, `browser-lane-setup`, `keeper-github login`)을 부른다. 브라우저는
-   설치된 것에 맞춰 길을 보여준다.
+   설치된 것에 맞춰 길을 보여준다. 나눠서 한다.
+   - 5a. 브라우저(automation) 줄과 GitHub 줄. 구현됨(#43119). 같은 PR 이 `pick` 에
+     "아무것도 고르지 않음"(`allow_empty`)을 더했다.
+   - 5b. 웹 검색 점검 줄. `masc web-search-setup` 이 main 에 들어온 뒤에 한다(#42821).
+   - 5c. 해제로 시작하는 줄(BiDi, 확장, Searxng). BiDi 와 확장은 지금 명령을 직접
+     실행해야 한다. Searxng 은 2b 가 먼저다.
 6. `Chromium`, `Stagehand_extension`: 값이 측정되지 않았으므로 마지막에 한다.

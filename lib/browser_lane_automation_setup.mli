@@ -17,12 +17,15 @@
 type request =
   { runtime_config_path : string
   ; geckodriver : string option
-        (** An absolute path. Without one, the first geckodriver that answers
-            [--version]: on [PATH]. *)
+        (** An absolute path. Without one, the [geckodriver] [PATH] names
+            first, when it answers [--version]; one that does not is an error,
+            not a reason to look further. *)
   ; browser : string option
         (** The [binary] the driver launches, an absolute path. Never written
             unless named: geckodriver finds Firefox itself, and an installed
-            Firefox found here would pin it. *)
+            Firefox found here would pin it. A path with a space or a tab
+            before or after it is refused, since the program looked for and the
+            value written would be two different names. *)
   }
 
 type key = Geckodriver | Browser
@@ -72,7 +75,8 @@ val notes : plan -> string list
     [--version]: it is written as named and not verified. *)
 
 val installed_geckodriver : unit -> Browser_runtime_dependencies.check
-(** The first geckodriver that answers [--version]. *)
+(** The [geckodriver] [PATH] finds first, with whether it answers
+    [--version]. *)
 
 (** Reads [runtime.toml] and decides what it holds, and refuses what can be
     refused without writing. Nothing is written. [find_geckodriver] is asked
@@ -81,6 +85,13 @@ val plan
   :  find_geckodriver:(unit -> Browser_runtime_dependencies.check)
   -> request
   -> (plan, error) result
+
+(** The same decisions against the file as it is now, for a plan whose file
+    another write of this command has changed since (the bidi table, in the
+    same run). The table, its keys and the notes are kept and nothing is looked
+    for or started again; the file is read, the edit is made on it, read back
+    and validated, and the revision is taken from it. *)
+val replan : plan -> (plan, error) result
 
 (** Commits the change under the configuration write lock. A configuration
     that is unchanged is not rewritten. *)

@@ -2318,7 +2318,7 @@ let browser_lane_setup_cmd =
           ~docv:"FILE"
           ~doc:
             "With --mode automation, the geckodriver executable, an absolute path. By \
-             default the first geckodriver on PATH that answers --version. A \
+             default the geckodriver PATH finds first, if it answers --version. A \
              configuration that is already there keeps its value unless this is given.")
   in
   let browser =

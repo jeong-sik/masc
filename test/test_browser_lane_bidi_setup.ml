@@ -302,6 +302,16 @@ let test_values_the_loader_refuses_are_not_written () =
         , "must be an integer from 1 to 65535"
       ])
 
+(* The probe trims what it is given. A value written with a space around it
+   would name a file the probe never saw. *)
+let test_a_named_firefox_with_a_space_around_it_is_refused () =
+  with_fixture (fun fixture ->
+    let spaced = fixture.firefox ^ " " in
+    refused "a trailing space"
+      (function B.Firefox_not_executable path -> String.equal path spaced | _ -> false)
+      fixture
+      (request ~firefox:spaced ~profile:fixture.root fixture))
+
 let test_a_profile_that_is_a_file_is_refused () =
   with_fixture (fun fixture ->
     let profile = Filename.concat fixture.root "a file" in
@@ -574,6 +584,8 @@ let () =
       , [ test_case "no Firefox to name" `Quick test_no_firefox_to_name_is_refused
         ; test_case "a named Firefox must run" `Quick test_a_named_firefox_must_be_a_file_that_can_run
         ; test_case "values the loader refuses" `Quick test_values_the_loader_refuses_are_not_written
+        ; test_case "a named Firefox with a space around it" `Quick
+            test_a_named_firefox_with_a_space_around_it_is_refused
         ; test_case "a profile that is a file" `Quick test_a_profile_that_is_a_file_is_refused
         ; test_case "the default profile needs a home" `Quick test_the_default_profile_needs_a_home
         ; test_case "a missing runtime.toml" `Quick

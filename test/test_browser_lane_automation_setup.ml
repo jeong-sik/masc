@@ -356,6 +356,103 @@ let test_a_spelling_the_line_editor_cannot_reach_is_refused_untouched () =
       , fun f -> request ~browser:f.browser f )
     ]
 
+(* A run that writes the bidi table first changes runtime.toml after this plan
+   was made. The plan is made again from the file as it is: it keeps what it
+   decided, looks for no program again, and is then accepted. *)
+let test_a_plan_made_again_keeps_its_decisions_and_runs_nothing () =
+  with_fixture (fun fixture ->
+    let calls = ref 0 in
+    let find () =
+      incr calls;
+      R.Started { command = fixture.driver; path = fixture.driver; output = "geckodriver 0.0" }
+    in
+    let plan = plan_ok ~find (request fixture) in
+    check int "asked once to plan" 1 !calls;
+    let other_write = runtime_base ^ "\n[browser.live.bidi]\nfirefox = \"/opt/f\"\nprofile = \"/opt/p\"\n" in
+    write fixture.runtime other_write;
+    (match A.apply plan with
+     | Error A.Configuration_changed -> ()
+     | Ok () | Error _ -> fail "the stale plan is refused");
+    (match A.replan plan with
+     | Ok again ->
+       check int "nothing was looked for again" 1 !calls;
+       check bool "the same table" true
+         (Browser_configuration.equal_automation (A.table plan) (A.table again));
+       apply_ok again
+     | Error error -> fail (A.error_message error));
+    lines_kept "the other writer's table survives" other_write (read fixture.runtime);
+    check string "and the driver is there" fixture.driver (configured fixture).C.driver)
+
+let test_a_plan_made_again_is_refused_when_the_file_no_longer_takes_it () =
+  with_fixture (fun fixture ->
+    let plan = plan_ok ~find:(found fixture) (request fixture) in
+    (* Before the first header, so the key is at the root of the file. *)
+    write fixture.runtime
+      (Printf.sprintf "browser.automation.geckodriver = \"%s\"\n" fixture.driver ^ runtime_base);
+    match A.replan plan with
+    | Error (A.Table_refused _) -> ()
+    | Ok _ | Error _ -> fail "a file that now declares the table another way is refused")
+
+(* The probe trims what it is given. A value written with a space around it
+   would name a file the probe never saw. *)
+let test_a_named_path_with_a_space_around_it_is_refused () =
+  with_fixture (fun fixture ->
+    List.iter
+      (fun (label, request, key, path) ->
+         refused label
+           (function
+             | A.Not_executable { key = found_key; path = found } ->
+               found_key = key && String.equal found path
+             | _ -> false)
+           fixture
+           request)
+      [ ( "a trailing space on the driver"
+        , request ~geckodriver:(fixture.driver ^ " ") fixture
+        , A.Geckodriver
+        , fixture.driver ^ " " )
+      ; ( "a trailing tab on the browser"
+        , request ~geckodriver:fixture.driver ~browser:(fixture.browser ^ "\t") fixture
+        , A.Browser
+        , fixture.browser ^ "\t" )
+      ])
+
+(* A line inside a multi-line string that reads like a header is data. It is
+   not a declaration of the table, and it does not hide one. *)
+let string_with_a_fake_header =
+  {|# Operator notes: kept as they are.
+[providers."deepseek"]
+display-name = """
+[browser.automation]
+"""
+protocol = "openai-compatible-http"
+endpoint = "https://fixture.invalid/v1"
+[providers."deepseek".credentials]
+type = "inline"
+value = "previous-fixture-key"
+[models.chat]
+api-name = "deepseek-v4-pro"
+["deepseek".chat]
+[runtime]
+default = "deepseek.chat"
+|}
+
+let test_a_header_inside_a_string_is_not_a_declaration_and_does_not_hide_one () =
+  with_fixture ~config:string_with_a_fake_header (fun fixture ->
+    let plan = plan_ok ~find:(found fixture) (request fixture) in
+    check bool "the table is new" true (A.location plan = A.New_table);
+    apply_ok plan;
+    check string "the driver is there" fixture.driver (configured fixture).C.driver);
+  with_fixture
+    ~config:
+      (Printf.sprintf "browser.automation.geckodriver = \"%s\"\n" "/opt/g" ^ string_with_a_fake_header)
+    (fun fixture ->
+       let message =
+         message_of
+           (A.plan ~find_geckodriver:never_asked (request ~browser:fixture.browser fixture))
+       in
+       check bool ("refused as dotted keys (got: " ^ message ^ ")") true
+         (contains message "dotted keys"))
+
 let test_a_change_after_the_plan_is_refused_and_not_overwritten () =
   with_fixture (fun fixture ->
     let plan = plan_ok ~find:(found fixture) (request fixture) in
@@ -427,6 +524,14 @@ let () =
             test_a_spelling_the_line_editor_cannot_reach_is_refused_untouched
         ; test_case "a change after the plan" `Quick
             test_a_change_after_the_plan_is_refused_and_not_overwritten
+        ; test_case "a plan made again keeps its decisions" `Quick
+            test_a_plan_made_again_keeps_its_decisions_and_runs_nothing
+        ; test_case "a plan made again is refused when the file does not take it" `Quick
+            test_a_plan_made_again_is_refused_when_the_file_no_longer_takes_it
+        ; test_case "a named path with a space around it" `Quick
+            test_a_named_path_with_a_space_around_it_is_refused
+        ; test_case "a header inside a string" `Quick
+            test_a_header_inside_a_string_is_not_a_declaration_and_does_not_hide_one
         ] )
     ; ( "what is not refused"
       , [ test_case "a driver that does not answer is noted" `Quick

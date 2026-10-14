@@ -279,12 +279,15 @@ let install
         | Ok tabled ->
           (* Both tables were planned against the same runtime.toml. The bidi
              table has been written since, so the automation plan would be
-             refused as stale: it is made again from what the file holds now,
-             and refused here only if that file no longer takes it. *)
+             refused as stale: it keeps its decisions and takes the revision of
+             what the file holds now. Nothing is looked for or run again, and
+             it is refused here only if that file no longer takes the edit. *)
           let automation =
             match bidi, automation with
-            | Some _, Some _ ->
-              automation_plan ~modes ~runtime_config_path ~geckodriver ~browser
+            | Some _, Some plan ->
+              Automation_setup.replan plan
+              |> Result.map Option.some
+              |> Result.map_error Automation_setup.error_message
             | None, _ | _, None -> Ok automation
           in
           (match

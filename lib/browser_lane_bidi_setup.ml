@@ -173,6 +173,10 @@ let decide ~find_firefox request = function
    need to print its version, so a refusal would turn away one that works. *)
 let named_firefox ~request ~set =
   match request.firefox with
+  | Some path when List.mem Firefox set && not (String.equal (String.trim path) path) ->
+    (* The probe trims what it is given, so it would find a program the value
+       written does not name. *)
+    Error (Firefox_not_executable path)
   | Some path when List.mem Firefox set ->
     (match Browser_runtime_dependencies.probe path with
      | Browser_runtime_dependencies.Missing _ -> Error (Firefox_not_executable path)

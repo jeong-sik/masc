@@ -50,8 +50,8 @@ lane's host up to the build you are running; running it again keeps the token.
 masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
 ```
 
-It names the first geckodriver on `PATH` that answers `--version` unless
-`--geckodriver` names one; `--browser` writes the `binary` key and is written only
+It names the `geckodriver` that `PATH` finds first, when it answers `--version`,
+unless `--geckodriver` names one; `--browser` writes the `binary` key and is written only
 when named. Keys already in `runtime.toml` keep their values and are edited where
 they are, in `[browser.automation]` or directly in `[browser]`. A table written
 inline or with dotted keys is not edited. The server reads the table when it

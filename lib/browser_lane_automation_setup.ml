@@ -184,6 +184,10 @@ let decide ~find_geckodriver request = function
    turn away one that works. *)
 let named_programs ~request ~set =
   let check key = function
+    | Some path when List.mem key set && not (String.equal (String.trim path) path) ->
+      (* The probe trims what it is given, so it would find a program the
+         value written does not name. *)
+      Error (Not_executable { key; path })
     | Some path when List.mem key set ->
       (match Browser_runtime_dependencies.probe path with
        | Browser_runtime_dependencies.Missing _ -> Error (Not_executable { key; path })
@@ -257,6 +261,32 @@ let plan ~find_geckodriver (request : request) =
       ; lane_enabled = configuration.Browser_configuration.automation_enabled
       ; notes
       }
+
+let replan previous =
+  let path = previous.runtime_config_path in
+  let* observation =
+    Runtime.load_config_observation ~runtime_config_path:path ()
+    |> Result.map_error (fun reason -> Configuration_unreadable { path; reason })
+  in
+  let text = observation.source_text in
+  let* configuration =
+    configuration_of_text text |> Result.map_error (fun reason -> Configuration_refused reason)
+  in
+  let location = location_of_text text in
+  let* () =
+    match previous.set with
+    | [] -> Ok ()
+    | set ->
+      let* edited = edited ~location ~table:previous.table ~set text in
+      Runtime.validate_config_text ~runtime_config_path:path edited
+      |> Result.map_error (fun reason -> Configuration_refused reason)
+  in
+  Ok
+    { previous with
+      revision = Runtime_table_edit.revision_of_observation observation
+    ; location
+    ; lane_enabled = configuration.Browser_configuration.automation_enabled
+    }
 
 let apply plan =
   match plan.set with

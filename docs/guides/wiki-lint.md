@@ -72,6 +72,13 @@ that if the writer then appends to that unfinished piece, the join becomes one
 line the parser cannot read, so `log_unreadable_line` can stay at 1 or more
 until the line is fixed.
 
+A dropped line above zero switches the `revision_log_hole` check off, because
+such a line may have carried a revision the parser cannot read. The response
+says so in `revision_log_hole_suppressed` (`true` whenever either count is
+above zero), so an empty `revision_log_hole` list is never read as "no holes".
+`log.md` is append-only, so once a dropped line is in it the check stays off for
+the life of that wiki; fix the line in `log.md` by hand to switch it back on.
+
 The tool reads `log.md` before it reads the pages, which is the order the
 writers work in (the page lands first, the log line second). A write that
 completes in between therefore shows as a page at or ahead of the log, never as

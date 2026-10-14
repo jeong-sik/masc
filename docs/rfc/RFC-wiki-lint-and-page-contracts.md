@@ -98,6 +98,7 @@ llm-wiki 의 작업은 ingest, query, lint 셋이다. promote 는 운영자 지�
 | `next_cursor` | string 또는 null | 더 있을 때만 문자열이다. 다음 호출의 `cursor` 로 넘긴다 |
 | `log_unknown_action` | int | `log.md` 에서 동작 단어가 §7 의 아는 둘 밖인 줄의 수 |
 | `log_unreadable_line` | int | `log.md` 에서 줄로 읽히지 않은 줄의 수. 개행으로 끝나지 않은 마지막 조각은 줄이 아니므로 여기에도 세지 않는다 |
+| `revision_log_hole_suppressed` | bool | 두 파서 건수 중 하나라도 0 보다 크면 true. 이때 `revision_log_hole` 점검이 꺼지므로 빈 `revision_log_hole` 목록을 "구멍 없음" 으로 읽지 않는다. `log.md` 는 덧붙이기만 하므로 한 번 버린 줄이 들어가면 그 위키가 사는 동안 꺼진 채이고, 손으로 `log.md` 를 고쳐야 다시 켜진다(§4.5) |
 
 finding 은 `kind` 로 갈리는 객체다.
 
@@ -193,7 +194,7 @@ finding 은 `kind` 로 갈리는 객체다.
 - 새 동작을 더할 때: 페이지를 바꾸는 동작만 `## [` 접두를 쓰고 그 페이지의 실제 revision 을 적는다. 찾지 못한 질의처럼 페이지를 바꾸지 않는 사건은 같은 접두에 섞지 않는다(옮김: ocaml-agent-ic `c-6146ceaa7e52fe94a517c524deaa4639`).
 - 동작을 더하는 PR 은 `mcp_server_eio_resource.ml` 의 리소스 설명 "One line per wiki page creation or update" 를 같이 고친다(옮김: ocaml-agent-ic).
 - 고정할 테스트: 옛 단어 둘만 아는 파서에 새 단어 줄을 넣으면 `unknown_action` 으로 남고 나머지 줄이 그대로 읽힌다. 끝에 개행 없는 마지막 조각은 세지 않는다.
-- 두 건수는 응답의 `log_unknown_action` 과 `log_unreadable_line` 으로 나간다(§4.2). 파서가 아는 동작 단어는 지금 `create`·`update` 둘이고, 이 둘 밖의 단어는 줄로 읽지 않는다. 개행 없이 끝난 마지막 조각 뒤에 다음 줄이 이어 붙으면 그 조각이 한 줄로 붙어 `log_unreadable_line` 이 영구히 1 이상이 될 수 있다(옮김: context-reviewer `c-c3c12f57185998957b57cd93b3bf2ac6`).
+- 두 건수는 응답의 `log_unknown_action` 과 `log_unreadable_line` 으로 나간다(§4.2). 파서가 아는 동작 단어는 지금 `create`·`update` 둘이고, 이 둘 밖의 단어는 줄로 읽지 않는다. 개행 없이 끝난 마지막 조각 뒤에 다음 줄이 이어 붙으면 그 조각이 한 줄로 붙어 `log_unreadable_line` 이 영구히 1 이상이 될 수 있다(옮김: context-reviewer `c-c3c12f57185998957b57cd93b3bf2ac6`). 그 둘 중 하나라도 0 보다 크면 구멍 점검이 꺼지고, 응답의 `revision_log_hole_suppressed` 가 그 사실을 알린다 — 빈 `revision_log_hole` 목록과 "점검 꺼짐" 을 구별하기 위해서다(task-2368).
 
 ## 8. 출처
 

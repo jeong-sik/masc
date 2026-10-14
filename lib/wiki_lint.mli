@@ -71,5 +71,14 @@ val run : Wiki_graph.t -> log:Wiki_log.t -> finding list
     one {!Wiki_log} read of the same directory; {!Wiki_log.empty} is what a
     wiki with no [log.md] gives. *)
 
+val log_hole_suppressed : Wiki_log.t -> bool
+(** [true] when the log has a line the parser dropped ([unknown_action] or
+    [unreadable_line] above zero), the one condition under which
+    {!Revision_log_hole} is not reported at all. A dropped line may have
+    carried an [r<N>] the check cannot read, so the hole rule refuses to guess.
+    The report surfaces this flag so "no holes" and "check off" are not the
+    same answer; [log.md] is append-only, so once a dropped line is in it the
+    check stays off until the file is fixed by hand. *)
+
 val counts : finding list -> (string * int) list
 (** One entry per {!all_kinds}, zero included, in that order. *)

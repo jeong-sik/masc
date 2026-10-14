@@ -3444,7 +3444,8 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
   check_json "parent result remains attached to original Task" (`String "task-A")
     (match parent_completed.request_context with Some fields -> List.assoc "source_task_id" fields
       | None -> fail "completed parent source missing");
-  Printf.eprintf "FIXED_ASYNC_CHILD_MEASURE prepare_to_wait_ms=%.3f recovery_ms=%.3f creates=%d starts=%d runtime_reads=%d\n%!"
+  Printf.eprintf "%s_ASYNC_CHILD_MEASURE prepare_to_wait_ms=%.3f recovery_ms=%.3f creates=%d starts=%d runtime_reads=%d\n%!"
+    (if dynamic_arguments then "UPSTREAM" else "FIXED")
     prepare_to_wait_ms (Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000.)
     (effect_count fixture "create") (effect_count fixture "start") !runtime_reads
 
@@ -3771,6 +3772,8 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
   let original_origin = match (Journal.source child_journal).producer with
     | Journal.Named {origin=(Nested _ as origin);_} -> Journal.named_origin_to_yojson origin
     | _ -> fail "physical child lost original producer origin" in
+  check_json "physical loss and recovery preserve the resolved upstream job argument"
+    (argument original_job) (member "args" original_origin);
   let original_ledger = Masc.Keeper_skill_activation_ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
       |> require "physical original child receipt" |> function Some ledger -> ledger
       | None -> fail "physical child has no original ledger" in
@@ -3800,6 +3803,8 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
     (completed |> member "exports" |> member "stdout" |> member "value");
   let submission_id = original_origin |> member "parent_node_id" |> to_string in
   let submission = composition_node submission_id (composition_nodes fixture completed) in
+  check_json "recovered submission retains the exact original resolved input"
+    (argument original_job) (member "input" submission);
   check_json "recovered parent acknowledgement retains original execution ID"
     (original_origin |> member "parent_execution_id") (member "execution_id" submission);
   check_json "recovered parent acknowledgement retains original tool-use ID"

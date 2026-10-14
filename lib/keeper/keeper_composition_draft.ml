@@ -152,7 +152,7 @@ let validate_plan ~execution ~capability_surface json =
     | Nested.Inputs_rejected (node_id, error) -> Inputs_rejected (node_id, error)
     | ( Nested.Invalid_call_field _ | Nested.Invalid_reference _
       | Nested.Reference_unavailable _ | Nested.Instruction_reference _
-      | Nested.Async_child_requires_suspension _ | Nested.Child_policy_mismatch _
+      | Nested.Async_child_requires_suspension _ | Nested.Dynamic_inline_arguments _ | Nested.Child_policy_mismatch _
       | Nested.Arguments_rejected _ | Nested.Binding_rejected _
       | Nested.Duplicate_alias _ | Nested.Unknown_alias _
       | Nested.Child_output_requires_export _ | Nested.Unknown_child_export _

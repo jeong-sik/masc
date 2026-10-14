@@ -30,15 +30,16 @@ B줄 3프렛, G줄 5프렛, e줄 0프렛"입니다. 띄어쓰기로 여러 노�
 
 ## 켜는 법과 켜지는 조건
 
-별도 설정이 없습니다. 펜스 태그가 alphatex면 켜집니다. 조건은 두 가지입니다
-(masc_tui_markdown.ml 직독):
+별도 설정이 없습니다. 펜스 태그 줄의 첫 단어가 `alphatex`이면 켜집니다
+(`bin/masc_tui_markdown.ml` `is_alphatex_tag` 직독):
 
-1. 첫 단어가 `alphatex` — 펜스 첫 줄에서 앞뒤 공백을 떼고 소문자로
-   비교합니다. ```AlphaTex 나 들여쓰기된 태그도 인정됩니다.
-2. 펜스 안 어느 위치든 `rhythm`이라는 단어가 하나 있으면 대안 인정 경로입니다.
+- 첫 단어가 `alphatex` — 펜스 태그 줄에서 앞뒤 공백을 떼고 소문자로
+  비교합니다. ```AlphaTex 나 들여쓰기된 태그도 인정됩니다.
+- 선택 옵션 `rhythm` — 태그 줄에서 `alphatex` 뒤에 `rhythm` 단어를 함께 적으면
+  (예: ```alphatex rhythm) 리듬 줄을 더 그리고 상단 머리글을
+  `alphaTex 악보 (리듬)`으로 바꿉니다(`alphatex_rhythm_word`).
 
-즉 첫 단어가 `alphatex`이기만 하면 리듬 슬롯 문법까지는 아니어도 렌더러가
-시작합니다. 지원 문법 밖의 지시자(`\subtitle` 등)를 만나면 렌더링을
+지원 문법 밖의 지시자(`\subtitle` 등)를 만나면 렌더링을
 중단하지 않고, 지시자 원문과 함께 이유를 적은 fallback 상자로 보여 줍니다:
 
 ```
@@ -123,9 +124,7 @@ Board 본문과 채팅 양쪽에서 실제로 그려진 화면:
 
 ## 참고
 
-- 근거: task-2335 실측 `evidence/task-2335-alphatex-guide/`(PTY 캡처 스크립트
-  `capture.py`, 렌더 화면 `board-post.txt`·`chat-alphatex.txt`, 판정
-  `report.json` — 12/12 단언 통과)
+- 근거: 작성자가 TUI PTY 세션(Board 본문 및 Keeper 직접 채팅)에서 렌더 화면을 확인
 - 용어: `docs/spec/00-glossary.md` "alphatex" 항목(#43108)
 - 렌더러: `bin/masc_tui_alphatex.ml`, `bin/masc_tui_alphatex_score.ml`,
   `bin/masc_tui_markdown.ml`(fence 분류)

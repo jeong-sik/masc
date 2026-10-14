@@ -551,8 +551,15 @@ def ask_text(label):
     return answer.strip()
 
 
-def pick(title, labels, multiple=False, defaults=()):
-    """TTY arrows/Space picker with type-to-filter; numbered input for accessible/scripted terminals."""
+def pick(title, labels, multiple=False, defaults=(), allow_empty=False):
+    """TTY arrows/Space picker with type-to-filter; numbered input for accessible/scripted terminals.
+
+    A multiple pick returns the row under the cursor when nothing is marked,
+    because a caller that cannot act on "nothing" would otherwise get no
+    answer. A caller that can asks for allow_empty: Enter then returns the
+    marks as they are on the screen, none included, and the numbered input
+    shows the marks and takes 0 for "none".
+    """
     if not labels:
         raise SetupError('there are no options to select')
     selected = set(defaults)
@@ -561,15 +568,22 @@ def pick(title, labels, multiple=False, defaults=()):
     if not interactive:
         print('\n' + paint(terminal_text(title), 'title'), file=sys.stderr)
         for index, label in enumerate(labels, 1):
-            print('  {}) {}'.format(index, terminal_text(label)), file=sys.stderr)
+            mark = ('[x] ' if index - 1 in selected else '[ ] ') if allow_empty else ''
+            print('  {}) {}{}'.format(index, mark, terminal_text(label)), file=sys.stderr)
         while True:
-            answer = ask_text('Numbers separated by commas; Enter selects marked choices or option 1; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1))
+            if allow_empty:
+                prompt = 'Numbers separated by commas; Enter keeps the marked rows; 0 skips all; q cancels'
+            else:
+                prompt = 'Numbers separated by commas; Enter selects marked choices or option 1; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1)
+            answer = ask_text(prompt)
             if not answer:
                 if not multiple:
                     return [current]
-                if selected:
+                if selected or allow_empty:
                     return sorted(selected)
                 return [current]
+            elif allow_empty and answer == '0':
+                return []
             else:
                 parts = answer.split(',')
                 if all(part.strip().isascii() and part.strip().isdigit() for part in parts):
@@ -673,7 +687,7 @@ def pick(title, labels, multiple=False, defaults=()):
                     continue
                 if not multiple:
                     return [current]
-                if selected:
+                if selected or allow_empty:
                     return sorted(selected)
                 return [current]
             elif key == b'\x7f':
@@ -1002,7 +1016,8 @@ def docker_account_action(binary, base_path, port, action):
 # The wire spells PDF tool readiness with exactly these two words. Naming them
 # once is what keeps five call sites from each carrying their own copy of the
 # literal, where a renamed or added word would change what the installer does
-# without anything here failing.
+# without anything here failing. Presentation and browser (geckodriver,
+# Firefox) readiness use the same two words, so they read these constants too.
 PDF_TOOLS_AVAILABLE = 'tools_available'
 PDF_TOOLS_UNAVAILABLE = 'unavailable'
 
@@ -1259,6 +1274,9 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
             raise ValueError('invalid readiness')
         if dependency == 'pdf-tools' and state == 'commands_completed' and readiness != PDF_TOOLS_AVAILABLE:
             raise ValueError('PDF installation was not rechecked')
+        if (dependency in BROWSER_TOOLS and state == 'commands_completed'
+                and readiness not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE)):
+            raise ValueError('browser installation was not rechecked')
     except (KeyError, TypeError, ValueError):
         raise SetupError('Installation action did not return a readable result; recheck the prerequisite')
     if dependency == 'presentation-tools':
@@ -2485,7 +2503,6 @@ def quick_sandbox(binary, base_path, backend):
 # written until the reader confirms the list, and a quick setup only prints it.
 AUTOMATION_TOOL = 'automation'
 GITHUB_TOOL = 'github'
-SKIP_TOOLS = 'Skip all of these'
 IMP_KEEPER = 'imp'
 GITHUB_HOST = 'github.com'
 # `gh auth status` asks GitHub whether the token works, so it answers as slowly
@@ -2505,16 +2522,28 @@ class HostGithubLogin:
 
 @dataclass(frozen=True)
 class ToolRow:
-    """One line of the checklist: what it gives imp, whether it starts marked,
-    and the command a quick setup prints instead of running it. [notice] is
+    """One line of the checklist: what it gives imp, and the command a quick
+    setup prints instead of running it. Every row starts marked. [notice] is
     what the reader is told before marking it. [host_login] is set on the
     GitHub row when the login on this computer is the one offered."""
     key: str
     label: str
     command: str
-    checked: bool
     notice: str = ''
     host_login: Optional[HostGithubLogin] = None
+
+
+def automation_command(base):
+    return 'masc browser-lane-setup --mode automation --base-path ' + shlex.quote(str(base))
+
+
+def github_command(base, login):
+    """The command that gives imp its login: the host's token for [login], or a one-time code."""
+    options = ' '.join(['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', shlex.quote(str(base))])
+    if login is None:
+        return 'masc keeper-github login ' + options
+    return 'gh auth token --hostname {} --user {} | masc keeper-github set-token {}'.format(
+        GITHUB_HOST, shlex.quote(login.login), options)
 
 
 def browser_tool(binary, program):
@@ -2523,32 +2552,48 @@ def browser_tool(binary, program):
     return decode_browser_tools_readiness(catalog.get('dependency_readiness'), program), catalog['actions']
 
 
+def install_action(actions):
+    """The first action MASC offers for a missing program, or None when it offers none."""
+    if not actions:
+        return None
+    action = actions[0]
+    if not (isinstance(action, dict) and isinstance(action.get('label'), str)
+            and isinstance(action.get('requires_admin'), bool)):
+        raise SetupError('MASC returned an unreadable install action')
+    return action
+
+
 def action_command(action):
-    """The command line an action runs, for a person to read and copy. It is
-    printed, never handed to a shell."""
+    """The command line an action runs, for a person to read and copy, or None
+    when the action opens a page instead. It is printed, never handed to a shell."""
     effect = action.get('effect')
     if isinstance(effect, dict) and effect.get('kind') == 'run_commands':
         steps = effect.get('argv_steps')
         if isinstance(steps, list) and steps and all(isinstance(step, list) and step for step in steps):
             return ' && '.join(' '.join(shlex.quote(str(part)) for part in step) for step in steps)
-    return 'see ' + terminal_text(action.get('source_url', ''))
+    return None
 
 
 def automation_row(binary, base):
     found = {program: browser_tool(binary, program) for program in BROWSER_TOOLS}
-    setup = 'masc browser-lane-setup --mode automation --base-path ' + shlex.quote(str(base))
     missing = [program for program in BROWSER_TOOLS if not found[program][0].available]
-    head = 'Let imp read web pages in a Firefox of its own'
+    head = "Web pages in imp's own Firefox"
     if not missing:
-        return ToolRow(AUTOMATION_TOOL, head + ' · geckodriver and Firefox found', setup, True)
+        return ToolRow(AUTOMATION_TOOL, head + ' · geckodriver and Firefox found', automation_command(base))
     names = ', '.join(BROWSER_TOOL_NAMES[program] for program in missing)
-    offered = [found[program][1][0] for program in missing if found[program][1]]
-    label = head + ' · ' + names + ' not found'
-    if offered:
-        label += ' · installs: ' + ', '.join(terminal_text(action['label']) for action in offered)
-        if any(action['requires_admin'] for action in offered):
-            label += ' · administrator permission'
-    return ToolRow(AUTOMATION_TOOL, label, ' && '.join([action_command(action) for action in offered] + [setup]), True)
+    offered = [action for action in (install_action(found[program][1]) for program in missing) if action is not None]
+    runnable, described = [], []
+    for action in offered:
+        command = action_command(action)
+        if command:
+            runnable.append(command)
+            described.append(command)
+        else:
+            described.append('official page ' + terminal_text(action.get('source_url', '')))
+    label = head + ' · ' + names + ' not found' + (' · ' + '; '.join(described) if described else '')
+    if any(action['requires_admin'] for action in offered):
+        label += ' · administrator permission'
+    return ToolRow(AUTOMATION_TOOL, label, ' && '.join(runnable + [automation_command(base)]))
 
 
 def host_github_login():
@@ -2570,6 +2615,9 @@ def host_github_login():
     except subprocess.TimeoutExpired:
         print('gh did not answer in time, so imp signs in with a one-time code instead.', file=sys.stderr)
         return None
+    except OSError:
+        print('gh could not be started, so imp signs in with a one-time code instead.', file=sys.stderr)
+        return None
     except (ValueError, KeyError, TypeError, AttributeError):
         print("Could not read gh's login (gh auth status --json), so imp signs in with a one-time code instead.",
               file=sys.stderr)
@@ -2584,19 +2632,17 @@ def host_github_login():
 
 def github_row(base):
     login = host_github_login()
-    options = ['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', shlex.quote(str(base))]
     if login is None:
         return ToolRow(GITHUB_TOOL, 'Sign imp into GitHub with a one-time code you approve in the browser',
-                       ' '.join(['masc keeper-github login'] + options), True)
+                       github_command(base, None))
     notice = ("\nimp can use the GitHub login on this computer: account {} on {}, token from {}, scopes {}.\n"
               'imp then pushes and opens pull requests as {}. With the workflow scope it can change workflow files too.\n'
               'imp gets a copy of the token, so revoking or refreshing it on this computer disconnects imp.\n'
               'Only imp gets it: other keepers are not given this token.').format(
                   terminal_text(login.login), GITHUB_HOST, terminal_text(login.source), terminal_text(login.scopes),
                   terminal_text(login.login))
-    command = 'gh auth token --hostname {} | {}'.format(GITHUB_HOST, ' '.join(['masc keeper-github set-token'] + options))
-    return ToolRow(GITHUB_TOOL, 'Let imp use the GitHub login on this computer · account '
-                   + terminal_text(login.login), command, True, notice=notice, host_login=login)
+    return ToolRow(GITHUB_TOOL, 'Let imp use the GitHub login on this computer · account ' + terminal_text(login.login),
+                   github_command(base, login), notice=notice, host_login=login)
 
 
 def imp_tool_rows(binary, base):
@@ -2605,67 +2651,90 @@ def imp_tool_rows(binary, base):
     rows = []
     try:
         rows.append(automation_row(binary, base))
-    except SetupError as error:
-        print(terminal_text(str(error)) + '\nRun masc browser-lane-setup --mode automation to give imp a browser later.',
+    except (SetupError, OSError) as error:
+        print(terminal_text(str(error)) + '\nRun ' + automation_command(base) + ' to give imp a browser later.',
               file=sys.stderr)
     rows.append(github_row(base))
     return rows
 
 
-def prepare_browser_automation(binary, base):
+def note_running_server(binary, base, port):
+    """Say that a server which is already running keeps the old browser setting.
+
+    The server reads the browser table when it starts, and `masc setup` starts
+    one only when none answers. A reader who chose "Continue with this running
+    workspace" would otherwise be told nothing and find the lane off.
+    """
+    try:
+        response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base), '--port', str(port)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        running = json.loads(response.stdout).get('status') == 'same_workspace'
+    except (OSError, ValueError, AttributeError):
+        running = None
+    if running is False:
+        return
+    print(('A workspace server is already running.' if running else 'If a workspace server is already running,')
+          + ' It reads the browser setting only when it starts, so restart it for imp\'s browser to turn on.',
+          file=sys.stderr)
+
+
+def prepare_browser_automation(binary, base, port=None):
     """Bring geckodriver and Firefox up, then write the lane's geckodriver.
 
-    The path handed to `browser-lane-setup` is the one MASC just saw answer, so
-    the table names the program that was checked rather than the next one
-    `PATH` happens to find.
+    The command is not told which geckodriver to use. It finds it the way the
+    catalog did (the first one on PATH that answers), and it keeps a value the
+    operator already wrote in runtime.toml, which a named path would replace.
     """
-    paths = {}
     for program in BROWSER_TOOLS:
         name = BROWSER_TOOL_NAMES[program]
         readiness, _ = browser_tool(binary, program)
         while not readiness.available:
             print(name + ' was not found on this computer.', file=sys.stderr)
             if not prerequisite_menu(binary, program, base_path=base):
-                print("imp's browser is not set up: " + name + ' is missing. Run masc browser-lane-setup '
-                      '--mode automation once it is installed.', file=sys.stderr)
+                print("imp's browser is not set up: " + name + ' is missing. Run ' + automation_command(base)
+                      + ' once it is installed.', file=sys.stderr)
                 return
             readiness, _ = browser_tool(binary, program)
-        paths[program] = readiness.path
-    result = subprocess.run([str(binary), 'browser-lane-setup', '--mode', 'automation',
-                             '--geckodriver', paths['geckodriver'], '--base-path', str(base)],
+    result = subprocess.run([str(binary), 'browser-lane-setup', '--mode', 'automation', '--base-path', str(base)],
                             stdout=sys.stderr)
     if result.returncode != 0:
         # The writer already said why. The browser is optional, so this does not end setup.
-        print("imp's browser was not saved. Everything else is. Run masc browser-lane-setup "
-              '--mode automation to try again.', file=sys.stderr)
+        print("imp's browser was not saved. Everything else is. Run " + automation_command(base) + ' to try again.',
+              file=sys.stderr)
+        return
+    if port is not None:
+        note_running_server(binary, base, port)
 
 
 def choose_imp_tools(binary, base):
+    """The rows the reader leaves marked. Nothing runs here."""
     rows = imp_tool_rows(binary, base)
     for row in rows:
         if row.notice:
             print(row.notice, file=sys.stderr)
-    # A multiple pick cannot return nothing: with every mark removed, Enter
-    # takes the row under the cursor. Skipping is therefore a row of its own,
-    # and it wins over any mark, so a doubt resolves to doing nothing.
-    chosen = pick('5 · Give imp tools (optional)', [row.label for row in rows] + [SKIP_TOOLS], multiple=True,
-                  defaults=[index for index, row in enumerate(rows) if row.checked])
-    if len(rows) in chosen:
-        return ()
-    confirmed = tuple(rows[index] for index in chosen)
-    if any(row.key == AUTOMATION_TOOL for row in confirmed):
-        prepare_browser_automation(binary, base)
-    return confirmed
+    print('\nEvery row starts marked. Unmark all of them to skip this step.', file=sys.stderr)
+    # allow_empty: with every mark removed, Enter must confirm nothing. The
+    # default would confirm the row under the cursor, which for the GitHub row
+    # is a copy of the reader's token after they had said no.
+    chosen = pick('5 · Give imp tools (optional)', [row.label for row in rows], multiple=True,
+                  defaults=list(range(len(rows))), allow_empty=True)
+    return tuple(rows[index] for index in chosen)
 
 
-def read_host_github_token():
-    """The token `gh` holds for github.com, read at the moment it is handed over."""
-    result = subprocess.run(['gh', 'auth', 'token', '--hostname', GITHUB_HOST],
+def read_host_github_token(login):
+    """The token `gh` holds for [login] on github.com, read at the moment it is handed over.
+
+    The account is named because the hand-over happens after `masc setup`,
+    which can take minutes, and `gh auth switch` in another terminal in the
+    meantime would otherwise give imp another account's token than the one
+    the reader agreed to.
+    """
+    result = subprocess.run(['gh', 'auth', 'token', '--hostname', GITHUB_HOST, '--user', login],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                             timeout=GH_PROBE_TIMEOUT_SECONDS)
     token = result.stdout.strip()
     if result.returncode != 0 or not token:
-        raise SetupError('gh did not give its GitHub token')
+        raise SetupError('gh did not give the GitHub token of ' + terminal_text(login))
     return token
 
 
@@ -2682,11 +2751,11 @@ def connect_imp_github(binary, base, row):
         result = subprocess.run([str(binary), 'keeper-github', 'login'] + options, stdout=sys.stderr)
     else:
         result = subprocess.run([str(binary), 'keeper-github', 'set-token'] + options,
-                                input=read_host_github_token(), text=True, stdout=sys.stderr)
+                                input=read_host_github_token(row.host_login.login), text=True, stdout=sys.stderr)
     if result.returncode != 0:
         # The command already said why. GitHub is optional, so this does not end setup.
-        print("imp's GitHub login was not saved. Everything else is. Run masc keeper-github login --keeper imp "
-              'to try again.', file=sys.stderr)
+        print("imp's GitHub login was not saved. Everything else is. Run " + github_command(base, None)
+              + ' to sign in with a one-time code.', file=sys.stderr)
 
 
 def finish_imp_tools(binary, base, confirmed):
@@ -2696,36 +2765,53 @@ def finish_imp_tools(binary, base, confirmed):
             try:
                 connect_imp_github(binary, base, row)
             except (SetupError, OSError, subprocess.SubprocessError) as error:
-                print(terminal_text(str(error)) + "\nimp's GitHub login was not saved. Run masc keeper-github login "
-                      '--keeper imp to sign in with a code.', file=sys.stderr)
+                print(terminal_text(str(error)) + "\nimp's GitHub login was not saved. Run "
+                      + github_command(base, None) + ' to sign in with a one-time code.', file=sys.stderr)
 
 
-def select_imp_tools(binary, base):
+def remind_imp_tools(confirmed):
+    """For a reader who leaves before imp exists: the GitHub login they confirmed is still to do."""
+    for row in confirmed:
+        if row.key == GITHUB_TOOL:
+            print("imp's GitHub login is not set up yet. Once imp is running, run: " + terminal_text(row.command),
+                  file=sys.stderr)
+
+
+def select_imp_tools(binary, base, port=None):
     """Ask what imp may use, and never take the journey down with it.
 
     The same rule as the voice question: the workspace and the model are saved
     and the first conversation is still ahead, so a cancel or a failure here
-    means "not this", not "abandon setup".
+    means "not this", not "abandon setup". The browser is prepared on its own
+    footing, so a failure there cannot take the confirmed GitHub login with it.
     """
     try:
-        return choose_imp_tools(binary, base)
+        confirmed = choose_imp_tools(binary, base)
     except SetupError as error:
-        print(terminal_text(str(error)) + "\nContinuing without them. Run masc browser-lane-setup --mode "
-              "automation to give imp a browser later.", file=sys.stderr)
+        print(terminal_text(str(error)) + '\nContinuing without them. Run ' + automation_command(base)
+              + ' to give imp a browser later.', file=sys.stderr)
         return ()
+    if any(row.key == AUTOMATION_TOOL for row in confirmed):
+        try:
+            prepare_browser_automation(binary, base, port)
+        except (SetupError, OSError, subprocess.SubprocessError) as error:
+            print(terminal_text(str(error)) + "\nimp's browser was not set up. Run " + automation_command(base)
+                  + ' once the problem is resolved.', file=sys.stderr)
+    return confirmed
 
 
 def show_imp_tools(binary, base):
     """What a quick setup leaves for later: each line with the command that does it.
 
     Quick setup has no screen where the reader marks anything, so nothing here
-    is installed or written. This only reads.
+    is installed or written. It only looks: MASC runs `--version` of the
+    browser programs and `gh auth status` asks GitHub about the token.
     """
     rows = imp_tool_rows(binary, base)
-    print("\nQuick setup leaves imp's tools for later. Each line is followed by the command that sets it up:",
+    print("\n5 · imp's tools (quick setup leaves them for later; each line is followed by its command)",
           file=sys.stderr)
     for row in rows:
-        print('  ' + terminal_text(row.label) + '\n      ' + row.command, file=sys.stderr)
+        print('  ' + terminal_text(row.label) + '\n      ' + terminal_text(row.command), file=sys.stderr)
 
 
 def journey(binary, base_path, port, timeout, resume=False):
@@ -2829,7 +2915,7 @@ def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None,
     if quick:
         show_imp_tools(binary, base)
     else:
-        confirmed = select_imp_tools(binary, base)
+        confirmed = select_imp_tools(binary, base, port)
     print('\n6 · Open your first conversation', file=sys.stderr)
     while True:
         # Native setup owns staging, image preparation, server/operator login,
@@ -2843,6 +2929,7 @@ def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None,
         action = pick('imp is not running yet. Keep your workspace and continue when ready.',
                       ['Retry preparation', 'Finish later'])[0]
         if action == 1:
+            remind_imp_tools(confirmed)
             return code
 
 

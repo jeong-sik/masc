@@ -408,21 +408,22 @@ MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 �
 
 setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
 모든 줄이 체크된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
-**Skip all of these**를 고르면 아무것도 하지 않고 넘어갑니다.
+모든 줄의 체크를 해제하면 아무것도 하지 않고 넘어갑니다(번호로 고르는 화면에서는 `0`을 입력하세요).
 
 - **브라우저.** `imp`가 자기 Firefox에서 웹 페이지를 읽습니다. geckodriver가 그 Firefox를 움직입니다.
   geckodriver나 Firefox가 없으면 Homebrew 설치(Linux는 공식 다운로드 페이지)를 안내하고, 다시
   확인한 뒤 `masc browser-lane-setup --mode automation`을 실행합니다. 이 명령이 geckodriver 경로를
-  `runtime.toml`에 씁니다. 서버는 시작할 때 이 값을 읽으므로, 이 줄은 `masc setup`이 서버를
-  시작하기 전에 실행합니다.
+  `runtime.toml`에 쓰고, 이미 적어 둔 geckodriver 가 있으면 그대로 둡니다. 서버는 시작할 때 이 값을
+  읽으므로, 이 줄은 `masc setup`이 서버를 시작하기 전에 실행합니다. 이미 실행 중인 워크스페이스
+  서버를 그대로 쓰기로 했다면 그 서버는 재시작하기 전까지 예전 설정을 쓰고, 여정이 그렇게 알려 줍니다.
 - **GitHub.** 이 컴퓨터의 `gh`에 로그인이 있으면 계정, 토큰의 scope, 토큰이 있는 곳을 보여 주고
   `imp`가 그 로그인을 써도 되는지 묻습니다. 그러면 `imp`는 그 계정 이름으로 push하고 PR을 엽니다.
   토큰은 복사본이 넘어가므로, 이 컴퓨터에서 토큰을 폐기하거나 갱신하면 `imp`가 끊깁니다.
   로그인이 없으면 `masc keeper-github login`이 일회용 코드를 보여 주고, 직접 승인하면 됩니다.
   이 줄은 `masc setup`이 끝난 뒤에 실행합니다. 로그인에는 `imp`가 먼저 있어야 하기 때문입니다.
 
-빠른 설치는 두 줄과 줄마다 명령을 보여 주기만 하고 아무것도 실행하지 않습니다. 나중에 직접
-실행하려면 다음과 같이 합니다.
+빠른 설치는 두 줄과 줄마다 명령을 보여 주기만 합니다. 프로그램의 `--version`과 `gh auth status`를
+실행해 보지만 설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과 같이 합니다.
 
 ```bash
 masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"

@@ -1107,6 +1107,17 @@ def browser_catalog(program, ready=True, admin=False):
                            dependency_readiness=browser_readiness(program, ready)))
 
 
+def browser_page_catalog(program, ready=False):
+    """A host where MASC only knows an official page to open."""
+    action = dict(id=program + '_official_page', label='Open the ' + BROWSER_NAMES[program] + ' download page',
+                  detail='Open the official page', source_url='https://example.invalid/' + program,
+                  requires_admin=False, effect=dict(kind='open_official_installer', url='https://example.invalid/' + program,
+                                                    argv=['xdg-open', 'https://example.invalid/' + program]),
+                  completion='external_step_pending', writes=None)
+    return json.dumps(dict(schema='masc.prerequisite_actions.v1', actions=[action],
+                           dependency_readiness=browser_readiness(program, ready)))
+
+
 def browser_receipt(program, status, readiness, ready=None, **extra):
     receipt = dict(schema='masc.prerequisite_action_result.v1', status=status, readiness=readiness, **extra)
     if ready is not None:
@@ -1114,8 +1125,7 @@ def browser_receipt(program, status, readiness, ready=None, **extra):
     return json.dumps(receipt)
 
 
-SETUP_ARGV = ['/bin/masc', 'browser-lane-setup', '--mode', 'automation',
-              '--geckodriver', '/opt/tools/geckodriver', '--base-path', '/workspace']
+SETUP_ARGV = ['/bin/masc', 'browser-lane-setup', '--mode', 'automation', '--base-path', '/workspace']
 
 
 class BrowserToolReadiness(unittest.TestCase):
@@ -1174,6 +1184,13 @@ class BrowserToolReadiness(unittest.TestCase):
         with self.assertRaises(SETUP.SetupError):
             self.execute('firefox', browser_receipt('firefox', 'commands_completed', 'tools_available', ready=False))
 
+    def test_a_completed_install_that_was_never_rechecked_is_not_completed(self):
+        # The binary always rechecks a browser install. A receipt that does not
+        # carry one is a shape that drifted, and "installed and starts" must not
+        # be printed for it (the PDF check already refuses the same input).
+        with self.assertRaises(SETUP.SetupError):
+            self.execute('geckodriver', browser_receipt('geckodriver', 'commands_completed', 'not_checked'))
+
     def test_a_receipt_whose_two_fields_disagree_is_unreadable_whatever_its_status(self):
         # The status check above catches a completed install; a failed one
         # carries no such claim, so only the comparison of the two fields can.
@@ -1204,7 +1221,7 @@ def gh_status(*accounts):
     return json.dumps(dict(hosts={'github.com': list(accounts)} if accounts else {}))
 
 
-def gh_account(login='octo', state='success', active=True, source='keyring', scopes="'repo', 'read:org', 'workflow'"):
+def gh_account(login='octo', state='success', active=True, source='keyring', scopes='gist, read:org, repo, workflow'):
     return dict(state=state, active=active, host='github.com', login=login, tokenSource=source,
                 scopes=scopes, gitProtocol='https')
 
@@ -1225,10 +1242,10 @@ class ImpTools(unittest.TestCase):
     def catalogs(self, *programs, ready=True, admin=False):
         return [completed(browser_catalog(program, ready, admin)) for program in programs]
 
-    def test_found_programs_make_a_marked_browser_row_that_names_the_command(self):
+    def test_found_programs_make_a_browser_row_that_names_the_command(self):
         with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')):
             rows = SETUP.imp_tool_rows('/bin/masc', '/work space')
-        self.assertEqual([(row.key, row.checked) for row in rows], [('automation', True), ('github', True)])
+        self.assertEqual([row.key for row in rows], ['automation', 'github'])
         self.assertIn('geckodriver and Firefox found', rows[0].label)
         self.assertEqual(rows[0].command,
                          "masc browser-lane-setup --mode automation --base-path '/work space'")
@@ -1238,9 +1255,8 @@ class ImpTools(unittest.TestCase):
                    completed(browser_catalog('firefox', ready=False, admin=True))]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies):
             row = SETUP.imp_tool_rows('/bin/masc', '/workspace')[0]
-        self.assertTrue(row.checked)
         self.assertIn('geckodriver, Firefox not found', row.label)
-        self.assertIn('Install geckodriver with Homebrew', row.label)
+        self.assertIn('brew install geckodriver; brew install --cask firefox', row.label)
         self.assertIn('administrator permission', row.label)
         self.assertEqual(row.command, 'brew install geckodriver && brew install --cask firefox && '
                                       'masc browser-lane-setup --mode automation --base-path /workspace')
@@ -1249,41 +1265,54 @@ class ImpTools(unittest.TestCase):
         replies = [completed(browser_catalog('geckodriver', ready=False)), completed(browser_catalog('firefox'))]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies):
             row = SETUP.imp_tool_rows('/bin/masc', '/workspace')[0]
-        self.assertNotIn('Install Firefox', row.label)
-        self.assertNotIn('--cask', row.command)
+        self.assertNotIn('--cask', row.label + row.command)
         self.assertTrue(row.command.startswith('brew install geckodriver && masc browser-lane-setup'))
+
+    def test_a_host_that_only_has_a_page_to_open_prints_no_command_for_it(self):
+        # `see https://... && masc ...` is not a command anyone can run.
+        replies = [completed(browser_page_catalog('geckodriver')), completed(browser_catalog('firefox'))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies):
+            row = SETUP.imp_tool_rows('/bin/masc', '/workspace')[0]
+        self.assertIn('official page https://example.invalid/geckodriver', row.label)
+        self.assertEqual(row.command, 'masc browser-lane-setup --mode automation --base-path /workspace')
+
+    def test_an_install_action_in_a_shape_that_drifted_leaves_the_github_row(self):
+        broken = json.loads(browser_catalog('geckodriver', ready=False))
+        del broken['actions'][0]['requires_admin']
+        replies = [completed(json.dumps(broken)), completed(browser_catalog('firefox'))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
+        self.assertEqual([row.key for row in rows], ['github'])
+        self.assertIn('unreadable install action', printed.getvalue())
 
     def test_a_catalog_the_binary_cannot_answer_is_not_read_as_missing_and_leaves_the_github_row(self):
         with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1)]), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
         self.assertEqual([row.key for row in rows], ['github'])
-        self.assertIn('Run masc browser-lane-setup --mode automation', printed.getvalue())
+        self.assertIn('Run masc browser-lane-setup --mode automation --base-path /workspace', printed.getvalue())
 
-    def test_the_checklist_starts_marked_and_ends_with_a_row_that_skips(self):
-        replies = self.catalogs('geckodriver', 'firefox') + self.catalogs('geckodriver', 'firefox') + [completed()]
+    def test_the_checklist_starts_marked_and_may_come_back_with_nothing(self):
+        replies = self.catalogs('geckodriver', 'firefox') + self.catalogs('geckodriver', 'firefox') + [
+            completed(), completed(json.dumps(dict(status='free')))]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
                 patch.object(SETUP, 'pick', return_value=[0]) as picker, \
                 contextlib.redirect_stderr(io.StringIO()):
-            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
+            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace', 8945)
         self.assertEqual([row.key for row in confirmed], ['automation'])
         title, labels = picker.call_args.args[:2]
         self.assertTrue(title.startswith('5 ·'))
-        self.assertEqual(len(labels), 3)
-        self.assertEqual(labels[-1], SETUP.SKIP_TOOLS)
-        self.assertEqual((picker.call_args.kwargs['multiple'], picker.call_args.kwargs['defaults']), (True, [0, 1]))
-        self.assertEqual(run.call_args_list[-1].args[0], SETUP_ARGV)
+        self.assertEqual(len(labels), 2)
+        self.assertEqual(picker.call_args.kwargs, dict(multiple=True, defaults=[0, 1], allow_empty=True))
+        self.assertEqual(run.call_args_list[-2].args[0], SETUP_ARGV)
 
-    def test_the_skip_row_wins_over_a_mark_and_nothing_runs(self):
-        # A multiple pick cannot return nothing, so skipping is a row. Marking
-        # it together with a tool resolves to doing nothing.
-        for chosen in ([2], [0, 2], [0, 1, 2]):
-            with self.subTest(chosen=chosen), \
-                    patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')) as run, \
-                    patch.object(SETUP, 'pick', return_value=chosen), \
-                    contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(SETUP.select_imp_tools('/bin/masc', '/workspace'), ())
-                self.assertEqual([call.args[0][1] for call in run.call_args_list], ['prerequisite-actions'] * 2)
+    def test_unmarking_every_row_confirms_nothing_and_runs_nothing(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')) as run, \
+                patch.object(SETUP, 'pick', return_value=[]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_imp_tools('/bin/masc', '/workspace'), ())
+        self.assertEqual([call.args[0][1] for call in run.call_args_list], ['prerequisite-actions'] * 2)
 
     def test_only_the_marked_rows_are_confirmed_and_the_github_one_waits_for_imp(self):
         # The GitHub login needs imp, which `masc setup` has not created yet:
@@ -1303,12 +1332,28 @@ class ImpTools(unittest.TestCase):
         self.assertIn('Continuing without them', printed.getvalue())
         self.assertNotIn('browser-lane-setup', [call.args[0][1] for call in run.call_args_list])
 
-    def test_the_geckodriver_written_is_the_one_masc_saw_answer(self):
+    def test_a_browser_step_that_raises_keeps_the_github_login_the_reader_confirmed(self):
+        # Ctrl-C in the install menu raises a SetupError. The GitHub row was
+        # marked and is still the reader's answer.
+        replies = self.catalogs('geckodriver', 'firefox') + [completed(browser_catalog('geckodriver', ready=False))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                patch.object(SETUP, 'pick', return_value=[0, 1]), \
+                patch.object(SETUP, 'prerequisite_menu', side_effect=SETUP.SetupError('setup cancelled')), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
+        self.assertEqual([row.key for row in confirmed], ['automation', 'github'])
+        self.assertIn("imp's browser was not set up", printed.getvalue())
+
+    def test_the_command_is_not_told_which_geckodriver_to_use(self):
+        # Named, the path replaces a geckodriver the operator already wrote in
+        # runtime.toml; left to the command, it keeps that value and finds the
+        # same program the catalog did (both take the first one on PATH).
         with patch.object(SETUP.subprocess, 'run',
                           side_effect=self.catalogs('geckodriver', 'firefox') + [completed()]) as run, \
                 contextlib.redirect_stderr(io.StringIO()):
             SETUP.prepare_browser_automation('/bin/masc', '/workspace')
         self.assertEqual(run.call_args_list[-1].args[0], SETUP_ARGV)
+        self.assertNotIn('--geckodriver', run.call_args_list[-1].args[0])
 
     def test_a_missing_program_is_installed_through_the_menu_and_checked_again(self):
         replies = [completed(browser_catalog('geckodriver', ready=False)), completed(browser_catalog('geckodriver')),
@@ -1328,14 +1373,42 @@ class ImpTools(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             SETUP.prepare_browser_automation('/bin/masc', '/workspace')
         self.assertEqual(len(run.call_args_list), 1)
-        self.assertIn('Run masc browser-lane-setup --mode automation', printed.getvalue())
+        self.assertIn('Run masc browser-lane-setup --mode automation --base-path /workspace', printed.getvalue())
 
-    def test_a_refused_write_does_not_end_setup(self):
+    def test_a_refused_write_does_not_end_setup_and_asks_nothing_about_the_server(self):
         with patch.object(SETUP.subprocess, 'run',
-                          side_effect=self.catalogs('geckodriver', 'firefox') + [completed('', 1)]), \
+                          side_effect=self.catalogs('geckodriver', 'firefox') + [completed('', 1)]) as run, \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
-            SETUP.prepare_browser_automation('/bin/masc', '/workspace')
+            SETUP.prepare_browser_automation('/bin/masc', '/workspace', 8945)
         self.assertIn("imp's browser was not saved", printed.getvalue())
+        self.assertNotIn('setup-server', [call.args[0][1] for call in run.call_args_list])
+
+    def note(self, reply):
+        with patch.object(SETUP.subprocess, 'run', side_effect=[reply]) as run, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.note_running_server('/bin/masc', '/workspace', 8945)
+        return run, printed.getvalue()
+
+    def test_a_server_that_is_already_running_keeps_the_old_setting_and_the_reader_is_told(self):
+        # `masc setup` starts a server only when none answers, and a server
+        # reads the browser table when it starts.
+        run, printed = self.note(completed(json.dumps(dict(status='same_workspace'))))
+        self.assertEqual(run.call_args.args[0], ['/bin/masc', 'setup-server', '--base-path', '/workspace', '--port', '8945'])
+        self.assertIn('A workspace server is already running.', printed)
+        self.assertIn('restart it', printed)
+
+    def test_no_running_server_means_no_note(self):
+        self.assertEqual(self.note(completed(json.dumps(dict(status='free'))))[1], '')
+
+    def test_a_server_observation_that_cannot_be_read_gives_the_note_in_its_conditional_form(self):
+        self.assertIn('If a workspace server is already running,', self.note(completed('', 1))[1])
+
+    def test_the_note_follows_a_successful_write(self):
+        replies = self.catalogs('geckodriver', 'firefox') + [completed(), completed(json.dumps(dict(status='same_workspace')))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.prepare_browser_automation('/bin/masc', '/workspace', 8945)
+        self.assertIn('already running', printed.getvalue())
 
     def test_a_quick_setup_lists_the_rows_and_runs_nothing(self):
         replies = [completed(browser_catalog('geckodriver', ready=False)), completed(browser_catalog('firefox'))]
@@ -1347,6 +1420,7 @@ class ImpTools(unittest.TestCase):
         self.assertEqual([call.args[0][1:3] for call in run.call_args_list],
                          [['prerequisite-actions', 'geckodriver'], ['prerequisite-actions', 'firefox']])
         self.assertNotIn('--execute', [word for call in run.call_args_list for word in call.args[0]])
+        self.assertIn("5 · imp's tools", printed.getvalue())
         self.assertIn('brew install geckodriver && masc browser-lane-setup --mode automation', printed.getvalue())
         self.assertIn('masc keeper-github login --keeper imp', printed.getvalue())
 
@@ -1356,6 +1430,103 @@ class ImpTools(unittest.TestCase):
             SETUP.show_imp_tools('/bin/masc', '/workspace')
         self.assertIn('Run masc browser-lane-setup --mode automation', printed.getvalue())
         self.assertIn('masc keeper-github login --keeper imp', printed.getvalue())
+
+
+class PickAllowingNothing(unittest.TestCase):
+    """`pick` with allow_empty, the real one, in both of its input modes.
+
+    Without the flag a multiple pick answers the row under the cursor when
+    nothing is marked. A consent screen cannot use that: the reader who
+    unmarked every row has said no.
+    """
+
+    def numbered(self, answer, **options):
+        with patch.object(sys, 'stdin', io.StringIO(answer)), contextlib.redirect_stderr(io.StringIO()) as printed:
+            return SETUP.pick('Title', ['first', 'second'], multiple=True, **options), printed.getvalue()
+
+    def test_numbered_enter_keeps_the_marked_rows_and_shows_the_marks(self):
+        chosen, printed = self.numbered('\n', defaults=[0, 1], allow_empty=True)
+        self.assertEqual(chosen, [0, 1])
+        self.assertIn('[x] first', printed)
+        self.assertIn('0 skips all', printed)
+
+    def test_numbered_zero_skips_all(self):
+        self.assertEqual(self.numbered('0\n', defaults=[0, 1], allow_empty=True)[0], [])
+
+    def test_numbered_enter_with_nothing_marked_confirms_nothing(self):
+        self.assertEqual(self.numbered('\n', allow_empty=True)[0], [])
+
+    def test_numbered_numbers_choose_the_named_rows(self):
+        self.assertEqual(self.numbered('2\n', defaults=[0, 1], allow_empty=True)[0], [1])
+
+    def test_without_the_flag_nothing_marked_still_answers_the_first_row_and_shows_no_marks(self):
+        chosen, printed = self.numbered('\n')
+        self.assertEqual(chosen, [0])
+        self.assertNotIn('[x]', printed)
+        self.assertNotIn('[ ]', printed)
+
+    def terminal(self, keys, options):
+        driver = ("import importlib.util, sys\n"
+                  "spec = importlib.util.spec_from_file_location('setup', sys.argv[1])\n"
+                  "module = importlib.util.module_from_spec(spec)\n"
+                  "spec.loader.exec_module(module)\n"
+                  "chosen = module.pick('Title', ['first', 'second'], multiple=True, " + options + ")\n"
+                  "print('RESULT', chosen, file=sys.stderr, flush=True)\n")
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execve(sys.executable, [sys.executable, '-I', '-c', driver, str(ROOT / 'scripts/install-runtime-setup.py')],
+                      {'PATH': os.environ.get('PATH', ''), 'TERM': 'xterm', 'HOME': tempfile.gettempdir()})
+        captured = b''
+
+        def until(expected):
+            nonlocal captured
+            deadline = time.monotonic() + 20
+            while expected not in captured and time.monotonic() < deadline:
+                if select.select([fd], [], [], 0.2)[0]:
+                    try:
+                        chunk = os.read(fd, 65536)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    captured += chunk
+            self.assertIn(expected, captured, captured.decode(errors='replace'))
+        try:
+            until(b'first')
+            for key in keys:
+                os.write(fd, key)
+                time.sleep(0.2)
+            until(b'RESULT')
+            time.sleep(0.2)
+            try:
+                captured += os.read(fd, 65536)
+            except OSError:
+                pass
+        finally:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            os.close(fd)
+        found = re.findall(rb'RESULT (\[[^\]]*\])', captured)
+        self.assertEqual(len(found), 1, captured.decode(errors='replace'))
+        return found[0].decode()
+
+    SPACE, DOWN, ENTER = b' ', b'\x1b[B', b'\r'
+
+    def test_a_terminal_that_unmarks_every_row_gets_nothing_back(self):
+        # The screen says "0 selected" and Enter must agree with it. This is the
+        # keystroke sequence an independent review used to confirm a row the
+        # reader had unmarked.
+        result = self.terminal([self.SPACE, self.DOWN, self.SPACE, self.ENTER], 'defaults=[0, 1], allow_empty=True')
+        self.assertEqual(result, '[]')
+
+    def test_a_terminal_that_leaves_the_marks_gets_them_back(self):
+        self.assertEqual(self.terminal([self.ENTER], 'defaults=[0, 1], allow_empty=True'), '[0, 1]')
+
+    def test_without_the_flag_a_terminal_that_unmarks_every_row_gets_the_row_under_the_cursor(self):
+        # What the flag exists to avoid, kept so the default stays what the
+        # connection pickers rely on.
+        result = self.terminal([self.SPACE, self.DOWN, self.SPACE, self.ENTER], 'defaults=[0, 1]')
+        self.assertEqual(result, '[1]')
 
 
 class HostGithubLoginProbe(unittest.TestCase):
@@ -1368,9 +1539,11 @@ class HostGithubLoginProbe(unittest.TestCase):
             return SETUP.host_github_login(), run, printed.getvalue()
 
     def test_an_active_account_github_accepts_is_offered_with_where_its_token_lives(self):
-        login, run, printed = self.probe(gh_status(gh_account('octo', source='keyring', scopes="'repo', 'workflow'")))
-        self.assertEqual((login.login, login.source, login.scopes), ('octo', 'keyring', "'repo', 'workflow'"))
+        login, run, printed = self.probe(gh_status(gh_account('octo', source='keyring', scopes='repo, workflow')))
+        self.assertEqual((login.login, login.source, login.scopes), ('octo', 'keyring', 'repo, workflow'))
         self.assertEqual(run.call_args.args[0], ['gh', 'auth', 'status', '--hostname', 'github.com', '--json', 'hosts'])
+        # A gh that hangs on the network must not hold the wizard.
+        self.assertEqual(run.call_args.kwargs['timeout'], SETUP.GH_PROBE_TIMEOUT_SECONDS)
         self.assertEqual(printed, '')
 
     def test_the_active_account_is_chosen_among_several(self):
@@ -1412,6 +1585,14 @@ class HostGithubLoginProbe(unittest.TestCase):
             self.assertIsNone(SETUP.host_github_login())
         self.assertIn('did not answer in time', printed.getvalue())
 
+    def test_a_gh_that_cannot_be_started_is_not_a_login_and_does_not_end_setup(self):
+        # A file named gh on PATH that will not run (a broken interpreter line).
+        with patch.object(SETUP.shutil, 'which', return_value='/usr/bin/gh'), \
+                patch.object(SETUP.subprocess, 'run', side_effect=FileNotFoundError('gh')), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            self.assertIsNone(SETUP.host_github_login())
+        self.assertIn('could not be started', printed.getvalue())
+
 
 class ImpGithubLogin(unittest.TestCase):
     """The GitHub row and its hand-over, once imp exists."""
@@ -1421,15 +1602,15 @@ class ImpGithubLogin(unittest.TestCase):
             return SETUP.github_row('/work space')
 
     def test_a_login_on_this_computer_is_offered_and_the_reader_is_told_what_it_means(self):
-        row = self.row(SETUP.HostGithubLogin('octo', "'repo', 'workflow'", 'keyring'))
-        self.assertTrue(row.checked)
+        row = self.row(SETUP.HostGithubLogin('octo', 'repo, workflow', 'keyring'))
         self.assertIn('account octo', row.label)
-        for sentence in ('account octo on github.com', 'token from keyring', "scopes 'repo', 'workflow'",
+        for sentence in ('account octo on github.com', 'token from keyring', 'scopes repo, workflow',
                          'pushes and opens pull requests as octo', 'workflow files', 'copy of the token',
                          'other keepers are not given'):
             self.assertIn(sentence, row.notice)
-        self.assertEqual(row.command, "gh auth token --hostname github.com | masc keeper-github set-token "
-                                      "--keeper imp --hostname github.com --base-path '/work space'")
+        # The account is named, so the token read later is that account's.
+        self.assertEqual(row.command, "gh auth token --hostname github.com --user octo | masc keeper-github "
+                                      "set-token --keeper imp --hostname github.com --base-path '/work space'")
         # Building the row only reads the account. The token is read at the
         # moment it is handed over, so nothing token-shaped can be in the text.
         self.assertNotIn(GH_TOKEN_FIXTURE, row.label + row.notice + row.command)
@@ -1437,7 +1618,7 @@ class ImpGithubLogin(unittest.TestCase):
 
     def test_building_the_row_runs_nothing(self):
         with patch.object(SETUP.subprocess, 'run') as run:
-            self.row(SETUP.HostGithubLogin('octo', "'repo'", 'keyring'))
+            self.row(SETUP.HostGithubLogin('octo', 'repo', 'keyring'))
             self.row(None)
         run.assert_not_called()
 
@@ -1445,10 +1626,10 @@ class ImpGithubLogin(unittest.TestCase):
         # The mark is the reader's consent to hand imp a copy of the token, so
         # what that means has to be on the screen when the question is asked.
         shown = []
-        login = SETUP.HostGithubLogin('octo', "'repo', 'workflow'", 'keyring')
+        login = SETUP.HostGithubLogin('octo', 'repo, workflow', 'keyring')
         with patch.object(SETUP, 'host_github_login', return_value=login), \
                 patch.object(SETUP, 'automation_row', side_effect=SETUP.SetupError('no browser tools')), \
-                patch.object(SETUP, 'pick', side_effect=lambda *a, **k: shown.append(sys.stderr.getvalue()) or [1]), \
+                patch.object(SETUP, 'pick', side_effect=lambda *a, **k: shown.append(sys.stderr.getvalue()) or [0]), \
                 contextlib.redirect_stderr(io.StringIO()):
             SETUP.choose_imp_tools('/bin/masc', '/workspace')
         self.assertEqual(len(shown), 1)
@@ -1457,7 +1638,6 @@ class ImpGithubLogin(unittest.TestCase):
 
     def test_without_a_login_the_row_is_the_one_time_code(self):
         row = self.row(None)
-        self.assertTrue(row.checked)
         self.assertIn('one-time code', row.label)
         self.assertEqual(row.notice, '')
         self.assertEqual(row.command, "masc keeper-github login --keeper imp --hostname github.com "
@@ -1470,9 +1650,12 @@ class ImpGithubLogin(unittest.TestCase):
         return run, printed.getvalue()
 
     def test_the_token_goes_to_the_command_on_its_standard_input_and_nowhere_else(self):
-        row = self.row(SETUP.HostGithubLogin('octo', "'repo'", 'keyring'))
+        row = self.row(SETUP.HostGithubLogin('octo', 'repo', 'keyring'))
         run, printed = self.hand_over(row, [completed(GH_TOKEN_FIXTURE + '\n'), completed()])
-        self.assertEqual(run.call_args_list[0].args[0], ['gh', 'auth', 'token', '--hostname', 'github.com'])
+        # The account the reader agreed to, not whichever one is active by now.
+        self.assertEqual(run.call_args_list[0].args[0],
+                         ['gh', 'auth', 'token', '--hostname', 'github.com', '--user', 'octo'])
+        self.assertEqual(run.call_args_list[0].kwargs['timeout'], SETUP.GH_PROBE_TIMEOUT_SECONDS)
         argv = run.call_args_list[1].args[0]
         self.assertEqual(argv, ['/bin/masc', 'keeper-github', 'set-token', '--keeper', 'imp',
                                 '--hostname', 'github.com', '--base-path', '/workspace'])
@@ -1480,6 +1663,13 @@ class ImpGithubLogin(unittest.TestCase):
         for call in run.call_args_list:
             self.assertNotIn(GH_TOKEN_FIXTURE, ' '.join(call.args[0]))
         self.assertNotIn(GH_TOKEN_FIXTURE, printed)
+
+    def test_the_token_is_not_printed_to_standard_output_either(self):
+        row = self.row(SETUP.HostGithubLogin('octo', 'repo', 'keyring'))
+        with patch.object(SETUP.subprocess, 'run', side_effect=[completed(GH_TOKEN_FIXTURE), completed()]), \
+                contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+            SETUP.finish_imp_tools('/bin/masc', '/workspace', (row,))
+        self.assertEqual(out.getvalue(), '')
 
     def test_without_a_login_the_command_asks_for_a_code_and_the_reader_approves_it(self):
         run, _ = self.hand_over(self.row(None), [completed()])
@@ -1489,24 +1679,40 @@ class ImpGithubLogin(unittest.TestCase):
         self.assertNotIn('input', run.call_args_list[0].kwargs)
 
     def test_a_refused_hand_over_says_what_to_run_and_does_not_end_setup(self):
-        row = self.row(SETUP.HostGithubLogin('octo', "'repo'", 'keyring'))
+        row = self.row(SETUP.HostGithubLogin('octo', 'repo', 'keyring'))
         _, printed = self.hand_over(row, [completed(GH_TOKEN_FIXTURE), completed('', 1)])
         self.assertIn("imp's GitHub login was not saved", printed)
-        self.assertIn('masc keeper-github login --keeper imp', printed)
+        self.assertIn('masc keeper-github login --keeper imp --hostname github.com --base-path /workspace', printed)
         self.assertNotIn(GH_TOKEN_FIXTURE, printed)
 
     def test_a_gh_that_gives_no_token_stops_before_the_command_runs(self):
-        row = self.row(SETUP.HostGithubLogin('octo', "'repo'", 'keyring'))
+        row = self.row(SETUP.HostGithubLogin('octo', 'repo', 'keyring'))
         run, printed = self.hand_over(row, [completed('', 1)])
         self.assertEqual(len(run.call_args_list), 1)
-        self.assertIn('gh did not give its GitHub token', printed)
+        self.assertIn('gh did not give the GitHub token of octo', printed)
+        self.assertIn("imp's GitHub login was not saved", printed)
+
+    def test_a_gh_that_cannot_be_started_does_not_end_setup(self):
+        row = self.row(SETUP.HostGithubLogin('octo', 'repo', 'keyring'))
+        _, printed = self.hand_over(row, FileNotFoundError('gh'))
         self.assertIn("imp's GitHub login was not saved", printed)
 
     def test_only_the_github_row_waits_for_imp(self):
-        browser = SETUP.ToolRow(SETUP.AUTOMATION_TOOL, 'browser', 'cmd', True)
+        browser = SETUP.ToolRow(SETUP.AUTOMATION_TOOL, 'browser', 'cmd')
         with patch.object(SETUP.subprocess, 'run') as run:
             SETUP.finish_imp_tools('/bin/masc', '/workspace', (browser,))
         run.assert_not_called()
+
+    def test_a_reader_who_leaves_before_imp_exists_is_reminded_of_the_login_they_confirmed(self):
+        github = self.row(SETUP.HostGithubLogin('octo', 'repo', 'keyring'))
+        browser = SETUP.ToolRow(SETUP.AUTOMATION_TOOL, 'browser', 'cmd')
+        with contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.remind_imp_tools((browser, github))
+        self.assertIn('Once imp is running, run: gh auth token', printed.getvalue())
+        self.assertEqual(printed.getvalue().count('Once imp is running'), 1)
+        with contextlib.redirect_stderr(io.StringIO()) as quiet:
+            SETUP.remind_imp_tools((browser,))
+        self.assertEqual(quiet.getvalue(), '')
 
 
 class ImpToolsInTheJourney(unittest.TestCase):
@@ -1524,34 +1730,37 @@ class ImpToolsInTheJourney(unittest.TestCase):
             order.append(argv[1])
             return subprocess.CompletedProcess([], code)
         with patch.object(SETUP, 'select_sandbox', side_effect=lambda *a, **k: order.append('sandbox') or sandbox), \
-                patch.object(SETUP, 'select_imp_tools', side_effect=lambda *a: order.append('tools') or ('row',)), \
+                patch.object(SETUP, 'select_imp_tools', side_effect=lambda *a: order.append('tools') or ('row',)) as asked, \
                 patch.object(SETUP, 'show_imp_tools', side_effect=lambda *a: order.append('list')), \
                 patch.object(SETUP, 'finish_imp_tools', side_effect=lambda *a: order.append('finish')) as finish, \
+                patch.object(SETUP, 'remind_imp_tools', side_effect=lambda *a: order.append('remind')), \
                 patch.object(SETUP, 'open_workspace', side_effect=lambda *a: order.append('open') or 0), \
                 patch.object(SETUP, 'pick', return_value=[1]), \
                 patch.object(SETUP.subprocess, 'run', side_effect=ran), \
                 contextlib.redirect_stderr(io.StringIO()):
             SETUP.sandbox_journey('/bin/masc', '/workspace', 8945, quick=quick)
-        return order, finish
+        return order, finish, asked
 
     def test_the_checklist_comes_after_the_sandbox_and_before_setup_and_the_login_after_it(self):
-        order, finish = self.walk(quick=False, sandbox=[])
+        order, finish, asked = self.walk(quick=False, sandbox=[])
         self.assertEqual(order, ['sandbox', 'tools', 'setup', 'finish', 'open'])
         self.assertEqual(finish.call_args.args, ('/bin/masc', '/workspace', ('row',)))
+        # The port is how a running server is recognised after the table is written.
+        self.assertEqual(asked.call_args.args, ('/bin/masc', '/workspace', 8945))
 
     def test_a_quick_setup_lists_instead_of_asking_and_confirms_nothing(self):
-        order, finish = self.walk(quick=True, sandbox=[])
+        order, finish, _ = self.walk(quick=True, sandbox=[])
         self.assertEqual(order, ['sandbox', 'list', 'setup', 'finish', 'open'])
         self.assertEqual(finish.call_args.args[2], ())
 
     def test_leaving_at_the_sandbox_does_not_open_the_step(self):
         self.assertEqual(self.walk(quick=False, sandbox=None)[0], ['sandbox'])
 
-    def test_a_setup_that_failed_gives_imp_no_login(self):
-        # imp is not running yet, so there is nothing to give a login to.
-        order, _ = self.walk(quick=False, sandbox=[], code=1)
-        self.assertNotIn('finish', order)
-        self.assertNotIn('open', order)
+    def test_a_setup_that_failed_gives_imp_no_login_and_reminds_the_reader_who_leaves(self):
+        # imp is not running yet, so there is nothing to give a login to. The
+        # reader who picks "Finish later" is told what is still to do.
+        order, _, _ = self.walk(quick=False, sandbox=[], code=1)
+        self.assertEqual(order, ['sandbox', 'tools', 'setup', 'remind'])
 
 
 @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
@@ -1563,22 +1772,27 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
     finds them, and the command the wizard runs writes a real runtime.toml.
     """
 
+    RUNTIME = ('[providers."deepseek"]\ndisplay-name = "Fixture"\nprotocol = "openai-compatible-http"\n'
+               'endpoint = "https://fixture.invalid/v1"\n[providers."deepseek".credentials]\ntype = "inline"\n'
+               'value = "fixture-key"\n[models.chat]\napi-name = "deepseek-v4-pro"\n["deepseek".chat]\n'
+               '[runtime]\ndefault = "deepseek.chat"\n')
+
+    def workspace(self, root, extra=''):
+        tools = root / 'tools'
+        tools.mkdir()
+        for name, banner in (('geckodriver', 'geckodriver 0.0'), ('firefox', 'Mozilla Firefox 0.0')):
+            (tools / name).write_text("#!/bin/sh\necho '" + banner + "'\n")
+            (tools / name).chmod(0o755)
+        base = root / 'workspace'
+        (base / '.masc/config').mkdir(parents=True)
+        (base / '.masc/config/runtime.toml').write_text(self.RUNTIME + extra)
+        (root / 'home').mkdir()
+        return tools, base
+
     def test_a_found_pair_is_written_into_the_workspace(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            tools = root / 'tools'
-            tools.mkdir()
-            for name, banner in (('geckodriver', 'geckodriver 0.0'), ('firefox', 'Mozilla Firefox 0.0')):
-                (tools / name).write_text("#!/bin/sh\necho '" + banner + "'\n")
-                (tools / name).chmod(0o755)
-            base = root / 'workspace'
-            (base / '.masc/config').mkdir(parents=True)
-            (base / '.masc/config/runtime.toml').write_text(
-                '[providers."deepseek"]\ndisplay-name = "Fixture"\nprotocol = "openai-compatible-http"\n'
-                'endpoint = "https://fixture.invalid/v1"\n[providers."deepseek".credentials]\ntype = "inline"\n'
-                'value = "fixture-key"\n[models.chat]\napi-name = "deepseek-v4-pro"\n["deepseek".chat]\n'
-                '[runtime]\ndefault = "deepseek.chat"\n')
-            (root / 'home').mkdir()
+            tools, base = self.workspace(root)
             # A file, not a StringIO: the command's output goes to this stderr's
             # descriptor, which a StringIO does not have.
             with open(root / 'stderr.txt', 'w') as sink, \
@@ -1590,6 +1804,25 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
             written = (base / '.masc/config/runtime.toml').read_text()
             self.assertIn('geckodriver = "' + str(tools / 'geckodriver') + '"', written)
             self.assertNotIn('was not saved', (root / 'stderr.txt').read_text())
+
+    def test_a_geckodriver_the_operator_already_wrote_is_kept(self):
+        # The wizard used to name the path it had found, and the command then
+        # replaced the operator's value with it.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            tools = root / 'tools'
+            (root / 'chosen').mkdir()
+            chosen = root / 'chosen' / 'geckodriver'
+            chosen.write_text("#!/bin/sh\necho 'geckodriver 0.0 (the operator choice)'\n")
+            chosen.chmod(0o755)
+            tools, base = self.workspace(root, '[browser.automation]\ngeckodriver = "' + str(chosen) + '"\n')
+            with open(root / 'stderr.txt', 'w') as sink, \
+                    patch.dict(os.environ, {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}), \
+                    contextlib.redirect_stderr(sink):
+                SETUP.prepare_browser_automation(BINARY, str(base))
+            written = (base / '.masc/config/runtime.toml').read_text()
+        self.assertIn(str(chosen), written)
+        self.assertNotIn(str(tools / 'geckodriver'), written)
 
     def test_the_github_hand_over_reaches_the_keeper_lookup_with_the_token_on_standard_input(self):
         # No imp exists in this scratch workspace, so the command ends at
@@ -1606,22 +1839,25 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
             (tools / 'gh').write_text(
                 "#!/bin/sh\ncase \"$*\" in\n"
                 "  'auth status --hostname github.com --json hosts') echo '" + status + "';;\n"
-                "  'auth token --hostname github.com') echo '" + token + "';;\n"
+                "  'auth token --hostname github.com --user octo') echo '" + token + "';;\n"
                 "  *) echo \"unexpected: $*\" >&2; exit 2;;\nesac\n")
             (tools / 'gh').chmod(0o755)
             (root / 'home').mkdir()
             base = root / 'workspace'
             base.mkdir()
-            record = root / 'stderr.txt'
-            saved, saved_input = os.dup(2), os.dup(0)
+            record, output = root / 'stderr.txt', root / 'stdout.txt'
+            saved, saved_output, saved_input = os.dup(2), os.dup(1), os.dup(0)
             sink = os.open(str(record), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+            sink_output = os.open(str(output), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
             nothing = os.open(os.devnull, os.O_RDONLY)
             try:
                 # The command's own stderr is descriptor 2, which the wizard's
                 # redirect of the Python object does not reach. Its standard
                 # input is empty unless the wizard supplies the token: a missing
                 # token fails this test at once instead of waiting on a terminal.
+                # Standard output is kept too, to see that the token is not on it.
                 os.dup2(sink, 2)
+                os.dup2(sink_output, 1)
                 os.dup2(nothing, 0)
                 with patch.dict(os.environ, {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}):
                     login = SETUP.host_github_login()
@@ -1630,16 +1866,17 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
                             SETUP.finish_imp_tools(BINARY, str(base), (SETUP.github_row(str(base)),))
             finally:
                 os.dup2(saved, 2)
+                os.dup2(saved_output, 1)
                 os.dup2(saved_input, 0)
-                for descriptor in (saved, saved_input, sink, nothing):
+                for descriptor in (saved, saved_output, saved_input, sink, sink_output, nothing):
                     os.close(descriptor)
-            printed = record.read_text()
+            printed, printed_output = record.read_text(), output.read_text()
         self.assertEqual((login.login, login.source), ('octo', 'keyring'))
         self.assertEqual(printed.count('keeper "imp" not found'), 2, printed)
         self.assertEqual(printed.count("imp's GitHub login was not saved"), 2, printed)
         self.assertNotIn('token must not be empty', printed)
         self.assertNotIn('unknown option', printed)
-        self.assertNotIn(token, printed)
+        self.assertNotIn(token, printed + printed_output)
 
 
 class PdfToolsProbe(unittest.TestCase):

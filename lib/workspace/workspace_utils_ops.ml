@@ -754,9 +754,9 @@ let with_file_lock_r config path f : ('a, masc_error) result =
 
 let log_event config event_json =
   let location =
-    Dated_jsonl.Store.cluster
-      (dated_store_cluster_root config)
-      Dated_jsonl.Store.Cluster.Events
+    Dated_jsonl.Store.at
+      (dated_store_root config)
+      Dated_jsonl.Store.Root.Events
   in
   let events_dir = Dated_jsonl.Store.dir location in
   mkdir_p events_dir;

@@ -8,8 +8,8 @@ let decode decoder json = match decoder (Yojson.Safe.from_string json) with
 
 let usage_journal config =
   Dated_jsonl.open_store
-    (Dated_jsonl.Store.cluster
-       (Workspace_utils.dated_store_cluster_root config)
+    (Dated_jsonl.Store.at
+       (Workspace_utils.dated_store_root config)
        Provider_usage_history)
 
 let fixture test = Eio_main.run (fun env ->

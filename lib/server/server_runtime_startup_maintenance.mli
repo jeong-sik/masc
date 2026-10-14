@@ -14,13 +14,13 @@ val keeper_scoped_flat_stores : string list
     [runtime-manifests] (one rotated JSONL per trace). *)
 
 val prune_shared_jsonl_stores :
-  days:int -> base_path:string -> masc_root:string -> int
+  days:int -> masc_root:string -> int
 (** Prune every shared retention-covered JSONL store in one fold: the
     date-split stores of {!Dated_jsonl.Store.all} by their own rules (with
     [days] as the operator window), then by mtime the flat [logs/] day
     files, keeper-scoped trajectories and [keeper_chat_events], flat
     [messages/] JSON files and [keeper_scoped_flat_stores]. [masc_root] is
-    the cluster's root. Both the startup pass and the 24h periodic pass call
+    [<base>/.masc]. Both the startup pass and the 24h periodic pass call
     exactly this function so the covered-store set cannot drift. Returns the
     number of files removed. Exposed for unit tests. *)
 

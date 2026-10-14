@@ -4,9 +4,9 @@
     another.  Unified telemetry can then surface the gap even when the primary
     lane itself has no fresh rows to read. *)
 
-(* [masc_root] is the cluster's root. *)
+(* [masc_root] is [<base>/.masc]. *)
 let location masc_root =
-  Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Telemetry_coverage_gaps)
+  Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Telemetry_coverage_gaps)
 
 let store_dir masc_root = Dated_jsonl.Store.dir (location masc_root)
 

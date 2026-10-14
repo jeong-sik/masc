@@ -84,11 +84,9 @@ let keepers_runtime_dir_for_base_path base_path =
     (backend_config_for base_path).base_path
     Common.keepers_runtime_dirname
 
-(* This cluster's root, as [Dated_jsonl.Store] takes it for the stores that
-   live under it. Made here so a caller with a config does not spell the
-   directory itself. *)
-let dated_store_cluster_root config =
-  Dated_jsonl.Store.cluster_root (masc_root_dir config)
+(* The workspace's state root as [Dated_jsonl.Store] takes it. Made here so
+   a caller with a config does not spell the directory itself. *)
+let dated_store_root config = Dated_jsonl.Store.root_of_base_path ~base_path:config.base_path
 
 (** Shared in-memory pubsub for FileSystem and Memory backends.
     All supported backends now share the same in-memory pubsub. *)

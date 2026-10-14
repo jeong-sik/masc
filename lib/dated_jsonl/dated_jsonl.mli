@@ -389,8 +389,7 @@ val prune : t -> days:int -> int
 (** [prune t ~days] deletes day-files older than [days] days ago.
     Returns the number of files deleted.  Removes empty month directories. *)
 
-val prune_listed_stores :
-  base_path:string -> Store.cluster_root -> operator_window_days:int -> int
+val prune_listed_stores : Store.root -> operator_window_days:int -> int
 (** Prune every store in {!Store.all} by its {!Store.retention}, in every
     directory {!Store.locations_on_disk} finds. [operator_window_days] is
     the workspace's window for [Operator_window] stores. Returns the number

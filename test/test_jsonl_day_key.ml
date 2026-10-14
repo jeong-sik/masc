@@ -28,7 +28,7 @@ let test_key_matches_the_path () =
   List.iter
     (fun (label, ts) ->
       let dated =
-        Dated_jsonl.Store.(dated_path (cluster (cluster_root "/store") Cluster.Audit) ~ts)
+        Dated_jsonl.Store.(dated_path (at (root_of_masc_dir "/store") Root.Audit) ~ts)
       in
       let expected =
         dated.Dated_jsonl.Store.month_dir ^ "-" ^ Filename.remove_extension dated.day_file

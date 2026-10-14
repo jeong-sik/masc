@@ -35,16 +35,16 @@ type read_result = {
 
 (* ── Store paths ────────────────────────────────────── *)
 
-(* [masc_root] is the cluster's root in every function below. *)
+(* [masc_root] is [<base>/.masc] in every function below. *)
 let fixed_store_location ~masc_root ~base_path source =
-  let cluster store =
-    Some Dated_jsonl.Store.(cluster (cluster_root masc_root) store)
+  let at_root store =
+    Some Dated_jsonl.Store.(at (root_of_masc_dir masc_root) store)
   in
   match source with
-  | Agent_event -> cluster Dated_jsonl.Store.Cluster.Telemetry
-  | Tool_call_io -> cluster Dated_jsonl.Store.Cluster.Tool_calls
-  | Tool_usage -> cluster Dated_jsonl.Store.Cluster.Tool_usage
-  | Agent_core_event -> cluster Dated_jsonl.Store.Cluster.Agent_core_events
+  | Agent_event -> at_root Dated_jsonl.Store.Root.Telemetry
+  | Tool_call_io -> at_root Dated_jsonl.Store.Root.Tool_calls
+  | Tool_usage -> at_root Dated_jsonl.Store.Root.Tool_usage
+  | Agent_core_event -> at_root Dated_jsonl.Store.Root.Agent_core_events
   | Keeper_metric | Trajectory_tool_call | Execution_receipt | Goal_event
   | Tool_metric ->
       ignore (base_path : string);
@@ -55,11 +55,11 @@ let fixed_store_dir ~masc_root ~base_path source =
   Option.map Dated_jsonl.Store.dir (fixed_store_location ~masc_root ~base_path source)
 
 let keeper_metric_location ~masc_root name =
-  Dated_jsonl.Store.(keeper (cluster_root masc_root) ~keeper:name Keeper.Metrics)
+  Dated_jsonl.Store.(keeper (root_of_masc_dir masc_root) ~keeper:name Keeper.Metrics)
 
 let execution_receipt_location ~masc_root name =
   Dated_jsonl.Store.(
-    keeper (cluster_root masc_root) ~keeper:name Keeper.Execution_receipts)
+    keeper (root_of_masc_dir masc_root) ~keeper:name Keeper.Execution_receipts)
 
 let source_freshness_slo_s ?keeper_keepalive_interval_s = function
   | Keeper_metric ->

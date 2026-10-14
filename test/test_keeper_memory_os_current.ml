@@ -1667,7 +1667,7 @@ let test_purge_plan_removes_memory_sidecars () =
 ;;
 
 let durable_range_id : Current.durable_range_id =
-  { receipt_scope = "runtime-cluster-a"
+  { receipt_scope = "receipt-scope-a"
   ; trace_id = "trace"
   ; history_start_boundary_line = 1
   ; start_atom = 1
@@ -1726,7 +1726,7 @@ let test_atom_receipt_wire_and_exclusive_identity () =
     `Assoc [ "receipts", `List [
       `Assoc [ "state", `String "committed"
       ; "range_id", `Assoc
-          [ "receipt_scope", `String "runtime-cluster-a"
+          [ "receipt_scope", `String "receipt-scope-a"
           ; "trace_id", `String "trace"
           ; "history_start_boundary_line", `Int 1
           ; "start_atom", `Int 1; "end_atom", `Int 2
@@ -1776,7 +1776,7 @@ let test_official_receipt_survives_other_commits () =
     `Assoc [ "receipts", `List [
       `Assoc [ "state", `String "committed"
       ; "official_range_id", `Assoc
-          [ "receipt_scope", `String "runtime-cluster-a"
+          [ "receipt_scope", `String "receipt-scope-a"
           ; "after_boundary_line", `Int 2
           ; "turns", `List
               (List.map (fun (line, turn_ref) ->
@@ -2033,12 +2033,12 @@ let test_committed_range_receipt_survives_retract_and_replace () =
        "replace erased the committed range receipt")
 ;;
 
-let test_committed_range_receipts_are_scoped_per_runtime_cluster () =
+let test_committed_range_receipts_are_kept_per_receipt_scope () =
   with_temp_keepers @@ fun keepers_dir ->
-  let cluster_a = durable_range_id in
-  let cluster_b =
+  let scope_a = durable_range_id in
+  let scope_b =
     { durable_range_id with
-      receipt_scope = "runtime-cluster-b"
+      receipt_scope = "receipt-scope-b"
     ; trace_id = "trace-b"
     ; end_atom = 3
     ; last_atom_digest = String.make 64 'b'
@@ -2046,8 +2046,8 @@ let test_committed_range_receipts_are_scoped_per_runtime_cluster () =
     ; boundary_lines_seen = 3
     }
   in
-  ignore (apply_disposition ~keepers_dir ~durable_range_id:cluster_a () |> require_ok);
-  ignore (apply_disposition ~keepers_dir ~durable_range_id:cluster_b () |> require_ok);
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:scope_a () |> require_ok);
+  ignore (apply_disposition ~keepers_dir ~durable_range_id:scope_b () |> require_ok);
   let read scope =
     match
       Current.committed_durable_range
@@ -2056,17 +2056,17 @@ let test_committed_range_receipts_are_scoped_per_runtime_cluster () =
         ~receipt_scope:scope
     with
     | Ok (Some range_id) -> range_id
-    | Ok None -> failf "cluster receipt %s was replaced" scope
+    | Ok None -> failf "receipt for scope %s was replaced" scope
     | Error detail -> fail detail
   in
   check string
-    "cluster A receipt survives cluster B commit"
-    cluster_a.trace_id
-    (read cluster_a.receipt_scope).trace_id;
+    "scope A receipt survives the scope B commit"
+    scope_a.trace_id
+    (read scope_a.receipt_scope).trace_id;
   check string
-    "cluster B has its own receipt"
-    cluster_b.trace_id
-    (read cluster_b.receipt_scope).trace_id
+    "scope B has its own receipt"
+    scope_b.trace_id
+    (read scope_b.receipt_scope).trace_id
 ;;
 
 (* A Librarian pass that changes no fact keeps the stored snapshot: the same
@@ -4405,9 +4405,9 @@ let () =
         ; test_case "prepared candidate receipt set recovers exact snapshot only" `Quick
             test_candidate_prepared_set_recovers_exact_snapshot
         ; test_case
-            "range receipts are scoped per runtime cluster"
+            "range receipts are kept per receipt scope"
             `Quick
-            test_committed_range_receipts_are_scoped_per_runtime_cluster
+            test_committed_range_receipts_are_kept_per_receipt_scope
         ; test_case
             "unchanged pass keeps snapshot and commits range"
             `Quick

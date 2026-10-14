@@ -16,7 +16,7 @@ external unsetenv : string -> unit = "masc_test_unsetenv"
 let recall_history config ~keeper =
   Dated_jsonl.open_store
     (Dated_jsonl.Store.keeper
-       (Masc.Workspace.dated_store_cluster_root config)
+       (Masc.Workspace.dated_store_root config)
        ~keeper
        Memory_recall_artifacts)
 

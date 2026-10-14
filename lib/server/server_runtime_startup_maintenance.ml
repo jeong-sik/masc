@@ -95,10 +95,9 @@ let prune_flat_json_older_than ~days dir =
    set cannot drift between them again. Date-split stores are pruned from
    their list ([Dated_jsonl.prune_listed_stores]); the rest below are flat
    files pruned by mtime. *)
-let prune_shared_jsonl_stores ~days ~base_path ~masc_root =
+let prune_shared_jsonl_stores ~days ~masc_root =
   Dated_jsonl.prune_listed_stores
-    ~base_path
-    (Dated_jsonl.Store.cluster_root masc_root)
+    (Dated_jsonl.Store.root_of_masc_dir masc_root)
     ~operator_window_days:days
   (* logs/: flat [system_log_YYYY-MM-DD.jsonl] day files (406 MB by
      2026-07-31, single day up to 180 MB). The active day file keeps a
@@ -143,7 +142,7 @@ let prune_jsonl_at_resolved_window ~base_path ~masc_root =
   let days, source, diagnostics =
     Server_maintenance_toml_config.resolve_retention_days ~config_path
   in
-  { pruned = prune_shared_jsonl_stores ~days ~base_path ~masc_root;
+  { pruned = prune_shared_jsonl_stores ~days ~masc_root;
     days;
     source;
     diagnostics }

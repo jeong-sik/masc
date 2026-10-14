@@ -159,7 +159,7 @@ let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
 let store_for ~base_path ~keeper_name =
   let location =
     Dated_jsonl.Store.decision_audit
-      ~base_path
+      (Dated_jsonl.Store.root_of_base_path ~base_path)
       ~keeper_dirname:(Keeper_alerting_path.sanitize_keeper_name keeper_name)
   in
   let base_dir = Dated_jsonl.Store.dir location in

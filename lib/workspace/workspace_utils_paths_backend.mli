@@ -44,11 +44,11 @@ val keepers_runtime_dir_for_base_path : string -> string
     runtime base path. This is the base-path form of {!keepers_runtime_dir};
     it opens no backend and creates no directory. *)
 
-val dated_store_cluster_root : config -> Dated_jsonl.Store.cluster_root
-(** This cluster's root, for locating a date-split JSONL store that lives
-    under it through [Dated_jsonl.Store]. *)
+val dated_store_root : config -> Dated_jsonl.Store.root
+(** The workspace's state root, for locating a date-split JSONL store
+    through [Dated_jsonl.Store]. *)
 
-(** Cluster-root state.json path. Used by bootstrap/init to gate
+(** Root state.json path. Used by bootstrap/init to gate
     one-time root setup. *)
 val root_state_path : config -> string
 

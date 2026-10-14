@@ -657,9 +657,9 @@ let rec process_pending ?store_ref acc = function
 
 let agent_core_event_store ~config =
   let location =
-    Dated_jsonl.Store.cluster
-      (Workspace.dated_store_cluster_root config)
-      Dated_jsonl.Store.Cluster.Agent_core_events
+    Dated_jsonl.Store.at
+      (Workspace.dated_store_root config)
+      Dated_jsonl.Store.Root.Agent_core_events
   in
   location, Dated_jsonl.open_store location
 ;;

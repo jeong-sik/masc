@@ -352,9 +352,9 @@ let reset_file_change_cache () =
   Stdlib.Mutex.protect file_change_cache_mu (fun () -> Hashtbl.reset file_change_cache)
 ;;
 
-(* [masc_root] is the cluster's root. *)
+(* [masc_root] is [<base>/.masc]. *)
 let location masc_root =
-  Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Tool_calls)
+  Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Tool_calls)
 ;;
 
 let init ~base_path () =

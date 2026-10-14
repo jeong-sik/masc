@@ -78,7 +78,7 @@ let trim_recent (type a) max_items (values : a list) : a list =
 
 
 let wake_payload_location ~base_path =
-  Dated_jsonl.Store.base ~base_path Dated_jsonl.Store.Base.Keeper_wake_payload
+  Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Keeper_wake_payload)
 ;;
 
 let get_or_create_store ~store_ref ~store_mu location_fn =

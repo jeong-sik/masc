@@ -22,7 +22,7 @@ let tmpdir prefix =
 (* Every store here is a listed store under a fresh temporary root. The
    store's directory is [Dated_jsonl.Store.dir location]; it exists, as the
    temporary directory did before. *)
-let store_under root = Dated_jsonl.Store.(cluster (cluster_root root) Cluster.Audit)
+let store_under root = Dated_jsonl.Store.(at (root_of_masc_dir root) Root.Audit)
 
 let temp_store prefix =
   let location = store_under (tmpdir prefix) in

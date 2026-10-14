@@ -33,7 +33,7 @@ let original_evidence ?task () =
 
 let events_day_file config =
   Dated_jsonl.Store.(
-    dated_path_now (cluster (Workspace.dated_store_cluster_root config) Cluster.Events))
+    dated_path_now (at (Workspace.dated_store_root config) Root.Events))
 
 let with_fixture f = Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

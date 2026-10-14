@@ -519,9 +519,9 @@ let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =
       | _ ->
         let ledger =
           Dated_jsonl.open_store
-            (Dated_jsonl.Store.cluster
-               (Workspace.dated_store_cluster_root config)
-               Dated_jsonl.Store.Cluster.Tool_calls)
+            (Dated_jsonl.Store.at
+               (Workspace.dated_store_root config)
+               Dated_jsonl.Store.Root.Tool_calls)
         in
         (match Keeper_tool_call_index.by_execution_ids
            ~store:ledger ~keeper_name ~execution_ids with

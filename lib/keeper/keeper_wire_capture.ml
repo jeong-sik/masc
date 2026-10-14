@@ -11,7 +11,7 @@ let redact redaction text =
    ([Keeper_hooks_agent_core_cost_events.emit_cost_event]); concurrent keepers
    serialise on a per-day file rather than one global blob. *)
 let wire_capture_location masc_root =
-  Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Wire_capture)
+  Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Wire_capture)
 ;;
 
 let wire_capture_dir masc_root = Dated_jsonl.Store.dir (wire_capture_location masc_root)

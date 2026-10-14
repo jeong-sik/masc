@@ -274,7 +274,7 @@ let approval_decision_kind_and_reason = function
 ;;
 
 let audit_location ~base_path =
-  Dated_jsonl.Store.base ~base_path Dated_jsonl.Store.Base.Audit_approvals
+  Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Audit_approvals)
 ;;
 
 let audit_today_path ~base_path =

@@ -69,8 +69,8 @@ let inference_identity_values ?identity_seed ~model ~ts () =
 let write_costs base entries =
   let store =
     Dated_jsonl.open_store
-      (Dated_jsonl.Store.cluster
-         (Dated_jsonl.Store.cluster_root (Filename.concat base ".masc"))
+      (Dated_jsonl.Store.at
+         (Dated_jsonl.Store.root_of_masc_dir (Filename.concat base ".masc"))
          Costs)
   in
   List.iter (Dated_jsonl.append store) entries

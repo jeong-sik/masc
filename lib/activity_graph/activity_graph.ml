@@ -14,12 +14,12 @@ module StringSet = Set_util.StringSet
 
 (* The directory this store occupies under [.masc]. Exposed so readers of the
    same store name it from here instead of spelling the literal. *)
-let store_dirname = Dated_jsonl.Store.Cluster.(relative_path Activity_events)
+let store_dirname = Dated_jsonl.Store.Root.(relative_path Activity_events)
 
 let location (config : Workspace_utils.config) =
-  Dated_jsonl.Store.cluster
-    (Workspace_utils.dated_store_cluster_root config)
-    Dated_jsonl.Store.Cluster.Activity_events
+  Dated_jsonl.Store.at
+    (Workspace_utils.dated_store_root config)
+    Dated_jsonl.Store.Root.Activity_events
 
 let root_dir (config : Workspace_utils.config) = Dated_jsonl.Store.dir (location config)
 

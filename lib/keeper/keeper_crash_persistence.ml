@@ -1,7 +1,7 @@
 (** Durable per-Keeper crash observation store. *)
 
 type crash_event =
-  { cluster_root : Dated_jsonl.Store.cluster_root
+  { store_root : Dated_jsonl.Store.root
   ; name : string
   ; ts : float
   ; reason : string
@@ -12,10 +12,10 @@ let queue : crash_event Queue.t = Queue.create ()
 let store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
 let store_mu = Eio.Mutex.create ()
 
-let crash_store ~cluster_root name =
+let crash_store ~store_root name =
   let location =
     Dated_jsonl.Store.keeper
-      cluster_root
+      store_root
       ~keeper:name
       Dated_jsonl.Store.Keeper.Crash_events
   in
@@ -29,12 +29,12 @@ let crash_store ~cluster_root name =
       store)
 ;;
 
-let enqueue_record ~cluster_root ~name ~ts ~reason ~restart_count =
-  Queue.push { cluster_root; name; ts; reason; restart_count } queue
+let enqueue_record ~store_root ~name ~ts ~reason ~restart_count =
+  Queue.push { store_root; name; ts; reason; restart_count } queue
 ;;
 
 let write_event (event : crash_event) =
-  let store = crash_store ~cluster_root:event.cluster_root event.name in
+  let store = crash_store ~store_root:event.store_root event.name in
   Dated_jsonl.append
     store
     (`Assoc
@@ -93,7 +93,7 @@ let start_drain_fiber ~sw ~clock =
     `Stop_daemon)
 ;;
 
-let recent_crashes ~cluster_root ~name ~max_entries =
-  let store = crash_store ~cluster_root name in
+let recent_crashes ~store_root ~name ~max_entries =
+  let store = crash_store ~store_root name in
   Dated_jsonl.read_recent store max_entries
 ;;

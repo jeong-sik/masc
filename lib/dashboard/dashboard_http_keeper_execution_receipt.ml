@@ -25,7 +25,7 @@ include Dashboard_http_keeper_types
 
 let execution_receipt_location config keeper_name =
   Dated_jsonl.Store.keeper
-    (Workspace.dated_store_cluster_root config)
+    (Workspace.dated_store_root config)
     ~keeper:keeper_name
     Dated_jsonl.Store.Keeper.Execution_receipts
 

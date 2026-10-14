@@ -3,6 +3,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { SkillSourceInspector } from './skill-source-inspector'
+import { SkillAsyncEvidenceView } from './skill-async-evidence-view'
 import {
   classifySkillEditorError,
   createSkill,
@@ -285,9 +286,11 @@ function SkillEvidenceView({ result }: { result: SkillEvidenceResponse | null })
         const delivered = activation.delivery !== null && activation.delivery !== undefined
         const ownerClaims = item.owner.claims.map(claim => claim.keeper).join(', ') || 'unclaimed'
         return html`
-          <div>
-            <div class="font-semibold">${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} actions${activationEvidence.length > 1 ? ` · equal-time candidate ${index + 1}/${activationEvidence.length}` : ''}</div>
+          <div key=${JSON.stringify([item.trace_id, runField(activation, 'skill_tool_use_id')])}>
+            <div class="font-semibold">Original activation · ${delivered ? '✓ delivered' : '◌ invoked'} · ${ownerClaims} · ${actions} original-turn actions${activationEvidence.length > 1 ? ` · equal-time candidate ${index + 1}/${activationEvidence.length}` : ''}</div>
             <div class="ss-muted mono">${runField(activation, 'activated_at')} · tool use ${runField(activation, 'skill_tool_use_id')} · trace ${item.trace_id} · owner ${item.owner.status}</div>
+            <div class="ss-muted mono">original ${runField(activation, 'turn_ref')} · runtime ${runField(activation, 'runtime_id')}</div>
+            <${SkillAsyncEvidenceView} evidence=${item} />
           </div>
         `
       })}

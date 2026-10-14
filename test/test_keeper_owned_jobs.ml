@@ -3227,6 +3227,12 @@ pointer = "/content"
        "async_actions", member "async_actions" evidence]) |> require "detail strict selected evidence decoder" in
   check int "detail can be consumed without rewriting original admission" 8
     (List.length decoded_detail.action_observations);
+  let display = Masc.Tui_skill_async_evidence.project decoded_detail in
+  check int "display decisions preserve the eleven physical handoffs" 11
+    (List.length display.result_deliveries);
+  check int "display decisions distinguish seven physical actions from eight links" 7
+    (List.length display.actions);
+  check int "display decisions retain every causal link" 8 display.action_link_count;
   let detail_ms = Mtime.Span.to_float_ns (Mtime_clock.count detail_started) /. 1_000_000. in
   Printf.printf "OWNED_RETAINED_ASYNC_SKILL_DETAIL %s\n%!" (Yojson.Safe.to_string (`Assoc
     ["scope", `String "synthetic public owned async flow, fresh retained discovery and actual detail projection";

@@ -4749,6 +4749,12 @@
   unix))
 
 (test
+ (name test_tui_skill_async_evidence)
+ (modules test_tui_skill_async_evidence)
+ (deps fixtures/skill-ledger-async-actions.json)
+ (libraries alcotest masc yojson))
+
+(test
  (name test_keeper_skill_activation_discovery)
  (modules test_keeper_skill_activation_discovery)
  (deps fixtures/skill-ledger-async-actions.json)

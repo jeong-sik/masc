@@ -1833,6 +1833,14 @@ export function decodeSkillActivationAsyncEvidence(
   return {async_result_deliveries: asyncDeliveries, async_actions: asyncActions}
 }
 
+/** Physical occurrence identity excludes delivery links and observation clocks.
+ * This is shared by canonical conflict validation and display grouping. */
+export function skillAsyncOccurrenceIdentity(action: DashboardSkillAsyncAction): string {
+  const occurrence = action.occurrence.kind === 'sdk_result'
+    ? {kind: action.occurrence.kind, invocation: action.occurrence.invocation} : action.occurrence
+  return JSON.stringify([action.physical_turn_ref, action.runtime_id, occurrence])
+}
+
 function validateAsyncOccurrenceFacts(asyncActions: readonly DashboardSkillAsyncAction[]): void {
   const actionIdentities = new Set<string>()
   const occurrenceFacts = new Map<string, string>()
@@ -1842,7 +1850,7 @@ function validateAsyncOccurrenceFacts(asyncActions: readonly DashboardSkillAsync
     const identity = JSON.stringify([action.delivery_sha256, action.physical_turn_ref, action.runtime_id, occurrence])
     if (actionIdentities.has(identity)) throw new Error('skill_activations repeats a causal occurrence')
     actionIdentities.add(identity)
-    const occurrenceIdentity = JSON.stringify([action.physical_turn_ref, action.runtime_id, occurrence])
+    const occurrenceIdentity = skillAsyncOccurrenceIdentity(action)
     const fact = JSON.stringify([action.tool_name, action.occurrence])
     const known = occurrenceFacts.get(occurrenceIdentity)
     if (known !== undefined && known !== fact) throw new Error('skill_activations physical occurrence differs across causal links')

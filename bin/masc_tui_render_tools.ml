@@ -19,6 +19,70 @@ module Tool_tree = Masc_tui_tool_tree
 module Tool_table = Masc_tui_tool_table
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
+let skill_async_evidence_lines evidence =
+  let view = Masc.Tui_skill_async_evidence.project evidence in
+  let deliveries = view.result_deliveries in
+  if List.is_empty deliveries && view.action_link_count = 0 then []
+  else
+    let delivery_lines =
+      List.concat_map
+        (fun (delivery : Masc.Keeper_skill_async_delivery.t) ->
+          let presentation = match delivery.presentation with
+            | Inline_result -> "inline result"
+            | Manifest_reference -> "manifest reference" in
+          [ Ansi.dim, Terminal_text.single_line (Printf.sprintf
+              "       Async %s received=%s runtime=%s at=%s"
+              presentation (Ids.Turn_ref.to_string delivery.physical_turn_ref)
+              delivery.runtime_id delivery.observed_at)
+          ; Ansi.dim, Terminal_text.single_line (Printf.sprintf
+              "         original=%s run=%s parent=%s request=%s bytes=%d sha256=%s"
+              (Ids.Turn_ref.to_string delivery.original_turn_ref)
+              (Masc.Keeper_tool_plan.Composition_run_id.to_string delivery.composition_run_id)
+              delivery.logical_parent_tool_use_id delivery.request_id
+              delivery.receipt.content_bytes delivery.receipt.content_sha256)
+          ])
+        deliveries
+    in
+    let action_lines =
+      List.concat_map
+        (fun (group : Masc.Tui_skill_async_evidence.action_group) ->
+          let action = group.first in
+          let style, occurrence = match action.occurrence with
+            | Masc.Keeper_skill_async_action.Sdk_result { invocation; result } ->
+              let style, outcome, bytes, sha256 = match result with
+                | Handler_returned { bytes; sha256 } -> Ansi.dim, "SDK returned", bytes, sha256
+                | Handler_errored { bytes; sha256; recoverable; error_class } ->
+                  let error = match error_class with
+                    | None -> "unclassified"
+                    | Some Agent_core.Types.Transient -> "transient"
+                    | Some Deterministic -> "deterministic"
+                    | Some Unknown -> "unknown" in
+                  Theme.bad (), Printf.sprintf "SDK errored class=%s recoverable=%b" error recoverable,
+                  bytes, sha256 in
+              style, Printf.sprintf "%s call=%s SDK-turn=%d bytes=%d sha256=%s"
+                outcome (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+                (Agent_core.Tool_contract.Invocation.turn invocation) bytes sha256
+            | Native_started { official_turn; identity } ->
+              let identity = match identity with
+                | Masc.Runtime_native_tools.Call_id id -> "call=" ^ id
+                | Provider_step { conversation_id; step_index } ->
+                  Printf.sprintf "step=%s:%d" conversation_id step_index in
+              Ansi.dim, Printf.sprintf "Native started official-turn=%d %s" official_turn identity
+          in
+          (style, Terminal_text.single_line (Printf.sprintf
+             "       %s · %s · received=%s runtime=%s" action.tool_name occurrence
+             (Ids.Turn_ref.to_string action.physical_turn_ref) action.runtime_id))
+          :: List.map
+               (fun (link : Masc.Keeper_skill_async_action.t) ->
+                 Ansi.dim, Terminal_text.single_line (Printf.sprintf
+                   "         causal handoff=%s at=%s" link.delivery_sha256 link.observed_at))
+               (group.first :: group.additional_links))
+        view.actions
+    in
+    (Ansi.dim, Printf.sprintf "       Async results: %d handoffs · %d physical actions · %d causal links"
+       (List.length deliveries) (List.length view.actions) view.action_link_count)
+    :: delivery_lines @ action_lines
+
 (* Newest events the Skill Timeline section draws. The full count still
    prints in the heading; the cap keeps one busy ledger from pushing the
    usage and catalog sections off the first screen. *)
@@ -716,7 +780,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                          in
                          [ Ansi.bold,
                            Printf.sprintf
-                             "     Activation: %s · owner=%s(%s) · actions=%d · at=%s"
+                             "     Original activation: %s · owner=%s(%s) · original-actions=%d · at=%s"
                              delivered
                              (Terminal_text.single_line item.sea_owner_status)
                              (Terminal_text.single_line keepers)
@@ -729,7 +793,11 @@ let tools_display_lines ?(cols = 80) (state : state) =
                              (Terminal_text.single_line
                                 (string_field "skill_tool_use_id"))
                              (if tied then " · equal-time candidate" else "")
-                         ])
+                         ; Ansi.dim,
+                           Printf.sprintf "       original %s · runtime %s"
+                             (Terminal_text.single_line (string_field "turn_ref"))
+                             (Terminal_text.single_line (string_field "runtime_id"))
+                         ] @ skill_async_evidence_lines item.sea_async_evidence)
                       items
                   in
                   let composition_lines =

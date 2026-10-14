@@ -1,5 +1,14 @@
 # Prepare and run exact inline Skill children
 
+The source Skill detail views in Dashboard and TUI show retained async result
+handoffs and later action facts alongside the original activation. Inline result
+and manifest-reference delivery are distinct. The detail counts physical action
+occurrences separately from causal links: one SDK invocation connected to two
+handoffs remains one action with both links and observation clocks. SDK returned,
+SDK errored and native started are distinct facts; native start carries no
+completion verdict. Original and receiving turns/runtimes remain visible.
+This display implementation needs installed runtime/UI verification separately.
+
 `Keeper_composition_nested.compile` expands an exact, turn-frozen inline Skill
 into the existing typed plan. The source `keeper_composition_prepare` schema now
 accepts this node alternative for task-specific inline drafts. Prepare freezes

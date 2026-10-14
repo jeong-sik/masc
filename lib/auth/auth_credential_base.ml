@@ -1360,7 +1360,10 @@ let credential_dir_time_step_sec = 2.0
    as they were (git calls such entries racily clean). It serves only until
    the step ends; the rebuild after that sees every write of the step, and
    any later write moves the times. The TTL still caps the step, so a file
-   system clock running ahead of this one keeps no index longer than before. *)
+   system clock running ahead of this one keeps no index longer than before.
+   The rule compares this host's clock with the file system's, so it holds
+   where they agree: a file clock more than a step behind (a network share)
+   files every index as listed after its step, which is the 60 s bound. *)
 let credential_index_expires_at ~stamped_at ~dir_changed_at =
   let ttl_end = stamped_at +. credential_index_cache_ttl_sec in
   match dir_changed_at with

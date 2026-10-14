@@ -64,7 +64,7 @@ let skill_async_evidence_lines evidence =
                 (Agent_core.Tool_contract.Invocation.turn invocation) bytes sha256
             | Native_started { official_turn; identity } ->
               let identity = match identity with
-                | Masc.Runtime_native_tools.Call_id id -> "call=" ^ id
+                | Runtime_native_tools.Call_id id -> "call=" ^ id
                 | Provider_step { conversation_id; step_index } ->
                   Printf.sprintf "step=%s:%d" conversation_id step_index in
               Ansi.dim, Printf.sprintf "Native started official-turn=%d %s" official_turn identity

@@ -453,6 +453,15 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
   let ledger = Ledger.load ~config ~trace_id |> require "reload actual activation ledger" in
   check int "only successfully admitted scopes activated" 2 (List.length (Ledger.activations ledger));
   List.iter (fun (activation : Ledger.activation) ->
+    let child = List.find (fun child ->
+      child |> member "admission" |> member "skill_tool_use_id" = `String activation.skill_tool_use_id) child_scopes in
+    let admission = child |> member "admission" in
+    check bool "public result retains the exact actual activation receipt" true
+      (Yojson.Safe.equal (Ledger.activation_to_yojson activation) (admission |> member "activation"));
+    check string "public result retains the original immutable admission frame"
+      (Ledger.activation_frame_sha256 activation) (admission |> member "activation_frame_sha256" |> to_string))
+    (Ledger.activations ledger);
+  List.iter (fun (activation : Ledger.activation) ->
     match activation.invocation with
     | Ledger.Nested_composition_invocation { scope; origin = Ledger.Task_composition { task_ids }; tool_name } ->
       let expected_parent = match execution with Inline -> "run-nested" | Async ->
@@ -475,6 +484,70 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      let bound = Draft.load_nested_activation ~base_path (Masc.Keeper_tool_execution_journal.source journal)
        |> require "restore original bound context from immutable run" |> function
        | Some bound -> bound | None -> fail "nested async run lost its original binding" in
+     let module Nested_run = Masc.Keeper_composition_nested_run in
+     let parent_invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"run-nested" ~turn:1
+         ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+         ~completion:Continue_after_success in
+     let compiled = Nested.compile ~capability_surface:surface recipe |> require "original frozen child calls" in
+     let retained = Nested_run.create ~calls:(Nested.calls compiled) ~composition_run_id:identity
+         ~delivery_parent_tool_use_id:(Nested_run.async_result_parent identity)
+         ~parent_invocation ~tool_name:Draft.run_tool_name ~record_activation:None () in
+     List.iter (fun (call : Nested.call) ->
+       match Nested_run.admitted_activation retained ~alias:call.alias with
+       | Error _ -> () | Ok _ -> fail "unrestored child manufactured an activation") (Nested.calls compiled);
+     Nested_run.restore_admissions retained ~find_activation:(fun ~invocation ~tool_name ~scope ~reference ->
+       Recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference);
+     List.iter (fun (call : Nested.call) ->
+       let receipt = Nested_run.admitted_activation retained ~alias:call.alias |> require "typed original child receipt" in
+       let original = List.find (fun (activation : Ledger.activation) ->
+         String.equal activation.skill_tool_use_id receipt.skill_tool_use_id) (Ledger.activations ledger) in
+       check bool "restoration preserves the complete original activation" true (receipt = original)) (Nested.calls compiled);
+     let source = Masc.Keeper_tool_execution_journal.source journal in
+     let find_result_children result =
+       match Draft.load_nested_result_children ~base_path source ~result |> require "decode exact retained result children" with
+       | None -> fail "original result lost child receipts"
+       | Some (original,children) -> Recorder.find_bound_result_children ~config original
+           ~composition_run_id:identity ~logical_parent_tool_use_id:(Nested_run.async_result_parent identity)
+           ~source_turn:1 ~tool_name:Draft.run_tool_name children in
+     let receipts = find_result_children result |> require "original result receipts join original ledger" in
+     check int "both actual admitted receipts survive public result parsing" 2 (List.length receipts);
+     let rewrite_admissions transform = match result with
+       | `Assoc fields -> `Assoc (("nested_scopes",`List (List.map (function
+           | `Assoc fields -> `Assoc (List.map (fun (name,value) ->
+               if String.equal name "admission" then name,transform value else name,value) fields)
+           | _ -> fail "typed child scope missing") child_scopes)) :: List.remove_assoc "nested_scopes" fields)
+       | _ -> fail "typed parent result missing" in
+     let missing = rewrite_admissions (function
+       | `Assoc fields -> `Assoc (List.remove_assoc "activation" fields)
+       | _ -> fail "admitted child expected") in
+     (match Draft.load_nested_result_children ~base_path source ~result:missing with
+      | Error (Draft.Malformed_draft _) -> () | _ -> fail "ID-only result laundered missing original receipt");
+     let changed_clock = rewrite_admissions (function
+       | `Assoc fields ->
+         let receipt = match List.assoc "activation" fields with
+           | `Assoc fields -> `Assoc (("activated_at",`String "2000-01-01T00:00:00Z") :: List.remove_assoc "activated_at" fields)
+           | _ -> fail "original receipt missing" in
+         let receipt = Ledger.activation_of_yojson ~expected_trace_id:trace_id receipt |> require "well-formed changed receipt" in
+         `Assoc (("activation",Ledger.activation_to_yojson receipt)
+           :: ("activation_frame_sha256",`String (Ledger.activation_frame_sha256 receipt))
+           :: List.remove_assoc "activation_frame_sha256" (List.remove_assoc "activation" fields))
+       | _ -> fail "admitted child expected") in
+     (match find_result_children changed_clock with
+      | Error (Recorder.Invalid_bound_context _) -> () | _ -> fail "self-consistent changed clock replaced original ledger proof");
+     let mismatched = Nested_run.create ~calls:(Nested.calls compiled) ~composition_run_id:identity
+         ~delivery_parent_tool_use_id:(Nested_run.async_result_parent identity)
+         ~parent_invocation ~tool_name:Draft.run_tool_name ~record_activation:None () in
+     let wrong_receipt = List.hd (Ledger.activations ledger) in
+     Nested_run.restore_admissions mismatched ~find_activation:(fun ~invocation:_ ~tool_name:_ ~scope:_ ~reference:_ ->
+       Ok (Some wrong_receipt));
+     let refused = List.filter (fun (call : Nested.call) ->
+       match Nested_run.admitted_activation mismatched ~alias:call.alias with Error _ -> true | Ok _ -> false)
+         (Nested.calls compiled) in
+     check int "a sibling receipt cannot admit another original child" 1 (List.length refused);
+     let unchanged = Ledger.load_existing ~config ~trace_id |> require "ledger after proof-only restoration checks"
+       |> function Some ledger -> ledger | None -> fail "original ledger disappeared" in
+     check bool "reading and refusing receipts creates no activation or clock" true
+       (Ledger.activations unchanged = Ledger.activations ledger);
      List.iter (fun (activation : Ledger.activation) ->
        match activation.invocation with
        | Ledger.Nested_composition_invocation {scope;tool_name;_} ->

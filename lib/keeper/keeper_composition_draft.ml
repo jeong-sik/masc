@@ -466,8 +466,20 @@ let load_nested_result_children ~base_path source ~result =
       let* child = match List.assoc "admission" fields with
         | `Null -> Ok None
         | `Assoc [("rejection",_)] -> Ok None
-        | `Assoc [("skill_tool_use_id",`String id)] when String.trim id <> "" ->
-          Ok (Some Keeper_skill_activation_recorder.{alias;skill_reference=reference;skill_tool_use_id=id})
+        | `Assoc _ as admission ->
+          let* admission = exact_fields ~names:["skill_tool_use_id";"activation";"activation_frame_sha256"] admission in
+          let* id = match List.assoc "skill_tool_use_id" admission with
+            | `String id when String.trim id <> "" -> Ok id
+            | _ -> malformed "invalid original child invocation ID" in
+          let* receipt = Keeper_skill_activation_ledger.activation_of_yojson
+              ~expected_trace_id:(Keeper_skill_activation_recorder.bound_trace_id activation)
+              (List.assoc "activation" admission)
+            |> Result.map_error (fun _ -> Malformed_draft "invalid retained original child activation") in
+          let activation_frame_sha256 = Keeper_skill_activation_ledger.activation_frame_sha256 receipt in
+          let* () = if String.equal id receipt.skill_tool_use_id
+              && List.assoc "activation_frame_sha256" admission = `String activation_frame_sha256 then Ok ()
+            else malformed "child admission differs from its retained activation frame" in
+          Ok (Some Keeper_skill_activation_recorder.{alias;skill_reference=reference;skill_tool_use_id=id;activation_frame_sha256})
         | _ -> malformed "invalid typed child admission" in
       Ok ((match child with None -> children | Some child -> child::children),frozen::seen)) (Ok ([],[])) scopes in
     if List.length seen <> List.length calls then malformed "terminal result omitted an original child scope"

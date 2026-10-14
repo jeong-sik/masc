@@ -29,6 +29,14 @@ val admit_node : t -> node:Keeper_tool_plan.node ->
     that result under a per-run Eio mutex, so concurrently ready sibling leaves
     share one admission. A rejection is proven before any leaf effect. *)
 
+val admitted_activation : t -> alias:Keeper_tool_plan.Node_id.t ->
+  (Keeper_skill_activation_ledger.activation,
+   Keeper_tool_plan_executor.admission_rejection) result
+(** Read the exact receipt retained by successful admission or original-ledger
+    restoration. Unknown, unstarted and rejected children remain errors. This
+    lookup records nothing, reconstructs no activation and grants no broker or
+    current-ledger authority; a producer must still check its owned source. *)
+
 val restore_admissions : t ->
   find_activation:(invocation:Agent_core.Tool_contract.Invocation.t -> tool_name:string ->
     scope:Keeper_skill_activation_ledger.nested_composition_scope -> reference:Skill_reference.t ->

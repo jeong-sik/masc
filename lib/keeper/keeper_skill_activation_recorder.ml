@@ -27,7 +27,12 @@ type bound_context = { context : t; runtime : string }
 let physical_turn_ref (context : t) = context.turn_ref
 let current_runtime_id (context : t) = context.runtime_id ()
 
-type result_child = {alias:string;skill_reference:Skill_reference.t;skill_tool_use_id:string}
+type result_child =
+  { alias : string
+  ; skill_reference : Skill_reference.t
+  ; skill_tool_use_id : string
+  ; activation_frame_sha256 : string
+  }
 let bound_trace_id bound = bound.context.trace_id
 let bound_turn_ref bound = bound.context.turn_ref
 
@@ -198,7 +203,8 @@ let find_bound_result_children ~config bound ~composition_run_id ~logical_parent
       | None -> Error (Invalid_bound_context "admitted original child activation is missing") in
     let* expected = bound_child_activation bound ~tool_use_id:child.skill_tool_use_id ~agent_core_turn:source_turn
       ~tool_name ~scope ~reference:child.skill_reference ~activated_at:existing.activated_at in
-    if Skill_reference.equal_identity expected.identity existing.identity
+    if String.equal child.activation_frame_sha256 (Ledger.activation_frame_sha256 existing)
+      && Skill_reference.equal_identity expected.identity existing.identity
       && expected.content_revision = existing.content_revision && expected.snapshot_revision = existing.snapshot_revision
       && Ids.Turn_ref.equal expected.turn_ref existing.turn_ref && expected.runtime_id = existing.runtime_id
       && expected.agent_core_turn = existing.agent_core_turn && expected.invocation = existing.invocation

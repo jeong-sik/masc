@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Retain exact nested Skill activation receipts through execution and restoration.
+  Child result delivery checks the original immutable admission frame, including
+  its first activation clock, rather than accepting an invocation ID alone.
+
 ## [0.56.0] - 2026-10-14
 
 ### Upgrade notes

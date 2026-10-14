@@ -117,5 +117,7 @@ val load_nested_result_children : base_path:string ->
   Keeper_tool_execution_journal.source -> result:Yojson.Safe.t ->
   ((Keeper_skill_activation_recorder.bound_context *
     Keeper_skill_activation_recorder.result_child list) option, error) result
-(** Restore only admitted child IDs whose complete result scope matches the
-    exact frozen run call. Do not infer admission from success text or outputs. *)
+(** Restore only admitted child receipts whose complete result scope matches
+    the exact frozen run call. Strictly decode each original activation and its
+    immutable frame digest; the recorder then compares that frame with the
+    original ledger. Do not infer admission from success text or outputs. *)

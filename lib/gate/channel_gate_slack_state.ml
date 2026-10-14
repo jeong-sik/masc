@@ -50,13 +50,11 @@ let binding_json = Store.binding_json
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
 (* The one definition of "the transport is live", used both by [status_json]
-   and by the [Channel_gate_connector.S] registry export [connected]. Keeping
-   them as one function is the point: they used to disagree, because
-   [status_json] folded startup and binding-store health into the same boolean
-   while the registry read the socket alone. Those two facts have their own
-   fields ([error], [binding_store_read_ok]) and their own effect on
-   [available]. It takes the state rather than reading it, so a status
-   reading that already holds the state does not read it again. *)
+   and by the [Channel_gate_connector.S] registry export [connected]. Startup
+   and binding-store health are not part of it; they have their own fields
+   ([error], [binding_store_read_ok]) and their own effect on [available]. It
+   takes the state rather than reading it, so a status reading that already
+   holds the state does not read it again. *)
 let gateway_connected = function
   | Slack_gateway_state.Connected -> true
   | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
@@ -149,12 +147,13 @@ let current_workspace_id () = Atomic.get workspace_id
 let clear_workspace_id () = Atomic.set workspace_id None
 
 (* One reading of the connector, rendered by [status_json] and
-   [connector_json] alike so the two views cannot disagree. *)
+   [connector_json] alike so the two views cannot disagree. The rendered
+   [connected] is computed from [gateway_state], so the two cannot be stored
+   apart. *)
 type status = {
   gateway_state : Slack_gateway_state.connection_state;
   trigger_policy : Slack_gateway_state.trigger_policy option;
   available : bool;
-  connected : bool;
   error : string;
   binding_store_path : string;
   audit_path : string;
@@ -189,7 +188,6 @@ let read_status ~audit_limit =
   let available =
     app_present && bot_present && startup_ok && binding_store_read_ok
   in
-  let connected = gateway_connected gateway_state in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -215,7 +213,6 @@ let read_status ~audit_limit =
     gateway_state;
     trigger_policy = get_trigger_policy ();
     available;
-    connected;
     error;
     binding_store_path = binding_store_path ();
     audit_path = binding_audit_path ();
@@ -237,13 +234,15 @@ let status_fields status =
   ; ("capabilities", Channel_gate_connector_capability.all_json)
   ; ("trigger_policy", trigger_policy_json status.trigger_policy)
   ; ("available", `Bool status.available)
-  ; ("connected", `Bool status.connected)
+  ; ("connected", `Bool (gateway_connected status.gateway_state))
   ; ("status",
      `String
        (* The gateway state machine is the liveness source; it has no
           heartbeat file that could age out, so it is never stale. *)
        (Channel_gate_connector.connector_state_label
-          ~available:status.available ~connected:status.connected ~stale:false))
+          ~available:status.available
+          ~connected:(gateway_connected status.gateway_state)
+          ~stale:false))
   ; ("error", `String status.error)
   ; ("status_source", `String "in_process_gateway")
   ; ("gateway_state", `String (gateway_state_label status.gateway_state))

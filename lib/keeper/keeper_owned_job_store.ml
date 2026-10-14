@@ -338,16 +338,20 @@ let load ~base_path ~keeper_name job_id =
 let recover ~base_path ~keeper_name job_id =
   let* base_path = canonical_base_path base_path in
   let* () = validate_owned_path ~base_path ~job_id ~create:false in
+  let read_prefix bytes =
+    let* () = validate_owned_path ~base_path ~job_id ~create:false in
+    let* record = decode_journal bytes in
+    if scope_matches ~base_path ~keeper_name ~job_id record then Ok record
+    else Error (Invalid_authority "different job/base/Keeper") in
   protect_io (fun () ->
     (* Effects follow a confirmed full intent append, so an incomplete suffix
        cannot own a backend effect or delivery ACK. Retain every complete row. *)
     match Fs_compat.recover_and_update_private_jsonl_durable_locked_result
+        ~validate_prefix:(fun bytes -> match read_prefix bytes with
+          | Ok _ -> Fs_compat.Recovery_authorized
+          | Error error -> Fs_compat.Recovery_refused (Error error))
         ~create:false (journal_path ~base_path job_id)
-        (fun bytes -> None,
-          let* () = validate_owned_path ~base_path ~job_id ~create:false in
-          let* record = decode_journal bytes in
-          if scope_matches ~base_path ~keeper_name ~job_id record then Ok record
-          else Error (Invalid_authority "different job/base/Keeper")) with
+        (fun bytes -> None, read_prefix bytes) with
     | Fs_compat.Private_file_succeeded result -> result
     | Private_file_succeeded_with_cleanup_failure {cleanup_failure;_} ->
         Error (Commit_unconfirmed (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))

@@ -1249,6 +1249,41 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
       "duplicate_blocked_worker_backend_calls", `Int 0]))
 
 
+let test_completion_recovery_preserves_refused_owner_bytes () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let first_id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let first_path = owner_path fixture first_id in
+  let original_first = read first_path in
+  let state = daemon fixture |> to_assoc in
+  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
+    (List.map (fun (name,value) -> name,(if name="container" then `Null else value)) state)));
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  let foreign_id = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"start-foreign" ~turn:52 "keeper_job_start"
+      (`Assoc ["argv", `List [`String "fixture-program"]])) |> job_id in
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"collect-foreign" ~turn:53 "keeper_job_status" (argument foreign_id)));
+  let foreign_prefix = read (owner_path fixture foreign_id) in
+  let foreign_bytes = foreign_prefix ^ "{\"completion_delivered\":tr" in
+  write first_path foreign_bytes;
+  let before = List.length (calls fixture) in
+  let refused = recover_completions fixture in
+  check int "foreign complete prefix is refused before tail repair" 1 (List.length refused.failures);
+  check string "foreign owner and torn suffix retain all original evidence" foreign_bytes (read first_path);
+  check int "foreign authority authorizes no backend call" before (List.length (calls fixture));
+  check string "valid independent original result still delivers" foreign_id
+    (Store.Job_id.to_string (only_selection fixture |> completion_payload).oj_job_id);
+  let corrupt_bytes = "complete malformed owner row\n{\"partial\":" in
+  write first_path corrupt_bytes;
+  let corrupt = recover_completions fixture in
+  check int "complete malformed prefix stays refused" 1 (List.length corrupt.failures);
+  check string "complete corruption and incomplete suffix remain byte-identical" corrupt_bytes (read first_path);
+  check int "corrupt authority authorizes no backend call" before (List.length (calls fixture));
+  write first_path original_first;
+  check bool "original authority remains recoverable after restoration" false (load fixture first_id).completion_delivered
+
+
 let () =
   Printf.printf "owned_job_feature_transport=synthetic_docker_cli actual_public_handler=true actual_docker_execution=false\n%!";
   run "Keeper owned jobs"
@@ -1270,4 +1305,5 @@ let () =
       ; test_case "completion enqueue failure recovers original result after restart" `Quick test_completion_delivery_failure_and_restart
       ; test_case "consumed notification survives missing producer ACK" `Quick test_completion_consumed_before_producer_ack
       ; test_case "completion recovery retains unknown launch and corrupt owner" `Quick test_completion_retains_unknown_launch_and_owner
-      ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend ]]
+      ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
+      ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

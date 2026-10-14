@@ -4034,7 +4034,15 @@ let read_private_jsonl_tail_locked_result path ~max_bytes =
       Private_file_failed_with_cleanup_failure { error = Read_error error; cleanup_failure }
 ;;
 
-let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomplete_tail=false) ?tail_bytes ~io path decide =
+type 'a private_jsonl_recovery_validation =
+  | Recovery_authorized
+  | Recovery_refused of 'a
+
+type 'a private_jsonl_recovered =
+  | Recovered_prefix of string
+  | Recovery_result of 'a
+
+let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?tail_bytes ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
   if create then mkdir_p_memoized dir;
@@ -4106,19 +4114,29 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
                String.sub existing (newline + 1) (String.length existing - newline - 1)
            in
            validate_binding ();
-           let recovered =
-             if not recover_incomplete_tail || existing = ""
-                || existing.[String.length existing - 1] = '\n' then Ok existing
-             else
+           let recovered = match validate_prefix with
+             | None -> Ok (Recovered_prefix existing)
+             | Some validate_prefix ->
                let complete_length = private_jsonl_last_complete_row_length existing in
-               let ( let* ) = Result.bind in
-               let failure append_failure = {append_failure; rollback_failures=[]} in
-               let* () = run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
-                 Unix.ftruncate fd complete_length) |> Result.map_error failure in
-               let* () = run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd)
-                 |> Result.map_error failure in
-               Ok (String.sub existing 0 complete_length) in
-           Result.bind recovered (fun existing ->
+               let prefix = if complete_length = String.length existing then existing
+                 else String.sub existing 0 complete_length in
+               let validation = validate_prefix prefix in
+               validate_binding ();
+               (match validation with
+                | Recovery_refused result -> Ok (Recovery_result result)
+                | Recovery_authorized ->
+                  if complete_length = String.length existing then Ok (Recovered_prefix prefix)
+                  else
+                    let ( let* ) = Result.bind in
+                    let failure append_failure = {append_failure; rollback_failures=[]} in
+                    let* () = run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
+                      Unix.ftruncate fd complete_length) |> Result.map_error failure in
+                    let* () = run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd)
+                      |> Result.map_error failure in
+                    Ok (Recovered_prefix prefix)) in
+           Result.bind recovered (function
+           | Recovery_result result -> validate_binding (); Ok result
+           | Recovered_prefix existing ->
            validate_binding ();
            let suffix, result = decide existing in
            validate_binding ();
@@ -4148,8 +4166,8 @@ let update_private_file_tail_durable_locked_result path ~max_bytes decide =
     ~io:private_jsonl_transaction_unix_io path decide
 ;;
 
-let recover_and_update_private_jsonl_durable_locked_result ?(create=true) path decide =
-  update_private_file_durable_locked_with_io ~create ~recover_incomplete_tail:true
+let recover_and_update_private_jsonl_durable_locked_result ?(create=true) ~validate_prefix path decide =
+  update_private_file_durable_locked_with_io ~create ~validate_prefix
     ~io:private_jsonl_transaction_unix_io path decide
 ;;
 

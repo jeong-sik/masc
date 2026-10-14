@@ -1486,15 +1486,29 @@ val update_private_file_tail_durable_locked_result :
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
-(** Append transaction for a recovery journal whose incomplete final event has
-    no externally committed effect. Under the same in-process mutex and exclusive
-    descriptor lock as the updater, truncate only the suffix after the last newline
-    and fsync before calling [decide]. Complete malformed rows are preserved for
-    the consumer decoder to refuse. Recovery/append/descriptor failures remain
-    explicit; no callback or success is returned after failed truncation/fsync.
-    [create=false] neither creates a missing journal nor prepares its parent. *)
+type 'a private_jsonl_recovery_validation =
+  | Recovery_authorized
+  | Recovery_refused of 'a
+
+(** Recovery transaction for a journal whose incomplete final event has no
+    externally committed effect. Under the same opened descriptor, path mutex
+    and exclusive file lock, [validate_prefix] checks all complete rows before
+    any truncation. This validation also runs when the journal has no torn tail.
+    [Recovery_refused value] preserves every payload byte and returns [value]
+    without calling [decide]. Only [Recovery_authorized] permits truncating and
+    fsyncing the incomplete suffix, then calling [decide] with the complete
+    prefix. The current path/descriptor binding is checked after validation
+    and before returning either result. Complete malformed or foreign-owner
+    prefixes can therefore be refused without discarding their torn suffixes.
+    Both callbacks run under the lock in a system thread and must avoid Eio
+    effects. Validation exceptions and cancellation propagate; truncate,
+    append/rollback and descriptor-settlement failures keep their existing
+    outcomes. Failed truncation/fsync never calls [decide]. [create=false]
+    neither creates a missing journal nor prepares its parent. *)
 val recover_and_update_private_jsonl_durable_locked_result :
-  ?create:bool -> string -> (string -> string option * 'a) ->
+  ?create:bool ->
+  validate_prefix:(string -> 'a private_jsonl_recovery_validation) ->
+  string -> (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
 (** Existing-only sibling of {!update_private_file_durable_locked_result}.

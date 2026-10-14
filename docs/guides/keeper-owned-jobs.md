@@ -103,7 +103,8 @@ is acknowledged in that same owner only after durable queue enqueue, then its
 discovery marker is retired. Failed enqueue, an interrupted acknowledgement or
 unreadable authority leaves recovery evidence. Queue consumption before the
 producer acknowledgement does not recreate the notification. Maintenance
-recovers only an incomplete final append under the journal lock; complete
+validates the full committed prefix and exact job owner before recovering an
+incomplete final append under the journal lock; complete
 malformed rows remain a refusal, and missing owners are never created. If the canonical
 result cannot be read at intake, the source stays pending and its error remains
 visible; independent sources can continue. These notifications let the Keeper

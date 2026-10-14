@@ -511,22 +511,59 @@ let handle_export_disk ~tool_name ~start_time ~base_path args =
   | _ -> reject ~tool_name ~start_time "filename must name one new catalog .dsk image"
 ;;
 
-let dispatch ~relay ~base_path ~agent ~name ~arguments =
-  let tool_name = name and start_time = Tool_timing.start () in
-  match name with
-  | "masc_msx_load" -> Some (handle_load ~relay ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
-  | "masc_msx_eject" -> Some (handle_eject ~relay ~tool_name ~start_time ~agent_name:agent arguments)
-  | "masc_msx_save" -> Some (handle_checkpoint ~restore:false ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_restore" -> Some (handle_checkpoint ~restore:true ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_export_disk" -> Some (handle_export_disk ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_change_disk" -> Some (handle_change_disk ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_meta" -> Some (handle_meta ~tool_name ~start_time
-      ?inventory_base_path:(if get_bool arguments "include_inventory" false then Some base_path else None) ())
-  | "masc_msx_checkpoint_info" -> Some (handle_checkpoint_info ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_press" -> Some (handle_press ~tool_name ~start_time ~who:agent arguments)
-  | "masc_msx_step" -> Some (handle_step ~tool_name ~start_time arguments)
-  | "masc_msx_step_until_change" -> Some (handle_step_until_change ~tool_name ~start_time arguments)
-  | "masc_msx_peek" -> Some (handle_peek ~tool_name ~start_time arguments)
-  | "masc_msx_ram_diff" -> Some (handle_ram_diff ~tool_name ~start_time ())
-  | "masc_msx_screen" -> Some (handle_screen ~tool_name ~start_time arguments)
-  | _ -> None
+(* The MSX worker's tools. The worker parses a call's tool name once with
+   [tool_of_name]; [tool_name] is the one place the names are written. *)
+type tool =
+  | Msx_load
+  | Msx_eject
+  | Msx_save
+  | Msx_restore
+  | Msx_export_disk
+  | Msx_change_disk
+  | Msx_screen
+  | Msx_meta
+  | Msx_checkpoint_info
+  | Msx_press
+  | Msx_step
+  | Msx_step_until_change
+  | Msx_peek
+  | Msx_ram_diff
+[@@deriving enumerate]
+
+let tool_name = function
+  | Msx_load -> "masc_msx_load"
+  | Msx_eject -> "masc_msx_eject"
+  | Msx_save -> "masc_msx_save"
+  | Msx_restore -> "masc_msx_restore"
+  | Msx_export_disk -> "masc_msx_export_disk"
+  | Msx_change_disk -> "masc_msx_change_disk"
+  | Msx_screen -> "masc_msx_screen"
+  | Msx_meta -> "masc_msx_meta"
+  | Msx_checkpoint_info -> "masc_msx_checkpoint_info"
+  | Msx_press -> "masc_msx_press"
+  | Msx_step -> "masc_msx_step"
+  | Msx_step_until_change -> "masc_msx_step_until_change"
+  | Msx_peek -> "masc_msx_peek"
+  | Msx_ram_diff -> "masc_msx_ram_diff"
+
+let tool_of_name name =
+  List.find_opt (fun tool -> String.equal (tool_name tool) name) all_of_tool
+
+let dispatch ~relay ~base_path ~agent ~tool ~arguments =
+  let tool_name = tool_name tool and start_time = Tool_timing.start () in
+  match tool with
+  | Msx_load -> handle_load ~relay ~tool_name ~start_time ~base_path ~agent_name:agent arguments
+  | Msx_eject -> handle_eject ~relay ~tool_name ~start_time ~agent_name:agent arguments
+  | Msx_save -> handle_checkpoint ~restore:false ~tool_name ~start_time ~base_path arguments
+  | Msx_restore -> handle_checkpoint ~restore:true ~tool_name ~start_time ~base_path arguments
+  | Msx_export_disk -> handle_export_disk ~tool_name ~start_time ~base_path arguments
+  | Msx_change_disk -> handle_change_disk ~tool_name ~start_time ~base_path arguments
+  | Msx_meta -> handle_meta ~tool_name ~start_time
+      ?inventory_base_path:(if get_bool arguments "include_inventory" false then Some base_path else None) ()
+  | Msx_checkpoint_info -> handle_checkpoint_info ~tool_name ~start_time ~base_path arguments
+  | Msx_press -> handle_press ~tool_name ~start_time ~who:agent arguments
+  | Msx_step -> handle_step ~tool_name ~start_time arguments
+  | Msx_step_until_change -> handle_step_until_change ~tool_name ~start_time arguments
+  | Msx_peek -> handle_peek ~tool_name ~start_time arguments
+  | Msx_ram_diff -> handle_ram_diff ~tool_name ~start_time ()
+  | Msx_screen -> handle_screen ~tool_name ~start_time arguments

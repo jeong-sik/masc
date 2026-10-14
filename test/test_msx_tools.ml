@@ -10,9 +10,11 @@ open Alcotest
 open Masc
 
 let dispatch ~base_path ?(agent = "msx-test") name assoc =
-  match Msx_machine_tools.dispatch ~relay:Machine_msx_host_events.relay ~base_path ~agent ~name ~arguments:(`Assoc assoc) with
-  | Some result -> result
-  | None -> fail (name ^ " is not dispatched by the machine worker")
+  match Msx_machine_tools.tool_of_name name with
+  | Some tool ->
+    Msx_machine_tools.dispatch ~relay:Machine_msx_host_events.relay ~base_path ~agent ~tool
+      ~arguments:(`Assoc assoc)
+  | None -> fail (name ^ " is not an MSX tool")
 ;;
 
 let with_workspace f =

@@ -140,4 +140,22 @@ describe('InventoryRow', () => {
     render(h(InventoryRow, { item: makeItem({ lifecycle: 'deprecated' }) }), container)
     expect(container.textContent).toContain('deprecated')
   })
+
+  // task-2325 (P3 follow-up to #42979): the card title is the one spot this
+  // row draws the tool name — pin that it goes through the shared label rule,
+  // so a revert to `${item.name}` fails here, not only on the TUI side.
+  it('draws the card title through the display label, not the raw wire name', () => {
+    const container = document.createElement('div')
+    render(h(InventoryRow, { item: makeItem({ name: 'keeper_task_done' }) }), container)
+    const title = container.querySelector('.v2-lab-card .text-md')!
+    expect(title.textContent).toBe('KeeperTaskDone')
+    expect(container.textContent).not.toContain('keeper_task_done')
+  })
+
+  it('passes a skill slug through unchanged in the card title', () => {
+    const container = document.createElement('div')
+    render(h(InventoryRow, { item: makeItem({ name: 'browser-lanes' }) }), container)
+    const title = container.querySelector('.v2-lab-card .text-md')!
+    expect(title.textContent).toBe('browser-lanes')
+  })
 })

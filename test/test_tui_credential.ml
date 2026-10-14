@@ -184,8 +184,6 @@ let test_only_the_notable_outcomes_speak () =
    | None -> fail "a fresh mint must be reported"
    | Some notice ->
        check bool "a mint says it made one" true (has "minted one" notice);
-       check bool "a mint warns the server may not see it yet" true
-         (has "credential index" notice);
        (* Read off the constant rather than spelled out, so the sentence
           cannot go on claiming thirty days after the window changes. *)
        check bool "a mint says how long it lasts" true

@@ -1300,8 +1300,13 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
     acquire.
 
     Cache semantics:
-    - TTL bound (60s) so external in-place edits eventually surface
-      without restarting the server.
+    - An entry serves only while the agents directory looks as it did when
+      the entry was built. Every credential write renames a file into that
+      directory, so a bearer another process wrote -- masc-tui minting its
+      operator token, [masc login], setup -- is found on the next lookup
+      instead of being refused as [Token mismatch].
+    - TTL bound (60s) so an edit that rewrites a file in place, which
+      leaves the directory as it was, still surfaces without a restart.
     - Explicit invalidation from [save_credential] / [delete_credential]
       so writes through this module are visible immediately.
     - Token hash -> [agent_credential list] (not single value) so the
@@ -1309,8 +1314,35 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
       owners are indexed in sorted name order; collision checks compare the
       complete records rather than granting the first candidate authority. *)
 
+(* The directory, not the files: a lookup pays one stat, so a bearer that
+   matches nothing never costs a re-read of every credential. *)
+type agents_dir_stamp = {
+  inode : int;
+  modified_at : float;
+  changed_at : float;
+}
+
+let agents_dir_stamp config : (agents_dir_stamp option, masc_error) result =
+  match run_blocking_io (fun () -> Unix.stat (agents_dir config)) with
+  | stats ->
+    Ok (Some { inode = stats.Unix.st_ino
+             ; modified_at = stats.Unix.st_mtime
+             ; changed_at = stats.Unix.st_ctime })
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error (System (System_error.IoError
+      (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+;;
+
+let equal_agents_dir_stamp a b =
+  Int.equal a.inode b.inode
+  && Float.equal a.modified_at b.modified_at
+  && Float.equal a.changed_at b.changed_at
+;;
+
 type credential_index_cache_entry = {
   loaded_at : float;
+  stamp : agents_dir_stamp option;
   by_token : (string, agent_credential list) Hashtbl.t;
 }
 
@@ -1363,8 +1395,10 @@ let invalidate_credential_index_cache config =
 let credential_token_index config
   : ((string, agent_credential list) Hashtbl.t, masc_error) result
   =
+  let ( let* ) = Result.bind in
   let key = agents_dir config in
   let now = Time_compat.now () in
+  let* current_stamp = agents_dir_stamp config in
   (* The cache mutex covers memory only. A cold read publishes under the
      credential transaction, so it cannot restore an old index after a
      writer invalidated it. Cache hits keep the short in-memory path. *)
@@ -1372,7 +1406,8 @@ let credential_token_index config
     with_credential_index_cache_lock (fun () ->
       match Hashtbl.find_opt credential_index_cache key with
       | Some entry
-        when now -. entry.loaded_at < credential_index_cache_ttl_sec ->
+        when now -. entry.loaded_at < credential_index_cache_ttl_sec
+             && Option.equal equal_agents_dir_stamp entry.stamp current_stamp ->
         Some entry.by_token
       | _ -> None)
   in
@@ -1387,6 +1422,10 @@ let credential_token_index config
       Auth_metric_store.metric_auth_credential_index_cache_misses
       ();
     with_credential_transaction config (fun _transaction ->
+       (* Stamped before listing: a write that lands while the files are
+          read moves the directory again, so the next lookup rebuilds
+          instead of keeping an index that missed it. *)
+       let* stamp = agents_dir_stamp config in
        (* Directory entries discover owners. Only each owner's current named
           binding supplies the credential indexed for authentication. An old
           UUID payload must neither resurrect its bearer nor hide a replacement
@@ -1402,8 +1441,9 @@ let credential_token_index config
        in
        let by_token = build_token_index creds in
        with_credential_index_cache_lock (fun () ->
-         Hashtbl.replace credential_index_cache key { loaded_at = now; by_token });
-       by_token)
+         Hashtbl.replace credential_index_cache key { loaded_at = now; stamp; by_token });
+       Ok by_token)
+    |> Result.join
 ;;
 
 (* Wire the forward-declared invalidator so [save_credential] and

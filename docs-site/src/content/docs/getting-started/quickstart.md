@@ -71,7 +71,8 @@ In the TUI, select **Keepers → imp** and send these requests one at a time:
 Confirm the reply, persisted Board post and Task, and successful sandbox and
 web tool results. This checks conversation and basic capabilities; Task
 completion is a separate workflow. Web fetch does not require a search API
-key; web search needs its own configured search provider. If a tool is waiting
+key; web search needs its own configured search provider, and
+`masc web-search-setup` shows which one is missing. If a tool is waiting
 for approval, inspect its pending request in the chat or **Approvals** view.
 Do not interpret a pending request or a listening HTTP server as successful
 model inference or tool execution.

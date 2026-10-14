@@ -9,7 +9,7 @@ type normalized_hit = {
   published_at : string option;
 }
 
-type provider =
+type provider = Web_search_provider.t =
   | Searxng
   | Brave
   | Brave_llm_context
@@ -221,26 +221,9 @@ let parse_brave_llm_context_json payload =
   in
   usable_results items parsed
 
-let provider_to_string = function
-  | Searxng -> "searxng"
-  | Brave -> "brave"
-  | Brave_llm_context -> "brave_llm_context"
-  | Tavily -> "tavily"
-  | Exa -> "exa"
-  | Bing_api -> "bing_api"
-  | Ollama -> "ollama"
+let provider_to_string = Web_search_provider.label
 
-let provider_of_string raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "searxng" | "searx" -> Some Searxng
-  | "brave" -> Some Brave
-  | "brave_llm_context" | "brave-llm-context" -> Some Brave_llm_context
-  | "tavily" -> Some Tavily
-  | "exa" -> Some Exa
-  | "bing" | "bing_api" -> Some Bing_api
-  | "ollama" -> Some Ollama
-  | "auto" | "" -> None
-  | _ -> None
+let provider_of_string = Web_search_provider.of_label
 
 let parse_provider_csv raw =
   raw
@@ -251,24 +234,25 @@ let parse_provider_csv raw =
   |> List.filter_map provider_of_string
 
 (* One source for both questions a provider asks about its credential: is it
-   there, and what is it. The presence check already read
-   [Env_config_core.raw_value_opt], which falls back to the boot-time config
-   overrides, while the fetchers read [Sys.getenv_opt], which does not. A key
-   declared in runtime.toml therefore made the provider selectable and then
-   unusable — the call found nothing (#21972 P2-3). *)
-let env_value name =
-  Env_config_core.raw_value_opt name |> Fun.flip Option.bind String_util.trim_nonempty
+   there, and what is it. [Web_search_provider] answers both from the same
+   variable names, through [Env_config_core.raw_value_opt], which falls back to
+   the boot-time config overrides. The presence check and the fetchers once
+   read different paths, so a key declared in runtime.toml made the provider
+   selectable and then unusable — the call found nothing (#21972 P2-3).
+   [masc web-search-setup] reports credentials through the same table. *)
+let provider_has_credentials = Web_search_provider.has_credentials
 
-let env_present name = Option.is_some (env_value name)
-
-let provider_has_credentials = function
-  | Searxng -> env_present "MASC_SEARXNG_URL"
-  | Brave | Brave_llm_context -> env_present "BRAVE_SEARCH_API_KEY"
-  | Tavily -> env_present "TAVILY_API_KEY"
-  | Exa -> env_present "EXA_API_KEY"
-  | Bing_api ->
-      env_present "BING_SEARCH_API_KEY" || env_present "AZURE_BING_SEARCH_API_KEY"
-  | Ollama -> env_present "OLLAMA_API_KEY"
+(* The credential a fetcher sends, looked up through the table that admitted
+   the provider, so the variable a failure names is the one that was read. *)
+let credential provider =
+  match Web_search_provider.credential provider with
+  | Some value -> Ok value
+  | None ->
+      Error
+        (Config
+           ("missing "
+            ^ String.concat " or "
+                (Web_search_provider.credential_env_names provider)))
 
 (* Only credentialed providers search. An empty order is a
    configuration fact and surfaces as an explicit failure in
@@ -276,9 +260,10 @@ let provider_has_credentials = function
 
    [Brave_llm_context] never enters the default order: its grounded
    response shape (context text, no result rows) is a caller choice
-   made through provider config, not a fallback. *)
+   made through provider config, not a fallback
+   ([Web_search_provider.default_order]). *)
 let default_provider_order () =
-  [ Searxng; Brave; Tavily; Exa; Bing_api; Ollama ]
+  Web_search_provider.default_order
   |> List.filter provider_has_credentials
 
 let provider_order () =
@@ -476,9 +461,9 @@ let brave_response_of_body ~search_url ~limit payload =
   Ok { engine = provider_to_string Brave; search_url; hits }
 
 let fetch_brave ~timeout_sec ~query ~limit =
-  match env_value "BRAVE_SEARCH_API_KEY" with
-  | None -> Error (Config "missing BRAVE_SEARCH_API_KEY")
-  | Some api_key ->
+  match credential Brave with
+  | Error error -> Error error
+  | Ok api_key ->
       let search_url =
         Printf.sprintf
           "https://api.search.brave.com/res/v1/web/search?q=%s&count=%d"
@@ -498,9 +483,9 @@ let fetch_brave ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 let fetch_tavily ~timeout_sec ~query ~limit =
-  match env_value "TAVILY_API_KEY" with
-  | None -> Error (Config "missing TAVILY_API_KEY")
-  | Some api_key ->
+  match credential Tavily with
+  | Error error -> Error error
+  | Ok api_key ->
       let search_url = "https://api.tavily.com/search" in
       let body_json =
         `Assoc
@@ -532,9 +517,9 @@ let fetch_tavily ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 let fetch_exa ~timeout_sec ~query ~limit =
-  match env_value "EXA_API_KEY" with
-  | None -> Error (Config "missing EXA_API_KEY")
-  | Some api_key ->
+  match credential Exa with
+  | Error error -> Error error
+  | Ok api_key ->
       let search_url = "https://api.exa.ai/search" in
       let body_json =
         `Assoc
@@ -566,14 +551,9 @@ let fetch_exa ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
 let fetch_bing_api ~timeout_sec ~query ~limit =
-  let api_key =
-    match env_value "BING_SEARCH_API_KEY" with
-    | Some key -> Some key
-    | None -> env_value "AZURE_BING_SEARCH_API_KEY"
-  in
-  match api_key with
-  | None -> Error (Config "missing BING_SEARCH_API_KEY or AZURE_BING_SEARCH_API_KEY")
-  | Some key ->
+  match credential Bing_api with
+  | Error error -> Error error
+  | Ok key ->
       let search_url =
         Printf.sprintf
           "https://api.bing.microsoft.com/v7.0/search?q=%s&count=%d&responseFilter=Webpages"
@@ -608,11 +588,9 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
    maximum_number_of_urls. A valid response with zero grounded items
    stays Ok so the chain records it as "no results". *)
 let fetch_brave_llm_context ~timeout_sec ~query ~limit =
-  match
-    env_value "BRAVE_SEARCH_API_KEY"
-  with
-  | None -> Error (Config "missing BRAVE_SEARCH_API_KEY")
-  | Some api_key ->
+  match credential Brave_llm_context with
+  | Error error -> Error error
+  | Ok api_key ->
       let search_url =
         Printf.sprintf
           "https://api.search.brave.com/res/v1/llm/context?q=%s&maximum_number_of_urls=%d"
@@ -641,11 +619,9 @@ let fetch_brave_llm_context ~timeout_sec ~query ~limit =
    POST /api/web_search with {query, max_results (default 5, max 10)}
    answers {results: [{title, url, content}]}. *)
 let fetch_ollama ~timeout_sec ~query ~limit =
-  match
-    env_value "OLLAMA_API_KEY"
-  with
-  | None -> Error (Config "missing OLLAMA_API_KEY")
-  | Some api_key ->
+  match credential Ollama with
+  | Error error -> Error error
+  | Ok api_key ->
       let search_url = "https://ollama.com/api/web_search" in
       let body_json =
         `Assoc [ ("query", `String query); ("max_results", `Int limit) ]
@@ -757,9 +733,15 @@ type search_failure =
   | All_providers_failed of string
 
 let no_provider_configured_message =
-  "no web search provider is configured: set web_search.searxng_url \
-   (MASC_SEARXNG_URL) or a provider API key (BRAVE_SEARCH_API_KEY / \
-   TAVILY_API_KEY / EXA_API_KEY / BING_SEARCH_API_KEY / OLLAMA_API_KEY)"
+  let names =
+    Web_search_provider.default_order
+    |> List.concat_map Web_search_provider.credential_env_names
+  in
+  Printf.sprintf
+    "no web search provider is configured: set one of %s where the server \
+     starts (web_search.searxng_url in runtime.toml also sets \
+     MASC_SEARXNG_URL). `masc web-search-setup` shows what each provider needs."
+    (String.concat " / " names)
 
 (* Keep trying after an empty response so later providers may supply hits.
    If none does, the first valid empty response still answers the query.

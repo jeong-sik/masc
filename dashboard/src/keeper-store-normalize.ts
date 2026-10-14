@@ -24,6 +24,7 @@ import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp 
 import { isKeeperOffline } from './lib/keeper-predicates'
 import { keeperDisplayStatus } from './lib/keeper-runtime-display'
 import { asKeeperRuntimeBlockerClass } from './lib/runtime-blocker-class'
+import { asTrustDisposition } from './lib/trust-disposition'
 import {
   asKeeperPauseState,
   asKeeperRuntimeBlockerState,
@@ -374,7 +375,7 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
   const approvalRaw = isRecord(raw.approval_state) ? raw.approval_state : raw.approval
   const executionRaw = isRecord(raw.execution_summary) ? raw.execution_summary : raw.execution
   return {
-    disposition: asString(raw.disposition) ?? null,
+    disposition: asTrustDisposition(raw.disposition),
     disposition_reason: asString(raw.disposition_reason) ?? null,
     operator_disposition: asString(raw.operator_disposition) ?? null,
     operator_disposition_reason: asString(raw.operator_disposition_reason) ?? null,

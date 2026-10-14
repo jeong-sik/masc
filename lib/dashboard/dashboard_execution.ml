@@ -394,10 +394,16 @@ let terminal_reason_requires_attention trust =
             (Keeper_turn_disposition.of_wire code)))
 ;;
 
+let trust_disposition trust =
+  Option.bind
+    (Json_util.get_string trust "disposition")
+    Keeper_trust_disposition.of_wire
+;;
+
 let trust_disposition_requires_attention trust =
-  match lowercase_json_string "disposition" trust with
-  | Some ("alert" | "blocked" | "pause") -> true
-  | _ -> false
+  match trust_disposition trust with
+  | Some disposition -> Keeper_trust_disposition.requires_attention disposition
+  | None -> false
 ;;
 
 let keeper_queue_severity keeper trust =
@@ -412,10 +418,10 @@ let keeper_queue_severity keeper trust =
      | Some "bad" -> "bad"
      | Some "warn" -> "warn"
      | _ ->
-       (match lowercase_json_string "disposition" trust with
-        | Some "alert" -> "bad"
-        | Some ("blocked" | "pause") -> "warn"
-        | _ ->
+       (match trust_disposition trust with
+        | Some Keeper_trust_disposition.Alert -> "bad"
+        | Some Keeper_trust_disposition.Blocked -> "warn"
+        | Some Keeper_trust_disposition.(Pass | Degraded) | None ->
           if Option.is_some (Json_util.assoc_string_opt "runtime_blocker_class" keeper)
           then "bad"
           else "warn"))

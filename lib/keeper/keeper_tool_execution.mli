@@ -102,6 +102,11 @@ val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
 val with_file_change_evidence : Keeper_file_change_evidence.t -> t -> t
 (** Attach producer-recorded line evidence only to a completed execution. *)
 
+val with_retained_artifacts : Tool_output.artifact_ref list -> t -> t
+(** Preserve producer-validated artifact roots in the execution carrier,
+    including failed results whose Tool_result payload has no retention field.
+    This changes no result data, disposition or effect evidence. *)
+
 (** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
     handler. [failure_effect_disposition] lets a producer preserve a phase it
     can prove; generic producers default to [Effect_outcome_unknown]. A

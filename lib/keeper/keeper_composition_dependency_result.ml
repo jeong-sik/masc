@@ -60,7 +60,7 @@ let handle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_met
         (* Failed Tool_result values have no retention field. Preserve the
            validated references in the execution carrier that crosses SDK
            projection and the per-call retention hook. *)
-        {execution with retained_artifacts = manifest @ references}
+        Keeper_tool_execution.with_retained_artifacts (manifest @ references) execution
       | Error error -> Keeper_tool_execution.failure_data
           ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
           ~message:("canonical composition result remains available; reader manifest publication failed: " ^ error.message)

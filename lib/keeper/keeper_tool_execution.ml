@@ -176,6 +176,10 @@ let with_file_change_evidence evidence result =
   | Tool_result.Deferred () | Tool_result.Failed _ -> result
 ;;
 
+let with_retained_artifacts retained_artifacts result =
+  { result with retained_artifacts }
+;;
+
 let of_tool_result
       ?failure_effect_disposition
       (result : Tool_result.result)

@@ -849,6 +849,7 @@ let composition_node name nodes = List.find (fun row -> row |> member "node_id" 
 
 let test_public_composition_wait_and_resume () = with_fixture @@ fun env initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"])
     |> job_id in
   let direct_before = List.length (calls fixture) in
@@ -946,6 +947,8 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let before_completed_resume = List.length (calls fixture) in
   let resumed = resume () in
   let ok, completed, completed_entry = await_composition env fixture resumed in
+  if not ok then
+    failf "original completed job resume failed: %s" (Yojson.Safe.to_string completed);
   check bool "original complete job continues the remaining DAG" true ok;
   check string "run identity survives resumption" run_id (resumed |> member "composition_run_id" |> to_string);
   check int "completed result read has no backend operation" before_completed_resume (List.length (calls fixture));

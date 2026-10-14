@@ -1,7 +1,10 @@
 (** Recover the original job's complete result, then durably enqueue one typed
     notification before acknowledging its canonical owner. *)
 type t
-val create : config:Workspace.config -> t
+val create : config:Workspace.config -> ?on_result_ready:(Keeper_owned_job_store.record -> unit) -> unit -> t
+(** [on_result_ready] observes an already-ready canonical result after durable
+    notification enqueue. It is a lifecycle hint, not delivery or execution
+    authority. Observer failures cannot discard the notification or result. *)
 val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_owned_job_store.error) result
 (** Server startup/maintenance entrypoint. Reserve independent lifecycle fibers
     for pending jobs; the pulse does not wait for backend I/O. A live worker is

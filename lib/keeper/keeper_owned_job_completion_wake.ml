@@ -21,7 +21,7 @@ let wake_hint (record : Store.record) =
       "owned job completion wake hint failed job_id=%s: %s"
       (Store.Job_id.to_string record.job_id) (Printexc.to_string exn)
 
-let deliver (record : Store.record) =
+let deliver ~on_result_ready (record : Store.record) =
   let completion : Keeper_event_queue.owned_job_completion =
     {oj_job_id=record.job_id;oj_source=record.source;oj_channel=record.completion_channel} in
   let stimulus : Keeper_event_queue.stimulus =
@@ -31,21 +31,28 @@ let deliver (record : Store.record) =
       ~base_path:record.base_path record.keeper_name stimulus with
     | Keeper_registry_event_queue.Stimulus_enqueued | Stimulus_already_present -> Ok ()
     | Stimulus_storage_error detail -> Error (Store.Io_failed detail) in
+  (* The exact completed output and notification are already durable. The
+     continuation observer can schedule its original DAG without a model turn. *)
+  (try on_result_ready record with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn -> Log.Keeper.warn ~keeper_name:record.keeper_name
+       "owned job result observer failed job_id=%s: %s"
+       (Store.Job_id.to_string record.job_id) (Printexc.to_string exn));
   (* Cleanup or producer ACK failure cannot suppress the committed queue's hint. *)
   wake_hint record;
   let* acknowledged = Store.acknowledge_completion record in
   let* () = Store.retire_delivery_marker acknowledged in
   Ok Delivered
 
-let recover ~base_path (marker : Store.pending_delivery) =
+let recover ~on_result_ready ~base_path (marker : Store.pending_delivery) =
   try
     let* record = Store.recover ~base_path ~keeper_name:marker.keeper_name marker.job_id in
     if record.completion_delivered then
       let* () = Store.retire_delivery_marker record in Ok Retired
-    else if Store.result_ready record then deliver record
+    else if Store.result_ready record then deliver ~on_result_ready record
     else
       let* record = Keeper_owned_job_runtime.reconcile record in
-      if Store.result_ready record then deliver record else Ok Waiting
+      if Store.result_ready record then deliver ~on_result_ready record else Ok Waiting
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Store.Io_failed (Printexc.to_string exn))
@@ -58,7 +65,7 @@ let reconcile ~config =
   let base_path = config.Workspace.base_path in
   let* pending = Store.pending_deliveries ~base_path in
   let empty = {inspected=0;waiting=0;delivered=0;retired=0;failures=pending.failures} in
-  let one (marker : Store.pending_delivery) = marker.job_id,recover ~base_path marker in
+  let one (marker : Store.pending_delivery) = marker.job_id,recover ~on_result_ready:ignore ~base_path marker in
   let outcomes = match Fs_compat.execution_context () with
     | Fs_compat.Non_eio -> List.map one pending.entries
     | Fs_compat.Eio_fiber ->
@@ -77,8 +84,11 @@ module Job_set = Set.Make (struct
   type t = Store.Job_id.t
   let compare left right = String.compare (Store.Job_id.to_string left) (Store.Job_id.to_string right)
 end)
-type t = { config : Workspace.config; mutable active : Job_set.t }
-let create ~config = {config;active=Job_set.empty}
+type t =
+  { config : Workspace.config
+  ; on_result_ready : Store.record -> unit
+  ; mutable active : Job_set.t }
+let create ~config ?(on_result_ready=ignore) () = {config;on_result_ready;active=Job_set.empty}
 
 let pulse ~sw supervisor =
   let base_path = supervisor.config.Workspace.base_path in
@@ -95,7 +105,7 @@ let pulse ~sw supervisor =
         Fun.protect
           ~finally:(fun () -> supervisor.active <- Job_set.remove marker.job_id supervisor.active)
           (fun () ->
-            match recover ~base_path marker with
+            match recover ~on_result_ready:supervisor.on_result_ready ~base_path marker with
             | Error error -> Log.Server.warn "owned job completion retained job=%s error=%s"
                 (Store.Job_id.to_string marker.job_id) (Store.error_to_string error)
             | Ok Waiting -> ()

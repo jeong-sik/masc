@@ -917,6 +917,7 @@ let composition_nodes fixture data =
 let composition_node name nodes = List.find (fun row -> row |> member "node_id" |> to_string = name) nodes
 
 let test_public_composition_wait_and_resume () = with_fixture @@ fun env initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   Call_log.init ~base_path:fixture.base_path ();
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"])
@@ -1220,19 +1221,59 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (match Journal.continuation_readiness after_second_loss with
    | Ok Journal.Results_ready -> ()
    | Ok Waiting_for_results | Error _ -> fail "restored original wait cannot recover repeated Lost successors");
-  let discovered = after_second_loss in
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  let config = Workspace.default_config fixture.base_path in
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  let write_profile deny =
+    let tools = if deny then "\n[keeper.tools]\ndeny = [\"keeper_job_result\"]\n" else "" in
+    write declaration ("[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\n"
+      ^ "sandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original result continuation fixture\"\n" ^ tools) in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  write runtime_path "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n";
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+      |> require "canonical fixture Skill publication authority" in
+  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
+  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
+   | Published _ | Unchanged _ -> () | Workspace_retired -> fail "fixture Skill publication retired early");
+  let context : float Masc.Keeper_types_profile.context =
+    {config;agent_name="continuation-maintenance-fixture";
+     sw=Async.server_background_switch () |> require "continuation maintenance switch";
+     clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  write_profile true;
+  let refused,notify_refused = Eio.Promise.create () in
+  let denied_wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
+  Wake.pulse ~sw:context.sw denied_wake |> require "actual maintenance pulse under current denial";
+  (match Eio.Promise.await refused with
+   | Ok result -> check bool "maintenance honors current TOML tool denial" true (Tool_result.is_failed result)
+   | Error error -> fail (Wake.error_to_string error));
+  check string "maintenance refusal keeps the exact original owner" (Journal.continuation_request_id after_second_loss)
+    (Journal.continuation_request_id (continuation ()));
+  check int "maintenance refusal has no backend operation" before_completed_resume (List.length (calls fixture));
+  write_profile false;
+  let accepted,notify_accepted = Eio.Promise.create () in
+  let accepted_callbacks = ref 0 in
+  (* A fresh supervisor proves durable discovery does not depend on the
+     previous intake's process-local reservation. This is not an OS restart. *)
+  let wake = Wake.create ~context ~on_result:(fun _ outcome ->
+      incr accepted_callbacks; Eio.Promise.resolve notify_accepted outcome) () in
   let recovery_started = Mtime_clock.counter () in
-  let resumed = resume_candidate changed_surface discovered |> Tool_result.data in
+  Wake.pulse ~sw:context.sw wake |> require "actual provider-free maintenance pulse";
+  Wake.pulse ~sw:context.sw wake |> require "repeated pulse while original intake is scheduled";
+  let resumed = Eio.Promise.await accepted |> require "maintenance intake accepted original DAG" |> Tool_result.data in
   let ok, completed, completed_entry = await_composition env fixture resumed in
   let recovery_ms = Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000. in
   if not ok then
     failf "original completed job resume failed: %s" (Yojson.Safe.to_string completed);
   check bool "original complete job continues the remaining DAG" true ok;
+  check int "repeated maintenance pulses accept only one original worker" 1 !accepted_callbacks;
   check string "run identity survives resumption" run_id (resumed |> member "composition_run_id" |> to_string);
   check int "completed result read has no backend operation" before_completed_resume (List.length (calls fixture));
   Printf.printf "OWNED_CONTINUATION_RECOVERY %s\n%!" (Yojson.Safe.to_string
     (`Assoc ["post_binding_losses",`Int (List.length [first_lost_entry;second_lost_entry]);
-      "resume_intake_to_continuation_completion_ms",`Float recovery_ms;
+      "maintenance_pulse_to_continuation_completion_ms",`Float recovery_ms;
       "backend_calls",`Int (List.length (calls fixture) - before_completed_resume);
       "unstarted_worker_calls",`Int !lost_worker_calls;
       "program_creates",`Int (effect_count fixture "create");
@@ -1856,7 +1897,7 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
   let running = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let blocked_id = job_id running in
   let config = Workspace.default_config fixture.base_path in
-  let supervisor = Completion_wake.create ~config in
+  let supervisor = Completion_wake.create ~config () in
   let entered = Filename.concat fixture.base_path "inspect-entered" in
   let release = Filename.concat fixture.base_path "inspect-release" in
   control fixture (`Assoc ["mode", `String "inspect_blocked"; "blocked_job_id", `String blocked_id]);

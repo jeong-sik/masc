@@ -2254,7 +2254,9 @@ status: reference
     필수 최상위 `half_life`(`"off"` 또는 양의 정수 시간)와 `[payout]` 테이블(`weight_max`·`deduction_rate`·`deduction_floor`·`share_rounding`·`remainder_tie_break`·`deduction_rounding` 및 운영자가 정한 `grades_milli`·동일 id의 `grade_criteria` 전수)을 갖춘 설정 파일은 `Enabled of policy`(선택적 `[shop.prices_milli]`로 장신구 기준 가격 지정. 선택적 `[shop.pricing]`의
     `mode`가 `fixed`이거나 표가 없으면 기준 가격 그대로 받고, `supply_scaled`(`target_per_keeper_milli`·
     `min_permille`·`max_permille`·`rounding`)이면 유통 통화량을 활동 Keeper 수 × 목표로 나눈 비율을
-    `min_permille`~`max_permille` 사이로 잘라 기준 가격에 곱해 구매 시점의 실효 가격을 정한다. 구매 도구의
+    `min_permille`~`max_permille` 사이로 잘라 기준 가격에 곱해 구매 시점의 실효 가격을 정한다(활동 Keeper는
+    잔액이 `target_per_keeper_milli`의 10분의 1 이상이고 최소 1인 Keeper이며, 그런 Keeper가 하나도 없으면
+    기준 가격으로 돌아온다). 구매 도구의
     선택 인자 `expected_price_milli`보다 실효 가격이 높으면 `price_changed`로 거절한다),
     빈 파일이나 `half_life`·`[payout]` 누락·파싱 실패·미지원 키·비정규 파일은 `Disabled of { reason }`으로 안전하게 비활성화되어 사유를 보고하고 턴 진행을
     차단하지 않는다. 서버 대시보드와 원격 TUI는 `Candle_equipment` 투영을 통해 원장의 `Equipped` 사건을 재생하여 최신 착용 상태를 표시한다.

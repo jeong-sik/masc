@@ -1,7 +1,7 @@
 
 (** Tool_local_runtime_core — the types the local-runtime tools share
-    (tool result, external-effect authorizer, context) and two string
-    parse helpers.
+    (tool result, external-effect authorizer, context) and one string
+    parse helper, [parse_int_opt].
 
     {!Tool_local_runtime_http} does [include Tool_local_runtime_core], so
     this module's surface is re-exported through it. *)

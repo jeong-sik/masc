@@ -360,6 +360,37 @@ let test_log_is_listed_and_served_once_it_exists () =
     | Some text -> check string "the log file is served as written" log text)
 ;;
 
+(* The log is append-only and grows without bound, so an explicit read returns
+   its tail, not the whole file (task-2309). The listing still reports the
+   whole-file size, so a client can tell a tail from the whole. *)
+let test_a_large_log_is_served_from_its_tail () =
+  let line i =
+    Printf.sprintf "## [2026-10-13 10:00] update r%d | alpha | codex | note %d\n" i i
+  in
+  let buffer = Buffer.create 131072 in
+  for i = 1 to 3000 do
+    Buffer.add_string buffer (line i)
+  done;
+  let log = Buffer.contents buffer in
+  let full = String.length log in
+  check bool "the fixture log exceeds the read bound" true (full > 65536);
+  with_wiki ~documents:(("log.md", log) :: contract_documents) (fun state ->
+    match served_text (read_resource state "masc://wiki/log") with
+    | None -> fail "expected the log to be served"
+    | Some served ->
+      let served_len = String.length served in
+      check bool "the tail is shorter than the file" true (served_len < full);
+      check string "the tail is a suffix of the file"
+        (String.sub log (full - served_len) served_len)
+        served;
+      check char "the tail starts at a line boundary" '\n' log.[(full - served_len) - 1];
+      let last = line 3000 in
+      let last_len = String.length last in
+      check bool "the tail ends with the last line" true
+        (served_len >= last_len
+         && String.sub served (served_len - last_len) last_len = last))
+;;
+
 let test_log_is_neither_listed_nor_served_without_a_log_file () =
   with_wiki ~documents:contract_documents (fun state ->
     check bool "no log entry" true
@@ -456,6 +487,10 @@ let () =
             "the log is neither listed nor served without a log file"
             `Quick
             test_log_is_neither_listed_nor_served_without_a_log_file
+        ; test_case
+            "a large log is served from its tail"
+            `Quick
+            test_a_large_log_is_served_from_its_tail
         ; test_case
             "the index file is not a listed page"
             `Quick

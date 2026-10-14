@@ -45,7 +45,7 @@ Keeper 턴에 위키 목차를 싣는 일은 이 RFC 가 다루지 않는다. �
 - 페이지: `<base_path>/.masc/wiki/<page>.md`. 이름은 `[a-z0-9-]+` 이고 처음과 끝에 `-` 를 둘 수 없으며 `index`, `log` 는 예약이다(옮김: ocaml-agent-ic, `tool_wiki.ml:384-402`).
 - 헤더: YAML frontmatter 일곱 키(`title`, `summary`, `source`, `author`, `created`, `revision`, `tags`)를 읽고 모두 필수다. `updated` 는 쓰지만 읽지 않는다(`tool_wiki.ml:140-151` 주석과 타입). `source` 는 `direct_experience`, `research`, `experiment`, `observation` 넷이고, 모르는 값이면 `Unknown_source` 로 그 페이지가 읽히지 않는다(`tool_wiki.ml:211`, 235). update 는 `source` 변경을 거절한다(`tool_wiki.ml:682`).
 - 도구 일곱 개: `masc_wiki_list`, `masc_wiki_read`, `masc_wiki_search`, `masc_wiki_create`, `masc_wiki_update`, `keeper_wiki_read`, `keeper_wiki_search` (`config/tools/` 의 toml 일곱 개).
-- log: `log.md` 에 `## [YYYY-MM-DD HH:MM] <create|update> r<N> | <page> | <author> | <note>` 줄을 제자리에 덧붙인다. 동작은 둘뿐이다(옮김: code-reviewer·ocaml-agent-ic, `wiki_journal.ml:41-71`). log 의 동작 단어를 해석하는 읽기 코드는 지금 없다. `masc://wiki/log` 는 파일 전체를 문자열로 내준다(옮김: ocaml-agent-ic, `mcp_server_eio_resource.ml:92-108`).
+- log: `log.md` 에 `## [YYYY-MM-DD HH:MM] <create|update> r<N> | <page> | <author> | <note>` 줄을 제자리에 덧붙인다. 동작은 둘뿐이다(옮김: code-reviewer·ocaml-agent-ic, `wiki_journal.ml:41-71`). log 의 동작 단어를 해석하는 읽기 코드는 지금 없다. `masc://wiki/log` 는 로그의 꼬리(마지막 64 KiB, 줄 경계에서 시작)를 내주고, 목록의 `size` 는 파일 전체 크기다(옮김: ocaml-agent-ic·code-reviewer, `mcp_server_eio_resource.ml`).
 - 링크: 코드에 링크를 해석하는 곳이 없다(옮김: ocaml-agent-ic). 링크 모양이 나오는 곳은 index 를 그리는 `- [제목](파일) — 요약` 하나다.
 - 라이브 위키(2026-10-13, 직독): 페이지 11장. 페이지 사이 링크 30개가 모두 `[글자](page.md)` 형식이고 깨진 것 0개, 들어오는 링크가 없는 페이지 1장(`rfc-map`), 구조화된 출처 참조가 있는 페이지 0장.
 - 없는 것: lint, ingest, promote, 링크 해석, 원문 층, 스키마 페이지, 삭제, 이름 바꾸기, 사용 가이드.

@@ -93,6 +93,8 @@ let build_workspace_attention_items config =
     (recent_tool_host_failures ~now:(Time_compat.now ()) ()
     @ pending_items)
 
+(* [Paused_on_blocker] and [Paused] share the wire reason, so both are
+   [keeper_paused]; the row's [next_human_action] tells them apart. *)
 let keeper_attention_kind reason =
   "keeper_" ^ Keeper_attention_reason.to_wire reason
 

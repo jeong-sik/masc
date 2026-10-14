@@ -6470,6 +6470,11 @@ type state = {
      [h] on the help sheet for the session). Off leaves "?:help" as the one
      remaining hint -- the door back for the reader who knows the keys. *)
   mutable hints_visible: bool;
+  (* Whether the opening screen's help-door line has been retired
+     ([tui].help_hint_shown at boot, written by the first input). The line
+     teaches the one key a new reader has none of the context for, and any
+     input says the reader is driving now. *)
+  mutable help_hint_shown: bool;
   (* Whether a line typed while an earlier one still waits joins that line
      instead of queueing behind it ([tui].coalesce_queued_input at boot). A
      queued line has not been sent, so joining two changes what one turn
@@ -10837,6 +10842,7 @@ let create_state
   agenda_selected = Masc_tui_agenda.Nowhere;
   agenda_navigation = Agenda_read_rows;
   hints_visible = true;
+  help_hint_shown = false;
   coalesce_queued_input = false;
   user_input_priority_next = false;
   keeper_chat_control_generations = [];

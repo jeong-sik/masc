@@ -329,6 +329,17 @@ let render_overview (state : state) =
     ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
             else Masc_tui_keys.footer_hints Overview)
     ~body:(fun ~budget c ->
+      (* The one-time door line: the first screen a reader meets names the
+         sheet's key, because a footer item is easy to read past before the
+         habit of reading footers exists. The first input of any kind
+         retires it and writes [tui].help_hint_shown. *)
+      let budget =
+        if state.help_hint_shown then budget
+        else begin
+          c.push (" " ^ Ansi.dim ^ "?: the keys of every screen" ^ Ansi.reset);
+          max 0 (budget - 1)
+        end
+      in
       c.push
         (" " ^ pressable (Press_surface Approvals)
            (Ansi.dim ^ "p:Approvals / Questions" ^ Ansi.reset));

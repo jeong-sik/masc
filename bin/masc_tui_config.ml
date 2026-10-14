@@ -17,6 +17,7 @@ type t = {
   lift_colours : bool option;
   table_frame : bool option;
   hints_visible : bool option;
+  help_hint_shown : bool option;
   coalesce_queued_input : bool option;
   send_on_stop : bool option;
   user_input_priority_next : bool option;
@@ -172,6 +173,13 @@ let reduce_motion_of_doc doc =
 let hints_visible_of_doc doc =
   Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".hints_visible")
 
+(* Whether the opening screen's help-door line has already been shown,
+   [tui].help_hint_shown. Absent reads as "no" on purpose: the line exists
+   for the operator who has met none of this yet, and a reader who has been
+   running masc for a year still meets it exactly once. *)
+let help_hint_shown_of_doc doc =
+  Keeper_toml_loader.toml_bool_opt doc (tui_table ^ ".help_hint_shown")
+
 (* Whether a line typed while an earlier one is still waiting joins that line
    instead of queueing behind it, [tui].coalesce_queued_input. Absent reads as
    "no" so separate sends retain their identities.
@@ -251,6 +259,7 @@ let load ~base_path =
     lift_colours = read lift_colours_of_doc;
     table_frame = read table_frame_of_doc;
     hints_visible = read hints_visible_of_doc;
+    help_hint_shown = read help_hint_shown_of_doc;
     coalesce_queued_input = read coalesce_queued_input_of_doc;
     send_on_stop = Option.bind text send_on_stop_of_text;
     user_input_priority_next = read user_input_priority_next_of_doc;
@@ -266,3 +275,18 @@ let set_tui_string ~base_path ~key value =
 
 let set_board_sort ~base_path sort = set_tui_string ~base_path ~key:"board_sort" sort
 let set_candle ~base_path candle = set_tui_string ~base_path ~key:"candle" candle
+
+(* [tui].help_hint_shown = true, written once when the first input retires
+   the opening screen's help-door line, under the same lock and in the same
+   file as the writers above. A bare boolean, not a quoted string: the
+   reader is [toml_bool_opt] and refuses "true" the way any typed reader
+   does. *)
+let set_help_hint_shown ~base_path =
+  match Runtime.edit_config_text
+      ~runtime_config_path:(runtime_toml_path ~base_path)
+      (fun content ->
+        Toml_line_editor.edit_table_bool content
+          ~path:tui_table ~key:"help_hint_shown" ~value:true)
+  with
+  | Ok (_ : Runtime.config_commit_receipt) -> Ok ()
+  | Error message -> Error message

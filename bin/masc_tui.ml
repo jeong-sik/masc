@@ -19675,6 +19675,10 @@ let main
      key, and a reader who never set it sees no change. *)
   state.hints_visible <-
     Option.value (tui_settings.hints_visible) ~default:true;
+  (* Absent reads as not shown: the door line exists for a first-time
+     reader, and a long-running operator still meets it once. *)
+  state.help_hint_shown <-
+    Option.value (tui_settings.help_hint_shown) ~default:false;
   state.coalesce_queued_input <-
     Option.value
       (tui_settings.coalesce_queued_input)
@@ -22611,6 +22615,27 @@ and is loaded on demand through keeper_skill.
         (not compact_viewport) && state.view = Keepers Keeper_message
         && not state.repository_changes_open
       in
+      (* The opening screen's help-door line retires on the first input of
+         any kind: the reader is driving now, and the doors it named -- the
+         footer item, the sheet -- stay on every screen without it. A paste
+         counts too; a wheel notch does not, because it can be a scroll
+         that never looked at the line. The write goes to the same
+         [tui] table the other one-time choices do, and a write that
+         cannot complete says so in the action slot rather than failing
+         the input it interrupted. *)
+      (match input with
+       | Some (Key _ | Pasted _) when not state.help_hint_shown ->
+           state.help_hint_shown <- true;
+           (match Masc_tui_config.set_help_hint_shown ~base_path with
+            | Ok () -> ()
+            | Error reason ->
+                report_action state "system"
+                  ("Could not store the help hint as shown: " ^ reason))
+       | Some (Key _ | Pasted _)
+       | Some (Graphics_reply _)
+       | Some (Mouse_left_press _ | Mouse_left_release _)
+       | Some (Mouse_wheel _)
+       | None -> ());
       let quit_key =
         match key with
         | Some k ->

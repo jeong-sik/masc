@@ -12,6 +12,7 @@ type t = private {
   lift_colours : bool option;
   table_frame : bool option;
   hints_visible : bool option;
+  help_hint_shown : bool option;
   coalesce_queued_input : bool option;
   send_on_stop : bool option;
   user_input_priority_next : bool option;
@@ -82,6 +83,16 @@ val lift_colours_of_doc : Keeper_toml_loader.toml_doc -> bool option
 val hints_visible_of_doc : Keeper_toml_loader.toml_doc -> bool option
 (** [tui].hints_visible: whether footers spell their key hints. [None]
     where the file, the table or the key is absent -- reads as "yes". *)
+
+val help_hint_shown_of_doc : Keeper_toml_loader.toml_doc -> bool option
+(** [tui].help_hint_shown: whether the opening screen's help-door line has
+    already been retired. [None] where absent -- reads as "no", unlike its
+    neighbours, because the line exists to meet a first-time reader; an
+    operator who never saw it still gets it once. *)
+
+val set_help_hint_shown : base_path:string -> (unit, string) result
+(** Write [tui].help_hint_shown = true once, under the same lock and in the
+    same file as {!set_board_sort}. *)
 
 val send_on_stop_of_text : string -> bool option
 (** [\[voice.stt\]].send_on_stop, parsed out of runtime.toml's source text:

@@ -4296,6 +4296,15 @@ module Browser_lane_view = struct
     | Open_session | Close_session | Goto _ | Scene_scroll _ | Scene_click _
     | Scene_follow _ | Viewport_pointer _ -> false
 
+  (* The operations [cadence_operation] can return: they re-read what is already
+     on screen, mark [refresh_pending] while they run, and give way to operator
+     input in [yield_refresh_to_input]. [Viewport_refresh] is not one of them. *)
+  let operation_is_refresh = function
+    | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> true
+    | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _
+    | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _
+    | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _ -> false
+
   (* A committed gesture is never retried. Only its discarded observation
      can be resumed after workspace identity is reconfirmed. *)
   let observation_after_effect = function
@@ -5030,16 +5039,12 @@ module Browser_lane_view = struct
                Some (Scene_follow_refresh {tab_id;guard;scene_view})
            | Some _ | None -> Some (Scene_refresh {tab_id;scene_view;scope}))
       | Some _, Text_view -> Some Read_refresh
+  (* [Viewport_refresh] stays loading: the operator's own [r] key in the viewport
+     launches it (bin/masc_tui.ml), [cadence_operation] never does. *)
   let yield_refresh_to_input t =
     match t.load with
-    | Loading (_, (Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)) -> {t with load = Idle}
-    | Loading
-        ( _
-        , ( Discover _ | Read | Open_session | Close_session | Goto _
-          | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _
-          | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _
-          | Viewport_pointer _ ) )
-    | Idle | No_browser | Failed _ -> t
+    | Loading (_, operation) when operation_is_refresh operation -> {t with load = Idle}
+    | Loading _ | Idle | No_browser | Failed _ -> t
   let read_view_for_operation operation previous =
     match operation with
     | Read | Read_refresh | Open_session | Close_session | Goto _ -> Text_view

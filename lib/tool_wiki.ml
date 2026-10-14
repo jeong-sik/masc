@@ -497,10 +497,27 @@ type search_tier =
   | Whole_query
   | Every_term
 
-let search_tier ~query content =
-  if String_util.contains_query_term_ci content query then Some Whole_query
-  else if String_util.contains_all_query_terms_ci content query then Some Every_term
+let search_tier ~query text =
+  if String_util.contains_query_term_ci text query then Some Whole_query
+  else if String_util.contains_all_query_terms_ci text query then Some Every_term
   else None
+
+(* What a search reads of a page: title, summary, tags and body. author,
+   source, created, revision and updated describe the page and not its subject,
+   so "claude" no longer finds every page that account wrote. A page whose
+   header does not read has no fields to choose from. It is read whole and
+   listed by file name, as before. *)
+let searchable_text content =
+  match parse_frontmatter content with
+  | Ok fm ->
+    String.concat
+      "\n"
+      [ (fm.title :> string)
+      ; (fm.summary :> string)
+      ; String.concat " " (List.map (fun (tag : Tag.t) -> (tag :> string)) fm.tags)
+      ; page_body content
+      ]
+  | Error _ -> content
 
 let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
   let query = Json_util.get_string args "query"
@@ -508,22 +525,28 @@ let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
   if String.equal query "" then query_required ~tool_name ~start_time
   else begin
     let docs = list_pages ~base_path:ctx.base_path in
-    let hits = List.filter_map (fun path ->
-      try
-        let content = In_channel.with_open_text path In_channel.input_all in
-        Option.map
-          (fun tier ->
-             let line =
-               match parse_frontmatter content with
-               | Ok fm ->
-                 sprintf "- **%s** %s" (fm.title :> string) (Filename.basename path)
-               | Error error -> sprintf "- %s" (describe_unreadable path error)
-             in
-             tier, line)
-          (search_tier ~query content)
-      with Sys_error _ -> None
+    let pages = List.filter_map (fun path ->
+      match In_channel.with_open_text path In_channel.input_all with
+      | content -> Some (path, content, searchable_text content)
+      | exception Sys_error _ -> None
     ) docs in
-    (* Pages holding the whole query come first. Each tier keeps name order. *)
+    (* The corpus for the relevance score is every page, not only the matches,
+       so a word found in nearly every page weighs little. *)
+    let scores = Wiki_rank.scores ~query (List.map (fun (_, _, text) -> text) pages) in
+    let hits = List.filter_map (fun ((path, content, text), score) ->
+      Option.map
+        (fun tier ->
+           let line =
+             match parse_frontmatter content with
+             | Ok fm ->
+               sprintf "- **%s** %s" (fm.title :> string) (Filename.basename path)
+             | Error error -> sprintf "- %s" (describe_unreadable path error)
+           in
+           tier, (score, line))
+        (search_tier ~query text)
+    ) (List.combine pages scores) in
+    (* Pages holding the whole query come first. Inside a tier the closest page
+       comes first, and pages of equal score keep name order. *)
     let whole, terms =
       List.partition
         (fun (tier, _) ->
@@ -532,7 +555,11 @@ let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
            | Every_term -> false)
         hits
     in
-    let matches = List.map snd (whole @ terms) in
+    let closest_first group =
+      List.stable_sort (fun (_, (a, _)) (_, (b, _)) -> Float.compare b a) group
+      |> List.map (fun (_, (_, line)) -> line)
+    in
+    let matches = closest_first whole @ closest_first terms in
     if Stdlib.List.length matches = 0 then
       text_ok ~tool_name ~start_time
         (sprintf "No pages matching '%s'" query)

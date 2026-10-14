@@ -4,9 +4,10 @@ Search the wiki by keyword.
 
 A page matches when it contains the whole query, or every \
 whitespace-separated word of it in any order. Pages containing \
-the whole query come first. A word of one or two ASCII letters \
-matches only as a whole word, so "ci" does not match "decision". \
-Returns one line per matching page: \
+the whole query come first, and inside each group the closest match \
+comes first. Only a page's title, summary, tags and body are read. \
+A word of one or two ASCII letters matches only as a whole word, so \
+"ci" does not match "decision". Returns one line per matching page: \
 its title and file name. Use to discover relevant pages before \
 reading full content with keeper_wiki_read."""
 

@@ -31,7 +31,12 @@ let inline_ancestor ~ancestors text =
       (fun path ->
          match Otoml.find_opt toml Fun.id path with
          | Some (Otoml.TomlInlineTable _) -> true
-         | Some _ | None -> false)
+         | Some
+             Otoml.(
+               TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _
+               | TomlOffsetDateTime _ | TomlLocalDateTime _ | TomlLocalDate _
+               | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlTableArray _)
+         | None -> false)
       ancestors
 
 let check_editable ~table_path ~ancestors ~declared text =

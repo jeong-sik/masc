@@ -53,7 +53,6 @@ type transition_result = {
   new_phase : phase;
   updated_conditions : conditions;
   entry_actions : entry_action list;
-  event_applied : event;
   timestamp : float;
 }
 type transition_error =

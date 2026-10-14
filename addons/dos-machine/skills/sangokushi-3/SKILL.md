@@ -42,6 +42,13 @@ screen after a digit or time advance can also mean that the selection needs a
 different input. Screen identity or elapsed execution steps alone do not prove
 that the game accepted a command.
 
+A small `steps` allowance ends the call before a slow transition does. At a
+month report (`아무 키나 누르세요`), `enter` with `steps: 300` ran 300 steps and
+left the text unchanged; `masc_dos_step` with 4,000,000 steps and no key then
+reached the command prompt. Leave `steps` at its default unless a short run is
+the point, and follow a short `press` with `masc_dos_step` before reading an
+unchanged picture as a refused key.
+
 ## Boot
 
 `masc_dos_load` with `program: samguk3`, `boot: KOEI.COM`. KOEI.COM runs the
@@ -78,6 +85,12 @@ whether a digit needs `enter` or what an empty `enter` will do.
   prompt.
   At `어떻게 하겠습니까(1-3)` in the save menu, it returns to the command
   prompt.
+- In the 개발 officer list (`누구에게 명령하겠습니까`) a number and `enter`
+  redrew the same prompt and moved the highlight to that officer; one empty
+  `enter` then opened the amount prompt. Send the empty `enter` once before
+  concluding that `enter` does nothing in a list. An order already sent this
+  month for a city may not open its officer list again. Details:
+  `references/turn-management.md`.
 - Battle-menu digits act immediately; a following `enter` backs out of the
   menu just opened. During officer placement, `enter` does nothing and `0`
   places the officer. Read those sections before sending another key.
@@ -233,6 +246,6 @@ This Skill is split so each file fits one inline `keeper_skill` read
 argument only when the situation matches; every file is an observation log
 in the same sense as the sections above.
 
-- `references/turn-management.md` — Turn management: recruiting and assigning officers, training orders at month progression, cancelling an undersupplied expedition and buying food
+- `references/turn-management.md` — Turn management: recruiting and assigning officers, training orders at month progression, development orders and the month report, cancelling an undersupplied expedition and buying food
 - `references/battle-commands.md` — Battle commands and information: the battle command set, battle information and the input device
 - `references/battle-campaigns.md` — Sieges, captures and defence: castle capture and forced retreat, manual siege and reinforcements, field victory then city capture, defending a captured city

@@ -441,9 +441,8 @@ For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and 
 ### Giving `imp` a browser and a GitHub login
 
 After the sandbox, the setup journey asks **5 · Give imp tools (optional)**. It is
-one checklist. The rows that give `imp` something safe to do start marked; the two
-that connect a Firefox you choose do not. Nothing is installed or written until
-you confirm it. Unmark every row to continue without any of them (on a terminal
+one checklist. The Browser and GitHub rows start marked; the two rows that connect
+a Firefox you choose do not. Nothing is installed or written until you confirm it. Unmark every row to continue without any of them (on a terminal
 that shows numbers, type `0`).
 
 - **Browser.** `imp` reads web pages in a Firefox of its own, driven through
@@ -484,15 +483,17 @@ marked. It only looks: it runs the programs' `--version` and `gh auth status`,
 and installs and writes nothing. To run them later:
 
 ```bash
+# Browser row: geckodriver in imp's own Firefox
 masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
+# BiDi row: a Firefox of its own that MASC starts
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
+# Add-on row: your everyday Firefox
 masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
+# GitHub row, with a login: gives imp the login gh already has (token on standard input)
 gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
+# GitHub row, without a login: a one-time code you approve
 masc keeper-github login --keeper imp --base-path "$HOME/masc-workspace"
 ```
-
-The second line gives `imp` the login `gh` already has, passing the token on
-standard input. The third asks for a one-time code instead.
 
 ## Images and the Linux/microVM boundary
 

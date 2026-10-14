@@ -407,7 +407,7 @@ MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 �
 ### `imp`에게 브라우저와 GitHub 로그인 주기
 
 setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
-`imp`가 안전하게 할 수 있는 일을 주는 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄은
+브라우저 줄과 GitHub 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄은
 해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
 모든 줄의 체크를 해제하면 아무것도 하지 않고 넘어갑니다(번호로 고르는 화면에서는 `0`을 입력하세요).
 
@@ -423,7 +423,7 @@ setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 �
   로그인이 없으면 `masc keeper-github login`이 일회용 코드를 보여 주고, 직접 승인하면 됩니다.
   이 줄은 `masc setup`이 끝난 뒤에 실행합니다. 로그인에는 `imp`가 먼저 있어야 하기 때문입니다.
 - **Firefox 연결 두 줄(체크 안 됨).** Firefox 를 찾았을 때만 `imp`가 로그인해서 쓸 Firefox 를
-  연결하는 줄이 둘 더 나옵니다. `masc browser-lane-setup` 의 두 길이에요.
+  연결하는 줄이 둘 더 나옵니다. `masc browser-lane-setup` 이 여는 두 길입니다.
   - *BiDi*: MASC 가 전용 Firefox 를 로컬 포트의 원격 디버깅으로 직접 띄웁니다. 다시 불러올 것이
     없고, `imp`가 일하는 사이트에 한 번 로그인하면 됩니다. 그 포트에는 인증이 없어서 이
     컴퓨터의 어떤 프로그램이든 그 브라우저를 움직이고 쿠키를 읽을 수 있습니다.
@@ -441,15 +441,17 @@ setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 �
 같이 합니다.
 
 ```bash
+# 브라우저 줄: imp 전용 Firefox 의 geckodriver
 masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
+# BiDi 줄: MASC 가 띄우는 전용 Firefox
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
+# 부가기능 줄: 평소 쓰는 Firefox
 masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
+# GitHub 줄, 로그인이 있을 때: gh 에 이미 있는 로그인을 imp 에게 줌(토큰은 표준 입력)
 gh auth token | masc keeper-github set-token --keeper imp --base-path "$HOME/masc-workspace"
+# GitHub 줄, 로그인이 없을 때: 직접 승인하는 일회용 코드
 masc keeper-github login --keeper imp --base-path "$HOME/masc-workspace"
 ```
-
-두 번째 줄은 `gh`에 이미 있는 로그인을 표준 입력으로 넘겨 `imp`에게 줍니다. 세 번째 줄은
-일회용 코드로 로그인합니다.
 
 ## 이미지와 Linux/microVM의 경계
 

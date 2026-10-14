@@ -1291,11 +1291,11 @@ class ImpTools(unittest.TestCase):
                 self.assertIn('unreadable install action', printed.getvalue())
 
     def test_a_catalog_the_binary_cannot_answer_is_not_read_as_missing_and_leaves_the_github_row(self):
-        with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1)]), \
+        with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1), completed('', 1)]), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
         self.assertEqual([row.key for row in rows], ['github'])
-        self.assertIn('Run masc browser-lane-setup --mode automation --base-path /workspace', printed.getvalue())
+        self.assertIn('left out of this list', printed.getvalue())
 
     def test_the_checklist_starts_marked_and_may_come_back_with_nothing(self):
         replies = self.catalogs('geckodriver', 'firefox') + self.catalogs('geckodriver', 'firefox') + [
@@ -1446,10 +1446,12 @@ class ImpTools(unittest.TestCase):
         self.assertIn('masc keeper-github login --keeper imp', printed.getvalue())
 
     def test_a_quick_setup_that_cannot_look_at_the_browser_says_so_and_still_lists_github(self):
-        with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1)]), \
+        # One look per program: geckodriver, then Firefox.
+        with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1), completed('', 1)]), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             SETUP.show_imp_tools('/bin/masc', '/workspace')
         self.assertIn('Run masc browser-lane-setup --mode automation', printed.getvalue())
+        self.assertIn('geckodriver: ', printed.getvalue())
         self.assertIn('masc keeper-github login --keeper imp', printed.getvalue())
 
 
@@ -1654,6 +1656,125 @@ class FirefoxRoutes(unittest.TestCase):
         self.assertEqual([row.key for row in confirmed], ['bidi'])
         self.assertIn("imp's browser was not saved", printed)
         self.assertIn("masc browser-lane-setup --mode bidi --base-path /workspace", printed)
+        # One route: there is no "one at a time" to offer.
+        self.assertNotIn('one route at a time', printed)
+
+    def test_the_notices_of_the_unmarked_rows_are_shown_before_the_checklist_asks(self):
+        # The unmarked rows are the ones that need the warning most: the reader
+        # marks them or not on what this screen says, and a notice printed only
+        # for marked rows would never reach them.
+        shown = []
+        replies = [completed(browser_catalog('geckodriver', ready=True)),
+                   completed(browser_catalog('firefox', ready=True))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                patch.object(SETUP, 'pick', side_effect=lambda *a, **k: shown.append((sys.stderr.getvalue(), a[1])) or []), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.choose_imp_tools('/bin/masc', '/workspace')
+        text, labels = shown[0]
+        self.assertIn('That port has no authentication', text)
+        self.assertIn('any program on this computer', text)
+        self.assertIn('removes the add-on', text)
+        # What the list line itself says, which is all a quick setup shows.
+        self.assertTrue(any('open debugging port' in label for label in labels))
+        self.assertTrue(any('load the add-on after each restart' in label for label in labels))
+
+    def test_choosing_both_routes_is_told_at_the_point_of_choice(self):
+        notice = {row.key: row for row in self.rows()}['extension'].notice
+        self.assertIn('refused as ambiguous', notice)
+
+    def test_the_restart_note_is_for_the_routes_that_write_a_table(self):
+        # The extension route writes no table of runtime.toml, and the lane token
+        # is read for each request: telling the reader to restart a live server
+        # for it would be advice that does nothing.
+        for modes, expected in ((('extension',), False), (('bidi',), True),
+                                (('automation',), True), (('bidi', 'extension'), True)):
+            with self.subTest(modes=modes):
+                looks = ([completed(browser_catalog('geckodriver', ready=True))] if 'automation' in modes else []) \
+                    + [completed(browser_catalog('firefox', ready=True))]
+                replies = looks + [completed(), completed(json.dumps(dict(status='same_workspace')))]
+                with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                        contextlib.redirect_stderr(io.StringIO()) as printed:
+                    SETUP.prepare_browser_lane('/bin/masc', '/workspace', modes, 8945)
+                asked = any(call.args[0][1] == 'setup-server' for call in run.call_args_list)
+                self.assertEqual(asked, expected)
+                self.assertEqual('already running' in printed.getvalue(), expected)
+
+    def test_leaving_the_geckodriver_install_drops_the_automation_lane_and_keeps_the_routes(self):
+        # The extension never needed geckodriver. Back at its install menu must
+        # not take a route the reader also chose down with it.
+        replies = [completed(browser_catalog('geckodriver', ready=False)),   # ensure geckodriver
+                   completed(browser_catalog('firefox', ready=True)),         # ensure firefox
+                   completed()]                                               # the command
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'prerequisite_menu', return_value=False), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('automation', 'extension'))
+        self.assertEqual(self.setup_calls(run),
+                         [['/bin/masc', 'browser-lane-setup', '--mode', 'extension', '--base-path', '/workspace']])
+        self.assertIn('geckodriver is missing, so this is left out', printed.getvalue())
+        self.assertIn('--mode automation', printed.getvalue())
+
+    def test_leaving_the_geckodriver_install_with_only_the_automation_lane_writes_nothing(self):
+        replies = [completed(browser_catalog('geckodriver', ready=False))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'prerequisite_menu', return_value=False), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('automation',))
+        self.assertEqual(self.setup_calls(run), [])
+
+    def test_a_missing_firefox_that_is_not_installed_writes_no_route(self):
+        replies = [completed(browser_catalog('firefox', ready=False))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'prerequisite_menu', return_value=False), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('bidi', 'extension'))
+        self.assertEqual(self.setup_calls(run), [])
+        self.assertIn('Firefox is missing, so this is left out', printed.getvalue())
+        self.assertIn('--mode bidi --mode extension', printed.getvalue())
+
+    def test_a_refused_call_with_several_routes_says_none_were_written_and_offers_each(self):
+        # The command plans every route before it writes, so one refusal means
+        # none were written. The reader can then run the ones that are fine.
+        replies = [completed(browser_catalog('firefox', ready=True)), completed('', 1)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('bidi', 'extension'), 8945)
+        text = printed.getvalue()
+        self.assertIn('Nothing was written for any of the routes in that one command', text)
+        self.assertIn('masc browser-lane-setup --mode bidi --mode extension --base-path /workspace', text)
+        self.assertIn('one route at a time: masc browser-lane-setup --mode bidi --base-path /workspace; '
+                      'masc browser-lane-setup --mode extension --base-path /workspace', text)
+
+    def test_an_unreadable_geckodriver_catalog_does_not_hide_the_firefox_routes(self):
+        # The routes need Firefox only. The automation row needs both programs.
+        replies = [completed('', 1), completed(browser_catalog('firefox', ready=True))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
+        self.assertEqual([row.key for row in rows], ['bidi', 'extension', 'github'])
+        self.assertIn('left out of this list', printed.getvalue())
+
+    def test_an_unreadable_firefox_catalog_leaves_the_automation_row_out_and_no_route(self):
+        replies = [completed(browser_catalog('geckodriver', ready=True)), completed('', 1)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rows = SETUP.imp_tool_rows('/bin/masc', '/workspace')
+        self.assertEqual([row.key for row in rows], ['github'])
+
+    def test_a_row_has_to_say_whether_it_starts_marked(self):
+        # No default: a row that forgot would start marked, and the rows that
+        # open a port or copy a token must never be the ones that do.
+        with self.assertRaises(TypeError):
+            SETUP.ToolRow('x', 'label', 'command')
+
+    def test_the_quick_setup_list_explains_the_marks(self):
+        replies = [completed(browser_catalog('geckodriver', ready=True)),
+                   completed(browser_catalog('firefox', ready=True))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.show_imp_tools('/bin/masc', '/workspace')
+        self.assertIn('[x] would start marked in the full setup', printed.getvalue())
+        self.assertIn('Nothing here has been run', printed.getvalue())
 
     def test_the_quick_setup_list_shows_what_would_be_marked(self):
         replies = [completed(browser_catalog('geckodriver', ready=True)),
@@ -1860,14 +1981,14 @@ class ImpGithubLogin(unittest.TestCase):
         self.assertIn("imp's GitHub login was not saved", printed)
 
     def test_only_the_github_row_waits_for_imp(self):
-        browser = SETUP.ToolRow(SETUP.AUTOMATION_TOOL, 'browser', 'cmd')
+        browser = SETUP.ToolRow(SETUP.AUTOMATION_TOOL, 'browser', 'cmd', checked=True)
         with patch.object(SETUP.subprocess, 'run') as run:
             SETUP.finish_imp_tools('/bin/masc', '/workspace', (browser,))
         run.assert_not_called()
 
     def test_a_reader_who_leaves_before_imp_exists_is_reminded_of_the_login_they_confirmed(self):
         github = self.row(SETUP.HostGithubLogin('octo', 'repo', 'keyring'))
-        browser = SETUP.ToolRow(SETUP.AUTOMATION_TOOL, 'browser', 'cmd')
+        browser = SETUP.ToolRow(SETUP.AUTOMATION_TOOL, 'browser', 'cmd', checked=True)
         with contextlib.redirect_stderr(io.StringIO()) as printed:
             SETUP.remind_imp_tools((browser, github))
         self.assertIn('Once imp is running, run: gh auth token', printed.getvalue())
@@ -1925,6 +2046,13 @@ class ImpToolsInTheJourney(unittest.TestCase):
         self.assertEqual(order, ['sandbox', 'tools', 'setup', 'remind'])
 
 
+def isolated_environment(root, tools):
+    """Only HOME and PATH. `masc browser-lane-setup` resolves runtime.toml from
+    MASC_CONFIG_DIR ahead of the base path, so a shell that exports it would
+    send these tests' writes to the operator's live configuration."""
+    return {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}
+
+
 @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
 class ImpToolsAgainstTheBinary(unittest.TestCase):
     """The wizard, the catalog and the command agree, as the real binary says them.
@@ -1958,7 +2086,7 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
             # A file, not a StringIO: the command's output goes to this stderr's
             # descriptor, which a StringIO does not have.
             with open(root / 'stderr.txt', 'w') as sink, \
-                    patch.dict(os.environ, {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}), \
+                    patch.dict(os.environ, isolated_environment(root, tools), clear=True), \
                     contextlib.redirect_stderr(sink):
                 rows = SETUP.imp_tool_rows(BINARY, str(base))
                 SETUP.prepare_browser_lane(BINARY, str(base), ('automation',))
@@ -1978,7 +2106,7 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
 
     def run_routes(self, root, base, tools, modes):
         with open(root / 'stderr.txt', 'w') as sink, \
-                patch.dict(os.environ, {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}), \
+                patch.dict(os.environ, isolated_environment(root, tools), clear=True), \
                 contextlib.redirect_stderr(sink):
             SETUP.prepare_browser_lane(BINARY, str(base), modes)
         return (root / 'stderr.txt').read_text()
@@ -2033,7 +2161,7 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
             chosen.chmod(0o755)
             tools, base = self.workspace(root, '[browser.automation]\ngeckodriver = "' + str(chosen) + '"\n')
             with open(root / 'stderr.txt', 'w') as sink, \
-                    patch.dict(os.environ, {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}), \
+                    patch.dict(os.environ, isolated_environment(root, tools), clear=True), \
                     contextlib.redirect_stderr(sink):
                 SETUP.prepare_browser_lane(BINARY, str(base), ('automation',))
             written = (base / '.masc/config/runtime.toml').read_text()
@@ -2052,7 +2180,7 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
             runtime = base / '.masc/config/runtime.toml'
             before = runtime.read_text()
             with open(root / 'stderr.txt', 'w') as sink, \
-                    patch.dict(os.environ, {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}), \
+                    patch.dict(os.environ, isolated_environment(root, tools), clear=True), \
                     contextlib.redirect_stderr(sink):
                 SETUP.prepare_browser_lane(BINARY, str(base), ('automation',))
             printed = (root / 'stderr.txt').read_text()
@@ -2096,7 +2224,7 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
                 os.dup2(sink, 2)
                 os.dup2(sink_output, 1)
                 os.dup2(nothing, 0)
-                with patch.dict(os.environ, {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}):
+                with patch.dict(os.environ, isolated_environment(root, tools), clear=True):
                     login = SETUP.host_github_login()
                     for offered in (login, None):
                         with patch.object(SETUP, 'host_github_login', return_value=offered):

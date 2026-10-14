@@ -670,6 +670,126 @@ let test_is_retryable_matrix () =
   not_retryable (Error.NotFound { provider = "p"; detail = "model" })
 ;;
 
+(* One sample per constructor. [expected_classification] lists every
+   constructor with no catch-all, so a new [provider_error] constructor stops
+   this file until its three answers are written down. *)
+let classification_samples : Error.provider_error list =
+  [ Error.MissingApiKey { var_name = "K" }
+  ; Error.InvalidConfig { field = "f"; detail = "d" }
+  ; Error.ParseError { detail = "d" }
+  ; Error.ProviderWireError
+      { provider = "p"
+      ; format = Http_client.Sse
+      ; kind = Http_client.Malformed_payload
+      ; detail = "d"
+      }
+  ; Error.ProviderReportedError { provider = "p"; error_type = None; detail = "d" }
+  ; Error.UnknownVariant { type_name = "t"; value = "v" }
+  ; Error.ProviderUnavailable { provider = "p"; detail = "d" }
+  ; Error.EmptyCompletion
+      { provider = "p"; stop_reason = Types.EndTurn; detail = "d" }
+  ; Error.RepeatingGeneration
+      { provider = "p"
+      ; shape = Types.Repeated_paragraph
+      ; occurrences = 3
+      ; unit_bytes = 4
+      ; detail = "d"
+      }
+  ; Error.RateLimit { provider = "p"; retry_after = None; detail = "d" }
+  ; Error.HardQuota { provider = "p"; retry_after = None; detail = "d" }
+  ; Error.CapacityExhausted
+      { scope = Error.CapacityModel; affected = []; retry_after = None; detail = "d" }
+  ; Error.AuthError { provider = "p"; detail = "d" }
+  ; Error.AuthorizationError { provider = "p"; detail = "d" }
+  ; Error.ServerError { provider = "p"; code = 500; transient = false; detail = "d" }
+  ; Error.NetworkError
+      { provider = "p"
+      ; kind = Http_client.Connection_refused
+      ; timeout_phase = Some Http_client.Queue
+      ; detail = "d"
+      }
+  ; Error.Timeout { provider = "p"; timeout_phase = None; detail = "d" }
+  ; Error.InvalidRequest { provider = "p"; reason = "r" }
+  ; Error.NotFound { provider = "p"; detail = "d" }
+  ; Error.ProviderTerminal
+      { provider = "p"; kind = Http_client.Session_conflict; detail = "d" }
+  ]
+;;
+
+(* (is_repeating_generation, is_local_admission_timeout,
+   is_candidate_access_rejection) *)
+let expected_classification : Error.provider_error -> bool * bool * bool = function
+  | Error.RepeatingGeneration _ -> true, false, false
+  | Error.Timeout _ -> false, false, false (* phase None: not local admission *)
+  | Error.AuthError _ | Error.AuthorizationError _ | Error.NotFound _ ->
+    false, false, true
+  | Error.MissingApiKey _
+  | Error.InvalidConfig _
+  | Error.ParseError _
+  | Error.ProviderWireError _
+  | Error.ProviderReportedError _
+  | Error.UnknownVariant _
+  | Error.ProviderUnavailable _
+  | Error.EmptyCompletion _
+  | Error.RateLimit _
+  | Error.HardQuota _
+  | Error.CapacityExhausted _
+  | Error.ServerError _
+  | Error.NetworkError _
+  | Error.InvalidRequest _
+  | Error.ProviderTerminal _ -> false, false, false
+;;
+
+let test_classification_predicates_per_constructor () =
+  check int "one sample per constructor" 20 (List.length classification_samples);
+  List.iter
+    (fun err ->
+       let name = Error.to_string err in
+       let repeating, admission, access = expected_classification err in
+       check bool (name ^ " is_repeating_generation") repeating
+         (Error.is_repeating_generation err);
+       check bool (name ^ " is_local_admission_timeout") admission
+         (Error.is_local_admission_timeout err);
+       check bool (name ^ " is_candidate_access_rejection") access
+         (Error.is_candidate_access_rejection err))
+    classification_samples
+;;
+
+let test_local_admission_timeout_by_phase () =
+  let timeout phase =
+    Error.Timeout { provider = "p"; timeout_phase = phase; detail = "d" }
+  in
+  let phases_true = [ Http_client.Queue; Http_client.Capacity_backpressure ] in
+  let phases_false =
+    [ Http_client.First_token
+    ; Http_client.Wall_clock
+    ; Http_client.Http_operation
+    ; Http_client.Non_streaming_body
+    ; Http_client.Stream_body
+    ; Http_client.Stream_idle Http_client.Streaming_answer
+    ; Http_client.Provider_step
+    ; Http_client.Cli_stdout_idle
+    ; Http_client.Unknown_timeout
+    ]
+  in
+  List.iter
+    (fun phase ->
+       check bool "local admission phase" true
+         (Error.timeout_phase_is_local_admission (Some phase));
+       check bool "Timeout with local admission phase" true
+         (Error.is_local_admission_timeout (timeout (Some phase))))
+    phases_true;
+  List.iter
+    (fun phase ->
+       check bool "other phase" false
+         (Error.timeout_phase_is_local_admission (Some phase));
+       check bool "Timeout with other phase" false
+         (Error.is_local_admission_timeout (timeout (Some phase))))
+    phases_false;
+  check bool "no phase" false (Error.timeout_phase_is_local_admission None);
+  check bool "Timeout with no phase" false (Error.is_local_admission_timeout (timeout None))
+;;
+
 let test_empty_completion_overflow_maps_to_invalid_request () =
   let err =
     Error.of_http_error
@@ -781,6 +901,14 @@ let () =
             `Quick
             test_http_boundary_remaining_variants_mapping
         ; test_case "is_retryable matrix" `Quick test_is_retryable_matrix
+        ; test_case
+            "classification predicates, every constructor"
+            `Quick
+            test_classification_predicates_per_constructor
+        ; test_case
+            "local admission timeout by phase"
+            `Quick
+            test_local_admission_timeout_by_phase
         ] )
     ]
 ;;

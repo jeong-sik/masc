@@ -84,28 +84,8 @@ let candidate_access_should_try_next error =
      | Llm_provider.Candidate_fault.Unknown_after_dispatch -> false)
   | None ->
     (match error with
-     | Agent_core.Error.Provider
-         ( Llm_provider.Error.AuthError _
-         | Llm_provider.Error.AuthorizationError _
-         | Llm_provider.Error.NotFound _ ) -> true
-     | Agent_core.Error.Provider
-         ( Llm_provider.Error.MissingApiKey _
-         | Llm_provider.Error.InvalidConfig _
-         | Llm_provider.Error.ParseError _
-         | Llm_provider.Error.ProviderWireError _
-         | Llm_provider.Error.ProviderReportedError _
-         | Llm_provider.Error.UnknownVariant _
-         | Llm_provider.Error.ProviderUnavailable _
-         | Llm_provider.Error.EmptyCompletion _
-         | Llm_provider.Error.RepeatingGeneration _
-         | Llm_provider.Error.RateLimit _
-         | Llm_provider.Error.HardQuota _
-         | Llm_provider.Error.CapacityExhausted _
-         | Llm_provider.Error.ServerError _
-         | Llm_provider.Error.NetworkError _
-         | Llm_provider.Error.Timeout _
-         | Llm_provider.Error.InvalidRequest _
-         | Llm_provider.Error.ProviderTerminal _ )
+     | Agent_core.Error.Provider provider_error ->
+       Llm_provider.Error.is_candidate_access_rejection provider_error
      | Agent_core.Error.Agent _
      | Agent_core.Error.Mcp _
      | Agent_core.Error.Config _

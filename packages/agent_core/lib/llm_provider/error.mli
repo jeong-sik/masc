@@ -132,3 +132,22 @@ val is_retryable : provider_error -> bool
 val capacity_scope_to_string : capacity_scope -> string
 val of_retry_api_error : ?provider:string -> Retry.api_error -> provider_error
 val of_http_error : ?provider:string -> Http_client.http_error -> provider_error
+
+val is_repeating_generation : provider_error -> bool
+(** [true] only for [RepeatingGeneration]: the model repeated one unit of
+    output until accept refused it. *)
+
+val timeout_phase_is_local_admission : Http_client.timeout_phase option -> bool
+(** [true] for [Queue] and [Capacity_backpressure]: the wait expired in MASC's
+    own permit queue or local capacity gate, before anything reached the
+    provider. [None] and every other phase are [false]. *)
+
+val is_local_admission_timeout : provider_error -> bool
+(** [true] only for [Timeout] whose phase satisfies
+    {!timeout_phase_is_local_admission}. [NetworkError] carrying a
+    [timeout_phase] is [false]. *)
+
+val is_candidate_access_rejection : provider_error -> bool
+(** [true] for [AuthError], [AuthorizationError] and [NotFound]: the candidate
+    refused this credential or does not serve this model, so the next
+    candidate may succeed where this one cannot. *)

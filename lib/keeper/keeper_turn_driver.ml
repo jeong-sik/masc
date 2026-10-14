@@ -702,27 +702,8 @@ let attempt_runtime_candidates
   in
   let repeated_generation (error : Agent_core.Error.t) =
     match error with
-    | Agent_core.Error.Provider (Llm_provider.Error.RepeatingGeneration _) -> true
-    | Agent_core.Error.Provider
-        ( Llm_provider.Error.MissingApiKey _
-        | Llm_provider.Error.InvalidConfig _
-        | Llm_provider.Error.ParseError _
-        | Llm_provider.Error.ProviderWireError _
-        | Llm_provider.Error.ProviderReportedError _
-        | Llm_provider.Error.UnknownVariant _
-        | Llm_provider.Error.ProviderUnavailable _
-        | Llm_provider.Error.EmptyCompletion _
-        | Llm_provider.Error.RateLimit _
-        | Llm_provider.Error.HardQuota _
-        | Llm_provider.Error.CapacityExhausted _
-        | Llm_provider.Error.AuthError _
-        | Llm_provider.Error.AuthorizationError _
-        | Llm_provider.Error.ServerError _
-        | Llm_provider.Error.NetworkError _
-        | Llm_provider.Error.Timeout _
-        | Llm_provider.Error.InvalidRequest _
-        | Llm_provider.Error.NotFound _
-        | Llm_provider.Error.ProviderTerminal _ )
+    | Agent_core.Error.Provider provider_error ->
+      Llm_provider.Error.is_repeating_generation provider_error
     | Agent_core.Error.Api _
     | Agent_core.Error.Agent _
     | Agent_core.Error.Mcp _
@@ -891,24 +872,11 @@ let attempt_runtime_candidates
           -- before anything was sent. That says nothing about the candidate.
           The typed phase is read here because the route does not carry it. *)
        let expired_in_admission =
-         let admission = function
-           | Some (Llm_provider.Http_client.Queue | Llm_provider.Http_client.Capacity_backpressure) ->
-             true
-           | Some
-               ( Llm_provider.Http_client.First_token | Llm_provider.Http_client.Wall_clock
-               | Llm_provider.Http_client.Http_operation
-               | Llm_provider.Http_client.Non_streaming_body
-               | Llm_provider.Http_client.Stream_body | Llm_provider.Http_client.Stream_idle _
-               | Llm_provider.Http_client.Provider_step
-               | Llm_provider.Http_client.Cli_stdout_idle
-               | Llm_provider.Http_client.Unknown_timeout )
-           | None -> false
-         in
          match error with
-         | Agent_core.Error.Api (Llm_provider.Retry.Timeout { phase; message = _ }) -> admission phase
-         | Agent_core.Error.Provider
-             (Llm_provider.Error.Timeout { timeout_phase; provider = _; detail = _ }) ->
-           admission timeout_phase
+         | Agent_core.Error.Api (Llm_provider.Retry.Timeout { phase; message = _ }) ->
+           Llm_provider.Error.timeout_phase_is_local_admission phase
+         | Agent_core.Error.Provider provider_error ->
+           Llm_provider.Error.is_local_admission_timeout provider_error
          | Agent_core.Error.Api
              ( Llm_provider.Retry.RateLimited _
              | Llm_provider.Retry.Overloaded _
@@ -921,26 +889,6 @@ let attempt_runtime_candidates
              | Llm_provider.Retry.ContextOverflow _
              | Llm_provider.Retry.InputCapacity _
              | Llm_provider.Retry.NetworkError _ )
-         | Agent_core.Error.Provider
-             ( Llm_provider.Error.MissingApiKey _
-             | Llm_provider.Error.InvalidConfig _
-             | Llm_provider.Error.ParseError _
-             | Llm_provider.Error.ProviderWireError _
-             | Llm_provider.Error.ProviderReportedError _
-             | Llm_provider.Error.UnknownVariant _
-             | Llm_provider.Error.ProviderUnavailable _
-             | Llm_provider.Error.EmptyCompletion _
-             | Llm_provider.Error.RepeatingGeneration _
-             | Llm_provider.Error.RateLimit _
-             | Llm_provider.Error.HardQuota _
-             | Llm_provider.Error.CapacityExhausted _
-             | Llm_provider.Error.AuthError _
-             | Llm_provider.Error.AuthorizationError _
-             | Llm_provider.Error.ServerError _
-             | Llm_provider.Error.NetworkError _
-             | Llm_provider.Error.InvalidRequest _
-             | Llm_provider.Error.NotFound _
-             | Llm_provider.Error.ProviderTerminal _ )
          | Agent_core.Error.Agent _
          | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
          | Agent_core.Error.Serialization _ | Agent_core.Error.Io _

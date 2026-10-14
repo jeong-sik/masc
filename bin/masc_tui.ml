@@ -92,7 +92,10 @@ let scrolled_surface state surface =
   | System_logs | Keepers _ | (Memory|Config) ->
       (* The Lanes overview's chrome counts the rows a multi-line refusal
          wraps to, so it is read at the terminal width like the Memory
-         overview's and Runtime's. *)
+         overview's and Runtime's. The Config runtime pane's chrome reads the
+         width too. The arm is not split per surface because
+         [Masc_tui_types.scrolled_surface] takes [~cols] for every surface,
+         and only those two arms use it. *)
       let _terminal_rows, cols = get_terminal_size () in
       Masc_tui_types.scrolled_surface state ~cols surface
 ;;
@@ -4880,11 +4883,8 @@ let launch_browser_lane state ~mailbox operation =
           | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
           | Viewport_cadence _ | Viewport_pointer _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
-        refresh_pending = (match operation with
-          | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation
-          | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _
-          | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _
-          | Viewport_refresh _ | Viewport_pointer _ -> view.refresh_pending) } in
+        refresh_pending =
+          if operation_is_refresh operation then Some generation else view.refresh_pending } in
       (* The picker that asks for the list again shows nothing of the read
          before it. Every other request leaves what the last discovery said. *)
       state.browser_lane <- Some (match operation with

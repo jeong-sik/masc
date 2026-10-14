@@ -1745,7 +1745,11 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
       Journal.prepare ~base_path:config.base_path source
       |> Result.map_error (fun error -> Submission.Journal_rejected error) in
     let prepared =
+      let* physical_turn_ref = match activation_context with
+        | Some context -> Ok (Keeper_skill_activation_recorder.physical_turn_ref context)
+        | None -> Error (Submission.Invalid_request "original named submission physical frame is unavailable") in
       let* request = Submission.request ~keeper_name:meta.name ~trace_id:meta.runtime.trace_id
+          ~physical_turn_ref
           ~invocation:parent_invocation ~source_task_id ~skill_reference ~tool_name ~plan in
       Submission.prepare ~base_path:config.base_path request ~make_source in
     match prepared with

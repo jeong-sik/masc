@@ -8344,18 +8344,19 @@ let test_async_composition_binds_params_into_durable_status () =
          | Ok selection -> selection
          | Error error -> fail (Masc.Keeper_task_skill_turn.error_to_string error)
        in
-       let skill_activation_context =
+       let make_activation_context ~absolute_turn =
          match Masc.Keeper_skill_activation_recorder.make
              ~trace_id:meta.runtime.trace_id
              ~turn_ref:(Ids.Turn_ref.make
                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-               ~absolute_turn:1)
+               ~absolute_turn)
              ~runtime_id:(fun () -> Some "composition-param.fixture")
              ~snapshot_revision:(Masc.Keeper_capability_surface.skill_snapshot_revision capability_surface)
              ~task_selection with
          | Ok context -> context
          | Error error -> fail (Masc.Keeper_skill_activation_recorder.error_to_string error)
        in
+       let skill_activation_context = make_activation_context ~absolute_turn:1 in
        let bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
            ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
            ~skill_activation_context () in
@@ -8510,6 +8511,19 @@ let test_async_composition_binds_params_into_durable_status () =
              Some path) else None)
          |> function Some path -> path | None -> fail "original named intent was not persisted"
        in
+       let fresh_bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
+           ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
+           ~skill_activation_context:(make_activation_context ~absolute_turn:2) () in
+       Fun.protect ~finally:fresh_bundle.cleanup (fun () ->
+         let fresh_tool = match find_tool_by_name fresh_bundle.tools "keeper_compose_memory-background" with
+           | Some tool -> tool | None -> fail "fresh Keeper frame lost its named Tool" in
+         match Agent_core.Tool.execute
+             ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+             fresh_tool (`Assoc ["query",`String query]) with
+         | Error _ -> ()
+         | Ok _ -> fail "fresh Keeper frame borrowed an earlier frame's named acknowledgement");
+       check bool "fresh physical frame creates no replacement broker request" true
+         (original_request_files = request_files ());
        let tail = open_out_gen [Open_wronly;Open_append;Open_binary] 0o600 intent_path in
        Fun.protect ~finally:(fun () -> close_out tail) (fun () -> output_string tail "{");
        replay ();

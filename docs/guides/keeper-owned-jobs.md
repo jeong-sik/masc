@@ -247,8 +247,9 @@ recorder facts, never from the current Task. The internal descriptor-only
 compatibility adapter cannot execute a named async run without a frozen turn
 surface; production Keeper bundles supply that surface.
 
-Named submission also retains one source for the SDK's original trace, turn and
-Tool invocation ID. Replaying an acknowledgement lost by the caller returns the
+Named submission also retains one source for the original physical Keeper
+TurnRef and the SDK's original trace, turn and Tool invocation ID. Replaying an
+acknowledgement lost by the caller within that original frame returns the
 same first request, run and `result_wait`; it never invokes a second worker.
 Exact Skill, bound arguments and original Task must still match. A fresh named
 submission uses its frozen activation recorder, and a recorded invocation whose
@@ -260,6 +261,8 @@ recorder's physical Keeper TurnRef identifies the admitted Keeper run. A fresh
 native SDK can invoke a Tool at ordinal zero during Keeper run one, and an
 official client session can reset its own ordinal. These coordinates are
 retained independently; resumption replaces neither with the current turn.
+A new physical Keeper frame cannot borrow an older acknowledgement by reusing
+the same SDK Tool ID and ordinal.
 
 The intent is durable before broker entry. A typed pre-acceptance rejection may
 release that same source for another attempt. Partial acceptance, reconciliation

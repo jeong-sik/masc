@@ -21,11 +21,13 @@ type error =
 val error_to_string : error -> string
 
 val request :
-  keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
+  keeper_name:string -> trace_id:Keeper_id.Trace_id.t -> physical_turn_ref:Ids.Turn_ref.t ->
   invocation:Agent_core.Tool_contract.Invocation.t -> source_task_id:string option ->
   skill_reference:Skill_reference.t -> tool_name:string ->
   plan:Keeper_tool_plan.t -> (request, error) result
-(** Invocation coordinates are supplied by the SDK, never model arguments.
+(** The original physical frame is supplied by the sealed activation recorder;
+    SDK coordinates alone do not identify an occurrence across client sessions.
+    Invocation coordinates are supplied by the SDK, never model arguments.
     Exact Skill, bound plan and original Task must match on every replay. *)
 
 val prepare :

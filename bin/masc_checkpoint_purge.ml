@@ -41,8 +41,7 @@ Options:
   --no-clear-tool-results  keep ToolResult payloads
   -h, --help               print this help
 
-The runtime root is the selected cluster under {workspace}/.masc.
-MASC_CLUSTER_NAME selects the cluster. Backups are stored in its runtime root.
+The runtime root is {workspace}/.masc. Backups are stored in it.
 
 --apply requires the keeper to be stopped (masc_keeper_down); a live keeper
 overwrites the purge on its next save. It also requires that no server owns

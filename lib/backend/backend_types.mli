@@ -27,7 +27,6 @@ type health_result = {
 type config = {
   base_path : string;
   node_id : string;
-  cluster_name : string;
   pubsub_max_messages : int;
 }
 
@@ -43,8 +42,8 @@ val node_id_suffix_bytes : int
 
 val generate_node_id : unit -> string
 
-(** Default config rooted at [".masc"], cluster ["default"], and
-    [pubsub_max_messages]. Node id is generated fresh on each call. *)
+(** Default config rooted at [".masc"] with [pubsub_max_messages]. Node id
+    is generated fresh on each call. *)
 val default_config : unit -> config
 
 (** {1 Safety utilities} *)

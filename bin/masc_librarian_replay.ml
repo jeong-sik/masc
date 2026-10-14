@@ -75,7 +75,7 @@ type outcome =
       }
   | Skipped of string
 
-(** The selected cluster's typed metadata owns its current trace. This reader
+(** The workspace's typed metadata owns its current trace. This reader
     neither creates directories nor repairs metadata, and opens no storage
     backend. *)
 let trace_of_metadata ~runtime_root ~keepers_dir keeper_id =

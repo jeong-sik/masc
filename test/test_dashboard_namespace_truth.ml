@@ -251,9 +251,6 @@ let test_dashboard_namespace_truth_empty_workspace () =
             (request "/api/v1/dashboard/namespace-truth")
         in
         let open Yojson.Safe.Util in
-        check string "cluster default"
-          "default"
-          (json |> member "workspace" |> member "status" |> member "cluster" |> to_string);
         check int "pending confirms zero"
           0
           (json |> member "operator" |> member "pending_confirm_summary" |> member "total_count" |> to_int);

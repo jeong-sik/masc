@@ -653,7 +653,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   (* Non-public registered tool usage log: durable JSONL observability. *)
   Tool_usage_log.init
     ~base_path:(Mcp_server.workspace_config state).base_path
-    ~cluster_name:(Mcp_server.workspace_config state).backend_config.Backend_types.cluster_name
     ();
   (* Inject keeper FD/disk pressure handling at the boundary so the generic
      Tool_usage_log surface does not reference the keeper subsystem directly
@@ -665,7 +664,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   (* Keeper tool call I/O log: full input/output for dashboard inspector *)
   Keeper_tool_call_log.init
     ~base_path:(Mcp_server.workspace_config state).base_path
-    ~cluster_name:(Mcp_server.workspace_config state).backend_config.Backend_types.cluster_name
     ();
   Keeper_tool_call_log.start_flush_fiber ~sw ~clock;
   (* Transition-audit forensics writes leave the keeper hot path: recorders

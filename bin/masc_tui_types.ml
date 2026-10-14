@@ -170,14 +170,8 @@ let server_workspace_matches ~expected reading =
 let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_identity) =
   let local_base_path = canonical_path local_base_path in
   let server_base_path = canonical_path identity.sid_base_path in
-  (* The server reports its cluster-aware masc root ([<base>/.masc] for the
-     default cluster, [<base>/.masc/clusters/<name>] otherwise). Compose
-     the local one with the same function from the same cluster selection:
-     a plain [<base>/.masc] calls every healthy non-default-cluster server
-     a mismatch, and every Keeper message is refused. *)
   let local_masc_root = canonical_path
-    (Workspace_utils.masc_root_dir_from ~base_path:local_base_path
-       ~cluster_name:(Env_config_core.cluster_name ())) in
+    (Workspace_utils.masc_dir_from_base_path ~base_path:local_base_path) in
   let server_masc_root = canonical_path identity.sid_masc_root in
   if String.equal local_base_path ""
   then Workspace_identity_unread

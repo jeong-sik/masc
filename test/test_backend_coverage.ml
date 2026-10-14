@@ -172,7 +172,6 @@ let with_eio_backend_and_dir f =
     { (Backend.default_config ()) with
       base_path = tmp_dir
     ; node_id = "test"
-    ; cluster_name = "test"
     }
   in
   Fun.protect

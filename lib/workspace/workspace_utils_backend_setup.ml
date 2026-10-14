@@ -332,21 +332,8 @@ let sanitize_namespace_segment name =
     if head = "" then "x-" ^ digest else head ^ "-" ^ digest)
 
 let backend_config_for base_path =
-  let cluster_name = Env_config_core.cluster_name () in
-  let masc_root = Common.masc_dir_from_base_path ~base_path in
-  let cluster_segment =
-    match cluster_name with
-    | "" | "default" -> None
-    | other -> Some (sanitize_namespace_segment other)
-  in
-  let backend_base_path =
-    match cluster_segment with
-    | None -> masc_root
-    | Some seg -> Filename.concat (Common.clusters_dir_from_base_path ~base_path) seg
-  in
   {
-    Backend_types.base_path = backend_base_path;
-    Backend_types.cluster_name;
+    Backend_types.base_path = Common.masc_dir_from_base_path ~base_path;
     Backend_types.node_id = Backend_types.generate_node_id ();
     Backend_types.pubsub_max_messages = Backend_types.pubsub_max_messages;
   }

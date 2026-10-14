@@ -21,11 +21,6 @@ type assertion_kind = Workspace_assertions.assertion_kind =
   | Current_task_set
 
 let valid_assertion_strings = Workspace_assertions.valid_assertion_strings
-let effective_cluster_name (config : Workspace.config) =
-  match String.trim config.backend_config.Backend_types.cluster_name with
-  | "" -> Env_config_core.cluster_name ()
-  | name -> name
-;;
 
 (* Handlers *)
 
@@ -237,7 +232,6 @@ let status_summary_string (ctx : context) =
     credential_state.credential_required && not credential_state.credential_available
   in
   let current_task, task_failures = safe_current_task ctx ~session_bound in
-  let effective_cluster_name = effective_cluster_name ctx.config in
   let active_task_assignees = Workspace.active_task_assignees_by_task_id backlog in
   let roster, roster_failures = safe_get_agents_observed ctx in
   let observation_failures =
@@ -376,7 +370,6 @@ let status_summary_string (ctx : context) =
        ~credential_state
        ~credential_blocked
        ~current_task
-       ~effective_cluster_name
        ~agents
        ~active_tasks
        ~todo_count

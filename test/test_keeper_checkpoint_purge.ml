@@ -711,7 +711,7 @@ let rec workspace_contents dir =
       (path, None) :: workspace_contents path
     else [ path, Some (In_channel.with_open_bin path In_channel.input_all) ])
 
-let test_cli_workspace ?(linked_worktree = false) cluster_name () =
+let test_cli_workspace ?(linked_worktree = false) () =
   Eio_main.run @@ fun env ->
   let owner_root = Filename.temp_dir "checkpoint-purge-cli-" "" |> Unix.realpath in
   let base_path =
@@ -730,7 +730,6 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
     ~finally:(fun () -> Fs_compat.remove_tree owner_root)
     (fun () ->
       Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
-      Masc_test_deps.with_process_env "MASC_CLUSTER_NAME" cluster_name @@ fun () ->
       let config = Masc.Workspace.default_config base_path in
       let checkpoint = checkpoint_fixture () in
       let session_dir = Masc.Keeper_fs.keeper_session_dir config checkpoint.session_id in
@@ -800,9 +799,6 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
           ; "MASC_BASE_PATH_LEASE_DIR=" ^ owner_root
           ]
           @ (if from_cwd then [] else [ "MASC_BASE_PATH=" ^ runtime_base_path ])
-          @ (match cluster_name with
-             | None -> []
-             | Some name -> [ "MASC_CLUSTER_NAME=" ^ name ])
         in
         let output =
           Eio.Process.parse_out
@@ -1505,11 +1501,9 @@ let () =
             test_librarian_rebase_refuses_a_rewrite_with_no_atoms
         ] )
     ; ( "cli"
-      , [ Alcotest.test_case "default cluster: workspace dry-run and apply" `Quick
-            (test_cli_workspace None)
-        ; Alcotest.test_case "named cluster: workspace dry-run and apply" `Quick
-            (test_cli_workspace (Some "  Purge/Cluster  "))
+      , [ Alcotest.test_case "workspace dry-run and apply" `Quick
+            (fun () -> test_cli_workspace ())
         ; Alcotest.test_case "linked worktree: shared runtime dry-run and apply" `Quick
-            (test_cli_workspace ~linked_worktree:true None)
+            (fun () -> test_cli_workspace ~linked_worktree:true ())
         ] )
     ]

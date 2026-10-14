@@ -40,10 +40,6 @@ val masc_dir_from_base_path : base_path:string -> string
     [Filename.concat base_path masc_dirname]. Canonical way to spell
     [<base_path>/.masc]. *)
 
-val clusters_dir_from_base_path : base_path:string -> string
-(** [<base>/.masc/clusters], the directory whose entries are the non-default
-    clusters' workspace roots. The single place that names it. *)
-
 val keepers_runtime_dirname : string
 (** OUTPUT root segment for server-written keeper runtime state. Single literal
     behind both keeper-dir SSOT functions; the input/output relocation flips it. *)
@@ -77,9 +73,9 @@ val fresh_config_root_keeper_seed_target : string -> string option
     and embedded roots agree on the roster. *)
 
 val keepers_runtime_dir_of_base : base_path:string -> string
-(** [<base_path>/.masc/keepers] for callers holding only a [base_path]
-    (default cluster). Low-level SSOT that avoids the Workspace dependency cycle
-    the cluster-aware [Workspace.keepers_runtime_dir] would impose. *)
+(** [<base_path>/.masc/keepers] for callers holding only a [base_path].
+    Low-level SSOT that avoids the Workspace dependency cycle
+    [Workspace.keepers_runtime_dir] would impose. *)
 
 type keeper_runtime_store =
   | Keeper_tool_usage

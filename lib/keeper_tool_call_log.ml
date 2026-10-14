@@ -357,11 +357,8 @@ let location masc_root =
   Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Tool_calls)
 ;;
 
-let init ?cluster_name ~base_path () =
-  let cluster_name =
-    Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
-  in
-  let masc_root = Workspace_utils.masc_root_dir_from ~base_path ~cluster_name in
+let init ~base_path () =
+  let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path in
   let location = location masc_root in
   let dir = Dated_jsonl.Store.dir location in
   Atomic.set store_state { store = None; configured = Some (masc_root, dir) };

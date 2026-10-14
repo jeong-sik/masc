@@ -271,7 +271,6 @@ let workspace_state_json config =
     `Assoc
       [
         ("project", `String (Filename.basename config.base_path));
-        ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool false);
         ("pause_reason", `Null);
       ]
@@ -280,7 +279,6 @@ let workspace_state_json config =
     `Assoc
       [
         ("project", `String state.project);
-        ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
         ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
       ]

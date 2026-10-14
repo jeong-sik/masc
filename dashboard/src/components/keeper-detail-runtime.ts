@@ -1435,8 +1435,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const namespaceName =
     namespaceStatus.project ?? serverStatus.value?.project ?? 'default'
   const project = namespaceStatus.project ?? serverStatus.value?.project ?? MISSING_DATA_DASH
-  const clusterRaw = namespaceStatus.cluster ?? serverStatus.value?.cluster ?? null
-  const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
   const openToolsQuery = observedTools[0] ?? null
@@ -1445,7 +1443,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
     <div class="flex flex-col gap-1.5">
       <${SignalRow} label="프로젝트 범위" value=${namespaceName} />
       <${SignalRow} label="프로젝트" value=${project} />
-      ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
       <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
       <div class="flex justify-end mt-1">
         <${ActionButton}

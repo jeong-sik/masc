@@ -208,7 +208,6 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
     `Assoc
       [
         ("workspace_health", `String (string_field ~default:"ok" "health" projection.digest_json));
-        ("cluster", Json_util.string_opt_to_json (Some (string_field "cluster" projection.namespace_json)));
         ("project", Json_util.string_opt_to_json (Some (string_field "project" projection.namespace_json)));
       ]
   in

@@ -121,9 +121,7 @@ let transcript_files_under dir =
           |> List.map (Filename.concat dir)))
 ;;
 
-(* The runtime writes keeper stores under the cluster's keepers directory; reading
-   the default cluster's instead finds nothing on any other cluster and passes
-   without having read a row. *)
+(* The keepers directory the runtime writes keeper stores under. *)
 let runtime_keepers_dir ~base_path =
   Workspace.keepers_runtime_dir_for_base_path base_path
 ;;

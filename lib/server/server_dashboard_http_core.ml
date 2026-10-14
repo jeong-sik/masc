@@ -335,7 +335,6 @@ let dashboard_shell_payload_json
       (config : Workspace.config)
   : Yojson.Safe.t
   =
-  let cluster = Env_config_core.cluster_name () in
   let cache_key = dashboard_shell_cache_key ~light config in
   let trace = shell_projection_trace_start ~cache_key in
   let started_at = Unix.gettimeofday () in
@@ -476,8 +475,7 @@ let dashboard_shell_payload_json
          ~surface:"shell"
          ~started_at
          ~extra:
-           ([ "cluster", `String cluster
-            ; "workspace_root", `String config.base_path
+           ([ "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
             ; "status_ms", `Int status_ms
             ; "agents_ms", `Int agents_ms

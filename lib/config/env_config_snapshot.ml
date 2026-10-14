@@ -34,7 +34,6 @@ let server_entries =
     entry ~default:"(derived)" Env_config_core.http_base_url_env_key "Public HTTP base URL";
     entry ~default:"(derived)" Env_config_core.mcp_url_env_key
       "MASC MCP endpoint URL (derived from base URL when unset)";
-    entry ~default:"" "MASC_CLUSTER_NAME" "Cluster name for multi-instance";
     entry ~default:"(cwd)" Env_config_core.base_path_env_key "Base storage directory";
     entry ~default:Masc_network_defaults.masc_http_default_host
       "MASC_HTTP_HOST" "HTTP server listen host";

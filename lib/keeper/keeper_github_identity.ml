@@ -107,11 +107,8 @@ let config_dir ~config ~keeper_name =
 ;;
 
 (* Base-path form of [config_dir] for callers that hold only [base_path] (the
-   chat store's redaction snapshot). [hosts.yml] is read where the login wrote
-   it, and the login writes through the cluster-aware [config_dir]; a
-   default-cluster path here would leave a non-default cluster's token out of
-   the redaction snapshot. [Workspace.keepers_runtime_dir_for_base_path]
-   resolves the cluster the same way the process's [Workspace.config] does. *)
+   chat store's redaction snapshot). [hosts.yml] is read where the login
+   wrote it through [config_dir]. *)
 let config_dir_of_base_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Workspace.keepers_runtime_dir_for_base_path base_path) keeper_name)

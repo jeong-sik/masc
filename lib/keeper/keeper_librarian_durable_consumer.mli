@@ -151,8 +151,8 @@ val consume_one
     [commit]. If the separate progress write then fails, the next pass first
     checks the original all-unread selection, before process-local retry
     narrowing, and advances to the committed endpoint without calling [commit]
-    again. Later Memory writers preserve every runtime cluster's receipt until
-    a newer durable range in that same cluster replaces it.
+    again. Later Memory writers preserve every receipt scope's receipt until
+    a newer durable range in that same scope replaces it.
 
     The continuity round saves Memory itself for a completed range this
     consumer has not committed, under its own receipt scope

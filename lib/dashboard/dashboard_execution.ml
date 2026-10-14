@@ -72,7 +72,6 @@ let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
     [ "workspace_root", `String (canonical_workspace_root config)
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
-    ; "cluster", `String (Env_config_core.cluster_name ())
     ; "project", `String project
     ; "tempo_interval_s", `Float tempo.current_interval_s
     ; "paused", `Bool paused

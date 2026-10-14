@@ -19,32 +19,16 @@ describe('agentsToPresence', () => {
     model: null,
   }
 
-  it('returns disconnected snapshot when cluster is undefined', () => {
-    const status: ApiStatus = { cluster: undefined }
-    const snap = agentsToPresence([sampleAgent], status)
-    expect(snap.kind).toBe('disconnected')
-  })
-
-  // Regression: prior code only checked `status.cluster === undefined`, so a
-  // JSON payload with `cluster: null` (the wire form of OCaml's [None]) hit
-  // `null.trim()` and crashed the entire CODE / IDE-shell surface render.
-  it('returns disconnected snapshot when cluster is null', () => {
-    const status: ApiStatus = { cluster: null }
-    const snap = agentsToPresence([sampleAgent], status)
+  it('returns disconnected snapshot when no status body arrived', () => {
+    const snap = agentsToPresence([sampleAgent], undefined)
     expect(snap.kind).toBe('disconnected')
     if (snap.kind === 'disconnected') {
       expect(snap.reason).toBe('runtime_unknown')
     }
   })
 
-  it('returns disconnected snapshot when cluster is whitespace only', () => {
-    const status: ApiStatus = { cluster: '   ' }
-    const snap = agentsToPresence([sampleAgent], status)
-    expect(snap.kind).toBe('disconnected')
-  })
-
-  it('returns disconnected snapshot when cluster is set but no agents present', () => {
-    const status: ApiStatus = { cluster: 'masc-local' }
+  it('returns disconnected snapshot when status arrived but no agents present', () => {
+    const status: ApiStatus = { project: 'ws' }
     const snap = agentsToPresence([], status)
     expect(snap.kind).toBe('disconnected')
     if (snap.kind === 'disconnected') {
@@ -52,43 +36,51 @@ describe('agentsToPresence', () => {
     }
   })
 
-  it('returns live snapshot with trimmed cluster id when both cluster and agents present', () => {
-    const status: ApiStatus = { cluster: '  masc-local  ' }
+  it('returns live snapshot named by the trimmed project when status and agents arrived', () => {
+    const status: ApiStatus = { project: '  ws  ' }
     const snap = agentsToPresence([sampleAgent], status)
     expect(snap.kind).toBe('live')
     if (snap.kind === 'live') {
-      expect(snap.runtime_id).toBe('masc-local')
+      expect(snap.runtime_id).toBe('ws')
       expect(snap.entries).toHaveLength(1)
       expect(snap.entries[0]?.workspace_label).toBe('nick0cave')
     }
+  })
+
+  // A null project (the JSON wire form of OCaml's [None]) must not crash the
+  // render; the runtime still answered, so the strip is live.
+  it('returns live snapshot when the project is null', () => {
+    const status: ApiStatus = { project: null }
+    const snap = agentsToPresence([sampleAgent], status)
+    expect(snap.kind).toBe('live')
+    if (snap.kind === 'live') expect(snap.runtime_id).toBe('')
   })
 })
 
 describe('unwrapEnvelope', () => {
   it('unwraps the {ok,data} envelope returned by /api/v1/status', () => {
-    const raw = { ok: true, data: { cluster: 'default', project: 'ws' } }
-    expect(unwrapEnvelope<ApiStatus>(raw)).toEqual({ cluster: 'default', project: 'ws' })
+    const raw = { ok: true, data: { project: 'ws' } }
+    expect(unwrapEnvelope<ApiStatus>(raw)).toEqual({ project: 'ws' })
   })
 
   it('returns an already-unwrapped payload unchanged when no data key is present', () => {
-    const raw = { cluster: 'default' }
-    expect(unwrapEnvelope<ApiStatus>(raw)).toEqual({ cluster: 'default' })
+    const raw = { project: 'ws' }
+    expect(unwrapEnvelope<ApiStatus>(raw)).toEqual({ project: 'ws' })
   })
 
   it('returns undefined for null / non-object input', () => {
     expect(unwrapEnvelope<ApiStatus>(null)).toBeUndefined()
   })
 
-  // Regression: the strip read status.cluster off the raw {ok,data} envelope,
-  // so cluster was always undefined -> permanent runtime_unknown even while the
-  // server reported a live cluster. Unwrapping first must yield a live snapshot.
+  // Regression: the strip read fields off the raw {ok,data} envelope, so they
+  // were always undefined. Unwrapping first must yield a live snapshot.
   it('feeds an enveloped status into agentsToPresence as a live runtime', () => {
-    const envelope = { ok: true, data: { cluster: 'default', project: 'ws' } }
-    const status = unwrapEnvelope<ApiStatus>(envelope) ?? {}
+    const envelope = { ok: true, data: { project: 'ws' } }
+    const status = unwrapEnvelope<ApiStatus>(envelope)
     const agent: ApiAgent = { name: 'nick0cave', status: 'active', current_task: null, model: null }
     const snap = agentsToPresence([agent], status)
     expect(snap.kind).toBe('live')
-    if (snap.kind === 'live') expect(snap.runtime_id).toBe('default')
+    if (snap.kind === 'live') expect(snap.runtime_id).toBe('ws')
   })
 })
 

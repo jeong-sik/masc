@@ -6,7 +6,7 @@
     No existing write paths are modified.  The module creates read-only
     {!Dated_jsonl} handles (no appends, no directory creation).
 
-    Sources (paths are relative to the cluster-aware [masc_root]):
+    Sources (paths are relative to [masc_root]):
     - [<masc_root>/keepers/<name>/metrics/]  — Per-keeper turn metrics
     - [<masc_root>/telemetry/]               — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls

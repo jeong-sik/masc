@@ -316,7 +316,7 @@ let test_boot_recovers_a_paused_owner () =
 
 let directive_workspace : Decode.server_identity = {
   sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None;
-  sid_base_path = "/workspace"; sid_masc_root = "/workspace/.masc/clusters/operator";
+  sid_base_path = "/workspace"; sid_masc_root = "/workspace/.masc";
   sid_executable_in_worktree = None; sid_state_ready = Some true;
   sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None;
 }

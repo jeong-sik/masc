@@ -552,11 +552,7 @@ let parse_args () =
     | Error error -> prerr_endline (Workspace_connection.error_message error); exit 1 in
 
   (* Resolve workspace *)
-  let r = if !workspace <> "" then !workspace
-    else match Env_config_core.cluster_name_opt () with
-      | Some name -> name
-      | None -> Filename.basename base
-  in
+  let r = if !workspace <> "" then !workspace else Filename.basename base in
 
   let reasoning_visibility =
     match !reasoning_visibility with

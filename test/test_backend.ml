@@ -32,7 +32,6 @@ let with_eio_env f =
   let config = { (Backend.default_config ()) with
     base_path = tmp_dir;
     node_id = "test_node";
-    cluster_name = "test";
   } in
   let backend = Backend.FileSystem.create ~fs config in
   Fun.protect

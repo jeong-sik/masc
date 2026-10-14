@@ -41,7 +41,6 @@ describe('normalizeMission', () => {
     const result = normalizeMission({
       summary: {
         workspace_health: 'healthy',
-        cluster: 'local',
         project: 'masc',
         paused: false,
         tempo_interval_s: 30,
@@ -50,7 +49,6 @@ describe('normalizeMission', () => {
       },
     })
     expect(result.summary.workspace_health).toBe('healthy')
-    expect(result.summary.cluster).toBe('local')
     expect(result.summary.project).toBe('masc')
     expect(result.summary.paused).toBe(false)
     expect(result.summary.tempo_interval_s).toBe(30)

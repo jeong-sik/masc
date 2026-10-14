@@ -53,12 +53,10 @@ val vote_direction_of_string_opt : string -> vote_direction option
 (** {1 Vote log path} *)
 
 val vote_log_path : unit -> string
-(** Path to the append-only vote log JSONL under the cluster-aware board
-    directory resolved by {!Board_paths.board_masc_dir} — the same
-    resolver used by [persist_path] / [comments_path] / [reactions_path] /
-    [sub_boards_path], so on the default cluster this is
-    [<base>/.masc/board_votes.jsonl] and on a named cluster it is
-    [<base>/.masc/clusters/<cluster>/board_votes.jsonl].  Each accepted row
+(** Path to the append-only vote log JSONL under the board directory
+    resolved by {!Board_paths.board_masc_dir} — the same resolver used by
+    [persist_path] / [comments_path] / [reactions_path] / [sub_boards_path],
+    so this is [<base>/.masc/board_votes.jsonl].  Each accepted row
     has exactly [target], [voter], [direction], and positive finite [ts]
     fields; [target] carries canonical typed target/voter identities and the
     derived [voter] field must match it. *)

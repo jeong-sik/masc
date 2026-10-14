@@ -81,8 +81,7 @@ val capture_request :
     multiple AGENT_CORE/provider calls inside that keeper turn. [trace_id] is the
     keeper runtime trace id passed to AGENT_CORE as [session_id] for raw-trace
     correlation. [base_path] selects the exact Keeper secret projection
-    snapshot; [masc_root] must already be the effective cluster-aware MASC
-    root. [tool_schema_bytes] records the byte length of the exact unredacted
+    snapshot; [masc_root] must already be the workspace's MASC root. [tool_schema_bytes] records the byte length of the exact unredacted
     compact JSON schema array while [tools_ref] points at its recursively
     redacted content in the shared blob store (see the module header).
     [history_messages] is consumed for [history_message_count] and

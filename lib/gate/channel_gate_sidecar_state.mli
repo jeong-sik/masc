@@ -27,13 +27,6 @@ module type Config = sig
   val default_poll_interval_sec : float
   (** Reported as [poll_interval_sec] when the status file has no value —
       either because it is absent or because this sidecar never writes one. *)
-
-  val extra_status_fields :
-    Yojson.Safe.t option -> (string * Yojson.Safe.t) list
-  (** Connector-specific status fields, derived from the parsed status file
-      ([None] when it is missing or unreadable). The keys are carried into
-      [connector_json] too, so a connector declares them once. Return the
-      same keys in both cases — the [None] result supplies the defaults. *)
 end
 
 module Make (_ : Config) : Channel_gate_connector.S

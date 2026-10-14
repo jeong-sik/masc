@@ -1,6 +1,5 @@
 (** Generic file-backed Channel Gate connector state for Python sidecars. *)
 
-module U = Yojson.Safe.Util
 module Store = Channel_gate_binding_store
 
 module type Config = sig
@@ -16,9 +15,6 @@ module type Config = sig
   val stale_after_env_name : string
   val guild_id_field : Channel_gate_binding_store.guild_id_field
   val default_poll_interval_sec : float
-
-  val extra_status_fields :
-    Yojson.Safe.t option -> (string * Yojson.Safe.t) list
 end
 
 module Make (Config : Config) = struct
@@ -101,13 +97,41 @@ module Make (Config : Config) = struct
         let updated_at = string_member json "updated_at" in
         bool_member json "connected" && not (stale_of_updated_at updated_at)
 
+  (* One reading of the status file and the binding store, rendered by
+     [status_json] and [connector_json] alike so the two views cannot
+     disagree. *)
+  type status = {
+    status_path : string;
+    binding_store_path : string;
+    audit_path : string;
+    configured_bindings : Store.binding list;
+    binding_store_read_ok : bool;
+    binding_store_error : string;
+    recent_audit : Yojson.Safe.t list;
+    available : bool;
+    stale : bool;
+    connected : bool;
+    error : string;
+    updated_at : string;
+    last_message_at : string;
+    messages_processed : int;
+    messages_failed : int;
+    poll_interval_sec : float;
+    gate_base_url : string;
+    gate_healthy : bool option;
+    gate_health_checked_at : string;
+    pid : int;
+    binding_source : string;
+    runtime_bindings_count : int;
+  }
+
   (* Every numeric field below is a display projection of what the sidecar
      last wrote, so an absent field reads as its zero rather than an error.
      That is the shape this whole record already had; [poll_interval_sec] is
      the one whose zero differs per connector, which is why it comes from the
      config instead of being written in twice. Only [available], [stale] and
      [connected] decide anything, and none of them defaults. *)
-  let status_json ?(audit_limit = 10) () =
+  let read_status ~audit_limit =
     let status_path = status_path () in
     let live_status = read_json_file_opt status_path in
     let binding_store_path = binding_store_read_path () in
@@ -142,101 +166,94 @@ module Make (Config : Config) = struct
       | Some json -> f json key
       | None -> default
     in
+    {
+      status_path;
+      binding_store_path;
+      audit_path;
+      configured_bindings;
+      binding_store_read_ok;
+      binding_store_error;
+      recent_audit;
+      available;
+      stale;
+      connected;
+      error;
+      updated_at;
+      last_message_at = status_field "last_message_at" string_member "";
+      messages_processed = status_field "messages_processed" int_member 0;
+      messages_failed = status_field "messages_failed" int_member 0;
+      poll_interval_sec =
+        status_field "poll_interval_sec"
+          (fun json key ->
+            (* sound-partial: allow — relocated default, see below *)
+            Json_util.get_float json key
+            |> Option.value ~default:Config.default_poll_interval_sec)
+          Config.default_poll_interval_sec;
+      gate_base_url = status_field "gate_base_url" string_member "";
+      gate_healthy =
+        (match live_status with
+         | Some json -> bool_option_member json "gate_healthy"
+         | None -> None);
+      gate_health_checked_at = status_field "gate_health_checked_at" string_member "";
+      pid = status_field "pid" int_member 0;
+      binding_source = status_field "binding_source" string_member "persisted";
+      runtime_bindings_count =
+        status_field "runtime_bindings_count" int_member
+          (List.length configured_bindings);
+    }
+
+  let status_label status =
+    Channel_gate_connector.connector_state_label ~available:status.available
+      ~connected:status.connected ~stale:status.stale
+
+  let gate_healthy_json status =
+    Option.value ~default:`Null
+      (Option.map (fun value -> `Bool value) status.gate_healthy)
+
+  (* The fields both views share, written once so a field added to one view
+     is in the other too. *)
+  let status_fields status =
+    [
+      ("available", `Bool status.available);
+      ("connected", `Bool status.connected);
+      ("stale", `Bool status.stale);
+      ("stale_after_sec", `Int (stale_after_sec ()));
+      ("status", `String (status_label status));
+      ("error", `String status.error);
+      ("status_path", `String status.status_path);
+      ("binding_store_path", `String status.binding_store_path);
+      ("binding_store_read_ok", `Bool status.binding_store_read_ok);
+      ("binding_store_error", `String status.binding_store_error);
+      ("audit_path", `String status.audit_path);
+      ("updated_at", `String status.updated_at);
+      ("last_message_at", `String status.last_message_at);
+      ("messages_processed", `Int status.messages_processed);
+      ("messages_failed", `Int status.messages_failed);
+      ("poll_interval_sec", `Float status.poll_interval_sec);
+      ("gate_base_url", `String status.gate_base_url);
+      ("gate_healthy", gate_healthy_json status);
+      ("gate_health_checked_at", `String status.gate_health_checked_at);
+      ("pid", `Int status.pid);
+      ("binding_source", `String status.binding_source);
+      ("runtime_bindings_count", `Int status.runtime_bindings_count);
+      ( "configured_bindings",
+        `List (List.map binding_json status.configured_bindings) );
+      ("recent_audit", `List status.recent_audit);
+    ]
+
+  let status_json ?(audit_limit = 10) () =
     `Assoc
-      ([
-        ("channel", `String channel);
-        ("available", `Bool available);
-        ("connected", `Bool connected);
-        ("stale", `Bool stale);
-        ("stale_after_sec", `Int (stale_after_sec ()));
-        ( "status",
-          `String
-            (Channel_gate_connector.connector_state_label ~available ~connected
-               ~stale) );
-        ("error", `String error);
-        ("status_path", `String status_path);
-        ("binding_store_path", `String binding_store_path);
-        ("binding_store_read_ok", `Bool binding_store_read_ok);
-        ("binding_store_error", `String binding_store_error);
-        ("audit_path", `String audit_path);
-        ("updated_at", `String updated_at);
-        ("last_message_at", `String (status_field "last_message_at" string_member ""));
-        ( "messages_processed",
-          `Int (status_field "messages_processed" int_member 0) );
-        ("messages_failed", `Int (status_field "messages_failed" int_member 0));
-        ( "poll_interval_sec",
-          `Float
-            (status_field "poll_interval_sec"
-               (fun json key ->
-                 (* sound-partial: allow — relocated default, see below *)
-                 Json_util.get_float json key
-                 |> Option.value ~default:Config.default_poll_interval_sec)
-               Config.default_poll_interval_sec) );
-        ("gate_base_url", `String (status_field "gate_base_url" string_member ""));
-        ( "gate_healthy",
-          Option.value ~default:`Null
-            (Option.map (fun value -> `Bool value)
-               (match live_status with
-                | Some json -> bool_option_member json "gate_healthy"
-                | None -> None)) );
-        ( "gate_health_checked_at",
-          `String (status_field "gate_health_checked_at" string_member "") );
-        ("pid", `Int (status_field "pid" int_member 0));
-        ( "binding_source",
-          `String (status_field "binding_source" string_member "persisted") );
-        ( "runtime_bindings_count",
-          `Int
-            (status_field "runtime_bindings_count" int_member
-               (List.length configured_bindings)) );
-        ("configured_bindings", `List (List.map binding_json configured_bindings));
-        ("recent_audit", `List recent_audit);
-      ]
-      @ Config.extra_status_fields live_status)
+      (("channel", `String channel) :: status_fields (read_status ~audit_limit))
 
   let connector_json ?(audit_limit = 10) () =
-    let status = status_json ~audit_limit () in
-    (* [status] already carries the connector-specific fields; copy them by
-       the keys the config declares so the two views cannot drift. *)
-    let extra_fields =
-      Config.extra_status_fields None
-      |> List.map (fun (key, _default) -> (key, U.member key status))
-    in
     `Assoc
       ([
-        ("connector_id", `String connector_id);
-        ("display_name", `String display_name);
-        ("channel", `String channel);
-        ("capabilities", Channel_gate_connector_capability.all_json);
-        ("status", `String (string_member status "status"));
-        ("available", `Bool (bool_member status "available"));
-        ("connected", `Bool (bool_member status "connected"));
-        ("stale", `Bool (bool_member status "stale"));
-        ("stale_after_sec", `Int (int_member status "stale_after_sec"));
-        ("error", `String (string_member status "error"));
-        ("status_path", `String (string_member status "status_path"));
-        ("binding_store_path", `String (string_member status "binding_store_path"));
-        ("binding_store_read_ok", status |> U.member "binding_store_read_ok");
-        ("binding_store_error", status |> U.member "binding_store_error");
-        ("audit_path", `String (string_member status "audit_path"));
-        ("updated_at", `String (string_member status "updated_at"));
-        ("last_message_at", `String (string_member status "last_message_at"));
-        ("messages_processed", `Int (int_member status "messages_processed"));
-        ("messages_failed", `Int (int_member status "messages_failed"));
-        ("poll_interval_sec", status |> U.member "poll_interval_sec");
-        ("gate_base_url", `String (string_member status "gate_base_url"));
-        ( "gate_healthy",
-          Option.value ~default:`Null
-            (Option.map (fun value -> `Bool value)
-               (bool_option_member status "gate_healthy")) );
-        ( "gate_health_checked_at",
-          `String (string_member status "gate_health_checked_at") );
-        ("binding_source", `String (string_member status "binding_source"));
-        ("runtime_bindings_count", `Int (int_member status "runtime_bindings_count"));
-        ("pid", `Int (int_member status "pid"));
-        ("configured_bindings", status |> U.member "configured_bindings");
-        ("recent_audit", status |> U.member "recent_audit");
-      ]
-      @ extra_fields)
+         ("connector_id", `String connector_id);
+         ("display_name", `String display_name);
+         ("channel", `String channel);
+         ("capabilities", Channel_gate_connector_capability.all_json);
+       ]
+      @ status_fields (read_status ~audit_limit))
 
   let bind ~channel_id ~keeper_name ~actor_name =
     let channel_id = String.trim channel_id in

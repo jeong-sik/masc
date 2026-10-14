@@ -749,7 +749,6 @@ export interface ServerStatus {
   workspace_root?: string
   workspace_path?: string
   workspace_differs?: boolean
-  cluster?: string
   project?: string
   paused?: boolean
   version?: string

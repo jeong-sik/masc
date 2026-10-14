@@ -893,10 +893,8 @@ type stored_binding =
   ; decoded : (t, string) result
   }
 
-(* Not [Workspace.keepers_runtime_dir_for_base_path]: [state_dir] writes under
-   [Common.keepers_runtime_dir_of_base], the default cluster's keepers
-   directory, on every cluster, so that is the directory listed here. Every
-   entry [path] accepts is read with [load_path], the reader every claim
+(* [state_dir] writes under [Common.keepers_runtime_dir_of_base], so that is
+   the directory listed here. Every entry [path] accepts is read with [load_path], the reader every claim
    uses, so this reads exactly the files a claim would read, a linked keeper
    directory included. Ordinary metadata files are not Keeper directories.
    A name [path] refuses is left out: [state_dir] refuses it too, so this

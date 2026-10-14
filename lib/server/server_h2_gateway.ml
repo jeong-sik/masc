@@ -1377,7 +1377,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             let workspace_state = Workspace.read_state config in
             let tempo = Tempo.get_tempo config in
             let json = `Assoc [
-              ("cluster", `String (Env_config_core.cluster_name ()));
               ("project", `String workspace_state.project);
               ("tempo_interval_s", `Float tempo.current_interval_s);
               ("paused", `Bool workspace_state.paused);

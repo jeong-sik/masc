@@ -7,9 +7,9 @@
 
     @since 2.190.0 -- Issue #5120 *)
 
-val init : ?cluster_name:string -> base_path:string -> unit -> unit
-(** [init ?cluster_name ~base_path ()] creates the Dated_jsonl store under the
-    cluster-aware [.masc/tool_usage/] root. Must be called before [install].
+val init : base_path:string -> unit -> unit
+(** [init ~base_path ()] creates the Dated_jsonl store under
+    [<base>/.masc/tool_usage/]. Must be called before [install].
     The server's prune pass removes its day files by age. *)
 
 val install : on_io_failure:(site:string -> exn -> unit) -> unit

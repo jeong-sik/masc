@@ -1806,34 +1806,24 @@ let test_dashboard_query_cache_key_partitions_route_params () =
            (Workspace_utils.masc_root_dir config))
         session_a)
 
-(* Two clusters can share a base path — the store separates them under
-   .masc/clusters/<name>. The cache partition was the constant "default", so
-   the keys did not, and a scope switch could serve the previous workspace's
-   projection (#24504). *)
-let test_dashboard_cache_key_partitions_by_cluster () =
+(* The cache partition is the workspace's root. It was once the constant
+   "default", so two workspaces shared keys and a scope switch could serve the
+   previous workspace's projection (#24504). *)
+let test_dashboard_cache_key_partitions_by_workspace_root () =
   let dir = test_dir () in
+  let other_dir = test_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () -> cleanup_dir dir; cleanup_dir other_dir)
     (fun () ->
       let config = Workspace_utils.default_config dir in
-      let other_cluster =
-        { config with
-          backend_config =
-            { config.Workspace_utils.backend_config with
-              Backend_types.cluster_name = "cluster-b"
-            }
-        }
-      in
-      check bool "the two configs share a base path" true
-        (String.equal config.Workspace_utils.base_path
-           other_cluster.Workspace_utils.base_path);
-      check bool "but their cache keys differ" true
+      let other = Workspace_utils.default_config other_dir in
+      check bool "two workspaces get different cache keys" true
         (not
            (String.equal
               (Server_dashboard_http_core_cache.dashboard_cache_key config
                  "session" "s")
               (Server_dashboard_http_core_cache.dashboard_cache_key
-                 other_cluster "session" "s"))))
+                 other "session" "s"))))
 
 let test_dashboard_query_cache_key_encodes_delimiter_values () =
   let dir = test_dir () in
@@ -4655,10 +4645,6 @@ let test_tools_prepared_selector_scope_and_keeper_contract () =
       (String_util.contains_substring (Server_timing.to_header_value second_timing) "request_one");
     let other_base = { config with Workspace.base_path = config.base_path ^ "-other" } in
     let other_workspace = { config with Workspace.workspace_path = config.workspace_path ^ "-other" } in
-    let other_root = { config with Workspace.backend_config =
-      { config.backend_config with Backend_types.cluster_name = "other-tools-cluster" } } in
-    check bool "cluster fixture resolves a distinct MASC root" true
-      (Workspace.masc_root_dir config <> Workspace.masc_root_dir other_root);
     let expect_json query_config keeper =
       let seen = ref None in
       let fallback ~keeper ~timing:_ actual_config =
@@ -4678,7 +4664,7 @@ let test_tools_prepared_selector_scope_and_keeper_contract () =
     in
     List.iter (fun (scope, keeper) -> expect_json scope keeper)
       [ config, Some ""; config, Some "exact-keeper";
-        other_base, None; other_workspace, None; other_root, None ];
+        other_base, None; other_workspace, None ];
     Dashboard_snapshot.reset_for_test ();
     expect_json config None)
 
@@ -8004,8 +7990,8 @@ let () =
             test_dashboard_query_cache_key_partitions_route_params;
           test_case "dashboard query cache key encodes delimiter values" `Quick
             test_dashboard_query_cache_key_encodes_delimiter_values;
-          test_case "cache key partitions by cluster" `Quick
-            test_dashboard_cache_key_partitions_by_cluster;
+          test_case "cache key partitions by workspace root" `Quick
+            test_dashboard_cache_key_partitions_by_workspace_root;
           test_case "operator snapshot default route exposes provenance" `Quick
             test_operator_snapshot_default_route_exposes_provenance;
           test_case "operator digest default route exposes provenance" `Quick

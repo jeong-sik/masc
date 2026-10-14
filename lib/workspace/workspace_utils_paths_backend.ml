@@ -1,23 +1,7 @@
 open Workspace_utils_backend_setup
 
-(** Pure helper: compute the masc_root directory from primitives.
-
-    Use this when a caller has a [base_path] string (e.g. from
-    [Env_config_core.base_path]) but no [Workspace.config] value. Semantics
-    match [masc_root_dir] exactly: default cluster -> [<base>/.masc/],
-    non-default -> [<base>/.masc/clusters/<sanitized>/]. *)
-let masc_root_dir_from ~base_path ~cluster_name =
-  let masc_root = Common.masc_dir_from_base_path ~base_path in
-  match cluster_name with
-  | "" | "default" -> masc_root
-  | other ->
-      let seg = sanitize_namespace_segment other in
-      Filename.concat (Common.clusters_dir_from_base_path ~base_path) seg
-
-let masc_root_dir config =
-  masc_root_dir_from
-    ~base_path:config.base_path
-    ~cluster_name:config.backend_config.Backend_types.cluster_name
+(* The workspace's state root, [<base>/.masc]. *)
+let masc_root_dir config = Common.masc_dir_from_base_path ~base_path:config.base_path
 
 type expected_workspace_error =
   | Invalid_workspace_precondition
@@ -47,14 +31,9 @@ let validate_expected_workspace ~config args =
      | _ -> Error Invalid_workspace_precondition)
   | _ -> Error Invalid_workspace_precondition
 
-(** Default-cluster shortcut for callers that only have a [base_path]
-    string and are in the default-cluster code path (no multi-cluster
-    awareness). Equivalent to
-    [masc_root_dir_from ~base_path ~cluster_name:"default"] and still
-    compiles down to [<base>/.masc]. Exposed so non-workspace call sites
-    stop re-inlining [Filename.concat base_path ".masc"]. Issue #8355. *)
-let masc_dir_from_base_path ~base_path =
-  masc_root_dir_from ~base_path ~cluster_name:"default"
+(** [<base>/.masc] for a caller that has a [base_path] string and no
+    config. *)
+let masc_dir_from_base_path ~base_path = Common.masc_dir_from_base_path ~base_path
 
 (** Directory resolution. Always resolves to the root .masc/ directory. *)
 let masc_dir config = masc_root_dir config
@@ -91,7 +70,7 @@ let message_seq_of_filename name =
 let backlog_path config = Filename.concat (tasks_dir config) backlog_filename
 let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
 
-(* Cluster-aware keeper OUTPUT directory (server-written state + sidecars). The
+(* Keeper OUTPUT directory (server-written state + sidecars). The
    trailing segment is [Common.keepers_runtime_dirname] — the single literal,
    shared with [Common.keepers_runtime_dir_of_base] — so the input/output
    relocation flips one constant, not a call-site sweep. Callers holding only a
@@ -276,9 +255,9 @@ let root_is_initialized config =
       Sys.file_exists (root_state_path config)
 
 (* Server-level cache for is_initialized — avoids 3 syscalls per request.
-   Cache key is (base_path, cluster_name) to handle multi-config scenarios. *)
+   Cache key is the base path, to handle multi-config scenarios. *)
 type init_cache_entry = {
-  cache_key : string * string;
+  cache_key : string;
   cached_result : bool;
   cached_at : float;
 }
@@ -286,8 +265,7 @@ type init_cache_entry = {
 let initialized_cache : init_cache_entry option Atomic.t = Atomic.make None
 let initialized_cache_ttl = 1.0  (* seconds *)
 
-let init_cache_key config =
-  (config.base_path, config.backend_config.Backend_types.cluster_name)
+let init_cache_key config = config.base_path
 
 (** Check if current workspace is initialized - backend-agnostic.
     Cached with 1-second TTL to avoid 3 filesystem syscalls per request. *)

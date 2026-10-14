@@ -91,12 +91,9 @@ let with_dashboard_timeout ~clock compute =
       ]
 ;;
 
-(* The directory the cached state actually lives in. This was a constant
-   "default", so a key told two clusters sharing a base path apart by nothing
-   and a scope switch could serve the previous workspace's projection
-   (#24504). [masc_root_dir] already owns the "" | "default" normalization and
-   the clusters/<name> layout, so reading it here keeps the cache partitioned
-   exactly like the store it caches. *)
+(* The directory the cached state actually lives in, so the cache is
+   partitioned exactly like the store it caches. A constant partition once let
+   a scope switch serve the previous workspace's projection (#24504). *)
 let cache_partition_segment (config : Workspace.config) =
   Workspace_utils.masc_root_dir config
 ;;

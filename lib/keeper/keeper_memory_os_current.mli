@@ -144,8 +144,9 @@ type read_classified =
     checkpoint digests. *)
 type durable_range_id =
   { receipt_scope : string
-      (** Stable runtime-cluster scope. Receipts for the same Keeper name in
-          other clusters remain independently recoverable. *)
+      (** Stable scope: the runtime keepers directory the receipt belongs to.
+          Receipts under another scope share the sidecar and remain
+          independently recoverable. *)
   ; trace_id : string
   ; history_start_boundary_line : int
   ; start_atom : int
@@ -268,7 +269,7 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
     supersedes target was found not current. *)
 val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
-(** WAL sidecar joining each runtime cluster's typed durable completed-turn
+(** WAL sidecar joining each receipt scope's typed durable completed-turn
     range identity to the exact shared Memory snapshot revision and bytes
     produced from it. *)
 val durable_range_receipt_path : keepers_dir:string -> keeper_id:string -> string
@@ -426,12 +427,12 @@ val committed_durable_range
   -> keeper_id:string
   -> receipt_scope:string
   -> (durable_range_id option, string) result
-(** Return this runtime cluster's last completed-turn range whose receipt is still proved by the
+(** Return this receipt scope's last completed-turn range whose receipt is still proved by the
     current Memory snapshot. A prepared receipt requires its exact snapshot
     revision and SHA-256. A committed receipt accepts that same snapshot or a
     higher parsed revision written later under the same store lock. Missing,
     lower, or same-revision/different-byte snapshots invalidate the receipt.
-    Other cluster receipts share the sidecar but are not replaced by this
+    Other scopes' receipts share the sidecar but are not replaced by this
     scope's commit. *)
 
 val committed_official_range

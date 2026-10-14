@@ -22,7 +22,6 @@ export interface ApiAgent {
 }
 
 export interface ApiStatus {
-  readonly cluster?: string | null
   readonly project?: string | null
   readonly paused?: boolean
 }
@@ -32,16 +31,15 @@ function mapAgentStatus(status: string): KeeperPresenceEntry['status'] {
   return parsed === 'active' || parsed === 'busy' ? 'active' : 'idle'
 }
 
-/** @internal — exported only so {@link ./ide-presence-strip.test.ts}
-    can pin the disconnected/live branch behaviour against runtime
-    payloads where [cluster] may arrive as [null] (the JSON wire form
-    of OCaml's [None]) rather than [undefined]. */
+/** A status body that arrived means the runtime answered; its project names
+    the runtime in the strip.
+    @internal — exported only so {@link ./ide-presence-strip.test.ts}
+    can pin the disconnected/live branch behaviour. */
 export function agentsToPresence(
   agents: ReadonlyArray<ApiAgent>,
-  status: ApiStatus,
+  status: ApiStatus | undefined,
 ): KeeperPresenceSnapshot {
-  const cluster = status.cluster?.trim() ?? ''
-  if (cluster === '') {
+  if (status === undefined) {
     return disconnectedSnapshot('runtime_unknown')
   }
   if (agents.length === 0) {
@@ -50,7 +48,7 @@ export function agentsToPresence(
   const now = Date.now()
   return {
     kind: 'live',
-    runtime_id: cluster,
+    runtime_id: status.project?.trim() ?? '',
     entries: agents.map((agent, idx) => ({
       keeper_id: agent.name,
       workspace_label: agent.name,
@@ -66,7 +64,7 @@ export function agentsToPresence(
     [/api/v1/providers] which returns its payload at the top level. [get()]
     returns the raw parsed body without unwrapping, so a consumer must pull
     [.data] out. Reading the envelope's absent top-level fields (e.g.
-    [status.cluster], which actually lives at [status.data.cluster]) is what
+    [status.project], which actually lives at [status.data.project]) is what
     made this strip render a permanent [disconnected (runtime_unknown)]
     regardless of the live runtime. Falls back to the raw value when no [data]
     key is present, so an un-enveloped response still works.
@@ -98,7 +96,7 @@ async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
     const agentsData = unwrapEnvelope<{ agents?: ApiAgent[] }>(agentsRaw)
     const statusData = unwrapEnvelope<ApiStatus>(statusRaw)
     const agents: ApiAgent[] = Array.isArray(agentsData?.agents) ? agentsData.agents : []
-    return agentsToPresence(agents, statusData ?? {})
+    return agentsToPresence(agents, statusData)
   }
 
   return disconnectedSnapshot('fetch_failed')

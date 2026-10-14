@@ -1,17 +1,12 @@
 (** Workspace paths + backend dispatch.
 
-    Resolves the canonical [.masc/] directory layout (per-cluster),
+    Resolves the canonical [.masc/] directory layout,
     and dispatches CRUD/lock/pubsub calls to
     the active [Backend] implementation (Memory / FileSystem). *)
 
 open Workspace_utils_backend_setup
 
-(** Compute the masc_root directory from primitives.
-    [cluster_name = "" | "default"] resolves to [<base>/.masc/];
-    other names produce [<base>/.masc/clusters/<sanitized>/]. *)
-val masc_root_dir_from :
-  base_path:string -> cluster_name:string -> string
-
+(** The workspace's state root, [<base>/.masc]. *)
 val masc_root_dir : config -> string
 
 type expected_workspace_error =
@@ -21,9 +16,7 @@ type expected_workspace_error =
 val validate_expected_workspace :
   config:config -> Yojson.Safe.t -> (Yojson.Safe.t, expected_workspace_error) result
 
-(** Default-cluster shortcut for callers holding only [base_path]
-    (#8355: stops re-inlining [<base>/.masc] across non-workspace
-    callsites). *)
+(** [<base>/.masc] for a caller holding only [base_path]. *)
 val masc_dir_from_base_path : base_path:string -> string
 
 val masc_dir : config -> string
@@ -40,14 +33,14 @@ val state_path : config -> string
 val backlog_path : config -> string
 val archive_path : config -> string
 
-(** Cluster-aware keeper OUTPUT directory (server-written state + sidecars). The
+(** Keeper OUTPUT directory (server-written state + sidecars). The
     trailing segment is [Common.keepers_runtime_dirname]; relocating the OUTPUT
     root flips that one constant. base_path-only and cycle-bound callers use
     [Common.keepers_runtime_dir_of_base] instead. *)
 val keepers_runtime_dir : config -> string
 
 val keepers_runtime_dir_for_base_path : string -> string
-(** Pure cluster-aware Keeper output directory for an already resolved
+(** Pure Keeper output directory for an already resolved
     runtime base path. This is the base-path form of {!keepers_runtime_dir};
     it opens no backend and creates no directory. *)
 

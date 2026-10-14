@@ -91,7 +91,6 @@ let workspace_json config =
     let agents = Workspace.get_agents_raw config in
     `Assoc
       [ "initialized", `Bool true
-      ; "cluster", `String (Env_config_core.cluster_name ())
       ; "project", `String state.project
       ; "paused", `Bool state.paused
       ; "pause_reason", Json_util.string_opt_to_json state.pause_reason

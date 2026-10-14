@@ -26,7 +26,6 @@ let kind_to_string = function
 
 type lifecycle_stage =
   | Spawned of string list
-  | Reap_wait_started
   | Waitpid_started
   | Waitpid_returned
   | Exit_published
@@ -37,7 +36,6 @@ type lifecycle_stage =
 
 let lifecycle_stage_fields = function
   | Spawned argv -> "spawned", argv
-  | Reap_wait_started -> "reap_wait_started", []
   | Waitpid_started -> "waitpid_started", []
   | Waitpid_returned -> "waitpid_returned", []
   | Exit_published -> "exit_published", []

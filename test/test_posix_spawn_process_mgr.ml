@@ -326,6 +326,41 @@ let test_group_final_reap_does_not_block_scheduler () =
   check int "one owner performs final wait" 1 (Atomic.get calls)
 ;;
 
+let test_observation_cancel_preserves_physical_reap () =
+  List.iter (fun target_stage ->
+    Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let injected = ref false and captured = ref None in
+    let waits = Atomic.make 0 in
+    let waitpid pid = ignore (Atomic.fetch_and_add waits 1 : int); Unix.waitpid [] pid in
+    let mgr = Posix_spawn_process_mgr.For_testing.foreground_mgr ~clock ~grace_seconds:2. ~waitpid in
+    Exec_tap.enable ~writer:(fun line ->
+      let stage = Yojson.Safe.Util.member "stage" (Yojson.Safe.from_string line) in
+      if stage = `String target_stage then (
+        injected := true;
+        raise (Eio.Cancel.Cancelled (Failure "fixture lifecycle observer cancelled"))));
+    Fun.protect ~finally:Exec_tap.disable @@ fun () ->
+    (* Fixture guard only. The production owner does not use a deadline. *)
+    Eio.Time.with_timeout_exn clock 10. @@ fun () ->
+    let propagated = match Eio.Switch.run (fun sw ->
+      let proc = Eio.Process.spawn ~sw mgr ["/bin/sh";"-c";"exit 7"] in
+      captured := Some proc;
+      ignore (Eio.Process.await proc);
+      Eio.Fiber.yield ()) with
+      | () -> false
+      | exception Eio.Cancel.Cancelled _ -> true in
+    check bool "observer cancellation was injected" true !injected;
+    check bool "observer cancellation propagates after settlement" true propagated;
+    check int "one owner physically waits once" 1 (Atomic.get waits);
+    let proc = match !captured with Some proc -> proc | None -> fail "child not captured" in
+    (match Eio.Process.await proc with
+     | `Exited code -> check int "settled original exit survives observer failure" 7 code
+     | `Signaled _ -> fail "observer failure changed a completed exit");
+    match Unix.waitpid [Unix.WNOHANG] (Eio.Process.pid proc) with
+    | exception Unix.Unix_error (Unix.ECHILD,_,_) -> ()
+    | _ -> fail "observer failure left an unreaped child") ["waitpid_started";"waitpid_returned"]
+;;
+
 let test_group_normal_exit_reaps_in_long_lived_switch () =
   with_group_fixture (fun env marker ->
     let clock = Eio.Stdenv.clock env in
@@ -456,7 +491,9 @@ let () =
         ; test_case "a group needs the leader this process owns" `Quick
             test_group_without_its_owned_leader_is_not_ours ])
     ; ( "foreground group ownership",
-        [ test_case "final reap leaves scheduler and signal responsive" `Quick
+        [ test_case "observer cancellation cannot strand physical reap or its owner promise" `Quick
+            test_observation_cancel_preserves_physical_reap
+        ; test_case "final reap leaves scheduler and signal responsive" `Quick
             test_group_final_reap_does_not_block_scheduler
         ; test_case "final reap needs no second SIGCHLD" `Quick
             test_group_final_reap_needs_no_second_signal

@@ -25,7 +25,6 @@ type call_kind =
     cancellation, retry or ownership. Spawn argv uses the existing redactor. *)
 type lifecycle_stage =
   | Spawned of string list
-  | Reap_wait_started
   | Waitpid_started
   | Waitpid_returned
   | Exit_published

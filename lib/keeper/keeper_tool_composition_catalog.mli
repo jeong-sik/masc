@@ -234,6 +234,10 @@ val skill_tool_name : string
 val error_to_string : error -> string
 
 val input_schema_of_params : param list -> Yojson.Safe.t
+
+val output_schema_of_params : param list -> Yojson.Safe.t
+(** Composable type projection of the declared arguments. Enum membership and
+    descriptions remain in [input_schema_of_params] for input validation. *)
 (** The model-visible input schema for an entry: an object with one required,
     described property per declared param, closed to extras. An
     [Enum_param] property is a string with its members under [enum]. The

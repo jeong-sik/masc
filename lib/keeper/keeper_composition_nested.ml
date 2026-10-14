@@ -7,7 +7,7 @@ module Inventory = Keeper_skill_inventory
 type arguments = Fixed of Yojson.Safe.t | Upstream of Plan.Json_template.t
 
 type scope =
-  | Inline of (Plan.Node_id.t * Plan.Node_id.t) list
+  | Inline of { argument_node : Plan.Node_id.t option; mapping : (Plan.Node_id.t * Plan.Node_id.t) list }
   | Async of { submission : Plan.Node_id.t; result : Plan.Node_id.t }
 
 type call =
@@ -31,7 +31,6 @@ type error =
       }
   | Instruction_reference of Plan.Node_id.t
   | Async_child_requires_suspension of Plan.Node_id.t
-  | Dynamic_inline_arguments of Plan.Node_id.t
   | Child_policy_mismatch of Plan.Node_id.t
   | Arguments_rejected of Plan.Node_id.t * Tool_input_validation.rejection
   | Binding_rejected of Plan.Node_id.t * Catalog.instantiation_error
@@ -54,7 +53,7 @@ type source_node = Ordinary of Plan.node | Nested of nested_node
 
 type expanded_node =
   | Leaf of Plan.node * Plan.Node_id.t
-  | Inline_child of nested_node * Plan.t * call
+  | Inline_child of nested_node * Plan.t * call * Plan.inline_arguments option
   | Async_child of nested_node * Plan.async_child * call
 
 let ( let* ) = Result.bind
@@ -182,8 +181,7 @@ let expand ~execution ~capability_surface ~policy = function
     let* () = if Plan.branch_failure_policy entry.plan = policy then Ok () else Error (Child_policy_mismatch node.alias) in
     let input_schema = Catalog.input_schema_of_params entry.params in
     let* arguments,plan = match node.arguments,entry.execution with
-      | Upstream _,Catalog.Inline -> Error (Dynamic_inline_arguments node.alias)
-      | Upstream input,Catalog.Async -> Ok (Upstream input,entry.plan)
+      | Upstream input,(Catalog.Inline | Catalog.Async) -> Ok (Upstream input,entry.plan)
       | Fixed args,(Catalog.Inline | Catalog.Async) ->
         let* args = Tool_input_validation.validate ~schema:input_schema
             ~name:(Catalog.tool_name entry) ~args ()
@@ -197,8 +195,16 @@ let expand ~execution ~capability_surface ~policy = function
       let exports = List.map (fun (export : Plan.export) ->
           Plan.export ~name:export.name ~node_id:(List.assoc export.node_id mapping)
             ~pointer:export.pointer) (Plan.exports plan) in
-      let call = {alias=node.alias;reference=node.reference;arguments;scope=Inline mapping;exports} in
-      Ok (Inline_child (node,plan,call))
+      let argument = match arguments with
+        | Fixed _ -> None
+        | Upstream input ->
+          let id = namespace_segments [Plan.Node_id.to_string node.alias;"arguments";"validated"] in
+          Some (Plan.inline_arguments ~alias:node.alias ~reference:node.reference ~id
+            ~tool_name:(Catalog.tool_name entry) ~input ~input_schema
+            ~output_schema:(Catalog.output_schema_of_params entry.params) ()) in
+      let argument_node = Option.map (fun (argument : Plan.inline_arguments) -> argument.node.id) argument in
+      let call = {alias=node.alias;reference=node.reference;arguments;scope=Inline {argument_node;mapping};exports} in
+      Ok (Inline_child (node,plan,call,argument))
     | Catalog.Async ->
       let alias = Plan.Node_id.to_string node.alias in
       let submission = namespace_segments [alias;"submission"]
@@ -214,10 +220,12 @@ let expand ~execution ~capability_surface ~policy = function
 
 let expanded_id = function
   | Leaf (node,_) -> node.Plan.id
-  | Inline_child (node,_,_) | Async_child (node,_,_) -> node.alias
+  | Inline_child (node,_,_,_) | Async_child (node,_,_) -> node.alias
 let members = function
   | Leaf (_,id) -> [id]
-  | Inline_child (_,plan,call) -> List.map (fun (leaf : Plan.node) -> namespace [call.alias;leaf.id]) (Plan.nodes plan)
+  | Inline_child (_,plan,call,argument) ->
+    Option.to_list (Option.map (fun (argument : Plan.inline_arguments) -> argument.node.id) argument)
+    @ List.map (fun (leaf : Plan.node) -> namespace [call.alias;leaf.id]) (Plan.nodes plan)
   | Async_child (_,_,call) -> (match call.scope with Async {result;_} -> [result] | Inline _ -> invalid_arg "async child scope")
 
 let find_expanded nodes id =
@@ -229,7 +237,7 @@ let resolve_outer_output nodes ~node_id ~pointer =
   let* producer = find_expanded nodes node_id in
   match producer with
   | Leaf (_, id) -> Ok (id, pointer)
-  | Inline_child (_,_,call) | Async_child (_,_,call) ->
+  | Inline_child (_,_,call,_) | Async_child (_,_,call) ->
     (match Plan.Json_pointer.uncons pointer with
      | None -> Error (Child_output_requires_export node_id)
      | Some (name, suffix) ->
@@ -239,21 +247,21 @@ let resolve_outer_output nodes ~node_id ~pointer =
           Ok (export.node_id, Plan.Json_pointer.append export.pointer suffix)))
 ;;
 
-let rec map_template ~output = function
+let rec map_template ?(param=(fun ~name -> Ok (Plan.Json_template.param ~name))) ~output = function
   | Plan.Json_template.Literal value -> Ok (Plan.Json_template.literal value)
-  | Plan.Json_template.Param { name } -> Ok (Plan.Json_template.param ~name)
+  | Plan.Json_template.Param { name } -> param ~name
   | Plan.Json_template.Output { node_id; pointer } ->
     let* node_id, pointer = output ~node_id ~pointer in
     Ok (Plan.Json_template.output ~node_id ~pointer)
   | Plan.Json_template.Object fields ->
     let* fields = List.fold_left (fun acc (name, template) ->
-        let* fields = acc in let* template = map_template ~output template in Ok ((name, template) :: fields)) (Ok []) fields in
+        let* fields = acc in let* template = map_template ~param ~output template in Ok ((name, template) :: fields)) (Ok []) fields in
     (match Plan.Json_template.object_ (List.rev fields) with
      | Ok template -> Ok template
      | Error (Plan.Json_template.Duplicate_field _) -> invalid_arg "validated template duplicate field")
   | Plan.Json_template.Array items ->
     let* items = List.fold_left (fun acc template ->
-        let* items = acc in let* template = map_template ~output template in Ok (template :: items)) (Ok []) items in
+        let* items = acc in let* template = map_template ~param ~output template in Ok (template :: items)) (Ok []) items in
     Ok (Plan.Json_template.array (List.rev items))
 ;;
 
@@ -265,23 +273,40 @@ let outer_dependencies nodes ids =
 
 let flatten nodes =
   List.fold_left (fun acc expanded ->
-      let* flattened,compiled = acc in
+      let* flattened,compiled,arguments = acc in
       match expanded with
       | Leaf (node, id) ->
         let* input = map_template ~output:(resolve_outer_output nodes) node.input in
         (* An output reference to a child is a dependency on the child's whole
            invocation, not merely its chosen successful producer. *)
         let* after = outer_dependencies nodes (Plan.dependencies node) in
-        Ok (Plan.node ~id ~tool_name:node.tool_name ~input ~after () :: flattened,compiled)
-      | Inline_child (node, child, call) ->
-        let* outer_after = outer_dependencies nodes node.after in
+        Ok (Plan.node ~id ~tool_name:node.tool_name ~input ~after () :: flattened,compiled,arguments)
+      | Inline_child (node, child, call, argument) ->
+        let input_dependencies = match argument with None -> []
+          | Some argument -> Plan.Json_template.dependencies argument.node.input in
+        let* outer_after = outer_dependencies nodes (node.after @ input_dependencies) in
+        let* argument = match argument with
+          | None -> Ok None
+          | Some (argument : Plan.inline_arguments) ->
+            let* input = map_template ~output:(resolve_outer_output nodes) argument.node.input in
+            Ok (Some (Plan.inline_arguments ~alias:argument.alias ~reference:argument.reference
+              ~id:argument.node.id ~tool_name:argument.node.tool_name ~input
+              ~input_schema:argument.input_schema ~output_schema:argument.output_schema ~after:outer_after ())) in
         let local id = namespace [call.alias;id] in
+        let param ~name = Ok (match argument with
+          | None -> Plan.Json_template.param ~name
+          | Some argument -> Plan.Json_template.output ~node_id:argument.node.id
+              ~pointer:(Plan.Json_pointer.of_segments [name])) in
+        let argument_ids = Option.to_list (Option.map (fun (argument : Plan.inline_arguments) -> argument.node.id) argument) in
         let* children = List.fold_left (fun acc (leaf : Plan.node) ->
             let* children = acc in
-            let* input = map_template ~output:(fun ~node_id ~pointer -> Ok (local node_id, pointer)) leaf.input in
-            let after = outer_after @ List.map local leaf.after in
+            let* input = map_template ~param ~output:(fun ~node_id ~pointer -> Ok (local node_id, pointer)) leaf.input in
+            let after = argument_ids @ outer_after @ List.map local leaf.after in
             Ok (Plan.node ~id:(local leaf.id) ~tool_name:leaf.tool_name ~input ~after () :: children)) (Ok []) (Plan.nodes child) in
-        Ok (children @ flattened,compiled)
+        let flattened = children @ flattened in
+        (match argument with
+         | None -> Ok (flattened,compiled,arguments)
+         | Some argument -> Ok (argument.node::flattened,compiled,argument::arguments))
       | Async_child (node,child,call) ->
         let original_input = Plan.child_input child in
         let* after = outer_dependencies nodes (node.after @ Plan.Json_template.dependencies original_input) in
@@ -293,8 +318,8 @@ let flatten nodes =
           | Async {submission;result} -> submission,result
           | Inline _ -> invalid_arg "async child scope" in
         let child = Plan.child_nodes ~child ~submission_id ~result_id ~after () in
-        Ok (child.result::child.submission::flattened,child::compiled)) (Ok ([],[])) nodes
-  |> Result.map (fun (nodes,children) -> List.rev nodes,List.rev children)
+        Ok (child.result::child.submission::flattened,child::compiled,arguments)) (Ok ([],[],[])) nodes
+  |> Result.map (fun (nodes,children,arguments) -> List.rev nodes,List.rev children,List.rev arguments)
 ;;
 
 let rec validate_leaves ?(parameterized=false) plan =
@@ -306,7 +331,7 @@ let rec validate_leaves ?(parameterized=false) plan =
           | Direct_only ->
             Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name }))
       | Some {target=Plan.Child_submission child;_} -> validate_leaves ~parameterized:true (Plan.child_plan child.child)
-      | Some {target=Plan.Child_result _;_} -> Ok ()
+      | Some {target=(Plan.Child_arguments _ | Plan.Child_result _);_} -> Ok ()
       | None -> Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name })) (Ok ()) (Plan.nodes plan) in
   (if parameterized then Plan.validate_parameterized_inputs plan
    else Plan.prepare_inputs plan |> Result.map (fun _ -> ()))
@@ -331,15 +356,15 @@ let compile ~execution ~capability_surface json =
       let* expanded = List.fold_left (fun acc node -> let* nodes = acc in
           let* node = expand ~execution ~capability_surface ~policy:request.branch_failure_policy node in Ok (node :: nodes)) (Ok []) source
           |> Result.map List.rev in
-      let* nodes,children = flatten expanded in
+      let* nodes,children,arguments = flatten expanded in
       let* exports = List.fold_left (fun acc (export : Plan.export) ->
           let* exports = acc in
           let* node_id, pointer = resolve_outer_output expanded ~node_id:export.node_id ~pointer:export.pointer in
           Ok (Plan.export ~name:export.name ~node_id ~pointer :: exports)) (Ok []) request.exports |> Result.map List.rev in
-      let* plan = Plan.create_compiled ~children ~descriptors:(Surface.descriptors capability_surface)
+      let* plan = Plan.create_compiled ~children ~arguments ~descriptors:(Surface.descriptors capability_surface)
           ~branch_failure_policy:request.branch_failure_policy ~exports nodes
           |> Result.map_error (fun error -> Expanded_plan_rejected error) in
-      let calls = List.filter_map (function Leaf _ -> None | Inline_child (_,_,call) | Async_child (_,_,call) -> Some call) expanded in
+      let calls = List.filter_map (function Leaf _ -> None | Inline_child (_,_,call,_) | Async_child (_,_,call) -> Some call) expanded in
       Ok (plan, calls) in
   let* () = validate_leaves plan in
   Ok { plan; calls }
@@ -355,8 +380,9 @@ let call_to_json (call : call) = `Assoc
             | Error (Request.Unsubstituted_param _) -> invalid_arg "public child input contains an unbound parameter" in
           `Assoc ["kind",`String "upstream";"input",input])
     ; "scope", (match call.scope with
-        | Inline mapping -> `Assoc ["kind",`String "inline";"node_mapping",`List (List.map (fun (source,expanded) ->
+        | Inline {argument_node;mapping} -> `Assoc (["kind",`String "inline";"node_mapping",`List (List.map (fun (source,expanded) ->
             `Assoc ["source",id_json source;"expanded",id_json expanded]) mapping)]
+            @ match argument_node with None -> [] | Some id -> ["argument_node",id_json id])
         | Async {submission;result} -> `Assoc ["kind",`String "async";"submission",id_json submission;"result",id_json result])
     ; "exports", `List (List.map (fun (export : Plan.export) -> `Assoc
         [ "name", `String export.name; "node", id_json export.node_id
@@ -380,7 +406,6 @@ let error_to_json error =
       ; "availability", (match availability with None -> `Null | Some value -> `String (Surface.capability_availability_to_string value)) ]
   | Instruction_reference id -> node "child_is_instruction" id
   | Async_child_requires_suspension id -> node "async_child_requires_suspension" id
-  | Dynamic_inline_arguments id -> node "dynamic_inline_arguments" id
   | Child_policy_mismatch id -> node "child_policy_mismatch" id
   | Arguments_rejected (id, rejection) -> tag "child_arguments_rejected" [ "node_id", id_json id; "detail", `String rejection.message ]
   | Binding_rejected (id, error) -> tag "child_binding_rejected" [ "node_id", id_json id; "error", Catalog.instantiation_error_to_json error ]

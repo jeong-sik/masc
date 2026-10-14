@@ -1629,7 +1629,7 @@ let submission_operand (attempt : attempt) plan =
   match Plan.contract plan attempt.occurrence.node_id with
   | Some {target=Plan.Child_submission child;_} when not attempt.occurrence.readonly
       && String.equal attempt.occurrence.tool_name child.submission.tool_name -> Ok child
-  | Some {target=(Plan.Child_submission _ | Child_result _ | Descriptor_target _);_} | None ->
+  | Some {target=(Plan.Child_arguments _ | Plan.Child_submission _ | Child_result _ | Descriptor_target _);_} | None ->
     Error (Node_identity_conflict attempt.occurrence.node_id)
 
 let original_nested_context journal =
@@ -1767,7 +1767,7 @@ let child_result_binding (attempt : attempt) ~plan =
   let* child = match Plan.contract plan attempt.occurrence.node_id with
     | Some {target=Plan.Child_result child;_} when attempt.occurrence.readonly
         && attempt.occurrence.input = `Assoc [] -> Ok child
-    | Some {target=(Plan.Child_submission _ | Child_result _ | Descriptor_target _);_} | None ->
+    | Some {target=(Plan.Child_arguments _ | Plan.Child_submission _ | Child_result _ | Descriptor_target _);_} | None ->
       Error (Node_identity_conflict attempt.occurrence.node_id) in
   let* link = update_existing journal (fun state -> None,
     let* () = check_attempt attempt state in

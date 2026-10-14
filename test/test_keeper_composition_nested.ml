@@ -137,7 +137,7 @@ let test_repeated_child_identity_bindings_and_output_mapping () =
   check bool "exact revision retained" true (Skill_reference.equal reference call.reference);
   let args = match call.arguments with Nested.Fixed args -> args | Upstream _ -> fail "expected fixed arguments" in
   check bool "canonical fixed bindings retained" true (Yojson.Safe.equal args (`Assoc [ "query", `String "docker" ]));
-  let mapping = match call.scope with Nested.Inline mapping -> mapping | Nested.Async _ -> fail "inline scope" in
+  let mapping = match call.scope with Nested.Inline {mapping;_} -> mapping | Nested.Async _ -> fail "inline scope" in
   let good_id = List.find (fun (id, _) -> Plan.Node_id.to_string id = "lane/~profile") mapping |> snd in
   let downstream = Plan.nodes plan |> List.find (fun (node : Plan.node) -> node.tool_name = "keeper_memory_search"
       && List.length (Plan.dependencies node) = 2) in
@@ -266,6 +266,60 @@ let test_upstream_child_arguments_bind_exact_declared_plan () =
    | Error (Nested.Invalid_call_field _) -> () | Error _ | Ok _ -> fail "ambiguous child input accepted")
 ;;
 
+let test_upstream_inline_arguments_and_whole_child_failure () =
+  Eio_main.run @@ fun _ ->
+  let surface,reference = fixture () in
+  let child alias source = `Assoc ["id",`String alias;"skill_reference",Skill_reference.to_yojson reference;
+    "input",`Assoc ["kind",`String "object";"fields",`List
+      [`Assoc ["name",`String "query";"value",`Assoc
+        ["kind",`String "output";"node",`String source;"pointer",`String "/profile"]]]]] in
+  let alias = "a/quote\"~" in
+  let lookalike = Yojson.Safe.to_string (`List [`String alias;`String "arguments";`String "validated"]) in
+  let compiled = compile surface (request ~exports:[exported "answer" alias pointer]
+      [leaf "first";leaf "second";child alias "first";child "b" "second";
+       consumer "downstream" alias pointer;leaf lookalike]) in
+  let plan = Nested.plan compiled in
+  let ids = List.map (fun (node : Plan.node) -> Plan.Node_id.to_string node.id) (Plan.nodes plan) in
+  check int "private argument IDs cannot collide with public lookalikes" (List.length ids)
+    (List.length (List.sort_uniq String.compare ids));
+  List.iter (fun (call : Nested.call) -> match call.scope with
+    | Nested.Inline {argument_node=Some id;_} ->
+      (match Plan.contract plan id with Some {target=Plan.Child_arguments _;_} -> ()
+       | Some _ | None -> fail "inline input lost its pure private contract");
+      check bool "argument validation invents no ordinary descriptor" true (Plan.descriptor plan id = None)
+    | Inline {argument_node=None;_} | Async _ -> fail "upstream inline input lost its validation node") (Nested.calls compiled);
+  let id source = Plan.Node_id.make (Yojson.Safe.to_string (`List [`String source])) |> require "parent ID" in
+  let queries = ref [] and downstream = ref false in
+  let dispatch ~tool_use_id:_ ~(node : Plan.node) ~descriptor:_ ~schedule:_ ~input =
+    if Plan.Node_id.equal node.id (id "downstream") then downstream := true;
+    if node.tool_name = "keeper_memory_search" then (
+      queries := Yojson.Safe.Util.(input |> member "query" |> to_string) :: !queries;
+      Executor.dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Runtime_failure
+          ~effect_disposition:Tool_result.Proven_pre_effect ~start_time:(Tool_timing.start ()) "fixture child sibling failed"))
+    else
+      let profile = if Plan.Node_id.equal node.id (id "second") then "host" else "docker" in
+      Executor.dispatch_result (Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
+        ~data:(`Assoc ["profile",`String profile;"lane",`Null;"endpoint",`Null;"operator_action",`Null]) ()) in
+  let failure = match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+    | Error failure -> failure | Ok _ -> fail "child sibling failures were promoted to success" in
+  check (list string) "one exact inline Skill receives two different upstream arguments" ["docker";"host"]
+    (List.sort String.compare !queries);
+  check bool "whole-child failure blocks selected-export consumers" false !downstream;
+  check bool "independent useful work remains completed" true
+    (List.exists (fun (node : Executor.node_result) -> Plan.Node_id.equal node.node_id (id lookalike)
+       && Tool_result.is_success node.result) failure.settled);
+  let lookup id = List.find_map (fun (node : Executor.node_result) ->
+    if Plan.Node_id.equal id node.node_id && Tool_result.is_success node.result
+    then Some (Tool_result.data node.result) else None) failure.settled in
+  (match Plan.resolve_exports plan ~lookup with
+   | [_,Ok (`String "docker")] -> ()
+   | _ -> fail "upstream inline sibling failure lost the successful selected export");
+  let encoded = Masc.Keeper_tool_plan_request.to_yojson plan |> require "private inline evidence encoding" in
+  (match Masc.Keeper_tool_plan_request.plan_of_json ~descriptors:(Surface.descriptors surface) encoded with
+   | Error _ -> () | Ok _ -> fail "private inline validation became public route authority")
+;;
+
 let test_refusals_preserve_frozen_authority_and_contracts () =
   let surface, reference = fixture () in
   let check_error label surface json accepts = match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Inline ~capability_surface:surface json with
@@ -346,8 +400,12 @@ let test_nested_draft_freezes_and_revalidates_recipe () =
     "input",`Assoc ["kind",`String "literal";"value",`Assoc ["query",`String "docker"]]]] in
   (match Draft.prepare ~base_path ~capability_surface:surface ~keeper_name:"fixture"
       ~execution:Masc.Keeper_tool_composition_catalog.Inline dynamic_inline with
-   | Error (Draft.Nested_rejected (Nested.Dynamic_inline_arguments _)) -> ()
-   | Error _ | Ok _ -> fail "unsupported inline input lost its typed draft refusal");
+   | Ok draft ->
+     check int "inline input retains one exact child" 1 (List.length (Draft.nested_calls draft));
+     (match (List.hd (Draft.nested_calls draft)).scope with
+      | Nested.Inline {argument_node=Some _;_} -> ()
+      | Inline {argument_node=None;_} | Async _ -> fail "draft omitted inline argument authority")
+   | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)));
   let draft = prepare ~base_path surface recipe in
   let stored = read_document ~base_path (Draft.reference draft) in
   let open Yojson.Safe.Util in
@@ -731,6 +789,7 @@ let () = run "exact inline composition compiler"
         ; test_case "whole-child failure barrier with useful independent results" `Quick test_child_failure_blocks_whole_child_consumers_but_keeps_exports
         ; test_case "fixed async child compiles exact canonical result barrier" `Quick test_fixed_async_child_compiles_exact_result_barrier
         ; test_case "upstream arguments bind repeated exact async Skills independently" `Quick test_upstream_child_arguments_bind_exact_declared_plan
+        ; test_case "upstream inline arguments preserve namespaces and whole-child failure" `Quick test_upstream_inline_arguments_and_whole_child_failure
         ; test_case "authority, arguments, cycles and semantic refusals" `Quick test_refusals_preserve_frozen_authority_and_contracts
         ; test_case "frozen nested draft recipe and exact provenance" `Quick test_nested_draft_freezes_and_revalidates_recipe
         ; test_case "public prepare/run admits exact children once and delivers through parent" `Quick

@@ -3235,7 +3235,7 @@ description: Wait for the original owned job and read its complete stdout.
 ```toml composition
 [[compositions]]
 name = "nested-owned-job"
-execution = "async"
+execution = %S
 branch_failure_policy = %S
 %s
 [[compositions.nodes]]
@@ -3259,7 +3259,8 @@ name = "stdout"
 node = "consume"
 pointer = "/content"
 ```
-|} (Masc.Keeper_tool_plan.branch_failure_policy_to_string branch_failure_policy) parameters job_input in
+|} (match execution with Masc.Keeper_tool_composition_catalog.Inline -> "inline" | Async -> "async")
+    (Masc.Keeper_tool_plan.branch_failure_policy_to_string branch_failure_policy) parameters job_input in
   write (Filename.concat skill_dir "SKILL.md") source;
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
   Fs_compat.mkdir_p (Filename.dirname declaration);
@@ -3490,6 +3491,65 @@ let test_upstream_arguments_reject_before_child_activation () =
      "extra-field",original_job,object_ ["job_id",output;"extra",output]];
   check int "invalid arguments never create another job" 1 (effect_count fixture "create");
   check int "invalid arguments never start another job" 1 (effect_count fixture "start")
+
+let test_public_upstream_inline_arguments ~reject () =
+  let cases = if reject then ["enum";"object-type";"extra-field"] else ["valid"] in
+  List.iter (fun label ->
+  with_nested_job_skill ~wait_only:true ~parameterized:true ~execution:Masc.Keeper_tool_composition_catalog.Inline
+  @@ fun ~env:_ ~fixture ~config ~surface:_ ~reference ~runtime:_ ~runtime_reads
+      ~publication_recovery:_ ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot:_ ->
+  let module Ledger = Masc.Keeper_skill_activation_ledger in
+  let id = read (Filename.concat fixture.base_path "physical-original-job") in
+  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-original-inline-result"
+    ~turn:41 "keeper_job_status" (`Assoc ["job_id",`String id])) |> ignore;
+  let backend_at_ready = List.length (calls fixture) in
+  let bytes = if label = "enum" then "wrong-original-job" else id in
+  let blob = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path) ~bytes ~mime:"text/plain" in
+  let output = `Assoc ["kind",`String "output";"node",`String "arguments";"pointer",`String "/content"] in
+  let fields = ["job_id",output] @ if label = "extra-field" then ["extra",output] else [] in
+  let input = if label = "object-type" then output else
+      `Assoc ["kind",`String "object";"fields",`List
+        (List.map (fun (name,value) -> `Assoc ["name",`String name;"value",value]) fields)] in
+  let recipe = `Assoc ["execution",`String "inline";"nodes",`List
+      [`Assoc ["id",`String "arguments";"tool",`String "keeper_artifact_read";
+        "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String blob.sha256]]];
+       `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"input",input]];
+      "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
+  let started = Mtime_clock.counter () in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-public-upstream-inline" ~turn:41 "keeper_composition_prepare" recipe) in
+  let activations () = Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
+      |> require "inline original activation authority"
+      |> function None -> [] | Some ledger -> Ledger.activations ledger in
+  check int "inline prepare never activates the child" 0 (List.length (activations ()));
+  check int "inline prepare has no backend calls" backend_at_ready (List.length (calls fixture));
+  let draft = prepared |> member "draft" |> composition_reference "public upstream inline draft" in
+  let result = with_bundle fixture (fun bundle -> invoke_raw bundle
+      ~tool_use_id:"run-public-upstream-inline" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
+  (match reject,result with
+   | true,Error _ ->
+     check int (label ^ " is rejected before child activation") 0 (List.length (activations ()));
+     check int "invalid inline arguments never select a runtime" 0 !runtime_reads
+   | false,Ok output ->
+     let completed = result_document ~base_path:fixture.base_path output.Agent_core.Types.content in
+     check_json "inline parent returns the original full selected export" (`String stdout_bytes)
+       (completed |> member "exports" |> member "stdout" |> member "value");
+     check int "valid inline arguments activate exactly one child" 1 (List.length (activations ()));
+     check int "valid inline child binds its runtime once" 1 !runtime_reads;
+     let argument_id = prepared |> member "nested_calls" |> to_list |> List.hd
+       |> member "scope" |> member "argument_node" |> to_string in
+     check_json "public inline evidence retains the actual validated input" (`Assoc ["job_id",`String id])
+       (composition_nodes fixture completed |> composition_node argument_id |> member "input");
+     check bool "inline completion does not become an async submission" true (member "request_id" completed = `Null)
+   | true,Ok _ -> failf "%s reached public inline success" label
+   | false,Error error -> failf "valid public inline arguments failed: %s" error.Agent_core.Types.message);
+  check int "canonical inline reads need no backend dispatch" backend_at_ready (List.length (calls fixture));
+  check int "inline argument binding creates no additional job" 1 (effect_count fixture "create");
+  check int "inline argument binding starts no additional job" 1 (effect_count fixture "start");
+  Printf.eprintf "UPSTREAM_INLINE_MEASURE case=%s prepare_to_result_ms=%.3f creates=%d starts=%d runtime_reads=%d\n%!"
+    label (Mtime.Span.to_float_ns (Mtime_clock.count started) /. 1_000_000.)
+    (effect_count fixture "create") (effect_count fixture "start") !runtime_reads) cases
 
 let lose_native_parent_after_child_acceptance base_path draft_sha run_id =
   with_nested_job_skill ~fixture_base_path:base_path ~wait_only:true ~parameterized:true
@@ -3829,8 +3889,9 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
   check int "canonical result recovery performs zero further backend calls" backend (List.length (calls fixture));
   check int "fresh process uses sealed original runtime without current callback" 0 !runtime_reads
 
-let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () =
-  with_nested_job_skill ~execution:Masc.Keeper_tool_composition_catalog.Inline
+let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic_arguments=false) () =
+  with_nested_job_skill ~wait_only:dynamic_arguments ~parameterized:dynamic_arguments
+    ~execution:Masc.Keeper_tool_composition_catalog.Inline
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
       ~publication_recovery ~physical_turn_ref ~delivery ~recorder:_ ~snapshot ->
   let module Async = Masc.Keeper_msg_async in
@@ -3840,13 +3901,26 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () =
   let module Async_delivery = Masc.Keeper_skill_async_delivery in
   let module Recorder = Masc.Keeper_skill_activation_recorder in
   let module Surface = Masc.Keeper_capability_surface in
+  let argument_nodes,child_input = if dynamic_arguments then (
+    let id = read (Filename.concat fixture.base_path "physical-original-job") in
+    let blob = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path)
+        ~bytes:id ~mime:"text/plain" in
+    [`Assoc ["id",`String "arguments";"tool",`String "keeper_artifact_read";
+      "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String blob.sha256]]]],
+    ("input",`Assoc ["kind",`String "object";"fields",`List
+      [`Assoc ["name",`String "job_id";"value",`Assoc ["kind",`String "output";
+        "node",`String "arguments";"pointer",`String "/content"]]]]))
+    else [],("args",`Assoc []) in
+  let backend_before_prepare = if dynamic_arguments then List.length (calls fixture) else 0 in
   let recipe = `Assoc ["execution",`String "async";"nodes",`List
-      [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"args",`Assoc []]];
+      (argument_nodes @ [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;child_input]]);
       "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
   let prepare_started = Mtime_clock.counter () in
   let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"prepare-nested-job" ~turn:41 "keeper_composition_prepare" recipe) in
-  check bool "nested prepare never launches a program" false (Sys.file_exists fixture.daemon_path);
+  if dynamic_arguments then
+    check int "dynamic inline prepare has no backend calls" backend_before_prepare (List.length (calls fixture))
+  else check bool "nested prepare never launches a program" false (Sys.file_exists fixture.daemon_path);
   let before_activation = Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
     |> require "preparation activation authority" in
   check int "nested preparation activates no child" 0
@@ -3993,11 +4067,17 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () =
   let expanded name = mappings |> List.find (fun row -> row |> member "source" |> to_string = name)
     |> member "expanded" |> to_string in
   let waiting_nodes = composition_nodes fixture waiting and completed_nodes = composition_nodes fixture completed in
-  List.iter (fun name -> List.iter (fun field -> check_json ("nested original occurrence " ^ name ^ "/" ^ field)
-      (composition_node (expanded name) waiting_nodes |> member field)
-      (composition_node (expanded name) completed_nodes |> member field)) ["execution_id";"tool_use_id"]) ["launch";"await"];
-  check_json "nested launch result is retained without dispatch" (`String "retained_completion")
-    (composition_node (expanded "launch") completed_nodes |> member "execution_origin");
+  let retained_node = if dynamic_arguments then
+      prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" |> member "argument_node" |> to_string
+    else expanded "launch" in
+  List.iter (fun node -> List.iter (fun field -> check_json ("nested original occurrence " ^ node ^ "/" ^ field)
+      (composition_node node waiting_nodes |> member field)
+      (composition_node node completed_nodes |> member field)) ["execution_id";"tool_use_id"])
+    [retained_node;expanded "await"];
+  check_json "original completed child operand is retained without dispatch" (`String "retained_completion")
+    (composition_node retained_node completed_nodes |> member "execution_origin");
+  if dynamic_arguments then check_json "fresh supervisor keeps original resolved inline arguments"
+    (`Assoc ["job_id",`String id]) (composition_node retained_node completed_nodes |> member "input");
   let scopes = completed |> member "nested_scopes" |> to_list in
   check int "final result retains one original child scope" 1 (List.length scopes);
   check_json "original child completed" (`String "completed") (List.hd scopes |> member "disposition");
@@ -4512,6 +4592,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () =
      "backend_calls_after_result_ready",`Int (List.length (calls fixture)-ready_backend);
      "original_activation_count",`Int 1;"activation_fault_refusals",`Int 2;
      "fault_after_durable_acceptance",`Bool fault_after_acceptance;
+     "upstream_inline_arguments",`Bool dynamic_arguments;
      "accepted_fault_worker_calls",`Int !accepted_worker_calls;
      "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
 
@@ -4657,10 +4738,16 @@ let () = match Array.to_list Sys.argv with
       ; test_case "upstream async Skill arguments survive fresh child and parent continuation" `Quick (test_fixed_async_skill_child ~dynamic_arguments:true)
       ; test_case "async Skill child launches its own isolated job once and resumes the whole result" `Quick (test_fixed_async_skill_child ~launch_in_child:true)
       ; test_case "upstream enum, type and extra-field rejection creates no child activation" `Quick test_upstream_arguments_reject_before_child_activation
+      ; test_case "public inline Skill consumes upstream arguments without async submission" `Quick
+          (test_public_upstream_inline_arguments ~reject:false)
+      ; test_case "public inline argument refusal precedes activation and leaf effects" `Quick
+          (test_public_upstream_inline_arguments ~reject:true)
       ; test_case "real parent loss retains upstream arguments and original accepted child" `Quick test_native_child_acceptance_survives_physical_parent_loss
       ; test_case "fresh supervisor retains nested child authority through owned-job waits" `Quick
           (test_nested_skill_job_continuation ~fault_after_acceptance:false)
       ; test_case "accepted worker activation fault keeps original child wait recoverable" `Quick
           (test_nested_skill_job_continuation ~fault_after_acceptance:true)
+      ; test_case "fresh supervisor retains upstream inline arguments and original child authority" `Quick
+          (test_nested_skill_job_continuation ~dynamic_arguments:true)
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

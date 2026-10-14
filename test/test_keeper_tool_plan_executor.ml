@@ -1686,10 +1686,10 @@ let test_compiled_child_node_contracts () =
   List.iter (function
     | Executor.Serial_batch scheduled ->
       (match scheduled.contract.target with Plan.Child_submission _ -> ()
-       | Plan.Child_result _ | Plan.Descriptor_target _ -> fail "result barrier acquired Serial lifetime")
+       | Plan.Child_arguments _ | Plan.Child_result _ | Plan.Descriptor_target _ -> fail "result barrier acquired Serial lifetime")
     | Executor.Concurrent_batch scheduled -> List.iter (fun (scheduled : Executor.scheduled_node) ->
         match scheduled.contract.target with Plan.Child_result _ -> ()
-        | Plan.Child_submission _ | Plan.Descriptor_target _ -> fail "submission was scheduled concurrently") scheduled)
+        | Plan.Child_arguments _ | Plan.Child_submission _ | Plan.Descriptor_target _ -> fail "submission was scheduled concurrently") scheduled)
     (Executor.schedule plan)
 
 let test_compiled_child_operand_identity () =

@@ -1375,7 +1375,7 @@ let rec async_worker_result
         (Tool_result.make_err ~tool_name:node.Plan.tool_name ~start_time
           ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect detail) in
     match target with
-    | Plan.Descriptor_target _ -> refuse "ordinary tools do not enter the native child producer"
+    | Plan.Descriptor_target _ | Plan.Child_arguments _ -> refuse "this target does not enter the native child producer"
     | Plan.Child_submission child ->
       Option.iter (fun before -> before ()) before_child_dispatch;
       let original =
@@ -1571,7 +1571,7 @@ let rec async_worker_result
                | None -> Complete_original_result
                | Some _ ->
                  match Plan.contract plan node.node_id with
-                 | None | Some {target=(Plan.Descriptor_target _ | Plan.Child_result _);_} ->
+                 | None | Some {target=(Plan.Descriptor_target _ | Plan.Child_arguments _ | Plan.Child_result _);_} ->
                    Complete_original_result
                  | Some {target=Plan.Child_submission _;_} -> node_continuation_recovery node)
         | Executor.Run_journal_rejected error ->

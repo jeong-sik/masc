@@ -918,6 +918,14 @@ let input_schema_of_params = function
       ]
 ;;
 
+let output_schema_of_params params =
+  let properties = List.map (fun param -> param.param_name,
+      `Assoc ["type",`String (param_type_to_string param.param_type)]) params in
+  `Assoc ["type",`String "object";"properties",`Assoc properties;
+    "required",`List (List.map (fun param -> `String param.param_name) params);
+    "additionalProperties",`Bool false]
+;;
+
 type instantiation_error = Plan.parameter_binding_error =
   | Missing_argument of string
   | Instantiated_plan_rejected of Plan.error

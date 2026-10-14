@@ -294,6 +294,7 @@ let execute_one
       ~tool_use_id_for_node
       ~dispatch
       ?launch_invocation_of
+      ?admit_node
       ?dispatch_compiled
       ?journal
       ?observe_node_result
@@ -378,9 +379,18 @@ let execute_one
                ~class_:Tool_result.Runtime_failure
                ~tool_name:node.tool_name ~start_time exn))
         (fun () ->
+          match (match admit_node with None -> Ok () | Some admit -> admit ~node) with
+          | Error rejection ->
+            dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
+              (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Runtime_failure
+                ~effect_disposition:Tool_result.Proven_pre_effect ~start_time
+                ~data:rejection.data rejection.detail)
+          | Ok () ->
           match scheduled.contract.target with
           | Keeper_tool_plan.Descriptor_target descriptor ->
             dispatch ?launch_replay ~tool_use_id ~node ~descriptor ~schedule:scheduled.schedule ~input ()
+          | Keeper_tool_plan.Child_arguments _ ->
+            dispatch_result (Tool_result.make_ok ~tool_name:node.tool_name ~start_time ~data:input ())
           | (Keeper_tool_plan.Child_submission _ | Keeper_tool_plan.Child_result _) as target ->
             match attempt,dispatch_compiled with
             | Some attempt,Some dispatch ->
@@ -526,6 +536,7 @@ let execute_with_tool_use_id
       ~tool_use_id_for_node
       ~dispatch
       ?launch_invocation_of
+      ?admit_node
       ?dispatch_compiled
       ?journal
       ?observe_node_result
@@ -764,6 +775,7 @@ let execute_with_tool_use_id
                 ~tool_use_id_for_node
                 ~dispatch
                 ?launch_invocation_of
+                ?admit_node
                 ?dispatch_compiled
                 ?journal
                 ?observe_node_result
@@ -868,7 +880,7 @@ let execute_with_tool_use_id
 
 (* TEL-OK: forwards to [execute_with_tool_use_id] below; no new effect
    originates here, so there is nothing local to instrument. *)
-let execute ~plan ~run_id ~dispatch ?launch_invocation_of ?dispatch_compiled ?journal ?observe_node_result () =
+let execute ~plan ~run_id ~dispatch ?launch_invocation_of ?admit_node ?dispatch_compiled ?journal ?observe_node_result () =
   let tool_use_id_for_node ~execution_id _node =
     "composition-node:" ^ Ids.Execution_id.to_string execution_id
   in
@@ -878,6 +890,7 @@ let execute ~plan ~run_id ~dispatch ?launch_invocation_of ?dispatch_compiled ?jo
     ~tool_use_id_for_node
     ~dispatch
     ?launch_invocation_of
+    ?admit_node
     ?dispatch_compiled
     ?journal
     ?observe_node_result
@@ -1069,15 +1082,6 @@ let execute_keeper_with_authority
         ?truncated_to
         result
   in
-  let dispatch ?launch_replay ~tool_use_id ~node ~descriptor ~schedule ~input () =
-    match (match admit_node with None -> Ok () | Some admit -> admit ~node) with
-    | Ok () -> dispatch_admitted ?launch_replay ~tool_use_id ~node ~descriptor ~schedule ~input ()
-    | Error rejection ->
-      dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
-        (Tool_result.make_err ~tool_name:node.Keeper_tool_plan.tool_name
-           ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
-           ~start_time:(Tool_timing.start ()) ~data:rejection.data rejection.detail)
-  in
   (* Derive the exact invocation identity a launch leaf will pass to the
      owned-job runtime, from the same ambient values that boundary reads:
      the turn snapshot supplies trace_id (and the turn fallback), the keeper
@@ -1103,14 +1107,6 @@ let execute_keeper_with_authority
       Some { Keeper_tool_execution_journal.trace_id; turn_ref }
     | Some _, Some _ | Some _, None | None, _ -> None
   in
-  let dispatch_compiled = Option.map (fun dispatch ~attempt ~target ~tool_use_id ~node ~schedule ~input ->
-    match (match admit_node with None -> Ok () | Some admit -> admit ~node) with
-    | Ok () -> dispatch ~attempt ~target ~tool_use_id ~node ~schedule ~input
-    | Error rejection ->
-      dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
-        (Tool_result.make_err ~tool_name:node.Keeper_tool_plan.tool_name
-          ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
-          ~start_time:(Tool_timing.start ()) ~data:rejection.data rejection.detail)) dispatch_compiled in
   let tool_use_id_for_node ~execution_id:_ node =
     nested_tool_use_id ~composition_run_id parent_invocation node.Keeper_tool_plan.id
   in
@@ -1118,8 +1114,9 @@ let execute_keeper_with_authority
     ~plan
     ~run_id
     ~tool_use_id_for_node
-    ~dispatch
+    ~dispatch:dispatch_admitted
     ~launch_invocation_of
+    ?admit_node
     ?dispatch_compiled
     ?journal
     ?observe_node_result

@@ -168,6 +168,7 @@ val execute
   -> run_id:Keeper_tool_plan.Run_id.t
   -> dispatch:dispatch
   -> ?launch_invocation_of:(unit -> Keeper_tool_execution_journal.launch_invocation option)
+  -> ?admit_node:(node:Keeper_tool_plan.node -> (unit, admission_rejection) result)
   -> ?dispatch_compiled:compiled_dispatch
   -> ?journal:Keeper_tool_execution_journal.worker
   -> ?observe_node_result:(node_result -> (unit, string) result)

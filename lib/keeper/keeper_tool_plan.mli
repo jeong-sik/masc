@@ -359,8 +359,23 @@ val child_nodes : child:async_child -> submission_id:Node_id.t -> result_id:Node
     readonly Concurrent result depends on submission and exposes only the
     child plan's validated named exports. No descriptor is copied or invented. *)
 
+type inline_arguments = private
+  { alias : Node_id.t
+  ; reference : Skill_reference.t
+  ; node : node
+  ; input_schema : Yojson.Safe.t
+  ; output_schema : Yojson.Safe.t
+  }
+(** Pure compiler-owned argument validation. Its resolved value is available
+    only after the frozen parameter schema accepts it. It submits no work. *)
+
+val inline_arguments : alias:Node_id.t -> reference:Skill_reference.t ->
+  id:Node_id.t -> tool_name:string -> input:Json_template.t ->
+  input_schema:Yojson.Safe.t -> output_schema:Yojson.Safe.t ->
+  ?after:Node_id.t list -> unit -> inline_arguments
+
 val create_compiled : descriptors:Keeper_tool_descriptor.t list ->
-  children:child_nodes list -> ?branch_failure_policy:branch_failure_policy ->
+  children:child_nodes list -> ?arguments:inline_arguments list -> ?branch_failure_policy:branch_failure_policy ->
   ?exports:export list -> node list -> (t, error) result
 (** Native compiler entry. Every compiled node must exactly match its operand;
     a plain node or model JSON cannot acquire a child route by tool name. *)
@@ -368,6 +383,7 @@ val compiled_children : t -> child_nodes list
 
 type execution_target =
   | Descriptor_target of Keeper_tool_descriptor.t
+  | Child_arguments of inline_arguments
   | Child_submission of child_nodes
   | Child_result of child_nodes
 

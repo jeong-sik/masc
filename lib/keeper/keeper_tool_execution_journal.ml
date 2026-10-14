@@ -25,7 +25,8 @@ type completed =
   ; truncated_to : int option
   }
 
-type replay = Dispatch | Reuse_completed of completed | Recheck_job_result of completed
+type recheck = { execution_id : Ids.Execution_id.t; tool_use_id : string }
+type replay = Dispatch | Reuse_completed of completed | Recheck_job_result of recheck
 
 type error =
   | Invalid_source of string
@@ -317,12 +318,18 @@ let job_wait_of_json = optional (fun json ->
   match Keeper_owned_job_store.Job_id.of_string (string json) with
   | Ok job_id -> job_id | Error detail -> refuse detail)
 
-let valid_job_wait (occurrence : occurrence) result phase job_id =
-  let read_only_action = match Tool_schemas_owned_job.find_definition occurrence.tool_name with
-    | Some { action = Tool_schemas_owned_job.Read_result; read_only = true; _ } -> true
-    | Some { action = (Start | Status | Cancel | Read_result); _ } | None -> false in
-  occurrence.readonly && read_only_action
-  && occurrence.input = `Assoc ["job_id", `String (Keeper_owned_job_store.Job_id.to_string job_id)]
+let result_read_job (occurrence : occurrence) =
+  let readonly_action = match Tool_schemas_owned_job.find_definition occurrence.tool_name with
+    | Some {action=Tool_schemas_owned_job.Read_result;read_only;_} -> read_only
+    | Some {action=(Start | Status | Cancel);_} | None -> false in
+  if not (occurrence.readonly && readonly_action) then None
+  else match occurrence.input with
+    | `Assoc ["job_id", `String id] ->
+        (match Keeper_owned_job_store.Job_id.of_string id with Ok job_id -> Some job_id | Error _ -> None)
+    | _ -> None
+
+let valid_job_wait occurrence result phase job_id =
+  result_read_job occurrence = Some job_id
   && phase = Some Tool_result.Proven_pre_effect
   && (match result with Tool_result.Deferred _ -> true | Completed _ | Failed _ -> false)
 
@@ -330,9 +337,13 @@ let replay_for binding node_id = function
   | None -> Ok Dispatch
   | Some (Settled (_, ({result = Tool_result.Completed _; _} as completed), _, _)) -> Ok (Reuse_completed completed)
   | Some (Settled (occurrence, completed, phase, Some job_id))
-      when valid_job_wait occurrence completed.result phase job_id -> Ok (Recheck_job_result completed)
+      when valid_job_wait occurrence completed.result phase job_id ->
+      Ok (Recheck_job_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
   | Some (Settled (_, {result = Tool_result.Failed _; _}, Some Tool_result.Proven_pre_effect, _)) -> Ok Dispatch
-  | Some (Attempting occurrence) when occurrence.readonly && not (same_binding occurrence.owner binding) -> Ok Dispatch
+  | Some (Attempting occurrence) when occurrence.readonly && not (same_binding occurrence.owner binding) ->
+      (match result_read_job occurrence with
+       | Some _ -> Ok (Recheck_job_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+       | None -> Ok Dispatch)
   | Some (Attempting _ | Settled _) -> Error (Replay_not_proven node_id)
 
 let decode_state bytes = decode (fun () ->

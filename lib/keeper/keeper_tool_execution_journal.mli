@@ -25,7 +25,8 @@ type completed =
   ; truncated_to : int option
   }
 
-type replay = Dispatch | Reuse_completed of completed | Recheck_job_result of completed
+type recheck = { execution_id : Ids.Execution_id.t; tool_use_id : string }
+type replay = Dispatch | Reuse_completed of completed | Recheck_job_result of recheck
 
 type error =
   | Invalid_source of string

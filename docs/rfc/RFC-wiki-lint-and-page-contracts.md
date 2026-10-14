@@ -96,6 +96,8 @@ llm-wiki 의 작업은 ingest, query, lint 셋이다. promote 는 운영자 지�
 | `findings` | array of finding | 이름순, 같은 페이지 안에서는 줄 번호순 |
 | `truncated` | bool | 더 있으면 true |
 | `next_cursor` | string 또는 null | 더 있을 때만 문자열이다. 다음 호출의 `cursor` 로 넘긴다 |
+| `log_unknown_action` | int | `log.md` 에서 동작 단어가 §7 의 아는 둘 밖인 줄의 수 |
+| `log_unreadable_line` | int | `log.md` 에서 줄로 읽히지 않은 줄의 수. 개행으로 끝나지 않은 마지막 조각은 줄이 아니므로 여기에도 세지 않는다 |
 
 finding 은 `kind` 로 갈리는 객체다.
 
@@ -108,12 +110,13 @@ finding 은 `kind` 로 갈리는 객체다.
 | `missing_sources` | `page`: string | `## Sources` 절이 없거나 그 절에 읽히는 참조 줄이 하나도 없다(§8) |
 | `hearsay_only` | `page`: string | 참조 줄이 `said:` 뿐이다 |
 | `unreadable_page` | `file`: string, `reason`: string | 헤더가 읽히지 않거나, 파일이 있는데 열 수 없다. `reason` 은 앞의 경우 기존 `frontmatter_error_to_string` 의 문장이고, 뒤의 경우 `the file could not be opened: ` 로 시작한다 |
+| `revision_log_gap` | `page`: string, `log_revision`: int, `page_revision`: int | log 가 이 페이지에 기록한 가장 높은 `r<N>` 을 페이지가 닿지 못했다(§4.5). `log_revision` 이 그 `N`, `page_revision` 이 파일이 지닌 revision 이다. 반대 방향은 발견이 아니다 |
 
 대상이 읽히지 않는 페이지인 링크는 `broken_link` 가 아니다. 파일은 있으므로 그 페이지의 `unreadable_page` 한 번으로만 보고한다(옮김: ocaml-agent-ic).
 
 ### 4.3 첫 조각에 넣지 않는 것
 
-- `revision_log_gap` (log 와 페이지 revision 의 어긋남). log 파서가 필요하고 §7 의 규칙이 먼저다. 2단계.
+- `revision_log_gap` (log 와 페이지 revision 의 어긋남). 첫 조각에는 log 파서가 없어 뺐고, 2단계에서 넣었다(§4.5, §7).
 - 모순 후보. 첫 조각에서 뺀다(리더 정리). 원장을 lint 입력으로 쓰는 일은 닫은 것이 아니라 미룬 것이다. §9 의 "이 RFC 의 결정"이 조건을 적고, 다시 다루는 자리는 §11.2 의 3단계다.
 - 입구에서 닿지 않는 페이지(`unreachable`). 입구를 적는 스키마 페이지가 아직 없다. 2단계.
 - 순환. 지금 11장은 서로 링크하는 구조라 순환은 결함이 아니다(옮김: ocaml-refactor-woman). 오류로 내지 않는다.
@@ -138,6 +141,8 @@ finding 은 `kind` 로 갈리는 객체다.
 ### 4.5 동시 쓰기
 
 쓰기 순서는 잠금 아래에서 페이지(원자적 rename), log 한 줄, index 재작성이다(옮김: code-reviewer, `write_page`). 읽기는 잠금을 잡지 않는다. 페이지 하나는 옛것 아니면 새것 전체로 읽힌다. 첫 조각은 페이지만 읽으므로 이것으로 충분하다. log 와 페이지를 함께 보는 2단계에서는 "log 에 `rN` 줄이 있는데 페이지 revision 이 N 보다 작다"만 오류이고 반대 방향은 보류로 낸다(옮김: code-reviewer `c-3082797d1fe2850cff4d07ea2ce8866e`).
+
+2단계의 구현은 이렇다. log 가 한 페이지에 기록한 가장 높은 `rN` 을 그 페이지가 닿지 못했으면 `revision_log_gap` 한 건을 내고, 페이지마다 최대 한 건이다(네 번 뒤진 페이지를 네 건으로 세지 않는다). 반대 방향 — 페이지가 log 보다 앞선 경우 — 은 발견으로 내지 않는다. 읽기가 잠금을 잡지 않으므로 쓰는 중인 페이지를 그 쓰기의 log 줄보다 먼저 볼 수 있고, 그것은 위 쓰기 순서의 정상적인 중간 상태다. 이 방향을 발견으로 낼지는 뒤 단계에서 정한다.
 
 ## 5. 링크 문법
 
@@ -182,6 +187,7 @@ finding 은 `kind` 로 갈리는 객체다.
 - 새 동작을 더할 때: 페이지를 바꾸는 동작만 `## [` 접두를 쓰고 그 페이지의 실제 revision 을 적는다. 찾지 못한 질의처럼 페이지를 바꾸지 않는 사건은 같은 접두에 섞지 않는다(옮김: ocaml-agent-ic `c-6146ceaa7e52fe94a517c524deaa4639`).
 - 동작을 더하는 PR 은 `mcp_server_eio_resource.ml` 의 리소스 설명 "One line per wiki page creation or update" 를 같이 고친다(옮김: ocaml-agent-ic).
 - 고정할 테스트: 옛 단어 둘만 아는 파서에 새 단어 줄을 넣으면 `unknown_action` 으로 남고 나머지 줄이 그대로 읽힌다. 끝에 개행 없는 마지막 조각은 세지 않는다.
+- 두 건수는 응답의 `log_unknown_action` 과 `log_unreadable_line` 으로 나간다(§4.2). 파서가 아는 동작 단어는 지금 `create`·`update` 둘이고, 이 둘 밖의 단어는 줄로 읽지 않는다.
 
 ## 8. 출처
 
@@ -265,7 +271,7 @@ finding 은 `kind` 로 갈리는 객체다.
 6. `Wiki_graph` 의 결과가 입력 순서를 섞어도 같다.
 7. 링크 파서 테이블 테스트: 코드 펜스 안, 이미지, 앵커, `[[x]]`, 상대 경로, 대문자 이름.
 8. 페이지 11장과 합성 5,000장에서 각각 한 번 돌려 걸린 시간과 출력 바이트를 PR 에 적는다. 값이 없는 채로 "수천 장을 견딘다"고 쓰지 않는다. 한 호출이 수 초를 넘으면 리더 결정의 되돌리는 조건에 따라 스위치를 다시 논의한다.
-9. 새 도구의 `config/tools/masc_wiki_lint.toml` 이 같은 PR 에 있다. Keeper 쪽 이름으로 투영한다면 `test/test_keeper_tool_matrix_cases.ml` 의 인자 계약 분기도 같은 PR 에 넣는다(근거: 작성자의 기억, 파일 미독). 도구 설명의 첫 단어는 `Experimental:` 이다.
+9. 새 도구의 `config/tools/masc_wiki_lint.toml` 이 같은 PR 에 있다. Keeper 쪽 이름으로 투영한다면 `test/test_keeper_tool_matrix_cases.ml` 의 인자 계약 분기도 같은 PR 에 넣는다(근거: 작성자의 기억, 파일 미독). 도구 설명의 첫 단어는 1c 에서 `Experimental:` 이었고, 라이브 호출 1건 뒤 v0.56 에서 뗐다(#43130).
 
 ### 11.2 PR 쪼개기와 켜는 법·끄는 법
 
@@ -274,8 +280,8 @@ finding 은 `kind` 로 갈리는 객체다.
 | 0 | 이 문서 | RFC | 해당 없음 | 해당 없음 |
 | 1a | 선행 리팩터링 | `Wiki_page_name`, `Wiki_page` 를 꺼낸다. 동작 불변 | 해당 없음 | 해당 없음 |
 | 1b | 순수 코어 | `Wiki_link`, `Wiki_graph`, `Wiki_lint` 와 테스트. 아직 도구 없음 | 해당 없음 | 해당 없음 |
-| 1c | 도구 | `Tool_wiki_lint`, 도구 toml, 사용 가이드 `docs/guides/wiki-lint.md`, 변경 조각(Experimental) | 설정 없음. 도구를 부른다 | 설정 없음. 부르지 않으면 아무 일도 일어나지 않는다 |
-| 2 | 별도 PR 들 | 스키마 페이지, 절 끝 두 줄, log 파서와 `revision_log_gap`, 입구에서 닿지 않는 페이지 | 읽기 전용이면 설정 없음 | 같음 |
+| 1c | 도구 | `Tool_wiki_lint`, 도구 toml, 사용 가이드 `docs/guides/wiki-lint.md`, 변경 조각(1c 는 Experimental, v0.56 에서 안정 표기로 바뀜 #43130) | 설정 없음. 도구를 부른다 | 설정 없음. 부르지 않으면 아무 일도 일어나지 않는다 |
+| 2 | 별도 PR 들 | log 파서와 `revision_log_gap`(착지), 스키마 페이지, 절 끝 두 줄, 입구에서 닿지 않는 페이지 | 읽기 전용이면 설정 없음 | 같음 |
 | 3 | 별도 RFC | 프롬프트 탑재(#42951), Curator 가 위키에 쓰기, promote, 원장이나 모델을 쓰는 모순 후보 | 자기 테이블의 `enabled`, 기본 꺼짐 | 그 키를 끈다 |
 
 - 1c 의 사용 가이드는 규약 a-dababc7a 의 여섯 항목을 담고, 실행 예시는 와이어 이름 그대로 적는다. Keeper 쪽 이름으로 투영할지(`keeper_wiki_lint`)는 1c 가 정한다.

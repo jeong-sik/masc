@@ -47,6 +47,13 @@ let finding_to_json (finding : Wiki_lint.finding) : Yojson.Safe.t =
   | Wiki_lint.Orphan_unconfirmed { page }
   | Wiki_lint.Missing_sources { page }
   | Wiki_lint.Hearsay_only { page } -> `Assoc [ "kind", kind; "page", `String page ]
+  | Wiki_lint.Revision_log_gap { page; log_revision; page_revision } ->
+    `Assoc
+      [ "kind", kind
+      ; "page", `String page
+      ; "log_revision", `Int log_revision
+      ; "page_revision", `Int page_revision
+      ]
   | Wiki_lint.Unreadable_page { file; reason } ->
     `Assoc [ "kind", kind; "file", `String file; "reason", `String reason ]
 ;;
@@ -96,7 +103,7 @@ let rec take_within_budget ~limit ~budget acc = function
       else take_within_budget ~limit:(limit - 1) ~budget:(budget - size) ((finding, json) :: acc) rest)
 ;;
 
-let render ~pages_total ~pages_unreadable ~findings request =
+let render ~pages_total ~pages_unreadable ~log ~findings request =
   let ( let* ) = Result.bind in
   let* () =
     match request.kind with
@@ -142,6 +149,10 @@ let render ~pages_total ~pages_unreadable ~findings request =
         ; ( "counts"
           , `Assoc
               (List.map (fun (kind, count) -> kind, `Int count) (Wiki_lint.counts findings)) )
+        (* The log's own unread parts, counted so that a line the parser could
+           not read is not the same answer as a log with nothing wrong (§7). *)
+        ; "log_unknown_action", `Int log.Wiki_log.unknown_action
+        ; "log_unreadable_line", `Int log.Wiki_log.unreadable_line
         ; "matched", `Int (List.length selected)
         ; "findings", `List (List.map snd shown)
         ; "truncated", `Bool truncated

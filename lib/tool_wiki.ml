@@ -538,17 +538,28 @@ let lint_nodes ~base_path =
       else None
     | content ->
       (match parse_frontmatter content with
-       | Ok _ ->
+       | Ok frontmatter ->
          let body = page_body content in
          Some
            (Wiki_graph.Readable
               { page = Filename.chop_suffix file ".md"
               ; links = Wiki_link.extract body
               ; sources = Wiki_sources.of_body body
+              ; revision = frontmatter.revision
               })
        | Error error ->
          Some
            (Wiki_graph.Unreadable { file; reason = frontmatter_error_to_string error })))
+
+(* [log.md] read for the lint. A wiki that has never been written has no log
+   yet, and that is an empty log, not a failure to read. The one parser in the
+   runtime is {!Wiki_log} (§7), so the lint and any later consumer read the
+   same words the same way. *)
+let lint_log ~base_path =
+  let path = Filename.concat (wiki_root ~base_path) Wiki_journal.log_file in
+  match In_channel.with_open_text path In_channel.input_all with
+  | exception Sys_error _ -> Wiki_log.empty
+  | content -> Wiki_log.parse content
 
 let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
   (* A value of the wrong type is refused, not read as "not given": a limit
@@ -591,6 +602,7 @@ let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
   | Error message -> workflow_err ~tool_name ~start_time message
   | Ok () ->
     let nodes = lint_nodes ~base_path:ctx.base_path in
+    let log = lint_log ~base_path:ctx.base_path in
     let pages_unreadable =
       List.length
         (List.filter
@@ -599,11 +611,12 @@ let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
              | Wiki_graph.Readable _ -> false)
            nodes)
     in
-    let findings = Wiki_lint.run (Wiki_graph.of_nodes nodes) in
+    let findings = Wiki_lint.run (Wiki_graph.of_nodes nodes) ~log in
     (match
        Wiki_lint_report.render
          ~pages_total:(List.length nodes)
          ~pages_unreadable
+         ~log
          ~findings
          request
      with

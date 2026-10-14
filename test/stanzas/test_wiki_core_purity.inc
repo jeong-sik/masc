@@ -13,6 +13,8 @@
   ../lib/wiki_link.mli
   ../lib/wiki_sources.ml
   ../lib/wiki_sources.mli
+  ../lib/wiki_log.ml
+  ../lib/wiki_log.mli
   ../lib/wiki_graph.ml
   ../lib/wiki_graph.mli
   ../lib/wiki_lint.ml

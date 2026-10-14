@@ -18,6 +18,7 @@ lock and calls no model. The design is
 | `missing_sources` | No `## Sources` section with a `repo:`, `board:`, `artifact:` or `url:` line. |
 | `hearsay_only` | Its sources are only `said:` lines. |
 | `unreadable_page` | Its header does not read, or the file exists but cannot be opened; `reason` says why. |
+| `revision_log_gap` | `log.md` records an `r<N>` this page never reached. `log_revision` is the highest `N` the log records for the page and `page_revision` is the revision the file carries. The other direction is not a finding: a read takes no lock, so it can see the page of a write in flight before that write's log line. |
 
 Links inside code fences, code spans and images are not counted.
 
@@ -57,6 +58,15 @@ it; `matched` is how many are left after they do; `findings` is one page of
 those, about 12 KB at most. Pass `next_cursor` back as `cursor` to read the
 rest.
 
+It also reads `log.md`, the same file `masc_wiki_create` and `masc_wiki_update`
+append to, and reports two counts of its own: `log_unknown_action` for lines
+whose action word it does not know and `log_unreadable_line` for lines it cannot
+read at all. Both are zero for a log no other tool has written. A line the
+parser cannot read is counted rather than raised, so "the log is fine" and "the
+log could not be read" stay different answers. A wiki with no `log.md` yet
+reports zero, not an error. A last line the writer had not finished — the file
+does not end in a newline — is not a line and is not counted.
+
 Refused arguments: an unknown `kind`, a `limit` below 1, a value of the wrong
 type (`{"limit": "20"}`, `{"kind": 5}`), a `cursor` this tool did not issue, a
 `page` that is not a valid page name.
@@ -80,6 +90,6 @@ no configuration switch.
 
 ## Status
 
-Stable. The seven finding kinds in the table above and the response fields are
-stable. A later step of the RFC may still add a kind — `revision_log_gap` is
-planned — so read the table above for the current set.
+Stable. The eight finding kinds in the table above and the response fields are
+stable. A later step of the RFC may still add a kind, so read the table above
+for the current set.

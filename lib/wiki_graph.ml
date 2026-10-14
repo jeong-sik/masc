@@ -3,14 +3,21 @@ type node =
       { page : string
       ; links : Wiki_link.link list
       ; sources : Wiki_sources.t
+      ; revision : int
       }
   | Unreadable of
       { file : string
       ; reason : string
       }
 
+type page_facts =
+  { links : Wiki_link.link list
+  ; sources : Wiki_sources.t
+  ; revision : int
+  }
+
 type t =
-  { pages : (string, Wiki_link.link list * Wiki_sources.t) Hashtbl.t
+  { pages : (string, page_facts) Hashtbl.t
   ; unreadable : (string, string) Hashtbl.t  (* file -> reason *)
   ; incoming_by_page : (string, int) Hashtbl.t
   }
@@ -20,12 +27,13 @@ let of_nodes nodes =
   let unreadable = Hashtbl.create 8 in
   List.iter
     (function
-      | Readable { page; links; sources } -> Hashtbl.replace pages page (links, sources)
+      | Readable { page; links; sources; revision } ->
+        Hashtbl.replace pages page { links; sources; revision }
       | Unreadable { file; reason } -> Hashtbl.replace unreadable file reason)
     nodes;
   let incoming_by_page = Hashtbl.create 64 in
   Hashtbl.iter
-    (fun page (links, _sources) ->
+    (fun page ({ links; _ } : page_facts) ->
        let targets =
          List.filter_map
            (fun (link : Wiki_link.link) ->
@@ -65,12 +73,16 @@ let file_exists t name =
 
 let links_of t name =
   match Hashtbl.find_opt t.pages name with
-  | Some (links, _sources) -> links
+  | Some { links; _ } -> links
   | None -> []
 ;;
 
 let sources_of t name =
-  Option.map (fun (_links, sources) -> sources) (Hashtbl.find_opt t.pages name)
+  Option.map (fun ({ sources; _ } : page_facts) -> sources) (Hashtbl.find_opt t.pages name)
+;;
+
+let revision_of t name =
+  Option.map (fun ({ revision; _ } : page_facts) -> revision) (Hashtbl.find_opt t.pages name)
 ;;
 
 let incoming t name = Option.value (Hashtbl.find_opt t.incoming_by_page name) ~default:0

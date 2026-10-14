@@ -11,6 +11,7 @@ let modules =
   ; "wiki_page"
   ; "wiki_link"
   ; "wiki_sources"
+  ; "wiki_log"
   ; "wiki_graph"
   ; "wiki_lint"
   ; "wiki_lint_report"

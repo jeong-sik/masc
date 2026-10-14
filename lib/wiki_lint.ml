@@ -18,6 +18,11 @@ type finding =
       { file : string
       ; reason : string
       }
+  | Revision_log_gap of
+      { page : string
+      ; log_revision : int
+      ; page_revision : int
+      }
 
 let kind = function
   | Broken_link _ -> "broken_link"
@@ -27,6 +32,7 @@ let kind = function
   | Missing_sources _ -> "missing_sources"
   | Hearsay_only _ -> "hearsay_only"
   | Unreadable_page _ -> "unreadable_page"
+  | Revision_log_gap _ -> "revision_log_gap"
 ;;
 
 let all_kinds =
@@ -37,6 +43,7 @@ let all_kinds =
   ; "missing_sources"
   ; "hearsay_only"
   ; "unreadable_page"
+  ; "revision_log_gap"
   ]
 ;;
 
@@ -46,7 +53,8 @@ let subject = function
   | Orphan { page }
   | Orphan_unconfirmed { page }
   | Missing_sources { page }
-  | Hearsay_only { page } -> page
+  | Hearsay_only { page }
+  | Revision_log_gap { page; _ } -> page
   | Unreadable_page { file; _ } -> file
 ;;
 
@@ -56,6 +64,7 @@ let line_of = function
   | Orphan_unconfirmed _
   | Missing_sources _
   | Hearsay_only _
+  | Revision_log_gap _
   | Unreadable_page _ -> 0
 ;;
 
@@ -108,7 +117,27 @@ let page_findings graph ~has_unreadable page =
   link_findings graph page @ source_findings @ orphan_findings
 ;;
 
-let run graph =
+(* One finding per page, not per log line: a page four revisions behind its
+   log would otherwise be reported four times. The highest revision the log
+   records for the page is the one it must have reached. *)
+let log_gap_findings graph (log : Wiki_log.t) =
+  let highest = Hashtbl.create 16 in
+  List.iter
+    (fun (line : Wiki_log.line) ->
+       let seen = Option.value (Hashtbl.find_opt highest line.page) ~default:0 in
+       if line.revision > seen then Hashtbl.replace highest line.page line.revision)
+    log.lines;
+  Hashtbl.fold
+    (fun page log_revision acc ->
+       match Wiki_graph.revision_of graph page with
+       | Some page_revision when page_revision < log_revision ->
+         Revision_log_gap { page; log_revision; page_revision } :: acc
+       | Some _ | None -> acc)
+    highest
+    []
+;;
+
+let run graph ~log =
   let unreadable = Wiki_graph.unreadable_files graph in
   let has_unreadable = unreadable <> [] in
   let from_pages =
@@ -117,7 +146,7 @@ let run graph =
   let from_files =
     List.map (fun (file, reason) -> Unreadable_page { file; reason }) unreadable
   in
-  List.sort compare_findings (from_pages @ from_files)
+  List.sort compare_findings (from_pages @ from_files @ log_gap_findings graph log)
 ;;
 
 let counts findings =

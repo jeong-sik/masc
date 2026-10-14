@@ -376,7 +376,10 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
            ignore (Agent_core.Execution_json.object_fields ~context:"public typed artifact envelope"
              ~required:["structured_content";"artifact_manifest"] ~optional:["content"] json
              |> require "canonical public artifact envelope");
-           read_document ~base_path reference
+           let projected = Yojson.Safe.Util.member "structured_content" json in
+           check bool "public inline projection matches its canonical manifest" true
+             (Yojson.Safe.equal projected (read_document ~base_path reference));
+           projected
          | Tool_output.Invalid_normalized_artifact_ref {detail} -> fail detail
          | Tool_output.Not_normalized_artifact_ref ->
            if success then fail "public success has no canonical artifact envelope"

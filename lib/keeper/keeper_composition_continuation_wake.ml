@@ -91,8 +91,8 @@ module Run_set = Set.Make (struct
       (Keeper_tool_plan.Composition_run_id.to_string left_run)
       (Keeper_tool_plan.Composition_run_id.to_string right_run)
 end)
-type t =
-  { context : float Keeper_types_profile.context
+type 'a t =
+  { context : 'a Keeper_types_profile.context
   ; on_result : Journal.continuation -> (Tool_result.result,error) result -> unit
   ; mutable active : Run_set.t }
 

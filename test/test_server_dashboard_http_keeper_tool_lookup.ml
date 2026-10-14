@@ -22,7 +22,7 @@ let with_workspace f =
       let state = Mcp_server.For_testing.create_state ~base_path:base in
       let config = Mcp_server.workspace_config state in
       let location =
-        Dated_jsonl.Store.(cluster (Workspace.dated_store_cluster_root config) Cluster.Tool_calls)
+        Dated_jsonl.Store.(at (Workspace.dated_store_root config) Root.Tool_calls)
       in
       let ledger = Dated_jsonl.Store.dir location in
       let store = Dated_jsonl.open_store location in

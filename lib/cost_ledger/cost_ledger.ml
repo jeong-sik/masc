@@ -367,7 +367,7 @@ let to_json ?(extra_fields = []) row =
 
 let store_of_masc_root masc_root =
   Dated_jsonl.open_store
-    Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Costs)
+    Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Costs)
 ;;
 
 (* The raw rows are written under the cluster's root, while this reader and

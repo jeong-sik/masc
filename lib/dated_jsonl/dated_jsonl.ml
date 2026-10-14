@@ -1911,7 +1911,7 @@ let days_to_keep ~operator_window_days store =
   | Store.Own_days read -> Some (read ())
   | Store.Kept -> None
 
-let prune_listed_stores ~base_path cluster_root ~operator_window_days =
+let prune_listed_stores root ~operator_window_days =
   List.fold_left
     (fun pruned store ->
        match days_to_keep ~operator_window_days store with
@@ -1920,7 +1920,7 @@ let prune_listed_stores ~base_path cluster_root ~operator_window_days =
          List.fold_left
            (fun pruned location -> pruned + prune (open_store location) ~days)
            pruned
-           (Store.locations_on_disk ~base_path cluster_root store))
+           (Store.locations_on_disk root store))
     0
     Store.all
 

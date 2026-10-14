@@ -221,7 +221,7 @@ let get_or_create_runtime () : active_runtime =
       | Some store -> activate current store
       | None ->
         let location =
-          Dated_jsonl.Store.base ~base_path Dated_jsonl.Store.Base.Tool_events
+          Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Tool_events)
         in
         Fs_compat.mkdir_p (Dated_jsonl.Store.dir location);
         let store = Dated_jsonl.open_store location in

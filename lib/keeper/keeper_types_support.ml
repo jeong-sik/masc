@@ -23,7 +23,7 @@ let metrics_store_mu = Eio.Mutex.create ()
    made first, as every store accessor here has always done. *)
 let keeper_store_location config name store =
   ignore (keeper_dir_ config : string);
-  Dated_jsonl.Store.keeper (Workspace.dated_store_cluster_root config) ~keeper:name store
+  Dated_jsonl.Store.keeper (Workspace.dated_store_root config) ~keeper:name store
 
 let keeper_metrics_storage config name =
   let location = keeper_store_location config name Dated_jsonl.Store.Keeper.Metrics in

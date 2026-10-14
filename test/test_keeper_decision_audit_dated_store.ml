@@ -44,7 +44,7 @@ let record ~keeper_name ~wall_clock =
 ;;
 
 let audit_location ~base_path ~keeper_name =
-  Dated_jsonl.Store.decision_audit ~base_path ~keeper_dirname:keeper_name
+  Dated_jsonl.Store.(decision_audit (root_of_base_path ~base_path)) ~keeper_dirname:keeper_name
 ;;
 
 let audit_base_dir ~base_path ~keeper_name =

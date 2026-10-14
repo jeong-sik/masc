@@ -11,10 +11,10 @@ let with_dir f =
   let dir = Filename.temp_dir "keeper-metrics-storage-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () -> f dir)
 
-(* One keeper's metrics store under a temporary cluster root. *)
+(* One keeper's metrics store under a temporary [.masc] root. *)
 let location ?(keeper_name = "k") root =
   Dated_jsonl.Store.keeper
-    (Dated_jsonl.Store.cluster_root root)
+    (Dated_jsonl.Store.root_of_masc_dir root)
     ~keeper:keeper_name
     Dated_jsonl.Store.Keeper.Metrics
 

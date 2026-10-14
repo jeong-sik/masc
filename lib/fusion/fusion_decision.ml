@@ -82,9 +82,9 @@ let validate_event json =
   else Ok json
 
 let events_location config =
-  Dated_jsonl.Store.cluster
-    (Workspace.dated_store_cluster_root config)
-    Dated_jsonl.Store.Cluster.Events
+  Dated_jsonl.Store.at
+    (Workspace.dated_store_root config)
+    Dated_jsonl.Store.Root.Events
 let events_root config = Dated_jsonl.Store.dir (events_location config)
 let protect f = try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

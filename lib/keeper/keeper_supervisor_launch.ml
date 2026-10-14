@@ -69,7 +69,7 @@ let launch_supervised_fiber_body
       (reg : Keeper_registry.registry_entry)
   =
   let base_path = ctx.config.base_path in
-  let cluster_root = Workspace.dated_store_cluster_root ctx.config in
+  let store_root = Workspace.dated_store_root ctx.config in
   if restart_launch_noop_enabled_for_test ()
   then (* test no-op launch: nothing forked, but not a fork rejection *) Ok ()
   else (
@@ -363,7 +363,7 @@ let launch_supervised_fiber_body
                | None -> 0
              in
              Keeper_crash_persistence.enqueue_record
-               ~cluster_root
+               ~store_root
                ~name:meta.name
                ~ts
                ~reason
@@ -521,7 +521,7 @@ let launch_supervised_fiber_body
                   | None -> 0
                 in
                 Keeper_crash_persistence.enqueue_record
-                  ~cluster_root
+                  ~store_root
                   ~name:meta.name
                   ~ts
                   ~reason

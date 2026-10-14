@@ -540,7 +540,6 @@ let test_journal_files_age_out_with_shared_prune () =
        let n =
          Server_runtime_startup_maintenance.prune_shared_jsonl_stores
            ~days:30
-           ~base_path:base_dir
            ~masc_root
        in
        Alcotest.(check bool) "old journal pruned" false (Sys.file_exists old_file);

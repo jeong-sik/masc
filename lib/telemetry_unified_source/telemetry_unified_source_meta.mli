@@ -14,7 +14,7 @@ type read_result = {
 
 val fixed_store_location :
   masc_root:string -> base_path:string -> source -> Dated_jsonl.Store.location option
-(** The store a fixed-path source reads. [masc_root] is the cluster's root. *)
+(** The store a fixed-path source reads. [masc_root] is [<base>/.masc]. *)
 
 val keeper_metric_location : masc_root:string -> string -> Dated_jsonl.Store.location
 val execution_receipt_location : masc_root:string -> string -> Dated_jsonl.Store.location

@@ -343,7 +343,7 @@ let emit_keeper_tool_exec config ~keeper_name ~tool_name ~success =
     ()
 
 (* When the activity write fails, emit_tool_exec records a coverage gap. The
-   gap goes under the cluster root ([<base>/.masc] here), where the readers
+   gap goes under [<base>/.masc], where the readers
    look, and not beside it under the base path (#42837). A plain file where
    the activity store's folder belongs makes the write fail. *)
 let test_failed_emit_records_its_gap_under_masc () =
@@ -352,13 +352,13 @@ let test_failed_emit_records_its_gap_under_masc () =
       Fs_compat.mkdir_p masc_root;
       Out_channel.with_open_text
         (Dated_jsonl.Store.dir
-           (Dated_jsonl.Store.cluster
-              (Lib.Workspace.dated_store_cluster_root config)
-              Dated_jsonl.Store.Cluster.Activity_events))
+           (Dated_jsonl.Store.at
+              (Lib.Workspace.dated_store_root config)
+              Dated_jsonl.Store.Root.Activity_events))
         (fun oc -> output_string oc "not a folder");
       emit_keeper_tool_exec config ~keeper_name:"testkeeper"
         ~tool_name:"masc_status" ~success:true;
-      check int "one gap under the cluster root" 1
+      check int "one gap under .masc" 1
         (List.length (Telemetry_coverage_gap.read_recent ~masc_root ~n:5));
       check bool "nothing beside .masc" false
         (Sys.file_exists (Filename.concat dir "telemetry-coverage-gaps")))

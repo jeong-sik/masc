@@ -577,7 +577,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 let disk_crashes =
                   (try
                      Keeper_crash_persistence.recent_crashes
-                       ~cluster_root:(Workspace.dated_store_cluster_root config)
+                       ~store_root:(Workspace.dated_store_root config)
                        ~name:m.name ~max_entries:20
                    with
                    | Eio.Cancel.Cancelled _ as exn -> raise exn

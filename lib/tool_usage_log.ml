@@ -27,9 +27,9 @@ let dashboard_surface = "/api/v1/dashboard/tools"
    already record a coverage_gap that bypasses this SLO. *)
 let freshness_slo_s = Masc_time_constants.hour
 
-(* [masc_root] is the cluster's root. *)
+(* [masc_root] is [<base>/.masc]. *)
 let location masc_root =
-  Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Tool_usage)
+  Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Tool_usage)
 
 let store_dir masc_root = Dated_jsonl.Store.dir (location masc_root)
 

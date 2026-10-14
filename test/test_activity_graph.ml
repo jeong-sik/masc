@@ -43,8 +43,8 @@ let test_day_file_follows_the_shared_layout () =
       check bool "the emitted day file exists" true (Sys.file_exists path);
       let expected =
         (Dated_jsonl.Store.dated_path_now
-           (Dated_jsonl.Store.cluster
-              (Workspace_utils.dated_store_cluster_root config)
+           (Dated_jsonl.Store.at
+              (Workspace_utils.dated_store_root config)
               Activity_events))
           .Dated_jsonl.Store.path
       in

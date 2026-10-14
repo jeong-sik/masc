@@ -498,7 +498,7 @@ let test_a_line_no_reader_decodes_is_not_written () =
   check int "nothing was written" 0 (List.length (read_lines ~keepers_dir))
 ;;
 
-(* The cluster-local log and read position are named together in the artifact
+(* The workspace's log and read position are named together in the artifact
    plan, so a same-name successor cannot inherit only half of the pair. *)
 let test_purge_plan_removes_the_turn_boundary_log () =
   let module Shutdown = Masc.Keeper_shutdown_types in

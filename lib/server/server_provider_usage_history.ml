@@ -4,9 +4,9 @@ let ( let* ) = Result.bind
 
 let store config =
   Dated_jsonl.open_store
-    (Dated_jsonl.Store.cluster
-       (Workspace_utils.dated_store_cluster_root config)
-       Dated_jsonl.Store.Cluster.Provider_usage_history)
+    (Dated_jsonl.Store.at
+       (Workspace_utils.dated_store_root config)
+       Dated_jsonl.Store.Root.Provider_usage_history)
 
 let scope_id = Runtime_quota_window.scope_id
 

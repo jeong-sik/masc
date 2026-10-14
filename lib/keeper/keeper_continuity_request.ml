@@ -67,7 +67,7 @@ let record_best_effort ~config ~keeper_name ~runtime_id ~selection ~range ~wire 
   let append () =
     let location =
       Dated_jsonl.Store.keeper
-        (Workspace.dated_store_cluster_root config)
+        (Workspace.dated_store_root config)
         ~keeper:keeper_name
         Dated_jsonl.Store.Keeper.Continuity_requests
     in

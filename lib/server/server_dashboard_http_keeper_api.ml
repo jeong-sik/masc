@@ -88,9 +88,9 @@ let keeper_tool_call_lookup_response ~config ~keeper_name req =
     else
       let store =
         Dated_jsonl.open_store
-          (Dated_jsonl.Store.cluster
-             (Workspace.dated_store_cluster_root config)
-             Dated_jsonl.Store.Cluster.Tool_calls)
+          (Dated_jsonl.Store.at
+             (Workspace.dated_store_root config)
+             Dated_jsonl.Store.Root.Tool_calls)
       in
       (match
          Keeper_tool_call_index.by_execution_ids

@@ -248,13 +248,13 @@ let audit_store_cache_mu = Eio.Mutex.create ()
 
 (* The directory this store occupies under [.masc]. Exposed so readers of the
    same store name it from here instead of spelling the literal. *)
-let store_dirname = Dated_jsonl.Store.Cluster.(relative_path Audit)
+let store_dirname = Dated_jsonl.Store.Root.(relative_path Audit)
 
 let get_audit_store (config : config) : Dated_jsonl.t =
   let location =
-    Dated_jsonl.Store.cluster
-      (Workspace_utils.dated_store_cluster_root config)
-      Dated_jsonl.Store.Cluster.Audit
+    Dated_jsonl.Store.at
+      (Workspace_utils.dated_store_root config)
+      Dated_jsonl.Store.Root.Audit
   in
   let base = Dated_jsonl.Store.dir location in
   Eio_guard.with_mutex audit_store_cache_mu (fun () ->

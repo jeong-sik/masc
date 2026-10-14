@@ -226,7 +226,7 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   List.iter
     (fun f -> Unix.utimes f old_ts old_ts)
     [ logs_old; raw_old; manifest_old; message_old ];
-  let n = SM.prune_shared_jsonl_stores ~days:30 ~base_path ~masc_root in
+  let n = SM.prune_shared_jsonl_stores ~days:30 ~masc_root in
   Alcotest.(check int) "sixteen stale files pruned" 16 n;
   Alcotest.(check bool)
     "stale provider usage day removed" false (Sys.file_exists provider_usage_old);

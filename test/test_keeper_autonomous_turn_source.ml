@@ -225,7 +225,7 @@ let test_execution_identity_joins_exact_occurrence () =
     ~raw_trace_run_ref:(Some selected_run);
   let ledger =
     Dated_jsonl.open_store
-      (Dated_jsonl.Store.cluster (Workspace.dated_store_cluster_root config) Tool_calls)
+      (Dated_jsonl.Store.at (Workspace.dated_store_root config) Tool_calls)
   in
   let row ~id ~invocation_turn ~keeper_turn =
     `Assoc [ "record_kind", `String "tool_call"; "ts", `Float 2005.;

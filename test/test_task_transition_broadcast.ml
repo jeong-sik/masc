@@ -549,7 +549,7 @@ let test_submit_schedules_review_after_log_failure () =
     seed config (make_task ~id:task_id ~status:(D.InProgress { assignee = owner; started_at = now }));
     let dated =
       Dated_jsonl.Store.(
-        dated_path_now (cluster (Workspace.dated_store_cluster_root config) Cluster.Events))
+        dated_path_now (at (Workspace.dated_store_root config) Root.Events))
     in
     if Sys.file_exists dated.Dated_jsonl.Store.path then Unix.unlink dated.path;
     Unix.mkdir dated.path 0o755;

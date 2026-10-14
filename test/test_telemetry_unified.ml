@@ -18,10 +18,10 @@ let tmpdir prefix =
   Fs_compat.mkdir_p dir;
   dir
 
-(* Listed stores of a workspace whose base path is [base_path], in the
-   default cluster. *)
-let masc_root_of base_path = Dated_jsonl.Store.cluster_root (Filename.concat base_path ".masc")
-let cluster_store base_path store = Dated_jsonl.Store.cluster (masc_root_of base_path) store
+(* Listed stores of a workspace whose base path is [base_path]. The path is
+   spelled out here, not taken from the code under test. *)
+let masc_root_of base_path = Dated_jsonl.Store.root_of_masc_dir (Filename.concat base_path ".masc")
+let root_store base_path store = Dated_jsonl.Store.at (masc_root_of base_path) store
 let keeper_store base_path ~keeper store =
   Dated_jsonl.Store.keeper (masc_root_of base_path) ~keeper store
 
@@ -135,7 +135,7 @@ let test_agent_event_source () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_agent_event" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   write_jsonl telemetry_location [
@@ -159,7 +159,7 @@ let test_agent_core_event_source_and_scope_filter () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_agent_core_event" in
-  let agent_core_events_location = cluster_store dir Agent_core_events in
+  let agent_core_events_location = root_store dir Agent_core_events in
   let agent_core_events_dir = Dated_jsonl.Store.dir agent_core_events_location in
   Fs_compat.mkdir_p agent_core_events_dir;
   write_jsonl agent_core_events_location [
@@ -202,7 +202,7 @@ let test_keeper_tool_called_scope_promoted_for_filters () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_keeper_tool_scope" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   write_jsonl telemetry_location
@@ -252,9 +252,9 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_shadow_tool_called" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
-  let tool_calls_location = cluster_store dir Tool_calls in
+  let tool_calls_location = root_store dir Tool_calls in
   let tool_calls_dir = Dated_jsonl.Store.dir tool_calls_location in
   Fs_compat.mkdir_p telemetry_dir;
   Fs_compat.mkdir_p tool_calls_dir;
@@ -316,9 +316,9 @@ let test_distinct_calls_within_the_old_window_are_both_kept () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_distinct_calls" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
-  let tool_calls_location = cluster_store dir Tool_calls in
+  let tool_calls_location = root_store dir Tool_calls in
   let tool_calls_dir = Dated_jsonl.Store.dir tool_calls_location in
   Fs_compat.mkdir_p telemetry_dir;
   Fs_compat.mkdir_p tool_calls_dir;
@@ -378,9 +378,9 @@ let test_agent_event_without_execution_id_is_kept () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_unidentified_call" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
-  let tool_calls_location = cluster_store dir Tool_calls in
+  let tool_calls_location = root_store dir Tool_calls in
   let tool_calls_dir = Dated_jsonl.Store.dir tool_calls_location in
   Fs_compat.mkdir_p telemetry_dir;
   Fs_compat.mkdir_p tool_calls_dir;
@@ -526,7 +526,7 @@ let test_sorted_newest_first () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_sorted" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   write_jsonl telemetry_location [
@@ -552,7 +552,7 @@ let test_n_limits_output () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_limit" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   write_jsonl telemetry_location (
@@ -569,7 +569,7 @@ let test_offset_windows_final_page () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_offset_final_page" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   write_jsonl telemetry_location
@@ -597,7 +597,7 @@ let test_time_window_reports_total_before_limit () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_window_limit" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let now = Unix.gettimeofday () in
@@ -631,7 +631,7 @@ let test_time_window_reads_matching_day_files () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_window_days" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let now = Unix.gettimeofday () in
@@ -660,7 +660,7 @@ let test_time_window_n_zero_is_bounded () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_window_unbounded" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let now = Unix.gettimeofday () in
@@ -694,7 +694,7 @@ let test_n_zero_no_window_returns_bounded () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_n0_no_window" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let now = Unix.gettimeofday () in
@@ -734,7 +734,7 @@ let test_summary_with_data () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_summary" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   write_jsonl telemetry_location [
@@ -752,7 +752,7 @@ let test_summary_includes_freshness_metadata () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_summary_freshness" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let recent_ts = Unix.gettimeofday () -. 42.0 in
@@ -960,7 +960,7 @@ let test_summary_includes_trajectory_and_execution_receipt_sources () =
      ^ "\n");
   let receipt_location =
     Dated_jsonl.Store.keeper
-      (Dated_jsonl.Store.cluster_root root)
+      (Dated_jsonl.Store.root_of_masc_dir root)
       ~keeper:"alice"
       Execution_receipts
   in
@@ -1028,7 +1028,7 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
      ^ "\n");
   let receipt_location =
     Dated_jsonl.Store.keeper
-      (Dated_jsonl.Store.cluster_root root)
+      (Dated_jsonl.Store.root_of_masc_dir root)
       ~keeper:"alice"
       Execution_receipts
   in
@@ -1401,7 +1401,7 @@ let test_summary_ignores_recovered_coverage_gap () =
     ();
   let recovered_ts = Unix.gettimeofday () +. 10.0 in
   write_jsonl
-    (Dated_jsonl.Store.cluster (Dated_jsonl.Store.cluster_root root) Tool_calls)
+    (Dated_jsonl.Store.at (Dated_jsonl.Store.root_of_masc_dir root) Tool_calls)
     [
       `Assoc
         [
@@ -1435,7 +1435,7 @@ let test_summary_counts_all_entries_beyond_recent_cap () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_summary_full_count" in
-  let telemetry_location = cluster_store dir Telemetry in
+  let telemetry_location = root_store dir Telemetry in
   let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   write_raw_jsonl_rows telemetry_dir 10_050;

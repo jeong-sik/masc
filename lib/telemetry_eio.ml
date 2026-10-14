@@ -135,9 +135,9 @@ let telemetry_max_bytes () =
 
 let get_telemetry_store config : Dated_jsonl.t =
   let location =
-    Dated_jsonl.Store.cluster
-      (Workspace_utils.dated_store_cluster_root config)
-      Dated_jsonl.Store.Cluster.Telemetry
+    Dated_jsonl.Store.at
+      (Workspace_utils.dated_store_root config)
+      Dated_jsonl.Store.Root.Telemetry
   in
   let base = Dated_jsonl.Store.dir location in
   Eio_guard.with_mutex telemetry_store_cache_mu (fun () ->

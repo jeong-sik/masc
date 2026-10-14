@@ -196,11 +196,10 @@ let with_tmp_log f =
       Fs_compat.remove_tree dir)
     (fun () -> f ())
 
-(* The tool call store of a workspace whose base path is [dir], in the
-   default cluster. *)
+(* The tool call store of a workspace whose base path is [base_path]. *)
 let tool_calls_location base_path =
-  Dated_jsonl.Store.cluster
-    (Dated_jsonl.Store.cluster_root (Filename.concat base_path ".masc"))
+  Dated_jsonl.Store.at
+    (Dated_jsonl.Store.root_of_masc_dir (Filename.concat base_path ".masc"))
     Tool_calls
 
 let with_tmp_log_dir f =

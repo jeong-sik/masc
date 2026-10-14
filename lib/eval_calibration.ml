@@ -103,7 +103,7 @@ type calibration_example = {
 let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 
 let location ~base_path =
-  Dated_jsonl.Store.base ~base_path Dated_jsonl.Store.Base.Verdicts
+  Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Verdicts)
 
 let rec get_store () =
   match Atomic.get store_ref with

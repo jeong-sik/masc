@@ -176,7 +176,7 @@ let with_workspace ~toml f =
      let oc = open_out path in
      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content));
   let masc_root = Filename.concat base_path ".masc" in
-  let audit = Dated_jsonl.Store.(cluster (cluster_root masc_root) Cluster.Audit) in
+  let audit = Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Audit) in
   let ten_days_old = write_day_file audit ~age_days:10 in
   let three_days_old = write_day_file audit ~age_days:3 in
   Eio_main.run @@ fun _env ->

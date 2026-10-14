@@ -1175,7 +1175,7 @@ let load_overview ~(host : string) ~(port : int) :
         decode_workspace_health workspace_health
       in
       (* Counted from the lists the briefing carries. The summary object
-         holds workspace_health, cluster, and project and nothing else --
+         holds workspace_health and project and nothing else --
          [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
          a count read from there was a default dressed as a reading. *)
       (* An unread Keeper is still a Keeper -- the server listed its name --

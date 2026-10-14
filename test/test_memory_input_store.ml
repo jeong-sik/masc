@@ -56,7 +56,7 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
 let with_store fn =
   let root = Filename.temp_dir "memory-input-store-" "" in
   let location =
-    Dated_jsonl.Store.keeper (Dated_jsonl.Store.cluster_root root) ~keeper:"omega" Turn_records
+    Dated_jsonl.Store.keeper (Dated_jsonl.Store.root_of_masc_dir root) ~keeper:"omega" Turn_records
   in
   let dir = Dated_jsonl.Store.dir location in
   let month = Filename.concat dir "2026-10" in

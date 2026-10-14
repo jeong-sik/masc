@@ -84,7 +84,7 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
 
 let location ~base_path ~keeper_name =
   Dated_jsonl.Store.reaction_ledger
-    ~base_path
+    (Dated_jsonl.Store.root_of_base_path ~base_path)
     ~keeper:keeper_name
     ~generation:storage_generation
 ;;

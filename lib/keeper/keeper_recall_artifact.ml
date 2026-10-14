@@ -68,7 +68,7 @@ let retain ~config ~keeper_id ~kind ~now (artifact : Tool_output.artifact_ref) =
   let json = Tool_output.normalized_artifact_ref_to_json artifact in
   let location =
     Dated_jsonl.Store.keeper
-      (Workspace.dated_store_cluster_root config)
+      (Workspace.dated_store_root config)
       ~keeper:keeper_id
       Dated_jsonl.Store.Keeper.Memory_recall_artifacts
   in

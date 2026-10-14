@@ -936,10 +936,10 @@ type workspace_state = {
 } [@@deriving yojson { strict = false }, show]
 
 (* ============================================ *)
-(* Tempo configuration for cluster pace control *)
+(* Tempo configuration for workspace pace control *)
 (* ============================================ *)
 
-(** Tempo mode - controls cluster execution pace *)
+(** Tempo mode - controls workspace execution pace *)
 type tempo_mode =
   | Normal    (* Default speed *)
   | Slow      (* Slow pace - careful work *)

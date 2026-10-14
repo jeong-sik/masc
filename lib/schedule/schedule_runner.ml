@@ -128,9 +128,9 @@ let schedules_dir config =
 ;;
 
 let signal_location config =
-  Dated_jsonl.Store.cluster
-    (Workspace_utils.dated_store_cluster_root config)
-    Dated_jsonl.Store.Cluster.Schedule_signals
+  Dated_jsonl.Store.at
+    (Workspace_utils.dated_store_root config)
+    Dated_jsonl.Store.Root.Schedule_signals
 ;;
 
 let signals_dir config = Dated_jsonl.Store.dir (signal_location config)

@@ -1221,7 +1221,7 @@ let readonly_for_input plan ~node_id ~input =
   | Some {target=Child_submission _;_} -> Some false
   | Some {target=Child_result _;_} -> Some true
 
-let validate_known_tools resolve off_surface nodes =
+let validate_known_tools (resolve : node -> contract option) off_surface nodes =
   List.find_map
     (fun node ->
        match resolve node with
@@ -1247,7 +1247,7 @@ let validate_dependencies nodes =
     nodes
 ;;
 
-let validate_output_references resolve nodes =
+let validate_output_references (resolve : node -> contract option) nodes =
   List.find_map
     (fun node ->
        Json_template.references node.input
@@ -1279,7 +1279,7 @@ let validate_output_references resolve nodes =
     nodes
 ;;
 
-let validate_output_schemas resolve nodes =
+let validate_output_schemas (resolve : node -> contract option) nodes =
   List.find_map
     (fun node ->
        match resolve node with
@@ -1297,7 +1297,7 @@ let validate_output_schemas resolve nodes =
     nodes
 ;;
 
-let validate_exports resolve nodes exports =
+let validate_exports (resolve : node -> contract option) nodes exports =
   match first_duplicate String.equal (List.map (fun (export : export) -> export.name) exports) with
   | Some name -> Some (Duplicate_export_name name)
   | None ->
@@ -1357,7 +1357,7 @@ let dependency_cycle nodes =
   visit_all [] nodes
 ;;
 
-let validate_terminal_dependency_boundary resolve nodes =
+let validate_terminal_dependency_boundary (resolve : node -> contract option) nodes =
   let terminal_nodes =
     List.filter
       (fun node ->

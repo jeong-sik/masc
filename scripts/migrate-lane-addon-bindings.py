@@ -46,13 +46,22 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import sys
-from typing import Any
+from typing import Any, NamedTuple
 
 BINDINGS_DIR = "bindings"
 MIGRATED_SUFFIX = ".migrated"
 LEGACY_SUFFIX = ".legacy"
+
+
+class ClassifiedRecord(NamedTuple):
+    name: str
+    raw_bytes: bytes
+    raw_sha256: str
+    record_class: str
+    fields: dict[str, Any] | None
 
 
 def object_fields(value: Any) -> dict[str, Any] | None:
@@ -136,10 +145,11 @@ def classify(value: Any) -> str:
     fields = object_fields(value)
     if fields is None:
         return UNREADABLE
+    has_any = "visibility" in fields or "source_access" in fields
+    if not has_any:
+        return DETACHED_LEGACY if is_detached(fields) else NON_DETACHED_LEGACY
     has_visibility = visibility_is_valid(fields)
     has_source_access = source_access_is_valid(fields)
-    if not has_visibility and not has_source_access:
-        return DETACHED_LEGACY if is_detached(fields) else NON_DETACHED_LEGACY
     return NEWER_READABLE if has_visibility and has_source_access else NEWER_BROKEN
 
 
@@ -181,6 +191,10 @@ class Report:
         return sum(self.counts.values())
 
 
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def sha256_of(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -189,58 +203,121 @@ def sha256_of(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def scan(bindings: pathlib.Path) -> tuple[Report, dict[str, dict[str, Any] | None]]:
+def read_and_classify(path: pathlib.Path) -> ClassifiedRecord:
+    try:
+        raw_bytes = path.read_bytes()
+    except OSError:
+        raw_bytes = b""
+        value = None
+    else:
+        try:
+            value = json.loads(raw_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            value = None
+    record_class = classify(value)
+    fields = object_fields(value)
+    return ClassifiedRecord(
+        name=path.name,
+        raw_bytes=raw_bytes,
+        raw_sha256=sha256_bytes(raw_bytes),
+        record_class=record_class,
+        fields=fields,
+    )
+
+
+def scan_records(bindings: pathlib.Path) -> tuple[Report, list[ClassifiedRecord]]:
     report = Report()
-    fields_by_file: dict[str, dict[str, Any] | None] = {}
+    records: list[ClassifiedRecord] = []
     for path in sorted(bindings.iterdir()):
         if not path.name.endswith(".json") or not path.is_file():
             continue
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            value = None
-        record_class = classify(value)
-        fields = object_fields(value)
-        fields_by_file[path.name] = fields
-        instance, sequence = identity_of(value)
-        owner = owner_of(fields) if fields is not None else "unreadable"
-        holding = holding_of(record_class, fields)
+        record = read_and_classify(path)
+        records.append(record)
+        instance, sequence = identity_of(record.fields if record.fields is not None else {})
+        owner = owner_of(record.fields) if record.fields is not None else "unreadable"
+        holding = holding_of(record.record_class, record.fields)
         report.add(
-            record_class,
-            f"{record_class}: {path.name} instance_id={instance} observation_seq={sequence} "
+            record.record_class,
+            f"{record.record_class}: {path.name} instance_id={instance} observation_seq={sequence} "
             f"owner={owner} holds-back: {holding}",
         )
+    return report, records
+
+
+def scan(bindings: pathlib.Path) -> tuple[Report, dict[str, dict[str, Any] | None]]:
+    report, records = scan_records(bindings)
+    fields_by_file = {record.name: record.fields for record in records}
     return report, fields_by_file
 
 
-def write_out(bindings: pathlib.Path, archive: pathlib.Path) -> list[str]:
+def write_archive_atomic(archive_path: pathlib.Path, raw_bytes: bytes, raw_sha256: str) -> None:
+    tmp_path = archive_path.with_name(f".{archive_path.name}.tmp.{os.getpid()}")
+    try:
+        tmp_path.write_bytes(raw_bytes)
+        if sha256_of(tmp_path) != raw_sha256:
+            tmp_path.unlink(missing_ok=True)
+            raise SystemExit(f"archive temporary copy differs from classified bytes: {archive_path.name}")
+        os.replace(tmp_path, archive_path)
+    except OSError as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise SystemExit(f"failed to write archive copy {archive_path}: {exc}") from exc
+
+
+def write_out(
+    bindings: pathlib.Path,
+    archive: pathlib.Path,
+    records: list[ClassifiedRecord] | None = None,
+) -> list[str]:
     """Move the detached legacy records out of the container's read path.
-    Every check runs before the first move, so a refused record aborts the
-    whole run without leaving a half-migrated directory."""
+
+    Destination pre-checks run across all detached legacy records before the
+    first move. Each archive copy is written atomically from the exact bytes
+    that were classified, and the source file is renamed only if its on-disk
+    sha256 still matches those classified bytes. If a prior run crashed after
+    publishing a byte-identical archive copy and before renaming the source,
+    rerunning completes the rename; any differing archive or existing
+    `.migrated` file aborts before the first move.
+    """
+    if records is None:
+        _, records = scan_records(bindings)
+    plan: list[tuple[ClassifiedRecord, bool]] = []
+    for record in records:
+        if record.record_class != DETACHED_LEGACY:
+            continue
+        path = bindings / record.name
+        archive_path = archive / (record.name + LEGACY_SUFFIX)
+        migrated_path = path.with_name(record.name + MIGRATED_SUFFIX)
+        if migrated_path.exists():
+            raise SystemExit(f"refusing to overwrite: {migrated_path} exists")
+        resume_existing_archive = False
+        if archive_path.exists():
+            try:
+                existing_sha = sha256_of(archive_path)
+            except OSError as exc:
+                raise SystemExit(f"refusing to overwrite unreadable archive {archive_path}: {exc}") from exc
+            if existing_sha != record.raw_sha256:
+                raise SystemExit(f"refusing to overwrite: {archive_path} exists with different bytes")
+            resume_existing_archive = True
+        plan.append((record, resume_existing_archive))
     moved: list[str] = []
-    for path in sorted(bindings.iterdir()):
-        if not path.name.endswith(".json") or not path.is_file():
-            continue
+    for record, resume_existing_archive in plan:
+        path = bindings / record.name
+        archive_path = archive / (record.name + LEGACY_SUFFIX)
+        migrated_path = path.with_name(record.name + MIGRATED_SUFFIX)
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            value = None
-        if classify(value) != DETACHED_LEGACY:
-            continue
-        archive_path = archive / (path.name + LEGACY_SUFFIX)
-        migrated_path = path.with_name(path.name + MIGRATED_SUFFIX)
-        if archive_path.exists() or migrated_path.exists():
-            raise SystemExit(f"refusing to overwrite: {archive_path} or {migrated_path} exists")
-        moved.append(path.name)
-    for name in moved:
-        path = bindings / name
-        archive_path = archive / (name + LEGACY_SUFFIX)
-        migrated_path = path.with_name(name + MIGRATED_SUFFIX)
-        archive_path.write_bytes(path.read_bytes())
-        if sha256_of(archive_path) != sha256_of(path):
-            archive_path.unlink(missing_ok=True)
-            raise SystemExit(f"archive copy differs from source: {name}")
+            current_sha = sha256_of(path)
+        except OSError as exc:
+            raise SystemExit(f"failed to read source before move {path}: {exc}") from exc
+        if current_sha != record.raw_sha256:
+            raise SystemExit(f"source record changed since classification: {record.name}")
+        if not resume_existing_archive:
+            write_archive_atomic(archive_path, record.raw_bytes, record.raw_sha256)
+        if sha256_of(archive_path) != record.raw_sha256:
+            raise SystemExit(f"archive copy differs from source: {record.name}")
+        if sha256_of(path) != record.raw_sha256:
+            raise SystemExit(f"source record changed before rename: {record.name}")
         path.rename(migrated_path)
+        moved.append(record.name)
         print(f"migrated: {path} -> {migrated_path} (archive copy at {archive_path})")
     return moved
 
@@ -275,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     if not bindings.is_dir():
         print(f"error: no bindings directory at {bindings}", file=sys.stderr)
         return 2
-    report, _ = scan(bindings)
+    report, records = scan_records(bindings)
     for line in report.lines:
         print(line)
     print(
@@ -298,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        moved = write_out(bindings, archive)
+        moved = write_out(bindings, archive, records)
         print(f"converted (moved away): {len(moved)} | rejected (left in place): {report.counts[NON_DETACHED_LEGACY]}")
     else:
         print("no changes made (default is classify-only; see --write-out)")

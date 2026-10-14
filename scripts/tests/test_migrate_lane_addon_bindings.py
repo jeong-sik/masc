@@ -158,6 +158,19 @@ class ClassificationTests(StoreTree, unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn('newer-broken: 1', out)
 
+    def test_detached_with_invalid_visibility_is_newer_broken_and_not_moved(self):
+        record = v048_record(phase=DETACHED)
+        record['visibility'] = {'kind': 'keeper', 'keeper': '   '}
+        path = self.write('h_detached.json', record)
+        self.archive.mkdir()
+        status, out = self.run_tool('--write-out', str(self.archive))
+        self.assertEqual(status, 0)
+        self.assertIn('newer-broken: 1', out)
+        self.assertIn('detached-legacy: 0', out)
+        self.assertTrue(path.exists())
+        self.assertFalse(path.with_name('h_detached.json.migrated').exists())
+        self.assertFalse((self.archive / 'h_detached.json.legacy').exists())
+
     def test_non_object_and_unparseable_files_are_unreadable(self):
         self.write('i1.json', ['not', 'an', 'object'])
         self.write('i2.json', '{not json')
@@ -229,6 +242,29 @@ class WriteOutTests(StoreTree, unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.run_tool('--write-out', str(self.archive))
         self.assertEqual(self.snapshot(), before)
+
+    def test_resumes_when_identical_archive_already_exists_without_migrated(self):
+        archived = self.archive / 'd1.json.legacy'
+        archived.write_bytes(self.original_detached)
+        status, out = self.run_tool('--write-out', str(self.archive))
+        self.assertEqual(status, 0)
+        self.assertFalse(self.detached.exists())
+        migrated = self.detached.with_name('d1.json.migrated')
+        self.assertTrue(migrated.exists())
+        self.assertEqual(migrated.read_bytes(), self.original_detached)
+        self.assertEqual(archived.read_bytes(), self.original_detached)
+        self.assertIn('converted (moved away): 1', out)
+
+    def test_aborts_if_source_changes_between_scan_and_move(self):
+        _, records = tool.scan_records(self.bindings)
+        self.detached.write_text(json.dumps(v048_record(phase=ATTACHED, instance='lane-d1')), encoding='utf-8')
+        modified_bytes = self.detached.read_bytes()
+        with self.assertRaises(SystemExit):
+            tool.write_out(self.bindings, self.archive, records)
+        self.assertTrue(self.detached.exists())
+        self.assertEqual(self.detached.read_bytes(), modified_bytes)
+        self.assertFalse(self.detached.with_name('d1.json.migrated').exists())
+        self.assertFalse((self.archive / 'd1.json.legacy').exists())
 
     def test_write_out_directory_inside_bindings_is_refused(self):
         inside = self.bindings / 'archive'

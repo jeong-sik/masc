@@ -2360,9 +2360,9 @@ let keeper_composition_result_descriptor () =
     ~readonly:true
     ()
   |> with_composable_output (Json_output { schema =
-       object_schema ~additional_properties:false
-         ~properties:["binding", object_schema ~additional_properties:true ~properties:[] ~required:[];
-                      "result", object_schema ~additional_properties:true ~properties:[] ~required:[];
+       object_output_schema
+         ~properties:["binding", opaque_object_schema;
+                      "result", opaque_object_schema;
                       "result_artifact", normalized_artifact_ref_schema]
          ~required:["binding"; "result"; "result_artifact"] })
 ;;

@@ -2884,6 +2884,7 @@ let rec private_jsonl_transaction_error_is_incomplete_tail_at ~wrapped = functio
   | Unexpected_stable_lock_permissions _
   | Invalid_stable_lock_state _
   | Cursor_mismatch _
+  | Transaction_content_changed _
   | Unexpected_transaction_file_kind _
   | Ambiguous_transaction_file_identity _
   | Transaction_path_binding_changed _

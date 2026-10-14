@@ -1848,6 +1848,7 @@ let replay_session_log ~ownership_root ~expected_trace_id path =
          | Fs_compat.Unexpected_transaction_file_kind _
          | Fs_compat.Ambiguous_transaction_file_identity _
          | Fs_compat.Transaction_path_binding_changed _
+         | Fs_compat.Transaction_content_changed _
          | Fs_compat.Invalid_transaction_suffix
          | Fs_compat.Private_jsonl_operation_failed _
          | Fs_compat.Rewrite_stage_failed _
@@ -1894,6 +1895,7 @@ let read_locked ~ownership_root ~expected_trace_id session_dir =
           | Fs_compat.Unexpected_transaction_file_kind _
           | Fs_compat.Ambiguous_transaction_file_identity _
           | Fs_compat.Transaction_path_binding_changed _
+          | Fs_compat.Transaction_content_changed _
           | Fs_compat.Invalid_transaction_suffix
           | Fs_compat.Private_jsonl_operation_failed _
           | Fs_compat.Rewrite_stage_failed _

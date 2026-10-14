@@ -122,6 +122,26 @@ type task_status =
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
 [@@deriving show]
 
+(** A {!task_status} constructor without its payload: what a status filter
+    names. *)
+module Task_status_tag : sig
+  type t =
+    | Todo
+    | Claimed
+    | In_progress
+    | Awaiting_verification
+    | Done
+    | Cancelled
+
+  val all : t list
+  val equal : t -> t -> bool
+  val to_string : t -> string
+
+  val of_string : string -> t option
+  (** The tag whose {!to_string} is exactly the input. *)
+end
+
+val task_status_tag : task_status -> Task_status_tag.t
 val task_status_to_string : task_status -> string
 val string_of_task_status : task_status -> string
 val task_status_icon : task_status -> string

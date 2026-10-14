@@ -262,7 +262,7 @@ let approval_queue_state_of_projection
 let trust_model_of_observations ~pending_approval_projection
     ~(runtime_blocker : Keeper_status_bridge.runtime_blocker_surface option)
     ~latest_receipt ~latest_next_action
-    ~(attention : Keeper_status_bridge.attention) =
+    ~(attention : Keeper_attention_reason.t option) =
   Trust_core.decide
     { approval_queue =
         approval_queue_state_of_projection pending_approval_projection
@@ -273,9 +273,7 @@ let trust_model_of_observations ~pending_approval_projection
           runtime_blocker
     ; receipt_operator_disposition =
         Option.bind latest_receipt receipt_operator_disposition
-    ; attention_needs_attention = attention.needs_attention
-    ; attention_reason = attention.attention_reason
-    ; attention_next_human_action = attention.next_human_action
+    ; status_attention = attention
     ; terminal_next_human_action = latest_next_action
     }
 ;;
@@ -637,7 +635,7 @@ type raw_observations =
   ; latest_approval_audit : Yojson.Safe.t option
   ; pending_approval_projection : pending_approval_projection
   ; runtime_blocker : Keeper_status_bridge.runtime_blocker_surface option
-  ; attention : Keeper_status_bridge.attention
+  ; attention : Keeper_attention_reason.t option
   ; observed_at_unix : float
   }
 

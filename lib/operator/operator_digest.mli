@@ -25,14 +25,13 @@ type recommended_action = {
 
 val keeper_attention_summary :
   name:string ->
-  reason:string option ->
+  reason:Keeper_attention_reason.t ->
   runtime_blocker_summary:string option ->
   string
 (** What one Keeper's attention row says: its name, the attention reason after
-    a colon, and the runtime blocker summary in parentheses --
-    ["lane-smith: paused"], ["yeongsu: runtime_blocked (every candidate
-    refused)"], ["yeongsu (keepalive lost)"]. With neither reading the row is
-    ["<name> needs operator attention"]. *)
+    a colon, and the runtime blocker summary in parentheses when there is one
+    -- ["lane-smith: paused"], ["yeongsu: runtime_blocked (every candidate
+    refused)"]. *)
 
 val severity_rank : operator_severity -> int
 

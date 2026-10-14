@@ -94,23 +94,18 @@ let build_workspace_attention_items config =
     @ pending_items)
 
 let keeper_attention_kind reason =
-  match reason with
-  | Some reason -> "keeper_" ^ reason
-  | None -> "keeper_attention"
+  "keeper_" ^ Keeper_attention_reason.to_wire reason
 
 (* Which Keeper and why. Every item in this projection needs operator
    attention, and every surface that draws one titles its list for that, so
    the row carries only what differs between rows: the Keeper's name, the
    attention reason after a colon, and the runtime blocker summary in
-   parentheses. The two readings keep their own marks so a row with only one
-   of them still says which it is. An item with neither has nothing else to
-   say, and the phrase is its whole reading. *)
+   parentheses when there is one. *)
 let keeper_attention_summary ~name ~reason ~runtime_blocker_summary =
-  match reason, runtime_blocker_summary with
-  | Some reason, Some summary -> Printf.sprintf "%s: %s (%s)" name reason summary
-  | Some reason, None -> Printf.sprintf "%s: %s" name reason
-  | None, Some summary -> Printf.sprintf "%s (%s)" name summary
-  | None, None -> Printf.sprintf "%s needs operator attention" name
+  let reason = Keeper_attention_reason.to_wire reason in
+  match runtime_blocker_summary with
+  | Some summary -> Printf.sprintf "%s: %s (%s)" name reason summary
+  | None -> Printf.sprintf "%s: %s" name reason
 
 (* Waiting connector messages are read off the event queue, not off the
    attention log. The queue is what makes a Keeper judge a message: a turn
@@ -196,17 +191,16 @@ let connector_attention_projection ~base_path ~keeper_name =
 
 let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta) =
   let runtime_blocker = Keeper_status_bridge.runtime_blocker_surface_opt config meta in
-  let approval_queue = Keeper_status_bridge.approval_queue_attention config meta in
+  let approval_queue = Keeper_status_bridge.read_approval_queue_attention config meta in
   let attention =
     Keeper_status_bridge.attention_of_surface config meta runtime_blocker approval_queue
   in
-  if not attention.needs_attention
-  then None
-  else
+  match attention with
+  | None -> None
+  | Some reason ->
     let blocker_fields =
       Keeper_status_bridge.runtime_blocker_fields_json_of_surface meta runtime_blocker
     in
-    let reason = attention.attention_reason in
     let runtime_blocker_summary =
       Option.map
         (fun (blocker : Keeper_status_bridge.runtime_blocker_surface) ->

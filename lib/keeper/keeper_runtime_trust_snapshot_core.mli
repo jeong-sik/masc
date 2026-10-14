@@ -13,9 +13,9 @@ type raw =
   ; runtime_blocker_class : Keeper_status_bridge_blocker.runtime_blocker_class option
   ; receipt_operator_disposition :
       (Keeper_execution_receipt.operator_disposition_kind * string) option
-  ; attention_needs_attention : bool
-  ; attention_reason : string option
-  ; attention_next_human_action : string option
+  ; status_attention : Keeper_attention_reason.t option
+  (** What {!Keeper_status_bridge.attention_of_surface} decided for the
+      Keeper's status surface. *)
   ; terminal_next_human_action : string option
   }
 

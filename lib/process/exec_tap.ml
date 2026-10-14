@@ -24,6 +24,28 @@ let kind_to_string = function
       "Process_eio.run_argv_with_stdin_and_status"
   | Process_eio_run_argv_with_status -> "Process_eio.run_argv_with_status"
 
+type lifecycle_stage =
+  | Spawned of string list
+  | Reap_wait_started
+  | Waitpid_started
+  | Waitpid_returned
+  | Exit_published
+  | Stdout_closed
+  | Stderr_closed
+  | Awaiting_exit
+  | Exit_observed
+
+let lifecycle_stage_fields = function
+  | Spawned argv -> "spawned", argv
+  | Reap_wait_started -> "reap_wait_started", []
+  | Waitpid_started -> "waitpid_started", []
+  | Waitpid_returned -> "waitpid_returned", []
+  | Exit_published -> "exit_published", []
+  | Stdout_closed -> "stdout_closed", []
+  | Stderr_closed -> "stderr_closed", []
+  | Awaiting_exit -> "awaiting_exit", []
+  | Exit_observed -> "exit_observed", []
+
 type mode =
   | Off
   | On of { writer : string -> unit }
@@ -229,6 +251,7 @@ let now_iso8601 () = Time_codec.rfc3339_of_unix_ms (Unix.gettimeofday ())
 type extra_field =
   [ `String of string * string
   | `Bool of string * bool
+  | `Int of string * int
   ]
 
 let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
@@ -239,7 +262,7 @@ let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
       Buffer.add_string buf "{\"ts\":";
       add_json_string buf (now_iso8601 ());
       Buffer.add_string buf ",\"kind\":";
-      add_json_string buf (kind_to_string kind);
+      add_json_string buf kind;
       Buffer.add_string buf ",\"argv\":";
       add_json_array_of_strings buf (redact_argv argv);
       Buffer.add_string buf ",\"env_keys\":";
@@ -257,6 +280,11 @@ let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
             add_json_string buf name;
             Buffer.add_char buf ':';
             add_json_string buf value
+          | `Int (name, value) ->
+            Buffer.add_char buf ',';
+            add_json_string buf name;
+            Buffer.add_char buf ':';
+            Buffer.add_string buf (string_of_int value)
           | `Bool (name, value) ->
             Buffer.add_char buf ',';
             add_json_string buf name;
@@ -271,7 +299,12 @@ let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
            Log.Exec_tap.error "exec_tap writer failed: %s" (Printexc.to_string exn))
 
 let record ~kind ~argv ?env ?cwd () =
-  write_line ~kind ~argv ?env ?cwd []
+  write_line ~kind:(kind_to_string kind) ~argv ?env ?cwd []
+
+let record_lifecycle ~pid ~stage () =
+  if enabled () then (
+    let stage, argv = lifecycle_stage_fields stage in
+    write_line ~kind:"Process.lifecycle" ~argv [`Int ("pid",pid);`String ("stage",stage)])
 
 (* ── install_from_env ─────────────────────────────────────────────── *)
 

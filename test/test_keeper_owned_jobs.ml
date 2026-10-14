@@ -236,6 +236,8 @@ let with_environment values f =
     | (name, value) :: rest -> Masc_test_deps.with_process_env name value (fun () -> loop rest)
   in loop values
 
+let stage label = Printf.eprintf "OWNED_JOB_STAGE %s\n%!" label
+
 let with_fixture ?continuation_channel f =
   let base_path = Filename.temp_file "masc-owned-job-feature-" "" in
   Unix.unlink base_path;
@@ -295,7 +297,22 @@ let with_fixture ?continuation_channel f =
       control_path=Filename.concat base_path "control.json";
       daemon_path=Filename.concat base_path "daemon.json";
       kill_marker=Filename.concat base_path "kill-entered"} in
-  f env initialize_transport fixture
+  Exec_tap.enable ~writer:(fun line -> Printf.eprintf "OWNED_JOB_EXEC %s%!" line);
+  Fun.protect ~finally:Exec_tap.disable @@ fun () ->
+  Eio.Fiber.first
+    (fun () -> f env initialize_transport fixture)
+    (fun () ->
+      (* Extend the existing fixture-only deadlock guard to every scenario,
+         including setup calls made inside [f]. Evidence precedes cancellation;
+         the race still joins cleanup and does not claim to force-stop it. *)
+      Eio.Time.sleep (Eio.Stdenv.clock env) 15.;
+      stage "owned job scenario watchdog expired";
+      List.iter (fun path ->
+        if Sys.file_exists path then
+          Printf.eprintf "OWNED_JOB_EVIDENCE file=%s bytes=%s\n%!" (Filename.basename path) (read path)
+        else Printf.eprintf "OWNED_JOB_EVIDENCE missing=%s\n%!" (Filename.basename path))
+        [fixture.daemon_path;fixture.control_path;Filename.concat base_path "transport-events.jsonl"];
+      fail "public owned job scenario did not finish; see process and transport evidence")
 
 let set_source fixture ~task_id ~turn =
   Call_log.set_turn_context ~cell:fixture.cell ~agent_name:keeper ~task_id
@@ -329,7 +346,6 @@ let result_document ~base_path content =
   | Tool_output.Not_artifact_manifest ->
       (match json |> member "structured_content" with `Null -> json | structured -> structured)
 
-let stage label = Printf.eprintf "OWNED_JOB_STAGE %s\n%!" label
 
 let invoke_raw bundle ~tool_use_id ~turn name input =
   let tool = List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) bundle.Masc.Keeper_tools_agent_core.tools
@@ -644,13 +660,7 @@ let test_cancelled_unconfirmed_launch_treats_late_container_as_orphan () = with_
    | _ -> fail "orphan replaced the cancelled launch phase")
 
 let test_cancel_in_flight_retains_exact_intent () = with_fixture @@ fun env _initialize fixture ->
-  (* Observe only fixture-local synthetic argv. The watchdog emits transport
-     evidence before cancelling work, even if child cleanup itself stalls. *)
-  Exec_tap.enable ~writer:(fun line -> Printf.eprintf "OWNED_JOB_EXEC %s%!" line);
-  Fun.protect ~finally:Exec_tap.disable @@ fun () ->
   let clock = Eio.Stdenv.clock env in
-  Eio.Fiber.first
-    (fun () ->
         set_source fixture ~task_id:"task-A" ~turn:41;
         let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
         let id = job_id started in
@@ -680,20 +690,7 @@ let test_cancel_in_flight_retains_exact_intent () = with_fixture @@ fun env _ini
         check string "exact cancelled container terminal observed" "exited" (completed |> member "phase" |> to_string);
         check int "verified terminal avoids another kill" 1 (effect_count fixture "kill");
         check int "cancel never relaunches" 1 (effect_count fixture "start");
-        check_original_source fixture completed)
-    (fun () ->
-      (* The existing fixture-only 15s guard now covers start, canonical load,
-         cancellation and recovery. Production job lifetime is unaffected. *)
-      Eio.Time.sleep clock 15.;
-      stage "cancellation scenario watchdog expired";
-      List.iter (fun path ->
-          match Sys.file_exists path with
-          | false -> Printf.eprintf "OWNED_JOB_EVIDENCE missing=%s\n%!" (Filename.basename path)
-          | true -> Printf.eprintf "OWNED_JOB_EVIDENCE file=%s bytes=%s\n%!"
-              (Filename.basename path) (read path))
-        [fixture.daemon_path; fixture.control_path;
-         Filename.concat fixture.base_path "transport-events.jsonl"];
-      fail "public cancellation scenario did not finish; see stage and transport evidence")
+        check_original_source fixture completed
 
 let test_changed_mount_cannot_authorize_cancel () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;

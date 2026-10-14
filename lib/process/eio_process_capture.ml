@@ -1,6 +1,9 @@
 (** Foreground Eio pipe capture and child cleanup. Caller policy and runtime
     state stay in Process_eio; all effects here receive their dependencies. *)
 
+let observe proc stage =
+  if Exec_tap.enabled () then Exec_tap.record_lifecycle ~pid:(Eio.Process.pid proc) ~stage ()
+
 let close_flow_best_effort label flow =
   try Eio.Flow.close flow with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -273,8 +276,11 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
       finalize_spawned_proc ~sw ~clock proc status ~sinks:[] ~sources:[ "stdout", stdout_r ])
     (fun () ->
       drain_to_eof stdout_r stdout_buf ~on_chunk:ignore_chunk;
+      observe proc Stdout_closed;
+      observe proc Awaiting_exit;
       let s = Eio.Process.await proc in
       status := Some s;
+      observe proc Exit_observed;
       s)
   |> unix_status_of_eio_status
 
@@ -304,13 +310,17 @@ let spawn_and_drain_both ?phase_ref ?output_capture ~sw pm ~cwd ?env ?stdin_sour
         (fun () ->
           drain_to_eof
             ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stdout) output_capture)
-            stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
+            stdout_r stdout_buf ~on_chunk:on_stdout_chunk;
+          observe proc Stdout_closed)
         (fun () ->
           drain_to_eof
             ?file_capture:(Option.map (fun c -> c, Process_output_capture.Stderr) output_capture)
-            stderr_r stderr_buf ~on_chunk:on_stderr_chunk);
+            stderr_r stderr_buf ~on_chunk:on_stderr_chunk;
+          observe proc Stderr_closed);
+      observe proc Awaiting_exit;
       let s = Eio.Process.await proc in
       status := Some s;
+      observe proc Exit_observed;
       s)
   |> unix_status_of_eio_status
 
@@ -356,9 +366,11 @@ let spawn_and_drain_both_with_stdin_held_open
       (try Eio.Flow.copy_string stdin_content stdin_w with
        | exn when is_downstream_pipe_closed exn -> ());
       Eio.Fiber.both
-        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk)
-        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:on_stderr_chunk);
+        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk; observe proc Stdout_closed)
+        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:on_stderr_chunk; observe proc Stderr_closed);
+      observe proc Awaiting_exit;
       let s = Eio.Process.await proc in
       status := Some s;
+      observe proc Exit_observed;
       s)
   |> unix_status_of_eio_status

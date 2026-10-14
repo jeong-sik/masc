@@ -78,6 +78,7 @@ let reap t set_exit_status =
    PGID escapes this owner. Normal completion kills remaining foreground
    descendants before reaping immediately; detached work uses another API. *)
 let rec reap_group t owner set_exit_status =
+  Exec_tap.record_lifecycle ~pid:t.pid ~stage:Reap_wait_started ();
   let next = Eio.Condition.loop_no_mutex Eio_unix.Process.sigchld (fun () ->
     locked t (fun () ->
       if Promise.is_resolved t.exit_status then Some `Done
@@ -119,10 +120,13 @@ let rec reap_group t owner set_exit_status =
         let rec wait () =
           try owner.waitpid t.pid with
           | Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
+        Exec_tap.record_lifecycle ~pid:t.pid ~stage:Waitpid_started ();
         match Eio_unix.run_in_systhread wait with
         | reaped, status ->
           assert (reaped = t.pid);
-          locked t (fun () -> Promise.resolve_ok set_exit_status status)
+          Exec_tap.record_lifecycle ~pid:t.pid ~stage:Waitpid_returned ();
+          locked t (fun () -> Promise.resolve_ok set_exit_status status);
+          Exec_tap.record_lifecycle ~pid:t.pid ~stage:Exit_published ()
         | exception exn ->
           (* Preserve the failure for a concurrent cleanup waiter as well. *)
           locked t (fun () -> Promise.resolve_error set_exit_status exn);
@@ -207,6 +211,7 @@ module Impl = struct
           signal t (match t.group with None -> Sys.sigkill | Some _ -> Sys.sigterm);
           if not (Promise.is_resolved t.exit_status) then reap_owned t set_exit_status)
       in
+      Exec_tap.record_lifecycle ~pid ~stage:(Spawned args) ();
       Fiber.fork_daemon ~sw (fun () ->
         reap_owned t set_exit_status;
         Switch.remove_hook hook;

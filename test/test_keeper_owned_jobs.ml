@@ -1091,11 +1091,12 @@ pointer = "/artifacts/0/_blob/sha256"
   assert_wrong_binding ();
   if child_fails then with_bundle fixture (fun bundle ->
     let tool_use_id = "failed-child-reader" in
-    (match invoke_raw bundle ~tool_use_id ~turn:52 "keeper_composition_result" (`Assoc ["binding",binding_json]) with
-     | Error _ -> () | Ok _ -> fail "failed child read became success");
     let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:52
       ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
       ~completion:Agent_core.Tool_contract.Continue_after_success in
+    let tool = List.find (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_composition_result") bundle.tools in
+    (match Agent_core.Tool.execute ~invocation tool (`Assoc ["binding",binding_json]) with
+     | Error _ -> () | Ok _ -> fail "failed child read became success");
     let retained = Call_log.peek_retained_artifacts ~invocation () in
     let child_artifact = child_result |> member "execution_artifact" |> composition_reference "failed child execution" in
     check bool "actual failed public read keeps original artifact in per-call carrier" true

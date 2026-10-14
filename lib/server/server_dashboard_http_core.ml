@@ -337,7 +337,7 @@ let dashboard_shell_payload_json
   =
   let cluster = Env_config_core.cluster_name () in
   let cache_key = dashboard_shell_cache_key ~light config in
-  let trace = shell_projection_trace_start ~cache_key ~light in
+  let trace = shell_projection_trace_start ~cache_key in
   let started_at = Unix.gettimeofday () in
   let record_timing label elapsed_ms =
     match timing with

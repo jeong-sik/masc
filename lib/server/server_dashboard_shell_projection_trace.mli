@@ -15,8 +15,7 @@ type shell_projection_trace_status =
   | Shell_trace_failed
 
 type shell_projection_trace =
-  { trace_light : bool
-  ; trace_started_at : float
+  { trace_started_at : float
   ; mutable trace_status : shell_projection_trace_status
   ; mutable trace_active : string list
   ; mutable trace_completed : shell_projection_timing list
@@ -25,14 +24,13 @@ type shell_projection_trace =
 
 type shell_projection_trace_snapshot =
   { snapshot_status : shell_projection_trace_status
-  ; snapshot_light : bool
   ; snapshot_elapsed_ms : int
   ; snapshot_active : string list
   ; snapshot_completed : shell_projection_timing list
   ; snapshot_finished_at : float option
   }
 
-val start : cache_key:string -> light:bool -> shell_projection_trace
+val start : cache_key:string -> shell_projection_trace
 val start_projection : shell_projection_trace -> string -> unit
 val finish_projection : shell_projection_trace -> string -> int -> unit
 

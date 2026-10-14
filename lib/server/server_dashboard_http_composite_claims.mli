@@ -47,8 +47,6 @@ val composite_claim_attempt_json :
 (** The claim attempt for [keeper_name] inside the window. An unreadable
     window renders [status = "tool_log_unavailable"] with the index's
     [detail], not the [not_observed] shape. *)
-val find_override_field_source :
-  string -> Yojson.Safe.t -> Yojson.Safe.t option
 val composite_config_drift_json :
   config:Workspace.config ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]

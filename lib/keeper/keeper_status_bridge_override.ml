@@ -1,52 +1,41 @@
-(** Default vs live override-field detail builder + 5 typed
-    matchers for keeper status surfaces.
+type t =
+  | Instructions of { default : string; live : string }
+  | Mention_targets of { default : string list; live : string list }
+  | Board_interests of { default : string list; live : string list }
+  | Runtime_id of { default : string; live : string }
+  | Activation_mode of
+      { default : Keeper_activation_mode.t
+      ; live : Keeper_activation_mode.t
+      }
 
-    Used by [live_override_details] (still in
-    [Keeper_status_bridge]) to compare a keeper's
-    [keeper_profile_defaults] against the live [keeper_meta] field
-    by field, producing a JSON-rendered list of overrides for the
-    operator dashboard.
-
-    Each matcher applies the same shape: take ~field name + default
-    + live, emit a [override_field_detail] iff the two differ.
-    Variants per type: [maybe_string_override] (optional string
-    with an optional normalizer), [maybe_bool_override] (optional
-    bool), [maybe_string_list_override] (optional list),
-    [nonempty_string_list_override] (non-empty list — empty default
-    means no preference, not a difference), [maybe_string_option_
-    override] (both default and live are options).
-
-    Pure builders — no parent state, no I/O. Verbatim extract from
-    [Keeper_status_bridge]; [Json_util.json_string_list] is a 1-line local
-    duplicate because the parent's copy is in flight on a different
-    extract path and this 1-line helper isn't worth a third sibling. *)
-
-
-type override_field_detail =
-  { field : string
-  ; default_value : Yojson.Safe.t
-  ; live_value : Yojson.Safe.t
-  }
-
-let override_field field ~default_value ~live_value =
-  { field; default_value; live_value }
-
-let maybe_string_override field ?(normalize = fun value -> value) default live acc =
-  let default = Option.map normalize default in
-  match default with
-  | Some value when value <> live ->
-    override_field field ~default_value:(`String value) ~live_value:(`String live) :: acc
-  | _ -> acc
+let field_name = function
+  | Instructions _ -> "prompt.instructions"
+  | Mention_targets _ -> "workspace.mention_targets"
+  | Board_interests _ -> "workspace.board_interests"
+  | Runtime_id _ -> "model.runtime_id"
+  | Activation_mode _ -> "activation_mode"
 ;;
 
-let nonempty_string_list_override field default live acc =
-  if default <> [] && default <> live
-  then
-    override_field
-      field
-      ~default_value:(Json_util.json_string_list default)
-      ~live_value:(Json_util.json_string_list live)
-    :: acc
-  else acc
+let default_value_json = function
+  | Instructions { default; _ } | Runtime_id { default; _ } -> `String default
+  | Mention_targets { default; _ } | Board_interests { default; _ } ->
+    Json_util.json_string_list default
+  | Activation_mode { default; _ } -> `String (Keeper_activation_mode.to_string default)
 ;;
 
+let live_value_json = function
+  | Instructions { live; _ } | Runtime_id { live; _ } -> `String live
+  | Mention_targets { live; _ } | Board_interests { live; _ } ->
+    Json_util.json_string_list live
+  | Activation_mode { live; _ } -> `String (Keeper_activation_mode.to_string live)
+;;
+
+type runtime_drift = { default : string; live : string }
+
+let runtime_drift overrides =
+  List.find_map
+    (function
+      | Runtime_id { default; live } -> Some { default; live }
+      | Instructions _ | Mention_targets _ | Board_interests _ | Activation_mode _ -> None)
+    overrides
+;;

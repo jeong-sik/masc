@@ -109,3 +109,20 @@ val runtime_surface_json :
 
 val source_provenance_json :
   Workspace_utils.config -> keeper_meta -> Yojson.Safe.t
+
+type source_provenance =
+  { overrides : Keeper_status_bridge_override.t list
+  ; live_meta_path : string
+  ; default_manifest_path : string option
+  ; default_source_kind : string option
+  ; default_config_error : Keeper_types_profile.keeper_toml_config_error option
+  ; resolution : Config_dir_resolver.resolution
+  }
+(** Where a Keeper's config comes from and which fields its live meta
+    overrides. {!source_provenance_json} renders this record. *)
+
+val source_provenance :
+  Workspace_utils.config -> keeper_meta -> source_provenance
+
+val active_config_root : source_provenance -> string
+val active_config_root_source : source_provenance -> string

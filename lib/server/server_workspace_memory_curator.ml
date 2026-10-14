@@ -247,22 +247,38 @@ let execute_output
   =
   let requirement = Exact.make_output_requirement ~schema
       ~minimum_guarantee:Exact.Json_syntax in
+  let cli_admission =
+    Keeper_lane_cli_oneshot.partition_cli_slots
+      ~lane:(Runtime.requirement_of_exact_lane ~schema Runtime.Workspace_curator)
+      resolved.cli_slots
+  in
+  let refused_cli_details =
+    List.map
+      (fun ({ slot; refusal } : Keeper_lane_cli_oneshot.refused_slot) ->
+         Printf.sprintf
+           "cli lane slot %s refused admission: %s"
+           slot
+           (Runtime.refusal_to_string refusal))
+      cli_admission.refused_cli_slots
+  in
   match execute_http ~resolved ~requirement ~rendered_prompt ~validate_output with
   | Ok answer -> Ok answer
   | Error No_http_slot ->
     if resolved.cli_slots = []
     then Error (Execution_failed "workspace curator has no admitted exact-output HTTP slot")
+    else if cli_admission.cli_slots = []
+    then Error (Execution_failed (String.concat "; " refused_cli_details))
     else
       execute_cli
         ~cli_runner
         ~base_path
-        ~cli_slots:resolved.cli_slots
+        ~cli_slots:cli_admission.cli_slots
         ~requirement
         ~rendered_prompt
         ~validate_output
         ~prior_size_refused:false
         ~prior_output_refused:false
-        ~prior_details:[]
+        ~prior_details:refused_cli_details
   | Error (Http_failed http_err) ->
     if resolved.cli_slots = []
     then Error http_err
@@ -273,16 +289,26 @@ let execute_output
         | Output_too_large _ -> false, true
         | Execution_failed _ -> false, false
       in
-      execute_cli
-        ~cli_runner
-        ~base_path
-        ~cli_slots:resolved.cli_slots
-        ~requirement
-        ~rendered_prompt
-        ~validate_output
-        ~prior_size_refused
-        ~prior_output_refused
-        ~prior_details:[execution_failure_detail http_err])
+      let prior_details = execution_failure_detail http_err :: refused_cli_details in
+      if cli_admission.cli_slots = []
+      then (
+        let detail = String.concat "; " prior_details in
+        if prior_size_refused
+        then Error (Input_too_large detail)
+        else if prior_output_refused
+        then Error (Output_too_large detail)
+        else Error (Execution_failed detail))
+      else
+        execute_cli
+          ~cli_runner
+          ~base_path
+          ~cli_slots:cli_admission.cli_slots
+          ~requirement
+          ~rendered_prompt
+          ~validate_output
+          ~prior_size_refused
+          ~prior_output_refused
+          ~prior_details)
 
 let execute_with_options ~cli_runner ~base_path ~resolved ~rendered_prompt ~selected ~ledger =
   execute_output ~cli_runner ~base_path ~resolved ~schema:output_schema ~rendered_prompt

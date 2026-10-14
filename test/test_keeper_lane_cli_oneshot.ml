@@ -976,7 +976,9 @@ let test_input_size_guard_and_refusal_classification () =
    with
    | Error
        (Cli_oneshot.Input_over_limit
-          { estimated_tokens = 50_000; limit_tokens = 32_768 }) -> ()
+          { estimated_tokens; limit_tokens }) ->
+     check int "estimated_tokens" 50_000 estimated_tokens;
+     check int "limit_tokens" 32_768 limit_tokens
    | Ok () -> fail "oversize caller-bounded input must be refused");
   (match
      Cli_oneshot.check_input_size

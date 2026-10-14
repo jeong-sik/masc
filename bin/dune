@@ -1296,6 +1296,14 @@
  (wrapped false)
  (modules masc_tui_midi))
 
+;; What opening a board attachment does: save, play, or hand to the local
+;; app. Pure decisions are tested; the caller injects the fetch.
+(library
+ (name masc_tui_attachment_action)
+ (wrapped false)
+ (modules masc_tui_attachment_action)
+ (libraries masc_tui_types masc_tui_browser masc_tui_midi unix))
+
 (library
  (name masc_tui_memo)
  (wrapped false)

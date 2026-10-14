@@ -55,12 +55,17 @@ let default_workspace_state config = {
    a reader paging in sequence order. It took someone editing state.json by
    hand.
 
-   Boot is where that is noticed, because it is the one moment the store and
-   the counter are both at rest. Raising the counter loses nothing: the
+   [Workspace.init] runs this at boot. Raising the counter loses nothing: the
    numbers between are simply never issued, and the store, not the counter,
    is what says which messages exist. A counter already at or above the store
-   is left exactly as it is. *)
+   is left exactly as it is.
+
+   It holds the state lock that [next_seq] takes, from reading the store to
+   writing the counter. Without it a message numbered in between could have
+   its number written over by an older read, and the counter would step
+   back. *)
 let reconcile_message_seq config path =
+  with_file_lock config path @@ fun () ->
   let filed = resume_message_seq config in
   if filed > 0 then
     match read_json config path with

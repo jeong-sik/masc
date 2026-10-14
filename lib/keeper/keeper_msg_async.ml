@@ -1603,6 +1603,19 @@ let transition_lock_for_key key =
   with_lock (fun () -> Request_table.find_opt transition_locks key)
 ;;
 
+let with_canonical_request_read ~base_path ~caller ~request_id f =
+  let read () = with_store_transition_lock ~base_path ~request_id f in
+  let key = request_key ~base_path ~submitted_by:caller ~request_id in
+  (* Status writers hold this owner lock through durable replacement and
+     runtime publication/removal. The store lock alone only excludes other
+     canonical readers and startup recovery, not a live status writer.
+     Preserve the writer-to-store order; startup recovery never acquires an
+     owner's transition lock while holding the store lock. *)
+  match transition_lock_for_key key with
+  | None -> read ()
+  | Some owner_lock -> Eio.Mutex.use_ro owner_lock read
+;;
+
 let set_status ~ops ?(preserve_terminal = false) key status =
   match transition_lock_for_key key with
   | None -> None
@@ -2161,7 +2174,7 @@ let load_canonical_request ~base_path ~caller request_id =
   | Error rejection -> Rejected rejection
   | Ok (base_path, caller) ->
     if not (is_safe_request_id request_id) then Rejected Invalid_request_id
-    else with_store_transition_lock ~base_path ~request_id (fun () ->
+    else with_canonical_request_read ~base_path ~caller ~request_id (fun () ->
       match load_record_canonical_located ~base_path ~request_id with
       | Located_absent -> Absent
       | Located_unreadable reason -> Unreadable reason
@@ -2179,7 +2192,7 @@ let with_canonical_durable_terminal ~base_path ~caller request_id ~f =
     if not (is_safe_request_id request_id)
     then Error (Canonical_terminal_access_rejected Invalid_request_id)
     else
-      with_store_transition_lock ~base_path ~request_id (fun () ->
+      with_canonical_request_read ~base_path ~caller ~request_id (fun () ->
         let key = request_key ~base_path ~submitted_by:caller ~request_id in
         match
           Eio.Mutex.use_ro mu (fun () -> Request_table.find_opt pending key)
@@ -2244,7 +2257,7 @@ let load_canonical_durable_queued ~base_path ~caller request_id =
   if not (is_safe_request_id request_id)
   then Error (Canonical_queued_access_rejected Invalid_request_id)
   else
-    with_store_transition_lock ~base_path ~request_id (fun () ->
+    with_canonical_request_read ~base_path ~caller ~request_id (fun () ->
       (* Canonical disk authority takes precedence over any cached reservation.
          The existing decoder also refuses unreadable/conflicting partitions. *)
       match load_record_canonical_located ~base_path ~request_id with

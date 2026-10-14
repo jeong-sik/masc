@@ -419,6 +419,9 @@ val poll : base_path:string -> caller:string -> string -> load_result
 
 val load_canonical_request : base_path:string -> caller:string -> string -> load_result
 (** Read the accepted source without reconciling workers or changing records.
+    A live local owner serializes this read with its status publication before
+    the request's store-transition lock is acquired. Atomic replacement by that
+    owner cannot race the strict canonical file snapshot read.
     A terminal status here is not proof of canonical terminal publication;
     use [load_canonical_durable_terminal] before consuming a final result. *)
 
@@ -440,7 +443,9 @@ val read_durable_active_inventory
     inventories a partition.  Process-local nonterminal ownership and a visible
     but unconfirmed terminal publication are distinct typed failures, so neither
     can be mistaken for durable truth.  Corrupt, conflicting, nonterminal, and
-    noncanonical records remain in place for lane-local recovery. *)
+    noncanonical records remain in place for lane-local recovery. Like
+    [load_canonical_request], the read serializes with a live local owner's
+    status publication. *)
 val load_canonical_durable_terminal :
   base_path:string ->
   caller:string ->
@@ -464,7 +469,8 @@ val load_canonical_durable_queued :
   string ->
   (durable_queued_proof, canonical_queued_error) result
 (** Read only the exact request's canonical terminal/active filenames under
-    the existing store-transition lock. Terminal precedence and strict record
+    the local owner's status-publication lock followed by the existing
+    store-transition lock. Terminal precedence and strict record
     conflicts remain authoritative. A process-local [Queued] reservation is
     accepted only when it equals the whole canonical durable entry; running,
     cancelling, terminal overlays and differing memory records are refused.

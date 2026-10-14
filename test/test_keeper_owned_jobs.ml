@@ -906,7 +906,9 @@ let await_composition env fixture accepted =
            | Async.Cancelled _ -> false, Async.entry_to_json entry, entry
            | Queued | Running | Cancelling _ | Lost _
            | Persistence_failed _ | Done {data=None;_}
-           | Waiting_for_dependencies {data=None;_} -> fail "composition did not settle a result")
+           | Waiting_for_dependencies {data=None;_} ->
+             failf "composition did not settle a result: %s"
+               (Async.entry_to_json entry |> Yojson.Safe.to_string))
       | Error (Async.Canonical_terminal_absent | Canonical_terminal_runtime_active _) ->
           Eio.Fiber.yield (); read_terminal ()
       | Error error -> fail (Async.canonical_terminal_error_to_string error)

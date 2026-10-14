@@ -75,11 +75,12 @@ type host_step =
   | Start_host of string
   | Launcher_not_ready of launcher_missing
 
-let launcher_missing_message missing =
-  Printf.sprintf "the browser lane is %s; run connectors/browser/install-host.sh for this workspace"
+let launcher_missing_message ~base_path missing =
+  Printf.sprintf "the browser lane is %s; run %s"
     (match missing with
      | Not_installed -> "not installed"
      | Needs_reinstall -> "not as its installation wrote it")
+    (Browser_lane_launcher.install ~base_path)
 
 let host_on_another_port_message ~port address =
   Printf.sprintf

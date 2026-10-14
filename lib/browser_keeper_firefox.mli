@@ -74,7 +74,7 @@ val host_step : port:int -> Browser_bidi_host_status.report -> host_step
 val host_on_another_port_message : port:int -> string -> string
 val host_address_unknown_message : port:int -> string
 
-val launcher_missing_message : launcher_missing -> string
+val launcher_missing_message : base_path:string -> launcher_missing -> string
 
 (** What a server finds of the Keeper Firefox its workspace's record names,
     before it stops that Firefox (RFC-browser-keeper-firefox §3.3, §3.5.4). *)

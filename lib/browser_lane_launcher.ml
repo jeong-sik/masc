@@ -111,10 +111,7 @@ let verdict t =
   | Serving { polling = []; _ }, Follows_workspace, Ok _ -> Misconfigured
 
 let install ~base_path =
-  Printf.sprintf
-    "the MASC browser host installer, install-host.sh (%s in the MASC repository), with \
-     --base-path %s"
-    (Browser_lane.live_transport_setup_doc Browser_lane.Web_extension)
+  Printf.sprintf "masc browser-lane-setup --mode extension --base-path %s"
     (Filename.quote base_path)
 
 let reinstall ~base_path =

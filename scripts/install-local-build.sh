@@ -5,8 +5,9 @@
 # too, so the preflight an operator runs there is the one this build produced
 # (#39224).
 #
-# install-host.sh copies the host executable into <workspace>/.masc/browser-lane/host
-# so a moved checkout cannot break it. That copy is what Firefox starts, and
+# masc browser-lane-setup copies the host executable into
+# <workspace>/.masc/browser-lane/host so a moved checkout cannot break it, and
+# writes the extension beside it. That copy is what Firefox starts, and
 # nothing else replaces it, so a local install that only refreshed the prefix
 # left the lane on whatever build was copied first. Every native messaging
 # manifest whose launcher lives under a workspace's browser-lane/host is
@@ -329,8 +330,9 @@ else
   echo "installed masc, masc-tui, masc-browser-host into $prefix (no deployment preflight pair: $build_dir/deployment_preflight_helper.exe is missing)"
 fi
 
-python3 - "$repo/connectors/browser/install-host.sh" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
+python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" <<'PY'
 import fcntl
+import filecmp
 import json
 import os
 from pathlib import Path
@@ -339,7 +341,7 @@ import struct
 import subprocess
 import sys
 
-installer, binary, manifest_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
+masc, binary, manifest_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
 launcher_suffix = Path(".masc/browser-lane/host/launch")
 
 registered = []
@@ -356,7 +358,7 @@ if manifest_dir.is_dir():
         if launcher.parts[-len(launcher_suffix.parts):] != launcher_suffix.parts:
             continue
         base = Path(*launcher.parts[:-len(launcher_suffix.parts)])
-        registered.append((name, base))
+        registered.append((name, base, declared["path"]))
 
 if not registered:
     print(f"no browser lane host is registered in {manifest_dir}")
@@ -392,10 +394,46 @@ def bidi_host_pid(base):
 # -ww: whole commands, so a long host path is matched in full.
 running = subprocess.run(["ps", "-ww", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
 stopped_pids = set()
-for name, base in registered:
-    subprocess.run(["bash", installer, "--binary", binary, "--base-path", str(base),
-                    "--host-name", name, "--manifest-dir", str(manifest_dir)],
-                   check=True, stdout=subprocess.DEVNULL)
+# The masc just installed brings a workspace's lane to the build it was built
+# from, and this says what is left wrong when it did not. masc resolves
+# --base-path as it does for every command (it trims the value and drops a
+# trailing .masc), so a registration whose workspace path does not survive that
+# would be written somewhere else and still look refreshed: the manifest it
+# rewrites is compared with the one it replaced, and the host copy with the
+# binary just installed.
+def refresh(name, base, declared_path):
+    registration = manifest_dir / f"{name}.json"
+    previous = registration.read_text() if registration.is_file() else None
+    result = subprocess.run(
+        [masc, "browser-lane-setup", "--mode", "extension", "--binary", binary,
+         "--base-path", str(base), "--host-name", name, "--manifest-dir", str(manifest_dir)],
+        stdout=subprocess.DEVNULL)
+    if result.returncode != 0:
+        return f"masc browser-lane-setup exited {result.returncode}"
+    try:
+        now = json.loads(registration.read_text()).get("path")
+    except (OSError, ValueError):
+        now = None
+    if not isinstance(now, str) or os.path.realpath(now) != os.path.realpath(declared_path):
+        if previous is None:
+            registration.unlink(missing_ok=True)
+        else:
+            registration.write_text(previous)
+        return (f"masc resolved {base} to another workspace (it wrote {now}); "
+                "the registration is as it was")
+    copy = base / ".masc/browser-lane/host/masc-browser-host"
+    if not copy.is_file() or not filecmp.cmp(binary, copy, shallow=False):
+        return f"{copy} is not the host just installed"
+    return None
+
+failures = []
+for name, base, declared_path in registered:
+    problem = refresh(name, base, declared_path)
+    if problem:
+        # The workspaces after this one are still brought up to date, and this
+        # one's running host is left alone: it still runs the copy it has.
+        failures.append(f"browser lane host {name} for {base}: {problem}")
+        continue
     host = str(base / ".masc/browser-lane/host/masc-browser-host")
     bidi_host = bidi_host_pid(base)
     stopped, kept = [], []
@@ -420,6 +458,10 @@ for name, base in registered:
         said.append(f"kept BiDi host pid {', '.join(kept)}, which nothing would start again; "
                     "it runs its old copy until it is restarted")
     print(f"refreshed browser lane host {name} for {base} ({'; '.join(said) or 'no host running'})")
+if failures:
+    for failure in failures:
+        print(f"install-local-build: could not refresh {failure}", file=sys.stderr)
+    sys.exit(1)
 PY
 
 # Installed binaries and browser hosts now hold their own copies. Clean only

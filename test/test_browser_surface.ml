@@ -774,8 +774,7 @@ let test_keeper_hears_which_connection_serves_the_work () =
         (* This workspace has no browser lane, so its launcher is not there yet. *)
         ; "then runs " ^ Filename.quote (Filename.concat workspace ".masc/browser-lane/host/launch")
           ^ " --bidi-url ws://127.0.0.1:PORT/session"
-        ; "the operator first installs the lane by running the MASC browser host installer, \
-           install-host.sh" ];
+        ; "the operator first installs the lane by running masc browser-lane-setup --mode extension" ];
       (* Readers that keep the beginning of a rejection keep what decides. *)
       let position key =
         let rec find index = function

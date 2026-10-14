@@ -11,17 +11,15 @@ MASC에는 세 가지 브라우저 소스가 있습니다.
 
 ## 설정: live
 
-브라우저가 실행되는 머신에 빌드된 OCaml native host를 설치합니다. 여기서 `--binary`는 Firefox/Zen 실행 파일이 아니라 **masc-browser-host**입니다. `--base-path`는 `.masc` 자체가 아닌 `.masc`를 포함하는 워크스페이스 경로입니다.
+브라우저가 실행되는 머신에 OCaml native host와 확장을 설치합니다. `--base-path`는 `.masc` 자체가 아닌 `.masc`를 포함하는 워크스페이스 경로입니다. host는 `masc` 옆에 설치된 `masc-browser-host`이고, 다른 것을 쓰려면 `--binary`로 지정합니다. `--binary`는 Firefox/Zen 실행 파일이 아닙니다.
 
 ```bash
-bash connectors/browser/install-host.sh \
-  --binary /path/to/masc-browser-host \
-  --base-path /path/to/workspace
+masc browser-lane-setup --mode extension --base-path /path/to/workspace
 ```
 
 launcher에는 서버 주소를 적지 않습니다. host는 워크스페이스의 `.masc/config/connection.toml`에서 포트를 읽습니다. poll이 실패하면 그 파일을 다시 읽고, 지금 서버가 더 이상 답하지 않으면서 파일이 가리키는 새 포트가 답할 때만 옮겨 갑니다. 그래서 서버가 다른 포트로 다시 떠도 다시 설치하지 않아도 됩니다.
 
-설치기는 macOS와 Linux를 지원하며 Mozilla native messaging manifest를 등록합니다. 다른 manifest 디렉터리가 필요하면 `--manifest-dir`로 지정합니다. Firefox 또는 Zen의 `about:debugging` → **임시 부가 기능 로드**에서 `connectors/browser/extension/manifest.json`을 선택합니다. 브라우저가 종료되면 임시 로드도 끝납니다.
+이 명령은 macOS와 Linux를 지원하며 Mozilla native messaging manifest를 등록합니다. 다른 manifest 디렉터리가 필요하면 `--manifest-dir`로 지정합니다. 확장은 `<base-path>/.masc/browser-lane/extension/`에 씁니다. Firefox 또는 Zen의 `about:debugging` → **임시 부가 기능 로드**에서 그 안의 `manifest.json`을 선택합니다. 브라우저가 종료되면 임시 로드도 끝납니다.
 
 각 연결은 브라우저 종류와 `clientId` UUID를 보고합니다. live 연결이 하나면 자동으로 선택할 수 있고, 여러 개면 원하는 UUID를 선택해야 합니다. 탭 ID는 연결마다 별개이므로 서로 다른 브라우저에서 같은 숫자일 수 있습니다. 끊어진 UUID는 다른 브라우저로 대체하지 않고 거부합니다. 재연결하면 새 UUID를 탐색해 다시 선택합니다.
 

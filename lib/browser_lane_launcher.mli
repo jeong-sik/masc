@@ -88,7 +88,7 @@ val host_directory_path : base_path:string -> string
     the reader and the writer cannot disagree on the fields. *)
 val declaration : launcher_script:string -> string
 
-(** The installer and what it is given for this workspace, as the words that
+(** The command that installs the lane for this workspace, as the words that
     follow "the operator runs". *)
 val install : base_path:string -> string
 

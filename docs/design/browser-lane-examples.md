@@ -14,12 +14,10 @@ Browser는 사이트 구분 없이 페이지를 읽는 공통 도구다. Keeper�
 Live 호스트를 설치하고 Firefox 또는 Zen의 `about:debugging`에서 확장을 적재한다.
 
 ```sh
-bash connectors/browser/install-host.sh \
-  --binary /path/to/masc-browser-host \
-  --base-path /path/to/workspace
+masc browser-lane-setup --mode extension --base-path /path/to/workspace
 ```
 
-확장 manifest: `connectors/browser/extension/manifest.json`.
+확장 manifest: `<base-path>/.masc/browser-lane/extension/manifest.json`.
 Automation은 resolved configuration directory의 `runtime.toml`에 geckodriver
 실행 파일 경로를 적고 MASC를 재시작한다. 서버가 그 geckodriver를 빈 loopback
 포트로 직접 띄우고, 서버가 끝날 때 같이 내린다.

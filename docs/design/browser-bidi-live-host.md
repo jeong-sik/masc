@@ -163,7 +163,7 @@ Without the table the operator does both steps.
    above is an example.
 
    The browser lane has to be installed for that workspace first.
-   `connectors/browser/install-host.sh` writes the lane token the host and the
+   `masc browser-lane-setup --mode extension` writes the lane token the host and the
    server share (`<base-path>/.masc/browser-lane/token`), a copy of the host
    executable, and the `launch` script used here. The launcher runs that copy
    with this workspace's `--base-path` and token file and passes on what

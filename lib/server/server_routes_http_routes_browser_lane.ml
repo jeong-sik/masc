@@ -10,7 +10,7 @@
 
    Auth is a lane token, not a dashboard session: the host process is not a
    person. The token lives at <base>/.masc/browser-lane/token (0600, written
-   by connectors/browser/install-host.sh). No token file means the lane is
+   by masc browser-lane-setup --mode extension). No token file means the lane is
    not installed, and every request fails closed — port 8935 is what the
    public tunnel points at, so an unauthenticated lane would publish the
    user's browser to the internet. *)

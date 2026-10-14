@@ -147,9 +147,9 @@ let current_workspace_id () = Atomic.get workspace_id
 let clear_workspace_id () = Atomic.set workspace_id None
 
 (* One reading of the connector, rendered by [status_json] and
-   [connector_json] alike so the two views cannot disagree. The rendered
-   [connected] is computed from [gateway_state], so the two cannot be stored
-   apart. *)
+   [connector_json] alike so the two views cannot disagree. Values computed
+   from other fields ([connected] from [gateway_state], [pid] from
+   [available]) are computed at render time, not stored beside their source. *)
 type status = {
   gateway_state : Slack_gateway_state.connection_state;
   trigger_policy : Slack_gateway_state.trigger_policy option;
@@ -165,7 +165,6 @@ type status = {
   app_token_present : bool;
   updated_at : string;
   last_ready : ready_info option;
-  pid : int;
 }
 
 let read_status ~audit_limit =
@@ -224,7 +223,6 @@ let read_status ~audit_limit =
     app_token_present = app_present;
     updated_at;
     last_ready = Atomic.get last_ready;
-    pid = (if available then Unix.getpid () else 0);
   }
 
 (* The fields both views share, written once so a field added to one view
@@ -267,7 +265,7 @@ let status_fields status =
         (match status.last_ready with
          | Some r -> r.ready_bot_user_id
          | None -> "") )
-  ; ("pid", `Int status.pid)
+  ; ("pid", `Int (if status.available then Unix.getpid () else 0))
   ]
 
 let status_json ?(audit_limit = 10) () =

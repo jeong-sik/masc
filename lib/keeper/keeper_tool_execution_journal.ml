@@ -195,11 +195,11 @@ let validate_source source =
   Option.iter (fun task -> require (exact_name task) "invalid source task identity") source.source_task_id;
   (match source.producer with
    | Prepared -> ()
-   | Named {tool_name;skill_reference=_;activation} ->
-     require (exact_name tool_name) "invalid named producer tool";
-     Option.iter (fun bound -> require
-       (Ids.Turn_ref.absolute_turn (Keeper_skill_activation_recorder.bound_turn_ref bound) = source.source_turn)
-       "named activation belongs to another original turn") activation);
+   | Named {tool_name;skill_reference=_;activation=_} ->
+     (* The SDK provider/client ordinal is not the admitted Keeper cycle.
+        Both original coordinates are sealed in the source; request ownership
+        checks the SDK ordinal and the recorder retains its physical frame. *)
+     require (exact_name tool_name) "invalid named producer tool");
   match Plan.Composition_run_id.of_string (Plan.Composition_run_id.to_string source.composition_run_id) with
   | Ok _ -> ()
   | Error _ -> refuse "invalid UUIDv7 composition run identity"

@@ -5501,10 +5501,10 @@ let composition_descriptor name =
   | None -> fail ("composition descriptor missing: " ^ name)
 ;;
 
-let composition_invocation ~completion =
+let composition_invocation_at ~turn ~completion =
   Agent_core.Tool_contract.Invocation.create
     ~tool_use_id:"composition-parent"
-    ~turn:7
+    ~turn
     ~schedule:
       { Agent_core.Tool_contract.planned_index = 0
       ; batch_index = 0
@@ -5513,6 +5513,8 @@ let composition_invocation ~completion =
       }
     ~completion
 ;;
+
+let composition_invocation = composition_invocation_at ~turn:7
 
 let frozen_capability_surface
       ?(tool_deny = [])
@@ -8319,6 +8321,9 @@ let test_write_then_unchanged_read_completes () =
 ;;
 
 let test_async_composition_binds_params_into_durable_status () =
+  (* A fresh native SDK starts at provider round zero while its admitted
+     Keeper run has physical TurnRef one. These are independent axes. *)
+  let composition_invocation = composition_invocation_at ~turn:0 in
   with_exec_fixture
     ~bind_eio_context:true
     "composition-async-param-durable-status"
@@ -8344,7 +8349,7 @@ let test_async_composition_binds_params_into_durable_status () =
              ~trace_id:meta.runtime.trace_id
              ~turn_ref:(Ids.Turn_ref.make
                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-               ~absolute_turn:7)
+               ~absolute_turn:1)
              ~runtime_id:(fun () -> Some "composition-param.fixture")
              ~snapshot_revision:(Masc.Keeper_capability_surface.skill_snapshot_revision capability_surface)
              ~task_selection with
@@ -8491,7 +8496,18 @@ let test_async_composition_binds_params_into_durable_status () =
            let header = In_channel.with_open_text path In_channel.input_line
              |> function Some line -> parse_json line | None -> fail "named submission header absent" in
            if Yojson.Safe.Util.(member "source" header |> member "composition_run_id") = `String composition_run_id
-           then Some path else None)
+           then (
+             let source = match Masc.Keeper_tool_execution_journal.source_of_yojson
+                 (Yojson.Safe.Util.member "source" header) with
+               | Ok source -> source
+               | Error error -> fail (Masc.Keeper_tool_execution_journal.error_to_string error) in
+             check int "original SDK ordinal is preserved" 0 source.source_turn;
+             (match source.producer with
+              | Named {activation=Some bound;_} ->
+                check int "original Keeper frame is preserved independently" 1
+                  (Ids.Turn_ref.absolute_turn (Masc.Keeper_skill_activation_recorder.bound_turn_ref bound))
+              | Named {activation=None;_} | Prepared -> fail "named producer lost its physical Keeper frame");
+             Some path) else None)
          |> function Some path -> path | None -> fail "original named intent was not persisted"
        in
        let tail = open_out_gen [Open_wronly;Open_append;Open_binary] 0o600 intent_path in

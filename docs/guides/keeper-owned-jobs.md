@@ -255,6 +255,12 @@ submission uses its frozen activation recorder, and a recorded invocation whose
 original intent is missing cannot create a replacement. This does not recover an
 old invocation by assigning it a new Tool ID.
 
+The SDK's original invocation turn is a provider/client ordinal. The activation
+recorder's physical Keeper TurnRef identifies the admitted Keeper run. A fresh
+native SDK can invoke a Tool at ordinal zero during Keeper run one, and an
+official client session can reset its own ordinal. These coordinates are
+retained independently; resumption replaces neither with the current turn.
+
 The intent is durable before broker entry. A typed pre-acceptance rejection may
 release that same source for another attempt. Partial acceptance, reconciliation
 or fork uncertainty retains the reservation and the actual request ID when
@@ -300,6 +306,8 @@ whole-task preparation improvement or installed runtime/UI behavior.
 `test_keeper_tool_dispatch_runtime` exercises the actual public SDK bundle and
 canonical broker records: acknowledgement replay preserves original IDs without
 new requests; an interrupted phase append still recovers accepted work; changed
-arguments and a missing original intent refuse replacement. Its one-shot SDK
+arguments and a missing original intent refuse replacement. The fixture uses
+Keeper run one and SDK ordinal zero; named parent/child continuation scenarios
+also keep different physical Keeper and original SDK turns. Its one-shot SDK
 intervals end before response decoding and verification. Authored assertions and
 interval capture are not execution evidence until the selected run completes.

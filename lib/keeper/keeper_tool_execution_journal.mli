@@ -18,6 +18,8 @@ type source =
   ; run_reference : Tool_output.artifact_ref
   ; parent_tool_use_id : string
   ; source_turn : int
+    (** Original SDK invocation ordinal. The named producer's sealed physical
+        Keeper TurnRef is a separate coordinate and remains in [activation]. *)
   ; source_task_id : string option
   ; producer : producer
   }

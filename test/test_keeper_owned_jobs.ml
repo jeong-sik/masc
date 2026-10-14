@@ -995,7 +995,7 @@ value = { sha256 = %S }
       ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
       ~task_skills:(Masc.Keeper_task_skill_turn.skills selection) in
   let recorder = Recorder.make ~trace_id:fixture.meta.runtime.trace_id
-      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ~absolute_turn:41)
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ~absolute_turn:1)
       ~runtime_id:(fun () -> Some "original.runtime")
       ~snapshot_revision:(Surface.skill_snapshot_revision surface) ~task_selection:selection
     |> require "named child original activation" in
@@ -1115,6 +1115,10 @@ value = { sha256 = %S }
       |> function Some value -> value | None -> fail "named producer lost its owned job wait" in
     (match (Journal.source child_journal).producer with
      | Journal.Named {activation=Some original;tool_name;skill_reference} ->
+       check int "named original SDK turn remains distinct from the physical Keeper frame" 41
+         (Journal.source child_journal).source_turn;
+       check int "named physical Keeper frame remains sealed" 1
+         (Ids.Turn_ref.absolute_turn (Recorder.bound_turn_ref original));
        check string "named journal retains the original tool" binding.composition_tool tool_name;
        check bool "named journal retains the exact reference" true (Skill_reference.equal reference skill_reference);
        check bool "named journal retains original Task Skill selection" true

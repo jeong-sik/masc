@@ -192,6 +192,30 @@ let test_boot_waits_for_the_state_lock () =
             Eio.Promise.resolve released ()));
     check int "raised once the lock is free" 2604 (recorded_seq config path))
 
+(* Only the store is read before the lock. A message numbered while the
+   repair waits raises the counter past the store, and the repair must read
+   the counter after the wait and keep that number, not write back what the
+   counter held before it waited. *)
+let test_boot_keeps_a_number_issued_while_it_waited () =
+  with_workspace (fun config messages ->
+    List.iter (file_a_message messages) [ 2604 ];
+    let path = write_state_with config 84 in
+    Eio_main.run @@ fun _env ->
+    let release, released = Eio.Promise.create () in
+    Eio.Fiber.both
+      (fun () ->
+        Workspace_utils_ops.with_file_lock config path (fun () ->
+          Eio.Promise.await release;
+          ignore (write_state_with config 2605 : string)))
+      (fun () ->
+        Eio.Fiber.both
+          (fun () -> Bootstrap.reconcile_message_seq config path)
+          (fun () ->
+            Eio.Fiber.yield ();
+            Eio.Promise.resolve released ()));
+    check int "the number issued under the lock stays" 2605
+      (recorded_seq config path))
+
 let () =
   run "workspace message seq resume"
     [ ( "filename"
@@ -225,5 +249,7 @@ let () =
             test_boot_does_not_touch_unreadable_state
         ; test_case "boot waits for the state lock" `Quick
             test_boot_waits_for_the_state_lock
+        ; test_case "boot keeps a number issued while it waited" `Quick
+            test_boot_keeps_a_number_issued_while_it_waited
         ] )
     ]

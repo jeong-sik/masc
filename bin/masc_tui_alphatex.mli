@@ -29,7 +29,16 @@ type tab_failure =
 val failure_text : tab_failure -> string
 (** The failure worded for the fence's fallback line. *)
 
-val render_tab : max_width:int -> string -> (string list, tab_failure) result
+val render_tab :
+  ?rhythm:bool -> max_width:int -> string -> (string list, tab_failure) result
 (** [render_tab ~max_width source] is the score's tablature, one line per
     string, highest string first, system after system -- or why the fence
-    should show the source instead. *)
+    should show the source instead.
+
+    [~rhythm:true] adds one more line under the lowest string, naming each
+    beat's length at its first cell: [w h q e s] for the whole, half,
+    quarter, eighth and sixteenth the reader's subset allows. The cells are
+    the measures' own, the same columns the frets sit in, and the beat a
+    subset later outgrows draws blank rather than a wrong letter. The
+    default is [false]: a fence that never asks for the line draws the same
+    tab as before, cell for cell. *)

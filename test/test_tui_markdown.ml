@@ -403,6 +403,26 @@ let test_alphatex_tag_ignores_case () =
     (render ~width:80 (fence score))
     (render ~width:80 ("```AlphaTex\n" ^ score ^ "\n```"))
 
+let test_alphatex_rhythm_word_draws_the_rhythm_line () =
+  let score = ":4 0.6 3.6 :8 5.6 3.6" in
+  let plain = render ~width:80 (fence score) in
+  let rhythm = render ~width:80 ("```alphatex rhythm\n" ^ score ^ "\n```") in
+  Alcotest.(check bool) "the rhythm fence draws one more row" true
+    (List.length rhythm = List.length plain + 1);
+  Alcotest.(check bool) "the rhythm fence keeps the score's tab" true
+    (List.for_all (fun row -> contains ~part:row plain rhythm) plain)
+
+let test_alphatex_rhythm_word_survives_case_and_order () =
+  let score = ":4 0.6 3.6" in
+  Alcotest.(check bool) "RHYTHM in caps still asks for the line" true
+    (List.exists
+       (contains ~part:"q")
+       (render ~width:80 ("```alphatex RHYTHM\n" ^ score ^ "\n```")));
+  Alcotest.(check bool) "a word before the tag is not a tag" false
+    (List.exists
+       (contains ~part:"q")
+       (render ~width:80 ("```rhythm alphatex\n" ^ score ^ "\n```")))
+
 (* A drawn tab has no source position to offer, so the document says its
    mapping is incomplete; the source shown for a score that fails is mapped
    like any other code. *)
@@ -446,6 +466,10 @@ let () =
             test_alphatex_fence_says_why_a_score_is_not_drawn
         ; Alcotest.test_case "the tag ignores case" `Quick
             test_alphatex_tag_ignores_case
+        ; Alcotest.test_case "the rhythm word draws the rhythm line" `Quick
+            test_alphatex_rhythm_word_draws_the_rhythm_line
+        ; Alcotest.test_case "the rhythm word survives case and order" `Quick
+            test_alphatex_rhythm_word_survives_case_and_order
         ; Alcotest.test_case "a drawn tab is not a searchable document" `Quick
             test_a_drawn_tab_is_not_a_searchable_document
         ] )

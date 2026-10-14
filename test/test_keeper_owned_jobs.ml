@@ -220,7 +220,7 @@ let with_environment values f =
     | (name, value) :: rest -> Masc_test_deps.with_process_env name value (fun () -> loop rest)
   in loop values
 
-let with_fixture f =
+let with_fixture ?continuation_channel f =
   let base_path = Filename.temp_file "masc-owned-job-feature-" "" in
   Unix.unlink base_path;
   Unix.mkdir base_path 0o700;
@@ -272,6 +272,7 @@ let with_fixture f =
     {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
   let make_bundle () = Bundle.make_tool_bundle_for_capability_surface
       ~config ~meta ~publication_recovery ~capability_surface:surface
+      ?continuation_channel
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"owned job fixture")
       ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:cell () in
   let fixture = {base_path;meta;cell;make_bundle;
@@ -986,6 +987,200 @@ let test_job_result_rejects_unavailable_authority () = with_fixture @@ fun _env 
     | Error _ -> () | Ok _ -> fail "unavailable authority was treated as a pending or complete result");
   check int "result authority failure performs no backend call" before (List.length (calls fixture))
 
+module Completion_wake = Masc.Keeper_owned_job_completion_wake
+module Event_registry = Masc.Keeper_registry_event_queue
+module Intake = Masc.Keeper_heartbeat_stimulus_intake
+
+let pending_completions fixture =
+  Event_registry.pending_selections_result ~base_path:fixture.base_path keeper
+  |> require "durable pending selections"
+let recover_completions fixture =
+  Completion_wake.reconcile ~config:(Workspace.default_config fixture.base_path)
+  |> store_value "actual maintenance completion recovery"
+let completion_payload (selection : Keeper_event_queue_state.pending_selection) =
+  match selection.source.payload with
+  | Keeper_event_queue.Owned_job_completed completion -> completion
+  | _ -> fail "pending source is not the original job completion"
+let only_selection fixture = match pending_completions fixture with
+  | [selection] -> selection | _ -> fail "expected one durable original completion"
+let owner_path fixture id =
+  let paths = Store.paths ~base_path:fixture.base_path (load fixture id).job_id in
+  Filename.concat paths.job_dir "owner.jsonl"
+let check_no_completion fixture =
+  check int "no terminal result is delivered prematurely" 0 (List.length (pending_completions fixture))
+let check_artifact_bytes fixture expected json =
+  match Tool_output.normalized_artifact_ref_of_json json with
+  | Tool_output.Decoded_normalized_artifact_ref reference ->
+    (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.base_path) ~sha256:reference.sha256 with
+     | Ok (Some bytes) -> check string "complete original output remains retrievable" expected bytes
+     | Ok None | Error _ -> fail "completed original output artifact is missing")
+  | Tool_output.Not_normalized_artifact_ref | Tool_output.Invalid_normalized_artifact_ref _ ->
+    fail "completion output is not a canonical artifact reference"
+
+let test_completion_delivery_failure_and_restart () =
+  let channel = Keeper_continuation_channel.dashboard ~thread_id:"original-task-thread"
+    |> require "original submission channel" in
+  with_fixture ~continuation_channel:channel @@ fun _env initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  let id = job_id started in
+  let original = load fixture id in
+  check_json "owner captures the originating channel"
+    (Keeper_continuation_channel.to_yojson channel)
+    (Keeper_continuation_channel.to_yojson original.completion_channel);
+  let running = recover_completions fixture in
+  check int "running job remains pending" 1 running.waiting;
+  check_no_completion fixture;
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
+  let unavailable = recover_completions fixture in
+  check int "exit without complete output keeps its obligation" 1 unavailable.waiting;
+  check bool "exit alone is not a result" false (Store.result_ready (load fixture id));
+  check_no_completion fixture;
+  (* A real durable snapshot failure happens after the backend has delivered
+     complete output. No producer callback or fabricated owner is substituted. *)
+  let queue_path = Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path:fixture.base_path) keeper)
+      Keeper_event_queue_schema.snapshot_filename in
+  let prior = if Sys.file_exists queue_path then Some (read queue_path) else None in
+  (match prior with Some _ -> Unix.unlink queue_path | None -> ());
+  Unix.mkdir queue_path 0o700;
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
+  let failed = recover_completions fixture in
+  check int "failed enqueue is visible" 1 (List.length failed.failures);
+  check bool "complete result committed before enqueue" true (Store.result_ready (load fixture id));
+  check bool "failed delivery is not acknowledged" false (load fixture id).completion_delivered;
+  let discovery = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "pending discovery" in
+  check int "failed delivery stays discoverable" 1 (List.length discovery.entries);
+  Unix.rmdir queue_path;
+  (match prior with Some bytes -> write queue_path bytes | None -> ());
+  Process_eio.reset_for_testing (); initialize ();
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  let before = List.length (calls fixture) in
+  let begin_recovery = Unix.gettimeofday () in
+  let delivered = recover_completions fixture in
+  let recovery_ms = (Unix.gettimeofday () -. begin_recovery) *. 1000. in
+  check int "restart delivers the original complete result" 1 delivered.delivered;
+  check int "durable result recovery needs no backend call" before (List.length (calls fixture));
+  check bool "canonical owner acknowledges durable delivery" true (load fixture id).completion_delivered;
+  let selection = only_selection fixture in
+  let completion = completion_payload selection in
+  check string "completion names original job" id (Store.Job_id.to_string completion.oj_job_id);
+  check_json "completion retains original source" (Store.source_to_json original.source)
+    (Keeper_owned_job_identity.source_to_json completion.oj_source);
+  check_json "queue continuation routes to original conversation" (Keeper_continuation_channel.to_yojson channel)
+    (Keeper_continuation_channel.to_yojson completion.oj_channel);
+  check bool "the wake carries original routing" true
+    (Keeper_event_queue.continuation_channel_of_payload selection.source.payload = Some channel);
+  let decoded = Keeper_event_queue.stimulus_of_yojson (Keeper_event_queue.stimulus_to_yojson selection.source)
+    |> require "strict durable completion round trip" in
+  check bool "typed completion survives the queue wire" true
+    (Keeper_event_queue.stimulus_identity_equal selection.source decoded);
+  let inspect () = Intake.pending_board_events_of_stimulus_result
+      ~base_path:fixture.base_path ~meta_after_triage:fixture.meta selection.source in
+  let event = match inspect () with
+    | Intake.Stimulus_consumed [event] -> event
+    | _ -> fail "complete original result was not admitted to the next prompt" in
+  (match event.Masc.Keeper_world_observation.event_kind with
+   | Owned_job_completed carried ->
+     check_json "model observation has the typed original source" (Store.source_to_json original.source)
+       (Keeper_owned_job_identity.source_to_json carried.oj_source)
+   | _ -> fail "model observation lost typed completion identity");
+  let preview = Yojson.Safe.from_string event.preview in
+  check bool "admitted result is available" true (preview |> member "result_available" |> to_bool);
+  check int "nonzero exit remains exact observed result" 7 (preview |> member "result" |> member "exit_code" |> to_int);
+  let outputs = preview |> member "result" |> member "artifacts" |> to_list in
+  (match outputs with [stdout;stderr] ->
+     check_artifact_bytes fixture stdout_bytes stdout;
+     check_artifact_bytes fixture stderr_bytes stderr
+   | _ -> fail "complete result did not retain both original output references");
+  let path = owner_path fixture id in
+  let owner_bytes = read path in
+  write path "not a canonical owner journal\n";
+  (match inspect () with
+   | Intake.Stimulus_job_unavailable (job_id,_) ->
+     check string "unavailable intake retains original identity" id (Store.Job_id.to_string job_id)
+   | _ -> fail "unavailable owner was consumed as an empty Board row");
+  check int "unreadable result remains durably pending" 1 (List.length (pending_completions fixture));
+  write path owner_bytes;
+  (match inspect () with Intake.Stimulus_consumed [_] -> () | _ -> fail "restored original owner cannot resume intake");
+  let forged = {completion with oj_source={completion.oj_source with task_id=Some "task-B"}} in
+  let forged_source = {selection.source with payload=Owned_job_completed forged} in
+  (match Intake.pending_board_events_of_stimulus_result ~base_path:fixture.base_path
+     ~meta_after_triage:fixture.meta forged_source with
+   | Intake.Stimulus_job_unavailable _ -> () | _ -> fail "a different Task authorized the original result");
+  Event_registry.ack_pending_result ~base_path:fixture.base_path keeper ~selection
+    |> require "actual completion queue consumption";
+  let again = recover_completions fixture in
+  check int "acknowledged jobs leave the pending discovery partition" 0 again.inspected;
+  check_no_completion fixture;
+  check int "original command is created once" 1 (effect_count fixture "create");
+  check int "original command is started once" 1 (effect_count fixture "start");
+  Printf.printf "owned_job_completion_measurement=%s\n%!"
+    (Yojson.Safe.to_string (`Assoc ["scope", `String "synthetic CLI public job, completed-output enqueue failure and restart recovery";
+      "durable_result_recovery_ms", `Float recovery_ms; "backend_calls_on_delivery_recovery", `Int 0;
+      "creates", `Int 1; "starts", `Int 1; "completion_notifications", `Int 1]))
+
+let test_completion_consumed_before_producer_ack () = with_fixture @@ fun _env initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  let id = job_id started in
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-original" ~turn:42
+      "keeper_job_status" (argument id)));
+  let record = load fixture id in
+  check bool "complete result is durable at interruption boundary" true (Store.result_ready record);
+  check bool "producer has not acknowledged delivery" false record.completion_delivered;
+  (* Seed the actual durable enqueue at the interruption boundary. Consumption
+     can finish before the producer CAS; recovery must consult queue evidence. *)
+  let completion : Keeper_event_queue.owned_job_completion =
+    {oj_job_id=record.job_id;oj_source=record.source;oj_channel=record.completion_channel} in
+  let stimulus : Keeper_event_queue.stimulus =
+    {post_id=Keeper_event_queue.owned_job_completion_post_id completion;urgency=Immediate;
+     arrived_at=Unix.gettimeofday ();payload=Owned_job_completed completion} in
+  (match Event_registry.enqueue_stimulus_once_durable_result ~base_path:fixture.base_path keeper stimulus with
+   | Stimulus_enqueued -> () | _ -> fail "actual interruption-boundary enqueue failed");
+  let selection = only_selection fixture in
+  Event_registry.ack_pending_result ~base_path:fixture.base_path keeper ~selection
+    |> require "consumer commits before producer ACK";
+  Process_eio.reset_for_testing (); initialize ();
+  let before = List.length (calls fixture) in
+  let report = recover_completions fixture in
+  check int "consumed delivery closes its original producer obligation" 1 report.delivered;
+  check_no_completion fixture;
+  check bool "producer ACK follows existing durable consumer evidence" true (load fixture id).completion_delivered;
+  check int "producer ACK recovery makes no backend command" before (List.length (calls fixture));
+  check int "no original launch replay" 1 (effect_count fixture "start");
+  let discovery = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "retired discovery" in
+  check int "acknowledged marker is retired" 0 (List.length discovery.entries)
+
+let test_completion_retains_unknown_launch_and_owner () = with_fixture @@ fun _env initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  control fixture (`Assoc ["mode", `String "create_unknown_absent"]);
+  let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  let id = job_id started in
+  Process_eio.reset_for_testing (); initialize ();
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  let pending = recover_completions fixture in
+  check int "unknown launch remains pending" 1 pending.waiting;
+  check_no_completion fixture;
+  check int "unknown create is not replayed by completion recovery" 1 (effect_count fixture "create");
+  check int "unconfirmed original job is never started" 0 (effect_count fixture "start");
+  let path = owner_path fixture id in
+  let original = read path in
+  write path "corrupt original owner\n";
+  let before = List.length (calls fixture) in
+  let corrupt = recover_completions fixture in
+  check int "unreadable original owner stays visible" 1 (List.length corrupt.failures);
+  check int "corrupt authority authorizes no backend operation" before (List.length (calls fixture));
+  check_no_completion fixture;
+  let discovery = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "retained owner discovery" in
+  check int "uncertain owner is not retired" 1 (List.length discovery.entries);
+  write path original;
+  ignore (recover_completions fixture);
+  check int "restored owner still cannot repeat original create" 1 (effect_count fixture "create");
+  check int "restored owner still cannot authorize an absent start" 0 (effect_count fixture "start")
+
+
 let () =
   Printf.printf "owned_job_feature_transport=synthetic_docker_cli actual_public_handler=true actual_docker_execution=false\n%!";
   run "Keeper owned jobs"
@@ -1003,4 +1198,7 @@ let () =
       ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch
       ; test_case "malformed whole source cannot publish a binding" `Quick test_malformed_source_cannot_publish_binding
       ; test_case "public Composition waits and resumes the original job result" `Quick test_public_composition_wait_and_resume
-      ; test_case "job result rejects unavailable owner authority" `Quick test_job_result_rejects_unavailable_authority ]]
+      ; test_case "job result rejects unavailable owner authority" `Quick test_job_result_rejects_unavailable_authority
+      ; test_case "completion enqueue failure recovers original result after restart" `Quick test_completion_delivery_failure_and_restart
+      ; test_case "consumed notification survives missing producer ACK" `Quick test_completion_consumed_before_producer_ack
+      ; test_case "completion recovery retains unknown launch and corrupt owner" `Quick test_completion_retains_unknown_launch_and_owner ]]

@@ -333,6 +333,7 @@ let projected_source_kind_to_string = function
   | Source_workspace_message -> "workspace_message"
   | Source_delegate_completed -> "keeper_delegate_completed"
   | Source_composition_completed -> "keeper_composition_completed"
+  | Source_owned_job_completed -> "owned_job_completed"
 ;;
 
 let source_kind_of_string = function
@@ -350,6 +351,7 @@ let source_kind_of_string = function
   | "workspace_message" -> Ok Source_workspace_message
   | "keeper_delegate_completed" -> Ok Source_delegate_completed
   | "keeper_composition_completed" -> Ok Source_composition_completed
+  | "owned_job_completed" -> Ok Source_owned_job_completed
   | other -> Error (Printf.sprintf "unknown projected source kind: %s" other)
 ;;
 

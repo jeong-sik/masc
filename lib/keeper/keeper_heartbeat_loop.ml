@@ -84,7 +84,8 @@ let should_run_turn_after_event_intake
   match event_queue_intake_error with
   | None | Some (Stimulus_intake.Connector_read_failed _)
   | Some (Stimulus_intake.Connector_item_missing _)
-  | Some (Stimulus_intake.Ask_read_failed _) -> true
+  | Some (Stimulus_intake.Ask_read_failed _)
+  | Some (Stimulus_intake.Job_result_unavailable _) -> true
   | Some (Stimulus_intake.Pending_selection_failed _) -> false
 ;;
 
@@ -436,6 +437,7 @@ let stimulus_owns_turn_reaction (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Owned_job_completed _
   | Keeper_event_queue.Task_outcome _ -> false
 ;;
 
@@ -469,6 +471,7 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Workspace_message _
        | Keeper_event_queue.Delegate_completed _
        | Keeper_event_queue.Composition_completed _
+       | Keeper_event_queue.Owned_job_completed _
        | Keeper_event_queue.Task_outcome _ -> ())
     stimuli
 ;;

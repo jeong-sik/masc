@@ -170,7 +170,7 @@ let finish ~tool_name ~start_time ~job_id = function
   | Error error -> failure ~job_id ~effect_disposition:Tool_result.Effect_outcome_unknown
       Tool_result.Runtime_failure (Store.error_to_string error)
 
-let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name ~args =
+let handle ~config ~meta ~source_context ~continuation_channel ~tool_use_id ~turn_ref ~trace_id ~name ~args =
   let start_time = Tool_timing.start () in
   let invalid message = failure ~effect_disposition:Tool_result.Proven_pre_effect
       Tool_result.Policy_rejection message in
@@ -201,7 +201,10 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
                                  base_path;workspace_host_path=paths.workspace;argv} in
              let* preparation = Backend.prepare ~config ~meta ~docker_config_path:paths.cli_config_dir spec
                  |> Result.map_error (fun error -> Store.Invalid_authority (Backend.error_to_string error)) in
-             Store.create ~base_path ~keeper_name:meta.name ~job_id ~source ~preparation ~inputs in
+             let completion_channel = match continuation_channel with
+               | Some channel -> channel
+               | None -> Keeper_continuation_channel.unrouted "job invocation did not capture an originating channel" in
+             Store.create ~base_path ~keeper_name:meta.name ~job_id ~source ~completion_channel ~preparation ~inputs in
            let start_new job_id = match prepare job_id with
              | Error error -> failure ~job_id ~effect_disposition:Tool_result.Proven_pre_effect
                  Tool_result.Runtime_failure (Store.error_to_string error)

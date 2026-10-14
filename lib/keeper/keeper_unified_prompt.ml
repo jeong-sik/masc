@@ -738,7 +738,8 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Task_cancelled _
          | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
-         | Keeper_world_observation.Composition_completed -> None)
+         | Keeper_world_observation.Composition_completed
+         | Keeper_world_observation.Owned_job_completed _ -> None)
       events
   in
   match rows with
@@ -788,7 +789,8 @@ let format_task_outcome_observations
          | Keeper_world_observation.Task_cancelled _
          | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
-         | Keeper_world_observation.Composition_completed -> None)
+         | Keeper_world_observation.Composition_completed
+         | Keeper_world_observation.Owned_job_completed _ -> None)
       events
   in
   match rows with
@@ -842,7 +844,8 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Task_outcome _
          | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
-         | Keeper_world_observation.Composition_completed -> None)
+         | Keeper_world_observation.Composition_completed
+         | Keeper_world_observation.Owned_job_completed _ -> None)
       events
   in
   match rows with

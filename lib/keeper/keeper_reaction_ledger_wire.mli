@@ -16,6 +16,7 @@ type stimulus_kind =
   | Workspace_message
   | Delegate_completed  (* One Keeper's answer to a turn another asked it to run *)
   | Composition_completed  (* An async composition this Keeper submitted has settled *)
+  | Owned_job_completed
 
 type reaction_kind =
   | Turn_started

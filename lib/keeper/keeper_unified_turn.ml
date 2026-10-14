@@ -300,6 +300,7 @@ let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
          | Keeper_event_queue.Workspace_message _
          | Keeper_event_queue.Delegate_completed _
          | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Owned_job_completed _
          | Keeper_event_queue.Task_outcome _ -> false)
       stimuli
   with
@@ -400,7 +401,8 @@ let connector_attention_preemption_request ~now pending =
          | Keeper_event_queue.Task_outcome _
          | Keeper_event_queue.Workspace_message _
          | Keeper_event_queue.Delegate_completed _
-         | Keeper_event_queue.Composition_completed _ ->
+         | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Owned_job_completed _ ->
            false)
       stimuli
   with

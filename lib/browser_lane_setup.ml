@@ -159,7 +159,7 @@ let is_executable_file path =
     (match Unix.access path [ Unix.X_OK ] with
      | () -> true
      | exception Unix.Unix_error _ -> false)
-  | _ -> false
+  | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } -> false
   | exception Unix.Unix_error _ -> false
 
 let real_path path = try Unix.realpath path with Unix.Unix_error _ -> path

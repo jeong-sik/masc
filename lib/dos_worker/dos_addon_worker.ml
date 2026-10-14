@@ -12,17 +12,13 @@ let json_response data : S.tool_result =
   { content = [S.TextContent {type_="text";text=Yojson.Safe.to_string data;annotations=None}];
     is_error=Some false;structured_content=Some data;_meta=None }
 
-let tool_names = ["masc_dos_load"; "masc_dos_eject"; "masc_dos_pass";
-  "masc_dos_meta"; "masc_dos_inventory"; "masc_dos_screen"; "masc_dos_step";
-  "masc_dos_press"; "masc_dos_click"; "masc_dos_type"; "masc_dos_peek";
-  "masc_dos_save"; "masc_dos_restore"]
-
-let schemas () = List.map (fun name ->
+let schemas () = List.map (fun tool ->
+  let name = Controller.dos_tool_name tool in
   match Embedded_config.read ("tools/" ^ name ^ ".toml") with
   | None -> invalid_arg ("missing DOS tool definition: " ^ name)
   | Some contents -> match Tool_definition_toml.load ~name ~contents with
-    | Ok definition -> definition.Tool_definition_toml.schema
-    | Error message -> invalid_arg message) tool_names
+    | Ok definition -> tool, definition.Tool_definition_toml.schema
+    | Error message -> invalid_arg message) Controller.all_of_dos_tool
 
 let definition (schema : Masc_domain.tool_schema) =
   match S.tool_of_yojson (`Assoc ["name", `String schema.name;
@@ -53,17 +49,17 @@ let create ~base_path () =
          | Dos_lane.Unsaveable _
          | Dos_lane.Checkpoint_refused _
          | Dos_lane.Other_program _ ) as error) -> Error (Dos_lane.error_to_string error) in
-  let authorize (call : Lane_addon_call_context.t) =
-    let controlled = match call.tool with
-      | "masc_dos_load" | "masc_dos_eject" | "masc_dos_step" | "masc_dos_press"
-      | "masc_dos_click" | "masc_dos_type" | "masc_dos_restore" | "masc_dos_pass" -> true
-      | _ -> false in
+  let authorize ~tool (call : Lane_addon_call_context.t) =
+    let need = Controller.controller_need tool in
+    let controlled = match need with
+      | Controller.Takes_controller | Controller.Hands_controller -> true
+      | Controller.No_controller -> false in
     let ( let* ) = Result.bind in
     let* actor = match call.principal with
       | Keeper name | Authenticated_agent name | Host_actor name ->
           Validation.Id_shape.parse name |> Result.map (fun _ -> name)
       | (Operator | Anonymous) as principal ->
-          if controlled || String.equal call.tool "masc_dos_save" then
+          if controlled || tool = Controller.Dos_save then
             Error "DOS controller calls require a verified named host principal"
           else Ok (Lane_addon_call_context.actor_label principal) in
     let* released_controller = if not controlled then Ok false else
@@ -73,11 +69,12 @@ let create ~base_path () =
           let* current = holder () in
           if current <> admission.observed_holder then Error "DOS controller changed since host admission"
           else
-            let* () = if String.equal call.tool "masc_dos_pass" then
-              let* target = Machine.pass_target call.arguments in
-              if target = admission.handoff_target then Ok ()
-              else Error "DOS handoff target differs from host admission"
-            else Ok () in
+            let* () = match need with
+              | Controller.Hands_controller ->
+                  let* target = Machine.pass_target call.arguments in
+                  if target = admission.handoff_target then Ok ()
+                  else Error "DOS handoff target differs from host admission"
+              | Controller.Takes_controller | Controller.No_controller -> Ok () in
             (match admission.observed_holder, admission.release with
              | Some departed, Some reason when not (String.equal departed actor) ->
                  (match Machine.off_domain (fun () -> Dos_lane.release_left ~holder:departed
@@ -88,18 +85,16 @@ let create ~base_path () =
              | _, None -> Ok false
              | None, Some _ | Some _, Some _ -> Error "invalid DOS controller release admission") in
     Ok (actor, released_controller) in
-  let invoke ~released_controller ~actor ~name ~arguments =
-    let tool_name = name and start_time = Tool_timing.start () in
-    let result = match Machine.dispatch ~base_path ~agent:actor ~name ~arguments with
-      | Some result -> result
-      | None -> Machine.reject ~tool_name ~start_time "Unknown DOS worker tool" in
+  let invoke ~released_controller ~actor ~tool ~arguments =
+    let result = Machine.dispatch ~base_path ~agent:actor ~tool ~arguments in
     let result = match result with
       | Tool_result.Failed failure when released_controller ->
           Tool_result.Failed {failure with effect_disposition=Tool_result.Proven_post_effect}
       | (Tool_result.Completed _ | Tool_result.Deferred _ | Failed _) as result -> result in
     response result in
   let screen ~arguments () =
-    let tool_name = "masc_dos_screen" and start_time = Tool_timing.start () in
+    let tool_name = Controller.dos_tool_name Controller.Dos_screen
+    and start_time = Tool_timing.start () in
     let failure code result =
       let answer = response result in
       let fields = match answer.S._meta with Some (`Assoc fields) -> fields | None | Some _ -> [] in
@@ -137,7 +132,7 @@ let create ~base_path () =
             ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad) (Ok observation)) in
   let schemas = schemas () in
   let server = Server.create ~name:"masc-dos-addon" ~version:"0.1.0" () in
-  let server = List.fold_left (fun server (schema : Masc_domain.tool_schema) ->
+  let server = List.fold_left (fun server (_tool, (schema : Masc_domain.tool_schema)) ->
     Server.add_tool (definition schema) (fun _context _name _arguments ->
       Ok (response (Tool_result.make_err ~tool_name:schema.name ~start_time:(Tool_timing.start ())
         ~class_:Tool_result.Policy_rejection ~effect_disposition:Tool_result.Proven_pre_effect
@@ -189,20 +184,21 @@ let create ~base_path () =
     (fun _context _name arguments -> Eio.Mutex.use_ro mutex (fun () ->
       let ( let* ) = Result.bind in
       let* call = Lane_addon_call_context.of_json (Option.value ~default:`Null arguments) in
-      let* schema = match List.find_opt (fun (schema : Masc_domain.tool_schema) ->
-        String.equal schema.name call.tool) schemas with
-        | Some schema -> Ok schema | None -> Error "Unknown exported machine tool" in
+      let* tool, schema =
+        match Option.bind (Controller.dos_tool_of_name call.tool) (fun tool ->
+          Option.map (fun schema -> tool, schema) (List.assoc_opt tool schemas)) with
+        | Some found -> Ok found | None -> Error "Unknown exported machine tool" in
       match Tool_input_contract.check_arguments ~schema:(Some schema.input_schema)
         ~name:schema.name ~args:call.arguments with
       | Error error -> Ok (response (Tool_input_contract.rejection_result error))
       | Ok (arguments, _) ->
           events := [];
-          let answer = match authorize call with
+          let answer = match authorize ~tool call with
             | Error message -> response (Machine.reject ~tool_name:call.tool
                 ~start_time:(Tool_timing.start ()) message)
             | Ok (actor, released_controller) ->
-                if String.equal call.tool "masc_dos_screen" then screen ~arguments ()
-                else invoke ~released_controller ~actor ~name:call.tool ~arguments in
+                if tool = Controller.Dos_screen then screen ~arguments ()
+                else invoke ~released_controller ~actor ~tool ~arguments in
           Machine.flush_announcements ();
           let metadata = match answer.S._meta with Some (`Assoc fields) -> fields | _ -> [] in
           Ok { answer with S._meta = Some (`Assoc

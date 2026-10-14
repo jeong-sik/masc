@@ -32,11 +32,14 @@ let path = function
   | Step -> "/api/v1/dos/step"
   | Pass -> "/api/v1/dos/pass"
 
-let tool_name = function
-  | Press -> "masc_dos_press"
-  | Type -> "masc_dos_type"
-  | Step -> "masc_dos_step"
-  | Pass -> "masc_dos_pass"
+let tool_name route =
+  let module C = Machine_controller_contract in
+  C.dos_tool_name
+    (match route with
+     | Press -> C.Dos_press
+     | Type -> C.Dos_type
+     | Step -> C.Dos_step
+     | Pass -> C.Dos_pass)
 
 let schema = function
   | Press -> Tool_schemas_misc_toml.dos_press

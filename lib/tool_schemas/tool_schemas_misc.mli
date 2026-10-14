@@ -154,11 +154,13 @@ val misc_operation_of_tool_name : string -> misc_operation option
 (** Parse a canonical misc wire name at the dispatch boundary. *)
 
 (** What a call does with the shared DOS machine's controller (RFC
-    play-link-for-the-shared-machine §2.8). *)
-type dos_controller_need =
-  | Takes_controller  (** moves the machine, so it needs the controller *)
-  | Hands_controller  (** [masc_dos_pass]: gives the controller to someone *)
-  | No_controller  (** reads or saves the machine, or is not a DOS call *)
+    play-link-for-the-shared-machine §2.8): the
+    {!Machine_controller_contract.controller_need} of the DOS tool the
+    operation runs, [No_controller] for an operation that runs none. *)
+type dos_controller_need = Machine_controller_contract.controller_need =
+  | Takes_controller
+  | Hands_controller
+  | No_controller
 
 val dos_controller_need : misc_operation -> dos_controller_need
 

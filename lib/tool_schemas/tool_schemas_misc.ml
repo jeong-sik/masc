@@ -191,34 +191,51 @@ type misc_operation =
 
 let misc_operations = all_of_misc_operation
 
-(* What a call does with the shared DOS machine's controller (RFC
-   play-link-for-the-shared-machine §2.8). Every operation is named, so a new
-   DOS tool is classified where it is declared. *)
-type dos_controller_need =
+(* The DOS tool a misc operation runs, if any. Every operation is named, so a
+   new DOS operation is mapped where it is declared. *)
+let dos_tool_of_operation : misc_operation -> Machine_controller_contract.dos_tool option =
+  let module C = Machine_controller_contract in
+  function
+  | Misc_dos_load -> Some C.Dos_load
+  | Misc_dos_meta -> Some C.Dos_meta
+  | Misc_dos_inventory -> Some C.Dos_inventory
+  | Misc_dos_eject -> Some C.Dos_eject
+  | Misc_dos_screen -> Some C.Dos_screen
+  | Misc_dos_step -> Some C.Dos_step
+  | Misc_dos_press -> Some C.Dos_press
+  | Misc_dos_click -> Some C.Dos_click
+  | Misc_dos_type -> Some C.Dos_type
+  | Misc_dos_peek -> Some C.Dos_peek
+  | Misc_dos_pass -> Some C.Dos_pass
+  | Misc_dos_save -> Some C.Dos_save
+  | Misc_dos_restore -> Some C.Dos_restore
+  | Misc_lane_declaration_read | Misc_lane_declaration_save
+  | Misc_lane_updates | Misc_lane_attach | Misc_lane_inspect
+  | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
+  | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_ask
+  | Misc_ask_status | Misc_ask_withdraw | Misc_config | Misc_dashboard
+  | Misc_gc | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
+  | Misc_web_search | Misc_browser_tabs | Misc_browser_read
+  | Misc_browser_session | Misc_browser_goto | Misc_browser_act
+  | Misc_browser_interact | Misc_browser_instruct | Misc_msx_load
+  | Misc_msx_eject | Misc_msx_export_disk | Misc_msx_save | Misc_msx_restore
+  | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_meta
+  | Misc_msx_checkpoint_info | Misc_msx_press | Misc_msx_step
+  | Misc_msx_step_until_change | Misc_msx_peek | Misc_msx_ram_diff
+  | Misc_portrait_read | Misc_candle_balance | Misc_candle_catalog
+  | Misc_candle_purchase | Misc_candle_equip | Misc_candle_gift
+  | Misc_play_room ->
+    None
+
+type dos_controller_need = Machine_controller_contract.controller_need =
   | Takes_controller
   | Hands_controller
   | No_controller
 
-let dos_controller_need = function
-  | Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_press | Misc_dos_click
-  | Misc_dos_type | Misc_dos_restore ->
-    Takes_controller
-  | Misc_dos_pass -> Hands_controller
-  | Misc_play_room
-  | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_updates
-  | Misc_lane_attach | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice
-  | Misc_lane_detach | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status
-  | Misc_ask | Misc_ask_status | Misc_ask_withdraw | Misc_config | Misc_dashboard
-  | Misc_gc | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
-  | Misc_web_search | Misc_browser_tabs | Misc_browser_read | Misc_browser_session
-  | Misc_browser_goto | Misc_browser_act | Misc_browser_interact
-  | Misc_browser_instruct | Misc_msx_load | Misc_msx_eject | Misc_msx_export_disk | Misc_msx_save
-  | Misc_msx_restore | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_meta
-  | Misc_msx_checkpoint_info | Misc_msx_press
-  | Misc_msx_step | Misc_msx_step_until_change | Misc_msx_peek | Misc_msx_ram_diff
-  | Misc_dos_meta | Misc_dos_inventory | Misc_dos_screen | Misc_dos_peek | Misc_dos_save | Misc_portrait_read
-  | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase | Misc_candle_equip | Misc_candle_gift ->
-    No_controller
+let dos_controller_need operation =
+  match dos_tool_of_operation operation with
+  | Some tool -> Machine_controller_contract.controller_need tool
+  | None -> No_controller
 
 let misc_tool_name = function
   | Misc_lane_declaration_read -> "masc_lane_declaration_read"
@@ -269,20 +286,33 @@ let misc_tool_name = function
   | Misc_candle_purchase -> "keeper_candle_purchase"
   | Misc_candle_equip -> "keeper_candle_equip"
   | Misc_candle_gift -> "keeper_candle_gift"
-  | Misc_dos_load -> "masc_dos_load"
-  | Misc_dos_meta -> "masc_dos_meta"
-  | Misc_dos_inventory -> "masc_dos_inventory"
-  | Misc_dos_eject -> "masc_dos_eject"
-  | Misc_dos_screen -> "masc_dos_screen"
-  | Misc_dos_step -> "masc_dos_step"
-  | Misc_dos_press -> "masc_dos_press"
-  | Misc_dos_click -> "masc_dos_click"
-  | Misc_dos_type -> "masc_dos_type"
-  | Misc_dos_peek -> "masc_dos_peek"
+  | Misc_dos_load ->
+    Machine_controller_contract.(dos_tool_name Dos_load)
+  | Misc_dos_meta ->
+    Machine_controller_contract.(dos_tool_name Dos_meta)
+  | Misc_dos_inventory ->
+    Machine_controller_contract.(dos_tool_name Dos_inventory)
+  | Misc_dos_eject ->
+    Machine_controller_contract.(dos_tool_name Dos_eject)
+  | Misc_dos_screen ->
+    Machine_controller_contract.(dos_tool_name Dos_screen)
+  | Misc_dos_step ->
+    Machine_controller_contract.(dos_tool_name Dos_step)
+  | Misc_dos_press ->
+    Machine_controller_contract.(dos_tool_name Dos_press)
+  | Misc_dos_click ->
+    Machine_controller_contract.(dos_tool_name Dos_click)
+  | Misc_dos_type ->
+    Machine_controller_contract.(dos_tool_name Dos_type)
+  | Misc_dos_peek ->
+    Machine_controller_contract.(dos_tool_name Dos_peek)
   | Misc_play_room -> "masc_play_room"
-  | Misc_dos_pass -> "masc_dos_pass"
-  | Misc_dos_save -> "masc_dos_save"
-  | Misc_dos_restore -> "masc_dos_restore"
+  | Misc_dos_pass ->
+    Machine_controller_contract.(dos_tool_name Dos_pass)
+  | Misc_dos_save ->
+    Machine_controller_contract.(dos_tool_name Dos_save)
+  | Misc_dos_restore ->
+    Machine_controller_contract.(dos_tool_name Dos_restore)
 ;;
 
 let misc_operation_of_tool_name value =

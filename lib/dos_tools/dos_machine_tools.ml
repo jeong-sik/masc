@@ -1059,23 +1059,24 @@ let handle_restore ~tool_name ~start_time ~base_path ~agent_name args =
       (of_lane ~base_path ~extra:[ slot_field slot; core_field ] ~tool_name ~start_time restored)
 ;;
 
-let dispatch ~base_path ~agent ~name ~arguments =
-  let tool_name = name and start_time = Tool_timing.start () in
-  match name with
-  | "masc_dos_load" -> Some (handle_load ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
-  | "masc_dos_eject" -> Some (handle_eject ~tool_name ~start_time ~agent_name:agent arguments)
-  | "masc_dos_pass" -> Some (handle_pass ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
-  | "masc_dos_meta" -> Some (handle_meta ~tool_name ~start_time)
-  | "masc_dos_inventory" -> Some (handle_inventory ~tool_name ~start_time ~base_path)
-  | "masc_dos_step" -> Some (handle_step ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_press" -> Some (handle_press ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_click" -> Some (handle_click ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_type" -> Some (handle_type ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_peek" -> Some (handle_peek ~tool_name ~start_time ~base_path arguments)
-  | "masc_dos_save" -> Some (handle_save ~tool_name ~start_time ~base_path ~who:agent arguments)
-  | "masc_dos_restore" -> Some (handle_restore ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
-  | "masc_dos_screen" -> Some (handle_screen ~tool_name ~start_time ~base_path arguments)
-  | _ -> None
+let dispatch ~base_path ~agent ~(tool : Machine_controller_contract.dos_tool) ~arguments =
+  let module C = Machine_controller_contract in
+  let tool_name = C.dos_tool_name tool
+  and start_time = Tool_timing.start () in
+  match tool with
+  | C.Dos_load -> handle_load ~tool_name ~start_time ~base_path ~agent_name:agent arguments
+  | C.Dos_eject -> handle_eject ~tool_name ~start_time ~agent_name:agent arguments
+  | C.Dos_pass -> handle_pass ~tool_name ~start_time ~base_path ~agent_name:agent arguments
+  | C.Dos_meta -> handle_meta ~tool_name ~start_time
+  | C.Dos_inventory -> handle_inventory ~tool_name ~start_time ~base_path
+  | C.Dos_step -> handle_step ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_press -> handle_press ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_click -> handle_click ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_type -> handle_type ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_peek -> handle_peek ~tool_name ~start_time ~base_path arguments
+  | C.Dos_save -> handle_save ~tool_name ~start_time ~base_path ~who:agent arguments
+  | C.Dos_restore -> handle_restore ~tool_name ~start_time ~base_path ~agent_name:agent arguments
+  | C.Dos_screen -> handle_screen ~tool_name ~start_time ~base_path arguments
 
 
 end

@@ -147,7 +147,8 @@ let release_shared_controller ~events ~config ~holder ~by ~reason =
   | Error detail -> Error (Lane_addon_runtime.Unavailable detail)
   | Ok exports ->
       match List.find_opt (fun (export : Lane_addon_tool_export.t) ->
-        String.equal export.tool.name "masc_dos_pass") exports with
+        String.equal export.tool.name
+          Machine_controller_contract.(dos_tool_name Dos_pass)) exports with
       | None -> Ok None
       | Some export ->
           let authorize ~release_controller ~snapshot:_ ~invoke:_ = release_controller ~holder ~reason in

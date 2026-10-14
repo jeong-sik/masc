@@ -1506,33 +1506,6 @@ let add_routes ~sw ~clock router =
          respond_board_json reqd (board_karma_ledger_json req)
        ) request reqd)
 
-  (* Mention Inbox API *)
-  |> Http.Router.prefix_get "/api/v1/mentions/" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
-         let path = Http.Request.path request in
-         (match extract_path_param ~prefix:"/api/v1/mentions/" path with
-          | None ->
-              Http.Response.json_value
-                (`Assoc [("error", `String "agent_name is required")])
-                ~status:`Bad_request reqd
-          | Some agent_name ->
-              let limit = standard_limit request in
-              let mentions =
-                Mention_inbox.read_mentions (Mcp_server.workspace_config state)
-                  ~target_agent:agent_name ~limit
-              in
-              let unread =
-                Mention_inbox.unread_count (Mcp_server.workspace_config state)
-                  ~target_agent:agent_name
-              in
-              let json = `Assoc [
-                ("agent", `String agent_name);
-                ("unread_count", `Int unread);
-                ("mentions", `List (List.map Mention_inbox.mention_record_to_json mentions));
-              ] in
-              Http.Response.json_value json reqd)
-       ) request reqd)
-
   (* Prompt Registry API *)
   |> Http.Router.get "/api/v1/prompts" (fun request reqd ->
        with_public_read (fun _state _req reqd ->

@@ -33,11 +33,6 @@ val merge_turn_event_bus_summary :
 val summarize_turn_event_bus :
   Agent_core.Event_bus.event list -> turn_event_bus_summary
 
-val turn_event_bus_evidence_detail :
-  turn_event_bus_summary -> string
-(** Compact forensic string for observed AGENT_CORE events around a typed provider
-    failure. *)
-
 type capacity_refusal =
   | Provider_context_window of { limit_tokens : int option }
   | Provider_request_body_refusal of { status : int }

@@ -634,7 +634,6 @@ let run_keeper_cycle
   let initial_turn_state : Keeper_unified_turn_types.turn_state =
     { cycle_completed = false
     ; manifest_seq = 0
-    ; current_turn_blocker_info = None
     ; last_execution = None
     ; degraded_retry_settled = None
     ; deferred_runtime_lane = None

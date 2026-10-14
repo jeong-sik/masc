@@ -66,13 +66,6 @@ let summarize_turn_event_bus
     empty_turn_event_bus_summary
     events
 
-let turn_event_bus_evidence_detail
-    (summary : turn_event_bus_summary) : string =
-  Printf.sprintf
-    "agent_core_event_evidence(events=%d,payload_kinds=[%s])"
-    summary.event_count
-    (String.concat "," summary.payload_kinds)
-
 type capacity_refusal =
   | Provider_context_window of { limit_tokens : int option }
   | Provider_request_body_refusal of { status : int }

@@ -310,7 +310,6 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
 let empty_turn_state : Unified_types.turn_state =
   { cycle_completed = false
   ; manifest_seq = 0
-  ; current_turn_blocker_info = None
   ; last_execution = None
   ; degraded_retry_settled = None
   ; failure_reason = None

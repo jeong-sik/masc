@@ -6452,7 +6452,7 @@ let test_initial_lane_exhaustion_cannot_escape_declared_candidates () =
       .Declared_runtime_lane_exhausted ->
     ()
   | Masc.Keeper_unified_turn_execution.For_testing
-      .Provider_context_overflow _ ->
+      .Provider_context_overflow ->
     Alcotest.fail "network exhaustion must not enter an outer catalog fallback"
 
 let access_error_from_http code =

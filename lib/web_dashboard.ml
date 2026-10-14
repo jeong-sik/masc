@@ -559,7 +559,7 @@ let surface_status_json_for_selection
           | _ -> `Null) )
      ; ( "build_producer"
        , (match manifest_identity with
-          | Some manifest -> `String manifest.build_producer
+          | Some _ -> `String Build_identity.dashboard_build_producer
           | _ -> `Null) )
      ; ( "build_runtime"
        , (match manifest_identity with
@@ -568,12 +568,15 @@ let surface_status_json_for_selection
               [ "node", `String manifest.build_node_version
               ; "node_platform", `String manifest.build_node_platform
               ; "node_arch", `String manifest.build_node_arch
-              ; "package_manager_kind", `String manifest.build_package_manager_kind
+              ; ( "package_manager_kind"
+                , `String
+                    (Build_identity.package_manager_kind_to_string
+                       manifest.build_package_manager_kind) )
               ; "pnpm", `String manifest.build_pnpm_version
               ; "vite", `String manifest.build_vite_version
               ; "installed_graph_metadata_sha256", `String manifest.build_installed_graph_metadata_sha256
               ; "installed_graph_metadata_count", `Int manifest.build_installed_graph_metadata_count
-              ; "mode", `String manifest.build_mode
+              ; "mode", `String Build_identity.dashboard_build_mode
               ]
           | _ -> `Null) )
      ; ("recovery", surface_recovery_json recovery)

@@ -143,7 +143,27 @@ let curl_post_json_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
   @ header_args headers
   @ [ "-d"; body_json; "-w"; "\n%{http_code}"; url ]
 
+(* [-i] puts the response's header block in front of its body, which the
+   write-out form above cannot give: an MCP server returns the id of a new
+   session in a header. There is no [-w] here because the status line the
+   block opens with already carries the status. *)
+let curl_post_json_response_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
+  let timeout_sec = max 1 timeout_sec in
+  [
+    "curl";
+    "-q";
+    "-sS";
+    "--http1.1";
+    "--max-time";
+    Int.to_string timeout_sec;
+    "-H";
+    "Content-Type: application/json";
+  ]
+  @ header_args headers
+  @ [ "-i"; "-d"; body_json; url ]
+
 let curl_get_argv_for_test = curl_get_argv
+let curl_post_json_response_argv_for_test = curl_post_json_response_argv
 
 type transport_failure =
   | Curl_exited of int
@@ -252,6 +272,78 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
 
 let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
   http_post_json_text_with_status_with_headers ~timeout_sec ~url ~body_json ()
+
+type http_header_response =
+  { status : int
+  ; headers : (string * string) list
+  ; body : string
+  }
+
+(* The line that ends a header block is empty. Servers write CRLF; a proxy or
+   a test fixture may write bare LF, so both end it. *)
+let find_header_block_end text =
+  let len = String.length text in
+  let rec scan i =
+    if i >= len then None
+    else if i + 3 < len && String.equal (String.sub text i 4) "\r\n\r\n" then Some (i, 4)
+    else if i + 1 < len && Char.equal text.[i] '\n' && Char.equal text.[i + 1] '\n' then
+      Some (i, 2)
+    else scan (i + 1)
+  in
+  scan 0
+
+let parse_status_line line =
+  match String.split_on_char ' ' (String.trim line) with
+  | version :: code :: _ when String.length version >= 5 && String.equal (String.sub version 0 5) "HTTP/" ->
+      parse_int_opt code
+  | _ -> None
+
+let parse_header_line line =
+  match String.index_opt line ':' with
+  | None -> None
+  | Some idx ->
+      let name = String.trim (String.sub line 0 idx) in
+      let value = String.trim (String.sub line (idx + 1) (String.length line - idx - 1)) in
+      if String.equal name "" then None else Some (name, value)
+
+(* An interim [1xx] block (a [100 Continue], a proxy's [200 Connection
+   established] is a final status and is kept) is skipped: the response is the
+   last block before the body. A reply that does not open with a status line
+   is not a response and is refused rather than read as an empty one. *)
+let rec split_http_response_with_headers text =
+  match find_header_block_end text with
+  | None -> None
+  | Some (idx, sep_len) ->
+      let block = String.sub text 0 idx in
+      let rest_start = idx + sep_len in
+      let rest = String.sub text rest_start (String.length text - rest_start) in
+      let lines =
+        String.split_on_char '\n' block |> List.map (fun l -> String.trim l)
+      in
+      (match lines with
+       | [] -> None
+       | status_line :: header_lines ->
+           (match parse_status_line status_line with
+            | None -> None
+            | Some status when status >= 100 && status < 200 -> split_http_response_with_headers rest
+            | Some status ->
+                Some { status; headers = List.filter_map parse_header_line header_lines; body = rest }))
+
+let http_post_json_response_with_headers ~timeout_sec ?(headers = []) ~url ~body_json () =
+  let timeout_sec = max 1 timeout_sec in
+  let argv = curl_post_json_response_argv ~timeout_sec ~headers ~url ~body_json () in
+  let status, body =
+    Fd_accountant.observe ~kind:Sandbox_exec (fun () ->
+      Process_eio.run_argv_with_status
+        ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
+        argv)
+  in
+  match transport_failure_of_status status with
+  | Some failure -> Error (transport_failure_to_string ~url failure)
+  | None ->
+      (match split_http_response_with_headers body with
+       | Some response -> Ok response
+       | None -> Error "the answer did not start with an HTTP status line")
 
 let int_member json key =
   match Json_util.assoc_member_opt key json with

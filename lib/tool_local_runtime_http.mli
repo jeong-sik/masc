@@ -167,3 +167,38 @@ val http_post_json_text_with_status :
     {!http_post_json_text_with_status_with_headers} with no extra
     headers. *)
 
+type http_header_response =
+  { status : int
+  ; headers : (string * string) list
+        (** In the order the server sent them, names as it wrote them. A caller
+            that looks one up compares case-insensitively. *)
+  ; body : string
+  }
+
+val split_http_response_with_headers : string -> http_header_response option
+(** The response in [curl -i] output: the status line and headers of the last
+    non-interim block, then the body. [None] when the text does not open with
+    an HTTP status line or has no end of header block. A [1xx] block is skipped. *)
+
+val http_post_json_response_with_headers :
+  timeout_sec:int ->
+  ?headers:(string * string) list ->
+  url:string ->
+  body_json:string ->
+  unit ->
+  (http_header_response, string) Result.t
+(** [http_post_json_response_with_headers ~timeout_sec ?headers ~url ~body_json ()]
+    issues a [POST url] via curl with [Content-Type: application/json] and
+    keeps the response headers, which {!http_post_json_text_with_status_with_headers}
+    drops. A caller must not pass its own [Content-Type]: it would be sent
+    twice. The answer is read whole, so a server that holds a stream open ends
+    only at [timeout_sec]. *)
+
+val curl_post_json_response_argv_for_test :
+  timeout_sec:int ->
+  ?headers:(string * string) list ->
+  url:string ->
+  body_json:string ->
+  unit ->
+  string list
+

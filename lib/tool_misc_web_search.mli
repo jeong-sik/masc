@@ -12,7 +12,10 @@
     provider config (never the default order) and answers with a
     grounded context envelope — [context_text] + [sources] — in
     place of result rows; its token budget is negotiated in the
-    provider request, not re-truncated locally.
+    provider request, not re-truncated locally. [Zai] joins the same way,
+    through [provider] or [provider_order] only: its key is the one the
+    GLM model provider already reads, so the key being present says nothing
+    about wanting the plan's search allowance spent.
 
     Internal: ~50+ helpers + internal types stay private —
     [normalized_hit] / [provider] (7-variant) /
@@ -60,7 +63,7 @@ type simulated_provider_outcome =
 val provider_plan : unit -> string list
 (** [provider_plan ()] returns the resolved provider order as
     canonical lowercase labels ([searxng] / [brave] / [tavily] /
-    [exa] / [bing_api] / [ollama], plus [brave_llm_context] when
+    [exa] / [bing_api] / [ollama], plus [brave_llm_context] and [zai] when
     explicitly configured).  Reads
     {!Env_config.Tools.web_search_provider_opt} and
     [web_search_fallbacks_opt] at call time, dedupes preserving
@@ -128,6 +131,22 @@ val parse_exa_json : string -> ((string * string * string) list, provider_error)
 val parse_bing_search_json : string -> ((string * string * string) list, provider_error) result
 (** Parse Bing Search API JSON response from
     [{ "webPages": { "value": \[{name, url, snippet}, ...\] } }]. *)
+
+val parse_zai_search_text : string -> ((string * string * string) list, provider_error) result
+(** Parse the text block z.ai's [web_search_prime] tool answers with: a JSON
+    string whose content is [\[{title, link, content, refer}, ...\]], or that
+    array itself. Entries without a title or an http(s) [link] are dropped; a
+    non-empty array with no usable entry is [Error (Parse _)]. *)
+
+val search_via_zai_for_test :
+  post:Mcp_client.post ->
+  api_key:string ->
+  query:string ->
+  limit:int ->
+  ((string * string * string) list, provider_error) result
+(** One z.ai search as [(title, url, snippet)] rows: open an MCP session, call
+    [web_search_prime], parse the answer, keep [limit] rows. [post] is the
+    transport, so a test answers the three requests of the session itself. *)
 
 val parse_ollama_search_json : string -> ((string * string * string) list, provider_error) result
 (** Parse an Ollama web-search response from

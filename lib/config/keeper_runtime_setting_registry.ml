@@ -848,6 +848,15 @@ let all =
       ~category:Web_search
       "Ollama account API key (admits the ollama provider)"
   ; setting
+      ~effective:Credential_presence
+      ~env_name:"ZAI_API_KEY"
+      ~exposure:Env_only
+      ~value_kind:String
+      ~default:"(none)"
+      ~consumers:[ "Tool_misc_web_search" ]
+      ~category:Web_search
+      "z.ai GLM Coding Plan key (the zai provider reads it when named in provider or provider_order; the glm-coding model provider reads the same variable)"
+  ; setting
       ~range:(int_range ~min:1 ~max:60 ())
       ~effective:(Reader (fun () -> display_int (Env_config_runtime.Tools.web_search_timeout_sec ())))
       ~env_name:"MASC_WEB_SEARCH_TIMEOUT_SEC"

@@ -95,6 +95,7 @@ let test_web_search_credentials_are_registered_env_only () =
   ; "EXA_API_KEY"
   ; "BING_SEARCH_API_KEY"
   ; "AZURE_BING_SEARCH_API_KEY"
+  ; "ZAI_API_KEY"
   ]
   |> List.iter (fun env_name ->
     match

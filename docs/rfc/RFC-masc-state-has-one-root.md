@@ -1,7 +1,7 @@
 ---
 rfc: "masc-state-has-one-root"
 title: "masc 상태는 root 하나 아래에만 둔다"
-status: Draft
+status: Implemented
 created: 2026-10-14
 updated: 2026-10-14
 author: claude
@@ -12,7 +12,7 @@ related: ["dated-stores-take-retention-from-one-list"]
 
 # RFC: masc 상태는 root 하나 아래에만 둔다
 
-- 상태: 초안. §9 의 물음 둘은 운영자가 2026-10-14 에 답했다.
+- 상태: 구현됨. Native Stack #43087 로 2026-10-14 에 main 에 들어갔다. 구현과 이 문서의 차이는 §11 에 적었다.
 - 이슈: #42837. 운영자가 2026-10-13 에 보존 규칙 RFC §9 Q6 에서 "기본이 아닌 클러스터는 쓰지 않는다. root 를 하나로"라고 답했다.
 - 근거: §2 의 코드 사실은 `origin/main` `5d142b8fb2` 에서 읽었다. 조사 에이전트가 쓰임새를 모았고, 글쓴이가 핵심 주장 셋(환경 변수를 읽는 곳, 대시보드 연결 표시, 라이브 폴더)을 다시 확인했다. 라이브는 2026-10-14 에 폴더 이름과 환경 변수 이름만 봤다.
 - 앞선 문서: RFC "날짜별 store 는 보존 규칙을 한 목록에서 받는다". 그 RFC 가 만든 store 목록이 두 root 를 타입으로 나눠 적었다(`Dated_jsonl.Store` 의 `Base` 와 `Cluster`).
@@ -178,3 +178,30 @@ Native Stack 하나로 올린다.
 5. blob 정리(D5).
 6. 문서, 안내문, 도움말.
 
+## 11. 구현 결과
+
+Native Stack #43087 의 여섯 층이 2026-10-14 에 한 번에 main 에 들어갔다.
+
+| PR | 한 일 | §10 의 단계 |
+|---|---|---|
+| #43017 | 클러스터 이름과 root(D1, D2), JSON `cluster` 칸과 대시보드(D4), blob 정리(D5) | 1, 4, 5 |
+| #43022 | `Dated_jsonl.Store` 의 `Base`/`Cluster` 를 `Root` 하나로 합쳤다(D3) | 2 |
+| #43031 | 같은 값을 돌려주는 root 함수를 하나씩만 남겼다(§3.2 의 셋 줄이기) | 3 의 일부 |
+| #43047 | `~base_path` 와 `~masc_root` 를 함께 받던 함수가 하나만 받는다 | 3 |
+| #43074 | workspace 상태 파일과 만드는 길을 하나로 줄였다 | §2.3 밖 |
+| #43086 | 안내문, 도움말, 용어집 | 6 |
+
+이 문서와 다른 곳은 셋이다.
+
+- §3.3 은 store 함수가 `~base_path` 를 받는다고 적었다. 구현은 `Dated_jsonl.Store.root` 를 받는다. `root_of_base_path` 나 `root_of_masc_dir` 로 만든다. `masc_root` 문자열만 들고 있는 호출처가 많아서다. §9 Q2 대로 이 값은 아직 타입으로 묶지 않았다(#43005).
+- §10 의 순서와 층이 다르다. 1, 4, 5 단계를 맨 아래 층 하나에 넣었고, 3 단계를 함수 이름 정리(#43031)와 입력 하나로 줄이기(#43047) 둘로 나눴다. 스택이 한 번에 들어갔으므로 main 에서 보이는 결과는 같다.
+- §2.3 목록 밖에서 같은 "root 가 둘" 구조를 하나 더 찾아 #43074 에서 고쳤다. 운영자가 2026-10-14 에 넣기로 했다.
+  - workspace 상태를 `.masc/root-state.json` 과 `.masc/state.json` 두 벌 적었고, workspace 를 만드는 길이 `Workspace.init` 과 `ensure_workspace_bootstrap` 둘이었다. 뒤의 것은 production 에서 아무도 부르지 않았다. 이제 `state.json` 과 `init` 하나뿐이다.
+  - 그러면서 찾은 버그 셋을 함께 고쳤다. 2026-08-25 사고 뒤에 넣은 메시지 번호 되살리기(`reconcile_message_seq`)가 부르지 않는 쪽에만 있어서 라이브에서 돈 적이 없었다. `init` 은 번호를 0 부터 시작하는 자기 사본으로 상태를 만들었다. `read_state` 는 `state.json` 이 없으면 그것을 만들어, 읽기만으로 workspace 가 초기화된 것처럼 보였다.
+
+§7 검증 가운데 라이브 확인(배포 뒤 `effective_masc_root` 가 `<base>/.masc` 인지)은 배포 뒤에 한다. 배포 뒤 라이브의 `.masc/root-state.json` 은 아무도 읽지 않으므로 지운다.
+
+이 RFC 밖에 남은 일:
+
+- #43005: `~masc_root` 를 타입으로 묶는다. wire 에 base path 와 masc root 를 둘 다 싣는 세 곳(`validate_expected_workspace`, msx checkpoint 영수증, path diagnostics)도 여기서 다룬다.
+- #43125: `reconcile_message_seq` 가 `next_seq` 와 같은 상태 잠금 안에서 돈다(리뷰 P3).

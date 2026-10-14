@@ -2,8 +2,8 @@
 
     One JSON object in [<keepers_dir>/<keeper>/librarian-progress.json], next
     to the keeper's turn-boundary log ({!Keeper_turn_boundaries}).
-    [keepers_dir] is {!Workspace.keepers_runtime_dir} for the selected cluster,
-    not the operator's config directory. Path construction and reads create
+    [keepers_dir] is {!Workspace.keepers_runtime_dir}, not the operator's
+    config directory. Path construction and reads create
     no directories. It is a
     value, not a pointer into that log: the trace, how many atoms of its saved
     history have been read, and the digest of the message that opens the last

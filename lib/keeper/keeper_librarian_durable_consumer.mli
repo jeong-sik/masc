@@ -113,7 +113,7 @@ val consume_one
   -> (outcome, error) result
 (** The first attempt reads all unread cut points and official lines. A
     failed commit, typed error, or cancellation keeps a process-local marker;
-    the next attempt for that cluster-scoped Keeper reads only the oldest
+    the next attempt for that Keeper reads only the oldest
     unread turn, of whichever kind ends first in the log. A small successful
     cut keeps that mode until the backlog is empty; a successful all-unread
     pass or a baseline also clears the marker. Durable progress remains the

@@ -8,6 +8,7 @@ type t =
   | Runtime_blocked
   | Paused
   | Keepalive_stopped
+[@@deriving enumerate]
 
 let to_wire = function
   | Approval_queue_unavailable -> "approval_queue_unavailable"

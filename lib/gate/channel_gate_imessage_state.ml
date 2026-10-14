@@ -85,7 +85,7 @@ let configured_reply_mode () =
 
    The poll is the transport, so the poll is the liveness. One definition,
    read both by [status_json] and by the [Channel_gate_connector.S] export
-   [connected]; they used to be able to disagree and no longer can. *)
+   [connected]. *)
 
 type poll_state =
   | Not_started
@@ -141,11 +141,11 @@ let chat_db_error () =
    connector receives and cannot answer, which is the same kind of half-working
    Slack reports for a missing bot token, so it is part of the verdict rather
    than a surprise at send time. *)
-let reply_target_error reply_mode =
+let reply_target_error ~self_chat_guid reply_mode =
   match reply_mode with
   | Source_chat -> ""
   | Self_chat ->
-    if String.equal (Atomic.get self_chat_guid_ref) "" then
+    if String.equal self_chat_guid "" then
       "no self-chat conversation resolved: iMessage receives but every reply \
        fails. Start a note-to-self conversation in Messages.app, or set \
        MASC_IMESSAGE_SELF_CHAT_GUID"
@@ -153,12 +153,12 @@ let reply_target_error reply_mode =
 ;;
 
 (* One reading of the connector, rendered by [status_json] and
-   [connector_json] alike so the two views cannot disagree. The poll state is
-   read once, so [connected], [poll_state] and the poll error in [error] all
-   describe the same cycle. *)
+   [connector_json] alike so the two views cannot disagree. The poll state and
+   the self-chat handle are each read once: the rendered [connected] is
+   computed from [poll_state], and [error] is built from the same two values
+   the record shows. *)
 type status =
   { available : bool
-  ; connected : bool
   ; error : string
   ; poll_state : poll_state
   ; reply_mode : reply_mode
@@ -179,6 +179,7 @@ let read_status ~audit_limit =
   let startup_error = Atomic.get startup_error in
   let startup_ok = Option.is_none startup_error in
   let poll_state = Atomic.get poll_state_ref in
+  let self_chat_guid = Atomic.get self_chat_guid_ref in
   let configured_bindings_result = read_bindings_result () in
   let binding_store_read_ok = Result.is_ok configured_bindings_result in
   let configured_bindings, binding_store_error =
@@ -194,7 +195,7 @@ let read_status ~audit_limit =
     match reply_mode_result with Ok mode -> mode | Error _ -> Self_chat
   in
   let chat_db_error = chat_db_error () in
-  let reply_target_error = reply_target_error reply_mode in
+  let reply_target_error = reply_target_error ~self_chat_guid reply_mode in
   let available =
     startup_ok && binding_store_read_ok
     && String.equal chat_db_error ""
@@ -223,11 +224,10 @@ let read_status ~audit_limit =
       |> String.concat "; "
   in
   { available
-  ; connected = poll_state_connected poll_state
   ; error
   ; poll_state
   ; reply_mode
-  ; self_chat_guid = Atomic.get self_chat_guid_ref
+  ; self_chat_guid
   ; cursor_rowid = Atomic.get cursor_rowid_ref
   ; chat_db_path = chat_db_path ()
   ; chat_db_readable = String.equal chat_db_error ""
@@ -247,14 +247,16 @@ let status_fields status =
   [ "channel", `String channel
   ; "capabilities", Channel_gate_connector_capability.all_json
   ; "available", `Bool status.available
-  ; "connected", `Bool status.connected
+  ; "connected", `Bool (poll_state_connected status.poll_state)
   ; ( "status"
     , `String
         (* The poll loop is the liveness source. It publishes into memory on
            every cycle, so there is no heartbeat that could age out and the
            connector is never stale. *)
         (Channel_gate_connector.connector_state_label
-           ~available:status.available ~connected:status.connected ~stale:false) )
+           ~available:status.available
+           ~connected:(poll_state_connected status.poll_state)
+           ~stale:false) )
   ; "error", `String status.error
   ; "status_source", `String "in_process_gateway"
   ; "poll_state", `String (poll_state_to_string status.poll_state)

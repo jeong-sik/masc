@@ -1629,13 +1629,21 @@ let set_status ~ops ?(preserve_terminal = false) key status =
                | Done _ )
            ; _
            } as entry) ->
-        (* A failed pre-fork worker has no scope left to consume a pending
-           cancel. Resolve that exact intent under the same transition lock
-           instead of overwriting it with a resumable Lost terminal. *)
-        let status = match status with
-          | Lost {reason} -> status_after_worker_absence ~reason entry.status
-          | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
-           | Waiting_for_owned_jobs _ | Done _ -> status in
+        (* A closed worker scope cannot consume a pending cancellation,
+           including when signalling failed and the worker returned normally.
+           The exact durable intent wins over any ordinary terminal outcome;
+           persistence failure remains explicit. *)
+        let status = match entry.status with
+          | Cancelling {reason;cancelled_by} ->
+            (match status with
+             | Lost _ | Cancelled _ | Waiting_for_owned_jobs _ | Done _ -> Cancelled {reason;cancelled_by}
+             | Queued | Running | Cancelling _ | Persistence_failed _ -> status)
+          | Queued | Running | Lost _ | Cancelled _ | Persistence_failed _
+          | Waiting_for_owned_jobs _ | Done _ ->
+            (match status with
+             | Lost {reason} -> status_after_worker_absence ~reason entry.status
+             | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
+             | Waiting_for_owned_jobs _ | Done _ -> status) in
         let completed_at =
           match status with
           | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ ->

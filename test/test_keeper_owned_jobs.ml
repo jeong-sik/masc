@@ -1316,7 +1316,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "composition never restarts original program" 1 (effect_count fixture "start")
 
 let test_cancelled_continuation_cannot_restart () =
-  List.iter (fun forget_before_fork -> with_fixture @@ fun env _initialize fixture ->
+  List.iter (fun mode -> with_fixture @@ fun env _initialize fixture ->
     let module Async = Masc.Keeper_msg_async in
     set_source fixture ~task_id:"task-A" ~turn:41;
     Call_log.init ~base_path:fixture.base_path ();
@@ -1340,43 +1340,102 @@ let test_cancelled_continuation_cannot_restart () =
       | Ok None | Error _ -> fail "cancellation fixture has no original job wait" in
     let backend_before = List.length (calls fixture) in
     let worker_calls = ref 0 and intent = ref None in
-    let stopped_switch = Eio.Switch.run (fun sw -> sw) in
+    let admitted_worker = ref None in
+    let entered, notify_entered = Eio.Promise.create () in
+    let release, allow_return = Eio.Promise.create () in
+    let settled, notify_settled = Eio.Promise.create () in
+    let background_sw = match mode with
+      | `Fork | `Startup -> Eio.Switch.run (fun sw -> sw)
+      | `Signal_failure -> Async.server_background_switch () |> require "live cancelled worker switch" in
+    let save_intent request_id =
+      match Async.poll ~base_path:fixture.base_path ~caller:keeper request_id with
+      | Found {status=Cancelling {reason;cancelled_by};_} -> intent := Some (reason,cancelled_by)
+      | Found _ | Absent | Unreadable _ | Rejected _ -> fail "committed cancel intent is unavailable" in
     let submission = Async.submit_worker_with_request_id ?request_context:waiting_entry.request_context
-        ~background_sw:stopped_switch ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+        ~background_sw ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
         ~on_accepted:(fun request_id ->
           match Journal.bind_continuation candidate ~request_id with
           | Error error -> Error (Journal.error_to_string error)
-          | Ok _ ->
-            (match Async.cancel ~base_path:fixture.base_path ~caller:keeper request_id with
-             | Cancellation_requested Durably_committed -> ()
-             | _ -> fail "pre-fork cancellation did not commit its exact intent");
-            (match Async.poll ~base_path:fixture.base_path ~caller:keeper request_id with
-             | Found {status=Cancelling {reason;cancelled_by};_} -> intent := Some (reason,cancelled_by)
-             | Found _ | Absent | Unreadable _ | Rejected _ -> fail "committed cancel intent is unavailable");
+          | Ok worker ->
+            admitted_worker := Some worker;
+            (match mode with
+             | `Signal_failure -> ()
+             | `Fork | `Startup ->
+               (match Async.cancel ~base_path:fixture.base_path ~caller:keeper request_id with
+                | Cancellation_requested Durably_committed -> ()
+                | _ -> fail "pre-fork cancellation did not commit its exact intent");
+               save_intent request_id);
             (* Explicit fixture process-memory reset leaves the actual durable
                Cancelling record for the exclusive startup recovery path. *)
-            if forget_before_fork then Async.For_testing.forget ~base_path:fixture.base_path ~caller:keeper ~request_id;
+            (match mode with
+             | `Startup -> Async.For_testing.forget ~base_path:fixture.base_path ~caller:keeper ~request_id
+             | `Fork | `Signal_failure -> ());
             Ok ())
-        ~f:(fun ~request_id:_ _ -> incr worker_calls;
-          Async.worker_finished (Tool_result.make_ok ~tool_name:"cancelled-continuation"
-            ~start_time:(Tool_timing.start ()) ())) () in
-    let request_id = match submission with
-      | Error (Background_fork_failed {request_id;_} as error) ->
+        ~on_worker_settled:(fun _ -> Eio.Promise.resolve notify_settled ())
+        ~f:(fun ~request_id:_ request_sw ->
+          incr worker_calls;
+          let worker = match !admitted_worker with Some worker -> worker
+            | None -> fail "cancelled worker has no actual journal binding" in
+          let surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
+          let draft = Masc.Keeper_composition_draft.load_continuation ~base_path:fixture.base_path
+              ~capability_surface:surface candidate |> require "cancelled worker's original draft" in
+          let source = Journal.continuation_source candidate in
+          let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:source.parent_tool_use_id
+              ~turn:source.source_turn ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
+              ~completion:Agent_core.Tool_contract.Continue_after_success in
+          let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+            {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+          let module Executor = Masc.Keeper_tool_plan_executor in
+          let actual = Eio_context.with_turn_switch request_sw (fun () ->
+            Executor.execute_keeper ~capability_surface:surface ~plan:(Masc.Keeper_composition_draft.plan draft)
+              ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ()) ~composition_run_id:run_id ~parent_invocation:invocation
+              ~config:(Workspace.default_config fixture.base_path) ~meta:fixture.meta ~publication_recovery
+              ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"cancelled continuation fixture")
+              ~keeper_turn_id:(fun () -> Some 41)
+              ~source_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+              ~clock:(Eio.Stdenv.clock env) ~journal:worker ()) in
+          let node = match actual with
+            | Error {cause=Executor.Tool_did_not_complete node;_} -> node
+            | Ok _ | Error _ -> fail "actual original job result did not produce a durable wait" in
+          let job_id = match node.deferred_kind with
+            | Some (Masc.Keeper_tool_execution.Owned_job_result_wait job_id) -> job_id
+            | Some _ | None -> fail "actual producer did not own the deferred job identity" in
+          Eio.Promise.resolve notify_entered ();
+          Eio.Promise.await release;
+          Async.worker_waiting_for_owned_jobs ~job_ids:[job_id] node.result
+            |> require "actual cancelled worker wait") () in
+    let request_id = match mode,submission with
+      | (`Fork | `Startup), Error (Background_fork_failed {request_id;_} as error) ->
         let wire = Async.submit_error_to_json error in
         check_json "cancelled fork response keeps the exact request identity" (`String request_id)
           (wire |> member "request_id");
         check_json "fork failure transport cannot misreport cancellation as Lost" `Null
           (wire |> member "status");
         request_id
-      | Error _ | Ok _ -> fail "closed switch did not exercise the failed worker fork" in
-    if forget_before_fork then (
+      | `Signal_failure, Ok outcome ->
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () -> Eio.Promise.await entered);
+        let request_id = outcome.request_id in
+        let ops = Async.For_testing.make_request_ops
+            ~signal_cancel:(fun _ _ -> failwith "fixture worker cancellation signal failed") () in
+        (match Async.For_testing.cancel ops ~base_path:fixture.base_path ~caller:keeper request_id with
+         | Cancel_worker_signal_failed {durability=Durably_committed;_} -> ()
+         | _ -> fail "failed cancellation signal did not retain durable operator intent");
+        save_intent request_id;
+        Eio.Promise.resolve allow_return ();
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () -> Eio.Promise.await settled);
+        request_id
+      | (`Fork | `Startup | `Signal_failure), (Error _ | Ok _) ->
+        fail "cancellation scenario did not exercise its worker settlement boundary" in
+    (match mode with
+    | `Startup ->
       (match Async.poll ~base_path:fixture.base_path ~caller:keeper request_id with
        | Found {status=Cancelling _;_} -> ()
        | Found _ | Absent | Unreadable _ | Rejected _ -> fail "ordinary polling stole disk-only cancellation");
       let recovered = Async.recover_lost_disk_records ~base_path:fixture.base_path () in
       check int "startup does not turn operator cancellation into Lost" 0 recovered.lost;
       check int "startup finalizes the exact cancellation" 1 recovered.finalized;
-      check int "startup cancellation settlement has no persistence failure" 0 recovered.failed);
+      check int "startup cancellation settlement has no persistence failure" 0 recovered.failed
+    | `Fork | `Signal_failure -> ());
     let terminal = Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper request_id
       |> require "cancelled continuation canonical terminal" |> Async.durable_terminal_entry in
     (match terminal.status with
@@ -1389,9 +1448,11 @@ let test_cancelled_continuation_cannot_restart () =
     let discovery = Journal.pending_continuations ~base_path:fixture.base_path |> require "cancelled pending discovery" in
     check int "cancelled owner dispatches no ready continuation" 0 (List.length discovery.ready);
     check int "cancelled owner retirement retains no unreadable evidence" 0 (List.length discovery.failures);
-    check int "cancelled continuation starts no worker" 0 !worker_calls;
+    check int "cancelled continuation admits only its original live worker"
+      (match mode with `Signal_failure -> 1 | `Fork | `Startup -> 0) !worker_calls;
     check int "cancelled continuation has no backend effect" backend_before (List.length (calls fixture));
-    check int "cancellation never relaunches the program" 1 (effect_count fixture "start")) [false;true]
+    check int "cancellation never relaunches the program" 1 (effect_count fixture "start"))
+    [`Fork;`Startup;`Signal_failure]
 
 let test_job_result_rejects_unavailable_authority () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
@@ -1799,7 +1860,7 @@ let () =
       ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch
       ; test_case "malformed whole source cannot publish a binding" `Quick test_malformed_source_cannot_publish_binding
       ; test_case "public Composition waits and resumes the original job result" `Quick test_public_composition_wait_and_resume
-      ; test_case "cancelled continuation stays cancelled at fork failure and startup" `Quick test_cancelled_continuation_cannot_restart
+      ; test_case "cancelled continuation preserves intent at fork, startup and signal failure" `Quick test_cancelled_continuation_cannot_restart
       ; test_case "job result rejects unavailable owner authority" `Quick test_job_result_rejects_unavailable_authority
       ; test_case "completion enqueue failure recovers original result after restart" `Quick test_completion_delivery_failure_and_restart
       ; test_case "consumed notification survives missing producer ACK" `Quick test_completion_consumed_before_producer_ack

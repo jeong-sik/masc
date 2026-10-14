@@ -1,4 +1,4 @@
-# Wiki lint (`masc_wiki_lint`) — Experimental
+# Wiki lint (`masc_wiki_lint`)
 
 ## What it is
 
@@ -80,6 +80,6 @@ no configuration switch.
 
 ## Status
 
-Experimental. The finding kinds and the response fields may change before the
-tool is declared stable; log and revision checks and a contradiction check are
-later steps of the RFC.
+Stable. The seven finding kinds in the table above and the response fields are
+stable. A later step of the RFC may still add a kind — `revision_log_gap` is
+planned — so read the table above for the current set.

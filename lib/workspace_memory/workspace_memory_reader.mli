@@ -2,11 +2,16 @@
     delivery state with deterministic retry and context-overflow bisection
     (RFC-shared-memory-appends-a-log-and-keepers-read-from-their-position). *)
 
+type delivery_mode =
+  | Full_entries
+  | Reference_only
+
 type pending_delivery = {
   from_seq : Workspace_memory_log.seq;
   to_seq : Workspace_memory_log.seq;
   digest_sha256 : string;
   entry_count : int;
+  mode : delivery_mode;
 }
 
 type reader_state = {
@@ -26,6 +31,11 @@ type error =
   | Missing_committed_entries of
       { from_seq : Workspace_memory_log.seq
       ; to_seq : Workspace_memory_log.seq
+      }
+  | Single_entry_context_overflow of
+      { seq : Workspace_memory_log.seq
+      ; fact_id : string
+      ; digest_sha256 : string
       }
   | Invalid_reader_state of string
   | Malformed_json of string
@@ -50,13 +60,32 @@ val plan_delivery
   -> committed:Workspace_memory_log.change_entry list
   -> ?max_entries:int
   -> unit
-  -> reader_state * Workspace_memory_log.change_entry list
+  -> (reader_state * Workspace_memory_log.change_entry list, error) result
 (** Deterministically plan the next slice of committed entries to deliver:
     - When [pending] is [Some p], re-deliver the exact committed slice
-      [[p.from_seq .. p.to_seq]] after verifying [p.digest_sha256].
+      [[p.from_seq .. p.to_seq]] after verifying [p.digest_sha256], or return
+      [Error (Missing_committed_entries _ | Digest_mismatch _)] if verification
+      fails.
     - When [pending] is [None], select committed entries with
       [seq > acknowledged_seq] (up to [max_entries] when specified),
-      compute [digest_sha256], and record [pending]. *)
+      compute [digest_sha256], and record [pending] with [mode = Full_entries].
+
+    Requirement: callers MUST persist the returned [reader_state] via
+    {!save_reader_state} before running the turn that carries the planned
+    slice, so a crash mid-turn re-delivers the same [pending] identity rather
+    than duplicating or dropping entries. *)
+
+val recover_corrupted_pending
+  :  reader_state
+  -> committed:Workspace_memory_log.change_entry list
+  -> ?max_entries:int
+  -> unit
+  -> (reader_state * Workspace_memory_log.change_entry list, error) result
+(** Explicit recovery transition when {!plan_delivery} fails verification on an
+    existing [pending] ([Missing_committed_entries] or [Digest_mismatch]):
+    drops the unverifiable [pending] while preserving [acknowledged_seq], and
+    re-plans delivery from [acknowledged_seq]. Returns
+    [Error No_pending_delivery] if [state.pending] is [None]. *)
 
 val apply_turn_outcome
   :  reader_state
@@ -68,9 +97,16 @@ val apply_turn_outcome
       [pending <- None].
     - [Turn_failed_transient]: preserve [acknowledged_seq] and keep
       [pending] unchanged for deterministic retry.
-    - [Context_overflow]: bisect the pending slice to
-      [half = max 1 (p.entry_count / 2)], recomputing [to_seq] and
-      [digest_sha256] for the first half without losing position. *)
+    - [Context_overflow]:
+      - When [p.entry_count > 1], bisect the pending slice to
+        [half = p.entry_count / 2], recomputing [to_seq] and [digest_sha256]
+        for the first half ([mode = Full_entries]) without losing position.
+      - When [p.entry_count = 1] and [p.mode = Full_entries], transition
+        [pending] to [mode = Reference_only] (RFC §3.3: deliver a 1-line
+        reference notice for that single entry so the keeper can fetch it via
+        [{"entry": seq}]).
+      - When [p.entry_count = 1] and [p.mode = Reference_only], return
+        [Error (Single_entry_context_overflow _)] instead of looping. *)
 
 val reader_state_to_yojson : reader_state -> Yojson.Safe.t
 val reader_state_of_yojson : Yojson.Safe.t -> (reader_state, error) result

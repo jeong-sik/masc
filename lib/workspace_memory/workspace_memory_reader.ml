@@ -1,8 +1,13 @@
+type delivery_mode =
+  | Full_entries
+  | Reference_only
+
 type pending_delivery = {
   from_seq : Workspace_memory_log.seq;
   to_seq : Workspace_memory_log.seq;
   digest_sha256 : string;
   entry_count : int;
+  mode : delivery_mode;
 }
 
 type reader_state = {
@@ -23,6 +28,11 @@ type error =
       { from_seq : Workspace_memory_log.seq
       ; to_seq : Workspace_memory_log.seq
       }
+  | Single_entry_context_overflow of
+      { seq : Workspace_memory_log.seq
+      ; fact_id : string
+      ; digest_sha256 : string
+      }
   | Invalid_reader_state of string
   | Malformed_json of string
   | Io_error of string
@@ -39,6 +49,12 @@ let error_to_string = function
       "missing_committed_entries(from_seq=%d, to_seq=%d)"
       from_seq
       to_seq
+  | Single_entry_context_overflow { seq; fact_id; digest_sha256 } ->
+    Printf.sprintf
+      "single_entry_context_overflow(seq=%d, fact_id=%s, digest=%s)"
+      seq
+      fact_id
+      digest_sha256
   | Invalid_reader_state detail ->
     Printf.sprintf "invalid_reader_state(%s)" detail
   | Malformed_json detail ->
@@ -96,7 +112,7 @@ let slice_for_pending
     else
       Ok slice
 
-let build_pending (slice : Workspace_memory_log.change_entry list) =
+let build_pending ?(mode = Full_entries) (slice : Workspace_memory_log.change_entry list) =
   match slice, List.rev slice with
   | first :: _, last :: _ ->
     Some
@@ -104,8 +120,29 @@ let build_pending (slice : Workspace_memory_log.change_entry list) =
       ; to_seq = last.seq
       ; digest_sha256 = compute_digest slice
       ; entry_count = List.length slice
+      ; mode
       }
   | _, _ -> None
+
+let plan_unseen
+    (state : reader_state)
+    ~(committed : Workspace_memory_log.change_entry list)
+    ?max_entries
+    () =
+  let unseen =
+    committed
+    |> sort_by_seq
+    |> List.filter (fun (e : Workspace_memory_log.change_entry) ->
+      e.seq > state.acknowledged_seq)
+  in
+  let selected =
+    match max_entries with
+    | None -> unseen
+    | Some limit -> take (Int.max 0 limit) unseen
+  in
+  match build_pending selected with
+  | None -> Ok ({ state with pending = None }, [])
+  | Some pending -> Ok ({ state with pending = Some pending }, selected)
 
 let plan_delivery
     (state : reader_state)
@@ -114,24 +151,20 @@ let plan_delivery
     () =
   match state.pending with
   | Some p ->
-    (match slice_for_pending p ~committed with
-     | Ok slice -> state, slice
-     | Error _ -> state, [])
+    let* slice = slice_for_pending p ~committed in
+    Ok (state, slice)
   | None ->
-    let unseen =
-      committed
-      |> sort_by_seq
-      |> List.filter (fun (e : Workspace_memory_log.change_entry) ->
-        e.seq > state.acknowledged_seq)
-    in
-    let selected =
-      match max_entries with
-      | None -> unseen
-      | Some limit -> take (Int.max 0 limit) unseen
-    in
-    (match build_pending selected with
-     | None -> state, []
-     | Some pending -> { state with pending = Some pending }, selected)
+    plan_unseen state ~committed ?max_entries ()
+
+let recover_corrupted_pending
+    (state : reader_state)
+    ~(committed : Workspace_memory_log.change_entry list)
+    ?max_entries
+    () =
+  match state.pending with
+  | None -> Error No_pending_delivery
+  | Some _ ->
+    plan_unseen { state with pending = None } ~committed ?max_entries ()
 
 let apply_turn_outcome
     (state : reader_state)
@@ -147,15 +180,43 @@ let apply_turn_outcome
      | Turn_failed_transient ->
        Ok state
      | Context_overflow ->
-       let half = Int.max 1 (p.entry_count / 2) in
-       let first_half = take half slice in
-       (match build_pending first_half with
-        | None ->
-          Error
-            (Missing_committed_entries
-               { from_seq = p.from_seq; to_seq = p.to_seq })
-        | Some narrowed ->
-          Ok { state with pending = Some narrowed }))
+       if p.entry_count <= 1 then
+         match p.mode, slice with
+         | Full_entries, _ ->
+           Ok { state with pending = Some { p with mode = Reference_only } }
+         | Reference_only, first :: _ ->
+           Error
+             (Single_entry_context_overflow
+                { seq = p.from_seq
+                ; fact_id = first.fact_id
+                ; digest_sha256 = p.digest_sha256
+                })
+         | Reference_only, [] ->
+           Error
+             (Missing_committed_entries
+                { from_seq = p.from_seq; to_seq = p.to_seq })
+       else
+         let half = Int.max 1 (p.entry_count / 2) in
+         let first_half = take half slice in
+         (match build_pending ~mode:Full_entries first_half with
+          | None ->
+            Error
+              (Missing_committed_entries
+                 { from_seq = p.from_seq; to_seq = p.to_seq })
+          | Some narrowed ->
+            Ok { state with pending = Some narrowed }))
+
+let delivery_mode_to_wire = function
+  | Full_entries -> "full_entries"
+  | Reference_only -> "reference_only"
+
+let delivery_mode_of_wire = function
+  | "full_entries" -> Ok Full_entries
+  | "reference_only" -> Ok Reference_only
+  | other ->
+    Error
+      (Invalid_reader_state
+         (Printf.sprintf "unknown pending.mode: %s" other))
 
 let pending_to_yojson (p : pending_delivery) =
   `Assoc
@@ -163,6 +224,7 @@ let pending_to_yojson (p : pending_delivery) =
     ; "to_seq", `Int p.to_seq
     ; "digest_sha256", `String p.digest_sha256
     ; "entry_count", `Int p.entry_count
+    ; "mode", `String (delivery_mode_to_wire p.mode)
     ]
 
 let reader_state_to_yojson (state : reader_state) =
@@ -222,7 +284,22 @@ let pending_of_yojson json =
   let* to_seq = require_int ~min_value:from_seq "to_seq" fields in
   let* digest_sha256 = require_sha256 "digest_sha256" fields in
   let* entry_count = require_int ~min_value:1 "entry_count" fields in
-  Ok { from_seq; to_seq; digest_sha256; entry_count }
+  let* mode =
+    match List.assoc_opt "mode" fields with
+    | None -> Ok Full_entries
+    | Some (`String raw) -> delivery_mode_of_wire raw
+    | Some _ ->
+      Error (Invalid_reader_state "pending.mode must be a string")
+  in
+  let* () =
+    match mode with
+    | Reference_only when entry_count <> 1 ->
+      Error
+        (Invalid_reader_state
+           "pending.mode=reference_only requires entry_count = 1")
+    | Reference_only | Full_entries -> Ok ()
+  in
+  Ok { from_seq; to_seq; digest_sha256; entry_count; mode }
 
 let reader_state_of_yojson json =
   let* fields = require_object "reader_state" json in

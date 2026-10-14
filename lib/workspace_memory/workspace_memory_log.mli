@@ -70,13 +70,17 @@ val append_batch
   -> changes:change_entry list
   -> committed_at:string
   -> (seq, error) result
-(** Validate that [changes] match [header.batch_id], [header.expected_changes],
-    and strictly increasing positive [seq] numbers, then append [Prepared],
-    all [Change] records, and [Committed], returning [final_seq]. *)
+(** Under an exclusive file lock on [path ^ ".lock"], load the current log's
+    [last_committed_seq], validate that [header.batch_id] is fresh and
+    [changes] match [header.batch_id], [header.expected_changes], and strictly
+    increasing [seq] numbers greater than [last_committed_seq], then append
+    [Prepared], all [Change] records, and [Committed], returning [final_seq]. *)
 
 val load_log : path:string -> (log_record list, error) result
-(** Load all JSONL records from [path]. Returns [Ok []] if [path] does not
-    exist. Rejects malformed JSON lines or invalid record payloads. *)
+(** Load all complete (newline-terminated) JSONL records from [path]. Returns
+    [Ok []] if [path] does not exist. A trailing fragment without a terminating
+    newline at EOF is ignored as an incomplete mid-append write; any malformed
+    complete line in the file returns [Error]. *)
 
 val abort_incomplete_batches
   :  path:string

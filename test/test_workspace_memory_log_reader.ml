@@ -199,7 +199,7 @@ let test_file_crash_recovery_aborts_incomplete () =
      with
      | Ok final_seq -> Alcotest.(check int) "final_seq is 2" 2 final_seq
      | Error err -> Alcotest.fail (Log.error_to_string err));
-    (* Simulate writer crash after Prepared + 1 Change (expected 2, no Committed) *)
+    (* Simulate writer crash after Prepared + 1 complete Change + a cut-off newline-less line (B2) *)
     let header_crash : Log.batch_header =
       { batch_id = "batch-crash"
       ; author = "curator"
@@ -220,6 +220,8 @@ let test_file_crash_recovery_aborts_incomplete () =
     (match Log.append_record ~path (Log.Change dangling_change) with
      | Ok () -> ()
      | Error err -> Alcotest.fail (Log.error_to_string err));
+    (* Append a truncated newline-less JSON fragment simulating crash mid-write *)
+    Fs_compat.append_file path "{\"kind\":\"change\",\"seq\":4,\"batch_id\":\"batch-crash";
     let before_abort =
       match Log.recover_file ~path with
       | Ok r -> r
@@ -230,7 +232,7 @@ let test_file_crash_recovery_aborts_incomplete () =
       2
       (List.length before_abort.committed_changes);
     Alcotest.(check (list string))
-      "batch-crash is incomplete before abort"
+      "batch-crash is incomplete before abort despite cut-off tail"
       [ "batch-crash" ]
       (List.map
          (fun (h : Log.batch_header) -> h.batch_id)
@@ -254,7 +256,7 @@ let test_file_crash_recovery_aborts_incomplete () =
       "aborted_batches contains batch-crash"
       [ "batch-crash" ]
       after_abort.aborted_batches;
-    (* Reload from disk to verify the Aborted record was durably appended *)
+    (* Reload from disk to verify the cut-off tail was truncated and Aborted record was durably appended *)
     let reloaded =
       match Log.recover_file ~path with
       | Ok r -> r
@@ -271,7 +273,34 @@ let test_file_crash_recovery_aborts_incomplete () =
     Alcotest.(check int)
       "reloaded log keeps last_committed_seq = 2"
       2
-      reloaded.last_committed_seq)
+      reloaded.last_committed_seq;
+    (* B1: Appending a batch with stale seq (<= last_committed_seq = 2) or duplicate batch_id is rejected *)
+    let stale_header : Log.batch_header =
+      { batch_id = "batch-stale"
+      ; author = "curator"
+      ; started_at = "2026-10-14T09:07:00Z"
+      ; expected_changes = 1
+      }
+    in
+    let stale_change =
+      make_change ~seq:2 ~batch_id:"batch-stale" ~fact_id:"f-stale" ~summary:"stale"
+    in
+    (match
+       Log.append_batch
+         ~path
+         ~header:stale_header
+         ~changes:[ stale_change ]
+         ~committed_at:"2026-10-14T09:07:01Z"
+     with
+     | Error (Log.Invalid_batch _) -> ()
+     | Ok seq ->
+       Alcotest.fail (Printf.sprintf "expected stale seq to fail, got Ok %d" seq)
+     | Error err -> Alcotest.fail (Log.error_to_string err))
+  )
+
+let unwrap_plan = function
+  | Ok pair -> pair
+  | Error err -> Alcotest.fail (Reader.error_to_string err)
 
 let test_reader_cursor_progression_and_sticky_retry () =
   let committed_initial =
@@ -281,7 +310,7 @@ let test_reader_cursor_progression_and_sticky_retry () =
   in
   let s0 = Reader.init ~keeper:"keeper-alpha" () in
   let s1, delivered1 =
-    Reader.plan_delivery s0 ~committed:committed_initial ()
+    unwrap_plan (Reader.plan_delivery s0 ~committed:committed_initial ())
   in
   Alcotest.(check (list int))
     "initial plan delivers [1; 2]"
@@ -318,7 +347,7 @@ let test_reader_cursor_progression_and_sticky_retry () =
       ]
   in
   let s_retry, delivered_retry =
-    Reader.plan_delivery s_failed ~committed:committed_extended ()
+    unwrap_plan (Reader.plan_delivery s_failed ~committed:committed_extended ())
   in
   Alcotest.(check (list int))
     "retry re-delivers exact pending slice [1; 2]"
@@ -333,6 +362,21 @@ let test_reader_cursor_progression_and_sticky_retry () =
     "pending digest_sha256 is identical across retry"
     pending1.digest_sha256
     pending_retry.digest_sha256;
+  (* B4: If committed entries are tampered with, plan_delivery returns Error Digest_mismatch, and recover_corrupted_pending recovers *)
+  let committed_tampered =
+    [ make_change ~seq:1 ~batch_id:"b1" ~fact_id:"f1" ~summary:"tampered!"
+    ; make_change ~seq:2 ~batch_id:"b1" ~fact_id:"f2" ~summary:"claim 2"
+    ]
+  in
+  (match Reader.plan_delivery s_retry ~committed:committed_tampered () with
+   | Error (Reader.Digest_mismatch _) -> ()
+   | Ok _ -> Alcotest.fail "expected Digest_mismatch on tampered slice"
+   | Error err -> Alcotest.fail (Reader.error_to_string err));
+  (match Reader.recover_corrupted_pending s_retry ~committed:committed_initial () with
+   | Ok (s_rec, slice_rec) ->
+     Alcotest.(check int) "recovered state keeps acknowledged_seq = 0" 0 s_rec.acknowledged_seq;
+     Alcotest.(check int) "recovered slice has 2 entries" 2 (List.length slice_rec)
+   | Error err -> Alcotest.fail (Reader.error_to_string err));
   (* Turn succeeds -> acknowledged_seq advances to 2 and pending clears *)
   let s_ack =
     match
@@ -354,7 +398,7 @@ let test_reader_cursor_progression_and_sticky_retry () =
     (Option.is_none s_ack.pending);
   (* Next turn plans [3; 4] *)
   let s_next, delivered_next =
-    Reader.plan_delivery s_ack ~committed:committed_extended ()
+    unwrap_plan (Reader.plan_delivery s_ack ~committed:committed_extended ())
   in
   Alcotest.(check (list int))
     "next delivery plans [3; 4]"
@@ -376,7 +420,7 @@ let test_context_overflow_bisection_and_persistence () =
       ]
     in
     let s0 = Reader.init ~keeper:"keeper-beta" () in
-    let s4, slice4 = Reader.plan_delivery s0 ~committed () in
+    let s4, slice4 = unwrap_plan (Reader.plan_delivery s0 ~committed ()) in
     Alcotest.(check int) "initial slice has 4 entries" 4 (List.length slice4);
     (* 1st Context_overflow: 4 -> 2 *)
     let s2 =
@@ -408,11 +452,29 @@ let test_context_overflow_bisection_and_persistence () =
      | Some p ->
        Alcotest.(check int) "bisected entry_count = 1" 1 p.entry_count;
        Alcotest.(check int) "bisected from_seq = 1" 1 p.from_seq;
-       Alcotest.(check int) "bisected to_seq = 1" 1 p.to_seq
+       Alcotest.(check int) "bisected to_seq = 1" 1 p.to_seq;
+       Alcotest.(check bool) "mode is Full_entries" true (p.mode = Reader.Full_entries)
      | None -> Alcotest.fail "expected pending after 2nd overflow");
-    (* Persist and reload s1 atomically *)
+    (* 3rd Context_overflow at entry_count = 1 (B3): transitions mode to Reference_only *)
+    let s1_ref =
+      match
+        Reader.apply_turn_outcome s1 ~committed Reader.Context_overflow
+      with
+      | Ok s -> s
+      | Error err -> Alcotest.fail (Reader.error_to_string err)
+    in
+    (match s1_ref.pending with
+     | Some p ->
+       Alcotest.(check bool) "mode transitions to Reference_only" true (p.mode = Reader.Reference_only)
+     | None -> Alcotest.fail "expected Reference_only pending");
+    (* 4th Context_overflow while already Reference_only returns terminal Single_entry_context_overflow *)
+    (match Reader.apply_turn_outcome s1_ref ~committed Reader.Context_overflow with
+     | Error (Reader.Single_entry_context_overflow { seq = 1; fact_id = "f1"; _ }) -> ()
+     | Ok _ -> Alcotest.fail "expected Single_entry_context_overflow on overflow of Reference_only"
+     | Error err -> Alcotest.fail (Reader.error_to_string err));
+    (* Persist and reload s1_ref atomically *)
     let path = Reader.reader_path ~base_path:dir ~keeper:"keeper-beta" in
-    (match Reader.save_reader_state ~path s1 with
+    (match Reader.save_reader_state ~path s1_ref with
      | Ok () -> ()
      | Error err -> Alcotest.fail (Reader.error_to_string err));
     let s1_loaded =
@@ -423,9 +485,9 @@ let test_context_overflow_bisection_and_persistence () =
     Alcotest.(check bool)
       "loaded reader state equals saved state"
       true
-      (s1_loaded = s1);
+      (s1_loaded = s1_ref);
     (* Delivering s1_loaded delivers [1]; succeeding advances acknowledged_seq to 1 *)
-    let s1_planned, slice1 = Reader.plan_delivery s1_loaded ~committed () in
+    let s1_planned, slice1 = unwrap_plan (Reader.plan_delivery s1_loaded ~committed ()) in
     Alcotest.(check (list int))
       "delivers [1] after bisection"
       [ 1 ]
@@ -445,7 +507,7 @@ let test_context_overflow_bisection_and_persistence () =
       1
       s_after_1.acknowledged_seq;
     (* Next plan_delivery delivers remaining [2; 3; 4] without losing position *)
-    let _, remaining_slice = Reader.plan_delivery s_after_1 ~committed () in
+    let _, remaining_slice = unwrap_plan (Reader.plan_delivery s_after_1 ~committed ()) in
     Alcotest.(check (list int))
       "remaining slice [2; 3; 4] delivered next"
       [ 2; 3; 4 ]

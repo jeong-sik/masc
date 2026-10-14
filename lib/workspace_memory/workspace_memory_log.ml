@@ -371,14 +371,83 @@ let io f =
   | Sys_error detail -> Error (Io_error detail)
   | Eio.Io _ as exn -> Error (Io_error (Printexc.to_string exn))
 
-let append_record ~path record =
+let with_log_lock ~path f =
+  let* () =
+    io (fun () ->
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Ok ())
+  in
+  match File_lock_eio.with_durable_lock ~lock_path:(path ^ ".lock") f with
+  | Ok result -> result
+  | Error lock_err ->
+    Error (Io_error (File_lock_eio.durable_lock_error_to_string lock_err))
+
+let truncate_incomplete_tail_unlocked ~path =
+  match Fs_compat.load_file_opt path with
+  | None -> ()
+  | Some content ->
+    let len = String.length content in
+    if len > 0 && not (Char.equal content.[len - 1] '\n') then
+      let clean_len =
+        match String.rindex_opt content '\n' with
+        | Some idx -> idx + 1
+        | None -> 0
+      in
+      Unix.truncate path clean_len
+
+let append_record_unlocked ~path record =
   io (fun () ->
     Fs_compat.mkdir_p (Filename.dirname path);
+    truncate_incomplete_tail_unlocked ~path;
     let line = record_to_json_line record ^ "\n" in
     Fs_compat.append_file path line;
     Ok ())
 
-let validate_batch ~(header : batch_header) ~(changes : change_entry list) =
+let append_record ~path record =
+  with_log_lock ~path (fun () -> append_record_unlocked ~path record)
+
+let load_log_unlocked ~path =
+  io (fun () ->
+    match Fs_compat.load_file_opt path with
+    | None -> Ok []
+    | Some content ->
+      let raw_lines = String.split_on_char '\n' content in
+      (* Every committed or prepared JSONL record is written with a trailing
+         '\n'. The element after the last '\n' is "" on a cleanly terminated
+         file, or a cut-off partial record when a crash interrupted an append.
+         Drop that trailing element so a mid-append crash leaves the batch
+         in-flight rather than bricking the log, while keeping strict decoding
+         for all complete lines. *)
+      let complete_lines =
+        match List.rev raw_lines with
+        | [] -> []
+        | _trailing_after_last_newline :: rev_complete -> List.rev rev_complete
+      in
+      let non_empty_lines =
+        List.filter
+          (fun line -> not (String.equal (String.trim line) ""))
+          complete_lines
+      in
+      let rec decode_all acc = function
+        | [] -> Ok (List.rev acc)
+        | line :: rest ->
+          let* record = record_of_json_line line in
+          decode_all (record :: acc) rest
+      in
+      decode_all [] non_empty_lines)
+
+let load_log ~path = load_log_unlocked ~path
+
+let batch_id_in_record batch_id = function
+  | Prepared h -> String.equal h.batch_id batch_id
+  | Change e -> String.equal e.batch_id batch_id
+  | Committed { batch_id = id; _ } | Aborted { batch_id = id; _ } ->
+    String.equal id batch_id
+
+let validate_batch
+    ~after_seq
+    ~(header : batch_header)
+    ~(changes : change_entry list) =
   let count = List.length changes in
   if String.equal (String.trim header.batch_id) "" then
     Error (Invalid_batch "batch_id must be non-blank")
@@ -414,61 +483,61 @@ let validate_batch ~(header : batch_header) ~(changes : change_entry list) =
         else
           check_entries entry.seq rest
     in
-    check_entries 0 changes
+    check_entries after_seq changes
 
-let append_batch ~path ~(header : batch_header) ~(changes : change_entry list) ~committed_at =
-  let* final_seq = validate_batch ~header ~changes in
-  let records =
-    Prepared header
-    :: List.map (fun entry -> Change entry) changes
-    @ [ Committed { batch_id = header.batch_id; committed_at; final_seq } ]
-  in
-  io (fun () ->
-    Fs_compat.mkdir_p (Filename.dirname path);
-    let payload =
-      String.concat "\n" (List.map record_to_json_line records) ^ "\n"
-    in
-    Fs_compat.append_file path payload;
-    Ok final_seq)
-
-let load_log ~path =
-  io (fun () ->
-    match Fs_compat.load_file_opt path with
-    | None -> Ok []
-    | Some content ->
-      let raw_lines = String.split_on_char '\n' content in
-      let non_empty_lines =
-        List.filter
-          (fun line -> not (String.equal (String.trim line) ""))
-          raw_lines
+let append_batch
+    ~path
+    ~(header : batch_header)
+    ~(changes : change_entry list)
+    ~committed_at =
+  with_log_lock ~path (fun () ->
+    let* existing_records = load_log_unlocked ~path in
+    if List.exists (batch_id_in_record header.batch_id) existing_records then
+      Error
+        (Invalid_batch
+           (Printf.sprintf "batch_id %s already exists in log" header.batch_id))
+    else
+      let existing_report = recover existing_records in
+      let* final_seq =
+        validate_batch
+          ~after_seq:existing_report.last_committed_seq
+          ~header
+          ~changes
       in
-      let rec decode_all acc = function
-        | [] -> Ok (List.rev acc)
-        | line :: rest ->
-          let* record = record_of_json_line line in
-          decode_all (record :: acc) rest
+      let records =
+        Prepared header
+        :: List.map (fun entry -> Change entry) changes
+        @ [ Committed { batch_id = header.batch_id; committed_at; final_seq } ]
       in
-      decode_all [] non_empty_lines)
+      io (fun () ->
+        Fs_compat.mkdir_p (Filename.dirname path);
+        truncate_incomplete_tail_unlocked ~path;
+        let payload =
+          String.concat "\n" (List.map record_to_json_line records) ^ "\n"
+        in
+        Fs_compat.append_file path payload;
+        Ok final_seq))
 
 let abort_incomplete_batches ~path ~aborted_at ~reason (report : recovery_report) =
-  let rec append_all acc_aborted = function
-    | [] ->
-      Ok
-        { report with
-          incomplete_batches = []
-        ; aborted_batches = List.rev acc_aborted
-        }
-    | (header : batch_header) :: rest ->
-      let record =
-        Aborted { batch_id = header.batch_id; aborted_at; reason }
-      in
-      let* () = append_record ~path record in
-      let next_aborted =
-        add_unique_batch_id header.batch_id acc_aborted
-      in
-      append_all next_aborted rest
-  in
-  append_all (List.rev report.aborted_batches) report.incomplete_batches
+  with_log_lock ~path (fun () ->
+    let rec append_all acc_aborted = function
+      | [] ->
+        Ok
+          { report with
+            incomplete_batches = []
+          ; aborted_batches = List.rev acc_aborted
+          }
+      | (header : batch_header) :: rest ->
+        let record =
+          Aborted { batch_id = header.batch_id; aborted_at; reason }
+        in
+        let* () = append_record_unlocked ~path record in
+        let next_aborted =
+          add_unique_batch_id header.batch_id acc_aborted
+        in
+        append_all next_aborted rest
+    in
+    append_all (List.rev report.aborted_batches) report.incomplete_batches)
 
 let recover_file ~path =
   let* records = load_log ~path in

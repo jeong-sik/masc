@@ -81,7 +81,8 @@ let resume ~context continuation =
   Ok (Keeper_tool_composition_surface.resume_continuation ~capability_surface ~continuation
       ~config ~meta ~publication_recovery
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:true ~system_prompt:meta.instructions)
-      ~turn_context ~invocation ~clock:context.clock ())
+      ~turn_context ~invocation
+      ~clock:(context.clock :> float Eio.Time.clock_ty Eio.Resource.t) ())
 
 module Run_set = Set.Make (struct
   type t = string * Keeper_tool_plan.Composition_run_id.t

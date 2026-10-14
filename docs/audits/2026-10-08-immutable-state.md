@@ -93,7 +93,6 @@ accumulation; they are not a proof that every mutable value in MASC is safe.
 | `Board_core.list_posts`, `Board_votes.get_all_karma` | Cache lookup, rebuild and publication occur inside `with_lock`; outputs are immutable lists. Ranking uses `Board_sort`. | No repair justified by this inspection. Writer invalidation sites were located, but their full lifecycle is not certified here. |
 | `Keeper_identity_tool_search.carry_from_history` | Hashtbl and refs are allocated inside the call; returned names/dropped lists do not expose those cells. Inputs include the carry window. | Keep private accumulation; replacing it mechanically would not fix a demonstrated sharing defect. |
 | `File_version_cache` consumers | Schedule state, prompt body/split, and ask event lists are the cached values inspected. Schedule Memory backend bypasses filesystem-version caching. | No shared mutable value identified in these inspected consumers. This does not certify all possible polymorphic callers or filesystem races. |
-| `Keeper_run_tools_hook_accumulator.freeze` | Copies immutable output fields from the turn's callback accumulator. | No alias to a mutable output cell identified; callback serialization is a separate requirement, not proven by the word “freeze”. |
 | `Keeper_tool_composition_plan_index` | Mutable list is owned by the turn gate, unlike the removed process-global identity index. | No mechanical conversion in this slice; retained-gate lifetime deserves its own evidence before claiming safety. |
 
 Requested targeted behavior workflow:

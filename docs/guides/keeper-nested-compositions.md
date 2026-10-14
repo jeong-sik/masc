@@ -95,6 +95,16 @@ not establish types or execution. Record an actual suite run and head before
 claiming these scenarios pass; model latency and installed behavior remain
 separate evidence.
 
+The owned-job suite also contains a public nested async-parent scenario with an
+actual published inline child that launches, waits and reads complete stdout.
+It changes the current Task/runtime, refuses fresh continuation intake with
+corrupt or missing original activation, then restores that exact authority and
+uses a fresh supervisor to finish the original child. Receipts distinguish
+prepare-through-saved-wait, fresh recovery pulse, backend calls before/after
+durable output and the original activation/create/start counts. The Docker CLI
+is synthetic; executing this scenario does not prove real Docker, a physical
+server restart, actual model delivery or a preparation-latency improvement.
+
 ## Nested invocation and delivery evidence
 
 The activation journal has a distinct `nested_composition` invocation carrying

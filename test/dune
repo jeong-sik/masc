@@ -17,6 +17,7 @@
  (name test_tui_play_room)
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))
+(include stanzas/test_runtime_blocker_classification.inc)
 (include stanzas/test_play_room.inc)
 (include stanzas/test_h2_play_room.inc)
 (test
@@ -655,7 +656,6 @@
   test_workspace_git_repo_owner
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
-  test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
   test_env_keeper_scrub
@@ -1012,7 +1012,6 @@
   test_workspace_git_repo_owner
   test_workspace_tree_exclusions
   test_workspace_file_confidentiality
-  test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
   test_keeper_wire_capture

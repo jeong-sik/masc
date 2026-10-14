@@ -418,27 +418,15 @@ export interface ProviderHealth {
 }
 
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
+  'heartbeat_failures',
+  'turn_failures',
   'runtime_exhausted',
   'provider_runtime_error',
   'official_client_recovery_required',
+  'turn_configuration_error',
   'fiber_unresolved',
-  'heartbeat_failures',
-  'turn_failures',
   'exception',
-  'agent_core_context_window_exceeded',
-  'agent_core_unrecognized_stop_reason',
-  'agent_core_guardrail_violation',
-  'agent_core_tripwire_violation',
-  'agent_core_input_required',
-  'gate_replay_repair_required',
-  'incomplete_tool_transcript',
-  'internal_bridge_exception',
-  'internal_contract_rejected',
-  'internal_unhandled_exception',
-  'provider_attempt_effect_fenced',
-  'receipt_persistence_failed',
-  'terminal_effect_failed',
-  'tool_correction_lost',
+  'operator_interrupt',
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]

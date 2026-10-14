@@ -1,8 +1,7 @@
 (** Tool_local_runtime -- local model runtime MCP dispatch and schemas.
 
-    Handler implementations are split across:
     Implementation is split across:
-    - Tool_local_runtime_core   : types, helpers, process discovery, model fetching
+    - Tool_local_runtime_core   : shared types and a parse helper
     - Tool_local_runtime_http   : HTTP helpers (curl wrappers, JSON member access)
     - Tool_local_runtime_verify : runtime contract verification
     - Tool_local_runtime_probe  : native Ollama timing/KV inference probe *)

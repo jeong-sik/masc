@@ -6,17 +6,15 @@
     deliberate status / verify / probe / bench adapter exports below.
     Implementation split across:
 
-    - {!Tool_local_runtime_core}: types, helpers, process discovery,
-      model fetching.
+    - {!Tool_local_runtime_core}: shared types and a parse helper.
     - {!Tool_local_runtime_http}: HTTP helpers (curl wrappers, JSON
       member access).
     - {!Tool_local_runtime_verify}: runtime contract verification.
     - {!Tool_local_runtime_probe}: native Ollama timing / KV
       inference probe.
 
-    Core types and cmdline/model-discovery helpers are intentionally
-    kept on {!Tool_local_runtime_core}; this top-level module no
-    longer re-exports that surface.
+    The shared types are kept on {!Tool_local_runtime_core}; this
+    top-level module does not re-export them.
 
     The two [handle_*] functions [dispatch] routes to
     ([handle_runtime_verify], [handle_runtime_ollama_probe]) plus the

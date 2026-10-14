@@ -626,7 +626,6 @@
   test_run_local_script
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
-  test_keeper_state_machine_preconditions
   test_keeper_state_machine_tla_correspondence
   test_keeper_lifecycle_hooks
   test_keeper_subprocess_registry

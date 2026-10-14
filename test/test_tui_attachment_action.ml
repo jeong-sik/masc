@@ -11,7 +11,8 @@ let action_testable =
          (match action with
           | Action.Play_local -> "play_local"
           | Action.Play_midi -> "play_midi"
-          | Action.Open_external -> "open_external"))
+          | Action.Open_external -> "open_external"
+          | Action.Save_only -> "save_only"))
     ( = )
 
 let check_action label kind expected =
@@ -22,10 +23,33 @@ let test_action_of_maps_all_kinds () =
   check_action "audio plays locally" Ak_audio Action.Play_local;
   check_action "midi plays through the synth" Ak_midi Action.Play_midi;
   List.iter
-    (fun kind -> check_action "everything else opens externally" kind
+    (fun kind -> check_action "media and links open externally" kind
         Action.Open_external)
-    [ Ak_image; Ak_video; Ak_youtube; Ak_external_link; Ak_file; Ak_score
-    ; Ak_unknown "stem" ]
+    [ Ak_image; Ak_video; Ak_youtube; Ak_external_link ];
+  List.iter
+    (fun kind -> check_action "files, scores, and unknowns save only" kind
+        Action.Save_only)
+    [ Ak_file; Ak_score; Ak_unknown "stem" ]
+
+let test_allows_external_open_blocks_executable_extensions () =
+  Alcotest.(check bool) "png image allowed" true
+    (Action.allows_external_open ~name:"cover.PNG");
+  Alcotest.(check bool) "mp4 video allowed" true
+    (Action.allows_external_open ~name:"clip.mp4");
+  Alcotest.(check bool) ".terminal blocked" false
+    (Action.allows_external_open ~name:"run.terminal");
+  Alcotest.(check bool) ".jar blocked" false
+    (Action.allows_external_open ~name:"payload.jar");
+  Alcotest.(check bool) ".pkg blocked" false
+    (Action.allows_external_open ~name:"installer.pkg");
+  Alcotest.(check bool) ".dmg blocked" false
+    (Action.allows_external_open ~name:"image.dmg");
+  Alcotest.(check bool) ".webloc blocked" false
+    (Action.allows_external_open ~name:"link.webloc");
+  Alcotest.(check bool) ".workflow blocked" false
+    (Action.allows_external_open ~name:"auto.workflow");
+  Alcotest.(check bool) "extensionless blocked" false
+    (Action.allows_external_open ~name:"attachment")
 
 let test_target_path_uses_digest_prefix_and_basename () =
   let path =
@@ -157,6 +181,8 @@ let () =
     [ ( "decisions"
       , [ Alcotest.test_case "the kind maps to an action" `Quick
             test_action_of_maps_all_kinds
+        ; Alcotest.test_case "external open allowlists safe extensions" `Quick
+            test_allows_external_open_blocks_executable_extensions
         ; Alcotest.test_case "the cache path names digest and file" `Quick
             test_target_path_uses_digest_prefix_and_basename
         ; Alcotest.test_case "no player in an empty path" `Quick

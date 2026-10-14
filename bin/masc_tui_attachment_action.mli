@@ -9,10 +9,18 @@ type action =
   | Play_local
   | Play_midi
   | Open_external
+  | Save_only
 
 val action_of : Masc_tui_types.board_attachment_kind -> action
-(** [Ak_audio]는 로컬 재생, [Ak_midi]는 fluidsynth 재생, 나머지(이미지
-    포함)는 저장 후 로컬 기본 앱으로 연다. *)
+(** [Ak_audio]는 로컬 재생, [Ak_midi]는 fluidsynth 재생,
+    [Ak_image | Ak_video | Ak_youtube | Ak_external_link]는 외부 앱 열기
+    (단, 내려받은 파일은 [allows_external_open]을 통과할 때만),
+    [Ak_file | Ak_score | Ak_unknown _]는 저장만 하고 경로를 보여 준다([Save_only]). *)
+
+val allows_external_open : name:string -> bool
+(** 내려받은 파일을 OS 기본 앱([open]/[xdg-open])에 넘겨도 안전한 확장자만
+    허용한다(이미지·영상·PDF·평문). [.terminal], [.jar], [.pkg], [.dmg],
+    [.webloc], [.workflow] 등 실행·설치 핸들러로 이어질 수 있는 확장자는 거절한다. *)
 
 val cache_dir : unit -> string
 (** [Filename.get_temp_dir_name ()/masc_attachments]; 없으면 만든다. *)
@@ -32,8 +40,8 @@ val midi_argv :
   unit ->
   (string list, string) result
 (** [fluidsynth -i <sf> <file>]. fluidsynth가 없거나 사운드폰트가
-    설정돼 있지 않거나/없으면 그 사유로 실패 — 호출부는 외부 앱 열기로
-    위임하고 사유를 보여 준다. *)
+    설정돼 있지 않거나/없으면 그 사유로 실패 — 호출부는 저장된 경로와
+    MIDI 요약을 보여 준다. *)
 
 type result_kind =
   | Played

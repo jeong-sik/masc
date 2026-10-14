@@ -6,13 +6,40 @@ type action =
   | Play_local
   | Play_midi
   | Open_external
+  | Save_only
 
 let action_of : Masc_tui_types.board_attachment_kind -> action = function
   | Ak_audio -> Play_local
   | Ak_midi -> Play_midi
-  | Ak_image | Ak_video | Ak_youtube | Ak_external_link | Ak_file | Ak_score
-  | Ak_unknown _ ->
-      Open_external
+  | Ak_image | Ak_video | Ak_youtube | Ak_external_link -> Open_external
+  | Ak_file | Ak_score | Ak_unknown _ -> Save_only
+
+let safe_external_extensions =
+  [
+    ".png";
+    ".jpg";
+    ".jpeg";
+    ".gif";
+    ".webp";
+    ".bmp";
+    ".svg";
+    ".mp4";
+    ".mov";
+    ".webm";
+    ".mkv";
+    ".m4v";
+    ".pdf";
+    ".txt";
+    ".md";
+  ]
+
+let allows_external_open ~name =
+  let ext =
+    Filename.basename name
+    |> Filename.extension
+    |> String.lowercase_ascii
+  in
+  not (String.equal ext "") && List.mem ext safe_external_extensions
 
 (* {1 Where an artifact lands} *)
 
@@ -78,7 +105,7 @@ let midi_argv ?path_value ~path ~soundfont () =
 
 let current_player : int option ref = ref None
 
-let devnull = lazy (Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0)
+let devnull = lazy (Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0)
 
 let stop_current () =
   match !current_player with
@@ -129,6 +156,8 @@ let describe_outcome { name; result; midi_summary } =
 
 (* {1 Effects} *)
 
+let max_attachment_bytes = 16 * 1024 * 1024
+
 let write_file path bytes =
   try
     let channel = open_out_bin path in
@@ -145,9 +174,12 @@ let display_name ~(sha256 : string) = function
       else sha256
 
 let open_external ~name ~path =
-  match Masc_tui_browser.open_url path with
-  | Ok _ -> { name; result = Opened; midi_summary = None }
-  | Error _ -> { name; result = Saved path; midi_summary = None }
+  if not (allows_external_open ~name) then
+    { name; result = Saved path; midi_summary = None }
+  else
+    match Masc_tui_browser.open_url path with
+    | Ok _ -> { name; result = Opened; midi_summary = None }
+    | Error _ -> { name; result = Saved path; midi_summary = None }
 
 let run ~fetch (attachment : Masc_tui_types.board_attachment) ~midi_soundfont =
   match attachment.ba_source with
@@ -159,12 +191,18 @@ let run ~fetch (attachment : Masc_tui_types.board_attachment) ~midi_soundfont =
       let name = display_name ~sha256 attachment.ba_name in
       match fetch ~sha256 with
       | Error reason -> { name; result = Failed reason; midi_summary = None }
+      | Ok bytes when String.length bytes > max_attachment_bytes ->
+          { name
+          ; result = Failed "attachment exceeds 16 MiB limit"
+          ; midi_summary = None
+          }
       | Ok bytes -> (
           let path = target_path ~name:(Some name) ~sha256 in
           match write_file path bytes with
           | Error reason -> { name; result = Failed reason; midi_summary = None }
           | Ok () -> (
               match action_of attachment.ba_kind with
+              | Save_only -> { name; result = Saved path; midi_summary = None }
               | Open_external -> open_external ~name ~path
               | Play_local -> (
                   match player_argvs ~path () with
@@ -199,13 +237,8 @@ let run ~fetch (attachment : Masc_tui_types.board_attachment) ~midi_soundfont =
                        | Ok () -> { name; result = Played; midi_summary }
                        | Error reason ->
                            { name; result = Failed reason; midi_summary })
-                   | Error reason -> (
-                       (* No synth here: hand the file to the local app and
-                          say why, with what the file turned out to be. *)
-                       match Masc_tui_browser.open_url path with
-                       | Ok _ -> { name; result = Opened; midi_summary }
-                       | Error open_reason ->
-                           { name
-                           ; result = Failed (reason ^ "; " ^ open_reason)
-                           ; midi_summary
-                           }))))
+                   | Error _reason ->
+                       (* Without fluidsynth/soundfont, keep the saved file on
+                          disk and report its path + MIDI summary rather than
+                          handing arbitrary filenames to OS open handlers. *)
+                       { name; result = Saved path; midi_summary })))

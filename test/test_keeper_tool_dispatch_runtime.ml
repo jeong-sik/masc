@@ -5915,7 +5915,7 @@ value = { query = "must-not-queue" }
    document, fixture or shipped, becomes the catalog [make_tools] reads. The
    directory has to match the frontmatter name, which has to match the
    composition's own name; that is what decides the [keeper_compose_*] tool. *)
-let skill_catalog_of_document ?descriptors ~name document =
+let skill_catalog_with_snapshot_of_document ?descriptors ~name document =
   let config_text =
     {|[skills]
 resource-read-max-bytes = 16384
@@ -5957,7 +5957,7 @@ access = "read-write"
     | Error _ -> fail "composition Skill snapshot fixture was rejected"
   in
   match Masc.Keeper_skill_catalog.of_snapshot ?descriptors snapshot with
-  | catalog, [] -> catalog
+  | catalog, [] -> snapshot, catalog
   | _, diagnostic :: _ ->
     failf
       "composition fixture %S was rejected as a skill: %s"
@@ -5965,16 +5965,24 @@ access = "read-write"
       (Masc.Keeper_skill_catalog.error_to_string diagnostic.error)
 ;;
 
+let skill_catalog_of_document ?descriptors ~name document =
+  snd (skill_catalog_with_snapshot_of_document ?descriptors ~name document)
+;;
+
 (* The fixtures here are composition TOML, wrapped in the skill document that
    carries a composition to the bundle. *)
-let skill_catalog_of_composition ?descriptors ~name toml =
-  skill_catalog_of_document ?descriptors
+let skill_catalog_with_snapshot_of_composition ?descriptors ~name toml =
+  skill_catalog_with_snapshot_of_document ?descriptors
     ~name
     (Printf.sprintf
        "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
        name
        name
        toml)
+;;
+
+let skill_catalog_of_composition ?descriptors ~name toml =
+  snd (skill_catalog_with_snapshot_of_composition ?descriptors ~name toml)
 ;;
 
 let one_node_terminal_composition =
@@ -8316,19 +8324,36 @@ let test_async_composition_binds_params_into_durable_status () =
     "composition-async-param-durable-status"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let query = "async-param-worker-marker" in
-       let skill_catalog =
-         skill_catalog_of_composition
+       let snapshot, skill_catalog =
+         skill_catalog_with_snapshot_of_composition
            ~name:"memory-background"
            async_param_memory_composition
        in
        let capability_surface = Masc.Keeper_capability_surface.create
            ~tool_deny:[] ~sandbox_profile:meta.sandbox_profile ~skill_names:None
            ~global_skill_catalog:skill_catalog
-           ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot
-             (Skill_catalog_snapshot.config_unreadable ~detail:"fixture supplies its frozen composition"))
+           ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot snapshot)
            ~task_skills:[] in
+       let task_selection =
+         match Masc.Keeper_task_skill_turn.resolve ~snapshot [] with
+         | Ok selection -> selection
+         | Error error -> fail (Masc.Keeper_task_skill_turn.error_to_string error)
+       in
+       let skill_activation_context =
+         match Masc.Keeper_skill_activation_recorder.make
+             ~trace_id:meta.runtime.trace_id
+             ~turn_ref:(Ids.Turn_ref.make
+               ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+               ~absolute_turn:7)
+             ~runtime_id:(fun () -> Some "composition-param.fixture")
+             ~snapshot_revision:(Masc.Keeper_capability_surface.skill_snapshot_revision capability_surface)
+             ~task_selection with
+         | Ok context -> context
+         | Error error -> fail (Masc.Keeper_skill_activation_recorder.error_to_string error)
+       in
        let bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
-           ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface () in
+           ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface
+           ~skill_activation_context () in
        Fun.protect ~finally:bundle.cleanup @@ fun () ->
        let tools = bundle.tools in
        let async_tool =

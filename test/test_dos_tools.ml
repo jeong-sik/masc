@@ -437,7 +437,7 @@ let test_inventory_temporary_swap_cannot_publish_foreign_names () =
     with_workspace (fun base_path ->
       let root = programs_dir ~base_path in
       install_program_file ~base_path "game" "game.com" hello_com;
-      let target = if nested then Filename.concat root "game" else root in
+      let target = Unix.realpath (if nested then Filename.concat root "game" else root) in
       let moved = target ^ ".moved" in
       let outside = Filename.temp_dir "masc-dos-outside-swap-" "" in
       Fun.protect ~finally:(fun () -> Fs_compat.remove_tree outside) (fun () ->

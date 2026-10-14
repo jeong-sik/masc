@@ -10,7 +10,6 @@
    typing indicator (Slack's is a separate Web API we don't surface yet). *)
 
 module Store = Channel_gate_binding_store
-module U = Yojson.Safe.Util
 
 type binding = Store.binding = {
   channel_id : string;
@@ -71,8 +70,7 @@ let set_trigger_policy (p : Slack_gateway_state.trigger_policy) =
 
 let get_trigger_policy () = !trigger_policy_ref
 
-let trigger_policy_json () =
-  match get_trigger_policy () with
+let trigger_policy_json = function
   | None -> `Null
   | Some policy ->
     `String (Slack_gateway_state.trigger_policy_to_string policy)
@@ -150,7 +148,27 @@ let record_workspace_id value =
 let current_workspace_id () = Atomic.get workspace_id
 let clear_workspace_id () = Atomic.set workspace_id None
 
-let status_json ?(audit_limit = 10) () =
+(* One reading of the connector, rendered by [status_json] and
+   [connector_json] alike so the two views cannot disagree. *)
+type status = {
+  gateway_state : Slack_gateway_state.connection_state;
+  trigger_policy : Slack_gateway_state.trigger_policy option;
+  available : bool;
+  connected : bool;
+  error : string;
+  binding_store_path : string;
+  audit_path : string;
+  binding_store_read_ok : bool;
+  binding_store_error : string;
+  configured_bindings : binding list;
+  recent_audit : Yojson.Safe.t list;
+  bot_present : bool;
+  app_present : bool;
+  updated_at : string;
+  last_ready : ready_info option;
+}
+
+let read_status ~audit_limit =
   let gateway_state = Slack_socket_client.connection_state () in
   let startup_error = Atomic.get startup_error in
   let bot_present = Option.is_some (bot_token_opt ()) in
@@ -192,78 +210,73 @@ let status_json ?(audit_limit = 10) () =
       |> String.concat "; "
   in
   let recent_audit = read_recent_audit ~limit:audit_limit in
-  let configured_binding_json = List.map binding_json configured_bindings in
-  `Assoc
-    [ ("channel", `String channel)
-    ; ("capabilities", Channel_gate_connector_capability.all_json)
-    ; ("trigger_policy", trigger_policy_json ())
-    ; ("available", `Bool available)
-    ; ("connected", `Bool connected)
-    ; ("status",
-       `String
-         (* The gateway state machine is the liveness source; it has no
-            heartbeat file that could age out, so it is never stale. *)
-         (Channel_gate_connector.connector_state_label ~available ~connected
-            ~stale:false))
-    ; ("error", `String error)
-    ; ("status_source", `String "in_process_gateway")
-    ; ("gateway_state", `String (gateway_state_label gateway_state))
-    ; ("binding_store_path", `String (binding_store_path ()))
-    ; ("audit_path", `String (binding_audit_path ()))
-    ; ("binding_source", `String "persisted")
-    ; ("binding_store_read_ok", `Bool binding_store_read_ok)
-    ; ("binding_store_error", `String binding_store_error)
-    ; ("runtime_bindings_count", `Int (List.length configured_bindings))
-    ; ("configured_bindings", `List configured_binding_json)
-    ; ("recent_audit", `List recent_audit)
-    ; ("bot_token_present", `Bool bot_present)
-    ; ("app_token_present", `Bool app_present)
-    ; ("updated_at", `String updated_at)
-    ; ( "last_ready_at"
-      , `String
-          (match Atomic.get last_ready with
-           | Some r -> r.ready_at
-           | None -> "") )
-    ; ( "bot_user_id"
-      , `String
-          (match Atomic.get last_ready with
-           | Some r -> r.ready_bot_user_id
-           | None -> "") )
-    ; ("pid", `Int (if available then Unix.getpid () else 0))
-    ]
+  {
+    gateway_state;
+    trigger_policy = get_trigger_policy ();
+    available;
+    connected;
+    error;
+    binding_store_path = binding_store_path ();
+    audit_path = binding_audit_path ();
+    binding_store_read_ok;
+    binding_store_error;
+    configured_bindings;
+    recent_audit;
+    bot_present;
+    app_present;
+    updated_at;
+    last_ready = Atomic.get last_ready;
+  }
+
+(* The fields both views share, written once so a field added to one view
+   is in the other too. *)
+let status_fields status =
+  [ ("channel", `String channel)
+  ; ("capabilities", Channel_gate_connector_capability.all_json)
+  ; ("trigger_policy", trigger_policy_json status.trigger_policy)
+  ; ("available", `Bool status.available)
+  ; ("connected", `Bool status.connected)
+  ; ("status",
+     `String
+       (* The gateway state machine is the liveness source; it has no
+          heartbeat file that could age out, so it is never stale. *)
+       (Channel_gate_connector.connector_state_label
+          ~available:status.available ~connected:status.connected ~stale:false))
+  ; ("error", `String status.error)
+  ; ("status_source", `String "in_process_gateway")
+  ; ("gateway_state", `String (gateway_state_label status.gateway_state))
+  ; ("binding_store_path", `String status.binding_store_path)
+  ; ("audit_path", `String status.audit_path)
+  ; ("binding_source", `String "persisted")
+  ; ("binding_store_read_ok", `Bool status.binding_store_read_ok)
+  ; ("binding_store_error", `String status.binding_store_error)
+  ; ("runtime_bindings_count", `Int (List.length status.configured_bindings))
+  ; ("configured_bindings", `List (List.map binding_json status.configured_bindings))
+  ; ("recent_audit", `List status.recent_audit)
+  ; ("bot_token_present", `Bool status.bot_present)
+  ; ("app_token_present", `Bool status.app_present)
+  ; ("updated_at", `String status.updated_at)
+  ; ( "last_ready_at"
+    , `String
+        (match status.last_ready with
+         | Some r -> r.ready_at
+         | None -> "") )
+  ; ( "bot_user_id"
+    , `String
+        (match status.last_ready with
+         | Some r -> r.ready_bot_user_id
+         | None -> "") )
+  ; ("pid", `Int (if status.available then Unix.getpid () else 0))
+  ]
+
+let status_json ?(audit_limit = 10) () =
+  `Assoc (status_fields (read_status ~audit_limit))
 
 let connector_json ?(audit_limit = 10) () =
-  let status = status_json ~audit_limit () in
-  let fields =
-    [ "channel"
-    ; "capabilities"
-    ; "trigger_policy"
-    ; "available"
-    ; "connected"
-    ; "status"
-    ; "error"
-    ; "status_source"
-    ; "gateway_state"
-    ; "binding_store_path"
-    ; "audit_path"
-    ; "binding_source"
-    ; "binding_store_read_ok"
-    ; "binding_store_error"
-    ; "runtime_bindings_count"
-    ; "configured_bindings"
-    ; "recent_audit"
-    ; "updated_at"
-    ; "last_ready_at"
-    ; "bot_user_id"
-    ; "bot_token_present"
-    ; "app_token_present"
-    ; "pid"
-    ]
-  in
   `Assoc
     (("connector_id", `String connector_id)
      :: ("display_name", `String display_name)
-     :: List.map (fun field -> field, status |> U.member field) fields)
+     :: status_fields (read_status ~audit_limit))
 
 let bind ~channel_id ~keeper_name ~actor_name =
   let channel_id = String.trim channel_id in

@@ -1699,12 +1699,20 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
     | Error detail -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
         ~effect_disposition:Tool_result.Proven_pre_effect detail
     | Ok (draft,source,journal) ->
-      async_submission_result ~skill_reference ~journal ~plan:(Draft.plan draft)
+      let result = async_submission_result ~skill_reference ~journal ~plan:(Draft.plan draft)
         ~draft_reference:source.draft_reference ~run_reference:source.run_reference
         ~composition_run_id:source.composition_run_id ~tool_name ~tool_kind ~parent_invocation
         ~config ~meta ~capability_authority ~publication_recovery ~ctx_snapshot ~turn_context ?clock ()
       |> bind_prepared_result ~composition_run_id:source.composition_run_id
-          ~run_reference:source.run_reference ~draft_reference:source.draft_reference
+          ~run_reference:source.run_reference ~draft_reference:source.draft_reference in
+      (match Tool_bridge.attach_artifact_manifest
+          ~projection:Tool_output.Inline_with_structured_diagnostic ~base_path:config.base_path result with
+       | Ok result -> result
+       | Error {message;_} ->
+         Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+           ~effect_disposition:Tool_result.Effect_outcome_unknown
+           ~data:(`Assoc ["submission_result_json",`String (Yojson.Safe.to_string (Tool_result.data result))])
+           message)
 ;;
 
 let resume_continuation ~capability_surface ~continuation ~(config : Workspace.config)

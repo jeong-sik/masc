@@ -8321,15 +8321,16 @@ let test_async_composition_binds_params_into_durable_status () =
            ~name:"memory-background"
            async_param_memory_composition
        in
-       let tools =
-         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
-           ~config
-           ~meta
-           ~publication_recovery
-           ~ctx_snapshot:ctx_work
-           ~skill_catalog
-           ()
-       in
+       let capability_surface = Masc.Keeper_capability_surface.create
+           ~tool_deny:[] ~sandbox_profile:meta.sandbox_profile ~skill_names:None
+           ~global_skill_catalog:skill_catalog
+           ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot
+             (Skill_catalog_snapshot.config_unreadable ~detail:"fixture supplies its frozen composition"))
+           ~task_skills:[] in
+       let bundle = Masc.Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
+           ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~capability_surface () in
+       Fun.protect ~finally:bundle.cleanup @@ fun () ->
+       let tools = bundle.tools in
        let async_tool =
          match find_tool_by_name tools "keeper_compose_memory-background" with
          | Some tool -> tool

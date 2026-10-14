@@ -1943,7 +1943,8 @@ let test_historical_output_contract_refuses_current_resume () = with_fixture @@ 
   let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
     {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
   let request_context =
-    ["composition_run_id",`String (Plan.Composition_run_id.to_string source.composition_run_id);
+    ["composition_tool",`String Masc.Keeper_composition_draft.run_tool_name;
+     "composition_run_id",`String (Plan.Composition_run_id.to_string source.composition_run_id);
      "draft_reference",Tool_output.normalized_artifact_ref_to_json source.draft_reference;
      "run_artifact",Tool_output.normalized_artifact_ref_to_json source.run_reference;
      "parent_tool_use_id",`String source.parent_tool_use_id;

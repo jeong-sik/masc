@@ -120,10 +120,7 @@ let registry_names_are_ascii () =
     |> List.concat_map (fun (d : Descriptor.t) ->
            [ d.Descriptor.public_name; d.Descriptor.internal_name ])
   in
-  let bad =
-    registered_names () |> List.filter (fun name -> not_ascii name)
-    |> List.map (fun name -> name)
-  in
+  let bad = registered_names () |> List.filter (fun name -> not_ascii name) in
   match bad with
   | [] -> ()
   | xs ->

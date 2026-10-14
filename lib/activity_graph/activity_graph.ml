@@ -1070,7 +1070,7 @@ let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
             id = edge.edge_id;
             source = edge.source;
             target = edge.target;
-            kind = edge.edge_kind;
+            kind = edge_kind_to_wire edge.edge_kind;
             weight = edge.weight;
             active = edge.active;
             last_event_at = edge.last_event_at;

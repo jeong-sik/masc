@@ -371,7 +371,16 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
       | Tool_output.Decoded reference -> read_document ~base_path reference
       | Tool_output.Not_marker ->
         let json = Yojson.Safe.from_string content in
-        Yojson.Safe.Util.member (if success then "structured_content" else "data") json
+        (match Tool_output.normalized_artifact_ref_of_json (Yojson.Safe.Util.member "artifact_manifest" json) with
+         | Tool_output.Decoded_normalized_artifact_ref reference ->
+           ignore (Agent_core.Execution_json.object_fields ~context:"public typed artifact envelope"
+             ~required:["structured_content";"artifact_manifest"] ~optional:["content"] json
+             |> require "canonical public artifact envelope");
+           read_document ~base_path reference
+         | Tool_output.Invalid_normalized_artifact_ref {detail} -> fail detail
+         | Tool_output.Not_normalized_artifact_ref ->
+           if success then fail "public success has no canonical artifact envelope"
+           else Yojson.Safe.Util.member "data" json)
       | Tool_output.Invalid_marker { detail } -> fail detail
     in
     if structured = `Null then fail ("public result lacks structured content: " ^ content);

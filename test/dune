@@ -5353,6 +5353,7 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_sandbox_prerequisites.inc)
+(include stanzas/test_browser_lane_setup.inc)
 
 (include stanzas/test_apple_container_install.inc)
 

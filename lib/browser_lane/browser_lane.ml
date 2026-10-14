@@ -19,6 +19,7 @@ module Action = Browser_action
 module Upload_lease = Browser_upload_lease
 module Document = Browser_document
 module Lane_name = Browser_lane_name
+module Lane_token = Browser_lane_token
 
 type node_ref = { document_id : string; node_id : string }
 type scene_view = Content | Regions

@@ -26,12 +26,27 @@ type verdict = Absent | Connected | Aligned | Unverified | Misconfigured
 let host_directory base_path =
   List.fold_left Filename.concat base_path [ Common.masc_dirname; Common.browser_lane_dirname; "host" ]
 
-(* install-host.sh writes both files in one installation; the names and the
-   declaration's fields are the contract between that script and this reader. *)
+(* A lane installation writes both files in one step; the names and the
+   declaration's fields are the contract between the writer and this reader,
+   and {!declaration} below is the one place that spells the fields. *)
 let launcher_name = "launch"
 let launcher_path ~base_path = Filename.concat (host_directory base_path) launcher_name
 let declaration_name = "launch.json"
-let declaration_fields = [ "destination"; "launcher_sha256" ]
+let declaration_path ~base_path = Filename.concat (host_directory base_path) declaration_name
+let host_directory_path ~base_path = host_directory base_path
+let destination_field = "destination"
+let launcher_digest_field = "launcher_sha256"
+let workspace_connection_destination = "workspace_connection"
+let declaration_fields = List.sort String.compare [ destination_field; launcher_digest_field ]
+let launcher_digest script = Digestif.SHA256.(to_hex (digest_string script))
+
+let declaration ~launcher_script =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ destination_field, `String workspace_connection_destination
+       ; launcher_digest_field, `String (launcher_digest launcher_script)
+       ])
+  ^ "\n"
 
 (* The launcher digest a declaration carries, when the declaration is exactly
    the object the installer writes; see the interface for the refusal rule. *)
@@ -39,11 +54,12 @@ let declared_launcher_digest = function
   | `Assoc fields ->
       (match
          List.sort String.compare (List.map fst fields),
-         List.assoc_opt "destination" fields,
-         List.assoc_opt "launcher_sha256" fields
+         List.assoc_opt destination_field fields,
+         List.assoc_opt launcher_digest_field fields
        with
-       | names, Some (`String "workspace_connection"), Some (`String digest)
-         when names = declaration_fields -> Some digest
+       | names, Some (`String destination), Some (`String digest)
+         when names = declaration_fields
+              && String.equal destination workspace_connection_destination -> Some digest
        | _ -> None)
   | _ -> None
 
@@ -74,7 +90,7 @@ let observe ~base_path ~server =
         (match declared, read_file (path launcher_name) with
          | None, _ | _, None -> Unreadable
          | Some digest, Some script
-           when String.equal digest Digestif.SHA256.(to_hex (digest_string script)) ->
+           when String.equal digest (launcher_digest script) ->
              Follows_workspace
          | Some _, Some _ -> Describes_another_launcher)
   in

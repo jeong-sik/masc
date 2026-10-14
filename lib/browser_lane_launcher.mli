@@ -4,7 +4,7 @@
     the dashboard's onboarding check and the browser tools answer from this
     one observation and its {!verdict}. *)
 
-(** What install-host.sh left under [<base-path>/.masc/browser-lane/host]:
+(** What a lane installation left under [<base-path>/.masc/browser-lane/host]:
     the [launch] script Firefox runs and the [launch.json] declaration the
     same installation wrote beside it.
 
@@ -75,6 +75,18 @@ val message : t -> string
 (** Where this workspace's [launch] script is, or will be once the lane is
     installed. *)
 val launcher_path : base_path:string -> string
+
+(** Where this workspace's [launch.json] is, beside {!launcher_path}. *)
+val declaration_path : base_path:string -> string
+
+(** The directory holding both, [<base-path>/.masc/browser-lane/host]. *)
+val host_directory_path : base_path:string -> string
+
+(** The text of the [launch.json] that goes with a [launch] script of exactly
+    these bytes: the one object {!observe} accepts, whose digest ties the
+    declaration to that script. The installer writes this and nothing else, so
+    the reader and the writer cannot disagree on the fields. *)
+val declaration : launcher_script:string -> string
 
 (** The installer and what it is given for this workspace, as the words that
     follow "the operator runs". *)

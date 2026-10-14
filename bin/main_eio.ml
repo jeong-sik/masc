@@ -2205,6 +2205,90 @@ let voice_local_setup_exit base_path speak_voice hear_model =
               print_endline "voice is configured";
               0
 
+let browser_lane_setup_cmd =
+  let mode =
+    Arg.(
+      value
+      & opt (some (enum [ "extension", Masc_cli_browser_lane_setup.Extension ])) None
+      & info
+          [ "mode" ]
+          ~docv:"MODE"
+          ~doc:
+            "How to connect Firefox. extension installs the native host and writes the \
+             MASC extension for Firefox to load. Without a mode nothing is written and \
+             the current state is printed.")
+  in
+  let binary =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "binary" ]
+          ~docv:"FILE"
+          ~doc:
+            "The built masc-browser-host to install. By default the one installed beside \
+             this masc, then the first on PATH.")
+  in
+  let token_file =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "token-file" ]
+          ~docv:"FILE"
+          ~doc:
+            "A lane token that is already provisioned. It must exist, hold a token, and \
+             equal the workspace's own lane token when that exists. A relative path is \
+             taken from the workspace.")
+  in
+  let manifest_dir =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "manifest-dir" ]
+          ~docv:"DIR"
+          ~doc:"Firefox's native messaging manifest directory. By default the per-user one.")
+  in
+  let host_name =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "host-name" ]
+          ~docv:"NAME"
+          ~doc:
+            "The native messaging host name, for an isolated Firefox profile that must not \
+             share the default host. Lowercase letters, digits and underscores, in segments \
+             separated by dots. Default: masc_browser_host.")
+  in
+  Cmd.v
+    (Cmd.info
+       "browser-lane-setup"
+       ~doc:"Connect this workspace's browser lane to Firefox."
+       ~man:
+         [ `S Manpage.s_description
+         ; `P
+             "Installs the browser lane host the MASC extension talks to, and writes the \
+              extension itself, so no source checkout is needed. It starts no browser: \
+              Firefox loads a temporary add-on only from about:debugging, and the last \
+              thing this prints is what to do there."
+         ; `P
+             "Installing again replaces the host, launcher, manifest and extension files \
+              and keeps the workspace's lane token."
+         ])
+    Term.(
+      const (fun base_path mode binary token_file manifest_dir host_name ->
+        Masc_cli_browser_lane_setup.run
+          ~base_path:(Env_config.normalize_masc_base_path_input base_path)
+          ~mode ~binary ~token_file ~manifest_dir ~host_name)
+      $ base_path
+      $ mode
+      $ binary
+      $ token_file
+      $ manifest_dir
+      $ host_name)
+
 let voice_local_setup_cmd =
   let voice =
     Arg.(
@@ -4308,6 +4392,7 @@ let cmd =
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
     ; voice_verify_cmd
+    ; browser_lane_setup_cmd
     ; voice_local_setup_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd

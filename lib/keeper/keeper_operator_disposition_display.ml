@@ -5,25 +5,25 @@ let reason_or_default ~operator_disposition_reason default =
 ;;
 
 let of_kind ~operator_disposition_reason = function
-  | Keeper_execution_receipt.Disp_pass -> ("Pass", "healthy")
-  | Keeper_execution_receipt.Disp_skipped -> ("Pass", "phase_skipped")
-  | Keeper_execution_receipt.Disp_pass_next_model -> ("Pass", "runtime_fallback")
+  | Keeper_execution_receipt.Disp_pass -> (Keeper_trust_disposition.Pass, "healthy")
+  | Keeper_execution_receipt.Disp_skipped -> (Keeper_trust_disposition.Pass, "phase_skipped")
+  | Keeper_execution_receipt.Disp_pass_next_model -> (Keeper_trust_disposition.Pass, "runtime_fallback")
   | Keeper_execution_receipt.Disp_fail_open_next_runtime ->
-    ("Pass", reason_or_default ~operator_disposition_reason "continue_next_cycle")
+    (Keeper_trust_disposition.Pass, reason_or_default ~operator_disposition_reason "continue_next_cycle")
   | Keeper_execution_receipt.Disp_retry_later ->
-    ("Pass", reason_or_default ~operator_disposition_reason "retry_later")
+    (Keeper_trust_disposition.Pass, reason_or_default ~operator_disposition_reason "retry_later")
   | Keeper_execution_receipt.Disp_operator_action_required ->
-    ( "Blocked",
+    ( Keeper_trust_disposition.Blocked,
       reason_or_default ~operator_disposition_reason "operator_action_required" )
   | Keeper_execution_receipt.Disp_effect_review_required as kind ->
     (* Not "Blocked": the Keeper keeps running. What the turn may have done
        outside still needs a person, so it stays an alert. *)
-    ( "Alert",
+    ( Keeper_trust_disposition.Alert,
       reason_or_default ~operator_disposition_reason
         (Keeper_execution_receipt.operator_disposition_kind_to_string kind) )
   | Keeper_execution_receipt.Disp_user_cancelled ->
-    ("Blocked", reason_or_default ~operator_disposition_reason "cancelled")
+    (Keeper_trust_disposition.Blocked, reason_or_default ~operator_disposition_reason "cancelled")
   | Keeper_execution_receipt.Disp_unknown ->
-    ( "Alert",
+    ( Keeper_trust_disposition.Alert,
       reason_or_default ~operator_disposition_reason "unmapped_runtime_state" )
 ;;

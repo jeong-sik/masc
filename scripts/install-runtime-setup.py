@@ -2743,7 +2743,9 @@ def github_row(base):
 
 
 def web_search_row(base):
-    return ToolRow(WEB_SEARCH_TOOL, 'Web search · show which providers have a key and what to export · writes nothing',
+    # "writes nothing" comes first: the picker cuts a line at the terminal width,
+    # and a row that starts marked must not read as one that writes.
+    return ToolRow(WEB_SEARCH_TOOL, 'Web search check (writes nothing) · shows which providers have a key',
                    web_search_command(base), checked=True)
 
 
@@ -2849,17 +2851,28 @@ def prepare_browser_lane(binary, base, modes, port=None):
         note_running_server(binary, base, port)
 
 
+# `masc setup` gives the server it starts the workspace's own values for these
+# two in place of the terminal's (Config_dir_resolver.environment_for_workspace).
+# A command that reports what that server will read is run without them, so it
+# opens the same runtime.toml the server will and not one MASC_CONFIG_DIR names.
+WORKSPACE_OWNED_ENVIRONMENT = ('MASC_BASE_PATH', 'MASC_CONFIG_DIR')
+
+
+def server_like_environment():
+    return {key: value for key, value in os.environ.items() if key not in WORKSPACE_OWNED_ENVIRONMENT}
+
+
 def check_web_search(binary, base):
     """Show which web search providers have a key.
 
-    The command is given no option, so it writes nothing, and it never creates a
-    key: keys are read from the environment of the process that starts the
-    server. A failure only means the reader did not get to look, so it does not
-    end the journey.
+    The command is given only the workspace, so it writes nothing, and it never
+    creates a key: keys are read from the environment of the process that starts
+    the server, which `masc setup` starts from this one. A failure only means
+    the reader did not get to look, so it does not end the journey.
     """
     try:
         failed = subprocess.run([str(binary), 'web-search-setup', '--base-path', str(base)],
-                                stdout=sys.stderr).returncode != 0
+                                stdout=sys.stderr, env=server_like_environment()).returncode != 0
     except OSError as error:
         print(terminal_text(str(error)), file=sys.stderr)
         failed = True

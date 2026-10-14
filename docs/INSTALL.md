@@ -461,13 +461,15 @@ that shows numbers, type `0`).
   computer disconnects `imp`. Without a login, `masc keeper-github login` shows
   a one-time code for you to approve. This row runs after `masc setup`, because
   the login needs `imp` to exist.
-- **Web search.** Runs `masc web-search-setup` with no option, which writes
-  nothing. It prints each provider's state, the search order a call would use
-  now, and the variable to export for a provider that has no key. A key is never
-  created or stored: the server reads it from its own environment. The server
-  `masc setup` starts inherits this terminal's environment, and one that is
-  already running keeps the one it has. Run the command again after exporting a
-  key, or to point at a SearXNG instance with `--searxng-url`.
+- **Web search.** Runs `masc web-search-setup --base-path <workspace>`, which
+  writes nothing. It prints each provider's state, the search order a call would
+  use now, and the variable to export for a provider that has no key. A key is
+  never created or stored: the server reads it from its own environment. The
+  server `masc setup` starts gets this terminal's environment with
+  `MASC_BASE_PATH` and `MASC_CONFIG_DIR` set to the workspace's, and a server
+  that is already running keeps the one it has. After exporting a key where the
+  server starts, run the command again. `masc web-search-setup --searxng-url
+  <url>` is a different run: it writes `[web_search]` into `runtime.toml`.
 - **Firefox routes (not marked).** When Firefox is found, two more rows connect
   a Firefox that `imp` can log in with, the same two routes
   [`masc browser-lane-setup`](../connectors/browser/host/README.md) offers:

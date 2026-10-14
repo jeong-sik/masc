@@ -430,8 +430,11 @@ let chord_notes ~strings inner =
       | None -> Error (Unclosed Effect_group)
       | Some close ->
           let _markup = String.sub inner (index + 1) (close - index - 1) in
-          (* Rhythm effects are read by the caller, on the beat; on a chord
-             member they mark the note the way other technique markup does. *)
+          (* A chord sounds as one beat: a rhythm effect inside it cannot
+             change the beat's length the way one on a lone note does, and no
+             member is the "latest beat" for the caller to read it from. It
+             only marks the member it rides, the way technique markup does,
+             and the chord keeps the count its [:n] or default gave it. *)
           (match found with
            | (word, _) :: earlier -> members ((word, true) :: earlier) (close + 1)
            | [] -> Error Effect_without_note)
@@ -541,7 +544,13 @@ let effect_rhythm text : (int -> duration) option =
     | [ "d" ], [], [] -> Some (fun unit -> Dotted unit)
     | [], _ :: _, [] when List.length words = 2 && List.exists tuplet_effect words -> (
         match tuplet_divide words with
-        | Some divide when divide >= 2 -> Some (fun unit -> Tuplet (unit, divide))
+        (* Three in the time of two is the only tuplet the ticks divide
+           exactly on every length the reader allows: a quarter is 64, an
+           eighth 32, a sixteenth 16. A five-tuplet (or any other count)
+           would read a length the ticks cannot hold -- a quarter is 96, and
+           96 times four is not divisible by five -- and pull every later
+           beat onto the wrong count. *)
+        | Some 3 -> Some (fun unit -> Tuplet (unit, 3))
         | _ -> None)
     | [], [], [ "gr" ] -> Some (fun _ -> Grace)
     | _ -> None

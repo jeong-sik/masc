@@ -202,6 +202,29 @@ let test_a_measure_the_pane_cannot_hold () =
   | Error other -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
   | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
 
+(* Two beats whose texts are wider than the ticks they hold (two-letter
+   frets on sixteenths, a grace note ahead of a full beat) must not overwrite
+   each other: the second keeps its own cells, so the first is still there. *)
+let test_wide_note_text_does_not_overwrite_the_next_beat () =
+  let string_row lines =
+    (* The first string line after the measure-number row holds string 1,
+       the high E these frets are written on. *)
+    List.nth lines 1
+  in
+  match Alphatex.render_tab ~max_width:40 ":16 12.1 10.1" with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+    let row = string_row lines in
+    let content = String.sub row 2 (String.length row - 2) in
+    Alcotest.(check bool) "both two-letter frets are drawn, the first intact" true
+      (let rec has_both i =
+         i + 5 <= String.length content
+         && ((content.[i] = '1' && content.[i + 1] = '2' && content.[i + 2] = '-'
+              && content.[i + 3] = '1' && content.[i + 4] = '0')
+             || has_both (i + 1))
+       in
+       has_both 0)
+
 (* The rhythm line rides under the lowest string: it is the beat letters
    [w h q e s] at their beats' first cells, with the same left lead and
    barlines as the string lines. *)
@@ -423,9 +446,13 @@ let test_markup_that_changes_length () =
     [ 96, [ 0, 0, ( true, [ "3@1" ] ); 0, 96, ( false, [ "5@1" ] ) ] ];
   check_music "a rhythm effect on a chord member marks the note" ":4 (3.1{d} 2.2)"
     [ 96, [ 0, 96, ( false, [ "3@1*"; "2@2" ] ) ] ];
+  check_failure "a tuplet the ticks cannot divide" ":4 0.6{tu 5} 3.6"
+    (Unsupported_rhythm "tu 5");
   check_failure "a tuplet with no number" ":4 0.6{tu} 3.6" (Unsupported_rhythm "tu");
   check_failure "a dot and a tuplet together" ":4 0.6{d tu 3} 3.6"
-    (Unsupported_rhythm "d tu 3")
+    (Unsupported_rhythm "d tu 3");
+  check_failure "another tuplet the ticks cannot divide" ":4 0.6{tu 6} 3.6"
+    (Unsupported_rhythm "tu 6")
 
 let test_notes_that_cannot_be_placed () =
   check_failure "markup with no note before it" "{v} :4 3.1" Effect_without_note;
@@ -538,6 +565,8 @@ let () =
             test_a_drawn_tab_stays_inside_the_pane
         ; Alcotest.test_case "a measure the pane cannot hold" `Quick
             test_a_measure_the_pane_cannot_hold
+        ; Alcotest.test_case "wide note text does not overwrite the next beat" `Quick
+            test_wide_note_text_does_not_overwrite_the_next_beat
         ; Alcotest.test_case "a repeated tab stays inside the pane" `Quick
             test_a_repeated_tab_stays_inside_the_pane
         ; Alcotest.test_case "a repeated measure the pane cannot hold" `Quick

@@ -60,13 +60,25 @@ let rhythm_letter (beat : Score.beat) =
    by the cell's plus the room its note text needs. *)
 let ticks_per_cell = 24
 
-let beat_cells (beat : Score.beat) =
-  if beat.span = 0 then 0
+(* The column a beat's notes draw at: the widest of its ticks and its note
+   text, so a two-letter fret never runs into the beat that follows it, and
+   the next beat starts past it. A beat the ticks do not fill alone (a
+   tuplet, a two-letter fret in a sixteenth) still holds the column its text
+   needs, and a column a grace note takes back gives the next beat one cell
+   so the grace does not erase it. *)
+let beat_width (beat : Score.beat) =
+  if beat.span = 0 then
+    (* A grace note takes no time, but its text still draws, one cell wide;
+       it does not crowd the beat before it, only the one it leads into. *)
+    1
   else
+    let span_cells = (beat.span + ticks_per_cell - 1) / ticks_per_cell in
     let text_len =
       List.fold_left (fun len note -> len + String.length (note_text note) + 1) 0 beat.notes
     in
-    ((beat.span + ticks_per_cell - 1) / ticks_per_cell) + text_len
+    max span_cells text_len
+
+let beat_cells = beat_width
 
 let measure_cells (measure : Score.measure) =
   List.fold_left (fun cells beat -> cells + beat_cells beat) 1 measure.beats
@@ -126,21 +138,27 @@ let systems ~max_width (score : Score.t) =
 let draw_measure ~strings (measure : Score.measure) =
   let cells = measure_cells measure in
   let rows = Array.init (strings + 1) (fun _ -> Bytes.make cells '-') in
-  List.iter
-    (fun (beat : Score.beat) ->
-      (match rhythm_letter beat with
-       | Some letter -> Bytes.set rows.(strings) (beat.start / ticks_per_cell) letter
-       | None -> ());
-      List.iter
-        (fun (note : Score.note) ->
-          (* [Score.read] kept the string within the tuning and
-             [ticks_per_cell] made the slot wider than the text. *)
-          let text = note_text note in
-          let cell = beat.start / ticks_per_cell in
-          if cell + String.length text <= cells then
-            Bytes.blit_string text 0 rows.(note.on_string - 1) cell (String.length text))
-        beat.notes)
-    measure.beats;
+  (* Each beat takes the column after the one before it, so the beats never
+     overlap and no note is dropped to keep inside the row. *)
+  let (_ : int) =
+    List.fold_left
+      (fun column (beat : Score.beat) ->
+        (match rhythm_letter beat with
+         | Some letter ->
+           if column < cells then Bytes.set rows.(strings) column letter
+         | None -> ());
+        List.iter
+          (fun (note : Score.note) ->
+            (* [Score.read] kept the string within the tuning and
+               [beat_width] gave the beat at least as many cells as its
+               text. *)
+            let text = note_text note in
+            if column + String.length text <= cells then
+              Bytes.blit_string text 0 rows.(note.on_string - 1) column (String.length text))
+          beat.notes;
+        column + beat_width beat)
+      0 measure.beats
+  in
   rows
 
 (* The header ahead of the tab: what the directives said, and nothing when

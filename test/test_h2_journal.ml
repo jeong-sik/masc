@@ -609,6 +609,145 @@ let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw b
       |> Masc.Keeper_composition_completion_result.to_json in
   check_json "public wake carries task A" (`String "task-A") (projected |> member "source" |> member "source_task_id"))
 
+let first_loss_plan ~readonly =
+  let sibling = node_id "completed-sibling" in
+  let tool_name, input = if readonly then "keeper_lane_status", `Assoc []
+    else "keeper_job_start", `Assoc ["argv", `List [`String "true"]] in
+  let descriptors = if readonly then [descriptor tool_name]
+    else [descriptor "keeper_lane_status"; descriptor tool_name] in
+  Plan.create ~descriptors
+    [Plan.node ~id:sibling ~tool_name:"keeper_lane_status"
+       ~input:(Plan.Json_template.literal (`Assoc [])) ();
+     Plan.node ~id:(node_id "interrupted") ~tool_name ~after:[sibling]
+       ~input:(Plan.Json_template.literal input) ()]
+  |> require "first-loss canonical plan"
+
+let first_loss_success (node : Plan.node) =
+  Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
+    ~data:(`Assoc ["profile", `String "original-profile"; "lane", `Null; "endpoint", `Null;
+      "probe", `Null; "last_dispatch", `Null; "operator_action", `Null]) ()
+  |> Executor.dispatch_result
+
+let child_first_loss base_path run_id mode =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let prepared = reconstruct base_path run_id in
+  let snapshot () = write (Filename.concat base_path "first-loss-journal")
+      (read (journal_path base_path prepared.source.composition_run_id)) in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    if node_name node = "interrupted" then (
+      (* This is an actual callback effect after Executor's Attempting append.
+         Process exit leaves the real broker/worker and journal unfinished;
+         the fixture never fabricates an owner, occurrence or Lost record. *)
+      let channel = open_out_gen [Open_wronly; Open_creat; Open_append; Open_binary] 0o600
+          (Filename.concat base_path "first-loss-effect") in
+      Fun.protect ~finally:(fun () -> close_out channel)
+        (fun () -> output_string channel "one dispatch entry\n");
+      match mode with
+      | "attempting" | "readonly" -> snapshot (); Unix._exit 0
+      | "unknown" -> failing Tool_result.Effect_outcome_unknown node
+      | "post_effect" -> failing Tool_result.Proven_post_effect node
+      | "deferred" -> Executor.dispatch_result
+          (Tool_result.make_deferred ~tool_name:node.tool_name
+            ~start_time:(Tool_timing.start ()) ())
+      | _ -> fail "invalid first-loss child mode")
+    else first_loss_success node in
+  let observe row =
+    if Plan.Node_id.to_string row.Executor.node_id = "interrupted"
+    then (snapshot (); Unix._exit 0) else Ok () in
+  let submission = submit ~observe
+      ~on_acceptance_probe:(fun request_id -> write (Filename.concat base_path "first-loss-request") request_id)
+      base_path sw prepared dispatch |> accepted in
+  ignore (await base_path submission);
+  fail "first-loss worker unexpectedly completed"
+
+let test_first_loss_retains_unproven_effects mode () =
+  with_workspace (fun env sw base_path ->
+    Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+      ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
+    let readonly = mode = "readonly" in
+    let prepared = prepare ~plan:(first_loss_plan ~readonly) base_path in
+    Eio.Process.run (Eio.Stdenv.process_mgr env)
+      [Sys.executable_name; "--lose-before-first-wait"; base_path;
+       Plan.Composition_run_id.to_string prepared.source.composition_run_id; mode];
+    let request_id = read (Filename.concat base_path "first-loss-request") in
+    let original = read (Filename.concat base_path "first-loss-journal") in
+    let path = journal_path base_path prepared.source.composition_run_id in
+    let recovered = Async.recover_lost_disk_records ~base_path () in
+    check int "exclusive recovery publishes one real Lost owner" 1 recovered.lost;
+    let terminal = Async.load_canonical_durable_terminal ~base_path ~caller:keeper request_id
+        |> require "canonical first-loss proof" |> Async.durable_terminal_entry in
+    (match terminal.status with Lost _ -> () | _ -> fail "first owner did not become Lost");
+    check_json "Lost owner retains original Task" (`String "original-source-task")
+      (match terminal.request_context with Some fields -> List.assoc "source_task_id" fields
+       | None -> fail "original source absent");
+    let marker_directory = Filename.concat (Filename.concat
+        (Common.masc_dir_from_base_path ~base_path) "keeper_msg_requests") "prepared_continuations" in
+    let marker_path = Filename.concat marker_directory
+        (Digestif.SHA256.(digest_string request_id |> to_hex) ^ ".json") in
+    let marker_bytes = read marker_path in
+    let reject = function
+      | Error (Journal.Replay_not_proven id) -> check string "exact unresolved node" "interrupted" (Plan.Node_id.to_string id)
+      | Error error -> fail (Journal.error_to_string error)
+      | Ok _ -> fail "unproven first-loss effects became a fresh resume" in
+    if readonly then (
+      (match Journal.waiting_continuation prepared.journal with
+       | Ok None -> () | Ok (Some _) | Error _ -> fail "readonly manual resume was broadened into a wait or refused");
+      let calls = ref [] in
+      let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+        calls := node_name node :: !calls; first_loss_success node in
+      let resumed = submit base_path sw prepared dispatch |> accepted in
+      ignore (await base_path resumed);
+      let rows = executed resumed |> require "readonly first-loss resume" in
+      check (list string) "only readonly unfinished node dispatched" ["interrupted"] !calls;
+      check bool "completed sibling retained" true
+        ((node_result "completed-sibling" rows).execution_origin = Executor.Retained_completion))
+    else (
+      let pending () = Journal.pending_continuations
+          ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path
+        |> journal_value "first-loss maintenance discovery" in
+      List.iter (fun _ ->
+        let report = pending () in
+        Printf.printf "first_loss_discovery=%s\n%!" (Yojson.Safe.to_string (`Assoc
+          ["mode",`String mode;"inspected",`Int report.inspected;"retired",`Int report.retired;
+           "ready",`Int (List.length report.ready);"failures",`Int (List.length report.failures)]));
+        check int "unresolved first owner remains indexed" 1 report.inspected;
+        check int "unresolved owner is not retired" 0 report.retired;
+        check int "unknown effects do not schedule a worker" 0 (List.length report.ready);
+        (match report.failures with [_,error] -> reject (Error error)
+         | _ -> fail "unresolved first owner is not reported");
+        check string "pending marker bytes retained" marker_bytes (read marker_path)) [(); ()];
+      let terminal_path = Async.For_testing.terminal_record_path ~base_path ~request_id
+          |> Option.get in
+      let terminal_files () = Sys.readdir (Filename.dirname terminal_path) |> Array.to_list |> List.sort String.compare in
+      let before = terminal_files () in
+      let config = Workspace.default_config base_path in
+      let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String keeper; "activation_mode", `String "manual"])
+          |> require "public loss Keeper metadata" in
+      let cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+      Masc.Keeper_tool_call_log.set_turn_context ~cell ~agent_name:keeper ~turn:43 ~keeper_turn_id:2 ~task_id:"replacement-task" ();
+      let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+        {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+      let tools = Masc.Keeper_tool_composition_surface.make_tools ~capability_surface:(surface base_path)
+          ~config ~meta ~publication_recovery ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+          ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () in
+      let tool = List.find_map (fun (tool,_,_) ->
+        if tool.Agent_core.Tool.schema.name = Draft.run_tool_name then Some tool else None) tools |> Option.get in
+      let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"first-loss-manual-resume" ~turn:43
+          ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+          ~completion:Continue_after_success in
+      (match Agent_core.Tool.execute ~invocation tool (`Assoc ["sha256", `String (Draft.reference prepared.draft).sha256;
+          "resume_run_id", `String (Plan.Composition_run_id.to_string prepared.source.composition_run_id)]) with
+       | Error _ -> () | Ok _ -> fail "public SDK accepted an unproven first-loss resume");
+      check (list string) "public refusal creates no terminal request" before (terminal_files ());
+      let active = Async.read_durable_active_inventory ~base_path |> require "public refusal active inventory" in
+      check int "public refusal creates no active request" 0 (List.length active.entries);
+      reject (Journal.waiting_continuation prepared.journal);
+      check string "manual refusal preserves pending marker" marker_bytes (read marker_path);
+      check string "discovery and manual refusal preserve original occurrences" original (read path));
+    check string "original child dispatched once" "one dispatch entry\n" (read (Filename.concat base_path "first-loss-effect")))
+
 let test_exact_queued_admission () = with_workspace (fun env sw base_path ->
   Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
     ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
@@ -970,6 +1109,7 @@ let test_launch_leaf_refuses_incomplete_invocation_identity () = with_workspace 
 let () = match Array.to_list Sys.argv with
   | [_; "--resume-child"; base_path; run_id] -> child_resume base_path run_id
   | [_; "--refuse-active-child"; base_path; run_id] -> child_refuse_active base_path run_id
+  | [_; "--lose-before-first-wait"; base_path; run_id; mode] -> child_first_loss base_path run_id mode
   | _ -> Alcotest.run "prepared async execution journal"
       ["continuation", [
         test_case "restart reuses completed data and occurrence" `Quick test_restart_reuses_completed;
@@ -980,6 +1120,11 @@ let () = match Array.to_list Sys.argv with
         test_case "foreign owned-job wait receipt cannot authorize rechecking" `Quick test_foreign_job_wait_receipt_is_rejected;
         test_case "owned cancellation retries only declared readonly unfinished work" `Quick test_cancelled_readonly_attempt;
         test_case "public prepare run resume preserves original task" `Quick test_public_run_resume_keeps_original_task;
+        test_case "first Lost effectful attempt retains its marker" `Quick (test_first_loss_retains_unproven_effects "attempting");
+        test_case "first Lost unknown outcome retains its marker" `Quick (test_first_loss_retains_unproven_effects "unknown");
+        test_case "first Lost post-effect failure retains its marker" `Quick (test_first_loss_retains_unproven_effects "post_effect");
+        test_case "first Lost unowned defer retains its marker" `Quick (test_first_loss_retains_unproven_effects "deferred");
+        test_case "first Lost readonly attempt still resumes" `Quick (test_first_loss_retains_unproven_effects "readonly");
         test_case "pending marker retirement retains physical and same-inode replacements" `Quick test_pending_marker_retirement_rejects_replacement;
         test_case "pending marker retirement preserves settlement and durability failures" `Quick test_pending_marker_retirement_settlement;
         test_case "exact Queued admission and matched inventory read measurements" `Quick test_exact_queued_admission;

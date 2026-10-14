@@ -2,14 +2,29 @@
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-10-14
+
 ### Upgrade notes
 
-- Retained lane add-on binding files written by v0.48.0 or earlier have no `visibility` and `source_access`, and this version does not read them. List them with `rg --files-without-match '"visibility"' <base-path>/.masc/lane-addons/bindings`, and again with `'"source_access"'`. A detached record leaves the declaration that names it applied, stays listed under the configuration issues, and keeps `slice` at `complete: false` until the operator moves the file away. A record that is not detached stops the declaration that names it, and the tool cannot detach it, because the container of such a record is cleaned up only through a readable record; the operator writes `visibility` and `source_access` into the file by hand. The accepted values are in `docs/guides/lane-package-activity.md` (#42868).
-- Keeper metadata that still carries `trace_history` or `last_handoff_ts` is no longer current. 0.41.0 dropped both keys on read for one release (#39025); that tolerance is gone, so such a file is treated like any file with a key outside the schema: the runtime logs it as unreadable and reads it as absent, the boot path moves the file aside as `<name>.json.rejected-<time>-…` and re-materialises the Keeper from its declaration with fresh counters (the parked copy keeps the old ones for recovery), and the deployment gate rejects it. A Keeper saved at least once on 0.41.0 or later has neither key. To clean a file that was never re-saved, stop the server, confirm it has exited, and run `for f in <base-path>/.masc/keepers/*.json; do cp -p "$f" "$f.bak" && cp -p "$f" "$f.new" && jq 'del(.trace_history, .last_handoff_ts)' "$f.bak" > "$f.new" && mv "$f.new" "$f"; done`, which keeps a `.bak` copy of each file (#43010).
+- **Check runtime.toml before upgrading (since 0.54.0).** A provider row whose catalog entry needs an API key must have a `[providers.<id>.credentials]` block. The server starts without it, but the first call routed to that row is refused, and every Keeper that uses the row stops with a configuration error. The deployment preflight does not catch a missing block; find such rows in the dashboard or TUI runtime.toml editor and add the block before upgrading (#42927, #42933).
+- **Keeper files never re-saved since 0.41.0 are now rejected.** Keeper metadata that still carries `trace_history` or `last_handoff_ts` is no longer current. 0.41.0 dropped both keys on read for one release (#39025); that tolerance is gone, so such a file is treated like any file with a key outside the schema: the runtime logs it as unreadable and reads it as absent, the boot path moves the file aside as `<name>.json.rejected-<time>-…` and re-materialises the Keeper from its declaration with fresh counters (the parked copy keeps the old ones for recovery), and the deployment gate rejects it. A Keeper saved at least once on 0.41.0 or later has neither key. To clean a file that was never re-saved, stop the server, confirm it has exited, and run `for f in <base-path>/.masc/keepers/*.json; do cp -p "$f" "$f.bak" && cp -p "$f" "$f.new" && jq 'del(.trace_history, .last_handoff_ts)' "$f.bak" > "$f.new" && mv "$f.new" "$f"; done`, which keeps a `.bak` copy of each file (#43010).
+- **Lane add-on bindings written by v0.48.0 or earlier are no longer read.** Retained lane add-on binding files written by v0.48.0 or earlier have no `visibility` and `source_access`, and this version does not read them. List them with `rg --files-without-match '"visibility"' <base-path>/.masc/lane-addons/bindings`, and again with `'"source_access"'`. A detached record leaves the declaration that names it applied, stays listed under the configuration issues, and keeps `slice` at `complete: false` until the operator moves the file away. A record that is not detached stops the declaration that names it, and the tool cannot detach it, because the container of such a record is cleaned up only through a readable record; the operator writes `visibility` and `source_access` into the file by hand. The accepted values are in `docs/guides/lane-package-activity.md` (#42868).
+- **Tool arguments that used to be read leniently are now refused.** Check any script or saved call that sends them.
+  - `masc_keeper_up` `network_mode`: a non-string value was ignored and the keeper TOML's mode was used. It is now refused with `network_mode must be a string` (#42931).
+  - `masc_keeper_up` `instructions`: a non-string value was read as absent and the keeper TOML's instructions were kept. It is now refused with `instructions must be a string`. An empty string still reads as absent (#42938).
+  - `masc_browser_read` `mode`: a non-string value was read as `text`. It is now refused, and an unknown spelling is refused with `mode must be one of …` (#42934).
+  - `masc_tasks` and `keeper_tasks_list` `status`: a value that is not one of the six task statuses, including the empty string, answered "No tasks." or an empty page. It is now refused with the accepted values (#42980).
+- **Thinking replay and downgrades.** This version reads provider response events written before the thinking-prefix digest (#42943). Whether an older version reads the events this version writes was checked at the decoder level only, not by running one (#42729, #42875).
+
+### Known issues
+
+- A row that points a catalog provider id at a proxy endpoint needing no key is refused at its first call since 0.54.0. A row cannot yet declare "no key" (task-2314). Rename the row to an id the catalog does not know and declare its `endpoint` and model `capabilities` yourself, and it runs as before. A row renamed this way has no model discovery (#42927, #42933).
+- When the server refuses to start on a store left in an unrecoverable publication state, the message recommends `--accept-store-quarantine`. That option is refused in this state too; only the second route in the message (repair, then `validate-stores`) works, and the repair procedure is not documented yet (task-2288).
+- The wiki and the stores that moved under `.masc/` in 0.54.0 look empty when files are still at the old place, and no screen says so. Move them as the 0.54.0 Upgrade notes table shows (task-2300).
 
 ### Added
 
-- Experimental: `masc_wiki_lint` reads the wiki and reports broken links, links it does not follow, orphan pages, pages without sources or with only hearsay, and pages whose header does not read. It writes nothing. Usage: call `masc_wiki_lint` with `{}`, or narrow with `kind`, `page`, `limit` and `cursor`; see `docs/guides/wiki-lint.md` (#42969).
+- `masc_wiki_lint` reads the wiki and reports broken links, links it does not follow, orphan pages, pages without sources or with only hearsay, and pages whose header does not read. It writes nothing. Usage: call `masc_wiki_lint` with `{}`, or narrow with `kind`, `page`, `limit` and `cursor`; see `docs/guides/wiki-lint.md` (#42969).
 
 ### Changed
 
@@ -111,14 +126,6 @@
 - The one-time retry of a cut `claude auth status` probe is decided where the document fails to parse instead of from the error text, so rewording the error can no longer switch it off (#43051).
 - Drop the fragile match on the Claude Code auth probe result so main builds under warning 4 again (#43064).
 - Count only Skills in the invalid-Skill search assertion of test_keeper_skill_inventory so a Tool that mentions the same word no longer fails it (#43066).
-
-## [0.55.0] - 2026-10-14
-
-### Changed
-- TBD
-
-### Deprecated
-- TBD
 
 ## [0.54.0] - 2026-10-13
 

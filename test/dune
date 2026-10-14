@@ -4517,6 +4517,7 @@
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_alphatex.inc)
 (include stanzas/test_tui_midi.inc)
+(include stanzas/test_tui_attachment_action.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_runtime_account_form.inc)

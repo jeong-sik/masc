@@ -253,7 +253,7 @@ let test_provider_config_judges () =
       (Agent_core.Error.Provider
          (Llm_provider.Error.MissingApiKey { var_name = "GLM_API_KEY" }))
   with
-  | KFR.Exhausted_visible_alive { terminal = KFR.Config_mismatch; _ } -> ()
+  | KFR.Exhausted_visible_alive { terminal = KFR.Config_mismatch } -> ()
   | other ->
     Alcotest.failf "missing api key should exhaust config, got %s"
       (KFR.route_kind_label other)
@@ -346,7 +346,7 @@ let test_non_transient_server_error_rotates_on_5xx () =
     (KFR.Rotate_now { rotate = KFR.Server_error_not_transient })
     (server 500);
   match route_of_agent_core_error (server 418) with
-  | KFR.Exhausted_visible_alive { terminal = KFR.Provider_integration; _ } -> ()
+  | KFR.Exhausted_visible_alive { terminal = KFR.Provider_integration } -> ()
   | other ->
     Alcotest.failf "a non-5xx server error should exhaust, got %s:%s"
       (KFR.route_kind_label other) (KFR.route_class_label other)
@@ -383,7 +383,7 @@ let test_masc_internal_terminal_classes () =
        (internal_err
           (Keeper_internal_error.Internal_contract_rejected { reason = "empty" }))
    with
-   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque; _ } -> ()
+   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque } -> ()
    | other ->
      Alcotest.failf "internal contract rejection should remain opaque, got %s"
        (KFR.route_kind_label other));
@@ -397,11 +397,11 @@ let test_masc_internal_terminal_classes () =
 let test_non_provider_families_judge () =
   let raw_internal = Agent_core.Error.Internal "boom" in
   (match route_of_agent_core_error raw_internal with
-   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque; _ } -> ()
+   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque } -> ()
    | other ->
      Alcotest.failf "raw Internal should exhaust, got %s" (KFR.route_kind_label other));
   (match route_of_masc_error raw_internal with
-   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque; _ } -> ()
+   | KFR.Exhausted_visible_alive { terminal = KFR.Internal_opaque } -> ()
    | other ->
      Alcotest.failf
        "MASC-produced raw Internal should exhaust, got %s"
@@ -410,7 +410,7 @@ let test_non_provider_families_judge () =
     route_of_agent_core_error
       (Agent_core.Error.Mcp (Agent_core.Error.InitializeFailed { detail = "handshake" }))
   with
-  | KFR.Exhausted_visible_alive { terminal = KFR.Protocol_error; _ } -> ()
+  | KFR.Exhausted_visible_alive { terminal = KFR.Protocol_error } -> ()
   | other ->
     Alcotest.failf "mcp error should exhaust protocol, got %s"
       (KFR.route_kind_label other)
@@ -427,7 +427,7 @@ let test_transcript_refusal_is_not_an_answer () =
   List.iter
     (fun (label, error) ->
        match route_of_masc_error error with
-       | KFR.Exhausted_visible_alive { terminal = KFR.Transcript_refused; _ } as route ->
+       | KFR.Exhausted_visible_alive { terminal = KFR.Transcript_refused } as route ->
          Alcotest.(check string) (label ^ ": own route label") "transcript_refused"
            (KFR.route_class_label route);
          Alcotest.(check bool) (label ^ ": no provider answer") false

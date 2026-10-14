@@ -545,7 +545,7 @@ let terminal_class_label = function
 let route_class_label = function
   | Retry_after_observed { retry_class; _ } -> retry_class_label retry_class
   | Rotate_now { rotate } -> rotate_class_label rotate
-  | Exhausted_visible_alive { terminal; _ } -> terminal_class_label terminal
+  | Exhausted_visible_alive { terminal } -> terminal_class_label terminal
 
 (* Whether the provider answered the request that carried the turn's input.
    Read by the heartbeat to settle a Gate continuation that failed on this

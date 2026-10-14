@@ -487,25 +487,52 @@ let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
                ~written:(sprintf "Updated wiki page %s to revision %d" page revision)))
 
 (* Search pages *)
+(* How a page matched a search query. [keeper_memory_search] uses the same two
+   tiers (RFC memory-search-beyond-substring): the whole query as one run of
+   text, then every whitespace-separated term anywhere in the page. A query of
+   two words that are not adjacent in the page is the second kind. Read as one
+   run it found nothing, and a Keeper took "No pages matching" to mean the
+   wiki held nothing on the subject. *)
+type search_tier =
+  | Whole_query
+  | Every_term
+
+let search_tier ~query content =
+  if String_util.contains_query_term_ci content query then Some Whole_query
+  else if String_util.contains_all_query_terms_ci content query then Some Every_term
+  else None
+
 let handle_search ~tool_name ~start_time ctx args : Tool_result.result =
   let query = Json_util.get_string args "query"
     |> Option.value ~default:"" in
   if String.equal query "" then query_required ~tool_name ~start_time
   else begin
-    let query_lower = String.lowercase_ascii query in
     let docs = list_pages ~base_path:ctx.base_path in
-    let matches = List.filter_map (fun path ->
+    let hits = List.filter_map (fun path ->
       try
         let content = In_channel.with_open_text path In_channel.input_all in
-        let content_lower = String.lowercase_ascii content in
-        if string_contains ~needle:query_lower content_lower then
-          match parse_frontmatter content with
-          | Ok fm ->
-            Some (sprintf "- **%s** %s" (fm.title :> string) (Filename.basename path))
-          | Error error -> Some (sprintf "- %s" (describe_unreadable path error))
-        else None
+        Option.map
+          (fun tier ->
+             let line =
+               match parse_frontmatter content with
+               | Ok fm ->
+                 sprintf "- **%s** %s" (fm.title :> string) (Filename.basename path)
+               | Error error -> sprintf "- %s" (describe_unreadable path error)
+             in
+             tier, line)
+          (search_tier ~query content)
       with Sys_error _ -> None
     ) docs in
+    (* Pages holding the whole query come first. Each tier keeps name order. *)
+    let whole, terms =
+      List.partition
+        (fun (tier, _) ->
+           match tier with
+           | Whole_query -> true
+           | Every_term -> false)
+        hits
+    in
+    let matches = List.map snd (whole @ terms) in
     if Stdlib.List.length matches = 0 then
       text_ok ~tool_name ~start_time
         (sprintf "No pages matching '%s'" query)

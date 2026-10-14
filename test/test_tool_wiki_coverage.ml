@@ -564,6 +564,113 @@ let test_search_finds_a_page_by_its_body () =
     Alcotest.(check bool) "leaves the other page out" false
       (msg_contains ~needle:"Other Page" msg))
 
+(* Where [needle] first appears in [haystack], for ordering checks. *)
+let position_of ~needle haystack =
+  try Some (Str.search_forward (Str.regexp_string needle) haystack 0)
+  with Not_found -> None
+
+(* How many times [needle] appears in [haystack]. *)
+let count_occurrences ~needle haystack =
+  let re = Str.regexp_string needle in
+  let rec count from acc =
+    match Str.search_forward re haystack from with
+    | at -> count (at + String.length needle) (acc + 1)
+    | exception Not_found -> acc
+  in
+  count 0 0
+
+(* The query was read as one run of text, so two words that are not adjacent in
+   the page answered "No pages matching" although both were there. *)
+let test_search_finds_a_page_holding_every_word_in_any_order () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx
+      (create_args ~page:"kr" ~title:"Korean Page"
+         ~body:"정치병자의 곡은 박자가 자주 바뀌어요" ());
+    create_ok ctx
+      (create_args ~page:"partial" ~title:"Partial Page"
+         ~body:"정치병자의 곡 목록만 있어요" ());
+    let (ok, msg) =
+      dispatch_exn ctx ~name:"masc_wiki_search"
+        ~args:(`Assoc [ "query", `String "정치병자 박자" ])
+    in
+    Alcotest.(check bool) "search ok" true ok;
+    Alcotest.(check bool) "names the page holding both words" true
+      (msg_contains ~needle:"**Korean Page** kr.md" msg);
+    Alcotest.(check bool) "leaves out the page missing one word" false
+      (msg_contains ~needle:"Partial Page" msg);
+    let (_, reversed) =
+      dispatch_exn ctx ~name:"masc_wiki_search"
+        ~args:(`Assoc [ "query", `String "박자 정치병자" ])
+    in
+    Alcotest.(check bool) "word order does not matter" true
+      (msg_contains ~needle:"**Korean Page** kr.md" reversed))
+
+let test_search_names_no_page_when_one_word_is_missing () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx (create_args ~page:"one" ~body:"the beat changes often" ());
+    let (ok, msg) =
+      dispatch_exn ctx ~name:"masc_wiki_search"
+        ~args:(`Assoc [ "query", `String "beat bassline" ])
+    in
+    Alcotest.(check bool) "search ok" true ok;
+    Alcotest.(check bool) "says nothing matched" true
+      (msg_contains ~needle:"No pages matching" msg))
+
+(* "gap" sorts before "phrase" by name, so only the tier can put "phrase"
+   first. *)
+let test_search_lists_whole_query_matches_before_every_word_matches () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx
+      (create_args ~page:"gap" ~title:"Gap Page" ~body:"the root of the note" ());
+    create_ok ctx
+      (create_args ~page:"phrase" ~title:"Phrase Page" ~body:"the root note is C" ());
+    let (ok, msg) =
+      dispatch_exn ctx ~name:"masc_wiki_search"
+        ~args:(`Assoc [ "query", `String "root note" ])
+    in
+    Alcotest.(check bool) "search ok" true ok;
+    (match position_of ~needle:"Phrase Page" msg, position_of ~needle:"Gap Page" msg with
+     | Some phrase, Some gap ->
+       Alcotest.(check bool) "the page with the whole query comes first" true (phrase < gap)
+     | _ -> Alcotest.fail ("both pages should match: " ^ msg));
+    (* A page that holds the whole query also holds every word of it; it is
+       listed once, in the first tier only. *)
+    Alcotest.(check int) "the whole-query page is listed once" 1
+      (count_occurrences ~needle:"Phrase Page" msg);
+    Alcotest.(check int) "the every-word page is listed once" 1
+      (count_occurrences ~needle:"Gap Page" msg))
+
+(* A query of only spaces holds no word. It used to match a page that happened
+   to contain that many spaces in a row. *)
+let test_search_with_only_spaces_matches_no_page () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx (create_args ~page:"spaced" ~title:"Spaced Page" ~body:"a   b" ());
+    let (ok, msg) =
+      dispatch_exn ctx ~name:"masc_wiki_search" ~args:(`Assoc [ "query", `String "   " ])
+    in
+    Alcotest.(check bool) "search ok" true ok;
+    Alcotest.(check bool) "says nothing matched" true
+      (msg_contains ~needle:"No pages matching" msg);
+    Alcotest.(check bool) "does not list the page with spaces" false
+      (msg_contains ~needle:"Spaced Page" msg))
+
+(* A term of one or two ASCII letters matches at a word boundary, so "ci"
+   finds "CI" and not "decision". The memory search applies the same rule
+   through [String_util.contains_query_term_ci]. *)
+let test_search_matches_a_short_ascii_word_at_word_boundaries () =
+  with_temp_base_path (fun ctx ->
+    create_ok ctx (create_args ~page:"ci" ~title:"Ci Page" ~body:"CI passes" ());
+    create_ok ctx
+      (create_args ~page:"decision" ~title:"Decision Page" ~body:"a decision was made" ());
+    let (ok, msg) =
+      dispatch_exn ctx ~name:"masc_wiki_search" ~args:(`Assoc [ "query", `String "ci" ])
+    in
+    Alcotest.(check bool) "search ok" true ok;
+    Alcotest.(check bool) "finds the page with the word" true
+      (msg_contains ~needle:"Ci Page" msg);
+    Alcotest.(check bool) "leaves out a word that only contains it" false
+      (msg_contains ~needle:"Decision Page" msg))
+
 let test_create_schema_requires_what_the_handler_requires () =
   let schema = required_schema "masc_wiki_create" in
   Alcotest.(check (list string))
@@ -1347,6 +1454,11 @@ let () =
       Alcotest.test_case "empty query" `Quick test_search_empty_query;
       Alcotest.test_case "query is rejected at run time, not by the schema" `Quick test_search_schema_allows_runtime_query_rejection;
       Alcotest.test_case "finds a page by its body" `Quick test_search_finds_a_page_by_its_body;
+      Alcotest.test_case "finds a page holding every word in any order" `Quick test_search_finds_a_page_holding_every_word_in_any_order;
+      Alcotest.test_case "names no page when one word is missing" `Quick test_search_names_no_page_when_one_word_is_missing;
+      Alcotest.test_case "lists whole-query matches before every-word matches" `Quick test_search_lists_whole_query_matches_before_every_word_matches;
+      Alcotest.test_case "matches a short ASCII word at word boundaries" `Quick test_search_matches_a_short_ascii_word_at_word_boundaries;
+      Alcotest.test_case "a query of only spaces matches no page" `Quick test_search_with_only_spaces_matches_no_page;
     ]);
     ("index_and_log", [
       Alcotest.test_case "every write adds a log line and rebuilds the index" `Quick test_every_write_adds_a_log_line_and_rebuilds_the_index;

@@ -20,6 +20,7 @@
   masc.lane_addon_call_context
   masc.machine_pad_layout
   masc.machine_controller_contract
+  masc.msx_tool
   masc.workspace_connection
   ;; The server start logs whether Candle is on (RFC-goal-candle-ledger 3.9), and
   ;; POST /api/v1/goals/confirmation writes the confirmed pass's PayoutOwed row

@@ -50,4 +50,5 @@
   ; binary-embedded config tree.
   masc.embedded_config
   masc.machine_controller_contract
+  masc.msx_tool
   masc.masc_goal))

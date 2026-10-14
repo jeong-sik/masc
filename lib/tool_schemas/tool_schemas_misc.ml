@@ -115,15 +115,10 @@ let mcp_runtime_schema operation =
 
 let mcp_runtime_schemas = List.map mcp_runtime_schema mcp_runtime_operations
 
-(* [misc_operation] is the set [Tool_misc.dispatch] routes.
-
-   The facade used to register the whole [schemas] list under [Mod_misc] while
-   routing only part of it. masc_broadcast, masc_messages, masc_start and the
-   three masc_plan_* names were registered there without a route and answered
-   correctly only because Tool_plan and Mcp_tool_runtime link later and
-   overwrite the module tag -- [Tool_dispatch.register_module_tag] is a map
-   insert, so the last registrar wins. Registration now walks this list, so the
-   set advertised here and the set routed here are the same set. *)
+(* [misc_operation] is the set [Tool_misc.dispatch] routes. Registration walks
+   this list, so the set advertised here and the set routed here are the same
+   set. An MSX tool is one constructor carrying {!Msx_tool.t}, so the MSX names
+   are written once, in [Msx_tool]. *)
 type misc_operation =
   | Misc_lane_declaration_read
   | Misc_lane_declaration_save
@@ -153,20 +148,7 @@ type misc_operation =
   | Misc_browser_act
   | Misc_browser_interact
   | Misc_browser_instruct
-  | Misc_msx_load
-  | Misc_msx_eject
-  | Misc_msx_export_disk
-  | Misc_msx_save
-  | Misc_msx_restore
-  | Misc_msx_change_disk
-  | Misc_msx_screen
-  | Misc_msx_meta
-  | Misc_msx_checkpoint_info
-  | Misc_msx_press
-  | Misc_msx_step
-  | Misc_msx_step_until_change
-  | Misc_msx_peek
-  | Misc_msx_ram_diff
+  | Misc_msx of Msx_tool.t
   | Misc_portrait_read
   | Misc_candle_balance
   | Misc_candle_catalog
@@ -217,11 +199,7 @@ let dos_tool_of_operation : misc_operation -> Machine_controller_contract.dos_to
   | Misc_gc | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
   | Misc_web_search | Misc_browser_tabs | Misc_browser_read
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
-  | Misc_browser_interact | Misc_browser_instruct | Misc_msx_load
-  | Misc_msx_eject | Misc_msx_export_disk | Misc_msx_save | Misc_msx_restore
-  | Misc_msx_change_disk | Misc_msx_screen | Misc_msx_meta
-  | Misc_msx_checkpoint_info | Misc_msx_press | Misc_msx_step
-  | Misc_msx_step_until_change | Misc_msx_peek | Misc_msx_ram_diff
+  | Misc_browser_interact | Misc_browser_instruct | Misc_msx _
   | Misc_portrait_read | Misc_candle_balance | Misc_candle_catalog
   | Misc_candle_purchase | Misc_candle_equip | Misc_candle_gift
   | Misc_play_room ->
@@ -266,20 +244,7 @@ let misc_tool_name = function
   | Misc_browser_act -> "masc_browser_act"
   | Misc_browser_interact -> "masc_browser_interact"
   | Misc_browser_instruct -> "masc_browser_instruct"
-  | Misc_msx_load -> "masc_msx_load"
-  | Misc_msx_eject -> "masc_msx_eject"
-  | Misc_msx_export_disk -> "masc_msx_export_disk"
-  | Misc_msx_save -> "masc_msx_save"
-  | Misc_msx_restore -> "masc_msx_restore"
-  | Misc_msx_change_disk -> "masc_msx_change_disk"
-  | Misc_msx_screen -> "masc_msx_screen"
-  | Misc_msx_meta -> "masc_msx_meta"
-  | Misc_msx_checkpoint_info -> "masc_msx_checkpoint_info"
-  | Misc_msx_press -> "masc_msx_press"
-  | Misc_msx_step -> "masc_msx_step"
-  | Misc_msx_step_until_change -> "masc_msx_step_until_change"
-  | Misc_msx_peek -> "masc_msx_peek"
-  | Misc_msx_ram_diff -> "masc_msx_ram_diff"
+  | Misc_msx tool -> Msx_tool.name tool
   | Misc_portrait_read -> "keeper_portrait_read"
   | Misc_candle_balance -> "keeper_candle_balance"
   | Misc_candle_catalog -> "keeper_candle_catalog"
@@ -327,20 +292,7 @@ let misc_operation_of_tool_name value =
    missing refuses the boot rather than registering a partial surface. *)
 let misc_registered_schema operation : tool_schema option =
   match operation with
-  | Misc_msx_load
-  | Misc_msx_eject
-  | Misc_msx_export_disk
-  | Misc_msx_save
-  | Misc_msx_restore
-  | Misc_msx_change_disk
-  | Misc_msx_screen
-  | Misc_msx_meta
-  | Misc_msx_checkpoint_info
-  | Misc_msx_press
-  | Misc_msx_step
-  | Misc_msx_step_until_change
-  | Misc_msx_peek
-  | Misc_msx_ram_diff
+  | Misc_msx _
   | Misc_dos_load
   | Misc_dos_meta
   | Misc_dos_inventory

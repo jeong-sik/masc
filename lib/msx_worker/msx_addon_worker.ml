@@ -34,26 +34,25 @@ let screen ~tool_name ~start_time ~arguments =
             "width", `Int frame.width; "height", `Int frame.height;
             "media_type", `String "image/png"] (Ok observation))
 
-let invoke ~base_path ~principal ~(tool : Machine.tool) ~arguments =
+let invoke ~base_path ~principal ~(tool : Msx_tool.t) ~arguments =
   let actor = match principal with
     | Lane_addon_call_context.Keeper name | Authenticated_agent name | Host_actor name -> name
     | Operator | Anonymous -> Lane_addon_call_context.actor_label principal in
-  let name = Machine.tool_name tool in
+  let name = Msx_tool.name tool in
   let start_time = Tool_timing.start () in
   let asks_for_pixels = match arguments with
     | `Assoc fields -> List.mem_assoc "pixel_response" fields || List.mem_assoc "known_pixels" fields
     | _ -> false in
   match tool with
-  | Machine.Msx_screen -> screen ~tool_name:name ~start_time ~arguments
-  | Machine.Msx_step when Tool_args.get_bool arguments "include_frame" false ->
+  | Msx_tool.Screen -> screen ~tool_name:name ~start_time ~arguments
+  | Msx_tool.Step when Tool_args.get_bool arguments "include_frame" false ->
     response (Msx_worker_frame.step ~arguments)
-  | Machine.Msx_step when asks_for_pixels ->
+  | Msx_tool.Step when asks_for_pixels ->
     response (Tool_result.make_err ~tool_name:name ~start_time
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
       "pixel_response and known_pixels require include_frame=true")
-  | Machine.(Msx_load | Msx_eject | Msx_save | Msx_restore | Msx_export_disk | Msx_change_disk
-            | Msx_meta | Msx_checkpoint_info | Msx_press | Msx_step | Msx_step_until_change
-            | Msx_peek | Msx_ram_diff) ->
+  | Msx_tool.(Load | Eject | Save | Restore | Export_disk | Change_disk | Meta | Checkpoint_info
+             | Press | Step | Step_until_change | Peek | Ram_diff) ->
     let events = ref [] in
     let relay ~author content =
       events := `Assoc ["author", `String author; "content", `String content] :: !events in
@@ -107,9 +106,9 @@ let observation history () =
           "complete", `Bool true; "detail", `Null]]])
 
 let schemas () =
-  Machine.all_of_tool
+  Msx_tool.all
   |> List.map (fun tool ->
-      let name = Machine.tool_name tool in
+      let name = Msx_tool.name tool in
       match Embedded_config.read ("tools/" ^ name ^ ".toml") with
       | None -> invalid_arg ("missing MSX tool definition: " ^ name)
       | Some contents ->
@@ -140,7 +139,7 @@ let create ~base_path () =
       match Lane_addon_call_context.of_json (Option.value ~default:`Null arguments) with
       | Error message -> Error message
       | Ok call ->
-          match Option.bind (Machine.tool_of_name call.tool) (fun tool ->
+          match Option.bind (Msx_tool.of_name call.tool) (fun tool ->
               Option.map (fun schema -> tool, schema) (List.assoc_opt tool schemas)) with
           | None -> Error "Unknown exported machine tool"
           | Some (tool, (schema : Masc_domain.tool_schema)) ->

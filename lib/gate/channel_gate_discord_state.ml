@@ -124,8 +124,7 @@ let set_trigger_policy (policy : Discord_gateway_state.trigger_policy) =
 
 let get_trigger_policy () = !trigger_policy_ref
 
-let trigger_policy_json () =
-  match get_trigger_policy () with
+let trigger_policy_json = function
   | None -> `Null
   | Some policy ->
     `String (Discord_gateway_state.trigger_policy_to_string policy)
@@ -140,6 +139,14 @@ let gateway_state_label = function
   | Connected _ -> "connected"
   | Reconnect_pending _ -> "reconnect_pending"
   | Failed _ -> "failed"
+
+(* The in-process gateway (RFC-0203) is the only Discord transport; its run
+   loop publishes the typed connection state. *)
+let gateway_connected = function
+  | Discord_gateway_state.Connected _ -> true
+  | Disconnected | Awaiting_hello | Identifying | Resuming
+  | Reconnect_pending _ | Failed _ ->
+      false
 
 (* Bot identity captured from the gateway's READY dispatch; the in-process
    gateway (RFC-0203) keeps it in memory. *)
@@ -239,6 +246,10 @@ type status = {
   binding_store_error : string option;
   configured_bindings : binding list;
   recent_audit : Yojson.Safe.t list;
+  trigger_policy : Discord_gateway_state.trigger_policy option;
+  last_ready : ready_info option;
+  bot_user_name : string option;
+  guild_count : int;
 }
 
 let read_status ~audit_limit =
@@ -261,12 +272,7 @@ let read_status ~audit_limit =
     | Reconnect_pending _ | Failed _ -> true
   in
   let available = transport_available && Result.is_ok configured_bindings_result in
-  let connected =
-    match gateway_state with
-    | Connected _ -> true
-    | Disconnected | Awaiting_hello | Identifying | Resuming
-    | Reconnect_pending _ | Failed _ -> false
-  in
+  let connected = gateway_connected gateway_state in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      only reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -299,6 +305,10 @@ let read_status ~audit_limit =
     binding_store_error;
     configured_bindings;
     recent_audit;
+    trigger_policy = get_trigger_policy ();
+    last_ready = Atomic.get last_ready;
+    bot_user_name = Atomic.get last_bot_user_name;
+    guild_count = List.length (current_guild_ids ());
   }
 
 let status_label status =
@@ -307,16 +317,16 @@ let status_label status =
   Channel_gate_connector.connector_state_label ~available:status.available
     ~connected:status.connected ~stale:false
 
-let last_ready_at () =
+let last_ready_at status =
   (* The READY timestamp survives reconnect_pending/resuming dips, so
      operators can tell "was up, recovering" from "never came up" — current
      liveness is gateway_state. *)
-  match Atomic.get last_ready with
+  match status.last_ready with
   | Some { ready_at; _ } -> ready_at
   | None -> ""
 
-let bot_user_id () =
-  match Atomic.get last_ready with
+let bot_user_id status =
+  match status.last_ready with
   | Some { ready_bot_user_id; _ } -> ready_bot_user_id
   | None -> ""
 
@@ -344,84 +354,54 @@ let gate_health_checked_at status = if status.connected then status.updated_at e
    connection status come from the gateway state. *)
 let pid status = if status.available then Unix.getpid () else 0
 
+(* The fields both views share, written once so a field added to one view
+   is in the other too. *)
+let status_fields status =
+  [
+    ("available", `Bool status.available);
+    ("connected", `Bool status.connected);
+    ("status", `String (status_label status));
+    ("error", `String status.error);
+    ("bot_token_present", `Bool status.token_present);
+    ("status_source", `String "in_process_gateway");
+    ("gateway_state", `String (gateway_state_label status.gateway_state));
+    ("trigger_policy", trigger_policy_json status.trigger_policy);
+    ("binding_store_path", `String status.binding_store_path);
+    ("audit_path", `String status.audit_path);
+    ("updated_at", `String status.updated_at);
+    ("last_ready_at", `String (last_ready_at status));
+    ("bot_user_name", `String (Option.value ~default:"" status.bot_user_name));
+    ("bot_user_id", `String (bot_user_id status));
+    ("guild_count", `Int status.guild_count);
+  ]
+  @ directory_fields status.directory
+  @ [
+    ("gate_base_url", `String "in-process");
+    ("gate_healthy", gate_healthy_json status);
+    ("gate_health_checked_at", `String (gate_health_checked_at status));
+    ("binding_source", `String "persisted");
+    ("binding_store_read_ok", `Bool status.binding_store_read_ok);
+    ( "binding_store_error",
+      `String (Option.value ~default:"" status.binding_store_error) );
+    ("runtime_bindings_count", `Int (List.length status.configured_bindings));
+    ("pid", `Int (pid status));
+    ( "configured_bindings",
+      `List (List.map binding_json status.configured_bindings) );
+    ("recent_audit", `List status.recent_audit);
+  ]
+
 let status_json ?(audit_limit = 10) () =
-  let status = read_status ~audit_limit in
-  `Assoc
-    ([
-      ("channel", `String channel);
-      ("available", `Bool status.available);
-      ("connected", `Bool status.connected);
-      ("status", `String (status_label status));
-      ("error", `String status.error);
-      ("bot_token_present", `Bool status.token_present);
-      ("status_source", `String "in_process_gateway");
-      ("gateway_state", `String (gateway_state_label status.gateway_state));
-      ("trigger_policy", trigger_policy_json ());
-      ("binding_store_path", `String status.binding_store_path);
-      ("audit_path", `String status.audit_path);
-      ("updated_at", `String status.updated_at);
-      ("last_ready_at", `String (last_ready_at ()));
-      ( "bot_user_name",
-        `String (Option.value ~default:"" (Atomic.get last_bot_user_name)) );
-      ("bot_user_id", `String (bot_user_id ()));
-      ("guild_count", `Int (List.length (current_guild_ids ())));
-    ]
-    @ directory_fields status.directory
-    @ [
-      ("gate_base_url", `String "in-process");
-      ("gate_healthy", gate_healthy_json status);
-      ("gate_health_checked_at", `String (gate_health_checked_at status));
-      ("binding_source", `String "persisted");
-      ("binding_store_read_ok", `Bool status.binding_store_read_ok);
-      ( "binding_store_error",
-        `String (Option.value ~default:"" status.binding_store_error) );
-      ("runtime_bindings_count", `Int (List.length status.configured_bindings));
-      ("pid", `Int (pid status));
-      ( "configured_bindings",
-        `List (List.map binding_json status.configured_bindings) );
-      ("recent_audit", `List status.recent_audit);
-    ])
+  `Assoc (("channel", `String channel) :: status_fields (read_status ~audit_limit))
 
 let connector_json ?(audit_limit = 10) () =
-  let status = read_status ~audit_limit in
   `Assoc
     ([
-      ("connector_id", `String connector_id);
-      ("display_name", `String display_name);
-      ("channel", `String channel);
-      ("capabilities", Channel_gate_connector_capability.all_json);
-      ("trigger_policy", trigger_policy_json ());
-      ("status", `String (status_label status));
-      ("available", `Bool status.available);
-      ("connected", `Bool status.connected);
-      ("status_source", `String "in_process_gateway");
-      ("gateway_state", `String (gateway_state_label status.gateway_state));
-      ("error", `String status.error);
-      ("bot_token_present", `Bool status.token_present);
-      ("binding_store_path", `String status.binding_store_path);
-      ("binding_store_read_ok", `Bool status.binding_store_read_ok);
-      ( "binding_store_error",
-        `String (Option.value ~default:"" status.binding_store_error) );
-      ("audit_path", `String status.audit_path);
-      ("updated_at", `String status.updated_at);
-      ("last_ready_at", `String (last_ready_at ()));
-      ( "bot_user_name",
-        `String (Option.value ~default:"" (Atomic.get last_bot_user_name)) );
-      ("bot_user_id", `String (bot_user_id ()));
-      ("guild_count", `Int (List.length (current_guild_ids ())));
-    ]
-    @ directory_fields status.directory
-    @ [
-      ("gate_base_url", `String "in-process");
-      ("gate_healthy", gate_healthy_json status);
-      ("gate_health_checked_at", `String (gate_health_checked_at status));
-      ("binding_source", `String "persisted");
-      ("runtime_bindings_count", `Int (List.length status.configured_bindings));
-      ("pid", `Int (pid status));
-      ( "configured_bindings",
-        `List (List.map binding_json status.configured_bindings) );
-      ("recent_audit", `List status.recent_audit);
-    ])
+       ("connector_id", `String connector_id);
+       ("display_name", `String display_name);
+       ("channel", `String channel);
+       ("capabilities", Channel_gate_connector_capability.all_json);
+     ]
+    @ status_fields (read_status ~audit_limit))
 
 let bind ~channel_id ~keeper_name ~actor_name =
   let channel_id = String.trim channel_id in
@@ -585,14 +565,7 @@ let bound_channels_result ~keeper_name =
 let bound_channels ~keeper_name =
   Store.bound_channels_result binding_store ~keeper_name
 
-let connected () =
-  (* The in-process gateway (RFC-0203) is the only Discord transport;
-     its run loop publishes the typed connection state. *)
-  match Discord_gateway_client.connection_state () with
-  | Discord_gateway_state.Connected _ -> true
-  | Disconnected | Awaiting_hello | Identifying | Resuming
-  | Reconnect_pending _ | Failed _ ->
-      false
+let connected () = gateway_connected (Discord_gateway_client.connection_state ())
 
 type send_error =
   | Missing_token

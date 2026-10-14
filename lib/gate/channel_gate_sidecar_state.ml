@@ -77,10 +77,14 @@ module Make (Config : Config) = struct
 
   let bool_option_member json key = Json_util.get_bool json key
 
-  let stale_of_updated_at updated_at =
+  let stale_of_updated_at ~stale_after_sec updated_at =
     match Gate_time_util.parse_iso8601_opt updated_at with
-    | Some ts -> Unix.gettimeofday () -. ts > float_of_int (stale_after_sec ())
+    | Some ts -> Unix.gettimeofday () -. ts > float_of_int stale_after_sec
     | None -> true
+
+  (* The sidecar heartbeats its status file: the transport is live when the
+     file says connected and is not stale. *)
+  let transport_live json ~stale = bool_member json "connected" && not stale
 
   (* RFC-0223 P2: presence surface. Both recomputed per call — no
      cached presence state. *)
@@ -89,13 +93,15 @@ module Make (Config : Config) = struct
     Store.bound_channels_result binding_store ~keeper_name
 
   let connected () =
-    (* Same liveness reading as [status_json]: the sidecar heartbeats
-       its status file; a missing or stale file means not live. *)
+    (* Transport liveness only. Unlike the status views it does not also
+       require the binding store to read; [bound_channels] reports that. *)
     match read_json_file_opt (status_path ()) with
     | None -> false
     | Some json ->
-        let updated_at = string_member json "updated_at" in
-        bool_member json "connected" && not (stale_of_updated_at updated_at)
+        transport_live json
+          ~stale:
+            (stale_of_updated_at ~stale_after_sec:(stale_after_sec ())
+               (string_member json "updated_at"))
 
   (* One reading of the status file and the binding store, rendered by
      [status_json] and [connector_json] alike so the two views cannot
@@ -109,6 +115,7 @@ module Make (Config : Config) = struct
     binding_store_error : string;
     recent_audit : Yojson.Safe.t list;
     available : bool;
+    stale_after_sec : int;
     stale : bool;
     connected : bool;
     error : string;
@@ -150,11 +157,15 @@ module Make (Config : Config) = struct
       | Some json -> string_member json "updated_at"
       | None -> ""
     in
-    let stale = if not available then true else stale_of_updated_at updated_at in
+    let stale_after_sec = stale_after_sec () in
+    let stale =
+      if not available then true
+      else stale_of_updated_at ~stale_after_sec updated_at
+    in
     let connected =
       match live_status with
       | Some json ->
-        binding_store_read_ok && bool_member json "connected" && not stale
+        binding_store_read_ok && transport_live json ~stale
       | None -> false
     in
     let error =
@@ -175,6 +186,7 @@ module Make (Config : Config) = struct
       binding_store_error;
       recent_audit;
       available;
+      stale_after_sec;
       stale;
       connected;
       error;
@@ -217,7 +229,7 @@ module Make (Config : Config) = struct
       ("available", `Bool status.available);
       ("connected", `Bool status.connected);
       ("stale", `Bool status.stale);
-      ("stale_after_sec", `Int (stale_after_sec ()));
+      ("stale_after_sec", `Int status.stale_after_sec);
       ("status", `String (status_label status));
       ("error", `String status.error);
       ("status_path", `String status.status_path);

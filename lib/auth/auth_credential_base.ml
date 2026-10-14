@@ -1305,6 +1305,9 @@ let retire_prune_credential_in_transaction (Credential_transaction config) retir
       directory, so a bearer another process wrote -- masc-tui minting its
       operator token, [masc login], setup -- is found on the next lookup
       instead of being refused as [Token mismatch].
+    - A file time moves in steps, so two writes inside one step can leave the
+      directory looking unchanged. An entry listed while the directory's last
+      change is still inside its step serves only until that step is over.
     - TTL bound (60s) so an edit that rewrites a file in place, which
       leaves the directory as it was, still surfaces without a restart.
     - Explicit invalidation from [save_credential] / [delete_credential]
@@ -1341,12 +1344,42 @@ let equal_agents_dir_stamp a b =
 ;;
 
 type credential_index_cache_entry = {
-  loaded_at : float;
+  expires_at : float;
   stamp : agents_dir_stamp option;
   by_token : (string, agent_credential list) Hashtbl.t;
 }
 
 let credential_index_cache_ttl_sec = 60.0
+
+(* The coarsest step a file time moves in: FAT keeps 2 s, HFS+ and ext3's
+   small inodes 1 s, Linux before 6.13 one clock tick. *)
+let credential_dir_time_step_sec = 2.0
+
+(* An index listed before the step holding the directory's last change is
+   over may have missed a second write in that step, one that left the times
+   as they were (git calls such entries racily clean). It serves only until
+   the step ends; the rebuild after that sees every write of the step, and
+   any later write moves the times. The TTL still caps the step, so a file
+   system clock running ahead of this one keeps no index longer than before.
+   The rule compares this host's clock with the file system's, so it holds
+   where they agree: a file clock more than a step behind (a network share)
+   files every index as listed after its step, which is the 60 s bound. *)
+let credential_index_expires_at ~stamped_at ~dir_changed_at =
+  let ttl_end = stamped_at +. credential_index_cache_ttl_sec in
+  match dir_changed_at with
+  | None -> ttl_end
+  | Some changed_at ->
+    let step_end = changed_at +. credential_dir_time_step_sec in
+    if stamped_at < step_end then Float.min step_end ttl_end else ttl_end
+;;
+
+let agents_dir_last_change stamp = Float.max stamp.modified_at stamp.changed_at
+
+module Credential_index_expiry_for_testing = struct
+  let time_step_sec = credential_dir_time_step_sec
+  let ttl_sec = credential_index_cache_ttl_sec
+  let expires_at = credential_index_expires_at
+end
 
 (* Plain [Stdlib.Mutex], not [Eio.Mutex]: [save_credential] is also
    called from non-Eio call sites (CLI bootstrap, tests outside
@@ -1396,7 +1429,7 @@ let cached_credential_index ~key ~now ~stamp =
   with_credential_index_cache_lock (fun () ->
     match Hashtbl.find_opt credential_index_cache key with
     | Some entry
-      when now -. entry.loaded_at < credential_index_cache_ttl_sec
+      when now < entry.expires_at
            && Option.equal equal_agents_dir_stamp entry.stamp stamp ->
       Some entry.by_token
     | Some _ | None -> None)
@@ -1425,12 +1458,15 @@ let credential_token_index config
     with_credential_transaction config (fun _transaction ->
        (* Stamped before listing: a write that lands while the files are
           read moves the directory again, so the next lookup rebuilds
-          instead of keeping an index that missed it. *)
+          instead of keeping an index that missed it. The clock is read
+          after the wait for this transaction and before the stat, so a
+          request that queued long does not date its index too early. *)
+       let stamped_at = Time_compat.now () in
        let* stamp = agents_dir_stamp config in
        (* Requests that missed together queue on this transaction. The
           first one rebuilds; the rest find its index here instead of
           re-reading every credential in turn. *)
-       match cached_credential_index ~key ~now ~stamp with
+       match cached_credential_index ~key ~now:stamped_at ~stamp with
        | Some by_token ->
          count_hit ();
          Ok by_token
@@ -1453,7 +1489,12 @@ let credential_token_index config
          in
          let by_token = build_token_index creds in
          with_credential_index_cache_lock (fun () ->
-           Hashtbl.replace credential_index_cache key { loaded_at = now; stamp; by_token });
+           Hashtbl.replace credential_index_cache key
+             { expires_at =
+                 credential_index_expires_at ~stamped_at
+                   ~dir_changed_at:(Option.map agents_dir_last_change stamp)
+             ; stamp
+             ; by_token });
          Ok by_token)
     |> Result.join
 ;;

@@ -16,6 +16,18 @@ module Regular_read_for_testing : sig
       boundary; no process-wide hook or production reader is changed. *)
 end
 
+module Credential_index_expiry_for_testing : sig
+  val time_step_sec : float
+  (** The coarsest step a file time moves in, as the token index assumes. *)
+
+  val ttl_sec : float
+
+  val expires_at : stamped_at:float -> dir_changed_at:float option -> float
+  (** When a token index stamped at [stamped_at] stops serving, given the
+      agents directory's last change time ([None] when it does not exist).
+      The production rule itself; no cache or clock is read or changed. *)
+end
+
 (** {1 Token Generation} *)
 
 val generate_token : unit -> string

@@ -397,43 +397,29 @@ let receipt_timeline_event receipt =
              ~severity ()))
 
 let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
-    ?observed_at_unix ~ts_unix ~runtime_blocker_fields
+    ?observed_at_unix ~ts_unix
+    ~(runtime_blocker : Keeper_status_bridge_blocker.runtime_blocker_surface option)
     ~next_human_action ?(observation_only = true) () =
-  let blocker_class = assoc_string_opt "runtime_blocker_class" runtime_blocker_fields in
-  let blocker_summary =
-    assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields
-  in
-  match blocker_class, blocker_summary with
-  | None, None -> None
-  | Some blocker_class, Some summary
-    when String.trim summary <> "" ->
-      Some
-        (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
-           ?observed_at_unix ~observation_only
-           ~ts_unix ~kind:"runtime_blocker"
-           ~title:"Runtime Blocker"
-           ~summary
-           ~severity:
-             (match blocker_class with
-              | "runtime_exhausted" -> "bad"
-              | _ -> "warn")
-           ())
-  | None, Some summary
-    when String.trim summary <> "" ->
-      Some
-        (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
-           ?observed_at_unix ~observation_only
-           ~ts_unix ~kind:"runtime_blocker"
-           ~title:"Runtime Blocker"
-           ~summary ~severity:"warn" ())
-  | Some blocker_class, None ->
-      Some
-        (timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
-           ?observed_at_unix ~observation_only
-           ~ts_unix ~kind:"runtime_blocker"
-           ~title:"Runtime Blocker"
-           ~summary:blocker_class ~severity:"warn" ())
-  | Some _, Some _ | None, Some _ -> None
+  Option.map
+    (fun (blocker : Keeper_status_bridge_blocker.runtime_blocker_surface) ->
+       timeline_event_json ?trace_id ?task_id ~goal_ids ?next_human_action
+         ?observed_at_unix ~observation_only
+         ~ts_unix ~kind:"runtime_blocker"
+         ~title:"Runtime Blocker"
+         ~summary:(Lazy.force blocker.summary)
+         ~severity:
+           (match blocker.blocker_class with
+            | Keeper_status_bridge_blocker.Blocked_by_runtime_exhaustion -> "bad"
+            | Keeper_status_bridge_blocker.Blocked_by_heartbeat_failures
+            | Keeper_status_bridge_blocker.Blocked_by_turn_failures
+            | Keeper_status_bridge_blocker.Blocked_by_provider_runtime_error
+            | Keeper_status_bridge_blocker.Blocked_by_official_client_recovery
+            | Keeper_status_bridge_blocker.Blocked_by_turn_configuration_error
+            | Keeper_status_bridge_blocker.Blocked_by_unresolved_fiber
+            | Keeper_status_bridge_blocker.Blocked_by_exception
+            | Keeper_status_bridge_blocker.Blocked_by_operator_interrupt -> "warn")
+         ())
+    runtime_blocker
 
 
 let latest_tool_call_json ~(keeper_name : string) =

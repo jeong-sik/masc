@@ -143,15 +143,20 @@ let test_trust_blocker_uses_structured_state () =
   let healthy = decide None in
   Alcotest.(check string) "no blocker is healthy" "healthy"
     healthy.disposition_reason;
-  let blocked = decide (Some (Ok Masc.Keeper_meta_contract.Internal_bridge_exception)) in
-  Alcotest.(check string) "bridge failure is not a guessed sandbox violation"
+  let exhausted =
+    decide (Some Masc.Keeper_status_bridge.Blocked_by_runtime_exhaustion)
+  in
+  Alcotest.(check string) "runtime exhaustion is named" "runtime_exhausted"
+    exhausted.disposition_reason;
+  let blocked = decide (Some Masc.Keeper_status_bridge.Blocked_by_unresolved_fiber) in
+  Alcotest.(check string) "an unresolved fiber is a critical block"
     "critical_block" blocked.disposition_reason;
   Alcotest.(check bool) "blocker requires attention" true blocked.needs_attention;
-  let unknown = decide (Some (Error "unknown_sandbox_status")) in
-  Alcotest.(check string) "unknown class is visible without prose classification"
-    "unknown_runtime_blocker" unknown.disposition_reason;
-  Alcotest.(check bool) "unknown class remains visible" true unknown.needs_attention;
-  (* No receipt is shown in any of the three, so there is no operator
+  let unnamed = decide (Some Masc.Keeper_status_bridge.Blocked_by_turn_failures) in
+  Alcotest.(check string) "a class with no reason of its own still shows as a blocker"
+    "unknown_runtime_blocker" unnamed.disposition_reason;
+  Alcotest.(check bool) "that blocker requires attention" true unnamed.needs_attention;
+  (* No receipt is shown in any of these, so there is no operator
      disposition to relay. A kind derived from the blocker would be a guess. *)
   List.iter
     (fun (label, (model : Core.t)) ->
@@ -159,7 +164,11 @@ let test_trust_blocker_uses_structured_state () =
          (label ^ " relays no operator disposition")
          None
          model.receipt_operator_disposition)
-    [ "no blocker", healthy; "named blocker", blocked; "undecoded blocker", unknown ]
+    [ "no blocker", healthy
+    ; "exhausted", exhausted
+    ; "named blocker", blocked
+    ; "unnamed blocker", unnamed
+    ]
 ;;
 
 let test_trust_relays_only_a_shown_receipt_operator_disposition () =
@@ -980,7 +989,7 @@ let test_model_observability_uses_runtime_trust_selected_model () =
   let json =
     O.model_observability_json
       ~current_runtime_id:"runtime-test"
-      ~runtime_blocker_fields:[]
+      ~runtime_blocker_class:None
       ~runtime_trust
       None
   in
@@ -1017,7 +1026,7 @@ let test_model_observability_uses_runtime_trust_execution_selected_model () =
   let json =
     O.model_observability_json
       ~current_runtime_id:"runtime-test"
-      ~runtime_blocker_fields:[]
+      ~runtime_blocker_class:None
       ~runtime_trust
       None
   in
@@ -1057,7 +1066,7 @@ let test_model_observability_missing_runtime_id_is_unscoped () =
   let json =
     O.model_observability_json
       ~current_runtime_id:"runtime-test"
-      ~runtime_blocker_fields:[]
+      ~runtime_blocker_class:None
       ~runtime_trust:(`Assoc [])
       latest_metrics
   in
@@ -1091,7 +1100,7 @@ let test_model_observability_runtime_match_does_not_promote_model_hint () =
   let json =
     O.model_observability_json
       ~current_runtime_id:"runtime-test"
-      ~runtime_blocker_fields:[]
+      ~runtime_blocker_class:None
       ~runtime_trust
       latest_metrics
   in

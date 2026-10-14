@@ -110,11 +110,11 @@ let keeper_attention_kind reason =
   | Some reason -> "keeper_" ^ reason
   | None -> "keeper_attention"
 
-let keeper_attention_severity ~reason ~runtime_blocker_class =
-  match reason, runtime_blocker_class with
+let keeper_attention_severity ~reason ~runtime_blocked =
+  match reason, runtime_blocked with
   | Some "runtime_blocked", _
   | Some "provider_timeout", _ -> Sev_bad
-  | _, Some _ -> Sev_bad
+  | _, true -> Sev_bad
   | _ -> Sev_warn
 
 (* Which Keeper and why. Every item in this projection needs operator
@@ -218,15 +218,21 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
   if not (assoc_bool_field ~default:false "needs_attention" attention_fields)
   then None
   else
-    let blocker_fields = Keeper_status_bridge.runtime_blocker_fields_json config meta in
+    let runtime_blocker = Keeper_status_bridge.runtime_blocker_surface_opt config meta in
+    let blocker_fields =
+      Keeper_status_bridge.runtime_blocker_fields_json_of_surface meta runtime_blocker
+    in
     let reason = assoc_string_field "attention_reason" attention_fields in
-    let runtime_blocker_class =
-      assoc_string_field "runtime_blocker_class" blocker_fields
-    in
     let runtime_blocker_summary =
-      assoc_string_field "runtime_blocker_summary" blocker_fields
+      Option.map
+        (fun (blocker : Keeper_status_bridge.runtime_blocker_surface) ->
+           String.trim (Lazy.force blocker.summary))
+        runtime_blocker
     in
-    let severity = keeper_attention_severity ~reason ~runtime_blocker_class in
+    let severity =
+      keeper_attention_severity ~reason
+        ~runtime_blocked:(Option.is_some runtime_blocker)
+    in
     let evidence =
       `Assoc
         [

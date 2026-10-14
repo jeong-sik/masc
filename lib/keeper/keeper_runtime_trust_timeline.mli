@@ -54,7 +54,7 @@ val blocker_timeline_event :
   ?trace_id:string ->
   ?observed_at_unix:float ->
   ts_unix:float ->
-  runtime_blocker_fields:(string * Yojson.Safe.t) list ->
+  runtime_blocker:Keeper_status_bridge_blocker.runtime_blocker_surface option ->
   next_human_action:string option ->
   ?observation_only:bool ->
   unit ->

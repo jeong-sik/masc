@@ -55,7 +55,6 @@ type t =
 type ordered_evidence =
   { evidence : evidence
   ; activated_at : float
-  ; ledger_index : int
   }
 
 let activation_reference
@@ -111,9 +110,9 @@ let latest_in_ledger trace_id reference ledger =
             Some candidate
           | Some current -> Some current)
        None
-  |> Option.map (fun (activation, activated_at, ledger_index) ->
+  |> Option.map (fun (activation, activated_at, _) ->
        let async_evidence = Keeper_skill_activation_ledger.async_evidence_for_activation ledger activation in
-       { evidence = { trace_id; activation; async_evidence }; activated_at; ledger_index })
+       { evidence = { trace_id; activation; async_evidence }; activated_at })
 ;;
 
 let latest_across_traces candidates =

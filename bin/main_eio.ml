@@ -3031,7 +3031,7 @@ let keeper_create_cmd =
     String.concat
       "\n"
       [ "  masc keeper-create --name scout --sandbox-profile docker"
-      ; "                     --network-mode inherit"
+      ; "                     --sandbox-image base --network-mode inherit"
       ; "                     --instructions 'Search the web.'"
       ; ""
       ; "  masc keeper-create --edit"

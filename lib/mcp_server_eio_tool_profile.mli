@@ -52,7 +52,7 @@ val seat_instructions : unit -> string
 
 val default_instructions : unit -> string
 (** [default_instructions ()] returns [Full] profile instructions. Describes
-    where MASC state lives (project / cluster / read / write conventions). It
+    where MASC state lives (project / read / write conventions). It
     names no tool as a thing to call: the typed schema is the callable
     catalog. *)
 

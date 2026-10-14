@@ -1276,6 +1276,7 @@ let rec async_worker_result
       ?(nested_calls=[])
       ?nested_activation
       ?continuation
+      ?after_child_submission
       ~plan
       ?journal
       ~tool_name
@@ -1355,6 +1356,7 @@ let rec async_worker_result
              ~admission:(Original_child {attempt;parent_plan=plan;origin;context})
              ~config ~meta ~capability_authority ~publication_recovery
              ~ctx_snapshot ~turn_context ?clock () in
+         Option.iter (fun after -> after result) after_child_submission;
          Executor.dispatch_result result)
     | Plan.Child_result child ->
       (match Journal.child_result_binding attempt ~plan with

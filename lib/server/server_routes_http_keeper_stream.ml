@@ -527,9 +527,9 @@ let handle_keeper_turns_list state request reqd =
    unasked, and the operator who set it is not always the operator reading
    the logs later. *)
 let handle_keeper_tool_approval_mode_get _state request reqd =
-  let overrides =
-    Keeper_tool_approval_mode.overrides (Keeper_tool_approval_mode.shared ())
-  in
+  let store = Keeper_tool_approval_mode.shared () in
+  let overrides = Keeper_tool_approval_mode.overrides store in
+  let restore_error = Keeper_tool_approval_mode.last_restore_error store in
   respond_json_value_with_cors ~status:`OK request reqd
     (`Assoc
        [ ( "overrides"
@@ -544,6 +544,10 @@ let handle_keeper_tool_approval_mode_get _state request reqd =
                     ])
                 overrides) )
        ; ("default", `String "auto")
+       ; ( "restore_error"
+         , match restore_error with
+           | Some detail -> `String detail
+           | None -> `Null )
        ])
 ;;
 

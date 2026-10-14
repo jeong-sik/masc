@@ -70,10 +70,15 @@ val set :
   mode ->
   (unit, string) result
 (** Persists the change beside the other gate state, then updates the
-    in-memory registry, so a failed write holds neither. Setting [Auto]
-    removes the keeper's row rather than storing a synonym for the default,
-    so the file lists exactly the keepers an operator has moved off [Auto].
-    The change is also written to the audit log as actor [actor]. *)
+    in-memory registry, so a failed write holds neither; the whole
+    read-modify-write is atomic with respect to other in-process writers.
+    Setting [Auto] removes the keeper's row rather than storing a synonym
+    for the default, so the file lists exactly the keepers an operator has
+    moved off [Auto]. The change is also written to the audit log as actor
+    [actor]; if that record fails ([Sys_error] from the store setup is
+    caught the same way), the error is returned even though the stance
+    itself already stands durably — the result is total, it never raises.
+*)
 
 val bind : base_path:string -> t -> (unit, string) result
 (** Replay the persisted overrides into the registry; the server calls this

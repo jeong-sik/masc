@@ -142,57 +142,92 @@ let keeper_overrides ~base_path =
 ;;
 
 let set t ~base_path ~actor ~keeper_name mode =
-  match keeper_overrides ~base_path with
-  | Error detail ->
-    Stdlib.Mutex.protect t.mutex (fun () -> t.restore_error <- Some detail);
-    Error detail
-  | Ok rows ->
-    let changed_at = Masc_domain.now_iso () in
-    let without =
-      List.filter
-        (fun row -> not (String.equal row.keeper_name keeper_name))
-        rows
-    in
-    (* Removing rather than storing a synonym for "no opinion": the file is
-       then also the list of keepers an operator has actually singled out,
-       and a screen showing it does not have to filter. *)
-    let rows =
-      match mode with
-      | Auto -> without
-      | Yolo -> without @ [ { keeper_name; mode; actor; changed_at } ]
-    in
-    Fs_compat.mkdir_p (Keeper_gate_path.dir ~base_path);
+  (* The mutex spans the whole read-modify-write, not just the memory part:
+     the file and the registry are one logical state, so two in-process
+     writers must not interleave read and write phases — the second would
+     read the first's pre-image and clobber it. The durable write still
+     lands before memory, so a failed [set] holds neither. The audit record
+     is deliberately outside the mutex: it must not couple the per-call
+     [resolve] path to event-bus latency, and a failed record does not
+     change the durable answer. *)
+  let result =
+    Stdlib.Mutex.protect t.mutex (fun () ->
+        match keeper_overrides ~base_path with
+        | Error detail ->
+          t.restore_error <- Some detail;
+          Error detail
+        | Ok rows ->
+          let changed_at = Masc_domain.now_iso () in
+          let without =
+            List.filter
+              (fun row -> not (String.equal row.keeper_name keeper_name))
+              rows
+          in
+          (* Removing rather than storing a synonym for "no opinion": the
+             file is then also the list of keepers an operator has actually
+             singled out, and a screen showing it does not have to filter. *)
+          let rows =
+            match mode with
+            | Auto -> without
+            | Yolo -> without @ [ { keeper_name; mode; actor; changed_at } ]
+          in
+          (match
+             try
+               Fs_compat.mkdir_p (Keeper_gate_path.dir ~base_path);
+               Ok ()
+             with
+             | Sys_error detail ->
+               Error
+                 (Printf.sprintf "tool approval mode store mkdir failed: %s" detail)
+           with
+           | Error _ as error -> error
+           | Ok () ->
+             match
+               Fs_compat.save_file_atomic
+                 (Keeper_gate_path.tool_approval_modes ~base_path)
+                 (Yojson.Safe.pretty_to_string (file_json rows))
+             with
+             | Error detail ->
+               Error
+                 (Printf.sprintf "tool approval mode store write failed: %s" detail)
+             | Ok () ->
+               t.overrides <-
+                 List.map (fun row -> row.keeper_name, row.mode) rows;
+               t.restore_error <- None;
+               Ok changed_at))
+  in
+  match result with
+  | Error _ as error -> error
+  | Ok changed_at ->
+    (* The stance stands durably from here; only its audit record can still
+       fail, and that is reported rather than swallowed — a [Sys_error]
+       from the store setup above already returned [Error] with nothing
+       changed. *)
     (match
-       Fs_compat.save_file_atomic
-         (Keeper_gate_path.tool_approval_modes ~base_path)
-         (Yojson.Safe.pretty_to_string (file_json rows))
+       try
+         Audit_log.log_action
+           (Workspace.default_config base_path)
+           ~agent_id:actor
+           ~action:(Audit_log.Custom "keeper_tool_approval_mode_set")
+           ~details:
+             (`Assoc
+                [ "keeper_name", `String keeper_name
+                ; ( "mode"
+                  , match mode with
+                    | Auto -> `Null
+                    | Yolo -> `String "yolo" )
+                ; "changed_at", `String changed_at
+                ; "actor", `String actor
+                ])
+           ~outcome:Audit_log.Success
+           ();
+         Ok ()
+       with
+       | Sys_error detail ->
+         Error (Printf.sprintf "tool approval mode audit failed: %s" detail)
      with
-     | Error detail ->
-       Error (Printf.sprintf "tool approval mode store write failed: %s" detail)
-     | Ok () ->
-       (* The durable write lands before memory: a [set] that fails on disk
-          must not hold in the registry, or a restart would silently drop
-          what the operator was told stood. *)
-       Stdlib.Mutex.protect t.mutex (fun () ->
-           t.overrides <- List.map (fun row -> row.keeper_name, row.mode) rows;
-           t.restore_error <- None);
-       Audit_log.log_action
-         (Workspace.default_config base_path)
-         ~agent_id:actor
-         ~action:(Audit_log.Custom "keeper_tool_approval_mode_set")
-         ~details:
-           (`Assoc
-              [ "keeper_name", `String keeper_name
-              ; ( "mode"
-                , match mode with
-                  | Auto -> `Null
-                  | Yolo -> `String "yolo" )
-              ; "changed_at", `String changed_at
-              ; "actor", `String actor
-              ])
-         ~outcome:Audit_log.Success
-         ();
-       Ok ())
+     | Ok () -> Ok ()
+     | Error _ as error -> error)
 ;;
 
 let bind ~base_path t =

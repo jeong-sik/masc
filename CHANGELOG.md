@@ -2,6 +2,124 @@
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- Retained lane add-on binding files written by v0.48.0 or earlier have no `visibility` and `source_access`, and this version does not read them. List them with `rg --files-without-match '"visibility"' <base-path>/.masc/lane-addons/bindings`, and again with `'"source_access"'`. A detached record leaves the declaration that names it applied, stays listed under the configuration issues, and keeps `slice` at `complete: false` until the operator moves the file away. A record that is not detached stops the declaration that names it, and the tool cannot detach it, because the container of such a record is cleaned up only through a readable record; the operator writes `visibility` and `source_access` into the file by hand. The accepted values are in `docs/guides/lane-package-activity.md` (#42868).
+- Keeper metadata that still carries `trace_history` or `last_handoff_ts` is no longer current. 0.41.0 dropped both keys on read for one release (#39025); that tolerance is gone, so such a file is treated like any file with a key outside the schema: the runtime logs it as unreadable and reads it as absent, the boot path moves the file aside as `<name>.json.rejected-<time>-…` and re-materialises the Keeper from its declaration with fresh counters (the parked copy keeps the old ones for recovery), and the deployment gate rejects it. A Keeper saved at least once on 0.41.0 or later has neither key. To clean a file that was never re-saved, stop the server, confirm it has exited, and run `for f in <base-path>/.masc/keepers/*.json; do cp -p "$f" "$f.bak" && cp -p "$f" "$f.new" && jq 'del(.trace_history, .last_handoff_ts)' "$f.bak" > "$f.new" && mv "$f.new" "$f"; done`, which keeps a `.bak` copy of each file (#43010).
+
+### Added
+
+- Experimental: `masc_wiki_lint` reads the wiki and reports broken links, links it does not follow, orphan pages, pages without sources or with only hearsay, and pages whose header does not read. It writes nothing. Usage: call `masc_wiki_lint` with `{}`, or narrow with `kind`, `page`, `limit` and `cursor`; see `docs/guides/wiki-lint.md` (#42969).
+
+### Changed
+
+- `masc_keeper_up` reads `network_mode` once and hands the typed mode on: an unknown spelling is refused at parse with the same message, a non-string value is refused with `network_mode must be a string` instead of falling back to the keeper TOML, `egress_allow` is checked against the parsed mode (so `"Policy"` is the policy lane there too), and the keeper TOML records the canonical spelling (#42931).
+- `masc_browser_read` reads `mode` once into a closed variant: an unknown spelling is refused with `mode must be one of …` right after the argument-name and `framePath` checks, before the destination, scope, frame and `maxChars` checks; a non-string `mode` is refused instead of being read as `text`; and the schema enum is checked against the decoder in `test_enum_mirror_sync` (#42934).
+- `masc_keeper_up` refuses a non-string `instructions` with `instructions must be a string` instead of reading it as absent and keeping the keeper TOML's instructions; the empty string still reads as absent, and a whitespace-only string is still read as instructions (#42938).
+- The JSONL prune pass reads directories and removes day files on a system
+  thread instead of the fiber that runs it, for dated stores
+  (`Dated_jsonl.prune`) and the flat stores the server prunes by mtime. The
+  two flat-store prunes are now one `prune_flat_files_older_than ~matches`
+  (#42947).
+- The dashboard tool surfaces no longer draw raw wire names in their last six spots: the executor list row, the executor detail title, the executor result rows, and the tool inventory card title pass the name through the shared display rule, so `keeper_task_done` renders as `KeeperTaskDone` while kebab-case skill slugs and already-PascalCase names stay untouched (#42979).
+
+### Removed
+
+- `masc_runtime_verify` no longer returns `slot_error`, `props_error` and `models_error` in each `runtimes` row; they were always `null`. Nothing in this repository reads them; readers outside it were not checked (#43023).
+
+### Fixed
+
+- Bind Anthropic thinking-block replay to the creating request's prefix: stored thinking replays only while the request digest still matches, and a rewritten prefix drops the stale block instead of failing the turn with an unretryable `Invalid signature in thinking block` 400 (#42729).
+- A board attachment `name` that is not valid UTF-8 is refused (#42845).
+- The reason line of an `alphatex` block the TUI cannot draw now goes through the same terminal sanitizer as other TUI rows, so control characters (including UTF-8 encoded C1 controls) and bidi or zero-width characters from the score are shown as escapes (#42845).
+- When a staged board attachment grows past the 32 MiB limit before the post is sent, the TUI stops reading at the limit and the refusal names the file's size (#42845).
+- One unreadable retained lane add-on binding no longer stops every declaration from being applied. The record holds back only the declaration that owns it, is listed under the configuration issues, and a record whose owner cannot be read holds back all enabled declarations. Retained records without `visibility` and `source_access` are now unreadable instead of being proven by the v0.48.0 compatibility reader (#42868).
+- A declaration keeps its document owner when an unreadable retained record of the same declaration still states a `visibility`. A record with a `visibility` that cannot be read holds the declaration back. A disabled declaration does not change its document owner while a record that may belong to it cannot be read (#42868).
+- Anthropic thinking replay now records its prefix digest on the Keeper request path, so thinking blocks created under an unchanged prefix are kept and only blocks whose tools or system prompt changed are dropped. An unreadable prefix tag drops that message's thinking instead of making every request for the Keeper fail (#42875).
+- The TUI Resources screen now follows `resources/list` `nextCursor` to the last page. It read only the first answer, and because the server sorts entries by URI the wiki pages sort at the end of the listing, so a listing longer than one page was cut off there without a word -- and with a small `MASC_LIST_PAGE_SIZE` no wiki page appeared at all (#42900).
+- A dashboard keeper config POST refused before the update runs (missing name, unknown keeper, missing or invalid revision, name mismatch, patch check, unconfirmed context shrink, parse refusal, non-object body, invalid JSON) now answers with `config_applied: false` and `runtime_sync: "not_attempted"`, as an update refusal that wrote nothing already does (#42939).
+- Keeper turns that continue an execution started before the thinking-prefix digest build (#42729) no longer fail with `execution store is corrupt ... invalid event: Types.inference_telemetry.reasoning_prefix`; provider response events written without that telemetry key, or with it explicitly null, load again (#42943).
+- A refused DOS tool call, such as a malformed slot name for `masc_dos_save`, now reaches the Keeper as a refusal that changed nothing. It used to end the Keeper's whole turn (#42944).
+- A broken symbolic link, or a keeper folder removed while the prune pass
+  read the folder list, no longer stops the whole JSONL prune pass. Both the
+  dated-store listing and the flat-store pass now pick folders with
+  `Fs_compat.subdirectory_names`, which treats such entries as not folders
+  (#42945).
+- `Dated_jsonl.prune` counts a day file only when it was removed, so the
+  "pruned N" startup log no longer counts files it failed to delete (#42945).
+- The `auth status` probe keeps the CLI's stderr with a parse failure, so a truncated probe names the crash instead of only the cut (#42952).
+- When a Keeper's in-turn tool activity could not be written, the coverage
+  gap that records the failure went to `<base>/telemetry-coverage-gaps`,
+  outside `.masc`, where no reader looks. It now goes under the cluster root
+  with the other coverage gaps. `Keeper_callback_failure.record` takes
+  `~masc_root` instead of `~base_dir` (#42954).
+- The TUI keeper roster draws a remote_ssh keeper's sandbox as `R` in its own colour instead of the warning colour it used for an unknown profile, and the legend lists docker / microvm / remote_ssh; the roster mark now uses the shared sandbox profile type (#42977).
+- `masc_tasks` and `keeper_tasks_list` refuse a `status` that is not one of the six task statuses — including the empty string — and a non-string `status`, with the values they accept, instead of answering "No tasks." or an empty page. `masc_tasks` now publishes those six values as the `status` enum. Both tools and the `keeper_tasks_list` cursor filter by the exported `Masc_domain.Task_status_tag`; a cursor naming a status the server does not know is unparseable (#42980).
+- `main` compiles again: `read_bindings` in `lane_addon_store.ml` lists both remaining `Fs_compat.exact_path_kind` constructors instead of a wildcard arm that warning 4 rejects under `-warn-error +a` (#43035).
+- A `claude auth status` probe whose output is cut mid-document is retried once before the Keeper request fails, and a persistent cut now reports how many stdout bytes arrived (#43040).
+- The dashboard shows a blocker label for Keepers stopped by a turn configuration error or an operator interrupt; its runtime blocker list is now the nine labels the server sends, pinned to one fixture both test suites read (#43055).
+
+### Documentation
+
+- The glossary now calls a workspace memory ledger claim entry `Shared Claim` (the name the code and the turn context use) instead of `Shared Fact`, says every claim has at least one member, and notes that the prompt's `World Curator` is the `Workspace Curator` lane (#42948).
+- The glossary now has a `Wiki lint (masc_wiki_lint)` entry: the seven finding kinds, that the tool is read-only and has no configuration switch, and how its `## Sources` lines differ from the page header `source` (#42983).
+
+### Internal
+
+- `Keeper_meta_contract.proactive_cycle_outcome_of_string` returns the outcome whose label is exactly the input, or `None`, instead of trimming, lowercasing and mapping anything else to `Proactive_unknown`; the module-load round-trip check and the decoder's canonical re-check are gone. Case and whitespace are forgiven only by the #28844 meta repair, which now keeps a misspelled `"unknown"` instead of resetting it to `never_started` (#42950).
+- The keeper sandbox profile has one type: `Keeper_types_profile_sandbox.sandbox_profile` and `Keeper_sandbox.backend` re-export `Keeper_sandbox_config.sandbox_profile` with its constructors, and the six identity conversions between the three copies are gone along with `Keeper_sandbox.backend_to_string`. `Keeper_sandbox.t` no longer carries the profile a second time as a string and holds `network_mode` as the variant; `context_status_fields` emits the same JSON (#42953).
+- `Dashboard_http_keeper_practice.role` holds the keeper's activation mode as `Keeper_activation_mode.t` instead of the string it was turned into when the role was built; `role_json` spells it, and the JSON is unchanged (#42958).
+- Remove the last four `[@warning "-4"]` attributes; the matches list every
+  constructor or match on `System_error_class.errno` (#42959).
+- `Keeper_sandbox_docker.effective_sandbox_profile` returns the meta's profile and network mode instead of matching each profile to itself, and the removed `Local` profile is no longer named in its interface or in the `test_keeper_cwd_response` fixtures (#42960).
+- The wiki page contract (the `source` vocabulary, header values, the frontmatter type and parser, page rendering) and the page name rule moved out of `Tool_wiki` into the pure modules `Wiki_page` and `Wiki_page_name`, so the wiki lint reads a page by the same definition the tool writes it by. `Tool_wiki` re-exports every name it had; behaviour is unchanged (#42964).
+- Pure modules for the wiki lint: `Wiki_link` extracts links from a page body, `Wiki_sources` counts the references under `## Sources`, `Wiki_graph` answers file and incoming-link questions, and `Wiki_lint` turns the graph into sorted findings. Nothing reads or writes a file; the `masc_wiki_lint` tool that uses them is a later step (#42966).
+- `Keeper_observability_artifact_registry` gives each artifact its row through a match over the variant (derived with `ppx_enumerate`) and names the three retention rules as a variant, so an artifact has exactly one row and a retention owner and policy by construction; `validate` keeps only the producer, authority and consumer checks, and the `/health` JSON is unchanged (#42975).
+- The removed `Local` sandbox profile is no longer named in `lib/` or the sandbox docs: `Keeper_cwd_response`'s host-path case is `Host_path` / `host_path`, the keeper sandbox, turn, shutdown and playground-path comments describe what each of `docker`, `microvm` and `remote_ssh` does today, and the boundary policy, user manual and sandbox runbook list the `docker`, `microvm` and `remote_ssh` profiles with the network modes each accepts (#42978).
+- The keeper phase gate decides a turn plan once, as `Supervisor_stopped | Registry_phase_missing | Phase_not_executable | Phase_executable`, instead of a six-field record it rebuilt after its own match; the manifest `Phase_gate_decided` row is unchanged (#42984).
+- `Channel_gate_metrics` keeps an ingress attempt's `outcome` as a value: `last_outcome` is an `outcome` rather than its label (no more `"idle"` seed), a recent gate event holds the `outcome` its label, error kind and error are read from, and the last failure is one `failure option` (`Ek_none` is gone). The gate status and events JSON is unchanged (#42985).
+- A Board karma event carries its target as `Board_vote_key.target_kind` (`Post | Comment`) instead of the `"post"`/`"comment"` string; `karma_event` moves to `Board_votes`, the module that builds it. The karma JSON is unchanged (#42986).
+- Executable provenance keeps only what the dashboard build-receipt check leaves open: `package_manager_kind` is `Pnpm | Corepack`, the single accepted build mode and producer are constants instead of stored strings, and `Dashboard_asset_bound` no longer copies twenty-eight manifest fields nothing reads. The status JSON is unchanged (#42988).
+- A failure envelope no longer stores `surface` and `entity_kind` strings: its only producer always wrote `"tool_host"` and `"tool_call"`, so the JSON writer emits those constants and the reader rejects any other value, the same way it already rejects a non-tool-host `cause_code`. The written JSON is unchanged (#42990).
+- A turn-FSM `transition_violation` carries the rejected edge's two states as `any_state` instead of their TLA symbol strings, and its always-identical `reason` field is the `transition_violation_reason` constant. The violation log lines and `invalid_arg` detail read the same (#42991).
+- Model inference metrics store `coverage_status` as `Coverage_error_only | Coverage_full | Coverage_none | Coverage_partial` instead of one of four strings; the metrics JSON and the keeper prompt line print `coverage_status_to_string`, so both read the same (#42993).
+- The keeper decision-log `outcome` is one shared variant, `Keeper_decision_outcome.t` (`Success | Checkpoint | Input_required | Failed`, written as `success`/`checkpoint`/`input_required`/`error`), instead of a string: `append_decision_record` takes it, both turn paths pass constructors, and the dashboard practice summary parses with `Keeper_decision_outcome.of_string` instead of its own copy of the labels. The no-result helper arms for `skipped`, `cancelled` and `partial`, which no caller passed, are gone. The written labels are unchanged (#42994).
+- The keeper runtime blocker surface carries `runtime_blocker_class` (one constructor per class it can produce) instead of a label, and the status bridge's attention arms match on it instead of comparing the label in three `is_*_blocker_class` guards. The status JSON writes `runtime_blocker_class_to_string`, the same nine labels. `runtime_blocker_surface_of_typed_class` and `Keeper_meta_contract.runtime_exhaustion_summary`, whose default-summary path never ran, are gone (#42996).
+- The agent timeline's `chat_line` holds `chat_role` (`Chat_user | Chat_assistant`) instead of a role label; the keeper chat bridge passes the constructor after dropping the other chat-store roles, and the chat timeline event writes `chat_role_to_string`, the same `user`/`assistant` (#42998).
+- Pin the shared tool label at the dashboard's web tool surfaces with render tests, and keep registered tool names ASCII so the JS port mirrors `capitalize_ascii` exactly (#42999).
+- `Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot` no longer carries `phase_values` or `phase_details`, and the `keeper_phase_detail` type is gone; their last readers were removed in #22498 and #29602, so the snapshot only built and sorted them (#43001).
+- The keeper turn state no longer carries `current_turn_blocker_info`, which a provider context overflow wrote and nothing read since the keeper meta `last_blocker` was removed (#29594); `Keeper_meta_contract.blocker_info`, `context_overflow_blocker_label`, `turn_event_bus_evidence_detail` and the `limit_tokens` payload of the lane-failure `Provider_context_overflow` go with it, while the overflow branch keeps its event-bus drain (#43003).
+- `Keeper_state_machine.transition_result` no longer carries `event_applied`, the event `apply_event` was given; its only reader, `Keeper_state_machine_json.transition_result_to_json`, was removed in #33557 (#43004).
+- `Local_runtime_pool.pool_state` no longer carries `parse_errors`: every branch of `load_runtimes_from_env` returned an empty error list, so the field was always `[]`, and its last reader was removed in #33557. The reload debug line drops the `errors=0` count, and the unused test hook `Local_runtime_pool.For_testing.install_pool` is removed (#43006).
+- `test_keeper_state_machine_preconditions` is no longer built as its own test executable: the file has no runner and its tests run inside `test_keeper_state_machine`, so the separate executable reported OK with zero tests (#43008).
+- `Keeper_registry_types.registry_entry` no longer carries `last_restart_ts`: the supervisor, `record_restart` and `restore_supervisor_state` wrote it and nothing read it; `restore_supervisor_state` loses its `~last_restart_ts` argument (#43011).
+- The dashboard Keeper JSON no longer emits `"dead_since": null` in `supervisor_diagnostics` for a Keeper without a registry entry; #29218 removed the key from the dashboard type and the registry-entry branch but left this one. Both branches now build the object through `supervisor_diagnostics_json`, so they can no longer emit different keys (#43013).
+- `masc_pause_status` no longer returns `meta_paused_count` and `phase_paused_count` as `null` for a workspace that is not initialised; #31712 removed both keys from the initialised branch but left them in this one. The backend now returns a typed census (`Workspace_not_initialized` or `Census`), and both the census and the tool reply are written as one JSON object each, so their cases can no longer emit different keys (#43014).
+- Keep the dashboard tool-label port byte-faithful to `capitalize_ascii` on every string, not only registered ASCII names: the first-letter lift now raises `[a-z]` alone, so unregistered non-ASCII inputs (skill slugs, MCP tool names) can no longer diverge from the TUI label (#43019, a #42999 P3 follow-up).
+- The trust snapshot, its decision core, the trust timeline, the status-detail observability and the operator digest take the runtime blocker as the typed `Keeper_status_bridge` surface instead of re-reading the `runtime_blocker_class` label from the JSON the bridge had just written. The snapshot used to decode that label with `Keeper_meta_contract.blocker_class_of_serialized_string`, which spells only two of the nine bridge classes; outputs are unchanged, including the seven classes still shown as `unknown_runtime_blocker` (#43018) (#43020).
+- `masc_runtime_verify` classifies its blocker as a closed variant instead of a label and a detail string, drops the unreachable `chat_contract_incompatible` branch and its `"confirmed"`/`"rejected"` parameter, and writes the discovered and undiscovered results through one JSON writer (#43023).
+- The release full checks (`full-check.yml`, "Release full checks") can be dispatched by hand, so the release-profile type checks they run can be run against a cut candidate before the release is cut (#43024).
+- `Keeper_sandbox_runtime_setup` no longer exports `cleanup_result`, a record type no code built or read (#43026).
+- `Tool_local_runtime_core` no longer exports the `llama_process` and `bench_sample` records or `split_ws`, none of which any code built or called, and its interface drops docs and section headings that had no definition under them (#43029).
+- The failure route `Exhausted_visible_alive` no longer carries a `detail` string, which nothing read since the keeper meta `last_blocker` and the turn `blocker_info` were removed; `Keeper_internal_error.cap_blocker_detail`, its length constants and its error-text prefix check go with it, as does the test that only exercised them (#43032).
+- `Keeper_meta_contract` no longer exports `blocker_class`, `blocker_class_to_string` or `blocker_class_of_serialized_string`, which nothing built or read after the turn `blocker_info` and the trust snapshot's label decoding were removed; the labels dashboards read come from `Keeper_status_bridge_blocker.runtime_blocker_class_to_string` (#43034).
+- Decide which browser lane operations are periodic refreshes in one exhaustive function (#43042).
+- Match LSP document-sync methods by constructor in the IDE LSP proxy dispatch instead of a `when` guard, so the compiler checks the list (#43043).
+- Patterns on the one-field `Exhausted_visible_alive` record bind `terminal` without a trailing `; _`, so no pattern silently drops a field added later (#43044).
+- Replayed thinking test fixtures now carry the request-prefix digest recorded for their producing request, so they exercise the prefix binding of #42729 and #42875 instead of being dropped as `Prefix_digest_absent` (#43045).
+- The activity graph HTTP handlers take only the two query-parameter readers they call; five never-called capabilities and the docs about SSE streaming that no longer exists are gone (#43049).
+- The one-time retry of a cut `claude auth status` probe is decided where the document fails to parse instead of from the error text, so rewording the error can no longer switch it off (#43051).
+- Drop the fragile match on the Claude Code auth probe result so main builds under warning 4 again (#43064).
+- Count only Skills in the invalid-Skill search assertion of test_keeper_skill_inventory so a Tool that mentions the same word no longer fails it (#43066).
+
+## [0.55.0] - 2026-10-14
+
+### Changed
+- TBD
+
+### Deprecated
+- TBD
+
 ## [0.54.0] - 2026-10-13
 
 ### Upgrade notes

@@ -64,8 +64,14 @@ whose action word it does not know and `log_unreadable_line` for lines it cannot
 read at all. Both are zero for a log no other tool has written. A line the
 parser cannot read is counted rather than raised, so "the log is fine" and "the
 log could not be read" stay different answers. A wiki with no `log.md` yet
-reports zero, not an error. A last line the writer had not finished — the file
-does not end in a newline — is not a line and is not counted.
+reports zero, not an error; a `log.md` that exists but cannot be read makes the
+call fail instead of reporting zero. A last line the writer had not finished —
+the file does not end in a newline — is not a line and is not counted.
+
+The tool reads `log.md` before it reads the pages, which is the order the
+writers work in (the page lands first, the log line second). A write that
+completes in between therefore shows as a page at or ahead of the log, never as
+a `revision_log_gap`.
 
 Refused arguments: an unknown `kind`, a `limit` below 1, a value of the wrong
 type (`{"limit": "20"}`, `{"kind": 5}`), a `cursor` this tool did not issue, a

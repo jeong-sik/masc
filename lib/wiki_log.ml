@@ -15,11 +15,6 @@ type t =
 let empty = { lines = []; unknown_action = 0; unreadable_line = 0 }
 let header = "## ["
 
-let has_prefix ~prefix text =
-  String.length text >= String.length prefix
-  && String.equal (String.sub text 0 (String.length prefix)) prefix
-;;
-
 (* Every complete line, and not the last piece of a line still being written.
    [String.split_on_char] gives one piece per line plus a last piece that is
    empty when the text ended in a newline and is the unfinished line when it
@@ -51,7 +46,7 @@ let read_fields rest =
 ;;
 
 let read_line text =
-  if not (has_prefix ~prefix:header text)
+  if not (String.starts_with ~prefix:header text)
   then `Unreadable
   else (
     match String.index_opt text ']' with

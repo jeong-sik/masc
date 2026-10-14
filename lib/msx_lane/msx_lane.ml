@@ -1009,12 +1009,21 @@ let pinned_core_source_digest = "cc6489f2ddae4a48596b4879b3c0e368"
    red naming the new digest. *)
 let pinned_core_commit = "7cc5836b517c43e3690272d7c7d561d9a1e5cc3b"
 
+(* The exact commit of the linked core, when this build can establish it:
+   the pinned commit when the running core's digest matches the pin, else
+   the core's own recorded commit; [None] when neither is known. *)
+let linked_core_commit =
+  if String.equal Msx_core_identity.source_digest pinned_core_source_digest
+  then Some pinned_core_commit
+  else Msx_core_identity.source_commit
+
 type core = {
   source_commit : string option;
   source_digest : string;
   pinned_source_digest : string;
   matches_pin : bool;
   pinned_commit : string;
+  linked_commit : string option;
 }
 [@@deriving yojson]
 
@@ -1024,6 +1033,7 @@ let core =
   ; pinned_source_digest = pinned_core_source_digest
   ; matches_pin = String.equal Msx_core_identity.source_digest pinned_core_source_digest
   ; pinned_commit = pinned_core_commit
+  ; linked_commit = linked_core_commit
   }
 
 type checkpoint_info = {

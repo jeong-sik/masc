@@ -337,8 +337,7 @@ type core = {
       (** The linked core's own clean-checkout Git commit, when its build
           can establish it. [None] for dirty, archive or unowned checkouts,
           or unavailable Git identity — in particular a vendor/pin build,
-          which has no [.git]. When [None], {!pinned_commit} names the same
-          linked core from the build-time pin. *)
+          which has no [.git]. *)
   source_digest : string;
       (** the linked ocaml-msx core's own identity: a digest of its [lib/]
           sources, computed by its build ([Msx_core_identity]). Not a
@@ -352,13 +351,21 @@ type core = {
           different core from the one CI builds against — an older opam
           copy, or a vendored checkout on another branch. *)
   pinned_commit : string;
-      (** the Git commit [scripts/opam-pin-external-deps.sh] pins as
-          [OCAML_MSX_SHA] — the build-time identity of the core a pinned
-          build links. When [source_commit] is [None] (a vendor/pin build
-          has no [.git] for the core to ask), this is the exact linked
-          commit; the build inputs recorded it, not a later switch query.
-          When [source_commit] is [Some], both name the same checkout and
-          agree. *)
+      (** The Git commit [scripts/opam-pin-external-deps.sh] pins as
+          [OCAML_MSX_SHA] — the commit MASC expects to link, recorded at
+          build time. This is the build-time pin, not proof of the linked
+          binary: it names the linked core only when [matches_pin] is
+          [true]. When [matches_pin] is [false] the server runs a different
+          core (an older opam copy or another branch's vendor checkout) and
+          [pinned_commit] does not describe it. See {!linked_commit}. *)
+  linked_commit : string option;
+      (** The exact commit of the linked core, or [None] when this build
+          cannot establish it. [Some c] when [matches_pin] is [true] (then
+          [c] is [pinned_commit]) or when [source_commit] names the linked
+          checkout; [None] when [matches_pin] is [false] and
+          [source_commit] is [None] — the honest "unknown" for a build that
+          links a core different from the pin and records no commit of its
+          own. *)
 }
 [@@deriving yojson]
 

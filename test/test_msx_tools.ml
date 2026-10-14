@@ -1112,6 +1112,20 @@ let test_core_identity_matches_pin () =
     true;
   check bool "source_commit agrees with the pin when present"
     (match core.source_commit with Some sha -> String.equal sha core.pinned_commit | None -> true)
+    true;
+  (* linked_commit names the exact linked commit only when it is known:
+     the pin when the running core matches the pin, else the core's own
+     commit. A build that links a different core (matches_pin false) with
+     no recorded commit must report None, not the pin. *)
+  check bool "linked_commit is the pin when the core matches the pin"
+    (match core.linked_commit with
+     | Some c -> core.matches_pin && String.equal c core.pinned_commit
+     | None -> not core.matches_pin)
+    true;
+  check bool "linked_commit falls back to source_commit when not matching the pin"
+    (if core.matches_pin
+     then match core.linked_commit with Some c -> String.equal c core.pinned_commit | None -> false
+     else core.source_commit = core.linked_commit)
     true
 ;;
 

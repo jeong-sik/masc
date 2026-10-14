@@ -118,7 +118,12 @@ let inline_ancestor text =
       (fun path ->
          match Otoml.find_opt toml Fun.id path with
          | Some (Otoml.TomlInlineTable _) -> true
-         | Some _ | None -> false)
+         | Some
+             Otoml.(
+               TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _
+               | TomlOffsetDateTime _ | TomlLocalDateTime _ | TomlLocalDate _
+               | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlTableArray _)
+         | None -> false)
       [ [ "browser" ]; [ "browser"; "live" ] ]
 
 let editable ~existing text =
@@ -228,7 +233,8 @@ let profile_state profile =
   | _ ->
     (match Unix.stat profile with
      | { Unix.st_kind = Unix.S_DIR; _ } -> Ok Directory
-     | _ | (exception Unix.Unix_error _) -> Ok Not_a_directory)
+     | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ }
+     | (exception Unix.Unix_error _) -> Ok Not_a_directory)
 
 (* The directory that would hold the new profile is the nearest one that
    exists, and a profile is made there only when it can be written. Asked at

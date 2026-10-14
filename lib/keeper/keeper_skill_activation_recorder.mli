@@ -4,7 +4,7 @@ type t
 type bound_context
 type result_child =
   { alias : string
-  ; reference : Skill_reference.t
+  ; skill_reference : Skill_reference.t
   ; skill_tool_use_id : string
   }
 val bound_trace_id : bound_context -> Keeper_id.Trace_id.t

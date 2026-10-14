@@ -3260,6 +3260,20 @@ type surface =
   | Tools
   | System_logs
 
+(** Whether the screen is the chat composer's. The chat owns its footer and
+    its printable keys, so the rules that stand aside for it ask this one
+    question -- the footer's help door, [composer_claimed], [message_mode].
+    Every constructor is named so a new surface has to decide, and the rule
+    rides no polymorphic compare over [surface]. *)
+let view_is_chat = function
+  | Keepers Keeper_message -> true
+  | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+            | Keeper_runtime_pick) -> false
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board
+  | Approvals | Planning | Schedules | Verification | Harness | Fusion
+  | Repositories | Code | Changes | Connectors | Runtime | Config
+  | Resources | Tools | System_logs -> false
+
 (** The Keeper roster or one Keeper's detail: where the selected Keeper is
     the one on screen, so a key can be read as meaning that Keeper. Every
     constructor is named so a new surface has to decide. *)
@@ -10751,6 +10765,20 @@ let modal_owns_keys (state : state) =
   || Option.is_some state.client_detail
   || Option.is_some state.collab
   || Option.is_some (play_card_shown state)
+
+(* Whether [?] opens the help sheet on the frame being drawn. A text field
+   holding printable keys takes [?] as a character, a modal owns its own
+   row, and the chat composer owns its footer -- its rows carry the door
+   item exactly while the draft is empty. The overlays that answer [?] in
+   their own dispatch arms (answering, link modal, keeper navigation) are
+   deliberately not excluded: their rows keep the stamped door.
+   [compact_viewport] is the frame's; a footer row on screen is itself the
+   frame's word that it had room, so the caller that has one passes
+   [false]. *)
+let help_key_answers ~compact_viewport (state : state) =
+  (not (view_is_chat state.view))
+  && Option.is_none (text_input_target state ~compact_viewport)
+  && not (modal_owns_keys state)
 
 let close_context_inspector (state : state) =
   state.context_inspector_open <- false;

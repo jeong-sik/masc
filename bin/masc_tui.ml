@@ -22676,7 +22676,7 @@ and is loaded on demand through keeper_skill.
           "Fusion launch left while its answer was out; the run may have started - r refreshes the list";
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
-        (not compact_viewport) && state.view = Keepers Keeper_message
+        (not compact_viewport) && view_is_chat state.view
         && not state.repository_changes_open
       in
       (* The opening screen's help-door line retires on the first input of
@@ -22845,7 +22845,7 @@ and is loaded on demand through keeper_skill.
            it. Asking whether a field is open at all is the same question the
            six were circling, and it cannot fall behind a new field. *)
         && Option.is_none (text_input_target state ~compact_viewport)
-        && state.view <> Keepers Keeper_message
+        && not (view_is_chat state.view)
         && not state.keeper_navigation_open
         && key <> Some toggle_mouse_tracking_key
         && key <> Some toggle_roster_pane_key

@@ -224,21 +224,6 @@ let list_dir config path =
 (* Initialization check                         *)
 (* ============================================ *)
 
-let root_state_path config = Filename.concat (masc_dir config) "root-state.json"
-
-(** Root initialization check - independent of current workspace.
-    Used by workspace/cluster management features. *)
-let root_is_initialized config =
-  match config.backend with
-  | Memory _ ->
-      (match key_of_path config (root_state_path config) with
-       | Some key -> backend_exists config ~key
-       | None -> false)
-  | FileSystem _ ->
-      Sys.file_exists (masc_dir config) &&
-      Sys.is_directory (masc_dir config) &&
-      Sys.file_exists (root_state_path config)
-
 (* Server-level cache for is_initialized — avoids 3 syscalls per request.
    Cache key is the base path, to handle multi-config scenarios. *)
 type init_cache_entry = {

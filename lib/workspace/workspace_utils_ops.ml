@@ -83,7 +83,7 @@ let mkdir_p path =
 
 let read_json_local path =
   (* Treat blank/empty files as an empty object, consistent with
-     [read_json_root] below. A blank JSON is a legitimate state for
+     [read_json] below. A blank JSON is a legitimate state for
      placeholders or newly-created agent metadata files, and does not
      warrant a WARN log line. *)
   match Safe_ops.read_file_safe path with
@@ -162,53 +162,6 @@ let write_encoded_json_local path (content : encoded_json) =
   | exn -> Error (Printexc.to_string exn)
 
 let write_json_local path json = write_encoded_json_local path (encode_json_pretty json)
-
-(* Root-scoped JSON helpers for shared root metadata. *)
-let read_json_root config path =
-  match key_of_path config path with
-  | Some key -> begin
-      match config.backend with
-      | FileSystem _ when Sys.file_exists path -> read_json_local path
-      | Memory _ | FileSystem _ ->
-      match backend_get config ~key with
-      | Ok (Some content) ->
-          (let trimmed = String.trim content in
-           if trimmed = "" then `Assoc []
-           else match Safe_ops.parse_json_safe ~context:"read_json_root" trimmed with
-           | Ok json -> json
-           | Error msg ->
-             Log.Misc.warn "[read_json_root] %s" msg;
-             `Assoc [])
-      | Ok None -> `Assoc []
-      | Error e ->
-        Log.Misc.warn "[read_json_root] backend_get failed for %s: %s" key (Backend_types.show_error e);
-        `Assoc []
-    end
-  | None -> read_json_local path
-
-let write_json_root config path json =
-  match key_of_path config path with
-  | Some key ->
-      let content = encode_json_pretty json in
-      backend_set config ~key ~value:content
-      |> Result.iter_error (fun e ->
-           Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e));
-      (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      write_json_local path json
-      |> Result.iter_error (fun msg ->
-           Log.Misc.warn "write_json_root: local mirror write failed for %s: %s" path msg)
-  | None ->
-      write_json_local path json
-      |> Result.iter_error (fun msg ->
-           Log.Misc.warn "write_json_root: local write failed for %s: %s" path msg)
-
-let path_exists_root config path =
-  match key_of_path config path with
-  | Some key ->
-      (match config.backend with
-       | FileSystem _ -> Sys.file_exists path || backend_exists config ~key
-       | Memory _ -> backend_exists config ~key)
-  | None -> Sys.file_exists path
 
 let read_json config path =
   match key_of_path config path with

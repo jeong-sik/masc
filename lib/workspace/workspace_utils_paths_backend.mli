@@ -40,10 +40,6 @@ val dated_store_root : config -> Dated_jsonl.Store.root
 (** The workspace's state root, for locating a date-split JSONL store
     through [Dated_jsonl.Store]. *)
 
-(** Root state.json path. Used by bootstrap/init to gate
-    one-time root setup. *)
-val root_state_path : config -> string
-
 (** Project-scoped key prefix for backend keys (e.g.
     ["proj:default"]). Used by broadcast/pubsub channel naming. *)
 val project_prefix : config -> string
@@ -123,10 +119,6 @@ val strip_prefix : string -> string -> string
 val list_dir : config -> string -> string list
 
 (** {1 Initialization check} *)
-
-(** [true] iff the cluster-root state file exists (independent of
-    the current workspace). Used by workspace/cluster management features. *)
-val root_is_initialized : config -> bool
 
 (** [true] iff the current workspace is initialized (state.json
     present). Backend-agnostic check. Cached with 1-second TTL. *)

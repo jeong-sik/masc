@@ -339,7 +339,7 @@ let handle_heartbeat
          | Ok ping ->
            (try
               let t0 = Unix.gettimeofday () in
-              if Workspace.root_is_initialized workspace_config
+              if Workspace.is_initialized workspace_config
               then (
                 match Workspace.heartbeat workspace_config ~agent_name:ping.agent_name with
                 | Workspace.Heartbeat_updated _ | Workspace.Agent_not_found _ -> ()

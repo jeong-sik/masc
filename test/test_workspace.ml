@@ -973,7 +973,7 @@ let test_is_agent_session_bound_after_default_join () =
 
 let test_workspace_bootstrap_preserves_backend_state () =
   with_memory_test_env (fun config ->
-    Workspace.ensure_workspace_bootstrap config;
+    ignore (Workspace.init config ~agent_name:None);
     let _ =
       Workspace.update_state config (fun state ->
         { state with message_seq = 41 })
@@ -989,7 +989,7 @@ let test_workspace_bootstrap_preserves_backend_state () =
     Workspace_utils.write_json config (Workspace.backlog_path config)
       (Masc_domain.backlog_to_yojson backlog);
 
-    Workspace.ensure_workspace_bootstrap config;
+    ignore (Workspace.init config ~agent_name:None);
 
     let state = Workspace.read_state config in
     let saved_backlog = Workspace.read_backlog config in
@@ -999,8 +999,8 @@ let test_workspace_bootstrap_preserves_backend_state () =
 
 let test_workspace_bootstrap_ignores_invalid_workspace_id_in_flat_mode () =
   with_memory_test_env (fun config ->
-    Workspace.ensure_workspace_bootstrap config;
-    Alcotest.(check bool) "root state initialized" true
+    ignore (Workspace.init config ~agent_name:None);
+    Alcotest.(check bool) "state initialized" true
       (Workspace.is_initialized config)
   )
 

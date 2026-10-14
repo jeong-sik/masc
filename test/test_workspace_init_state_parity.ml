@@ -1,13 +1,14 @@
-(** [Workspace.init] writes [root-state.json] for a fresh workspace.
+(** [Workspace.init] writes [state.json] for a fresh workspace.
 
-    [Workspace_bootstrap.default_workspace_state] declares that record, and
-    [ensure_workspace_bootstrap] uses it. [init] carried its own copy of the
-    same twelve fields, so changing a default — [search_strategy_default] is
-    one — moved the initial state only for whichever entry point happened to
-    run on a fresh workspace. Nothing in the type system connected the two.
+    [Workspace_bootstrap.default_workspace_state] declares that record.
+    [init] carried its own copy of the same twelve fields, so changing a
+    default — [search_strategy_default] is one — did not reach a workspace
+    [init] created. Nothing in the type system connected the two.
 
     This pins what [init] writes against the declared default. A re-inlined
-    copy that drifts in any field fails here.
+    copy that drifts in any field fails here. A message is filed before
+    [init], so a copy that starts the counter at 0 instead of resuming it
+    past that message fails too.
 
     One workspace per executable: [Workspace] pins [MASC_BASE_PATH] for the
     running test binary and logs "Ignoring test MASC_BASE_PATH override" for a
@@ -41,7 +42,7 @@ let with_workspace f =
   let dir =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "root-state-parity-%d" (Unix.getpid ()))
+      (Printf.sprintf "init-state-parity-%d" (Unix.getpid ()))
   in
   rm dir;
   Unix.mkdir dir 0o755;
@@ -54,11 +55,18 @@ let with_workspace f =
     (fun () -> f config)
 ;;
 
+let filed_message_seq = 42
+
 let test_init_writes_the_declared_default_state () =
   with_workspace (fun config ->
+    let messages = Q.messages_dir config in
+    Fs_compat.mkdir_p messages;
+    Out_channel.with_open_text
+      (Filename.concat messages (Printf.sprintf "%d_filed.json" filed_message_seq))
+      (fun oc -> output_string oc "{}");
     let (_ : string) = Q.init config ~agent_name:None in
     let written =
-      without_started_at (Workspace_utils.read_json_root config (Q.root_state_path config))
+      without_started_at (Workspace_utils.read_json config (Q.state_path config))
     in
     let declared =
       without_started_at
@@ -69,7 +77,12 @@ let test_init_writes_the_declared_default_state () =
        keys than the record has fields. *)
     (match written with
      | `Assoc fields when List.length fields >= 4 -> ()
-     | other -> fail ("root-state.json read back as: " ^ Yojson.Safe.to_string other));
+     | other -> fail ("state.json read back as: " ^ Yojson.Safe.to_string other));
+    check
+      int
+      "the counter resumes past the filed message"
+      filed_message_seq
+      Yojson.Safe.Util.(written |> member "message_seq" |> to_int);
     check
       string
       "init writes default_workspace_state"
@@ -79,8 +92,8 @@ let test_init_writes_the_declared_default_state () =
 
 let () =
   run
-    "workspace_root_state_parity"
-    [ ( "root state"
+    "workspace_init_state_parity"
+    [ ( "state"
       , [ test_case
             "init writes the declared default state"
             `Quick

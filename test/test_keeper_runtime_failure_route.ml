@@ -448,8 +448,7 @@ let test_response_observed_per_class () =
   in
   let rotate rotate = KFR.Rotate_now { rotate } in
   let terminal terminal =
-    KFR.Exhausted_visible_alive
-      { terminal; detail = "" }
+    KFR.Exhausted_visible_alive { terminal }
   in
   let check_observed expected route =
     Alcotest.(check bool)
@@ -614,8 +613,7 @@ let test_route_resumes_on_same_path_per_class () =
   in
   let rotate rotate = KFR.Rotate_now { rotate } in
   let terminal terminal =
-    KFR.Exhausted_visible_alive
-      { terminal; detail = "" }
+    KFR.Exhausted_visible_alive { terminal }
   in
   let check_resumes expected (label, route) =
     Alcotest.(check bool)

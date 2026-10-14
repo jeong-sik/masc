@@ -87,11 +87,9 @@ let transient_retry_route =
     }
 ;;
 
-let deterministic_route ~detail =
+let deterministic_route =
   Keeper_runtime_failure_route.Exhausted_visible_alive
-    { terminal = Keeper_runtime_failure_route.Deterministic_request
-    ; detail
-    }
+    { terminal = Keeper_runtime_failure_route.Deterministic_request }
 ;;
 
 let discord_surface ~channel_id =
@@ -784,7 +782,7 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
     ; Some
         (failed_outcome
            ~source_disposition:Keeper_unified_turn.Follow_failure_route
-           ~route:(deterministic_route ~detail:"deterministic rejection")
+           ~route:deterministic_route
            ~deferred_runtime_lane:None
            meta)
     ; Some (Keeper_heartbeat_loop_cycle.Input_required meta)

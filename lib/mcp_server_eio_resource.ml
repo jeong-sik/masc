@@ -40,35 +40,40 @@ module For_testing = struct
     run_blocking_resource_io Eio_guard.execution_context
 end
 
-(* One listed resource per wiki page. The pages are otherwise reachable only
-   through the [masc://wiki/{topic}] template, which a client that lists
-   resources cannot expand, so it could not open a page. A page whose header
-   does not read is listed by file name with the reason, as the index resource
-   does. A file whose name is not a valid page topic is not listed: its URI
-   would not read back as the same file ([notes.json.md] reads as a JSON
-   request for [notes]; [?] and [#] fall to URI parsing), and the index
-   resource still shows it with its reason. The log is listed once it exists.
+(* A page's header sits at the top, so the listing reads only this many bytes
+   of a page to find it, not the whole file (task-2309). A page larger than
+   this whose header still does not read from the prefix falls back to the
+   whole file, so a header longer than the bound is listed exactly as before. *)
+let frontmatter_read_limit = 8192
 
-   Known limit, tracked as task-2309: every listing reads each page file and
-   the whole log. The TUI Resources screen follows [nextCursor] now, so a
-   listing longer than one page (512 entries by default) is no longer cut off
-   at its end, where the wiki entries sort. *)
-let wiki_resources ~base_path : Mcp_server.mcp_resource list =
-  run_blocking_resource_io (fun () ->
-    let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in
-    let pages =
-      Tool_wiki.list_pages ~base_path
-      |> List.filter_map (fun path ->
-        match Fs_compat.load_file path with
+let read_listing_header ~path ~size =
+  if size <= frontmatter_read_limit
+  then Fs_compat.load_file path
+  else begin
+    let prefix = Fs_compat.read_slice ~path ~from:0 ~len:frontmatter_read_limit in
+    match Tool_wiki.parse_frontmatter prefix with
+    | Ok _ -> prefix
+    | Error _ -> Fs_compat.load_file path
+  end
+;;
+
+(* One listed resource per page, or [None] when the name is not a valid page
+   topic or the file vanished. The URI comes from the validated topic, never
+   from concatenating the file name. The size is a stat, so a page's body is
+   not read to list it. *)
+let page_resource path : Mcp_server.mcp_resource option =
+  let file = Filename.basename path in
+  let topic = Filename.chop_suffix file ".md" in
+  match Tool_wiki.validate_page_name topic with
+  | Error _ -> None
+  | Ok _ ->
+    (match Fs_compat.file_size path with
+     | None -> None
+     | Some size ->
+       (match read_listing_header ~path ~size with
         | exception Sys_error _ -> None
         | content ->
-          let file = Filename.basename path in
-          let topic = Filename.chop_suffix file ".md" in
-          match Tool_wiki.validate_page_name topic with
-          | Error _ -> None
-          | Ok _ ->
-          let uri = uri_of_topic topic in
-          let size = String.length content in
+          let uri = "masc://" ^ wiki_topic_prefix ^ topic in
           (match Tool_wiki.parse_frontmatter content with
            | Ok (fm : Tool_wiki.frontmatter) ->
              Some
@@ -88,18 +93,38 @@ let wiki_resources ~base_path : Mcp_server.mcp_resource list =
                   ~name:file
                   ~description:(Tool_wiki.frontmatter_error_to_string error)
                   ~mime_type:"text/markdown"
-                  ())))
-    in
+                  ()))))
+;;
+
+(* One listed resource per wiki page. The pages are otherwise reachable only
+   through the [masc://wiki/{topic}] template, which a client that lists
+   resources cannot expand, so it could not open a page. A page whose header
+   does not read is listed by file name with the reason, as the index resource
+   does. A file whose name is not a valid page topic is not listed: its URI
+   would not read back as the same file ([notes.json.md] reads as a JSON
+   request for [notes]; [?] and [#] fall to URI parsing), and the index
+   resource still shows it with its reason. The log is listed once it exists.
+
+   Read cost (task-2309): the listing no longer reads page bodies. Each page
+   contributes a stat and, at most, a bounded header prefix, and the log is
+   sized by stat. The TUI Resources screen follows [nextCursor], so a listing
+   longer than one page is no longer cut off at its end, where the wiki entries
+   sort. Still open: an explicit [masc://wiki/log] read returns the whole file,
+   with no cap or tail read. *)
+let wiki_resources ~base_path : Mcp_server.mcp_resource list =
+  run_blocking_resource_io (fun () ->
+    let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in
+    let pages = Tool_wiki.list_pages ~base_path |> List.filter_map page_resource in
     let log_path =
       Filename.concat (Tool_wiki.wiki_root ~base_path) Wiki_journal.log_file
     in
     let log =
-      match Fs_compat.load_file log_path with
-      | exception Sys_error _ -> []
-      | content ->
+      match Fs_compat.file_size log_path with
+      | None -> []
+      | Some size ->
         [ Mcp_server.make_resource
             ~title:"Wiki log"
-            ~size:(String.length content)
+            ~size
             ~uri:(uri_of_topic wiki_log_topic)
             ~name:wiki_log_topic
             ~description:

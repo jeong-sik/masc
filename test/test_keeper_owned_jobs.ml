@@ -2053,12 +2053,124 @@ let test_running_absent_inventory_notified_once () = with_fixture @@ fun _env in
   check int "closed running job never restarts" 1 (effect_count fixture "start")
 
 
+let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  let module Async = Masc.Keeper_msg_async in
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let recipe = `Assoc ["execution",`String "async";"nodes",`List
+      [`Assoc ["id",`String "await";"tool",`String "keeper_job_result";
+         "input",`Assoc ["kind",`String "literal";"value",argument id]];
+       `Assoc ["id",`String "consume";"tool",`String "keeper_artifact_read";
+         "after",`List [`String "await"];
+         "input",`Assoc ["kind",`String "object";"fields",`List
+           [`Assoc ["name",`String "sha256";"value",`Assoc
+             ["kind",`String "output";"node",`String "await";
+              "pointer",`String "/artifacts/0/_blob/sha256"]]]]]]] in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-hint" ~turn:41 "keeper_composition_prepare" recipe) in
+  let reference = prepared |> member "draft" |> composition_reference "actual completion hint draft" in
+  let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"run-hint" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String reference.sha256])) in
+  let ok,waiting,waiting_entry = await_composition env fixture accepted in
+  check bool "original DAG is suspended before completion" false ok;
+  (match waiting_entry.status with
+   | Async.Waiting_for_owned_jobs {job_ids;_} ->
+     check (list string) "completion hint has the original job wait" [id] (List.map Store.Job_id.to_string job_ids)
+   | _ -> fail "original DAG was not canonically waiting for the job");
+  let config = Workspace.default_config fixture.base_path in
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  write declaration "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original completion hint fixture\"\n";
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  write runtime_path "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n";
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+      |> require "completion hint Skill publication authority" in
+  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
+  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
+   | Published _ | Unchanged _ -> () | Workspace_retired -> fail "completion hint publication retired early");
+  let context : float Masc.Keeper_types_profile.context =
+    {config;agent_name="completion-hint-fixture";
+     sw=Async.server_background_switch () |> require "completion hint background switch";
+     clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let resumed,notify_resumed = Eio.Promise.create () in
+  let accepted_intakes = ref 0 and other_intakes = ref [] in
+  let continuations = Wake.create ~context ~on_result:(fun _ outcome -> match outcome with
+      | Ok (Tool_result.Completed _ as result) ->
+        incr accepted_intakes; Eio.Promise.resolve notify_resumed result
+      | Ok (Tool_result.Deferred _ | Tool_result.Failed _) | Error _ ->
+        other_intakes := outcome :: !other_intakes) () in
+  let hints = ref [] in
+  let jobs = Completion_wake.create ~config ~on_result_ready:(fun (record : Store.record) ->
+      hints := (record,Store.result_ready record,pending_completions fixture,List.length (calls fixture)) :: !hints;
+      Wake.pulse ~sw:context.sw continuations |> require "actual durable completion hints original DAG") () in
+  (* Change the current turn before the original job completes. No direct
+     composition resume or independent continuation pulse follows this point. *)
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  let backend_before = List.length (calls fixture) in
+  let completion_started = Mtime_clock.counter () in
+  Completion_wake.pulse ~sw:context.sw jobs |> store_value "actual owned completion maintenance pulse";
+  let resumed = Eio.Promise.await resumed |> Tool_result.data in
+  let ok,completed,completed_entry = await_composition env fixture resumed in
+  let completion_ms = Mtime.Span.to_float_ns (Mtime_clock.count completion_started) /. 1_000_000. in
+  check bool "durable completion hint finishes the original DAG" true ok;
+  check int "durable completion hint accepts one original worker" 1 !accepted_intakes;
+  let record,ready,queued,backend_at_ready = match !hints with
+    | [hint] -> hint | _ -> fail "expected exactly one original durable result hint" in
+  check bool "hint follows full durable output" true ready;
+  check string "hint identifies the original job" id (Store.Job_id.to_string record.job_id);
+  check (option string) "hint keeps the original Task" (Some "task-A") record.source.task_id;
+  let job_notifications = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      match selection.source.payload with
+      | Keeper_event_queue.Owned_job_completed completion ->
+        Store.Job_id.to_string completion.oj_job_id = id
+      | _ -> false) queued in
+  check int "original notification is durable before hint" 1 (List.length job_notifications);
+  let rec await_original_ack () =
+    if (load fixture id).completion_delivered then ()
+    else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; await_original_ack ()) in
+  await_original_ack ();
+  check bool "ordinary completion ACK is retained" true (load fixture id).completion_delivered;
+  check int "continuation does not query the backend after complete output" backend_at_ready (List.length (calls fixture));
+  check string "completion keeps the original run" (accepted |> member "composition_run_id" |> to_string)
+    (resumed |> member "composition_run_id" |> to_string);
+  let waiting_node = composition_node "await" (composition_nodes fixture waiting)
+  and completed_node = composition_node "await" (composition_nodes fixture completed) in
+  List.iter (fun field -> check_json ("completion hint keeps original occurrence " ^ field)
+      (waiting_node |> member field) (completed_node |> member field)) ["execution_id";"tool_use_id"];
+  check_json "hint consumer receives complete original stdout" (`String stdout_bytes)
+    (composition_node "consume" (composition_nodes fixture completed) |> member "result"
+     |> member "data" |> member "content");
+  let request_context = match completed_entry.request_context with
+    | Some fields -> `Assoc fields | None -> fail "original hint completion has no source context" in
+  check_json "hint completion belongs to original Task" (`String "task-A") (request_context |> member "source_task_id");
+  check int "completion never recreates the original program" 1 (effect_count fixture "create");
+  check int "completion never restarts the original program" 1 (effect_count fixture "start");
+  Printf.printf "OWNED_COMPLETION_HINT_CONTINUATION %s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["scope",`String "synthetic CLI public start/prepare/run and actual durable completion supervisor hint";
+     "completion_pulse_to_original_dag_completion_ms",`Float completion_ms;
+     "backend_calls_to_complete_original_job",`Int (backend_at_ready-backend_before);
+     "backend_calls_after_result_ready",`Int (List.length (calls fixture)-backend_at_ready);
+     "accepted_intakes",`Int !accepted_intakes;"other_intakes",`Int (List.length !other_intakes);
+     "durable_job_notifications_before_hint",`Int (List.length job_notifications);
+     "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
+
+exception Fixture_result_observer_failed
+
 let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let running = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let blocked_id = job_id running in
   let config = Workspace.default_config fixture.base_path in
-  let supervisor = Completion_wake.create ~config () in
+  let failed_observers = ref [] in
+  let supervisor = Completion_wake.create ~config ~on_result_ready:(fun (record : Store.record) ->
+      failed_observers := record.job_id :: !failed_observers;
+      raise Fixture_result_observer_failed) () in
   let entered = Filename.concat fixture.base_path "inspect-entered" in
   let release = Filename.concat fixture.base_path "inspect-release" in
   control fixture (`Assoc ["mode", `String "inspect_blocked"; "blocked_job_id", `String blocked_id]);
@@ -2088,17 +2200,21 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
       ~tool_use_id:"collect-independent" ~turn:53 "keeper_job_status" (argument later_id)));
   let calls_before = List.length (calls fixture) in
   Completion_wake.pulse ~sw:job_sw supervisor |> store_value "next pulse admits independent recovery";
-  await_condition (fun () -> List.length (pending_completions fixture) = 1);
+  await_condition (fun () -> List.length (pending_completions fixture) = 1
+      && (load fixture later_id).completion_delivered);
   let completion = only_selection fixture |> completion_payload in
   check string "new completed job delivers while older backend is blocked" later_id
     (Store.Job_id.to_string completion.oj_job_id);
   check int "active blocked worker is not duplicated by another pulse" calls_before (List.length (calls fixture));
+  check (list string) "failed observer cannot block the independent result ACK" [later_id]
+    (List.map Store.Job_id.to_string !failed_observers);
   check bool "pending first job has not been misclassified completed" false (load fixture blocked_id).completion_delivered;
   write release "continue the original inspection\n";
   Printf.printf "owned_job_completion_supervisor_measurement=%s\n%!"
     (Yojson.Safe.to_string (`Assoc ["scope", `String "synthetic CLI actual maintenance supervisor";
       "pulse_returned_before_backend_release", `Bool true;
       "new_job_delivered_before_backend_release", `Bool true;
+      "failed_result_observers", `Int (List.length !failed_observers);
       "duplicate_blocked_worker_backend_calls", `Int 0]))
 
 
@@ -2162,5 +2278,6 @@ let () =
       ; test_case "completion recovery retains unknown launch and corrupt owner" `Quick test_completion_retains_unknown_launch_and_owner
       ; test_case "finished without outputs and absent inventory is notified once and leaves waiting" `Quick test_finished_without_outputs_absent_inventory_notified_once
       ; test_case "running with absent inventory is notified once and leaves waiting" `Quick test_running_absent_inventory_notified_once
+      ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

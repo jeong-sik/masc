@@ -19,6 +19,7 @@
       running server; the server's own invalidation never sees those writes.
     - A bearer that matches nothing does not rebuild the index while the
       credentials are unchanged, so unknown tokens cost one stat each.
+    - Requests that miss together rebuild the index once, not once each.
 
     The cache is keyed by [agents_dir config] (per base_path), so each
     test sets up its own temp workspace and cleans up to avoid cross-test
@@ -205,6 +206,24 @@ let test_unknown_bearer_does_not_rebuild_the_index () =
         done;
         check (float 0.0) "no rebuild for an unknown bearer" before (index_rebuilds ())))
 
+(* Requests that miss together queue on the credential transaction; only
+   the first may re-read the credentials. *)
+let test_requests_that_miss_together_rebuild_once () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let raw = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
+        let before = index_rebuilds () in
+        Eio.Fiber.List.iter
+          (fun () ->
+            match Auth.find_credential_by_token dir ~token:raw with
+            | Ok _ -> ()
+            | Error e -> fail ("concurrent lookup: " ^ Masc_domain.masc_error_to_string e))
+          (List.init 5 (fun _ -> ()));
+        check (float 0.0) "one rebuild" (before +. 1.0) (index_rebuilds ())))
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; flag; dir; agent_name; token_out ] when String.equal flag mint_child_flag ->
@@ -229,5 +248,7 @@ let () =
           `Quick test_token_minted_by_another_process_is_found
         ; test_case "an unknown bearer does not rebuild the index"
           `Quick test_unknown_bearer_does_not_rebuild_the_index
+        ; test_case "requests that miss together rebuild once"
+          `Quick test_requests_that_miss_together_rebuild_once
         ] )
     ]

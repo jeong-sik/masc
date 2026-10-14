@@ -1392,57 +1392,69 @@ let invalidate_credential_index_cache config =
     Hashtbl.remove credential_index_cache key)
 ;;
 
+let cached_credential_index ~key ~now ~stamp =
+  with_credential_index_cache_lock (fun () ->
+    match Hashtbl.find_opt credential_index_cache key with
+    | Some entry
+      when now -. entry.loaded_at < credential_index_cache_ttl_sec
+           && Option.equal equal_agents_dir_stamp entry.stamp stamp ->
+      Some entry.by_token
+    | Some _ | None -> None)
+;;
+
 let credential_token_index config
   : ((string, agent_credential list) Hashtbl.t, masc_error) result
   =
   let ( let* ) = Result.bind in
   let key = agents_dir config in
   let now = Time_compat.now () in
+  let count_hit () =
+    Auth_metric_store.inc_counter
+      Auth_metric_store.metric_auth_credential_index_cache_hits
+      ()
+  in
   let* current_stamp = agents_dir_stamp config in
   (* The cache mutex covers memory only. A cold read publishes under the
      credential transaction, so it cannot restore an old index after a
      writer invalidated it. Cache hits keep the short in-memory path. *)
-  let cached =
-    with_credential_index_cache_lock (fun () ->
-      match Hashtbl.find_opt credential_index_cache key with
-      | Some entry
-        when now -. entry.loaded_at < credential_index_cache_ttl_sec
-             && Option.equal equal_agents_dir_stamp entry.stamp current_stamp ->
-        Some entry.by_token
-      | _ -> None)
-  in
-  match cached with
+  match cached_credential_index ~key ~now ~stamp:current_stamp with
   | Some by_token ->
-    Auth_metric_store.inc_counter
-      Auth_metric_store.metric_auth_credential_index_cache_hits
-      ();
+    count_hit ();
     Ok by_token
   | None ->
-    Auth_metric_store.inc_counter
-      Auth_metric_store.metric_auth_credential_index_cache_misses
-      ();
     with_credential_transaction config (fun _transaction ->
        (* Stamped before listing: a write that lands while the files are
           read moves the directory again, so the next lookup rebuilds
           instead of keeping an index that missed it. *)
        let* stamp = agents_dir_stamp config in
-       (* Directory entries discover owners. Only each owner's current named
-          binding supplies the credential indexed for authentication. An old
-          UUID payload must neither resurrect its bearer nor hide a replacement
-          because it happened to be listed before the named file. *)
-       let creds =
-         list_credentials config
-         |> List.map (fun (credential : agent_credential) -> credential.agent_name)
-         |> List.sort_uniq String.compare
-         |> List.filter_map (fun name ->
-           match load_credential config name with
-           | Some credential when String.equal credential.agent_name name -> Some credential
-           | Some _ | None -> None)
-       in
-       let by_token = build_token_index creds in
-       with_credential_index_cache_lock (fun () ->
-         Hashtbl.replace credential_index_cache key { loaded_at = now; stamp; by_token });
-       Ok by_token)
+       (* Requests that missed together queue on this transaction. The
+          first one rebuilds; the rest find its index here instead of
+          re-reading every credential in turn. *)
+       match cached_credential_index ~key ~now ~stamp with
+       | Some by_token ->
+         count_hit ();
+         Ok by_token
+       | None ->
+         Auth_metric_store.inc_counter
+           Auth_metric_store.metric_auth_credential_index_cache_misses
+           ();
+         (* Directory entries discover owners. Only each owner's current named
+            binding supplies the credential indexed for authentication. An old
+            UUID payload must neither resurrect its bearer nor hide a replacement
+            because it happened to be listed before the named file. *)
+         let creds =
+           list_credentials config
+           |> List.map (fun (credential : agent_credential) -> credential.agent_name)
+           |> List.sort_uniq String.compare
+           |> List.filter_map (fun name ->
+             match load_credential config name with
+             | Some credential when String.equal credential.agent_name name -> Some credential
+             | Some _ | None -> None)
+         in
+         let by_token = build_token_index creds in
+         with_credential_index_cache_lock (fun () ->
+           Hashtbl.replace credential_index_cache key { loaded_at = now; stamp; by_token });
+         Ok by_token)
     |> Result.join
 ;;
 

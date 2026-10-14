@@ -1105,6 +1105,27 @@ let test_core_identity_matches_pin () =
   check bool "digest is 32 lowercase hex characters"
     (String.length core.source_digest = 32
     && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) core.source_digest)
+    true;
+  check bool "pinned_commit is a 40-hex commit"
+    (String.length core.pinned_commit = 40
+    && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) core.pinned_commit)
+    true;
+  check bool "source_commit agrees with the pin when present"
+    (match core.source_commit with Some sha -> String.equal sha core.pinned_commit | None -> true)
+    true;
+  (* linked_commit names the exact linked commit only when it is known:
+     the pin when the running core matches the pin, else the core's own
+     commit. A build that links a different core (matches_pin false) with
+     no recorded commit must report None, not the pin. *)
+  check bool "linked_commit is the pin when the core matches the pin"
+    (match core.linked_commit with
+     | Some c -> core.matches_pin && String.equal c core.pinned_commit
+     | None -> not core.matches_pin)
+    true;
+  check bool "linked_commit falls back to source_commit when not matching the pin"
+    (if core.matches_pin
+     then match core.linked_commit with Some c -> String.equal c core.pinned_commit | None -> false
+     else core.source_commit = core.linked_commit)
     true
 ;;
 
@@ -1141,6 +1162,10 @@ let test_pin_table_names_the_same_core () =
            String.sub lock (from + String.length url) 40 = sha
          else contains (from + 1) in
        contains 0
+     | None -> false);
+  check bool "msx_lane pinned_commit equals the pin script OCAML_MSX_SHA" true
+    (match script_sha with
+     | Some sha -> String.equal sha Msx_lane.core.pinned_commit
      | None -> false)
 ;;
 
@@ -1168,6 +1193,17 @@ let test_checkpoint_info_reads_without_restoring () =
   check bool "checkpoint saved" true (is_completed save);
   let info = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
   check bool "info completes" true (is_completed info);
+  check bool "a returned slot reports exists=true" true
+    (match member "exists" (Tool_result.data info) with
+     | Some (`Bool true) -> true
+     | _ -> false);
+  check bool "mtime_utc renders an ISO 8601 UTC instant" true
+    (match member "mtime_utc" (Tool_result.data info) with
+     | Some (`String s) ->
+       String.length s = 20
+       && s.[4] = '-' && s.[7] = '-' && s.[10] = 'T' && s.[13] = ':' && s.[16] = ':'
+       && s.[19] = 'Z'
+     | _ -> false);
   check bool "no media names on a BIOS-only save" true
     (match (member "cartridge" (Tool_result.data info), member "disk" (Tool_result.data info)) with
      | Some `Null, Some `Null -> true

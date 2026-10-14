@@ -466,9 +466,11 @@ let enqueue_stimulus_durable_result
   | Error error -> Stimulus_storage_error (durable_intake_error_to_string error)
 ;;
 
-let enqueue_stimulus_once_durable_result ~base_path name stimulus =
+let enqueue_stimulus_once_durable_result ?not_before ~base_path name stimulus =
+  let not_before = Option.value not_before ~default:0. in
   let already_delivered () =
     Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+      ~not_before
       ~base_path ~keeper_name:name ~post_id:stimulus.Keeper_event_queue.post_id
       ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
     |> Result.map_error Keeper_reaction_ledger.strict_delivery_evidence_error_to_string

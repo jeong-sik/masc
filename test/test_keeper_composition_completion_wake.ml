@@ -96,6 +96,7 @@ let queued_results ~base_path ~keeper_name =
 let deliver_or_fail config ~terminal =
   match
     Wake.deliver
+      ~not_before:0.
       ~base_path:config.Workspace.base_path
       ~keeper_name:submitter
       ~request_id
@@ -174,7 +175,7 @@ let conflicting_results_leave_the_original_delivery () =
     ensure_keeper config ~keeper_name:submitter;
     deliver_or_fail config ~terminal:Event_queue.Composition_succeeded;
     let assert_rejected ~tool ~terminal =
-      match Wake.deliver ~base_path:config.Workspace.base_path
+      match Wake.deliver ~not_before:0. ~base_path:config.Workspace.base_path
           ~keeper_name:submitter ~request_id ~composition_tool:tool ~terminal with
       | Error _ -> ()
       | Ok () -> fail "same request with conflicting completion payload was accepted" in
@@ -571,7 +572,8 @@ let completion_delivery_recovers_without_replaying_or_reconsuming () =
     Async.For_testing.clear ();
     let queued_but_unacknowledged = Outbox.flush ~base_path
         ~deliver:(fun ~composition_tool entry ->
-          match Wake.deliver ~base_path ~keeper_name:entry.Async.submitted_by
+          match Wake.deliver ~base_path ~not_before:entry.Async.submitted_at
+              ~keeper_name:entry.Async.submitted_by
               ~request_id:entry.request_id ~composition_tool ~terminal:Event_queue.Composition_succeeded with
           | Error _ as error -> error
           | Ok () -> Error "injected interruption after durable enqueue, before producer acknowledgement")
@@ -591,9 +593,10 @@ let completion_delivery_recovers_without_replaying_or_reconsuming () =
      | Ok (Queue.Turn_source_acked _) -> ()
      | Ok Queue.Turn_selection_withdrawn -> fail "completion disappeared before consumption"
      | Error detail -> fail detail);
-    let ledger_dir = Masc.Keeper_reaction_ledger.store_dir
-        ~masc_root:(Common.masc_dir_from_base_path ~base_path) ~keeper_name:submitter in
-    let ledger_store = Dated_jsonl.create ~base_dir:ledger_dir () in
+    let ledger_store =
+      Dated_jsonl.open_store
+        (Masc.Keeper_reaction_ledger.location ~base_path ~keeper_name:submitter)
+    in
     let ledger_paths = Dated_jsonl.range_day_file_paths_result ledger_store
         ~since:"1970-01-01" ~until:"9999-12-31" |> Result.get_ok in
     check bool "consumption has physical ledger evidence" true (ledger_paths <> []);
@@ -616,6 +619,51 @@ let completion_delivery_recovers_without_replaying_or_reconsuming () =
       (Atomic.get dispatched) recovered.delivered)
 ;;
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
+(* The completion path the P2 was reported on: a torn row in a partition older
+   than the request must not reject the delivery of a brand-new completion.
+   Before the floor existed, the strict absence scan read every partition and
+   turned that unrelated damage into [Stimulus_storage_error]. *)
+let an_older_torn_row_does_not_block_a_new_completion () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    let base_path = config.Workspace.base_path in
+    let dir =
+      Filename.concat
+        (Masc.Keeper_reaction_ledger.store_dir ~base_path ~keeper_name:submitter)
+        "2020-01"
+    in
+    mkdir_p dir;
+    Out_channel.with_open_bin
+      (Filename.concat dir "01.jsonl")
+      (fun oc -> output_string oc "not-json\n");
+    (match
+       Wake.deliver
+         ~not_before:(Unix.gettimeofday ())
+         ~base_path
+         ~keeper_name:submitter
+         ~request_id
+         ~composition_tool
+         ~terminal:Event_queue.Composition_succeeded
+     with
+     | Ok () -> ()
+     | Error detail ->
+       fail ("an older partition's torn row rejected a new completion: " ^ detail));
+    match queued_results ~base_path ~keeper_name:submitter with
+    | [ _, completion ] ->
+      check string "the new completion is delivered" request_id completion.cc_request_id
+    | _ -> fail "older ledger damage lost or duplicated the completion")
+;;
+
 let () =
   run
     "keeper composition completion wake"
@@ -630,6 +678,8 @@ let () =
             conflicting_results_leave_the_original_delivery
         ; test_case "uncertain queue durability cannot acknowledge delivery" `Quick
             uncertain_queue_durability_does_not_acknowledge_delivery
+        ; test_case "an older torn ledger row does not block a new completion" `Quick
+            an_older_torn_row_does_not_block_a_new_completion
         ] )
     ; ( "the turn"
       , [ test_case "can read the result" `Quick the_turn_can_read_the_result

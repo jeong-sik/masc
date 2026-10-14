@@ -15,7 +15,7 @@ let outcome_label : Keeper_event_queue.composition_terminal -> string = function
   | Keeper_event_queue.Composition_cancelled _ -> "cancelled"
 ;;
 
-let deliver ~base_path ~keeper_name ~request_id ~composition_tool ~terminal =
+let deliver ~not_before ~base_path ~keeper_name ~request_id ~composition_tool ~terminal =
   let completion =
     { Keeper_event_queue.cc_request_id = request_id
     ; cc_tool = composition_tool
@@ -46,7 +46,7 @@ let deliver ~base_path ~keeper_name ~request_id ~composition_tool ~terminal =
   in
   match
     try
-      match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result ~base_path keeper_name stimulus with
+      match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result ~not_before ~base_path keeper_name stimulus with
       | Keeper_registry_event_queue.Stimulus_enqueued
       | Keeper_registry_event_queue.Stimulus_already_present -> Ok ()
       | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
@@ -150,6 +150,7 @@ let on_worker_settled ~base_path ~composition_tool settlement =
        (match
           deliver
             ~base_path
+            ~not_before:entry.Keeper_msg_async.submitted_at
             ~keeper_name:entry.Keeper_msg_async.submitted_by
             ~request_id:entry.Keeper_msg_async.request_id
             ~composition_tool
@@ -191,6 +192,7 @@ let reconcile ~base_path =
     ~deliver:(fun ~composition_tool (entry : Keeper_msg_async.entry) ->
       match terminal_of_status entry.status with
       | None -> Error "canonical composition completion has a nonterminal status"
-      | Some terminal -> deliver ~base_path ~keeper_name:entry.submitted_by
+      | Some terminal -> deliver ~base_path ~not_before:entry.submitted_at
+          ~keeper_name:entry.submitted_by
           ~request_id:entry.request_id ~composition_tool ~terminal)
 ;;

@@ -24,12 +24,18 @@
     proof on startup and the existing maintenance pulse, without replay. *)
 
 val deliver
-  :  base_path:string
+  :  not_before:float
+  -> base_path:string
   -> keeper_name:string
   -> request_id:string
   -> composition_tool:string
   -> terminal:Keeper_event_queue.composition_terminal
   -> (unit, string) result
+(** [not_before] is the request's submission time as a Unix timestamp; it is
+    forwarded as the floor of the negative-delivery-evidence scan so a torn
+    write in an older, unrelated ledger partition cannot reject this
+    delivery. Both production callers pass the canonical request's
+    [submitted_at]; [0.] means no floor and scans the whole ledger. *)
 
 val on_worker_settled
   :  base_path:string

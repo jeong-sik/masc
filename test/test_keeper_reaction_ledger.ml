@@ -1119,8 +1119,9 @@ let with_consumed_delivery_source f =
   f ~base_path ~keeper_name ~source
 ;;
 
-let delivery_seen_strict ~base_path ~keeper_name source =
+let delivery_seen_strict ?(not_before = 0.) ~base_path ~keeper_name source =
   Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+    ~not_before
     ~base_path ~keeper_name ~post_id:source.Keeper_event_queue.post_id
     ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
 ;;
@@ -1227,6 +1228,62 @@ let test_valid_complete_delivery_scan_can_prove_absence () =
   with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source:_ ->
   delivery_seen_strict ~base_path ~keeper_name (board_stimulus ~post_id:"never-delivered-source" ())
     |> require_strict_delivery "complete valid ledger proves exact absence" false
+;;
+
+let test_delivery_absence_ignores_partitions_before_the_request () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "narrowed-delivery-keeper" in
+  let dir = Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "2020-01" in
+  mkdir_p dir;
+  write_file (Filename.concat dir "01.jsonl") "not-json\n";
+  let source = board_stimulus ~post_id:"fresh-source-after-old-damage" () in
+  (match delivery_seen_strict ~base_path ~keeper_name source with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete { malformed_row_count; _ }) ->
+     check int "an older partition still forbids absence without a floor" 1 malformed_row_count
+   | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+   | Ok _ -> fail "whole-ledger absence was approved through an older damaged row");
+  delivery_seen_strict
+    ~not_before:(Unix.gettimeofday ())
+    ~base_path
+    ~keeper_name
+    source
+  |> require_strict_delivery
+       "a pre-request partition's torn write does not forbid a new delivery" false
+;;
+
+let test_delivery_absence_still_counts_damage_inside_the_request_window () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "narrowed-delivery-window-keeper" in
+  (* Let the writer open today's partition, then damage that very file, so the
+     test cannot drift from the layout the store actually uses. *)
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ~post_id:"window-filler" ());
+  let store = reaction_ledger_store ~base_path ~keeper_name in
+  let path =
+    match
+      Dated_jsonl.range_day_file_paths_result store ~since:"1970-01-01" ~until:"9999-12-31"
+    with
+    | Ok [ path ] -> path
+    | Ok _ -> fail "expected exactly one day file"
+    | Error error -> fail (Dated_jsonl.read_error_to_string error)
+  in
+  write_file path "not-json\n";
+  let source = board_stimulus ~post_id:"fresh-source-inside-window" () in
+  match
+    delivery_seen_strict
+      ~not_before:(Unix.gettimeofday ())
+      ~base_path
+      ~keeper_name
+      source
+  with
+  | Error (Keeper_reaction_ledger.Evidence_incomplete { malformed_row_count; _ }) ->
+    check int "damage inside the request window still forbids absence" 1 malformed_row_count
+  | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+    fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok _ -> fail "in-window damage was ignored by the narrowed scan"
 ;;
 
 let test_syntax_error_does_not_claim_an_occurrence_identity () =
@@ -1593,6 +1650,12 @@ let () =
         ; test_case
             "only a complete valid delivery scan proves absence"
             `Quick test_valid_complete_delivery_scan_can_prove_absence
+        ; test_case
+            "delivery absence ignores partitions before the request"
+            `Quick test_delivery_absence_ignores_partitions_before_the_request
+        ; test_case
+            "delivery absence still counts damage inside the request window"
+            `Quick test_delivery_absence_still_counts_damage_inside_the_request_window
         ; test_case
             "syntax error cannot claim an occurrence identity"
             `Quick

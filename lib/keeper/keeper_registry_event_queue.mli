@@ -290,13 +290,20 @@ val enqueue_stimulus_durable_result :
     opaque-event-id API above. *)
 
 val enqueue_stimulus_once_durable_result :
+  ?not_before:float ->
   base_path:string -> string -> Keeper_event_queue.stimulus -> enqueue_stimulus_durable_result
 (** One-shot producer delivery with the same pending/outbox deduplication,
     plus same-source payload conflict rejection and strict snapshot durability,
     including exact replays. Exact source reaction evidence is checked under
     the owner lock; incomplete negative evidence rejects the delivery. A
     source that already entered a turn or reached a durable queue terminal is
-    not recreated, including after consumption and producer-ack failure. *)
+    not recreated, including after consumption and producer-ack failure.
+
+    [not_before] is the request's submission time as a Unix timestamp; it
+    narrows the negative-evidence scan to day partitions at or after that UTC
+    day, so a torn write from an unrelated older partition does not reject a
+    new delivery. Callers that know the submission time (the durable producer
+    path does) should always pass it; omitting it scans the whole ledger. *)
 
 val project_accepted_transfer_durable_result :
   ?intake_token:Keeper_shutdown_intake_fence.intake_token

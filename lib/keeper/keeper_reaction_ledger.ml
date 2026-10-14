@@ -1016,6 +1016,7 @@ let strict_delivery_evidence_error_to_string = function
 ;;
 
 let event_queue_delivery_seen_for_source_strict_result
+      ~not_before
       ~base_path ~keeper_name ~post_id ~stimulus_kind =
   if String.equal post_id ""
   then Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
@@ -1031,7 +1032,7 @@ let event_queue_delivery_seen_for_source_strict_result
     in
     let expected_stimulus_kind = stimulus_kind_to_string stimulus_kind in
     let store = store_for_base_path ~base_path ~keeper_name in
-    match Dated_jsonl.iter_all_entries_result store (function
+    let visit_entry = function
       | Dated_jsonl.Malformed_json _ ->
         incr malformed_row_count;
         note_reason Malformed_json_row
@@ -1043,7 +1044,24 @@ let event_queue_delivery_seen_for_source_strict_result
          | Ok row ->
            if current_row_matches_source_reaction
                 ~reaction_matches:delivery_reaction_matches ~post_id ~expected_stimulus_kind row
-           then reaction_seen := true)) with
+           then reaction_seen := true)
+    in
+    (* Evidence for this source can only exist from the day its request was
+       submitted onward: a row for it cannot be older than the request that
+       produced it. [not_before] narrows the scan to day partitions at or after
+       that submission time's UTC day, so a torn write in an unrelated older
+       partition no longer turns this source's absence into
+       [Evidence_incomplete], and the scan reads far fewer rows while the queue
+       owner lock is held. [0.] means no floor: the whole ledger, as before. *)
+    let read_result =
+      if not_before <= 0.
+      then Dated_jsonl.iter_all_entries_result store visit_entry
+      else
+        Dated_jsonl.iter_range_entries_result store
+          ~since:(Jsonl_writer.day_key ~ts:not_before) ~until:"9999-12-31"
+          visit_entry
+    in
+    match read_result with
     | Error error -> Error (Delivery_evidence_unavailable (Evidence_read_error error))
     | Ok () when !reaction_seen -> Ok true
     | Ok () ->

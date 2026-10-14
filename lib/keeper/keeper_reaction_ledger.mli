@@ -229,19 +229,26 @@ type strict_delivery_evidence_error =
 val strict_delivery_evidence_error_to_string : strict_delivery_evidence_error -> string
 
 val event_queue_delivery_seen_for_source_strict_result :
+  not_before:float ->
   base_path:string ->
   keeper_name:string ->
   post_id:string ->
   stimulus_kind:stimulus_kind ->
   (bool, strict_delivery_evidence_error) result
-(** Scan every owned current-generation row through the canonical decoder.
-    Exact valid turn-entry or accepted-terminal evidence returns [Ok true],
-    even when unrelated rows are malformed or semantically invalid. Without
+(** Scan owned current-generation rows through the canonical decoder. Exact
+    valid turn-entry or accepted-terminal evidence returns [Ok true], even
+    when unrelated rows are malformed or semantically invalid. Without
     positive evidence, any invalid row produces {!Evidence_incomplete}; only
     a complete valid scan can return [Ok false]. Empty identities and owned
     storage failures remain typed {!Delivery_evidence_unavailable} errors.
     This strict absence authority is for one-shot recovery; the permissive
-    reader above and its existing callers retain their prior semantics. *)
+    reader above and its existing callers retain their prior semantics.
+
+    [not_before] is the request's submission time as a Unix timestamp. Only
+    day partitions at or after its UTC calendar day are opened: a source's
+    evidence cannot predate the request that produced it, so an older
+    partition's torn write is not this source's evidence and must not turn its
+    absence into an error. [0.] means no floor and scans the whole ledger. *)
 
 val summary_for_keeper :
   base_path:string -> keeper_name:string -> limit:int -> Yojson.Safe.t

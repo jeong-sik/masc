@@ -336,7 +336,7 @@ let render_overview (state : state) =
       let budget =
         if state.help_hint_shown then budget
         else begin
-          c.push (" " ^ Ansi.dim ^ "?: the keys of every screen" ^ Ansi.reset);
+          c.push (" " ^ Ansi.dim ^ "?:help — every screen's keys" ^ Ansi.reset);
           max 0 (budget - 1)
         end
       in

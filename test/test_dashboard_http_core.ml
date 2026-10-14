@@ -252,9 +252,9 @@ let test_keeper_up_workspace_precondition () =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let config = Workspace.default_config dir in
-    mkdir_p (Workspace.masc_root_dir config);
+    mkdir_p (Workspace.masc_dir config);
     let base = Unix.realpath config.base_path in
-    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let root = Unix.realpath (Workspace.masc_dir config) in
     let expected base root = `Assoc ["base_path", `String base; "masc_root", `String root] in
     let declaration = ["name", `String "new-keeper"; "create_only", `Bool true] in
     let args workspace = `Assoc (("expected_workspace", workspace) :: declaration) in
@@ -281,7 +281,7 @@ let test_keeper_up_workspace_precondition () =
         (`Assoc (("expected_workspace", expected base root)
           :: ("expected_workspace", expected base root) :: declaration))
        = Error Lifecycle.Invalid_workspace_precondition);
-    Unix.rmdir (Workspace.masc_root_dir config);
+    Unix.rmdir (Workspace.masc_dir config);
     check bool "unreadable receiving root fails closed" true
       (Lifecycle.validate_up_workspace ~config (args (expected base root))
        = Error Lifecycle.Workspace_precondition_failed))
@@ -290,9 +290,9 @@ let test_gate_resolve_workspace_precondition () =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let config = Workspace.default_config dir in
-    mkdir_p (Workspace.masc_root_dir config);
+    mkdir_p (Workspace.masc_dir config);
     let base = Unix.realpath config.base_path in
-    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let root = Unix.realpath (Workspace.masc_dir config) in
     let request base_path masc_root =
       `Assoc
         [ "id", `String "absent-approval"
@@ -459,9 +459,9 @@ let test_hitl_recover_route_and_preconditions () =
 let test_gate_retry_workspace_precondition () =  let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let config = Workspace.default_config dir in
-    mkdir_p (Workspace.masc_root_dir config);
+    mkdir_p (Workspace.masc_dir config);
     let base = Unix.realpath config.base_path in
-    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let root = Unix.realpath (Workspace.masc_dir config) in
     let expected base_path masc_root =
       `Assoc [ "base_path", `String base_path; "masc_root", `String masc_root ]
     in
@@ -1803,7 +1803,7 @@ let test_dashboard_query_cache_key_partitions_route_params () =
       check string "deterministic key shape"
         (Printf.sprintf
            "session:%s:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
-           (Workspace_utils.masc_root_dir config))
+           (Workspace_utils.masc_dir config))
         session_a)
 
 (* The cache partition is the workspace's root. It was once the constant

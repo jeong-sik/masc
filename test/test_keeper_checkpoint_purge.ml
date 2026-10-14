@@ -733,7 +733,7 @@ let test_cli_workspace ?(linked_worktree = false) () =
       let config = Masc.Workspace.default_config base_path in
       let checkpoint = checkpoint_fixture () in
       let session_dir = Masc.Keeper_fs.keeper_session_dir config checkpoint.session_id in
-      let runtime_root = Masc.Workspace.masc_root_dir config in
+      let runtime_root = Masc.Workspace.masc_dir config in
       let checkpoint_path =
         Masc.Keeper_checkpoint_store.agent_core_checkpoint_path
           ~session_dir ~session_id:checkpoint.session_id

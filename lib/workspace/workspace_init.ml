@@ -12,7 +12,7 @@ open Workspace_broadcast
 let init config ~agent_name =
   invalidate_initialized_cache ();
   (* Ensure root .masc structure exists even when initializing a non-default workspace. *)
-  let root_dir = masc_root_dir config in
+  let root_dir = masc_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
   let root_keepers_dir = Filename.concat root_dir Common.keepers_runtime_dirname in
   let root_traces_dir = Filename.concat root_dir "traces" in

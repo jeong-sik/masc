@@ -339,7 +339,7 @@ let receipt_json ~(config : Workspace.config) (receipt : Checkpoint_receipt.rece
         "checkpoint_sha256",`String completed.checkpoint_sha256]] in
   ["ok",`Bool (status="committed");
    "workspace",`Assoc ["base_path",`String (Unix.realpath config.base_path);
-                         "masc_root",`String (Unix.realpath (Workspace.masc_root_dir config))];
+                         "masc_root",`String (Unix.realpath (Workspace.masc_dir config))];
    "operation_id",`String (Keeper_operation_id.to_string binding.operation_id);
    "checkpoint",`String (match binding.action with Save -> "save" | Restore -> "restore");
    "slot",`String binding.slot;"epoch",`String receipt.epoch;"status",`String status] @ extra

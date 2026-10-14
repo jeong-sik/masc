@@ -84,7 +84,7 @@ let test_workspace_identity_compares_the_masc_root () =
     | Masc_tui_types.Workspace_identity_unread -> false
   in
   Alcotest.(check bool) "the base's .masc is this workspace" true
-    (is_match (classify (Workspace_utils.masc_dir_from_base_path ~base_path:base)));
+    (is_match (classify (Filename.concat base ".masc")));
   Alcotest.(check bool) "another root under the same base is another store" false
     (is_match (classify (Filename.concat base "elsewhere/.masc")))
 

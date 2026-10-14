@@ -94,7 +94,7 @@ let chat_trace_block_by_turn_ref ~max_lines
   let allowed_trace_ids = Json_util.dedupe_keep_order allowed_trace_ids in
   let allowed = allowed_trace_id_set allowed_trace_ids in
   let cache = Hashtbl.create (max 1 (List.length allowed_trace_ids)) in
-  let masc_root = Workspace.masc_root_dir config in
+  let masc_root = Workspace.masc_dir config in
   let lines_for_trace_id trace_id =
     if not (Set_util.StringSet.mem trace_id allowed)
     then None

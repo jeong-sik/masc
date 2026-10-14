@@ -95,7 +95,7 @@ let with_dashboard_timeout ~clock compute =
    partitioned exactly like the store it caches. A constant partition once let
    a scope switch serve the previous workspace's projection (#24504). *)
 let cache_partition_segment (config : Workspace.config) =
-  Workspace_utils.masc_root_dir config
+  Workspace_utils.masc_dir config
 ;;
 
 let dashboard_cache_key (config : Workspace.config) prefix suffix =

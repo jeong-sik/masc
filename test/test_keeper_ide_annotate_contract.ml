@@ -66,7 +66,7 @@ let setup f =
   with_eio_fs @@ fun ~fs ~sw () ->
   let base = temp_dir () in
   let config = Workspace.default_config base in
-  ensure_dir (Workspace.masc_root_dir config);
+  ensure_dir (Workspace.masc_dir config);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.For_testing.clear ();
   let meta = make_meta "tester" in
@@ -76,7 +76,7 @@ let setup f =
   Masc_test_deps.with_publication_recovery_registry
     ~sw
     ~fs
-    ~registry_root:(Workspace.masc_root_dir config)
+    ~registry_root:(Workspace.masc_dir config)
   @@ fun registry ->
   let publication_recovery =
     { Masc.Keeper_publication_recovery_availability.provider =

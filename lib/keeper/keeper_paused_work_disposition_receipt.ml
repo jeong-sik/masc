@@ -127,7 +127,7 @@ let validate receipt =
 let sha256 value = Digestif.SHA256.(digest_string value |> to_hex)
 
 let keeper_dir config keeper_name =
-  let root = Workspace.masc_root_dir config in
+  let root = Workspace.masc_dir config in
   Filename.concat
     (Filename.concat root store_dirname)
     ("keeper-" ^ sha256 keeper_name)
@@ -143,7 +143,7 @@ let receipt_path_of_masc_root ~masc_root ~keeper_name ~operator_operation_id =
 
 let receipt_path config ~keeper_name ~operator_operation_id =
   receipt_path_of_masc_root
-    ~masc_root:(Workspace.masc_root_dir config)
+    ~masc_root:(Workspace.masc_dir config)
     ~keeper_name
     ~operator_operation_id
 ;;
@@ -437,7 +437,7 @@ let save_if_absent (lock : keeper_lock) config receipt =
     then Ok ()
     else Error "paused-work disposition lock owner does not match receipt"
   in
-  let root = Workspace.masc_root_dir config in
+  let root = Workspace.masc_dir config in
   let path =
     receipt_path
       config

@@ -9,7 +9,7 @@ let base_path = Filename.concat (Filename.get_temp_dir_name ()) "masc-fd-pressur
 
 let default_path =
   Filename.concat
-    (Workspace_utils.masc_dir_from_base_path ~base_path)
+    (Common.masc_dir_from_base_path ~base_path)
     "masc-host-pressure.state"
 
 let restore_env name = function

@@ -165,7 +165,7 @@ let write_json_local path json = write_encoded_json_local path (encode_json_pret
 
 (* Root-scoped JSON helpers for shared root metadata. *)
 let read_json_root config path =
-  match root_key_of_path config path with
+  match key_of_path config path with
   | Some key -> begin
       match config.backend with
       | FileSystem _ when Sys.file_exists path -> read_json_local path
@@ -187,7 +187,7 @@ let read_json_root config path =
   | None -> read_json_local path
 
 let write_json_root config path json =
-  match root_key_of_path config path with
+  match key_of_path config path with
   | Some key ->
       let content = encode_json_pretty json in
       backend_set config ~key ~value:content
@@ -203,7 +203,7 @@ let write_json_root config path json =
            Log.Misc.warn "write_json_root: local write failed for %s: %s" path msg)
 
 let path_exists_root config path =
-  match root_key_of_path config path with
+  match key_of_path config path with
   | Some key ->
       (match config.backend with
        | FileSystem _ -> Sys.file_exists path || backend_exists config ~key

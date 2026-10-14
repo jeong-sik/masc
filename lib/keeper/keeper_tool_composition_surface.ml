@@ -469,7 +469,7 @@ let record_skill_composition_evidence
       detail;
     (try
        Telemetry_coverage_gap.record
-         ~masc_root:(Workspace.masc_root_dir config)
+         ~masc_root:(Workspace.masc_dir config)
          ~source:"skill_composition_evidence"
          ~producer:"keeper_tool_composition_surface"
          ~durable_store:"skill-composition-evidence-v1"

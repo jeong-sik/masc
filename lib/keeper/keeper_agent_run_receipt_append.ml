@@ -22,7 +22,7 @@ let append_with_coverage_gap
       "execution_receipt append failed: %s"
       err_msg;
     (try
-       let masc_root = Workspace.masc_root_dir config in
+       let masc_root = Workspace.masc_dir config in
        Telemetry_coverage_gap.record
          ~masc_root
          ~source:

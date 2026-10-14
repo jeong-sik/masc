@@ -1020,7 +1020,7 @@ let test_a_raising_keeper_list_does_not_drop_the_refresh () =
   let base_path = temp_base_path () in
   register base_path;
   let config = Masc.Workspace.default_config base_path in
-  let masc_dir = Masc.Workspace.masc_root_dir config in
+  let masc_dir = Masc.Workspace.masc_dir config in
   Alcotest.(check bool) "fixture: no keepers directory yet" false
     (Sys.file_exists (Masc.Workspace.keepers_runtime_dir config));
   Unix.chmod masc_dir 0o500;

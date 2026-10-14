@@ -944,7 +944,7 @@ let run_keeper_cycle
                       base_dir
                       (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                in
-               let masc_root = Workspace.masc_root_dir config in
+               let masc_root = Workspace.masc_dir config in
                let trajectory_acc =
                  Trajectory.create_accumulator
                    ~masc_root

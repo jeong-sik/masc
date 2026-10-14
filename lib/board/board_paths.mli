@@ -1,7 +1,7 @@
 (** Board persistence paths.
 
     Unbound path helpers are derived from [Env_config_core.base_path] via
-    [Workspace_utils.masc_dir_from_base_path] at call time. Bound store loads
+    [Common.masc_dir_from_base_path] at call time. Bound store loads
     use the workspace directory captured before their global store was
     loaded. *)
 

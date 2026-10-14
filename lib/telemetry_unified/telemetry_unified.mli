@@ -2,7 +2,7 @@
 
     Provides a single, time-sorted view over independent telemetry stores.
     Paths under [.masc/] are resolved via [masc_root]
-    (use [Workspace.masc_root_dir config]):
+    (use [Workspace.masc_dir config]):
     - [<masc_root>/keepers/<name>/metrics/] — Per-keeper turn metrics
     - [<masc_root>/telemetry/]              — Agent lifecycle + tool call events
     - [<masc_root>/tool_calls/]             — Full I/O for keeper tool calls
@@ -99,7 +99,7 @@ val read_unified :
     [truncated = true] rather than a full-store scan (RFC-0372).
 
     [masc_root] is the workspace's .masc directory (use
-    [Workspace.masc_root_dir config] to obtain it).  [base_path] is the
+    [Workspace.masc_dir config] to obtain it).  [base_path] is the
     project root, used only for [data/] paths.
 
     Each entry is a JSON object with an added ["source"] field. *)

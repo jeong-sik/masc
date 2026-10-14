@@ -673,7 +673,7 @@ let keeper_chat_history_page_json ?max_total config name ~before =
 let cached_keeper_chat_history_json config name =
   let cache_key =
     Printf.sprintf "keeper:chat-history:%s:%s"
-      (Workspace.masc_root_dir config) name
+      (Workspace.masc_dir config) name
   in
   let current = keeper_chat_history_freshness config name in
   (match Dashboard_cache.peek cache_key with
@@ -1004,7 +1004,7 @@ let handle_keeper_get_subroutes state req request reqd =
       | Error detail -> respond_error reqd detail
       | Ok window_hours ->
       let config = Mcp_server.workspace_config state in
-      let masc_root = Workspace.masc_root_dir config in
+      let masc_root = Workspace.masc_dir config in
       let cache_key =
         keeper_file_changes_cache_key ~masc_root ~keeper_name:name ~window_hours
       in
@@ -1098,7 +1098,7 @@ let handle_keeper_get_subroutes state req request reqd =
         reqd
     else
       let config = (Mcp_server.workspace_config state) in
-      let masc_root = Workspace.masc_root_dir config in
+      let masc_root = Workspace.masc_dir config in
       let window_hours =
         Server_utils.int_query_param req "window_hours"
           ~default:24
@@ -1213,7 +1213,7 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min tool_calls_limit_max
       in
       let config = (Mcp_server.workspace_config state) in
-      let masc_root = Workspace.masc_root_dir config in
+      let masc_root = Workspace.masc_dir config in
       (* The durable index selects this Keeper before limiting rows. A fleet
          tail cannot bound the requested Keeper's history when others are busy.
          Keep ledger/index I/O off the request domain and preserve chronological
@@ -1906,7 +1906,7 @@ let handle_keeper_get_subroutes state req request reqd =
         ( "durable_store",
           `String
             (Filename.concat
-               (Workspace.masc_root_dir config)
+               (Workspace.masc_dir config)
                (Printf.sprintf "keepers/%s/turn-records" name)) );
         ("dashboard_surface", `String "/api/v1/keepers/:name/turn-records");
         ("freshness_slo_s", `Float turn_record_freshness_slo_s);
@@ -2025,7 +2025,7 @@ let handle_keeper_get_subroutes state req request reqd =
          let cache_key =
            Printf.sprintf
              "keeper:trajectory:%s:%s:%s:%d:%d:%b:%d"
-             (Workspace.masc_root_dir config)
+             (Workspace.masc_dir config)
              name
              trace_id
              limit
@@ -2036,7 +2036,7 @@ let handle_keeper_get_subroutes state req request reqd =
          let payload =
            Dashboard_cache.get_or_compute_payload cache_key ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               let masc_root = Workspace.masc_root_dir config in
+               let masc_root = Workspace.masc_dir config in
                let trajectory_lines =
                  Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name
                    ~trace_id ~max_lines:tail_scan_lines

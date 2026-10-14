@@ -179,7 +179,7 @@ let test_latest_selects_newest_recorded_at () =
 ;;
 
 let store_dir config =
-  Filename.concat (Workspace.masc_root_dir config) "skill-composition-evidence-v1"
+  Filename.concat (Workspace.masc_dir config) "skill-composition-evidence-v1"
 ;;
 
 let partition reference =
@@ -352,7 +352,7 @@ let test_canonical_failed_results () =
          `Assoc (("effect_disposition",`String "proven_pre_effect") :: fields)];
       (* Canonical failed evidence must reach storage, where the occupied
          directory fails independently of result schema validation. *)
-      let path = Filename.concat (Workspace.masc_root_dir config) "skill-composition-evidence-v1" in
+      let path = Filename.concat (Workspace.masc_dir config) "skill-composition-evidence-v1" in
       Fs_compat.remove_tree path;
       Out_channel.with_open_bin path (fun channel -> output_string channel "occupied");
       (match E.save_latest config evidence with

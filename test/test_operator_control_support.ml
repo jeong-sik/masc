@@ -24,7 +24,7 @@ let ensure_fs env =
 
 let publication_recovery_registry env sw config =
   let registry_root =
-    Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
+    Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_dir config)
   in
   match
     Fs_compat.Publication_recovery.open_registry

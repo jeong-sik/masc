@@ -4276,7 +4276,7 @@ candidates = ["projection.http", "codex.codex"]
                                 then
                                   Some
                                     (Trajectory.create_accumulator
-                                       ~masc_root:(Workspace.masc_root_dir config)
+                                       ~masc_root:(Workspace.masc_dir config)
                                        ~keeper_name:meta.name
                                        ~trace_id
                                        ())
@@ -7632,7 +7632,7 @@ let test_production_keeper_records_newest_codex_request_context () =
 let raw_cost_rows ~base_path =
   let store =
     Cost_ledger.store_of_masc_root
-      (Workspace.masc_root_dir (Workspace.default_config base_path))
+      (Workspace.masc_dir (Workspace.default_config base_path))
   in
   Dated_jsonl.read_recent store 100
   |> List.filter_map (fun json ->
@@ -7782,7 +7782,7 @@ let test_production_keeper_ledgers_codex_spend_of_a_failed_turn () =
                total, which a cumulative count is read against. *)
             let store =
               Cost_ledger.store_of_masc_root
-                (Workspace.masc_root_dir (Workspace.default_config base_path))
+                (Workspace.masc_dir (Workspace.default_config base_path))
             in
             let conversation_of json =
               let open Yojson.Safe.Util in

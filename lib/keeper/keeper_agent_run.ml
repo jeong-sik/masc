@@ -2051,7 +2051,7 @@ let run_turn
                                  | Some (Ok provider_content) ->
                                    Keeper_wire_capture
                                    .capture_request_projection_change
-                                     ~masc_root:(Workspace.masc_root_dir config)
+                                     ~masc_root:(Workspace.masc_dir config)
                                      ~keeper_name:meta.name
                                      ~turn_id:manifest_keeper_turn_id
                                      ~agent_core_turn:acc.current_turn
@@ -2307,7 +2307,7 @@ let run_turn
                                     MASC_KEEPER_WIRE_CAPTURE. *)
                                  Keeper_wire_capture.capture_response
                                    ~base_path:config.base_path
-                                   ~masc_root:(Workspace.masc_root_dir config)
+                                   ~masc_root:(Workspace.masc_dir config)
                                    ~keeper_name:meta.name
                                    ~turn_id:manifest_keeper_turn_id
                                    ~agent_core_turn:result.turns

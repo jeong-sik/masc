@@ -137,7 +137,7 @@ let model_checks config_path =
    Keepers were declared by hand never has it, and judging history by imp alone
    sent that workspace back into setup on every bare `masc`. *)
 let persistence_check base_path =
-  let root = Workspace_utils.masc_dir_from_base_path ~base_path in
+  let root = Common.masc_dir_from_base_path ~base_path in
   let dir = Filename.concat root Common.keepers_runtime_dirname in
   let listed = if directory_exists dir then Safe_ops.list_dir_safe dir else Ok [] in
   match listed with

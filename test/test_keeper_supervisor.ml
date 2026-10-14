@@ -327,7 +327,7 @@ let seed_durable_librarian_baseline
   config
   (meta : Keeper_meta_contract.keeper_meta)
   =
-  let config_dir = Filename.concat (Workspace.masc_root_dir config) "config" in
+  let config_dir = Filename.concat (Workspace.masc_dir config) "config" in
   write_keeper_toml config_dir ~name:meta.name;
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
   (match Keeper_meta_store.replace_snapshot config meta with
@@ -573,7 +573,7 @@ let ensure_test_runtime =
 
 let publication_recovery_registry env sw config =
   let registry_root =
-    Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_root_dir config)
+    Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_dir config)
   in
   match
     Fs_compat.Publication_recovery.open_registry

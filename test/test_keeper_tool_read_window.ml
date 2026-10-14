@@ -151,7 +151,7 @@ let setup f =
        Masc_test_deps.with_publication_recovery_registry
          ~sw
          ~fs
-         ~registry_root:(Workspace.masc_root_dir config)
+         ~registry_root:(Workspace.masc_dir config)
        @@ fun _registry -> f ~config ~meta ~playground)
 ;;
 

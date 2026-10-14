@@ -463,7 +463,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      save exists because a crash is a restart too, and the whole point is the
      restart path. *)
   let count_cache_path =
-    Filename.concat (Workspace.masc_root_dir config) "dated-jsonl-count-cache.json"
+    Filename.concat (Workspace.masc_dir config) "dated-jsonl-count-cache.json"
   in
   (match Dated_jsonl.load_count_cache ~path:count_cache_path with
    | Ok 0 -> ()
@@ -480,7 +480,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      use, so a missing or stale file costs a cold read and nothing else. *)
   let trajectory_cache_path =
     Filename.concat
-      (Workspace.masc_root_dir config)
+      (Workspace.masc_dir config)
       "trajectory-summary-cache.json"
   in
   (match
@@ -681,7 +681,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Otel_runtime_observables.start_store_writer
     ~sw
     ~clock
-    ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state))
+    ~masc_root:(Workspace.masc_dir (Mcp_server.workspace_config state))
     ();
   start_otel_exporter_background ~sw (fun () -> Otel_spans.setup_exporter ~sw env);
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
@@ -1117,6 +1117,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      this switch and the single-flight CAS makes a concurrent refresh a no-op. *)
   Server_dashboard_http_runtime_info.maybe_fork_dashboard_runtime_probe_refresh ();
   let resolved_base = (Mcp_server.workspace_config state).base_path in
-  let masc_dir = Workspace.masc_root_dir (Mcp_server.workspace_config state) in
+  let masc_dir = Workspace.masc_dir (Mcp_server.workspace_config state) in
   resolved_base, masc_dir
 ;;

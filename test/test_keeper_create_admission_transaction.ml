@@ -131,7 +131,7 @@ let with_workspace f =
 let test_shutdown_rejection_precedes_all_creation_writes () =
   with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path ->
   let keeper_name = "admission-transaction-probe" in
-  let trace_root = Filename.concat (Workspace.masc_root_dir config) "traces" in
+  let trace_root = Filename.concat (Workspace.masc_dir config) "traces" in
   mkdir_p trace_root;
   let trace_entries_before = sorted_dir_entries trace_root in
   let runtime_config_before = read_file runtime_path in

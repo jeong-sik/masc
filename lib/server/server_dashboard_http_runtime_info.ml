@@ -2137,7 +2137,7 @@ let runtime_resolution_json (config : Workspace.config) =
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
-      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
       ; ( "server_repo_path"
         , match server_repo_path with
@@ -2240,7 +2240,7 @@ let light_runtime_resolution_json ?profile_snapshot (config : Workspace.config) 
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
-      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
       ; ( "server_repo_path"
         , match server_repo_path with
@@ -2334,7 +2334,7 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
         |> fun metrics ->
         `Assoc (("non_public_call_log",
           Tool_usage_log.source_metadata_json
-             ~masc_root:(Workspace.masc_root_dir config))
+             ~masc_root:(Workspace.masc_dir config))
           :: Yojson.Safe.Util.to_assoc metrics))
     in
     `Assoc

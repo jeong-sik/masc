@@ -651,7 +651,7 @@ remote_endpoint = "fixture"
       (item |> member "format" |> to_string);
     let body = item |> member "body" |> to_string in
     Alcotest.(check string) "endpoint image body survives snapshot" png
-      (read_file (Filename.concat (Workspace.masc_root_dir config) body));
+      (read_file (Filename.concat (Workspace.masc_dir config) body));
     write_file endpoint_file (png ^ String.make Store.verification_evidence_max_bytes 'x');
     (match reader ~worker:meta.name ~relative:"render.PNG" with
      | Ok (Store.Binary_payload { data; bytes; _ }) ->

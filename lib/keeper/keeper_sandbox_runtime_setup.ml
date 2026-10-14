@@ -454,7 +454,7 @@ let unique_preserving_order values =
 let docker_workspace_state_mount_specs ~base_path ~container_root =
   (* The board, task and goal stores the workspace reads, mounted at the same
      place under the container's root. *)
-  let host_masc_root = Workspace_utils.masc_dir_from_base_path ~base_path in
+  let host_masc_root = Common.masc_dir_from_base_path ~base_path in
   (* [container_root] is itself a bind-mounted playground. Mounting workspace-state
      files inside it creates nested bind targets that Docker Desktop can resolve
      through /run/host_virtiofs and reject as outside the container rootfs. *)

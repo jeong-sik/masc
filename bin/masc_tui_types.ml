@@ -171,7 +171,7 @@ let workspace_identity_of_paths ~local_base_path (identity : Tui_decode.server_i
   let local_base_path = canonical_path local_base_path in
   let server_base_path = canonical_path identity.sid_base_path in
   let local_masc_root = canonical_path
-    (Workspace_utils.masc_dir_from_base_path ~base_path:local_base_path) in
+    (Common.masc_dir_from_base_path ~base_path:local_base_path) in
   let server_masc_root = canonical_path identity.sid_masc_root in
   if String.equal local_base_path ""
   then Workspace_identity_unread

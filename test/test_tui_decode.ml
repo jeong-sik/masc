@@ -13145,7 +13145,7 @@ let () =
           test_decode_tool_snapshot_requires_both_keeper_projection_fields;
         Alcotest.test_case "Skill activation reuses canonical ledger decoder" `Quick
           test_decode_skill_activations_reuses_canonical_ledger_decoder;
-        test_case "async actions retain original scope" `Quick test_decode_async_actions_keeps_original_scope;
+        Alcotest.test_case "async actions retain original scope" `Quick test_decode_async_actions_keeps_original_scope;
       ] );
     ( "decode_connectors",
       [

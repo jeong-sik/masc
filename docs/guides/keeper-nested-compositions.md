@@ -201,7 +201,7 @@ inline body-delivery counts. Neither delivery form creates a later action.
 The Python measurement reader validates the same original frame digests and
 canonical revision as the server. The Dashboard preserves typed digests and validates occurrence shape and scope
 membership. Its async Tools fetch additionally verifies causal delivery digests
-and the original frames referenced by action facts with Web Crypto. It does not
+and the original frames referenced by action facts with portable SHA-256. It does not
 authenticate the complete server ledger revision; write authority stays in the
 canonical transaction.
 

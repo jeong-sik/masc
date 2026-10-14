@@ -3097,12 +3097,12 @@ pointer = "/content"
     value.runtime_id="later.official.runtime" && value.presentation=Delivery.Inline_result) !observed in
   physical_runtime := official_observation.runtime_id;
   handoff official_observation;
-  let native = {Masc.Runtime_native_tools.identity=Some (Call_id "native-follow-on");tool_name=Some "native-read";origin=Built_in} in
+  let native = {Runtime_native_tools.identity=Some (Call_id "native-follow-on");tool_name=Some "native-read";origin=Built_in} in
   let native_observe ~official_turn ~identity ~tool_name =
     Action_observer.native_started action_observer ~runtime_id:!physical_runtime ~official_turn ~identity ~tool_name
     |> require "actual official native start callback" |> ignore in
-  Masc.Runtime_native_tools.observe_exact_action ~official_turn:0 ~observe:native_observe native;
-  Masc.Runtime_native_tools.observe_exact_action ~official_turn:0 ~observe:native_observe native;
+  Runtime_native_tools.observe_exact_action ~official_turn:0 ~observe:native_observe native;
+  Runtime_native_tools.observe_exact_action ~official_turn:0 ~observe:native_observe native;
   check int "native starts are observed once independently of SDK turn 41" (before_actions+4) (action_count ());
   (match Action_observer.native_started action_observer ~runtime_id:!physical_runtime ~official_turn:0
       ~identity:(Call_id "native-follow-on") ~tool_name:"contradictory-native-name" with
@@ -3170,7 +3170,7 @@ pointer = "/content"
   Action_observer.clear action_observer;
   let sibling_provider = List.find (fun (value : Delivery.observation) ->
     value.runtime_id=observation.runtime_id && value.presentation=Delivery.Inline_result
-    && value.transport_receipt.tool_use_id <> observation.transport_receipt.tool_use_id) !observed in
+    && value.boundary <> observation.boundary) !observed in
   Eio.Switch.run (fun io_sw ->
     let started,notify_started = Eio.Promise.create () in
     let finished,notify_finished = Eio.Promise.create () in

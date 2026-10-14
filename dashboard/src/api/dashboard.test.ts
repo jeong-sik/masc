@@ -1328,9 +1328,29 @@ describe('fetchDashboardTools', () => {
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: invalid}),
       {status: 200, headers: {'Content-Type': 'application/json'}}))
     await expect(fetchDashboardTools()).rejects.toThrow('matching inline causal delivery')
+    for (const identity of [{kind: 'call_id', call_id: ' '},
+      {kind: 'provider_step', conversation_id: ' ', step_index: 0}]) {
+      const invalidIdentity = structuredClone(projection)
+      const native = invalidIdentity.ledger.async_actions[2]!
+      Object.assign(native.occurrence, {identity})
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: invalidIdentity}),
+        {status: 200, headers: {'Content-Type': 'application/json'}}))
+      await expect(fetchDashboardTools()).rejects.toThrow('blank')
+    }
     const duplicate = structuredClone(projection)
     duplicate.ledger.async_actions.push(structuredClone(duplicate.ledger.async_actions[0]!))
     expect(() => normalizeSkillActivationProjection(duplicate)).toThrow('causal occurrence')
+  })
+
+  it('verifies causal action receipts on supported HTTP origins without SubtleCrypto', async () => {
+    const projection = { ...validSkillActivationProjectionFixture(), ledger: sharedAsyncActionLedger }
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: projection}),
+      {status: 200, headers: {'Content-Type': 'application/json'}}))
+    vi.stubGlobal('crypto', {})
+    try {
+      const result = await fetchDashboardTools()
+      expect(result.skill_activations?.status).toBe('available')
+    } finally { vi.unstubAllGlobals() }
   })
 
   it('retains async child receipts across SDK turns without changing the original Task', () => {

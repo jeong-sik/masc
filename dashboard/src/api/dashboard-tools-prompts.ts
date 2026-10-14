@@ -6,6 +6,8 @@ import { get, post, type AbortableRequestOptions } from './core'
 import { nestedCompositionScopeIsValid, type NestedCompositionScope } from './skill-activation-scope'
 import { validate as isUuid, version as uuidVersion } from 'uuid'
 import { parseStrictRfc3339 } from '../lib/rfc3339'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
 import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
@@ -1369,7 +1371,7 @@ function decodeSkillActionIdentity(
     const record = exactSkillActivationObject(value, label, ['kind', 'call_id'])
     return {
       kind: 'call_id',
-      call_id: skillActivationString(record.call_id, `${label}.call_id`),
+      call_id: skillActivationNonblank(record.call_id, `${label}.call_id`),
     }
   }
   if (value.kind === 'provider_step') {
@@ -1380,7 +1382,7 @@ function decodeSkillActionIdentity(
     )
     return {
       kind: 'provider_step',
-      conversation_id: skillActivationString(
+      conversation_id: skillActivationNonblank(
         record.conversation_id,
         `${label}.conversation_id`,
       ),
@@ -1788,18 +1790,19 @@ function decodeAsyncAction(value: unknown, label: string): DashboardSkillAsyncAc
   }
 }
 
-async function validateAsyncActionLinks(projection: DashboardSkillActivationProjection | null | undefined): Promise<void> {
+function validateAsyncActionLinks(projection: DashboardSkillActivationProjection | null | undefined): void {
   if (projection?.status !== 'available' || projection.ledger.async_actions.length === 0) return
-  const hash = async (value: unknown): Promise<string> => {
+  const hash = (value: unknown): string => {
     const bytes = new TextEncoder().encode(JSON.stringify(value).replaceAll('\u007f', '\\u007f'))
-    const digest = await crypto.subtle.digest('SHA-256', bytes)
-    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+    return bytesToHex(sha256(bytes))
   }
   const deliveries = new Map<string, DashboardSkillAsyncResultDelivery>()
   for (const delivery of projection.ledger.async_result_deliveries) {
     const {observed_at: _clock, ...identity} = delivery
-    deliveries.set(await hash(identity), delivery)
+    deliveries.set(hash(identity), delivery)
   }
+  const activations = new Map(projection.ledger.activations.map(value => [value.skill_tool_use_id, value]))
+  const frameDigests = new Map<string, string>()
   for (const action of projection.ledger.async_actions) {
     const delivery = deliveries.get(action.delivery_sha256)
     if (!delivery || delivery.presentation !== 'inline_result' || delivery.physical_turn_ref !== action.physical_turn_ref
@@ -1808,8 +1811,14 @@ async function validateAsyncActionLinks(projection: DashboardSkillActivationProj
       throw new Error('skill_activations action has no matching inline causal delivery')
     }
     for (const child of delivery.child_activations) {
-      const activation = projection.ledger.activations.find(value => value.skill_tool_use_id === child.skill_tool_use_id)!
-      if (await hash({...activation, delivery: null, actions: []}) !== child.activation_sha256) {
+      let digest = frameDigests.get(child.skill_tool_use_id)
+      if (digest === undefined) {
+        const activation = activations.get(child.skill_tool_use_id)
+        if (!activation) throw new Error('skill_activations action original frame is absent')
+        digest = hash({...activation, delivery: null, actions: []})
+        frameDigests.set(child.skill_tool_use_id, digest)
+      }
+      if (digest !== child.activation_sha256) {
         throw new Error('skill_activations action original frame differs')
       }
     }
@@ -1949,7 +1958,7 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
     ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined
   const normalizedSkillActivations = normalizeSkillActivationProjection(raw.skill_activations)
-  await validateAsyncActionLinks(normalizedSkillActivations)
+  validateAsyncActionLinks(normalizedSkillActivations)
   return {
     ...raw,
     tool_inventory: {

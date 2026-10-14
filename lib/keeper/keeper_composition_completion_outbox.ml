@@ -211,6 +211,12 @@ let flush ~base_path ~deliver =
           then Error (Invalid_obligation "canonical result changed completion owner")
           else
             let* tool = composition_tool entry in
+            let* recovery_pending = Keeper_tool_execution_journal.completion_pending ~base_path entry
+                |> Result.map_error (fun error -> Storage_failed (Keeper_tool_execution_journal.error_to_string error)) in
+            if recovery_pending then
+              let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name ~request_id:entry.request_id in
+              Ok Retired
+            else
             match entry.status with
             | Async.Waiting_for_dependencies _ ->
               let* () = acknowledge_waiting ~base_path ~keeper_name:obligation.keeper_name

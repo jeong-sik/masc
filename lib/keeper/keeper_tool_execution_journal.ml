@@ -1349,6 +1349,31 @@ let waiting_continuation journal = filesystem (fun () ->
 type read_composition_result =
   base_path:string -> keeper_name:string -> Dependency.composition -> (Dependency.readiness,string) result
 
+let completion_pending ~base_path (entry : Async.entry) = filesystem (fun () ->
+  match entry.status with
+  | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
+  | Waiting_for_dependencies _ | Done _ -> Ok false
+  | Lost _ ->
+    match Option.bind entry.request_context (List.assoc_opt "composition_run_id") with
+    | None -> Ok false
+    | Some (`String identity) ->
+      let* composition_run_id = Plan.Composition_run_id.of_string identity
+        |> Result.map_error (fun _ -> Invalid_source "completion has an invalid run identity") in
+      let* journal = load ~base_path ~keeper_name:entry.keeper_name ~composition_run_id in
+      let rec observe () =
+        let* () = validate_request journal entry in
+        let* before = strict_read ~root:journal.root journal.path in
+        let* () = check_source journal before in
+        let* pending = match before.owner with
+          | Some owner when not (String.equal owner.request_id entry.request_id) -> Ok true
+          | Some _ -> waiting_continuation journal |> Result.map Option.is_some
+          | None -> Error Ownership_changed in
+        let* after = strict_read ~root:journal.root journal.path in
+        let* () = check_source journal after in
+        if same_owner before.owner after.owner then Ok pending else observe () in
+      observe ()
+    | Some _ -> Error (Invalid_source "completion has a malformed run identity"))
+
 let continuation_readiness ~read_composition_result (continuation : continuation) = filesystem (fun () ->
   let journal = continuation.journal in
   let* state = strict_read ~root:journal.root journal.path in

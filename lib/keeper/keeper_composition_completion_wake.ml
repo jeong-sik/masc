@@ -145,6 +145,18 @@ let on_worker_settled ~base_path ~composition_tool settlement =
   match settlement with
   | Keeper_msg_async.Status_settlement
       { entry; durability = Keeper_msg_async.Durable; origin = _ } ->
+    (match Keeper_tool_execution_journal.completion_pending ~base_path entry with
+     | Error error -> Log.Keeper.error ~keeper_name:entry.submitted_by
+         "composition completion awaits original recovery authority request_id=%s: %s"
+         entry.request_id (Keeper_tool_execution_journal.error_to_string error)
+     | Ok true ->
+       (match Keeper_composition_completion_outbox.acknowledge ~base_path
+           ~keeper_name:entry.submitted_by ~request_id:entry.request_id with
+        | Ok () -> ()
+        | Error error -> Log.Keeper.error ~keeper_name:entry.submitted_by
+            "recoverable physical attempt completion retirement failed request_id=%s: %s"
+            entry.request_id (Keeper_composition_completion_outbox.error_to_string error))
+     | Ok false ->
     (match terminal_of_status entry.Keeper_msg_async.status with
      | None ->
        (match entry.status with
@@ -180,7 +192,7 @@ let on_worker_settled ~base_path ~composition_tool settlement =
         (* [deliver] already logged the reason. The pre-dispatch obligation
            remains for canonical-result reconciliation; only delivery is
            retried, while the result remains in the original request record. *)
-        | Error _ -> ()))
+        | Error _ -> ())))
   (* The store does not hold this settlement as canonical truth. Telling the
      Keeper its work succeeded on evidence that may not survive would be worse
      than leaving it to read the record. *)

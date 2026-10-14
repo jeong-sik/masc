@@ -126,8 +126,9 @@ export names too. The compiler maps the export to its exact leaf producer and
 revalidates the combined pointer against that producer's schema. Whole-child root
 output and undeclared exports are explicit errors.
 
-Every dependency on a child, including a reference to its exported output, waits
-on all its leaves. A failing sibling therefore blocks a downstream consumer even
+Every dependency on an inline child, including a reference to its exported output,
+waits on all its leaves. An async child uses its canonical whole-result barrier.
+A failing sibling therefore blocks a downstream consumer even
 when the selected producer succeeded. Under `continue_independent`, unrelated
 branches still run and successful selected exports remain available with the
 aggregate failure. Child and parent failure policies must agree in this first
@@ -138,10 +139,10 @@ parent IDs and child IDs are renamed, so an arbitrary user ID that resembles a
 child path cannot collide. Each compiled call retains its exact reference, bound
 arguments and source-to-expanded leaf mapping for later durable evidence.
 
-Async children are refused as `async_child_requires_suspension`. An async request
-receipt is not a child result. Connecting that child requires durable suspension,
-completion correlation and resumption, rather than flattening a worker as a normal
-inline leaf. Expanded leaves admit static read-only ordinary Tool contracts and
+Inline parents refuse async children as `async_child_requires_suspension`.
+Async parents use the native submission and result operands described above;
+an async request receipt is not a child result. Named async Skills retain their
+static read-only admission contract. Expanded inline leaves admit static read-only ordinary Tool contracts and
 the isolated owned-job launch producer with its Serial durable ownership.
 General resource-aware effect admission remains a separate implementation unit.
 

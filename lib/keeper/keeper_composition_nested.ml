@@ -124,13 +124,15 @@ let source_node ~index = function
 
 let source_id = function Ordinary node -> node.Plan.id | Nested node -> node.alias
 
-let namespace path =
+let namespace_segments path =
   (* JSON arrays are injective over complete string paths, including quotes,
      delimiters, Unicode and ordinary IDs that resemble a child path. *)
-  match Plan.Node_id.make (Yojson.Safe.to_string (`List (List.map id_json path))) with
+  match Plan.Node_id.make (Yojson.Safe.to_string (`List (List.map (fun value -> `String value) path))) with
   | Ok id -> id
   | Error Plan.Node_id.Empty -> invalid_arg "nonempty encoded composition path"
 ;;
+
+let namespace path = namespace_segments (List.map Plan.Node_id.to_string path)
 
 let entry_for_call ~capability_surface (node : nested_node) =
   let row = Surface.skill_capabilities capability_surface |> List.find_opt (fun (row : Surface.skill_capability) ->
@@ -184,7 +186,9 @@ let expand ~execution ~capability_surface ~policy = function
       let call = {alias=node.alias;reference=node.reference;args;scope=Inline mapping;exports} in
       Ok (Inline_child (node,plan,call))
     | Catalog.Async ->
-      let submission = namespace [node.alias;"submission"] and result = namespace [node.alias;"result"] in
+      let alias = Plan.Node_id.to_string node.alias in
+      let submission = namespace_segments [alias;"submission"]
+      and result = namespace_segments [alias;"result"] in
       let child = Plan.fixed_async_child ~alias:node.alias ~reference:node.reference
           ~tool_name:(Catalog.tool_name entry) ~args ~input_schema:(Catalog.input_schema_of_params entry.params)
           ~bound_plan:plan in

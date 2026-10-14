@@ -369,6 +369,9 @@ let observe_async_run_settlement
   | Keeper_msg_async.Status_settlement
       { entry; durability = Keeper_msg_async.Durable; origin = _ } ->
     let terminal =
+      match Journal.completion_pending ~base_path:entry.base_path entry with
+      | Ok true | Error _ -> None
+      | Ok false ->
       match entry.Keeper_msg_async.status with
       | Keeper_msg_async.Done { ok; body; data = _ } -> Some (ok, body)
       | Keeper_msg_async.Lost { reason } -> Some (false, reason)

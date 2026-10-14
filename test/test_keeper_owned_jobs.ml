@@ -3259,12 +3259,12 @@ pointer = "/content"
       ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
   let fixture = {fixture with make_bundle} in
   operation ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
-    ~publication_recovery ~physical_turn_ref ~delivery ~recorder
+    ~publication_recovery ~physical_turn_ref ~delivery ~recorder ~snapshot
 
 let test_fixed_async_skill_child () =
   with_nested_job_skill ~wait_only:true ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
-      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ->
+      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot:_ ->
   let module Async = Masc.Keeper_msg_async in
   let module Ledger = Masc.Keeper_skill_activation_ledger in
   let module Tools = Masc.Keeper_tool_composition_surface in
@@ -3385,7 +3385,7 @@ let lose_native_parent_after_child_acceptance base_path draft_sha run_id =
   with_nested_job_skill ~fixture_base_path:base_path ~wait_only:true
     ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference:_ ~runtime:_ ~runtime_reads
-      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder ->
+      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder ~snapshot:_ ->
   let module Async = Masc.Keeper_msg_async in
   let module Draft = Masc.Keeper_composition_draft in
   let module Plan = Masc.Keeper_tool_plan in
@@ -3440,7 +3440,7 @@ let lose_native_parent_after_child_acceptance base_path draft_sha run_id =
 let test_native_child_acceptance_survives_physical_parent_loss () =
   with_nested_job_skill ~wait_only:true ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
-      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ->
+      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot:_ ->
   let module Async = Masc.Keeper_msg_async in
   let module Plan = Masc.Keeper_tool_plan in
   let sibling = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path)
@@ -3501,13 +3501,23 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
     let original_events = read events in
     let fault_request = Fun.protect ~finally:(fun () -> write events original_events) (fun () ->
       let worker = Atomic.make None in
+      let settled,notify_settled = Eio.Promise.create () in
       let accepted = Async.submit_worker_with_request_id ?request_context:terminal.request_context
           ~background_sw:(Async.server_background_switch () |> require "ACK-ready accepted worker fault switch")
           ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
-          ~on_accepted:(fun request_id -> Journal.bind_continuation continuation ~request_id
+          ~on_accepted:(fun request_id ->
+            let ( let* ) = Result.bind in
+            let* () = Masc.Keeper_composition_completion_outbox.prepare ~base_path:fixture.base_path
+                ~keeper_name:keeper ~request_id ~composition_tool:Draft.run_tool_name
+              |> Result.map_error Masc.Keeper_composition_completion_outbox.error_to_string in
+            Journal.bind_continuation continuation ~request_id
             |> Result.map (fun admitted -> Atomic.set worker (Some admitted);
               write events "invalid-original-activation-after-ACK-ready-acceptance\n")
             |> Result.map_error Journal.error_to_string)
+          ~on_worker_settled:(fun settlement ->
+            Masc.Keeper_composition_completion_wake.on_worker_settled ~base_path:fixture.base_path
+              ~composition_tool:Draft.run_tool_name settlement;
+            Eio.Promise.resolve notify_settled ())
           ~f:(fun ~request_id request_sw ->
             let worker = match Atomic.get worker with Some worker -> worker | None -> fail "fault worker not actually bound" in
             Masc.Keeper_tool_composition_surface.For_testing.async_worker_result
@@ -3529,7 +3539,13 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
         | Error (Canonical_terminal_absent | Canonical_terminal_runtime_active _) -> Eio.Fiber.yield (); read_loss ()
         | Error error -> fail (Async.canonical_terminal_error_to_string error) in
       read_loss ();
+      Eio.Promise.await settled;
       accepted.request_id) in
+    let recovery = Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
+        |> require "recover original physical attempt completion obligations" in
+    check int "recovery publishes no false logical completion" 0 recovery.delivered;
+    check int "original recovery authority is now readable" 0 (List.length recovery.failures);
+    check int "recoverable physical attempts enqueue no failed completion" 0 (List.length (pending_completions fixture));
     let retained = candidate journal in
     check string "transient authority fault keeps the accepted physical owner recoverable" fault_request
       (Journal.continuation_request_id retained);
@@ -3592,12 +3608,14 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
 let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () =
   with_nested_job_skill ~execution:Masc.Keeper_tool_composition_catalog.Inline
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
-      ~publication_recovery ~physical_turn_ref ~delivery ~recorder:_ ->
+      ~publication_recovery ~physical_turn_ref ~delivery ~recorder:_ ~snapshot ->
   let module Async = Masc.Keeper_msg_async in
   let module Wake = Masc.Keeper_composition_continuation_wake in
   let module Ledger = Masc.Keeper_skill_activation_ledger in
   let module Delivery = Masc.Keeper_composition_result_delivery in
   let module Async_delivery = Masc.Keeper_skill_async_delivery in
+  let module Recorder = Masc.Keeper_skill_activation_recorder in
+  let module Surface = Masc.Keeper_capability_surface in
   let recipe = `Assoc ["execution",`String "async";"nodes",`List
       [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"args",`Assoc []]];
       "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in

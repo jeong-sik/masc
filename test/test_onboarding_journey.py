@@ -55,12 +55,20 @@ class StepByStep(unittest.TestCase):
     quick_plan looks for claude on PATH, so a developer's Mac and a CI runner
     would open these cases on different first screens. They are pinned to a
     computer that has no plan to offer; QuickSetup covers the plan.
+
+    The tools step asks the binary what it finds on this computer, and a case
+    that walks the sandbox would otherwise spend its stand-in replies on that.
+    ImpTools covers the step itself.
     """
 
     def setUp(self):
         plan = patch.object(SETUP, 'quick_plan', return_value=None)
         plan.start()
         self.addCleanup(plan.stop)
+        for name in ('select_imp_tools', 'show_imp_tools'):
+            stand_in = patch.object(SETUP, name)
+            stand_in.start()
+            self.addCleanup(stand_in.stop)
 
 
 def path_without(command, path):
@@ -1074,6 +1082,317 @@ class LocalVoice(StepByStep):
         self.assertEqual(order, ['voice', 'sandbox'])
 
 
+BROWSER_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox'}
+BROWSER_INSTALLS = {'geckodriver': ['brew', 'install', 'geckodriver'],
+                    'firefox': ['brew', 'install', '--cask', 'firefox']}
+
+
+def browser_readiness(program, ready=True):
+    """The wire shape MASC sends for geckodriver and Firefox."""
+    row = (dict(command=program, status='started', path='/opt/tools/' + program, output=program + ' 1.0')
+           if ready else dict(command=program, status='missing'))
+    return dict(schema='masc.browser_tools_readiness.v1', program=program,
+                status='tools_available' if ready else 'unavailable',
+                scope='current_process_environment', checks=[row], lane='not_checked')
+
+
+def browser_catalog(program, ready=True, admin=False):
+    action = dict(id=program + '_brew_install', label='Install ' + BROWSER_NAMES[program] + ' with Homebrew',
+                  detail='Install through the existing Homebrew package manager',
+                  source_url='https://formulae.brew.sh/' + program, requires_admin=admin,
+                  effect=dict(kind='run_commands', argv_steps=[BROWSER_INSTALLS[program]]),
+                  completion='recheck_required', writes=None)
+    return json.dumps(dict(schema='masc.prerequisite_actions.v1', actions=[action],
+                           dependency_readiness=browser_readiness(program, ready)))
+
+
+def browser_receipt(program, status, readiness, ready=None, **extra):
+    receipt = dict(schema='masc.prerequisite_action_result.v1', status=status, readiness=readiness, **extra)
+    if ready is not None:
+        receipt['dependency_readiness'] = browser_readiness(program, ready)
+    return json.dumps(receipt)
+
+
+SETUP_ARGV = ['/bin/masc', 'browser-lane-setup', '--mode', 'automation',
+              '--geckodriver', '/opt/tools/geckodriver', '--base-path', '/workspace']
+
+
+class BrowserToolReadiness(unittest.TestCase):
+    """Reading what MASC says about geckodriver and Firefox.
+
+    The decoder is the one place the wire words are read, so a shape the
+    binary stops sending fails here instead of reading as "not installed".
+    """
+
+    def test_the_wire_shape_is_read(self):
+        found = SETUP.decode_browser_tools_readiness(browser_readiness('geckodriver'), 'geckodriver')
+        self.assertEqual((found.available, found.path), (True, '/opt/tools/geckodriver'))
+        absent = SETUP.decode_browser_tools_readiness(browser_readiness('firefox', ready=False), 'firefox')
+        self.assertEqual((absent.available, absent.path), (False, None))
+
+    def test_a_shape_that_drifted_is_refused_rather_than_read_as_missing(self):
+        def drifted(change, program='geckodriver', ready=True):
+            value = browser_readiness(program, ready)
+            change(value)
+            return value
+        cases = {
+            'another program': lambda v: v.update(program='firefox'),
+            'unknown schema': lambda v: v.update(schema='masc.browser_tools_readiness.v2'),
+            'a lane already checked': lambda v: v.update(lane='checked'),
+            'another scope': lambda v: v.update(scope='workspace'),
+            'unknown status': lambda v: v.update(status='ok'),
+            'two checks': lambda v: v['checks'].append(dict(v['checks'][0])),
+            'started but unavailable': lambda v: v.update(status='unavailable'),
+            'available but missing': lambda v: v['checks'][0].update(status='missing'),
+            'a relative path': lambda v: v['checks'][0].update(path='bin/geckodriver'),
+            'no path': lambda v: v['checks'][0].pop('path'),
+        }
+        for name, change in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.decode_browser_tools_readiness(drifted(change), 'geckodriver')
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.decode_browser_tools_readiness(None, 'geckodriver')
+
+    def execute(self, program, receipt, code=0):
+        with patch.object(SETUP.subprocess, 'run', return_value=completed(receipt, code)), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            return SETUP.execute_prerequisite('/bin/masc', program, program + '_brew_install'), printed.getvalue()
+
+    def test_an_install_that_left_a_program_that_starts_is_completed(self):
+        state, printed = self.execute('geckodriver', browser_receipt(
+            'geckodriver', 'commands_completed', 'tools_available', ready=True))
+        self.assertEqual(state, 'commands_completed')
+        self.assertIn('geckodriver is installed and starts', printed)
+
+    def test_an_install_that_left_nothing_that_starts_is_not_completed(self):
+        # A receipt that claims success next to a recheck that says otherwise is
+        # a contradiction the screen must not report as an install.
+        with self.assertRaises(SETUP.SetupError):
+            self.execute('firefox', browser_receipt('firefox', 'commands_completed', 'unavailable', ready=False))
+        with self.assertRaises(SETUP.SetupError):
+            self.execute('firefox', browser_receipt('firefox', 'commands_completed', 'tools_available', ready=False))
+
+    def test_a_receipt_whose_two_fields_disagree_is_unreadable_whatever_its_status(self):
+        # The status check above catches a completed install; a failed one
+        # carries no such claim, so only the comparison of the two fields can.
+        with self.assertRaises(SETUP.SetupError):
+            self.execute('firefox', browser_receipt('firefox', 'failed', 'tools_available', ready=False,
+                                                    reason='brew exited 1'), code=1)
+
+    def test_a_failed_install_says_why_in_the_reason_it_carries(self):
+        for readiness, ready in (('unavailable', False), ('not_checked', None)):
+            with self.subTest(readiness=readiness):
+                state, printed = self.execute('firefox', browser_receipt(
+                    'firefox', 'failed', readiness, ready=ready, reason='brew exited 1'), code=1)
+                self.assertEqual(state, 'failed')
+                self.assertIn('brew exited 1', printed)
+
+    def test_an_official_page_install_waits_for_the_reader(self):
+        state, printed = self.execute('geckodriver', browser_receipt(
+            'geckodriver', 'external_step_pending', 'not_checked'))
+        self.assertEqual(state, 'external_step_pending')
+        self.assertIn('Complete the vendor installation window', printed)
+
+
+class ImpTools(unittest.TestCase):
+    """The tools checklist: one screen after the sandbox that starts marked.
+
+    Nothing runs until the reader confirms it, and a quick setup runs nothing.
+    """
+
+    def catalogs(self, *programs, ready=True, admin=False):
+        return [completed(browser_catalog(program, ready, admin)) for program in programs]
+
+    def test_found_programs_make_one_marked_row_that_names_the_command(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')):
+            rows = SETUP.imp_tool_rows('/bin/masc', '/work space')
+        self.assertEqual([(row.key, row.checked) for row in rows], [('automation', True)])
+        self.assertIn('geckodriver and Firefox found', rows[0].label)
+        self.assertEqual(rows[0].command,
+                         "masc browser-lane-setup --mode automation --base-path '/work space'")
+
+    def test_a_missing_program_names_its_install_in_the_row_and_the_command(self):
+        replies = [completed(browser_catalog('geckodriver', ready=False)),
+                   completed(browser_catalog('firefox', ready=False, admin=True))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies):
+            row = SETUP.imp_tool_rows('/bin/masc', '/workspace')[0]
+        self.assertTrue(row.checked)
+        self.assertIn('geckodriver, Firefox not found', row.label)
+        self.assertIn('Install geckodriver with Homebrew', row.label)
+        self.assertIn('administrator permission', row.label)
+        self.assertEqual(row.command, 'brew install geckodriver && brew install --cask firefox && '
+                                      'masc browser-lane-setup --mode automation --base-path /workspace')
+
+    def test_only_the_missing_program_is_offered_for_install(self):
+        replies = [completed(browser_catalog('geckodriver', ready=False)), completed(browser_catalog('firefox'))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies):
+            row = SETUP.imp_tool_rows('/bin/masc', '/workspace')[0]
+        self.assertNotIn('Install Firefox', row.label)
+        self.assertNotIn('--cask', row.command)
+        self.assertTrue(row.command.startswith('brew install geckodriver && masc browser-lane-setup'))
+
+    def test_a_catalog_the_binary_cannot_answer_is_not_read_as_missing(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1)]):
+            with self.assertRaises(SETUP.SetupError):
+                SETUP.imp_tool_rows('/bin/masc', '/workspace')
+
+    def test_the_checklist_starts_marked_and_ends_with_a_row_that_skips(self):
+        replies = self.catalogs('geckodriver', 'firefox') + self.catalogs('geckodriver', 'firefox') + [completed()]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]) as picker, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_imp_tools('/bin/masc', '/workspace'), ('automation',))
+        title, labels = picker.call_args.args[:2]
+        self.assertTrue(title.startswith('5 ·'))
+        self.assertEqual(labels[-1], SETUP.SKIP_TOOLS)
+        self.assertEqual((picker.call_args.kwargs['multiple'], picker.call_args.kwargs['defaults']), (True, [0]))
+        self.assertEqual(run.call_args_list[-1].args[0], SETUP_ARGV)
+
+    def test_the_skip_row_wins_over_a_mark_and_nothing_runs(self):
+        # A multiple pick cannot return nothing, so skipping is a row. Marking
+        # it together with the tool resolves to doing nothing.
+        for chosen in ([1], [0, 1]):
+            with self.subTest(chosen=chosen), \
+                    patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('geckodriver', 'firefox')) as run, \
+                    patch.object(SETUP, 'pick', return_value=chosen), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(SETUP.select_imp_tools('/bin/masc', '/workspace'), ())
+                self.assertEqual([call.args[0][1] for call in run.call_args_list], ['prerequisite-actions'] * 2)
+
+    def test_a_cancel_or_an_unreadable_catalog_continues_without_the_tools(self):
+        for name, replies, picked in (('cancel', self.catalogs('geckodriver', 'firefox'), SETUP.SetupError('setup cancelled')),
+                                      ('catalog', [completed('', 1)], [0])):
+            with self.subTest(name), patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                    patch.object(SETUP, 'pick', side_effect=[picked] if isinstance(picked, list) else picked), \
+                    contextlib.redirect_stderr(io.StringIO()) as printed:
+                self.assertEqual(SETUP.select_imp_tools('/bin/masc', '/workspace'), ())
+            self.assertIn('Continuing without them', printed.getvalue())
+            self.assertNotIn('browser-lane-setup', [call.args[0][1] for call in run.call_args_list])
+
+    def test_the_geckodriver_written_is_the_one_masc_saw_answer(self):
+        with patch.object(SETUP.subprocess, 'run',
+                          side_effect=self.catalogs('geckodriver', 'firefox') + [completed()]) as run, \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.prepare_browser_automation('/bin/masc', '/workspace')
+        self.assertEqual(run.call_args_list[-1].args[0], SETUP_ARGV)
+
+    def test_a_missing_program_is_installed_through_the_menu_and_checked_again(self):
+        replies = [completed(browser_catalog('geckodriver', ready=False)), completed(browser_catalog('geckodriver')),
+                   completed(browser_catalog('firefox')), completed()]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'prerequisite_menu', return_value=True) as menu, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.prepare_browser_automation('/bin/masc', '/workspace')
+        menu.assert_called_once_with('/bin/masc', 'geckodriver', base_path='/workspace')
+        self.assertIn('geckodriver was not found', printed.getvalue())
+        self.assertEqual(run.call_args_list[-1].args[0], SETUP_ARGV)
+
+    def test_leaving_the_install_menu_writes_nothing_and_says_what_to_run(self):
+        replies = [completed(browser_catalog('geckodriver', ready=False))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'prerequisite_menu', return_value=False), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.prepare_browser_automation('/bin/masc', '/workspace')
+        self.assertEqual(len(run.call_args_list), 1)
+        self.assertIn('Run masc browser-lane-setup --mode automation', printed.getvalue())
+
+    def test_a_refused_write_does_not_end_setup(self):
+        with patch.object(SETUP.subprocess, 'run',
+                          side_effect=self.catalogs('geckodriver', 'firefox') + [completed('', 1)]), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.prepare_browser_automation('/bin/masc', '/workspace')
+        self.assertIn("imp's browser was not saved", printed.getvalue())
+
+    def test_a_quick_setup_lists_the_row_and_runs_nothing(self):
+        replies = [completed(browser_catalog('geckodriver', ready=False)), completed(browser_catalog('firefox'))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick') as picker, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.show_imp_tools('/bin/masc', '/workspace')
+        picker.assert_not_called()
+        self.assertEqual([call.args[0][1:3] for call in run.call_args_list],
+                         [['prerequisite-actions', 'geckodriver'], ['prerequisite-actions', 'firefox']])
+        self.assertNotIn('--execute', [word for call in run.call_args_list for word in call.args[0]])
+        self.assertIn('brew install geckodriver && masc browser-lane-setup --mode automation', printed.getvalue())
+
+    def test_a_quick_setup_that_cannot_look_says_so_and_goes_on(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1)]), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.show_imp_tools('/bin/masc', '/workspace')
+        self.assertIn('Run masc browser-lane-setup --mode automation', printed.getvalue())
+
+
+class ImpToolsInTheJourney(unittest.TestCase):
+    """Where the step sits: after the sandbox, before `masc setup` starts the server.
+
+    The server reads the browser table when it starts, so a table written
+    after `masc setup` would wait for a restart nobody asked for.
+    """
+
+    def walk(self, quick, sandbox):
+        order = []
+
+        def ran(argv, **_):
+            order.append(argv[1])
+            return subprocess.CompletedProcess([], 0)
+        with patch.object(SETUP, 'select_sandbox', side_effect=lambda *a, **k: order.append('sandbox') or sandbox), \
+                patch.object(SETUP, 'select_imp_tools', side_effect=lambda *a: order.append('tools')), \
+                patch.object(SETUP, 'show_imp_tools', side_effect=lambda *a: order.append('list')), \
+                patch.object(SETUP, 'open_workspace', return_value=0), \
+                patch.object(SETUP.subprocess, 'run', side_effect=ran), \
+                contextlib.redirect_stderr(io.StringIO()):
+            SETUP.sandbox_journey('/bin/masc', '/workspace', 8945, quick=quick)
+        return order
+
+    def test_the_checklist_comes_after_the_sandbox_and_before_setup(self):
+        self.assertEqual(self.walk(quick=False, sandbox=[]), ['sandbox', 'tools', 'setup'])
+
+    def test_a_quick_setup_lists_instead_of_asking(self):
+        self.assertEqual(self.walk(quick=True, sandbox=[]), ['sandbox', 'list', 'setup'])
+
+    def test_leaving_at_the_sandbox_does_not_open_the_step(self):
+        self.assertEqual(self.walk(quick=False, sandbox=None), ['sandbox'])
+
+
+@unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+class ImpToolsAgainstTheBinary(unittest.TestCase):
+    """The wizard, the catalog and the command agree, as the real binary says them.
+
+    The fixtures above are copies of what the binary prints, and a copy can
+    drift. Here geckodriver and Firefox are scripts on PATH, so the catalog
+    finds them, and the command the wizard runs writes a real runtime.toml.
+    """
+
+    def test_a_found_pair_is_written_into_the_workspace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            tools = root / 'tools'
+            tools.mkdir()
+            for name, banner in (('geckodriver', 'geckodriver 0.0'), ('firefox', 'Mozilla Firefox 0.0')):
+                (tools / name).write_text("#!/bin/sh\necho '" + banner + "'\n")
+                (tools / name).chmod(0o755)
+            base = root / 'workspace'
+            (base / '.masc/config').mkdir(parents=True)
+            (base / '.masc/config/runtime.toml').write_text(
+                '[providers."deepseek"]\ndisplay-name = "Fixture"\nprotocol = "openai-compatible-http"\n'
+                'endpoint = "https://fixture.invalid/v1"\n[providers."deepseek".credentials]\ntype = "inline"\n'
+                'value = "fixture-key"\n[models.chat]\napi-name = "deepseek-v4-pro"\n["deepseek".chat]\n'
+                '[runtime]\ndefault = "deepseek.chat"\n')
+            (root / 'home').mkdir()
+            # A file, not a StringIO: the command's output goes to this stderr's
+            # descriptor, which a StringIO does not have.
+            with open(root / 'stderr.txt', 'w') as sink, \
+                    patch.dict(os.environ, {'HOME': str(root / 'home'), 'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'}), \
+                    contextlib.redirect_stderr(sink):
+                rows = SETUP.imp_tool_rows(BINARY, str(base))
+                SETUP.prepare_browser_automation(BINARY, str(base))
+            self.assertIn('geckodriver and Firefox found', rows[0].label)
+            written = (base / '.masc/config/runtime.toml').read_text()
+            self.assertIn('geckodriver = "' + str(tools / 'geckodriver') + '"', written)
+            self.assertNotIn('was not saved', (root / 'stderr.txt').read_text())
+
+
 class PdfToolsProbe(unittest.TestCase):
     # Journey replaces pdf_tools_status for every case, so the probe itself is
     # exercised here, without that stand-in.
@@ -1440,7 +1759,7 @@ class QuickSetup(unittest.TestCase):
         self.assertEqual([call.args[0] for call in picker.call_args_list], ['Quick setup'])
         models.assert_called_once_with('/bin/masc', '/workspace', 10, quick_model='claude-sonnet-5')
         voice.assert_not_called()
-        sandbox.assert_called_once_with('/bin/masc', '/workspace', 8945, quick_backend='apple_container')
+        sandbox.assert_called_once_with('/bin/masc', '/workspace', 8945, quick_backend='apple_container', quick=True)
         self.assertIn('Claude Code / claude-sonnet-5', errors)
 
     def test_choosing_each_step_is_the_journey_as_it_was(self):
@@ -1450,7 +1769,7 @@ class QuickSetup(unittest.TestCase):
         self.assertEqual([call.args[0] for call in picker.call_args_list], ['Quick setup', '1 \u00b7 Your workspace'])
         models.assert_called_once_with('/bin/masc', '/workspace', 10, quick_model=None)
         voice.assert_called_once()
-        sandbox.assert_called_once_with('/bin/masc', '/workspace', 8945, quick_backend=None)
+        sandbox.assert_called_once_with('/bin/masc', '/workspace', 8945, quick_backend=None, quick=False)
 
     def test_finishing_later_from_the_plan_writes_nothing(self):
         plan = dict(model='claude-sonnet-5', sandbox=None, sandbox_ready=False)

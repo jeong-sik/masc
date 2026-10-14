@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import select
+import shlex
 import shutil
 import stat
 import sys
@@ -22,6 +23,7 @@ import tempfile
 import termios
 import time
 import tty
+from typing import Optional
 from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError, URLError
@@ -1126,6 +1128,42 @@ def show_presentation_readiness(readiness):
             print(terminal_text(detail), file=sys.stderr)
 
 
+# The programs the automation lane starts, in the order they are checked. The
+# names are the ones `masc prerequisite-actions` takes.
+BROWSER_TOOLS = ('geckodriver', 'firefox')
+BROWSER_TOOL_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox'}
+
+
+@dataclass(frozen=True)
+class BrowserToolReadiness:
+    """MASC's answer about one program a browser lane starts, already read.
+    [path] is where the program that answered lives, and only then."""
+    program: str
+    available: bool
+    path: Optional[str]
+
+
+def decode_browser_tools_readiness(value, program):
+    if (not isinstance(value, dict) or value.get('schema') != 'masc.browser_tools_readiness.v1'
+            or value.get('program') != program
+            or value.get('status') not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE)
+            or value.get('scope') != 'current_process_environment'
+            or value.get('lane') != 'not_checked'):
+        raise SetupError('MASC returned unreadable ' + BROWSER_TOOL_NAMES.get(program, program) + ' readiness')
+    checks = value.get('checks')
+    if (not isinstance(checks, list) or len(checks) != 1 or not isinstance(checks[0], dict)
+            or checks[0].get('status') not in ('missing', 'started', 'failed')):
+        raise SetupError('MASC did not check ' + BROWSER_TOOL_NAMES[program])
+    row = checks[0]
+    started = row['status'] == 'started'
+    if started != (value['status'] == PDF_TOOLS_AVAILABLE):
+        raise SetupError('MASC returned inconsistent ' + BROWSER_TOOL_NAMES[program] + ' readiness')
+    path = row.get('path')
+    if started and not (isinstance(path, str) and os.path.isabs(path)):
+        raise SetupError('MASC did not say where ' + BROWSER_TOOL_NAMES[program] + ' runs')
+    return BrowserToolReadiness(program=program, available=started, path=path if started else None)
+
+
 def prerequisite_catalog(binary, dependency, workspace_args=()):
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency] + list(workspace_args),
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -1205,6 +1243,12 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
                 raise ValueError('inconsistent PDF recheck')
             if state == 'commands_completed' and not pdf.available:
                 raise ValueError('PDF tools were not available after installation')
+        elif dependency in BROWSER_TOOLS and readiness in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE):
+            browser = decode_browser_tools_readiness(receipt.get('dependency_readiness'), dependency)
+            if (readiness == PDF_TOOLS_AVAILABLE) != browser.available:
+                raise ValueError('inconsistent browser tool recheck')
+            if state == 'commands_completed' and not browser.available:
+                raise ValueError('browser tool was not available after installation')
         elif dependency == 'presentation-tools':
             presentation = decode_presentation_tools_readiness(receipt.get('dependency_readiness'), base_path)
             if readiness not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE) or (readiness == PDF_TOOLS_AVAILABLE) != presentation.available:
@@ -1232,6 +1276,8 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
         print('The selected presentation component is ready. Install the remaining component shown above, then refresh detection.', file=sys.stderr)
     elif dependency == 'pdf-tools' and state == 'commands_completed':
         print('PDF tools installed and both commands started successfully. Original PDF inspection runs when a document is read.', file=sys.stderr)
+    elif dependency in BROWSER_TOOLS and state == 'commands_completed':
+        print(BROWSER_TOOL_NAMES[dependency] + ' is installed and starts.', file=sys.stderr)
     elif state == 'external_step_pending':
         print('Complete the vendor installation window, then choose Refresh detection.', file=sys.stderr)
     elif state == 'commands_completed_recheck_required':
@@ -2434,6 +2480,137 @@ def quick_sandbox(binary, base_path, backend):
             return None
 
 
+# What imp can use once setup ends, offered as one checklist that starts marked
+# (RFC setup-web-search-and-browser-lane section 4.3). Nothing is installed or
+# written until the reader confirms the list, and a quick setup only prints it.
+AUTOMATION_TOOL = 'automation'
+SKIP_TOOLS = 'Skip all of these'
+
+
+@dataclass(frozen=True)
+class ToolRow:
+    """One line of the checklist: what it gives imp, whether it starts marked,
+    and the command a quick setup prints instead of running it."""
+    key: str
+    label: str
+    command: str
+    checked: bool
+
+
+def browser_tool(binary, program):
+    """What MASC found for one program, and the actions it offers on this host."""
+    catalog = prerequisite_catalog(binary, program)
+    return decode_browser_tools_readiness(catalog.get('dependency_readiness'), program), catalog['actions']
+
+
+def action_command(action):
+    """The command line an action runs, for a person to read and copy. It is
+    printed, never handed to a shell."""
+    effect = action.get('effect')
+    if isinstance(effect, dict) and effect.get('kind') == 'run_commands':
+        steps = effect.get('argv_steps')
+        if isinstance(steps, list) and steps and all(isinstance(step, list) and step for step in steps):
+            return ' && '.join(' '.join(shlex.quote(str(part)) for part in step) for step in steps)
+    return 'see ' + terminal_text(action.get('source_url', ''))
+
+
+def automation_row(binary, base):
+    found = {program: browser_tool(binary, program) for program in BROWSER_TOOLS}
+    setup = 'masc browser-lane-setup --mode automation --base-path ' + shlex.quote(str(base))
+    missing = [program for program in BROWSER_TOOLS if not found[program][0].available]
+    head = 'Let imp read web pages in a Firefox of its own'
+    if not missing:
+        return ToolRow(AUTOMATION_TOOL, head + ' · geckodriver and Firefox found', setup, True)
+    names = ', '.join(BROWSER_TOOL_NAMES[program] for program in missing)
+    offered = [found[program][1][0] for program in missing if found[program][1]]
+    label = head + ' · ' + names + ' not found'
+    if offered:
+        label += ' · installs: ' + ', '.join(terminal_text(action['label']) for action in offered)
+        if any(action['requires_admin'] for action in offered):
+            label += ' · administrator permission'
+    return ToolRow(AUTOMATION_TOOL, label, ' && '.join([action_command(action) for action in offered] + [setup]), True)
+
+
+def imp_tool_rows(binary, base):
+    return [automation_row(binary, base)]
+
+
+def prepare_browser_automation(binary, base):
+    """Bring geckodriver and Firefox up, then write the lane's geckodriver.
+
+    The path handed to `browser-lane-setup` is the one MASC just saw answer, so
+    the table names the program that was checked rather than the next one
+    `PATH` happens to find.
+    """
+    paths = {}
+    for program in BROWSER_TOOLS:
+        name = BROWSER_TOOL_NAMES[program]
+        readiness, _ = browser_tool(binary, program)
+        while not readiness.available:
+            print(name + ' was not found on this computer.', file=sys.stderr)
+            if not prerequisite_menu(binary, program, base_path=base):
+                print("imp's browser is not set up: " + name + ' is missing. Run masc browser-lane-setup '
+                      '--mode automation once it is installed.', file=sys.stderr)
+                return
+            readiness, _ = browser_tool(binary, program)
+        paths[program] = readiness.path
+    result = subprocess.run([str(binary), 'browser-lane-setup', '--mode', 'automation',
+                             '--geckodriver', paths['geckodriver'], '--base-path', str(base)],
+                            stdout=sys.stderr)
+    if result.returncode != 0:
+        # The writer already said why. The browser is optional, so this does not end setup.
+        print("imp's browser was not saved. Everything else is. Run masc browser-lane-setup "
+              '--mode automation to try again.', file=sys.stderr)
+
+
+def choose_imp_tools(binary, base):
+    rows = imp_tool_rows(binary, base)
+    # A multiple pick cannot return nothing: with every mark removed, Enter
+    # takes the row under the cursor. Skipping is therefore a row of its own,
+    # and it wins over any mark, so a doubt resolves to doing nothing.
+    chosen = pick('5 · Give imp tools (optional)', [row.label for row in rows] + [SKIP_TOOLS], multiple=True,
+                  defaults=[index for index, row in enumerate(rows) if row.checked])
+    if len(rows) in chosen:
+        return ()
+    keys = tuple(rows[index].key for index in chosen)
+    if AUTOMATION_TOOL in keys:
+        prepare_browser_automation(binary, base)
+    return keys
+
+
+def select_imp_tools(binary, base):
+    """Ask what imp may use, and never take the journey down with it.
+
+    The same rule as the voice question: the workspace and the model are saved
+    and the first conversation is still ahead, so a cancel or a failure here
+    means "not this", not "abandon setup".
+    """
+    try:
+        return choose_imp_tools(binary, base)
+    except SetupError as error:
+        print(terminal_text(str(error)) + "\nContinuing without them. Run masc browser-lane-setup --mode "
+              "automation to give imp a browser later.", file=sys.stderr)
+        return ()
+
+
+def show_imp_tools(binary, base):
+    """What a quick setup leaves for later: each line with the command that does it.
+
+    Quick setup has no screen where the reader marks anything, so nothing here
+    is installed or written. This only reads.
+    """
+    try:
+        rows = imp_tool_rows(binary, base)
+    except SetupError as error:
+        print(terminal_text(str(error)) + '\nRun masc browser-lane-setup --mode automation to give imp a browser later.',
+              file=sys.stderr)
+        return
+    print("\nQuick setup leaves imp's tools for later. Each line is followed by the command that sets it up:",
+          file=sys.stderr)
+    for row in rows:
+        print('  ' + terminal_text(row.label) + '\n      ' + row.command, file=sys.stderr)
+
+
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
     # `invalid` is not one condition. Saving a selection repairs some of them —
@@ -2507,10 +2684,10 @@ def journey(binary, base_path, port, timeout, resume=False):
         print('imp stays text only. Run masc voice-local-setup to give it a voice later.', file=sys.stderr)
     else:
         select_local_voice(binary, base)
-    return sandbox_journey(binary, base, port, quick_backend=plan['sandbox'] if quick else None)
+    return sandbox_journey(binary, base, port, quick_backend=plan['sandbox'] if quick else None, quick=quick)
 
 
-def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None):
+def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None, quick=False):
     if port is None:
         port = workspace_port(binary, base)
     if refresh_owner:
@@ -2529,7 +2706,13 @@ def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None)
     if sandbox_args is None:
         print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
         return 0
-    print('\n5 · Open your first conversation', file=sys.stderr)
+    # After the sandbox and before the first conversation: the server reads the
+    # browser table when it starts, and `masc setup` below is what starts it.
+    if quick:
+        show_imp_tools(binary, base)
+    else:
+        select_imp_tools(binary, base)
+    print('\n6 · Open your first conversation', file=sys.stderr)
     while True:
         # Native setup owns staging, image preparation, server/operator login,
         # and imp boot. --no-tui avoids re-entering this interactive journey.

@@ -19,6 +19,8 @@ type t =
 
 let default_interval_s = 0.1
 let default_window = 600
+let over_50ms_threshold_s = 0.050
+let over_200ms_threshold_s = 0.200
 let stall_threshold_s = 1.0
 
 let create ?(interval_s = default_interval_s) ?(window = default_window) () =
@@ -128,8 +130,7 @@ let select xs lo hi k =
 let milliseconds_per_second = 1000.0
 let nanoseconds_per_second = 1e9
 
-let summarize t =
-  let xs = samples t in
+let summarize_samples xs =
   let n = Array.length xs in
   if n = 0
   then None
@@ -172,6 +173,8 @@ let summarize t =
   end
 ;;
 
+let summarize t = summarize_samples (samples t)
+
 type gc_snapshot =
   { minor_collections : int
   ; major_collections : int
@@ -185,11 +188,13 @@ type gc_snapshot =
   }
 
 type lag_percentiles =
-  { sample_count : int
+  { samples : int
   ; p50_ms : float
   ; p95_ms : float
   ; p99_ms : float
   ; max_ms : float
+  ; mean_ms : float
+  ; stalls : int
   ; over_50ms_count : int
   ; over_200ms_count : int
   }
@@ -219,29 +224,38 @@ let capture_gc () =
 
 let compute_lag_percentiles t =
   let xs = samples t in
-  let n = Array.length xs in
   let over_50ms_count =
-    Array.fold_left (fun acc s -> if s *. milliseconds_per_second > 50.0 then acc + 1 else acc) 0 xs
+    Array.fold_left
+      (fun acc s -> if s > over_50ms_threshold_s then acc + 1 else acc)
+      0
+      xs
   in
   let over_200ms_count =
-    Array.fold_left (fun acc s -> if s *. milliseconds_per_second > 200.0 then acc + 1 else acc) 0 xs
+    Array.fold_left
+      (fun acc s -> if s > over_200ms_threshold_s then acc + 1 else acc)
+      0
+      xs
   in
-  match summarize t with
+  match summarize_samples xs with
   | None ->
-    { sample_count = 0
+    { samples = 0
     ; p50_ms = 0.0
     ; p95_ms = 0.0
     ; p99_ms = 0.0
     ; max_ms = 0.0
+    ; mean_ms = 0.0
+    ; stalls = 0
     ; over_50ms_count = 0
     ; over_200ms_count = 0
     }
   | Some s ->
-    { sample_count = n
+    { samples = s.samples
     ; p50_ms = s.p50_ms
     ; p95_ms = s.p95_ms
     ; p99_ms = s.p99_ms
     ; max_ms = s.max_ms
+    ; mean_ms = s.mean_ms
+    ; stalls = s.stalls
     ; over_50ms_count
     ; over_200ms_count
     }
@@ -269,11 +283,13 @@ let gc_snapshot_to_yojson (gc : gc_snapshot) : Yojson.Safe.t =
 
 let lag_percentiles_to_yojson (lag : lag_percentiles) : Yojson.Safe.t =
   `Assoc
-    [ "sample_count", `Int lag.sample_count
+    [ "samples", `Int lag.samples
     ; "p50_ms", `Float lag.p50_ms
     ; "p95_ms", `Float lag.p95_ms
     ; "p99_ms", `Float lag.p99_ms
     ; "max_ms", `Float lag.max_ms
+    ; "mean_ms", `Float lag.mean_ms
+    ; "stalls", `Int lag.stalls
     ; "over_50ms_count", `Int lag.over_50ms_count
     ; "over_200ms_count", `Int lag.over_200ms_count
     ]
@@ -284,20 +300,6 @@ let snapshot_to_yojson (s : snapshot) : Yojson.Safe.t =
     [ "lag", lag_percentiles_to_yojson s.lag
     ; "gc", gc_snapshot_to_yojson s.gc
     ]
-;;
-
-let run_probe_loop ~clock ?(interval_s = 0.020) t =
-  let interval_s = if interval_s <= 0.0 then 0.020 else interval_s in
-  Atomic.set t.state Running;
-  let rec loop () =
-    let t0 = Eio.Time.now clock in
-    Eio.Time.sleep clock interval_s;
-    let t1 = Eio.Time.now clock in
-    let lag_ms = Float.max 0.0 ((t1 -. t0 -. interval_s) *. milliseconds_per_second) in
-    record_lag_ms t lag_ms;
-    loop ()
-  in
-  loop ()
 ;;
 
 let to_fields t : (string * Yojson.Safe.t) list =
@@ -315,26 +317,13 @@ let to_fields t : (string * Yojson.Safe.t) list =
     ; "stall_threshold_ms", `Float (stall_threshold_s *. milliseconds_per_second)
     ]
   in
-  let stats =
-    match summarize t with
-    | None -> [ "samples", `Int 0 ]
-    | Some s ->
-      [ "samples", `Int s.samples
-      ; "p50_ms", `Float s.p50_ms
-      ; "p95_ms", `Float s.p95_ms
-      ; "p99_ms", `Float s.p99_ms
-      ; "max_ms", `Float s.max_ms
-      ; "mean_ms", `Float s.mean_ms
-      ; "stalls", `Int s.stalls
-      ]
-  in
   let snap = snapshot t in
   let snapshot_fields =
     [ "lag", lag_percentiles_to_yojson snap.lag
     ; "gc", gc_snapshot_to_yojson snap.gc
     ]
   in
-  probe @ shape @ stats @ snapshot_fields
+  probe @ shape @ snapshot_fields
 ;;
 
 let start ~sw ~(mono_clock : _ Eio.Time.Mono.t) t =

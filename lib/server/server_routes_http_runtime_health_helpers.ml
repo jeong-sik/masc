@@ -98,13 +98,10 @@ let scheduler_json () =
   (* The probe fiber runs on the main domain; its ring says how late a ready
      fiber there ran over the last minute. [pool_domains] is carried next to
      it because a stall on the main domain while the pool is idle and a stall
-     while every worker is busy are different findings. [lag] and [gc] expose
-     the typed [Server_scheduler_probe] snapshot. *)
+     while every worker is busy are different findings. *)
   let pool_domains =
     match Domain_pool_ref.domain_count_opt () with
     | Some count -> `Int count
     | None -> `Null
   in
-  `Assoc (("pool_domains", pool_domains) :: Scheduler_lag.to_fields Server_scheduler_probe.global)
-
-
+  `Assoc (("pool_domains", pool_domains) :: Scheduler_lag.to_fields Scheduler_lag.global)

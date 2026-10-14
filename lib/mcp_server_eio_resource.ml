@@ -49,10 +49,10 @@ end
    request for [notes]; [?] and [#] fall to URI parsing), and the index
    resource still shows it with its reason. The log is listed once it exists.
 
-   Known limits, tracked as task-2309: every listing reads each page file and
-   the whole log, and the TUI Resources screen does not follow [nextCursor], so
-   a listing longer than one page (512 entries by default) is cut off at its
-   end, which is where the wiki entries sort. *)
+   Known limit, tracked as task-2309: every listing reads each page file and
+   the whole log. The TUI Resources screen follows [nextCursor] now, so a
+   listing longer than one page (512 entries by default) is no longer cut off
+   at its end, where the wiki entries sort. *)
 let wiki_resources ~base_path : Mcp_server.mcp_resource list =
   run_blocking_resource_io (fun () ->
     let uri_of_topic topic = "masc://" ^ wiki_topic_prefix ^ topic in

@@ -3262,7 +3262,7 @@ pointer = "/content"
     ~publication_recovery ~physical_turn_ref ~delivery ~recorder
 
 let test_fixed_async_skill_child () =
-  with_nested_job_skill ~execution:Masc.Keeper_tool_composition_catalog.Async
+  with_nested_job_skill ~wait_only:true ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
       ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ->
   let module Async = Masc.Keeper_msg_async in
@@ -3277,9 +3277,10 @@ let test_fixed_async_skill_child () =
        `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"args",`Assoc []]];
       "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
   let started = Mtime_clock.counter () in
+  let backend_before_prepare = List.length (calls fixture) in
   let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"prepare-fixed-async-child" ~turn:41 "keeper_composition_prepare" recipe) in
-  check bool "async child preparation has no backend effects" false (Sys.file_exists fixture.daemon_path);
+  check int "async child preparation has no backend effects" backend_before_prepare (List.length (calls fixture));
   let draft = prepared |> member "draft" |> composition_reference "fixed async child draft" in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-fixed-async-child" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
@@ -3486,6 +3487,54 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
         ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
         ~completion:Agent_core.Tool_contract.Continue_after_success)
       ~clock:(Eio.Stdenv.clock env) () in
+  let continuation =
+    let module Draft = Masc.Keeper_composition_draft in
+    let source = Journal.continuation_source continuation in
+    let draft = Draft.load_continuation ~base_path:fixture.base_path ~capability_surface:surface continuation
+        |> require "original ACK-ready draft before post-acceptance authority fault" in
+    let bound = Draft.load_nested_activation ~base_path:fixture.base_path source
+        |> require "original ACK-ready recorder" |> function Some bound -> bound
+        | None -> fail "ACK-ready source lost its original recorder" in
+    let events = Filename.concat
+        (Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id))
+        "skill-activation-events.jsonl" in
+    let original_events = read events in
+    let fault_request = Fun.protect ~finally:(fun () -> write events original_events) (fun () ->
+      let worker = Atomic.make None in
+      let accepted = Async.submit_worker_with_request_id ?request_context:terminal.request_context
+          ~background_sw:(Async.server_background_switch () |> require "ACK-ready accepted worker fault switch")
+          ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+          ~on_accepted:(fun request_id -> Journal.bind_continuation continuation ~request_id
+            |> Result.map (fun admitted -> Atomic.set worker (Some admitted);
+              write events "invalid-original-activation-after-ACK-ready-acceptance\n")
+            |> Result.map_error Journal.error_to_string)
+          ~f:(fun ~request_id request_sw ->
+            let worker = match Atomic.get worker with Some worker -> worker | None -> fail "fault worker not actually bound" in
+            Masc.Keeper_tool_composition_surface.For_testing.async_worker_result
+              ~composition_execution:Masc.Keeper_tool_composition_catalog.Async ~tool_kind:Descriptor.Async_composition_tool
+              ~nested_calls:(Draft.nested_calls draft) ~nested_activation:bound ~continuation
+              ~plan:(Draft.plan draft) ~journal:worker ~tool_name:Draft.run_tool_name
+              ~request_id ~composition_run_id:run_id ~request_sw ~config ~meta:fixture.meta
+              ~source_invocation:(Agent_core.Tool_contract.Invocation.create ~tool_use_id:source.parent_tool_use_id
+                ~turn:source.source_turn ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+              ~capability_authority:(Masc.Keeper_tool_runtime.Frozen_surface surface) ~publication_recovery
+              ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"ACK-ready authority fault")
+              ~turn_context:(Some { (Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+                with task_id=source.source_task_id }) ~clock:(Eio.Stdenv.clock env) ()) ()
+        |> require "real ACK-ready acceptance before transient authority fault" in
+      let rec read_loss () = match Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper accepted.request_id with
+        | Ok proof -> (match (Async.durable_terminal_entry proof).status with
+            | Lost _ -> () | _ -> fail "transient ACK-ready authority fault became logical completion")
+        | Error (Canonical_terminal_absent | Canonical_terminal_runtime_active _) -> Eio.Fiber.yield (); read_loss ()
+        | Error error -> fail (Async.canonical_terminal_error_to_string error) in
+      read_loss ();
+      accepted.request_id) in
+    let retained = candidate journal in
+    check string "transient authority fault keeps the accepted physical owner recoverable" fault_request
+      (Journal.continuation_request_id retained);
+    check int "authority fault does not invent a dependency wait" 0 (List.length (Journal.continuation_dependencies retained));
+    retained in
   let resumed = resume continuation "recover-physical-parent-ack" in
   check bool "fresh parent recovers actual acknowledgement" true (Tool_result.is_success resumed);
   let ok,pending,entry = await_composition env fixture (Tool_result.data resumed) in

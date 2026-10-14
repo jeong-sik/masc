@@ -1313,6 +1313,8 @@ let rec async_worker_result
         | Some worker -> Journal.worker_child_admission worker ~node_ids
         | None -> Error Journal.Missing_journal) in
   match admission,continuation with
+  | Error rejection,Some continuation when Journal.continuation_dependencies continuation = [] ->
+    Keeper_msg_async.worker_interrupted ~reason:rejection.detail
   | Error rejection,Some continuation ->
     let result = Tool_result.make_deferred ~tool_name ~start_time
         ~data:(`Assoc ["kind",`String "waiting_for_original_child_activation";"cause",rejection.data]) () in

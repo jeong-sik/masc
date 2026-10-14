@@ -21,11 +21,13 @@ open Keeper_msg_async_record
 
 type worker_outcome =
   | Worker_finished of tool_result
+  | Worker_interrupted of {reason : string}
   | Worker_waiting of
       { dependencies : Keeper_composition_dependency.t list
       ; result : tool_result }
 
 let worker_finished result = Worker_finished result
+let worker_interrupted ~reason = Worker_interrupted {reason}
 
 let worker_waiting_for_dependencies ~dependencies result =
   let dependencies = Keeper_composition_dependency.normalize dependencies in
@@ -1990,18 +1992,17 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
            | `Already_settled entry -> raise (Worker_already_settled entry)
            | `Preempted reason -> raise (Worker_preempted reason));
           let outcome = f ~request_id req_sw in
-          let result = match outcome with
-            | Worker_finished result | Worker_waiting {result;_} -> result in
-          let data =
+          let result_data result =
             match Tool_result.data result with
             | `String _ -> None
             | data -> Some data
           in
           match outcome with
-          | Worker_finished _ ->
-              Done {ok=tool_result_success result;body=tool_result_body result;data}
-          | Worker_waiting {dependencies;_} ->
-              Waiting_for_dependencies {dependencies;body=tool_result_body result;data})
+          | Worker_interrupted {reason} -> Lost {reason}
+          | Worker_finished result ->
+              Done {ok=tool_result_success result;body=tool_result_body result;data=result_data result}
+          | Worker_waiting {dependencies;result} ->
+              Waiting_for_dependencies {dependencies;body=tool_result_body result;data=result_data result})
       with
       | CancelledByOperator ->
         Fun.protect

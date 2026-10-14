@@ -367,6 +367,10 @@ val submit
 type worker_outcome
 
 val worker_finished : Keeper_types_profile.tool_result -> worker_outcome
+val worker_interrupted : reason:string -> worker_outcome
+(** Settle this physical worker as canonical Lost without claiming logical
+    completion or inventing a result dependency. Continuation still requires
+    the owning producer's original journal and replay proof. *)
 val worker_waiting_for_dependencies :
   dependencies:Keeper_composition_dependency.t list ->
   Keeper_types_profile.tool_result -> (worker_outcome, string) result

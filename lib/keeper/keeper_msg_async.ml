@@ -56,6 +56,7 @@ let worker_cancel_source_to_string = function
 let same_entry_record = Keeper_msg_async_record.same_entry_record
 let canonical_terminal_error_to_string = Keeper_msg_async_record.canonical_terminal_error_to_string
 let durable_terminal_entry = Keeper_msg_async_record.durable_terminal_entry
+let persistence_target_to_string = Keeper_msg_async_record.persistence_target_to_string
 let status_to_string = Keeper_msg_async_record.status_to_string
 let access_rejection_to_json = Keeper_msg_async_record.access_rejection_to_json
 let submit_error_to_json = Keeper_msg_async_record.submit_error_to_json
@@ -1551,7 +1552,11 @@ let persist_failure_locked ~ops key transition_lock (attempted_entry : entry) re
     { attempted_entry with
       status =
         Persistence_failed
-          { attempted_status = status_to_string attempted_entry.status; reason }
+          { attempted_status = (match attempted_entry.status with
+              | Persistence_failed {attempted_status;_} -> attempted_status
+              | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+              | Waiting_for_dependencies _ | Done _ -> State_transition (status_to_string attempted_entry.status))
+          ; reason }
     ; completed_at = Some (Time_compat.now ())
     }
   in
@@ -1862,7 +1867,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
                ~ops
                key
                (Persistence_failed
-                  { attempted_status = "accepted"; reason })
+                  { attempted_status = Acceptance_callback; reason })
              : worker_settlement option);
           Error (Acceptance_persistence_failed { request_id; reason })
         | Ok () ->
@@ -1914,7 +1919,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
                 ~ops
                 key
                 (Persistence_failed
-                   { attempted_status = status_to_string attempted_status
+                   { attempted_status = State_transition (status_to_string attempted_status)
                    ; reason = callback_error
                    })
           in

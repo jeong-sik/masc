@@ -50,6 +50,7 @@ module Json_pointer = struct
     | Expected_schema_container of string
 
   let root = []
+  let of_segments segments = segments
 
   let uncons = function [] -> None | segment :: rest -> Some (segment, rest)
   let append prefix suffix = prefix @ suffix
@@ -381,6 +382,10 @@ module Composition_run_id = struct
 
   let to_string value = value
   let equal = String.equal
+  let result_receipt_id identity = "composition-result:" ^ identity
+  let child_tool_use_id identity ~parent_tool_use_id ~alias =
+    "composition-skill:" ^ Yojson.Safe.to_string
+      (`List [`String identity;`String parent_tool_use_id;`String (Node_id.to_string alias)])
 end
 
 type json_type =

@@ -40,14 +40,19 @@ type t =
 
 type disposition = Not_started | Admission_rejected | Completed | Failed | Deferred | Partially_settled
 
-let async_result_parent identity = "composition-result:" ^ Plan.Composition_run_id.to_string identity
+let async_result_parent = Plan.Composition_run_id.result_receipt_id
+;;
+
+let member_nodes (call : Nested.call) = match call.scope with
+  | Nested.Inline mapping -> List.map snd mapping
+  | Nested.Async {submission;result} -> [submission;result]
 ;;
 
 let create ?delivery_parent_tool_use_id ~calls ~composition_run_id ~parent_invocation ~tool_name ~record_activation () =
   let delivery_parent_tool_use_id = match delivery_parent_tool_use_id with Some id -> id
     | None -> Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation in
   let children = List.map (fun (call : Nested.call) ->
-      let members = List.fold_left (fun members (_, id) -> Node_set.add id members) Node_set.empty call.node_mapping in
+      let members = List.fold_left (fun members id -> Node_set.add id members) Node_set.empty (member_nodes call) in
       { call; members; mutex = Eio.Mutex.create (); admission = Not_attempted }) calls in
   let node_owners = List.fold_left (fun index child -> Node_set.fold (fun id index ->
       if Node_map.mem id index then invalid_arg "compiled child leaf belongs to two scopes"
@@ -63,8 +68,8 @@ let child_invocation run child =
   let parent = Agent_core.Tool_contract.Invocation.tool_use_id run.parent_invocation in
   let alias = Plan.Node_id.to_string child.call.alias in
   let run_id = Plan.Composition_run_id.to_string run.composition_run_id in
-  let tool_use_id = "composition-skill:" ^ Yojson.Safe.to_string
-      (`List [ `String run_id; `String parent; `String alias ]) in
+  let tool_use_id = Plan.Composition_run_id.child_tool_use_id run.composition_run_id
+      ~parent_tool_use_id:parent ~alias:child.call.alias in
   let open Result in
   let ( let* ) = bind in
   let* scope = Ledger.nested_composition_scope ~parent_tool_use_id:run.delivery_parent_tool_use_id ~composition_run_id:run_id ~alias
@@ -207,7 +212,7 @@ let disposition child nodes execution =
         | Tool_result.Completed _, None | Tool_result.Deferred _, _ -> false) nodes then Failed
     else if List.exists (fun (node : Executor.node_result) ->
         match node.result with Tool_result.Deferred _ -> true | Tool_result.Completed _ | Tool_result.Failed _ -> false) nodes then Deferred
-    else if List.length nodes = List.length child.call.node_mapping then Completed
+    else if List.length nodes = List.length (member_nodes child.call) then Completed
     else Partially_settled
 ;;
 
@@ -230,7 +235,7 @@ let evidence_to_json run ~plan ~execution =
   let index = List.fold_left (fun index (node : Executor.node_result) -> Node_map.add node.node_id node index)
       Node_map.empty (settled execution) in
   `List (List.map (fun child ->
-    let nodes = List.filter_map (fun (_, id) -> Node_map.find_opt id index) child.call.node_mapping in
+    let nodes = List.filter_map (fun id -> Node_map.find_opt id index) (member_nodes child.call) in
     let cause = own_cause child execution in
     let lookup id = if not (contains child id) then None else
         match Node_map.find_opt id index with
@@ -246,8 +251,11 @@ let evidence_to_json run ~plan ~execution =
           ; "activation", Ledger.activation_to_yojson activation
           ; "activation_frame_sha256", `String (Ledger.activation_frame_sha256 activation) ]
       | Rejected rejection -> `Assoc [ "rejection", rejection.data ] in
-    let node_states = List.map (fun (source, id) ->
-        let fields = [ "source", `String (Plan.Node_id.to_string source); "node_id", `String (Plan.Node_id.to_string id) ] in
+    let members = match child.call.scope with
+      | Nested.Inline mapping -> List.map (fun (source,id) -> ["source",`String (Plan.Node_id.to_string source)],id) mapping
+      | Nested.Async {submission;result} -> [(["phase",`String "submission"],submission);(["phase",`String "result"],result)] in
+    let node_states = List.map (fun (origin,id) ->
+        let fields = origin @ ["node_id",`String (Plan.Node_id.to_string id)] in
         let state = match Node_map.find_opt id index with
           | None -> [ "settled", `Bool false; "disposition", `Null ]
           | Some node ->
@@ -257,7 +265,7 @@ let evidence_to_json run ~plan ~execution =
                 | Some disposition -> `String (Tool_result.failure_effect_disposition_to_string disposition))
             ; "output_validation_error", (match node.output_validation_error with None -> `Null
                 | Some error -> Projection.plan_execution_error_to_json error) ] in
-        `Assoc (fields @ state)) child.call.node_mapping in
+        `Assoc (fields @ state)) members in
     let exports = `Assoc (List.map (fun (export : Plan.export) -> export.name,
         match Plan.resolve_export plan ~lookup export with
         | Ok value -> `Assoc [ "available", `Bool true; "value", value ]

@@ -70,7 +70,7 @@ let resume ~context continuation =
       (Keeper_skill_catalog.error_to_string diagnostic.error)) diagnostics;
   let original_activation = match source.producer with
     | Journal.Prepared -> nested_activation
-    | Journal.Named {activation;tool_name=_;skill_reference=_} -> activation in
+    | Journal.Named {activation;tool_name=_;skill_reference=_;origin=_} -> activation in
   let* task_selection = match original_activation with
     | None -> Ok Keeper_task_skill_turn.empty
     | Some bound -> Keeper_task_skill_turn.resolve ~snapshot

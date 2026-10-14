@@ -1,7 +1,27 @@
 open Keeper_msg_async_types
 
 let ( let* ) = Result.bind
-let record_schema_version = 5
+let record_schema_version = 6
+
+let persistence_target_to_string = function
+  | Acceptance_callback -> "acceptance callback"
+  | State_transition status -> status
+
+let persistence_target_to_json = function
+  | Acceptance_callback -> `Assoc ["kind",`String "acceptance_callback"]
+  | State_transition status -> `Assoc ["kind",`String "state_transition";"status",`String status]
+
+let persistence_target_of_json json =
+  match json with
+  | `Assoc ["kind",`String "acceptance_callback"] -> Ok Acceptance_callback
+  | `Assoc fields ->
+    let* fields = Agent_core.Execution_json.object_fields ~context:"request persistence target"
+        ~required:["kind";"status"] ~optional:[] (`Assoc fields) in
+    (match List.assoc "kind" fields,List.assoc "status" fields with
+     | `String "state_transition",`String status when String.trim status <> "" ->
+       Ok (State_transition status)
+     | _ -> Error "invalid request persistence target")
+  | _ -> Error "invalid request persistence target"
 
 let status_to_string = function
   | Queued -> "queued"
@@ -245,7 +265,7 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
       fields @ [ "reason", `String reason; "cancelled_by", `String cancelled_by ]
     | Persistence_failed { attempted_status; reason } ->
       fields
-      @ [ "attempted_status", `String attempted_status; "reason", `String reason ]
+      @ [ "attempted_status", persistence_target_to_json attempted_status; "reason", `String reason ]
     | Queued | Running -> fields
   in
   `Assoc fields
@@ -434,7 +454,9 @@ let decode_status ~tag json =
     let* completed_at = required_completed_at json in
     Ok (Cancelled { reason; cancelled_by }, completed_at)
   | "persistence_failed" ->
-    let* attempted_status = required_string "attempted_status" json in
+    let* attempted_status = match Json_util.assoc_member_opt "attempted_status" json with
+      | Some json -> persistence_target_of_json json
+      | None -> Error "request persistence target is absent" in
     let* reason = required_string "reason" json in
     let* completed_at = required_completed_at json in
     Ok (Persistence_failed { attempted_status; reason }, completed_at)
@@ -593,7 +615,7 @@ let entry_to_json ~now (e : entry) : Yojson.Safe.t =
         ; ( "result"
           , `Assoc
               [ "error", `String "request_persistence_failed"
-              ; "attempted_status", `String attempted_status
+              ; "attempted_status", persistence_target_to_json attempted_status
               ; "reason", `String reason
               ] )
         ]

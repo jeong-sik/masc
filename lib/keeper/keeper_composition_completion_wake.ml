@@ -129,7 +129,7 @@ let terminal_of_status : Keeper_msg_async.request_status -> Keeper_event_queue.c
   | Keeper_msg_async.Persistence_failed { attempted_status; reason } ->
     Some
       (Keeper_event_queue.Composition_failed
-         (Printf.sprintf "persisting %s failed: %s" attempted_status reason))
+         (Printf.sprintf "persisting %s failed: %s" (Keeper_msg_async.persistence_target_to_string attempted_status) reason))
   | Keeper_msg_async.Cancelled { reason; cancelled_by } ->
     Some
       (Keeper_event_queue.Composition_cancelled

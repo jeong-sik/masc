@@ -145,8 +145,8 @@ let prepare_schema : Masc_domain.tool_schema =
 let run_schema = Tool_schemas_composition_control.run_schema
 ;;
 
-let validate_plan ~capability_surface json =
-  Nested.compile ~capability_surface json |> Result.map_error (function
+let validate_plan ~execution ~capability_surface json =
+  Nested.compile ~execution ~capability_surface json |> Result.map_error (function
     | Nested.Request_rejected error -> Plan_rejected error
     | Nested.Unsupported_leaf { node_id; tool_name } -> Unsupported_node { node_id; tool_name }
     | Nested.Inputs_rejected (node_id, error) -> Inputs_rejected (node_id, error)
@@ -238,7 +238,7 @@ let prepare ~base_path ~capability_surface ~keeper_name ~execution json =
   let* plan_json, metadata = match json with
     | `Assoc fields -> Ok (`Assoc (List.remove_assoc "skill" fields), List.assoc_opt "skill" fields)
     | _ -> Ok (json, None) in
-  let* compiled = validate_plan ~capability_surface plan_json in
+  let* compiled = validate_plan ~execution ~capability_surface plan_json in
   let plan = Nested.plan compiled in
   let* () = match Nested.calls compiled, execution, metadata with
     | [], _, _ | _ :: _, (Catalog.Inline | Catalog.Async), None -> Ok ()
@@ -309,7 +309,7 @@ let load_with ~admission_check ~base_path ~capability_surface ~keeper_name ~sha2
           && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) recorded_surface
       then Ok () else Error Capability_changed in
   let* compiled = match List.assoc_opt "recipe" fields with
-    | Some json -> validate_plan ~capability_surface json
+    | Some json -> validate_plan ~execution ~capability_surface json
     | None -> Error (Malformed_draft "missing recipe") in
   let plan = Nested.plan compiled in
   let* canonical = encode_plan plan in
@@ -459,7 +459,7 @@ let load_nested_result_children ~base_path source ~result =
       let frozen = List.assoc "scope" fields in
       let* () = if List.exists (Yojson.Safe.equal frozen) calls && not (List.exists (Yojson.Safe.equal frozen) seen)
         then Ok () else malformed "result child scope differs or repeats the original frozen run" in
-      let* call = exact_fields ~names:["alias";"reference";"args";"node_mapping";"exports"] frozen in
+      let* call = exact_fields ~names:["alias";"reference";"args";"scope";"exports"] frozen in
       let* alias = match List.assoc "alias" call with `String alias -> Ok alias | _ -> malformed "invalid original child alias" in
       let* reference = Skill_reference.of_yojson (List.assoc "reference" call)
         |> Result.map_error (fun _ -> Malformed_draft "invalid original child reference") in

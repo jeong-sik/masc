@@ -635,7 +635,7 @@ let child_first_loss base_path run_id mode =
   let prepared = reconstruct base_path run_id in
   let snapshot () = write (Filename.concat base_path "first-loss-journal")
       (read (journal_path base_path prepared.source.composition_run_id)) in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     if node_name node = "interrupted" then (
       (* This is an actual callback effect after Executor's Attempting append.
          Process exit leaves the real broker/worker and journal unfinished;
@@ -695,7 +695,7 @@ let test_first_loss_retains_unproven_effects mode () =
       (match Journal.waiting_continuation prepared.journal with
        | Ok None -> () | Ok (Some _) | Error _ -> fail "readonly manual resume was broadened into a wait or refused");
       let calls = ref [] in
-      let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+      let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
         calls := node_name node :: !calls; first_loss_success node in
       let resumed = submit base_path sw prepared dispatch |> accepted in
       ignore (await base_path resumed);

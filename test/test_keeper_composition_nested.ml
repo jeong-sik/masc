@@ -115,7 +115,7 @@ let request ?(policy = "continue_independent") ?(exports = []) nodes = `Assoc
 ;;
 
 let exported name node pointer = `Assoc [ "name", `String name; "node", `String node; "pointer", `String pointer ]
-let compile surface json = match Nested.compile ~capability_surface:surface json with
+let compile surface json = match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Inline ~capability_surface:surface json with
   | Ok value -> value | Error error -> fail (Yojson.Safe.to_string (Nested.error_to_json error))
 let pointer = "/profile~1~0name"
 
@@ -136,11 +136,12 @@ let test_repeated_child_identity_bindings_and_output_mapping () =
   let call = List.hd (Nested.calls compiled) in
   check bool "exact revision retained" true (Skill_reference.equal reference call.reference);
   check bool "canonical fixed bindings retained" true (Yojson.Safe.equal call.args (`Assoc [ "query", `String "docker" ]));
-  let good_id = List.find (fun (id, _) -> Plan.Node_id.to_string id = "lane/~profile") call.node_mapping |> snd in
+  let mapping = match call.scope with Nested.Inline mapping -> mapping | Nested.Async _ -> fail "inline scope" in
+  let good_id = List.find (fun (id, _) -> Plan.Node_id.to_string id = "lane/~profile") mapping |> snd in
   let downstream = Plan.nodes plan |> List.find (fun (node : Plan.node) -> node.tool_name = "keeper_memory_search"
       && List.length (Plan.dependencies node) = 2) in
   check (list string) "consumer depends on whole child scope"
-    (List.map (fun (_, id) -> Plan.Node_id.to_string id) call.node_mapping |> List.sort String.compare)
+    (List.map (fun (_, id) -> Plan.Node_id.to_string id) mapping |> List.sort String.compare)
     (Plan.dependencies downstream |> List.map Plan.Node_id.to_string |> List.sort String.compare);
   let export = List.hd (Plan.exports plan) in
   check bool "named child export maps exact producer" true (Plan.Node_id.equal good_id export.node_id);
@@ -181,9 +182,41 @@ let test_child_failure_blocks_whole_child_consumers_but_keeps_exports () =
     Printf.printf "composition_nested_trial child_failed=true dependent_dispatches=0 independent_result_retained=true selected_export_retained=true model_latency_measured=false\n%!"
 ;;
 
+let test_fixed_async_child_compiles_exact_result_barrier () =
+  let surface,reference = fixture ~source:(document ~execution:"async" ()) () in
+  let recipe = request ~exports:[exported "answer" "child" pointer]
+      [nested "child" reference;consumer "use-answer" "child" pointer] in
+  let compiled = Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
+      ~capability_surface:surface recipe |> require "fixed async child compiler" in
+  let plan = Nested.plan compiled in
+  let call = List.hd (Nested.calls compiled) in
+  let submission,result = match call.scope with Nested.Async {submission;result} -> submission,result
+    | Inline _ -> fail "async child was flattened inline" in
+  check int "one child has one submission, one canonical result and one consumer" 3 (List.length (Plan.nodes plan));
+  let submission_contract = Plan.contract plan submission |> function Some contract -> contract
+    | None -> fail "native submission contract missing" in
+  let result_contract = Plan.contract plan result |> function Some contract -> contract
+    | None -> fail "native result contract missing" in
+  (match submission_contract.target,result_contract.target with
+   | Plan.Child_submission child,Plan.Child_result result_child ->
+     check bool "both operands retain one exact frozen child" true
+       (Skill_reference.equal reference (Plan.child_reference child.child)
+        && Skill_reference.equal reference (Plan.child_reference result_child.child));
+     check bool "canonical fixed args remain bound" true
+       (Yojson.Safe.equal (Plan.child_args child.child) (`Assoc ["query",`String "docker"]));
+     check bool "result observes only after original submission" true
+       (List.mem submission (Plan.dependencies result_child.result))
+   | _ -> fail "async compiler did not retain native execution targets");
+  let export = List.hd (Plan.exports plan) in
+  check bool "outer consumers reference the canonical result barrier" true (Plan.Node_id.equal result export.node_id);
+  check string "escaped named export stays one exact pointer segment" pointer
+    (Plan.Json_pointer.to_string export.pointer);
+  check bool "native result never routes through an ordinary descriptor name" true (Plan.descriptor plan result = None)
+;;
+
 let test_refusals_preserve_frozen_authority_and_contracts () =
   let surface, reference = fixture () in
-  let check_error label surface json accepts = match Nested.compile ~capability_surface:surface json with
+  let check_error label surface json accepts = match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Inline ~capability_surface:surface json with
     | Error error when accepts error -> ()
     | Error error -> failf "%s: %s" label (Yojson.Safe.to_string (Nested.error_to_json error))
     | Ok _ -> fail (label ^ " accepted") in
@@ -488,7 +521,7 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      let parent_invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"run-nested" ~turn:1
          ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
          ~completion:Continue_after_success in
-     let compiled = Nested.compile ~capability_surface:surface recipe |> require "original frozen child calls" in
+     let compiled = Nested.compile ~execution ~capability_surface:surface recipe |> require "original frozen child calls" in
      let retained = Nested_run.create ~calls:(Nested.calls compiled) ~composition_run_id:identity
          ~delivery_parent_tool_use_id:(Nested_run.async_result_parent identity)
          ~parent_invocation ~tool_name:Draft.run_tool_name ~record_activation:None () in
@@ -638,6 +671,7 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
 let () = run "exact inline composition compiler"
     [ "composition", [ test_case "repeat exact child, bind params, namespace and map outputs" `Quick test_repeated_child_identity_bindings_and_output_mapping
         ; test_case "whole-child failure barrier with useful independent results" `Quick test_child_failure_blocks_whole_child_consumers_but_keeps_exports
+        ; test_case "fixed async child compiles exact canonical result barrier" `Quick test_fixed_async_child_compiles_exact_result_barrier
         ; test_case "authority, arguments, cycles and semantic refusals" `Quick test_refusals_preserve_frozen_authority_and_contracts
         ; test_case "frozen nested draft recipe and exact provenance" `Quick test_nested_draft_freezes_and_revalidates_recipe
         ; test_case "public prepare/run admits exact children once and delivers through parent" `Quick

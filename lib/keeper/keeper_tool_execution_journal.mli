@@ -3,12 +3,21 @@
     requires the previous owner's exact canonical terminal proof; every node
     operation checks the current durable binding under the run transaction. *)
 
+type nested_origin
+type named_origin = Standalone | Nested of nested_origin
+
+val named_origin_to_yojson : named_origin -> Yojson.Safe.t
+(** Immutable producer identity. Nested origins can only be constructed from
+    the actual parent attempt and its frozen child operand. Decoding an owned
+    source is evidence, not permission to enter a broker. *)
+
 type producer =
   | Prepared
   | Named of
       { tool_name : string
       ; skill_reference : Skill_reference.t
       ; activation : Keeper_skill_activation_recorder.bound_context option
+      ; origin : named_origin
       }
 
 type source =
@@ -27,6 +36,7 @@ type source =
 type t
 type worker
 type attempt
+type child_submission
 type continuation
 (** Exact suspended owner captured from its canonical terminal record and
     matching journal nodes. A Lost successor additionally requires its exact
@@ -63,6 +73,7 @@ type replay =
   | Reuse_completed of completed
   | Recheck_result of recheck
   | Recheck_launch of recheck_launch
+  | Recheck_child_submission of recheck
 
 type error =
   | Invalid_source of string
@@ -226,6 +237,32 @@ val bind_request : t -> request_id:string -> (worker, error) result
 val validate_plan : worker -> plan:Keeper_tool_plan.t -> (unit, error) result
 (** Integrity-read the original manifest and compare the exact frozen plan
     (including edges and exports), then check current durable ownership. *)
+
+val child_origin : attempt -> plan:Keeper_tool_plan.t ->
+  activation:Keeper_skill_activation_ledger.activation -> (named_origin, error) result
+(** Verify the exact native submission operand and its original canonical
+    Nested activation, retaining the parent occurrence independently of the
+    logical child Skill invocation ID. No activation or broker effect. *)
+
+val record_child_submission : attempt -> plan:Keeper_tool_plan.t ->
+  child_source:source -> (child_submission, error) result
+(** Persist the immutable original attempt-to-child source join before broker
+    entry. A changed or copied source cannot replace the original intent. *)
+
+val accept_child_submission : child_submission -> request_id:string -> (unit, error) result
+(** Last producer acceptance effect: validate real canonical Queued membership
+    and child journal ownership before retaining its binding in the parent.
+    Does not settle the parent node or claim the child's final result. *)
+
+val child_result_binding : attempt -> plan:Keeper_tool_plan.t ->
+  (Keeper_composition_dependency.composition, error) result
+(** Read only the exact accepted child associated with this native result
+    barrier. Empty model input cannot supply a different child binding. *)
+
+val accepted_child_submission : child_submission ->
+  (Keeper_composition_dependency.composition, error) result
+(** Recheck the original parent acceptance and its canonical child source.
+    Does not repair missing acceptance or admit a request. *)
 
 val lookup
   : worker

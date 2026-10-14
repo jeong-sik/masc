@@ -299,7 +299,14 @@ let test_acceptance_failure_prevents_worker_start () =
           check bool "worker never starts" false !worker_called;
           (match Keeper_msg_async.poll ~base_path ~caller request_id with
            | Keeper_msg_async.Found
-               { status = Keeper_msg_async.Persistence_failed _; _ } -> ()
+               { status = Keeper_msg_async.Persistence_failed
+                   {attempted_status=Keeper_msg_async.Acceptance_callback;_}; _ } ->
+             (match Keeper_msg_async.load_canonical_durable_terminal ~base_path ~caller request_id with
+              | Ok proof ->
+                (match (Keeper_msg_async.durable_terminal_entry proof).status with
+                 | Persistence_failed {attempted_status=Acceptance_callback;_} -> ()
+                 | _ -> fail "canonical persistence lost its acceptance-callback target")
+              | Error error -> fail (Keeper_msg_async.canonical_terminal_error_to_string error))
            | Keeper_msg_async.Found { status; _ } ->
              failf
                "expected persistence_failed, got %s"

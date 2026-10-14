@@ -1,6 +1,7 @@
 module Catalog = Keeper_tool_composition_catalog
 module Executor = Keeper_tool_plan_executor
 module Journal = Keeper_tool_execution_journal
+module Plan = Keeper_tool_plan
 module Activation_ledger = Keeper_skill_activation_ledger
 open Keeper_tool_composition_projection
 
@@ -374,7 +375,7 @@ let observe_async_run_settlement
       | Keeper_msg_async.Cancelled { reason; cancelled_by } ->
         Some (false, Printf.sprintf "%s: %s" cancelled_by reason)
       | Keeper_msg_async.Persistence_failed { attempted_status; reason } ->
-        Some (false, Printf.sprintf "persisting %s failed: %s" attempted_status reason)
+        Some (false, Printf.sprintf "persisting %s failed: %s" (Keeper_msg_async.persistence_target_to_string attempted_status) reason)
       | Keeper_msg_async.Queued
       | Keeper_msg_async.Running
       | Keeper_msg_async.Cancelling _ -> None
@@ -572,166 +573,6 @@ let execute_keeper_plan ~capability_authority =
     Executor.Compatibility.execute_keeper
 ;;
 
-let async_worker_result
-      ~composition_execution
-      ~tool_kind
-      ?skill_reference
-      ?(nested_calls=[])
-      ?nested_activation
-      ?continuation
-      ~plan
-      ?journal
-      ~tool_name
-      ~request_id
-      ~composition_run_id
-      ~source_invocation
-      ~request_sw
-      ~(config : Workspace.config)
-      ~meta
-      ~capability_authority
-      ~publication_recovery
-      ~ctx_snapshot
-      ~turn_context
-      ?clock
-      ()
-  =
-  Eio_context.with_turn_switch request_sw
-  @@ fun () ->
-  let sandbox_factory = Keeper_sandbox_factory.create ~config ~meta () in
-  Eio.Switch.on_release request_sw (fun () ->
-    Keeper_sandbox_factory.cleanup sandbox_factory);
-  let start_time = Tool_timing.start () in
-  let run_id = Keeper_tool_plan.Run_id.fresh () in
-  let nested_run = Keeper_composition_nested_run.create ~calls:nested_calls ~composition_run_id
-      ~delivery_parent_tool_use_id:(Keeper_composition_nested_run.async_result_parent composition_run_id)
-      ~parent_invocation:source_invocation ~tool_name
-      ~record_activation:(Option.map (fun bound ~invocation ~tool_name ~scope ~reference ->
-        Keeper_skill_activation_recorder.record_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference) nested_activation) () in
-  Option.iter (fun bound -> Keeper_composition_nested_run.restore_admissions nested_run
-    ~find_activation:(fun ~invocation ~tool_name ~scope ~reference ->
-      Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
-  let admission = Keeper_composition_nested_run.check_original_admissions nested_run
-      ~child_history:(fun ~node_ids -> match journal with
-        | Some worker -> Journal.worker_child_admission worker ~node_ids
-        | None -> Error Journal.Missing_journal) in
-  match admission,continuation with
-  | Error rejection,Some continuation ->
-    let result = Tool_result.make_deferred ~tool_name ~start_time
-        ~data:(`Assoc ["kind",`String "waiting_for_original_child_activation";"cause",rejection.data]) () in
-    (match Keeper_msg_async.worker_waiting_for_dependencies
-      ~dependencies:(Journal.continuation_dependencies continuation) result with
-     | Ok outcome -> outcome
-     | Error _ -> Keeper_msg_async.worker_finished (Tool_result.make_err ~tool_name ~start_time
-         ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect rejection.detail))
-  | Error rejection,None -> Keeper_msg_async.worker_finished (Tool_result.make_err ~tool_name ~start_time
-      ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect rejection.detail)
-  | Ok (),_ ->
-  let execution =
-    execute_keeper_plan
-    ~capability_authority
-    ~plan
-    ~run_id
-    ?journal
-    ~composition_run_id
-    ~parent_invocation:
-      (async_parent_invocation ~request_id source_invocation)
-    ~config
-    ~meta
-    ~publication_recovery
-    ~ctx_snapshot
-    ~keeper_turn_id:(keeper_turn_id_of turn_context)
-    ~admit_node:(Keeper_composition_nested_run.admit_node nested_run)
-    ?source_context:turn_context
-    ~turn_sandbox_factory:sandbox_factory
-    ?observe_node_result:
-      (Option.map
-         (fun turn_context ->
-            observe_node_result
-              ?on_receipt_committed:None
-              ~composition_tool:tool_name
-              ~composition_execution
-              ~composition_tool_kind:tool_kind
-              ~composition_run_id
-              ~parent_invocation:source_invocation
-              ~meta
-              ~turn_context)
-         turn_context)
-    ?clock
-      ()
-  in
-  let result =
-    result_of_execution
-      ~tool_name
-      ~tool_kind
-      ~start_time
-      execution
-  in
-  let result =
-    let nested_scopes = match nested_calls with [] -> None | _::_ ->
-      Some (Keeper_composition_nested_run.evidence_to_json nested_run ~plan ~execution) in
-    match Keeper_composition_result.project ?nested_scopes ~base_path:config.base_path ~plan ~execution result with
-    | Ok result -> result
-    | Error { message; _ } ->
-      Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure
-        ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time message
-  in
-  Option.iter
-    (fun reference ->
-       record_skill_composition_evidence
-         ~on_publication_failure:(fun _ -> ())
-         ~config
-         ~reference
-         ~composition_run_id
-         ~request_id:(Some request_id)
-         ~parent_invocation:source_invocation
-         ~meta
-         ~composition_tool:tool_name
-         ~composition_execution
-         ~execution
-         ~result)
-    skill_reference;
-  let waiting_dependencies =
-    let collect_waiting_dependencies settled =
-      let rec collect reversed = function
-        | [] -> Some (List.rev reversed)
-        | (node : Executor.node_result) :: rest ->
-          (match node.output_validation_error with
-           | Some _ -> None
-           | None ->
-             (match node.result with
-              | Tool_result.Completed _ -> collect reversed rest
-              | Tool_result.Failed _ -> None
-              | Tool_result.Deferred _ ->
-                (match node.deferred_kind with
-                 | Some (Keeper_tool_execution.Owned_job_result_wait id) ->
-                   collect (Keeper_composition_dependency.Owned_job id :: reversed) rest
-                 | Some (Keeper_tool_execution.Composition_result_wait binding) ->
-                   collect (Keeper_composition_dependency.Composition_result binding :: reversed) rest
-                 | None | Some (Keeper_tool_execution.Generic_deferred
-                               | External_effect_deferred _) -> None))) in
-      collect [] settled
-    in
-    match journal, execution with
-    | None, (Ok _ | Error _) | Some _, Ok _ -> None
-    | Some _, Error failure ->
-      (match failure.Executor.cause with
-       | Executor.Tool_did_not_complete node ->
-         (match node.deferred_kind with
-          | Some (Keeper_tool_execution.Owned_job_result_wait _ | Composition_result_wait _) ->
-            collect_waiting_dependencies failure.settled
-          | None | Some (Keeper_tool_execution.Generic_deferred
-                        | External_effect_deferred _) -> None)
-       | Executor.Run_journal_rejected _ | Plan_execution_failed _
-       | Node_observation_failed _ | Outer_completion_mismatch _ -> None)
-  in
-  match waiting_dependencies with
-  | None -> Keeper_msg_async.worker_finished result
-  | Some dependencies ->
-    (match Keeper_msg_async.worker_waiting_for_dependencies ~dependencies result with
-     | Ok outcome -> outcome
-     | Error _ -> Keeper_msg_async.worker_finished result)
-;;
-
 let result_from_json ~tool_name ~start_time ~class_ ~ok data =
   if ok
   then Tool_result.make_ok ~tool_name ~start_time ~data ()
@@ -747,270 +588,6 @@ let result_from_json ~tool_name ~start_time ~class_ ~ok data =
 type async_submission_error =
   | Submission_result of Tool_result.result
   | Broker_error of Keeper_msg_async.submit_error
-
-let async_submission_result
-      ?skill_reference
-      ?nested_calls
-      ?nested_activation
-      ?draft_reference
-      ?run_reference
-      ?composition_run_id
-      ?journal
-      ?continuation
-      ?refusal
-      ?before_submit
-      ?observe_submission
-      ~plan
-      ~tool_name
-      ~tool_kind
-      ~parent_invocation
-      ~(config : Workspace.config)
-      ~(meta : Keeper_meta_contract.keeper_meta)
-      ~capability_authority
-      ~publication_recovery
-      ~ctx_snapshot
-      ~turn_context
-      ?clock
-      ()
-  =
-  let start_time = Tool_timing.start () in
-  let composition_run_id = match composition_run_id with
-    | Some identity -> identity
-    | None -> Keeper_tool_plan.Composition_run_id.fresh () in
-  let journal_worker = Atomic.make None in
-  let source_task_id = match journal with
-    | Some journal -> (Journal.source journal).source_task_id
-    | None -> Option.bind turn_context (fun context ->
-        context.Keeper_tool_call_log_context.task_id)
-  in
-  let request_context_fields =
-    [ "composition_tool", `String tool_name
-    ; "parent_tool_use_id", `String (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
-    ; "source_turn", `Int (Agent_core.Tool_contract.Invocation.turn parent_invocation)
-    ; ( "composition_run_id"
-      , `String
-          (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) ) ]
-    @ Option.to_list
-        (Option.map
-           (fun reference -> "skill_reference", Skill_reference.to_yojson reference)
-           skill_reference)
-    @ Option.to_list (Option.map (fun reference -> "draft_reference", Tool_output.normalized_artifact_ref_to_json reference) draft_reference)
-    @ Option.to_list (Option.map (fun reference -> "run_artifact", Tool_output.normalized_artifact_ref_to_json reference) run_reference)
-    @ Option.to_list (Option.map (fun task_id -> "source_task_id", `String task_id)
-        source_task_id)
-  in
-  let request_context =
-    match request_context_fields with
-    | [] -> None
-    | fields -> Some fields
-  in
-  match Keeper_msg_async.server_background_switch () with
-  | Error error ->
-    let data =
-      with_tool_kind_field tool_kind (Keeper_msg_async.submit_error_to_json error)
-    in
-    result_from_json
-      ~tool_name
-      ~start_time
-      ~class_:Tool_result.Runtime_failure
-      ~ok:false
-      data
-  | Ok background_sw ->
-    let submit () = Keeper_msg_async.submit_worker_with_request_id
-         ?request_context
-         ~on_accepted:(fun request_id ->
-           Result.bind
-             (Keeper_composition_completion_outbox.prepare ~base_path:config.base_path
-                ~keeper_name:meta.name ~request_id ~composition_tool:tool_name
-              |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
-             (fun () ->
-                let* () = match skill_reference,continuation,journal with
-                  | None,_,_ -> Ok ()
-                  | Some _,Some _,Some journal ->
-                    Journal.named_binding journal |> Result.map (fun _ -> ())
-                    |> Result.map_error Journal.error_to_string
-                  | Some _,(None | Some _),(None | Some _) ->
-                    let* binding = Keeper_composition_dependency.composition_of_request_context
-                        ~request_id request_context_fields in
-                    Keeper_composition_named_run.admit ~base_path:config.base_path
-                      ~keeper_name:meta.name binding in
-                match journal with
-                | None -> Ok ()
-                | Some journal ->
-                  let binding = match continuation with
-                    | None -> Journal.bind_request journal ~request_id
-                    | Some continuation -> Journal.bind_continuation continuation ~request_id in
-                  match binding with
-                  | Error error -> Error (Journal.error_to_string error)
-                  | Ok worker -> Atomic.set journal_worker (Some worker); Ok ()))
-         ~background_sw
-         ~base_path:config.base_path
-         ~caller:meta.name
-         ~keeper_name:meta.name
-         (* Without this the submitter is never told the work finished. The
-            tool hands back a request id and returns, so the result reached
-            the Keeper only if it remembered to read that id: measured over
-            2026-08-18..26, 22 submissions produced 12 reads and a settled
-            result waited a median of 21.9s against a median 2.7ms of work.
-            The same callback Fusion uses, on the same broker. *)
-         ~on_worker_settled:(fun settlement ->
-           observe_async_run_settlement
-             ~composition_tool:tool_name
-             ?skill_reference
-             ~composition_tool_kind:tool_kind
-             ~composition_run_id
-             ~parent_invocation
-             ~meta
-             ~turn_context
-             settlement;
-           Keeper_composition_completion_wake.on_worker_settled
-             ~base_path:config.base_path
-             ~composition_tool:tool_name
-             settlement)
-         ~f:(fun ~request_id request_sw ->
-           match journal, Atomic.get journal_worker with
-           | Some _, None ->
-             Keeper_msg_async.worker_finished
-               (Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
-               ~class_:Tool_result.Runtime_failure
-               ~effect_disposition:Tool_result.Proven_pre_effect
-               "prepared composition worker has no accepted journal binding")
-           | (None | Some _), worker ->
-           match refusal with
-           | Some error ->
-             (* A permanently refused producer (e.g. its named Skill left the
-                catalog) still settles the accepted successor durably: pulse
-                must retire the continuation marker and the parent dependency
-                must observe a terminal failure instead of a repeated refusal. *)
-             Keeper_msg_async.worker_finished
-               (Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
-                  ~class_:(Journal.failure_class error)
-                  ~effect_disposition:Tool_result.Proven_pre_effect
-                  ~data:(Journal.error_to_json error) (Journal.error_to_string error))
-           | None ->
-           async_worker_result
-             ~composition_execution:Catalog.Async
-             ~tool_kind
-             ?skill_reference
-             ?nested_calls
-             ?nested_activation
-             ?continuation
-             ~plan
-             ?journal:worker
-             ~tool_name
-             ~request_id
-             ~composition_run_id
-             ~source_invocation:parent_invocation
-             ~request_sw
-             ~config
-             ~meta
-             ~capability_authority
-             ~publication_recovery
-             ~ctx_snapshot
-             ~turn_context
-             ?clock
-             ())
-         () in
-    let submitted =
-      match Option.fold ~none:(Ok ()) ~some:(fun before -> before ()) before_submit with
-      | Error result -> Error (Submission_result result)
-      | Ok () ->
-        let outcome = submit () in
-        let observed = Option.fold ~none:(Ok ()) ~some:(fun observe -> observe outcome) observe_submission in
-        (match observed with
-         | Ok () -> Result.map_error (fun error -> Broker_error error) outcome
-         | Error detail ->
-           let original = match outcome with
-             | Ok accepted -> Keeper_msg_async.submit_outcome_to_json accepted
-             | Error error -> Keeper_msg_async.submit_error_to_json error in
-           Error (Submission_result
-             (Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
-               ~effect_disposition:Tool_result.Effect_outcome_unknown
-               ~data:(`Assoc ["submission_outcome_json",`String (Yojson.Safe.to_string original)])
-               ("named submission observation failed: " ^ detail)))) in
-    (match submitted with
-     | Error (Submission_result result) -> result
-     | Error (Broker_error error) ->
-       let data =
-         with_tool_kind_field
-           tool_kind
-           (Keeper_msg_async.submit_error_to_json error)
-       in
-       result_from_json
-         ~tool_name
-         ~start_time
-         ~class_:Tool_result.Runtime_failure
-         ~ok:false
-         data
-     | Ok
-         ({ Keeper_msg_async.acceptance = Keeper_msg_async.Durably_accepted
-          ; request_id
-          } as outcome) ->
-       let data =
-         `Assoc
-           (("composition_tool", `String tool_name)
-            :: ( "composition_run_id"
-               , `String
-                   (Keeper_tool_plan.Composition_run_id.to_string
-                      composition_run_id) )
-            :: tool_kind_field tool_kind
-            :: [ "execution", `String "async"
-              ; "request_id", `String request_id
-              ; ( "delivery"
-                , `Assoc
-                    [ "completion_notification", `Bool true
-                    ; ( "result_reference"
-                      , `Assoc
-                          [ "tool", `String Catalog.status_tool_name
-                          ; "arguments", `Assoc [ "request_id", `String request_id ]
-                          ] )
-                    ] )
-              ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
-              ])
-       in
-       let binding = match skill_reference,continuation,journal with
-         | None,_,_ -> Ok None
-         | Some _,Some _,Some journal ->
-           Journal.named_binding journal |> Result.map Option.some |> Result.map_error Journal.error_to_string
-         | Some _,(None | Some _),(None | Some _) ->
-           Keeper_composition_dependency.composition_of_request_context
-             ~request_id request_context_fields |> Result.map Option.some in
-       (match binding with
-        | Ok binding ->
-          let data = match data, binding with
-            | `Assoc fields, Some binding -> `Assoc (fields @
-                ["result_wait", Keeper_composition_dependency.composition_to_json binding])
-            | _, None -> data
-            | _, Some _ -> data in
-          result_from_json ~tool_name ~start_time ~class_:Tool_result.Runtime_failure ~ok:true data
-        | Error detail ->
-          Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
-            ~effect_disposition:Tool_result.Proven_post_effect ~data
-            ("async request accepted but its result binding could not be encoded: " ^ detail))
-     | Ok
-         ({ Keeper_msg_async.acceptance =
-              Keeper_msg_async.Reconciliation_required _
-          ; _
-          } as outcome) ->
-       let data =
-         `Assoc
-           (("composition_tool", `String tool_name)
-            :: ( "composition_run_id"
-               , `String
-                   (Keeper_tool_plan.Composition_run_id.to_string
-                      composition_run_id) )
-            :: tool_kind_field tool_kind
-            :: [ "execution", `String "async"
-              ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
-              ])
-       in
-       result_from_json
-         ~tool_name
-         ~start_time
-         ~class_:Tool_result.Runtime_failure
-         ~ok:false
-         data)
-;;
 
 let discard_status_binding ~delivery_registry ~invocation =
   match delivery_registry,invocation with
@@ -1599,18 +1176,6 @@ let make_instruction_skill_tool
                    (carried_references_text instruction_skills)))))))
 ;;
 
-module For_testing = struct
-  let async_worker_result = async_worker_result
-  let node_result_to_json = node_result_to_json
-  let project_execution_result = project_execution_result
-  let result_of_execution = result_of_execution
-  let observe_node_result = observe_node_result
-  let failure_payload = failure_payload
-  let instruction_skill_description = instruction_skill_description
-  let make_instruction_skill_tool = make_instruction_skill_tool
-  let status_result = status_result
-  let cancel_result = cancel_result
-end
 
 (* A composition failure goes back to the model when every failed node, called
    directly, would have gone back: its handler's boundary
@@ -1695,10 +1260,516 @@ let bind_prepared_result ~composition_run_id ~run_reference ~draft_reference res
     (run_reference :: draft_reference :: Tool_result.retained_artifacts result) result
 ;;
 
-let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
+type named_admission =
+  | Fresh_named of Keeper_skill_activation_recorder.t option
+  | Original_child of
+      { attempt : Journal.attempt
+      ; parent_plan : Keeper_tool_plan.t
+      ; origin : Journal.named_origin
+      ; context : Keeper_skill_activation_recorder.bound_context
+      }
+
+let rec async_worker_result
+      ~composition_execution
+      ~tool_kind
+      ?skill_reference
+      ?(nested_calls=[])
+      ?nested_activation
+      ?continuation
+      ~plan
+      ?journal
+      ~tool_name
+      ~request_id
+      ~composition_run_id
+      ~source_invocation
+      ~request_sw
+      ~(config : Workspace.config)
+      ~meta
+      ~capability_authority
+      ~publication_recovery
+      ~ctx_snapshot
+      ~turn_context
+      ?clock
+      ()
+  =
+  Eio_context.with_turn_switch request_sw
+  @@ fun () ->
+  let sandbox_factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Eio.Switch.on_release request_sw (fun () ->
+    Keeper_sandbox_factory.cleanup sandbox_factory);
+  let start_time = Tool_timing.start () in
+  let run_id = Keeper_tool_plan.Run_id.fresh () in
+  let nested_run = Keeper_composition_nested_run.create ~calls:nested_calls ~composition_run_id
+      ~delivery_parent_tool_use_id:(Keeper_composition_nested_run.async_result_parent composition_run_id)
+      ~parent_invocation:source_invocation ~tool_name
+      ~record_activation:(Option.map (fun bound ~invocation ~tool_name ~scope ~reference ->
+        Keeper_skill_activation_recorder.record_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference) nested_activation) () in
+  Option.iter (fun bound -> Keeper_composition_nested_run.restore_admissions nested_run
+    ~find_activation:(fun ~invocation ~tool_name ~scope ~reference ->
+      Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
+  let admission = Keeper_composition_nested_run.check_original_admissions nested_run
+      ~child_history:(fun ~node_ids -> match journal with
+        | Some worker -> Journal.worker_child_admission worker ~node_ids
+        | None -> Error Journal.Missing_journal) in
+  match admission,continuation with
+  | Error rejection,Some continuation ->
+    let result = Tool_result.make_deferred ~tool_name ~start_time
+        ~data:(`Assoc ["kind",`String "waiting_for_original_child_activation";"cause",rejection.data]) () in
+    (match Keeper_msg_async.worker_waiting_for_dependencies
+      ~dependencies:(Journal.continuation_dependencies continuation) result with
+     | Ok outcome -> outcome
+     | Error _ -> Keeper_msg_async.worker_finished (Tool_result.make_err ~tool_name ~start_time
+         ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect rejection.detail))
+  | Error rejection,None -> Keeper_msg_async.worker_finished (Tool_result.make_err ~tool_name ~start_time
+      ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect rejection.detail)
+  | Ok (),_ ->
+  let dispatch_compiled ~attempt ~target ~tool_use_id:_ ~node ~schedule ~input:_ =
+    let start_time = Tool_timing.start () in
+    let refuse detail = Executor.dispatch_result
+        ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err ~tool_name:node.Plan.tool_name ~start_time
+          ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail) in
+    match target with
+    | Plan.Descriptor_target _ -> refuse "ordinary tools do not enter the native child producer"
+    | Plan.Child_submission child ->
+      let original =
+        let* context = match nested_activation with
+          | Some context -> Ok context
+          | None -> Error "native child has no original sealed activation context" in
+        let* activation = Keeper_composition_nested_run.admitted_activation nested_run
+            ~alias:(Plan.child_alias child.child)
+          |> Result.map_error (fun rejection -> rejection.Executor.detail) in
+        let* origin = Journal.child_origin attempt ~plan ~activation
+          |> Result.map_error Journal.error_to_string in
+        Ok (context,activation,origin) in
+      (match original with
+       | Error detail -> refuse detail
+       | Ok (context,activation,origin) ->
+         let parent_invocation = Agent_core.Tool_contract.Invocation.create
+             ~tool_use_id:activation.skill_tool_use_id ~turn:activation.agent_core_turn
+             ~schedule ~completion:Agent_core.Tool_contract.Continue_after_success in
+         let result = named_async_submission_result
+             ~skill_reference:(Plan.child_reference child.child) ~plan:(Plan.child_plan child.child)
+             ~tool_name:(Plan.child_tool_name child.child)
+             ~tool_kind:Keeper_tool_descriptor.Async_composition_tool ~parent_invocation
+             ~admission:(Original_child {attempt;parent_plan=plan;origin;context})
+             ~config ~meta ~capability_authority ~publication_recovery
+             ~ctx_snapshot ~turn_context ?clock () in
+         Executor.dispatch_result result)
+    | Plan.Child_result child ->
+      (match Journal.child_result_binding attempt ~plan with
+       | Error error -> refuse (Journal.error_to_string error)
+       | Ok binding ->
+         let observed = Keeper_composition_dependency_result.handle ~config ~meta
+             ~args:(`Assoc ["binding",Keeper_composition_dependency.composition_to_json binding]) in
+         let data = match observed.data with Some data -> data | None -> `String observed.raw_output in
+         let result = match observed.disposition with
+           | Tool_result.Deferred () -> Tool_result.make_deferred ~tool_name:node.tool_name ~start_time
+               ~data ?metadata:observed.metadata ()
+           | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:node.tool_name ~start_time
+               ~class_ ~effect_disposition:observed.failure_effect_disposition
+               ~data ?metadata:observed.metadata observed.raw_output
+           | Tool_result.Completed () ->
+             let selected =
+               let* fields = match data with `Assoc fields -> Ok fields
+                 | _ -> Error "canonical child result is not a structured object" in
+               let* exports = match List.assoc_opt "result" fields with
+                 | Some (`Assoc fields) -> (match List.assoc_opt "exports" fields with
+                     | Some (`Assoc exports) -> Ok exports
+                     | None when Plan.exports (Plan.child_plan child.child) = [] -> Ok []
+                     | Some _ | None -> Error "canonical child result has no export projection")
+                 | Some _ | None -> Error "canonical child result is absent" in
+               List.fold_left (fun acc (export : Plan.export) ->
+                 let* values = acc in
+                 match List.assoc_opt export.name exports with
+                 | Some (`Assoc fields) when List.assoc_opt "available" fields = Some (`Bool true) ->
+                   (match List.assoc_opt "value" fields with
+                    | Some value -> Ok ((export.name,value)::values)
+                    | None -> Error ("canonical child export has no value: " ^ export.name))
+                 | Some _ | None -> Error ("canonical child export is unavailable: " ^ export.name))
+                 (Ok []) (Plan.exports (Plan.child_plan child.child))
+               |> Result.map (fun values -> `Assoc (List.rev values)) in
+             (match selected with
+              | Ok data -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time ~data ()
+              | Error detail -> Tool_result.make_err ~tool_name:node.tool_name ~start_time
+                  ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect detail) in
+         Executor.dispatch_result ~failure_effect_disposition:observed.failure_effect_disposition
+           ?deferred_kind:observed.deferred_kind
+           (Tool_result.with_retained_artifacts observed.retained_artifacts result)) in
+  let execution =
+    execute_keeper_plan
+    ~capability_authority
+    ~plan
+    ~run_id
+    ?journal
+    ~composition_run_id
+    ~parent_invocation:
+      (async_parent_invocation ~request_id source_invocation)
+    ~config
+    ~meta
+    ~publication_recovery
+    ~ctx_snapshot
+    ~keeper_turn_id:(keeper_turn_id_of turn_context)
+    ~admit_node:(Keeper_composition_nested_run.admit_node nested_run)
+    ~dispatch_compiled
+    ?source_context:turn_context
+    ~turn_sandbox_factory:sandbox_factory
+    ?observe_node_result:
+      (Option.map
+         (fun turn_context ->
+            observe_node_result
+              ?on_receipt_committed:None
+              ~composition_tool:tool_name
+              ~composition_execution
+              ~composition_tool_kind:tool_kind
+              ~composition_run_id
+              ~parent_invocation:source_invocation
+              ~meta
+              ~turn_context)
+         turn_context)
+    ?clock
+      ()
+  in
+  let result =
+    result_of_execution
+      ~tool_name
+      ~tool_kind
+      ~start_time
+      execution
+  in
+  let result =
+    let nested_scopes = match nested_calls with [] -> None | _::_ ->
+      Some (Keeper_composition_nested_run.evidence_to_json nested_run ~plan ~execution) in
+    match Keeper_composition_result.project ?nested_scopes ~base_path:config.base_path ~plan ~execution result with
+    | Ok result -> result
+    | Error { message; _ } ->
+      Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time message
+  in
+  Option.iter
+    (fun reference ->
+       record_skill_composition_evidence
+         ~on_publication_failure:(fun _ -> ())
+         ~config
+         ~reference
+         ~composition_run_id
+         ~request_id:(Some request_id)
+         ~parent_invocation:source_invocation
+         ~meta
+         ~composition_tool:tool_name
+         ~composition_execution
+         ~execution
+         ~result)
+    skill_reference;
+  let waiting_dependencies =
+    let collect_waiting_dependencies settled =
+      let rec collect reversed = function
+        | [] -> Some (List.rev reversed)
+        | (node : Executor.node_result) :: rest ->
+          (match node.output_validation_error with
+           | Some _ -> None
+           | None ->
+             (match node.result with
+              | Tool_result.Completed _ -> collect reversed rest
+              | Tool_result.Failed _ -> None
+              | Tool_result.Deferred _ ->
+                (match node.deferred_kind with
+                 | Some (Keeper_tool_execution.Owned_job_result_wait id) ->
+                   collect (Keeper_composition_dependency.Owned_job id :: reversed) rest
+                 | Some (Keeper_tool_execution.Composition_result_wait binding) ->
+                   collect (Keeper_composition_dependency.Composition_result binding :: reversed) rest
+                 | None | Some (Keeper_tool_execution.Generic_deferred
+                               | External_effect_deferred _) -> None))) in
+      collect [] settled
+    in
+    match journal, execution with
+    | None, (Ok _ | Error _) | Some _, Ok _ -> None
+    | Some _, Error failure ->
+      (match failure.Executor.cause with
+       | Executor.Tool_did_not_complete node ->
+         (match node.deferred_kind with
+          | Some (Keeper_tool_execution.Owned_job_result_wait _ | Composition_result_wait _) ->
+            collect_waiting_dependencies failure.settled
+          | None | Some (Keeper_tool_execution.Generic_deferred
+                        | External_effect_deferred _) -> None)
+       | Executor.Run_journal_rejected _ | Plan_execution_failed _
+       | Node_observation_failed _ | Outer_completion_mismatch _ -> None)
+  in
+  match waiting_dependencies with
+  | None -> Keeper_msg_async.worker_finished result
+  | Some dependencies ->
+    (match Keeper_msg_async.worker_waiting_for_dependencies ~dependencies result with
+     | Ok outcome -> outcome
+     | Error _ -> Keeper_msg_async.worker_finished result)
+
+
+and async_submission_result
+      ?skill_reference
+      ?nested_calls
+      ?nested_activation
+      ?draft_reference
+      ?run_reference
+      ?composition_run_id
+      ?journal
+      ?continuation
+      ?refusal
+      ?before_submit
+      ?observe_submission
+      ?on_producer_accepted
+      ~plan
+      ~tool_name
+      ~tool_kind
+      ~parent_invocation
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~capability_authority
+      ~publication_recovery
+      ~ctx_snapshot
+      ~turn_context
+      ?clock
+      ()
+  =
+  let start_time = Tool_timing.start () in
+  let composition_run_id = match composition_run_id with
+    | Some identity -> identity
+    | None -> Keeper_tool_plan.Composition_run_id.fresh () in
+  let journal_worker = Atomic.make None in
+  let source_task_id = match journal with
+    | Some journal -> (Journal.source journal).source_task_id
+    | None -> Option.bind turn_context (fun context ->
+        context.Keeper_tool_call_log_context.task_id)
+  in
+  let request_context_fields =
+    [ "composition_tool", `String tool_name
+    ; "parent_tool_use_id", `String (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
+    ; "source_turn", `Int (Agent_core.Tool_contract.Invocation.turn parent_invocation)
+    ; ( "composition_run_id"
+      , `String
+          (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) ) ]
+    @ Option.to_list
+        (Option.map
+           (fun reference -> "skill_reference", Skill_reference.to_yojson reference)
+           skill_reference)
+    @ Option.to_list (Option.map (fun reference -> "draft_reference", Tool_output.normalized_artifact_ref_to_json reference) draft_reference)
+    @ Option.to_list (Option.map (fun reference -> "run_artifact", Tool_output.normalized_artifact_ref_to_json reference) run_reference)
+    @ Option.to_list (Option.map (fun task_id -> "source_task_id", `String task_id)
+        source_task_id)
+  in
+  let request_context =
+    match request_context_fields with
+    | [] -> None
+    | fields -> Some fields
+  in
+  match Keeper_msg_async.server_background_switch () with
+  | Error error ->
+    let data =
+      with_tool_kind_field tool_kind (Keeper_msg_async.submit_error_to_json error)
+    in
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Runtime_failure
+      ~ok:false
+      data
+  | Ok background_sw ->
+    let submit () = Keeper_msg_async.submit_worker_with_request_id
+         ?request_context
+         ~on_accepted:(fun request_id ->
+           Result.bind
+             (Keeper_composition_completion_outbox.prepare ~base_path:config.base_path
+                ~keeper_name:meta.name ~request_id ~composition_tool:tool_name
+              |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
+             (fun () ->
+                let* () = match skill_reference,continuation,journal with
+                  | None,_,_ -> Ok ()
+                  | Some _,Some _,Some journal ->
+                    Journal.named_binding journal |> Result.map (fun _ -> ())
+                    |> Result.map_error Journal.error_to_string
+                  | Some _,(None | Some _),(None | Some _) ->
+                    let* binding = Keeper_composition_dependency.composition_of_request_context
+                        ~request_id request_context_fields in
+                    Keeper_composition_named_run.admit ~base_path:config.base_path
+                      ~keeper_name:meta.name binding in
+                let* () = match journal with
+                | None -> Ok ()
+                | Some journal ->
+                  let binding = match continuation with
+                    | None -> Journal.bind_request journal ~request_id
+                    | Some continuation -> Journal.bind_continuation continuation ~request_id in
+                  match binding with
+                  | Error error -> Error (Journal.error_to_string error)
+                  | Ok worker -> Atomic.set journal_worker (Some worker); Ok () in
+                Option.fold ~none:(Ok ())
+                  ~some:(fun accepted -> accepted request_id) on_producer_accepted))
+         ~background_sw
+         ~base_path:config.base_path
+         ~caller:meta.name
+         ~keeper_name:meta.name
+         (* Without this the submitter is never told the work finished. The
+            tool hands back a request id and returns, so the result reached
+            the Keeper only if it remembered to read that id: measured over
+            2026-08-18..26, 22 submissions produced 12 reads and a settled
+            result waited a median of 21.9s against a median 2.7ms of work.
+            The same callback Fusion uses, on the same broker. *)
+         ~on_worker_settled:(fun settlement ->
+           observe_async_run_settlement
+             ~composition_tool:tool_name
+             ?skill_reference
+             ~composition_tool_kind:tool_kind
+             ~composition_run_id
+             ~parent_invocation
+             ~meta
+             ~turn_context
+             settlement;
+           Keeper_composition_completion_wake.on_worker_settled
+             ~base_path:config.base_path
+             ~composition_tool:tool_name
+             settlement)
+         ~f:(fun ~request_id request_sw ->
+           match journal, Atomic.get journal_worker with
+           | Some _, None ->
+             Keeper_msg_async.worker_finished
+               (Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
+               ~class_:Tool_result.Runtime_failure
+               ~effect_disposition:Tool_result.Proven_pre_effect
+               "prepared composition worker has no accepted journal binding")
+           | (None | Some _), worker ->
+           match refusal with
+           | Some error ->
+             Keeper_msg_async.worker_finished
+               (Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
+                  ~class_:(Journal.failure_class error)
+                  ~effect_disposition:Tool_result.Proven_pre_effect
+                  ~data:(Journal.error_to_json error) (Journal.error_to_string error))
+           | None ->
+           async_worker_result
+             ~composition_execution:Catalog.Async
+             ~tool_kind
+             ?skill_reference
+             ?nested_calls
+             ?nested_activation
+             ?continuation
+             ~plan
+             ?journal:worker
+             ~tool_name
+             ~request_id
+             ~composition_run_id
+             ~source_invocation:parent_invocation
+             ~request_sw
+             ~config
+             ~meta
+             ~capability_authority
+             ~publication_recovery
+             ~ctx_snapshot
+             ~turn_context
+             ?clock
+             ())
+         () in
+    let submitted =
+      match Option.fold ~none:(Ok ()) ~some:(fun before -> before ()) before_submit with
+      | Error result -> Error (Submission_result result)
+      | Ok () ->
+        let outcome = submit () in
+        let observed = Option.fold ~none:(Ok ()) ~some:(fun observe -> observe outcome) observe_submission in
+        (match observed with
+         | Ok () -> Result.map_error (fun error -> Broker_error error) outcome
+         | Error detail ->
+           let original = match outcome with
+             | Ok accepted -> Keeper_msg_async.submit_outcome_to_json accepted
+             | Error error -> Keeper_msg_async.submit_error_to_json error in
+           Error (Submission_result
+             (Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+               ~effect_disposition:Tool_result.Effect_outcome_unknown
+               ~data:(`Assoc ["submission_outcome_json",`String (Yojson.Safe.to_string original)])
+               ("named submission observation failed: " ^ detail)))) in
+    (match submitted with
+     | Error (Submission_result result) -> result
+     | Error (Broker_error error) ->
+       let data =
+         with_tool_kind_field
+           tool_kind
+           (Keeper_msg_async.submit_error_to_json error)
+       in
+       result_from_json
+         ~tool_name
+         ~start_time
+         ~class_:Tool_result.Runtime_failure
+         ~ok:false
+         data
+     | Ok
+         ({ Keeper_msg_async.acceptance = Keeper_msg_async.Durably_accepted
+          ; request_id
+          } as outcome) ->
+       let data =
+         `Assoc
+           (("composition_tool", `String tool_name)
+            :: ( "composition_run_id"
+               , `String
+                   (Keeper_tool_plan.Composition_run_id.to_string
+                      composition_run_id) )
+            :: tool_kind_field tool_kind
+            :: [ "execution", `String "async"
+              ; "request_id", `String request_id
+              ; ( "delivery"
+                , `Assoc
+                    [ "completion_notification", `Bool true
+                    ; ( "result_reference"
+                      , `Assoc
+                          [ "tool", `String Catalog.status_tool_name
+                          ; "arguments", `Assoc [ "request_id", `String request_id ]
+                          ] )
+                    ] )
+              ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
+              ])
+       in
+       let binding = match skill_reference,continuation,journal with
+         | None,_,_ -> Ok None
+         | Some _,Some _,Some journal ->
+           Journal.named_binding journal |> Result.map Option.some |> Result.map_error Journal.error_to_string
+         | Some _,(None | Some _),(None | Some _) ->
+           Keeper_composition_dependency.composition_of_request_context
+             ~request_id request_context_fields |> Result.map Option.some in
+       (match binding with
+        | Ok binding ->
+          let data = match data, binding with
+            | `Assoc fields, Some binding -> `Assoc (fields @
+                ["result_wait", Keeper_composition_dependency.composition_to_json binding])
+            | _, None -> data
+            | _, Some _ -> data in
+          result_from_json ~tool_name ~start_time ~class_:Tool_result.Runtime_failure ~ok:true data
+        | Error detail ->
+          Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Proven_post_effect ~data
+            ("async request accepted but its result binding could not be encoded: " ^ detail))
+     | Ok
+         ({ Keeper_msg_async.acceptance =
+              Keeper_msg_async.Reconciliation_required _
+          ; _
+          } as outcome) ->
+       let data =
+         `Assoc
+           (("composition_tool", `String tool_name)
+            :: ( "composition_run_id"
+               , `String
+                   (Keeper_tool_plan.Composition_run_id.to_string
+                      composition_run_id) )
+            :: tool_kind_field tool_kind
+            :: [ "execution", `String "async"
+              ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
+              ])
+       in
+       result_from_json
+         ~tool_name
+         ~start_time
+         ~class_:Tool_result.Runtime_failure
+         ~ok:false
+         data)
+
+
+and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
     ~parent_invocation ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
     ~capability_authority ~publication_recovery ~ctx_snapshot ~turn_context
-    ?activation_context ?clock () =
+    ~admission ?clock () =
   let module Draft = Keeper_composition_draft in
   let module Submission = Keeper_composition_named_submission in
   let start_time = Tool_timing.start () in
@@ -1710,20 +1781,24 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
   | Keeper_tool_runtime.Frozen_surface capability_surface ->
     let source_task_id = Option.bind turn_context (fun context ->
       context.Keeper_tool_call_log_context.task_id) in
-    let original_activation = match activation_context with
-        | None -> Error (Submission.Invalid_request "named async submission requires its frozen activation context")
-        | Some context -> Keeper_skill_activation_recorder.bind_async context
+    let original_activation () = match admission with
+        | Original_child {context;_} -> Ok context
+        | Fresh_named None -> Error (Submission.Invalid_request "named async submission requires its frozen activation context")
+        | Fresh_named (Some context) -> Keeper_skill_activation_recorder.bind_async context
             |> Result.map_error (fun error -> Submission.Invalid_request
               (Keeper_skill_activation_recorder.error_to_string error)) in
     let make_source () =
-      let* activation = original_activation in
+      let* activation = original_activation () in
+      let* () = match admission with
+        | Original_child _ -> Ok ()
+        | Fresh_named _ ->
       let* recorded = Keeper_skill_activation_recorder.record_bound_composition
           ~config activation ~invocation:parent_invocation ~tool_name skill_reference
         |> Result.map_error (fun error -> Submission.Invalid_request
           (Keeper_skill_activation_recorder.error_to_string error)) in
-      let* () = match recorded with
+      (match recorded with
         | Activation_ledger.Recorded _ -> Ok ()
-        | Activation_ledger.Already_recorded _ -> Error Submission.Missing_intent in
+        | Activation_ledger.Already_recorded _ -> Error Submission.Missing_intent) in
       let* recipe = Keeper_tool_plan_request.to_yojson plan
         |> Result.map_error (fun (Keeper_tool_plan_request.Unsubstituted_param {name}) ->
           Submission.Invalid_request ("named async plan retains unbound parameter " ^ name)) in
@@ -1732,7 +1807,7 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
         |> Result.map_error (fun error -> Submission.Persistence_failed
           (Yojson.Safe.to_string (Draft.error_to_json error))) in
       let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
-      let* run_reference = Draft.record_invocation ~base_path:config.base_path ~composition_run_id
+      let* run_reference = Draft.record_invocation ~base_path:config.base_path ~nested_activation:activation ~composition_run_id
           ~invocation:parent_invocation draft
         |> Result.map_error (fun error -> Submission.Persistence_failed
           (Yojson.Safe.to_string (Draft.error_to_json error))) in
@@ -1741,21 +1816,31 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
          parent_tool_use_id=Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation;
          source_turn=Agent_core.Tool_contract.Invocation.turn parent_invocation;
          source_task_id;
-         producer=Journal.Named {tool_name;skill_reference;activation=Some activation}} in
+         producer=Journal.Named {tool_name;skill_reference;activation=Some activation;
+           origin=(match admission with Fresh_named _ -> Journal.Standalone | Original_child {origin;_} -> origin)}} in
       Journal.prepare ~base_path:config.base_path source
       |> Result.map_error (fun error -> Submission.Journal_rejected error) in
     let prepared =
-      let* physical_turn_ref = match activation_context with
-        | Some context -> Ok (Keeper_skill_activation_recorder.physical_turn_ref context)
-        | None -> Error (Submission.Invalid_request "original named submission physical frame is unavailable") in
-      let* request = Submission.request ~keeper_name:meta.name ~trace_id:meta.runtime.trace_id
+      let* trace_id,physical_turn_ref,origin = match admission with
+        | Fresh_named (Some context) -> Ok (meta.runtime.trace_id,
+            Keeper_skill_activation_recorder.physical_turn_ref context,Journal.Standalone)
+        | Original_child {context;origin;_} -> Ok (Keeper_skill_activation_recorder.bound_trace_id context,
+            Keeper_skill_activation_recorder.bound_turn_ref context,origin)
+        | Fresh_named None -> Error (Submission.Invalid_request "original named submission physical frame is unavailable") in
+      let* request = Submission.request ~keeper_name:meta.name ~trace_id
           ~physical_turn_ref
-          ~invocation:parent_invocation ~source_task_id ~skill_reference ~tool_name ~plan in
-      Submission.prepare ~base_path:config.base_path request ~make_source in
+          ~invocation:parent_invocation ~source_task_id ~origin ~skill_reference ~tool_name ~plan in
+      let* intent = Submission.prepare ~base_path:config.base_path request ~make_source in
+      let* child_submission = match admission with
+        | Fresh_named _ -> Ok None
+        | Original_child {attempt;parent_plan;_} ->
+          Journal.record_child_submission attempt ~plan:parent_plan ~child_source:(Submission.source intent)
+          |> Result.map Option.some |> Result.map_error (fun error -> Submission.Journal_rejected error) in
+      Ok (intent,child_submission) in
     match prepared with
     | Error error -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
         ~effect_disposition:Tool_result.Effect_outcome_unknown (Submission.error_to_string error)
-    | Ok intent ->
+    | Ok (intent,child_submission) ->
       let source = Submission.source intent in
       let journal = Submission.journal intent in
       let unresolved error =
@@ -1770,6 +1855,14 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
         match binding with
         | None -> Ok None
         | Some binding ->
+          let* () = match child_submission with
+            | None -> Ok ()
+            | Some submission ->
+              let* accepted = Journal.accepted_child_submission submission
+                |> Result.map_error (fun error -> Submission.Journal_rejected error) in
+              if Yojson.Safe.equal (Keeper_composition_dependency.composition_to_json accepted)
+                  (Keeper_composition_dependency.composition_to_json binding)
+              then Ok () else Error Submission.Source_conflict in
           let* owner = Journal.named_result_owner journal binding
             |> Result.map_error (fun error -> Submission.Journal_rejected error) in
           Ok (Some (Tool_result.make_ok ~tool_name ~start_time
@@ -1820,6 +1913,12 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
         | Ok (Some result) -> result
         | Ok None ->
           async_submission_result ~skill_reference ~journal ~plan
+            ?on_producer_accepted:(Option.map (fun submission request_id ->
+              Journal.accept_child_submission submission ~request_id
+              |> Result.map_error Journal.error_to_string) child_submission)
+            ~nested_calls:[]
+            ?nested_activation:(match source.producer with
+              | Journal.Named {activation;_} -> activation | Journal.Prepared -> None)
             ~draft_reference:source.draft_reference ~run_reference:source.run_reference
             ~composition_run_id:source.composition_run_id ~tool_name ~tool_kind ~parent_invocation
             ~before_submit ~observe_submission ~config ~meta ~capability_authority
@@ -1836,6 +1935,19 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
            message)
 ;;
 
+module For_testing = struct
+  let async_worker_result = async_worker_result
+  let node_result_to_json = node_result_to_json
+  let project_execution_result = project_execution_result
+  let result_of_execution = result_of_execution
+  let observe_node_result = observe_node_result
+  let failure_payload = failure_payload
+  let instruction_skill_description = instruction_skill_description
+  let make_instruction_skill_tool = make_instruction_skill_tool
+  let status_result = status_result
+  let cancel_result = cancel_result
+end
+
 let resume_continuation ~capability_surface ~continuation ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) ~publication_recovery ~ctx_snapshot
     ~(turn_context : Keeper_tool_call_log_context.turn_context) ~invocation ?clock () =
@@ -1843,7 +1955,7 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
   let source = Journal.continuation_source continuation in
   let tool_name,skill_reference = match source.producer with
     | Journal.Prepared -> Draft.run_tool_name,None
-    | Journal.Named {tool_name;skill_reference;activation=_} -> tool_name,Some skill_reference in
+    | Journal.Named {tool_name;skill_reference;activation=_;origin=_} -> tool_name,Some skill_reference in
   let start_time = Tool_timing.start () in
   let refuse_journal error = Tool_result.make_err ~tool_name
       ~class_:(Journal.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
@@ -2142,7 +2254,7 @@ let make_tools_with_authority
                      message
                  | Ok plan ->
                    named_async_submission_result
-                     ?activation_context:nested_activation_context
+                     ~admission:(Fresh_named nested_activation_context)
                      ~skill_reference:skill.reference ~plan ~tool_name
                      ~tool_kind:(Catalog.tool_kind entry) ~parent_invocation
                      ~config ~meta ~capability_authority ~publication_recovery

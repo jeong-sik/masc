@@ -1114,7 +1114,7 @@ value = { sha256 = %S }
     let child_continuation = Journal.waiting_continuation child_journal |> require "named producer continuation"
       |> function Some value -> value | None -> fail "named producer lost its owned job wait" in
     (match (Journal.source child_journal).producer with
-     | Journal.Named {activation=Some original;tool_name;skill_reference} ->
+     | Journal.Named {activation=Some original;tool_name;skill_reference;origin=Standalone} ->
        check int "named original SDK turn remains distinct from the physical Keeper frame" 41
          (Journal.source child_journal).source_turn;
        check int "named physical Keeper frame remains sealed" 1
@@ -1123,7 +1123,7 @@ value = { sha256 = %S }
        check bool "named journal retains the exact reference" true (Skill_reference.equal reference skill_reference);
        check bool "named journal retains original Task Skill selection" true
          (List.exists (Skill_reference.equal reference) (Recorder.bound_task_references original))
-     | Named {activation=None;_} | Prepared -> fail "named original activation was not sealed");
+     | Named {activation=None;_} | Named {activation=Some _;origin=Nested _;_} | Prepared -> fail "named original standalone activation was not sealed");
     with_bundle fixture (fun bundle -> ignore (invoke fixture bundle ~tool_use_id:"parked-child-read" ~turn:52
       "keeper_composition_result" (`Assoc ["binding",binding_json])));
     check bool "released child still leaves parent waiting" true
@@ -3119,21 +3119,18 @@ let test_interrupted_prepared_launch_resumes_the_same_job () = with_fixture @@ f
   Printf.printf "OWNED_INTERRUPTED_LAUNCH_RESUME job=%s phase=%s\n%!" id
     (match job.phase with Store.Running _ -> "running" | _ -> "other")
 
-let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () = with_fixture @@ fun env _initialize fixture ->
+let with_nested_job_skill ~execution operation = with_fixture @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   let module Async = Masc.Keeper_msg_async in
-  let module Wake = Masc.Keeper_composition_continuation_wake in
-  let module Ledger = Masc.Keeper_skill_activation_ledger in
   let module Recorder = Masc.Keeper_skill_activation_recorder in
   let module Surface = Masc.Keeper_capability_surface in
   let module Delivery = Masc.Keeper_composition_result_delivery in
-  let module Async_delivery = Masc.Keeper_skill_async_delivery in
   let config = Workspace.default_config fixture.base_path in
   set_source fixture ~task_id:"task-A" ~turn:41;
   Call_log.init ~base_path:fixture.base_path ();
   let skill_dir = Filename.concat fixture.base_path ".agents/skills/nested-owned-job" in
   Fs_compat.mkdir_p skill_dir;
-  write (Filename.concat skill_dir "SKILL.md") {|---
+  write (Filename.concat skill_dir "SKILL.md") (Printf.sprintf {|---
 name: nested-owned-job
 description: Launch one owned job and consume its original complete stdout.
 ---
@@ -3141,7 +3138,7 @@ description: Launch one owned job and consume its original complete stdout.
 ```toml composition
 [[compositions]]
 name = "nested-owned-job"
-execution = "inline"
+execution = "%s"
 [[compositions.nodes]]
 id = "launch"
 tool = "keeper_job_start"
@@ -3175,7 +3172,7 @@ name = "stdout"
 node = "consume"
 pointer = "/content"
 ```
-|};
+|} (match execution with Masc.Keeper_tool_composition_catalog.Inline -> "inline" | Async -> "async"));
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
   Fs_compat.mkdir_p (Filename.dirname declaration);
   write declaration "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original nested owned-job continuation fixture\"\n";
@@ -3217,6 +3214,137 @@ pointer = "/content"
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"nested owned-job fixture")
       ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
   let fixture = {fixture with make_bundle} in
+  operation ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
+    ~publication_recovery ~physical_turn_ref ~delivery
+
+let test_fixed_async_skill_child () =
+  with_nested_job_skill ~execution:Masc.Keeper_tool_composition_catalog.Async
+  @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
+      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ->
+  let module Async = Masc.Keeper_msg_async in
+  let module Ledger = Masc.Keeper_skill_activation_ledger in
+  let module Tools = Masc.Keeper_tool_composition_surface in
+  let module Plan = Masc.Keeper_tool_plan in
+  let sibling = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path)
+      ~bytes:"independent parent work\n" ~mime:"text/plain" in
+  let recipe = `Assoc ["execution",`String "async";"nodes",`List
+      [`Assoc ["id",`String "sibling";"tool",`String "keeper_artifact_read";
+          "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String sibling.sha256]]];
+       `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"args",`Assoc []]];
+      "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
+  let started = Mtime_clock.counter () in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-fixed-async-child" ~turn:41 "keeper_composition_prepare" recipe) in
+  check bool "async child preparation has no backend effects" false (Sys.file_exists fixture.daemon_path);
+  let draft = prepared |> member "draft" |> composition_reference "fixed async child draft" in
+  let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"run-fixed-async-child" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
+  let ok,waiting,parent_entry = await_composition env fixture accepted in
+  check bool "parent releases its worker while the original child is pending" false ok;
+  let binding = match parent_entry.status with
+    | Async.Waiting_for_dependencies {dependencies=[Dependency.Composition_result binding];_} -> binding
+    | _ -> fail "compiled child did not establish its exact canonical result wait" in
+  let child_ok,child_wait,child_entry = await_composition env fixture
+      (`Assoc ["request_id",`String binding.request_id]) in
+  check bool "real async child releases its own worker on the original job" false child_ok;
+  let id = match child_entry.status with
+    | Async.Waiting_for_dependencies {dependencies=[dependency];_} -> dependency_job_id dependency
+    | _ -> fail "fixed child did not run the actual owned job producer" in
+  let child_journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+      ~composition_run_id:binding.composition_run_id |> require "fixed original child journal" in
+  (match (Journal.source child_journal).producer with
+   | Journal.Named {skill_reference;activation=Some original;origin=Nested _;_} ->
+     check bool "child source retains the exact frozen Skill" true (Skill_reference.equal reference skill_reference);
+     check int "child retains original physical frame" 41
+       (Ids.Turn_ref.absolute_turn (Masc.Keeper_skill_activation_recorder.bound_turn_ref original))
+   | Named {origin=Standalone;_} | Named {activation=None;origin=Nested _;_} | Prepared ->
+     fail "native child became a standalone or unsealed named submission");
+  let ledger = Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
+      |> require "original fixed child ledger" |> function Some value -> value | None -> fail "child has no actual Nested activation" in
+  let activation = match Ledger.activations ledger with [activation] -> activation
+    | _ -> fail "fixed child recorded duplicate or missing activation" in
+  (match activation.invocation with Ledger.Nested_composition_invocation _ -> ()
+   | Instruction_invocation _ | Composition_invocation _ -> fail "native producer re-recorded child as standalone composition");
+  check string "logical child invocation is the actual original receipt" activation.skill_tool_use_id binding.parent_tool_use_id;
+  let nodes = composition_nodes fixture waiting in
+  check_json "independent parent work settles while child is pending" (`String "completed")
+    (composition_node "[\"sibling\"]" nodes |> member "result" |> member "disposition");
+  let prepare_to_wait_ms = Mtime.Span.to_float_ns (Mtime_clock.count started) /. 1_000_000. in
+  let candidate journal = Journal.waiting_continuation journal |> require "original async continuation"
+      |> function Some value -> value | None -> fail "original async result wait disappeared" in
+  let child_continuation = candidate child_journal in
+  let parent_run = accepted |> member "composition_run_id" |> to_string |> Plan.Composition_run_id.of_string
+      |> require "original native parent identity" in
+  let parent_journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper ~composition_run_id:parent_run
+      |> require "original native parent journal" in
+  let parent_continuation = candidate parent_journal in
+  check bool "pending canonical child keeps original parent suspended" true
+    (Journal.continuation_readiness ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+      parent_continuation = Ok Journal.Waiting_for_results);
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  runtime := "later.runtime";
+  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-fixed-child-job"
+    ~turn:52 "keeper_job_status" (argument id)));
+  let backend_after_result = List.length (calls fixture) in
+  let resume continuation tool_use_id =
+    let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:52
+        ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
+        ~completion:Agent_core.Tool_contract.Continue_after_success in
+    Tools.resume_continuation ~capability_surface:surface ~continuation ~config ~meta:fixture.meta
+      ~publication_recovery ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"fresh fixed child supervisor")
+      ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+      ~invocation ~clock:(Eio.Stdenv.clock env) () in
+  let recovery_started = Mtime_clock.counter () in
+  let resumed_child = resume child_continuation "resume-original-fixed-child" in
+  check bool "fresh supervisor accepts original child continuation" true (Tool_result.is_success resumed_child);
+  check_json "child successor retains the original public binding" (Dependency.composition_to_json binding)
+    (Tool_result.data resumed_child |> member "result_wait");
+  let child_ok,child_completed,_ = await_composition env fixture (Tool_result.data resumed_child) in
+  check bool "actual child resolves its whole original DAG" true child_ok;
+  let child_nodes = composition_nodes fixture child_completed in
+  let previous_child_nodes = composition_nodes fixture child_wait in
+  List.iter (fun field -> check_json ("original child job occurrence " ^ field)
+      (composition_node "await" previous_child_nodes |> member field)
+      (composition_node "await" child_nodes |> member field)) ["execution_id";"tool_use_id"];
+  let resumed_parent = resume parent_continuation "resume-original-fixed-parent" in
+  check bool "whole canonical child result makes original parent ready" true (Tool_result.is_success resumed_parent);
+  let parent_ok,completed,parent_completed = await_composition env fixture (Tool_result.data resumed_parent) in
+  check bool "native result barrier completes original parent" true parent_ok;
+  check_json "parent consumes exact complete child export" (`String stdout_bytes)
+    (completed |> member "exports" |> member "stdout" |> member "value");
+  let completed_nodes = composition_nodes fixture completed in
+  let scope = prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" in
+  let submission_id = scope |> member "submission" |> to_string in
+  List.iter (fun field -> check_json ("original parent submission occurrence " ^ field)
+      (composition_node submission_id nodes |> member field)
+      (composition_node submission_id completed_nodes |> member field)) ["execution_id";"tool_use_id"];
+  check_json "accepted child submission is retained rather than resubmitted" (`String "retained_completion")
+    (composition_node submission_id completed_nodes |> member "execution_origin");
+  check int "fresh child and parent use no backend after canonical output" backend_after_result (List.length (calls fixture));
+  check int "fixed child creates one job" 1 (effect_count fixture "create");
+  check int "fixed child starts one job" 1 (effect_count fixture "start");
+  check int "native submission and continuation read original runtime once" 1 !runtime_reads;
+  let final_ledger = Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
+      |> require "final original Nested receipt" |> function Some value -> value | None -> fail "original receipt was removed" in
+  check bool "all continuations retain exact original Nested activation" true
+    (Ledger.activations ledger = Ledger.activations final_ledger);
+  check_json "parent result remains attached to original Task" (`String "task-A")
+    (match parent_completed.request_context with Some fields -> List.assoc "source_task_id" fields
+      | None -> fail "completed parent source missing");
+  Printf.eprintf "FIXED_ASYNC_CHILD_MEASURE prepare_to_wait_ms=%.3f recovery_ms=%.3f creates=%d starts=%d runtime_reads=%d\n%!"
+    prepare_to_wait_ms (Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000.)
+    (effect_count fixture "create") (effect_count fixture "start") !runtime_reads
+
+let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () =
+  with_nested_job_skill ~execution:Masc.Keeper_tool_composition_catalog.Inline
+  @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
+      ~publication_recovery ~physical_turn_ref ~delivery ->
+  let module Async = Masc.Keeper_msg_async in
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  let module Ledger = Masc.Keeper_skill_activation_ledger in
+  let module Delivery = Masc.Keeper_composition_result_delivery in
+  let module Async_delivery = Masc.Keeper_skill_async_delivery in
   let recipe = `Assoc ["execution",`String "async";"nodes",`List
       [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"args",`Assoc []]];
       "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
@@ -3366,7 +3494,7 @@ pointer = "/content"
   check int "nested recovery has zero backend calls after full result" ready_backend (List.length (calls fixture));
   check_json "parent exports original complete stdout" (`String stdout_bytes)
     (completed |> member "exports" |> member "stdout" |> member "value");
-  let mappings = prepared |> member "nested_calls" |> to_list |> List.hd |> member "node_mapping" |> to_list in
+  let mappings = prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" |> member "node_mapping" |> to_list in
   let expanded name = mappings |> List.find (fun row -> row |> member "source" |> to_string = name)
     |> member "expanded" |> to_string in
   let waiting_nodes = composition_nodes fixture waiting and completed_nodes = composition_nodes fixture completed in
@@ -4025,6 +4153,7 @@ let () =
       ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag
       ; test_case "prepared DAG launches an owned job and resumes its original result" `Quick test_prepared_job_launch_and_continuation
       ; test_case "interrupted prepared launch resumes the same job without recreating it" `Quick test_interrupted_prepared_launch_resumes_the_same_job
+      ; test_case "fixed async Skill child submits once and resumes its canonical whole result" `Quick test_fixed_async_skill_child
       ; test_case "fresh supervisor retains nested child authority through owned-job waits" `Quick
           (test_nested_skill_job_continuation ~fault_after_acceptance:false)
       ; test_case "accepted worker activation fault keeps original child wait recoverable" `Quick

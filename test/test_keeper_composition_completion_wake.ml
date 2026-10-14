@@ -583,7 +583,7 @@ let every_settled_status_is_announced () =
       ; "kmsg-done-err", Async.Done { ok = false; body = "boom"; data = None }
       ; "kmsg-lost", Async.Lost { reason = "worker vanished" }
       ; ( "kmsg-persist"
-        , Async.Persistence_failed { attempted_status = "done"; reason = "disk full" } )
+        , Async.Persistence_failed { attempted_status = Async.State_transition "done"; reason = "disk full" } )
       ; ( "kmsg-cancel"
         , Async.Cancelled { reason = "no longer needed"; cancelled_by = "operator" } )
       ]

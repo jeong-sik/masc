@@ -1,4 +1,4 @@
-# Prepare and run exact inline Skill children
+# Prepare and run exact Skill children
 
 The source Skill detail views in Dashboard and TUI show retained async result
 handoffs and later action facts alongside the original activation. Inline result
@@ -10,7 +10,8 @@ completion verdict. Original and receiving turns/runtimes remain visible.
 This display implementation needs installed runtime/UI verification separately.
 
 `Keeper_composition_nested.compile` expands an exact, turn-frozen inline Skill
-into the existing typed plan. The source `keeper_composition_prepare` schema now
+into the existing typed plan and lowers an async Skill into native submission
+and canonical result nodes. An async child requires an async parent. The source `keeper_composition_prepare` schema now
 accepts this node alternative for task-specific inline drafts. Prepare freezes
 the original recipe, flattened plan, exact child references, normalized arguments,
 leaf/export mappings and tool contracts in one owned immutable manifest. Run
@@ -59,13 +60,24 @@ evidence retains the exact child reference, fixed arguments, bound plan and
 recursive contracts. Copying that private evidence into a public request does
 not create a compiler capability.
 
-This internal representation does not yet enable async children in public
-prepare/run. The executor requires an actual canonical parent journal attempt
-and an original child producer; absent authority refuses before effects, never
-through an ordinary tool-name fallback. The compiler's existing async-child
-refusal stays until the original Nested receipt, accepted-child parent owner
-transition and canonical result-wait journal path are connected. Private
-contract tests are not evidence that an end-to-end async child has executed.
+An async parent can prepare and run a fixed async child through the same exact
+reference grammar. Its original Nested activation seals the child producer;
+submission records an immutable parent-occurrence-to-child-source join before
+broker entry. The protected acceptance callback commits the real child membership
+and child journal binding before retaining acceptance in the parent journal.
+The result node reads only that accepted binding through the canonical result
+reader. Pending children release the parent worker; whole-child failures and
+cancellations stay failures, and successful named exports are validated against
+the frozen result schema before any consumer can use them.
+
+A Lost parent whose child acceptance was committed can recover that original
+acknowledgement with its original occurrence IDs, even before its first result
+wait. This does not authorize replay of an unproven effectful tool. A failed
+acceptance callback remains distinct from a later worker-publication failure;
+both retain their real evidence. Missing, changed or copied child authority
+cannot create replacement acceptance. These are source guarantees until an
+exact-head execution receipt proves the selected scenario; installed runtime,
+visible UI and whole-task speedup remain separate evidence.
 
 Call `keeper_composition_prepare` with `execution: "inline"` or `"async"`, the ordinary outer
 `nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of
@@ -104,9 +116,9 @@ not schedule a replacement, and public manual resume refuses before accepting
 another request. The original Task, occurrences and retained results stay in
 the same journal. Declared read-only unfinished work still permits the existing
 manual resume; this refusal does not add a retry budget or a new runtime setting.
-This retention is not accepted-child acknowledgement recovery: that still needs
-the exact child admission proof and a parent owner transition before async
-children can be compiled.
+Native child acknowledgement recovery additionally requires its immutable
+submission intent, committed parent acceptance and exact canonical child
+membership. Other unproven effectful attempts retain the refusal above.
 
 A child output is its declared named export. `/profile` selects export `profile`;
 `/document/items/0` selects within export `document`. RFC 6901 escaping applies to
@@ -304,7 +316,7 @@ ID reuse, official native starts, duplicate and contradictory facts, sibling
 receipts, corrupt-ledger recovery and a real canonical lock around an in-flight
 attempt reset. It retains the original child activation and checks zero backend
 redispatch after the result. Record an actual run/head before calling these cases
-passed. Named async children, dynamic child input, general resource admission,
+passed. Dynamic child input, general resource admission,
 installed runtime/UI and matched whole-task timings remain
 separate work.
 

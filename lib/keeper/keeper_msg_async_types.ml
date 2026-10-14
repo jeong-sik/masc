@@ -1,3 +1,9 @@
+type persistence_target =
+  | Acceptance_callback
+  | State_transition of string
+(** The state label is diagnostic only. Admission recovery branches on the
+    constructor, never on a status or reason string. *)
+
 type request_status =
   | Queued
   | Running
@@ -11,7 +17,7 @@ type request_status =
       ; cancelled_by : string
       }
   | Persistence_failed of
-      { attempted_status : string
+      { attempted_status : persistence_target
       ; reason : string
       }
   | Waiting_for_dependencies of

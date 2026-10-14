@@ -261,6 +261,8 @@ val nested_composition_scope :
 val empty : workspace_root:string -> trace_id:Keeper_id.Trace_id.t -> t
 val activation_frame_sha256 : activation -> string
 (** Digest of the immutable admission frame, excluding subsequent delivery and actions. *)
+val activation_frame_to_yojson : activation -> Yojson.Safe.t
+(** Original admission evidence without later delivery or action observations. *)
 val activations : t -> activation list
 val transition_rejections : t -> transition_rejection list
 val async_result_deliveries : t -> Keeper_skill_async_delivery.t list

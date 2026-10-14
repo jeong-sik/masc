@@ -10,6 +10,12 @@
 
 (** {1 Types} *)
 
+type persistence_target =
+  | Acceptance_callback
+  | State_transition of string
+(** The state label is diagnostic only. Admission recovery branches on the
+    constructor, never on a status or reason string. *)
+
 type request_status =
   | Queued
   | Running
@@ -23,7 +29,7 @@ type request_status =
       ; cancelled_by : string
       }
   | Persistence_failed of
-      { attempted_status : string
+      { attempted_status : persistence_target
       ; reason : string
       }
   | Waiting_for_dependencies of
@@ -542,6 +548,7 @@ val list_for_keeper
 
 (** {1 JSON output} *)
 
+val persistence_target_to_string : persistence_target -> string
 val status_to_string : request_status -> string
 val access_rejection_to_json : access_rejection -> Yojson.Safe.t
 val submit_error_to_json : submit_error -> Yojson.Safe.t

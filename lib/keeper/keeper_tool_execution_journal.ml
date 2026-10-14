@@ -528,6 +528,7 @@ let update_existing journal decide = filesystem (fun () ->
 
 let prepare ~base_path immutable_source = filesystem (fun () ->
   let* () = Result.map_error (fun detail -> Invalid_source detail) (decode (fun () -> validate_source immutable_source)) in
+  let base_path = Fs_compat.realpath base_path in
   let* () = validate_artifacts ~base_path immutable_source in
   let root, path = path_for ~base_path ~keeper_name:immutable_source.keeper_name ~composition_run_id:immutable_source.composition_run_id in
   let journal = {base_path; root; path; immutable_source; source_sha = json_sha (source_json immutable_source)} in
@@ -556,6 +557,7 @@ let prepare ~base_path immutable_source = filesystem (fun () ->
 
 let load ~base_path ~keeper_name ~composition_run_id = filesystem (fun () ->
   if not (exact_name keeper_name) then Error (Invalid_source "invalid keeper name") else
+  let base_path = Fs_compat.realpath base_path in
   let root, path = path_for ~base_path ~keeper_name ~composition_run_id in
   let* state = strict_read ~root path in
   if not (String.equal state.source.keeper_name keeper_name && Plan.Composition_run_id.equal state.source.composition_run_id composition_run_id)

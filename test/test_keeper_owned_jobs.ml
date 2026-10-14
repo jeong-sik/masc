@@ -1095,6 +1095,23 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
    | Ok Waiting_for_results | Error _ -> fail "complete original outputs are not ready");
   let changed_surface = current_surface ~tool_deny:["keeper_job_start"] () in
   let module Draft = Masc.Keeper_composition_draft in
+  let alias_base = Filename.concat fixture.base_path "." in
+  let original_source = Journal.continuation_source discovered in
+  let alias_prepared = Journal.prepare ~base_path:alias_base original_source
+    |> require "same original journal through an alias base" in
+  let alias_loaded = Journal.load ~base_path:(fixture.base_path ^ "/") ~keeper_name:keeper
+      ~composition_run_id:original_source.composition_run_id
+    |> require "same original journal through a trailing slash" in
+  let capture journal = match Journal.waiting_continuation journal with
+    | Ok (Some candidate) -> candidate
+    | Ok None | Error _ -> fail "alias lost the original waiting continuation" in
+  List.iter (fun journal ->
+    let candidate = capture journal in
+    check string "journal ingress stores canonical workspace authority" fixture.base_path
+      (Journal.continuation_base_path candidate);
+    ignore (Draft.load_continuation ~base_path:alias_base ~capability_surface:changed_surface candidate
+      |> require "same physical workspace admits an alias continuation")) [alias_prepared;alias_loaded];
+  let discovered = capture alias_loaded in
   (match Draft.load ~base_path:fixture.base_path ~capability_surface:changed_surface ~keeper_name:keeper ~sha256 with
    | Error Draft.Capability_changed -> ()
    | Ok _ | Error _ -> fail "ordinary draft admission silently adopted a changed whole surface");

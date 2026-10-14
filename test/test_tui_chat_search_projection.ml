@@ -1447,7 +1447,7 @@ let test_held_excerpt_reflows_badge_to_current_width () = at_sizes (fun origin -
      25 (after it) and only rejects over-shrinking the margin to 23 or
      less. *)
   check bool "held excerpt margin refits the narrowed pane" true (widest <= 25);
-  check bool "red control: the carried badge would draw past column 25" false
+  check bool "margin does not over-shrink below the 23-cell floor" false
     (widest <= 23);
   (* Frame dumps for task-2292 live in evidence/task-2292/, not in every
      CI log. Keep painting the wide frame so the exercise order (and the

@@ -73,6 +73,13 @@ let test_exact_event_commands () =
     (Result.is_error (Inbox.parse "cancel-event ref -1 reason"));
   Alcotest.(check bool) "cancellation requires reason" true
     (Result.is_error (Inbox.parse "cancel-event ref 42"))
+let test_clear_names_no_message () =
+  (match get (Inbox.parse "clear") with
+   | Inbox.Clear -> ()
+   | Inbox.Inspect | Pause | Resume | Cancel _ | Move_to_end _ | Edit _
+   | Cancel_event _ | Prioritize_event _ -> Alcotest.fail "clear was read as another command");
+  Alcotest.(check bool) "an argument is not silently ignored" true
+    (Result.is_error (Inbox.parse "clear tui-01a13350-f5ce-7000-bf11-57eec0f43f1a"))
 let test_pagination_requires_identity () =
   Alcotest.(check (option string)) "empty page ends read" None
     (get (Inbox.next_sequence (`Assoc ["operations",`List []])));
@@ -86,4 +93,5 @@ let () = Alcotest.run "TUI queue controls"
     Alcotest.test_case "paused running work remains visible" `Quick test_pause_and_work_are_separate;
     Alcotest.test_case "editing preserves media and context" `Quick test_edit_retains_media_and_turn_context;
     Alcotest.test_case "event controls address an exact source" `Quick test_exact_event_commands;
+    Alcotest.test_case "clear takes no message id" `Quick test_clear_names_no_message;
     Alcotest.test_case "queue pagination rejects missing identity" `Quick test_pagination_requires_identity]]

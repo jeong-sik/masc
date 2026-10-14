@@ -553,6 +553,974 @@ let test_anthropic_honors_a_latest_turn_replay_declaration () =
     (content_has_reasoning (List.nth projected 3).content)
 ;;
 
+(* Creation-prefix binding: a signed thinking block replays only while the
+   system prompt, the tools, the controls, and every byte before it are
+   unchanged. The live failure these pin: round one carries an extra-context
+   block the post-tool round drops, so round two's replay of round one's
+   thinking fails the whole request with an unretryable "Invalid signature
+   in thinking block" 400. The fold drops the stale block instead, and the
+   turn proceeds. *)
+
+let anthropic_build_config () =
+  Provider_config.make
+    ~kind:Anthropic
+    ~model_id:"claude-sonnet-5-5"
+    ~base_url:"https://api.anthropic.com"
+    ~max_tokens:4096
+    ~system_prompt:"keeper system"
+    ~model_capabilities_override:
+      { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+        reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls
+      }
+    ()
+;;
+
+let anthropic_build_config_variant
+      ?(system = "keeper system")
+      ?temperature
+      ?tool_choice
+      ?cache_system_prompt
+      ?cap_override
+      ()
+  =
+  let model_capabilities_override =
+    match cap_override with
+    | Some caps -> caps
+    | None ->
+      { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+        reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls
+      }
+  in
+  Provider_config.make
+    ~kind:Anthropic
+    ~model_id:"claude-sonnet-5-5"
+    ~base_url:"https://api.anthropic.com"
+    ~max_tokens:4096
+    ~system_prompt:system
+    ?temperature
+    ?tool_choice
+    ?cache_system_prompt
+    ~model_capabilities_override
+    ()
+;;
+
+let prefix_test_tool_schema =
+  `Assoc
+    [ "name", `String "inspect"
+    ; "description", `String "inspect something"
+    ; "input_schema", `Assoc [ "type", `String "object" ]
+    ]
+;;
+
+let stamped_assistant ~config ~request_messages ~tools response_content =
+  let prefix =
+    Backend_anthropic.transmitted_reasoning_prefix
+      ~config
+      ~messages:request_messages
+      ~tools
+      ~response_content
+      ()
+  in
+  check_bool "the producing request records a digest" true (Option.is_some prefix);
+  let telemetry =
+    { Types.default_inference_telemetry with
+      reasoning_source = Some (source_for_config config)
+    ; reasoning_prefix = prefix
+    }
+  in
+  let response =
+    { Types.id = "msg_test_round_one"
+    ; model = "claude-sonnet-5-5"
+    ; stop_reason = Types.EndTurn
+    ; content = response_content
+    ; usage = None
+    ; telemetry = Some telemetry
+    }
+  in
+  match Types.assistant_message_of_response response with
+  | Ok message -> message
+  | Error _ -> Alcotest.fail "a sourced response must stamp"
+;;
+
+let wire_content_types body =
+  let open Yojson.Safe.Util in
+  Yojson.Safe.from_string body |> member "messages" |> to_list
+  |> List.map (fun message ->
+      message |> member "content" |> to_list
+      |> List.map (fun block -> block |> member "type" |> to_string))
+;;
+
+let round_one_fixtures () =
+  let config = anthropic_build_config () in
+  let tools = [ prefix_test_tool_schema ] in
+  let carrier = message User [ Text "trigger"; Text "extra context block" ] in
+  let response_content =
+    [ Thinking { content = "round one reasoning"; signature = Some "sig-round-one" }
+    ; Text "round one text"
+    ; ToolUse { id = "call-1"; name = "inspect"; input = `Assoc [] }
+    ]
+  in
+  let assistant =
+    stamped_assistant ~config ~request_messages:[ carrier ] ~tools response_content
+  in
+  config, tools, carrier, assistant
+;;
+
+(* The agent pipeline admits every request body before it dispatches
+   ([Pipeline_stage_route]: [admit_request_body], then [complete_serialized]
+   or [complete_stream_serialized]), so a Keeper turn's response always
+   arrives with an admitted body. It must still record its prefix, or the
+   next round drops every thinking block as [Prefix_digest_absent]. *)
+let admitted_round_one ~stream =
+  let config = anthropic_build_config () in
+  let tools = [ prefix_test_tool_schema ] in
+  let carrier = message User [ Text "trigger"; Text "extra context block" ] in
+  let response =
+    { Types.id = "msg_admitted_round_one"
+    ; model = "claude-sonnet-5-5"
+    ; stop_reason = Types.EndTurn
+    ; content =
+        [ Thinking { content = "admitted round reasoning"; signature = Some "sig-admitted" }
+        ; Text "admitted round text"
+        ; ToolUse { id = "call-1"; name = "inspect"; input = `Assoc [] }
+        ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  let transport =
+    { Llm_transport.complete_sync =
+        (fun _ -> { Llm_transport.response = Ok response; latency_ms = None })
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok response)
+    }
+  in
+  let completed =
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let prepared = Complete.prepare_request ~config ~messages:[ carrier ] ~tools () in
+    match Complete.admit_request_body ~stream prepared with
+    | Error _ -> Alcotest.fail "the round-one body must be admitted"
+    | Ok serialized ->
+      if stream
+      then
+        Complete.complete_stream_serialized
+          ~sw
+          ~net
+          ~transport
+          serialized
+          ~on_event:ignore
+          ()
+      else Complete.complete_serialized ~sw ~net ~transport serialized ()
+  in
+  match completed with
+  | Error _ -> Alcotest.fail "the stubbed admitted completion must succeed"
+  | Ok resp -> config, tools, carrier, resp
+;;
+
+let check_admitted_round_two_keeps_thinking ~stream =
+  let config, tools, carrier, resp = admitted_round_one ~stream in
+  check_bool
+    "the admitted response records its prefix"
+    true
+    (match resp.telemetry with
+     | Some telemetry -> Option.is_some telemetry.reasoning_prefix
+     | None -> false);
+  match Types.assistant_message_of_response resp with
+  | Error _ -> Alcotest.fail "the admitted response must stamp"
+  | Ok assistant ->
+    let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+    let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+    check_bool
+      "round one's thinking replays in round two"
+      true
+      (List.mem "thinking" (List.nth (wire_content_types body) 1))
+;;
+
+let test_an_admitted_completion_keeps_thinking_for_the_next_round () =
+  check_admitted_round_two_keeps_thinking ~stream:false
+;;
+
+let test_an_admitted_stream_keeps_thinking_for_the_next_round () =
+  check_admitted_round_two_keeps_thinking ~stream:true
+;;
+
+let test_prefix_binding_keeps_thinking_on_a_stable_prefix () =
+  let config, tools, carrier, assistant = round_one_fixtures () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "round one's thinking replays verbatim"
+    true
+    (List.mem "thinking" (List.nth types 1));
+  check_bool
+    "round one's text still rides"
+    true
+    (List.mem "text" (List.nth types 1))
+;;
+
+let test_prefix_binding_drops_thinking_when_the_carrier_block_is_gone () =
+  let config, tools, _carrier, assistant = round_one_fixtures () in
+  (* The post-tool round drops the extra-context block the signature was
+     bound to: the live 400 shape. *)
+  let round_two =
+    [ message User [ Text "trigger" ]; assistant; message Tool [ tool_result "call-1" ] ]
+  in
+  let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "the stale thinking block is dropped instead of failing the request"
+    false
+    (List.mem "thinking" (List.nth types 1));
+  check_bool "the answer text still rides" true (List.mem "text" (List.nth types 1));
+  check_bool
+    "the tool call still rides"
+    true
+    (List.mem "tool_use" (List.nth types 1))
+;;
+
+let test_prefix_binding_drops_thinking_edited_in_place () =
+  let config, tools, carrier, assistant = round_one_fixtures () in
+  let edited =
+    { assistant with
+      content =
+        List.map
+          (function
+            | Thinking thinking -> Thinking { thinking with content = "edited reasoning" }
+            | block -> block)
+          assistant.content
+    }
+  in
+  let round_two = [ carrier; edited; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "edited thinking fails the message digest"
+    false
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_drops_legacy_thinking_without_a_digest () =
+  let config = anthropic_build_config () in
+  let tools = [ prefix_test_tool_schema ] in
+  let source = source_for_config config in
+  let assistant =
+    with_source
+      source
+      Assistant
+      [ Thinking { content = "legacy reasoning"; signature = Some "sig-legacy" }
+      ; ToolUse { id = "call-1"; name = "inspect"; input = `Assoc [] }
+      ]
+  in
+  let round_two =
+    [ message User [ Text "trigger" ]; assistant; message Tool [ tool_result "call-1" ] ]
+  in
+  let body = Backend_anthropic.build_request ~config ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a stamp without a digest fails closed"
+    false
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_entry_round_trip_and_classification () =
+  let prefix =
+    { Types.Reasoning_prefix.request_digest = String.make 64 'a'
+    ; message_digest = String.make 64 'b'
+    }
+  in
+  (match Types.Reasoning_prefix.classify (Types.Reasoning_prefix.metadata prefix) with
+   | Present
+       { Types.Reasoning_prefix.request_digest = request_digest
+       ; message_digest = message_digest
+       } ->
+     check_bool
+       "metadata round-trip"
+       true
+       (String.equal request_digest (String.make 64 'a')
+        && String.equal message_digest (String.make 64 'b'))
+   | Absent | Invalid | Duplicate -> Alcotest.fail "expected a present prefix");
+  (match Types.Reasoning_prefix.classify [] with
+   | Absent -> ()
+   | Present _ | Invalid | Duplicate -> Alcotest.fail "expected absent prefix");
+  let bad_hex =
+    { Types.Reasoning_prefix.request_digest = "not-hex"
+    ; message_digest = String.make 64 'b'
+    }
+  in
+  (match Types.Reasoning_prefix.classify (Types.Reasoning_prefix.metadata bad_hex) with
+   | Invalid -> ()
+   | Absent | Present _ | Duplicate -> Alcotest.fail "expected an invalid prefix");
+  let entry = Types.Reasoning_prefix.entry prefix in
+  (match Types.Reasoning_prefix.classify [ entry; entry ] with
+   | Duplicate -> ()
+   | Absent | Present _ | Invalid -> Alcotest.fail "expected a duplicate prefix")
+;;
+
+let drop_testable =
+  Alcotest.testable Reasoning_history_projection.pp_prefix_drop ( = )
+;;
+
+let fold_role_tag = function
+  | System -> "system"
+  | User -> "user"
+  | Assistant -> "assistant"
+  | Tool -> "tool"
+;;
+
+let fold ~head messages =
+  Reasoning_history_projection.verify_prefix_binding
+    ~head
+    ~encode_block:Api_common.content_block_to_json
+    ~role_tag:fold_role_tag
+    messages
+;;
+
+let valid_prefix_for_tag_tests =
+  { Types.Reasoning_prefix.request_digest = String.make 64 'a'
+  ; message_digest = String.make 64 'b'
+  }
+;;
+
+let invalid_prefix_entries =
+  Types.Reasoning_prefix.metadata
+    { Types.Reasoning_prefix.request_digest = "not-hex"
+    ; message_digest = String.make 64 'b'
+    }
+;;
+
+let duplicate_prefix_entries =
+  let entry = Types.Reasoning_prefix.entry valid_prefix_for_tag_tests in
+  [ entry; entry ]
+;;
+
+let assistant_with_prefix_entries ~config entries content =
+  message
+    ~metadata:(Types.Reasoning_source.metadata (source_for_config config) @ entries)
+    Assistant
+    content
+;;
+
+let test_prefix_unreadable_entry_drops_with_its_own_cause () =
+  let config = anthropic_build_config () in
+  let thinking = [ Thinking { content = "t"; signature = Some "s" } ] in
+  List.iter
+    (fun (label, entries, cause) ->
+       let verdict =
+         fold ~head:[] [ assistant_with_prefix_entries ~config entries thinking ]
+       in
+       Alcotest.(check (list drop_testable))
+         (label ^ ": the drop names its message and cause")
+         [ { Reasoning_history_projection.message_index = 0
+           ; cause
+           ; stored_message_digest = None
+           }
+         ]
+         verdict.prefix_drops;
+       check_int (label ^ ": one message entered the fold with reasoning") 1
+         verdict.reasoning_message_count;
+       check_bool
+         (label ^ ": the reasoning block is not in the verdict")
+         false
+         (List.exists
+            (fun (m : message) -> content_has_reasoning m.content)
+            verdict.messages))
+    [ ( "invalid tag"
+      , invalid_prefix_entries
+      , Reasoning_history_projection.Prefix_entry_invalid )
+    ; ( "duplicate tag"
+      , duplicate_prefix_entries
+      , Reasoning_history_projection.Prefix_entry_duplicate )
+    ]
+;;
+
+(* A corrupted tag sits in stored history, so a request that refused it would
+   refuse again on every later request while the message stays in the window.
+   The request is built without that block, and a block created after the
+   corruption was already being dropped still replays. *)
+let test_a_corrupted_tag_in_history_does_not_block_requests () =
+  let preserve_always =
+    { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+      reasoning_replay_override = Capabilities.Force_preserve_always
+    }
+  in
+  let config = anthropic_build_config_variant ~cap_override:preserve_always () in
+  let tools = [ prefix_test_tool_schema ] in
+  let thinking_blocks ~call_id reasoning signature =
+    [ Thinking { content = reasoning; signature = Some signature }
+    ; Text (reasoning ^ " text")
+    ; ToolUse { id = call_id; name = "inspect"; input = `Assoc [] }
+    ]
+  in
+  List.iter
+    (fun (label, entries) ->
+       let u1 = message User [ Text "one" ] in
+       let corrupted =
+         assistant_with_prefix_entries
+           ~config
+           entries
+           (thinking_blocks ~call_id:"call-1" "corrupted reasoning" "sig-corrupted")
+       in
+       let t1 = message Tool [ tool_result "call-1" ] in
+       let u2 = message User [ Text "two" ] in
+       let later =
+         stamped_assistant
+           ~config
+           ~request_messages:[ u1; corrupted; t1; u2 ]
+           ~tools
+           (thinking_blocks ~call_id:"call-2" "later reasoning" "sig-later")
+       in
+       let t2 = message Tool [ tool_result "call-2" ] in
+       let history = [ u1; corrupted; t1; u2; later; t2 ] in
+       let assert_wire body =
+         let types = wire_content_types body in
+         check_int (label ^ ": five merged wire messages") 5 (List.length types);
+         check_bool
+           (label ^ ": the corrupted block is not sent")
+           false
+           (List.mem "thinking" (List.nth types 1));
+         check_bool
+           (label ^ ": its text still rides")
+           true
+           (List.mem "text" (List.nth types 1));
+         check_bool
+           (label ^ ": the block created after the corruption replays")
+           true
+           (List.mem "thinking" (List.nth types 3))
+       in
+       assert_wire (Backend_anthropic.build_request ~config ~messages:history ~tools ());
+       (* Token counting shares the payload builder and had the same refusal. *)
+       assert_wire
+         (Backend_anthropic.build_count_tokens_request ~config ~messages:history ~tools ()))
+    [ "invalid tag", invalid_prefix_entries
+    ; "duplicate tag", duplicate_prefix_entries
+    ]
+;;
+
+let stored_message_digest_exn (message : message) =
+  match Types.Reasoning_prefix.classify message.metadata with
+  | Present prefix -> prefix.Types.Reasoning_prefix.message_digest
+  | Absent | Invalid | Duplicate -> Alcotest.fail "expected a stamped message"
+;;
+
+(* Stamps a response the way the record side does: the request digest is the
+   chain over what the request would send, drops included. *)
+let stamp_over ~head ~request_messages content =
+  let verdict = fold ~head request_messages in
+  let prefix =
+    { Types.Reasoning_prefix.request_digest =
+        verdict.Reasoning_history_projection.final_digest
+    ; message_digest =
+        Reasoning_history_projection.content_wire_digest
+          ~encode_block:Api_common.content_block_to_json
+          content
+    }
+  in
+  message
+    ~metadata:
+      (Types.Reasoning_source.metadata (source_for_config (anthropic_build_config ()))
+       @ Types.Reasoning_prefix.metadata prefix)
+    Assistant
+    content
+;;
+
+let hex_head_12 digest = String.sub digest 0 12
+
+let test_a_cut_counts_once_per_request_and_later_blocks_survive () =
+  let head_one = [ "system", `String "one" ] in
+  let head_two = [ "system", `String "two" ] in
+  let reasoning label = [ Thinking { content = label; signature = Some ("sig-" ^ label) }; Text label ] in
+  let u1 = message User [ Text "u1" ] in
+  let a = stamp_over ~head:head_one ~request_messages:[ u1 ] (reasoning "a") in
+  let u2 = message User [ Text "u2" ] in
+  let b = stamp_over ~head:head_one ~request_messages:[ u1; a; u2 ] (reasoning "b") in
+  let history = [ u1; a; u2; b ] in
+  let stable = fold ~head:head_one history in
+  Alcotest.(check (list drop_testable)) "the creating head drops nothing" [] stable.prefix_drops;
+  check_int "both blocks entered" 2 stable.reasoning_message_count;
+  let changed = fold ~head:head_two history in
+  let digest_a = stored_message_digest_exn a in
+  let digest_b = stored_message_digest_exn b in
+  Alcotest.(check (list drop_testable))
+    "the first mismatch is the cut; the later block is its cascade"
+    [ { Reasoning_history_projection.message_index = 1
+      ; cause = Reasoning_history_projection.Prefix_request_mismatch
+      ; stored_message_digest = Some digest_a
+      }
+    ; { Reasoning_history_projection.message_index = 3
+      ; cause = Reasoning_history_projection.Prefix_chain_broken_upstream
+      ; stored_message_digest = Some digest_b
+      }
+    ]
+    changed.prefix_drops;
+  (* A block stamped after the cut was already in effect chains over the
+     stripped history, so it verifies and is not a drop. *)
+  let u3 = message User [ Text "u3" ] in
+  let c =
+    stamp_over ~head:head_two ~request_messages:[ u1; a; u2; b; u3 ] (reasoning "c")
+  in
+  let later = fold ~head:head_two [ u1; a; u2; b; u3; c ] in
+  Alcotest.(check (list drop_testable))
+    "only the two stale blocks are cut; the block created afterwards replays"
+    changed.prefix_drops
+    later.prefix_drops;
+  check_int "three blocks entered" 3 later.reasoning_message_count;
+  let snapshot =
+    Reasoning_history_projection.prefix_snapshot_json
+      ~component:"test"
+      ~stream:false
+      changed
+  in
+  let open Yojson.Safe.Util in
+  let int_field name = snapshot |> member name |> to_int in
+  check_int "snapshot: entering" 2 (int_field "reasoning_messages");
+  check_int "snapshot: replayed" 0 (int_field "reasoning_messages_replayed");
+  check_int "snapshot: dropped" 2 (int_field "reasoning_messages_dropped");
+  check_int "snapshot: one root mismatch" 1 (int_field "request_mismatch");
+  check_int "snapshot: one cascade" 1 (int_field "chain_broken_upstream");
+  check_int "snapshot: no tag corruption" 0 (int_field "entry_invalid");
+  Alcotest.(check (list string))
+    "snapshot names blocks by the head of their stored digest"
+    [ hex_head_12 digest_a; hex_head_12 digest_b ]
+    (snapshot |> member "dropped_block_ids" |> to_list |> List.map to_string)
+;;
+
+(* A block that never carried a readable stamp is dropped the same way by every
+   request, so it says nothing about a later block whose digest stopped
+   matching. That later block is the first real mismatch. A block whose stamp
+   is unreadable might have been sent, and its removal does move later digests. *)
+let test_a_stable_earlier_drop_does_not_hide_the_first_real_mismatch () =
+  let config = anthropic_build_config () in
+  let head_one = [ "system", `String "one" ] in
+  let head_two = [ "system", `String "two" ] in
+  let reasoning label =
+    [ Thinking { content = label; signature = Some ("sig-" ^ label) }; Text label ]
+  in
+  let u1 = message User [ Text "u1" ] in
+  let u2 = message User [ Text "u2" ] in
+  List.iter
+    (fun (label, earlier, earlier_cause, later_cause) ->
+       let b =
+         stamp_over ~head:head_one ~request_messages:[ u1; earlier; u2 ] (reasoning "b")
+       in
+       let history = [ u1; earlier; u2; b ] in
+       let stable = fold ~head:head_one history in
+       Alcotest.(check (list drop_testable))
+         (label ^ ": the creating head drops only the earlier block")
+         [ { Reasoning_history_projection.message_index = 1
+           ; cause = earlier_cause
+           ; stored_message_digest = None
+           }
+         ]
+         stable.prefix_drops;
+       let changed = fold ~head:head_two history in
+       Alcotest.(check (list drop_testable))
+         (label ^ ": a changed head names the later block")
+         [ { Reasoning_history_projection.message_index = 1
+           ; cause = earlier_cause
+           ; stored_message_digest = None
+           }
+         ; { Reasoning_history_projection.message_index = 3
+           ; cause = later_cause
+           ; stored_message_digest = Some (stored_message_digest_exn b)
+           }
+         ]
+         changed.prefix_drops)
+    [ ( "no stamp"
+      , assistant_with_prefix_entries ~config [] (reasoning "earlier")
+      , Reasoning_history_projection.Prefix_digest_absent
+      , Reasoning_history_projection.Prefix_request_mismatch )
+    ; ( "no source"
+      , message Assistant (reasoning "earlier")
+      , Reasoning_history_projection.Prefix_source_not_present
+      , Reasoning_history_projection.Prefix_request_mismatch )
+    ; ( "unreadable stamp"
+      , assistant_with_prefix_entries ~config invalid_prefix_entries (reasoning "earlier")
+      , Reasoning_history_projection.Prefix_entry_invalid
+      , Reasoning_history_projection.Prefix_chain_broken_upstream )
+    ]
+;;
+
+(* The Keeper path admits the request body before dispatch, so the response
+   that stamps the digest comes from [complete_serialized] and
+   [complete_stream_serialized], not from the direct [complete] calls. This
+   goes admit, dispatch, stamp, admit again over a loopback provider and reads
+   the second admitted body from the wire: the thinking block rides only when
+   the digest recorded on the admitted path matched. *)
+let admitted_thinking_response_json =
+  {|{"id":"msg-1","type":"message","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"thinking","thinking":"admitted reasoning","signature":"sig-admitted"},{"type":"text","text":"admitted text"},{"type":"tool_use","id":"call-1","name":"inspect","input":{}}],"stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":1}}|}
+;;
+
+let admitted_thinking_response_sse =
+  "event: message_start\n\
+   data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-5-5\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n\
+   event: content_block_start\n\
+   data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n\
+   event: content_block_delta\n\
+   data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"admitted reasoning\"}}\n\n\
+   event: content_block_delta\n\
+   data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-admitted\"}}\n\n\
+   event: content_block_stop\n\
+   data: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+   event: content_block_start\n\
+   data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+   event: content_block_delta\n\
+   data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"admitted text\"}}\n\n\
+   event: content_block_stop\n\
+   data: {\"type\":\"content_block_stop\",\"index\":1}\n\n\
+   event: content_block_start\n\
+   data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":\"inspect\",\"input\":{}}}\n\n\
+   event: content_block_delta\n\
+   data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n\
+   event: content_block_stop\n\
+   data: {\"type\":\"content_block_stop\",\"index\":2}\n\n\
+   event: message_delta\n\
+   data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":1}}\n\n\
+   event: message_stop\n\
+   data: {\"type\":\"message_stop\"}\n\n"
+;;
+
+let free_loopback_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt socket Unix.SO_REUSEADDR true;
+  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port =
+    match Unix.getsockname socket with
+    | Unix.ADDR_INET (_, port) -> port
+    | Unix.ADDR_UNIX _ -> Alcotest.fail "loopback socket did not expose a TCP port"
+  in
+  Unix.close socket;
+  port
+;;
+
+let extra_tool_schema =
+  `Assoc
+    [ "name", `String "msx_press"
+    ; "description", `String "press a key on the MSX"
+    ; "input_schema", `Assoc [ "type", `String "object" ]
+    ]
+;;
+
+(* A restart reads the history back from its stored form. *)
+let reload_through_checkpoint (stored : message) =
+  let json = Agent_core.Checkpoint.message_to_json stored in
+  match
+    Agent_core.Checkpoint.message_of_json
+      (Yojson.Safe.from_string (Yojson.Safe.to_string json))
+  with
+  | Ok reloaded -> reloaded
+  | Error _ -> Alcotest.fail "the checkpoint round trip failed"
+;;
+
+(* The second request keeps the creating request's tools and system prompt
+   unless [second_tools] or [second_system] says otherwise, and reads its
+   history back through the checkpoint codec when [reload_history] is set. *)
+let admitted_wire_types
+      ~stream
+      ?(reload_history = false)
+      ?(second_tools = [ prefix_test_tool_schema ])
+      ?second_system
+      ()
+  =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = free_loopback_port () in
+  let completion_bodies = ref [] in
+  let handler _conn _request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    completion_bodies := body :: !completion_bodies;
+    if stream
+    then
+      Cohttp_eio.Server.respond_string
+        ~status:`OK
+        ~headers:(Cohttp.Header.of_list [ "content-type", "text/event-stream" ])
+        ~body:admitted_thinking_response_sse
+        ()
+    else
+      Cohttp_eio.Server.respond_string
+        ~status:`OK
+        ~body:admitted_thinking_response_json
+        ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run
+      socket
+      (Cohttp_eio.Server.make ~callback:handler ())
+      ~on_error:(fun _ -> ()));
+  let config =
+    Provider_config.make
+      ~kind:Anthropic
+      ~model_id:"claude-sonnet-5-5"
+      ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+      ~api_key:"test-key"
+      ~headers:
+        [ "Content-Type", "application/json"; "anthropic-version", "2023-06-01" ]
+      ~request_path:"/proxy/messages"
+      ~max_tokens:4096
+      ~system_prompt:"keeper system"
+      ~model_capabilities_override:
+        { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+          reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls
+        }
+      ()
+  in
+  let tools = [ prefix_test_tool_schema ] in
+  let dispatch ~config ~tools messages =
+    let serialized =
+      match
+        Complete.admit_request_body
+          ~stream
+          (Complete.prepare_request ~config ~messages ~tools ())
+      with
+      | Ok serialized -> serialized
+      | Error _ -> Alcotest.fail "admission of the request body failed"
+    in
+    let result =
+      if stream
+      then Complete.complete_stream_serialized ~sw ~net serialized ~on_event:ignore ()
+      else Complete.complete_serialized ~sw ~net serialized ()
+    in
+    match result with
+    | Ok response -> response
+    | Error _ -> Alcotest.fail "the loopback provider call failed"
+  in
+  let carrier = message User [ Text "trigger"; Text "extra context block" ] in
+  let first = dispatch ~config ~tools [ carrier ] in
+  let assistant =
+    match Types.assistant_message_of_response first with
+    | Ok assistant -> assistant
+    | Error _ -> Alcotest.fail "a sourced response must stamp"
+  in
+  check_bool
+    "the admitted response carries a recorded digest"
+    true
+    (match first.Types.telemetry with
+     | Some { Types.reasoning_prefix = Some _; _ } -> true
+     | Some { Types.reasoning_prefix = None; _ } | None -> false);
+  let second_history =
+    [ carrier; assistant; message Tool [ tool_result "call-1" ] ]
+  in
+  let second_history =
+    if reload_history
+    then List.map reload_through_checkpoint second_history
+    else second_history
+  in
+  let second_config =
+    match second_system with
+    | None -> config
+    | Some system -> { config with Provider_config.system_prompt = Some system }
+  in
+  let _second = dispatch ~config:second_config ~tools:second_tools second_history in
+  match !completion_bodies with
+  | second_body :: _first_body :: [] -> wire_content_types second_body
+  | bodies ->
+    Alcotest.failf "expected two dispatched bodies, saw %d" (List.length bodies)
+;;
+
+let test_admitted_path_records_a_digest_the_next_request_honors ~stream () =
+  let types = admitted_wire_types ~stream () in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "thinking recorded on the admitted path replays in the next admitted body"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+(* A restart reads the stored history back, tags included. The block replays
+   only if the tags survived the stored form. *)
+let test_admitted_path_digest_survives_a_restart ~stream () =
+  let types = admitted_wire_types ~stream ~reload_history:true () in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "thinking replays after the history is reloaded from its stored form"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+(* The live incident: a restart, then a tool set that grew between the request
+   that created the thinking and the one that replays it. *)
+let test_admitted_path_drops_thinking_when_the_tool_set_grows ~stream ~reload_history () =
+  let types =
+    admitted_wire_types
+      ~stream
+      ~reload_history
+      ~second_tools:[ prefix_test_tool_schema; extra_tool_schema ]
+      ()
+  in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "an added tool drops the stale thinking from the admitted body"
+    false
+    (List.mem "thinking" (List.nth types 1));
+  check_bool
+    "the assistant text still rides"
+    true
+    (List.mem "text" (List.nth types 1))
+;;
+
+let test_admitted_path_drops_thinking_when_the_system_prompt_changes () =
+  let types =
+    admitted_wire_types ~stream:false ~second_system:"a different system prompt" ()
+  in
+  check_int "three wire messages" 3 (List.length types);
+  check_bool
+    "a new system prompt drops the stale thinking from the admitted body"
+    false
+    (List.mem "thinking" (List.nth types 1));
+  check_bool
+    "the assistant text still rides"
+    true
+    (List.mem "text" (List.nth types 1))
+;;
+
+let test_prefix_binding_drops_thinking_when_the_request_head_changes () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  let changed = anthropic_build_config_variant ~system:"a different system prompt" () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:changed ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a new system prompt fails the request digest"
+    false
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_keeps_thinking_when_only_sampling_changes () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  let resampled = anthropic_build_config_variant ~temperature:0.7 () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:resampled ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "temperature steers decoding, not conversation identity"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_keeps_thinking_when_tool_choice_changes () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  (* [tool_choice] is not part of the API's prefix check, so the head must
+     not hash it: dropping here would discard thinking the API accepts. *)
+  let rechosen = anthropic_build_config_variant ~tool_choice:Types.Any () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:rechosen ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a tool_choice change keeps thinking"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+(* Turning [cache_system_prompt] on moves the system prompt from a string to a
+   list of text blocks. The API documents no equality between the two forms, so
+   the head treats the change as an edit and drops. *)
+let test_prefix_binding_drops_thinking_when_the_system_form_changes () =
+  let _config, tools, carrier, assistant = round_one_fixtures () in
+  let cached = anthropic_build_config_variant ~cache_system_prompt:true () in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:cached ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a string system prompt that becomes a block list drops thinking"
+    false
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+(* The [cache_control] marker on the system block is not part of the check, and
+   the same form on both sides keeps thinking. *)
+let test_prefix_binding_keeps_thinking_when_the_cached_system_form_is_unchanged () =
+  let cached = anthropic_build_config_variant ~cache_system_prompt:true () in
+  let tools = [ prefix_test_tool_schema ] in
+  let carrier = message User [ Text "trigger"; Text "extra context block" ] in
+  let assistant =
+    stamped_assistant
+      ~config:cached
+      ~request_messages:[ carrier ]
+      ~tools
+      [ Thinking { content = "cached reasoning"; signature = Some "sig-cached" }
+      ; Text "cached text"
+      ; ToolUse { id = "call-1"; name = "inspect"; input = `Assoc [] }
+      ]
+  in
+  let round_two = [ carrier; assistant; message Tool [ tool_result "call-1" ] ] in
+  let body = Backend_anthropic.build_request ~config:cached ~messages:round_two ~tools () in
+  let types = wire_content_types body in
+  check_bool
+    "a block-list system prompt on both requests keeps thinking"
+    true
+    (List.mem "thinking" (List.nth types 1))
+;;
+
+let test_prefix_binding_keeps_thinking_across_chained_rounds () =
+  let preserve_always =
+    { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+      reasoning_replay_override = Capabilities.Force_preserve_always
+    }
+  in
+  let config = anthropic_build_config_variant ~cap_override:preserve_always () in
+  let tools = [ prefix_test_tool_schema ] in
+  let thinking ~call_id reasoning signature =
+    [ Thinking { content = reasoning; signature = Some signature }
+    ; Text (reasoning ^ " text")
+    ; ToolUse { id = call_id; name = "inspect"; input = `Assoc [] }
+    ]
+  in
+  let u1 = message User [ Text "one" ] in
+  let asst1 =
+    stamped_assistant
+      ~config
+      ~request_messages:[ u1 ]
+      ~tools
+      (thinking ~call_id:"call-1" "round one reasoning" "sig-one")
+  in
+  let t1 = message Tool [ tool_result "call-1" ] in
+  let u2 = message User [ Text "two" ] in
+  let asst2 =
+    stamped_assistant
+      ~config
+      ~request_messages:[ u1; asst1; t1; u2 ]
+      ~tools
+      (thinking ~call_id:"call-2" "round two reasoning" "sig-two")
+  in
+  let t2 = message Tool [ tool_result "call-2" ] in
+  let body =
+    Backend_anthropic.build_request
+      ~config
+      ~messages:[ u1; asst1; t1; u2; asst2; t2 ]
+      ~tools
+      ()
+  in
+  (* The tool-result/user merge folds the six history messages into five
+     wire messages; both assistants keep their thinking at their merged
+     positions. *)
+  let types = wire_content_types body in
+  check_int "five merged wire messages" 5 (List.length types);
+  check_bool
+    "round one thinking survives round three"
+    true
+    (List.mem "thinking" (List.nth types 1));
+  check_bool
+    "round two thinking survives round three"
+    true
+    (List.mem "thinking" (List.nth types 3))
+;;
+
 (* Every codec has to answer, because the caller asks before it knows which
    serializer will run. The expectation is not written down per codec — it is
    read off that codec's own replay contract, so a codec whose dispatch was
@@ -1453,6 +2421,112 @@ let () =
             "anthropic honors a latest-turn replay declaration"
             `Quick
             test_anthropic_honors_a_latest_turn_replay_declaration
+        ; Alcotest.test_case
+            "an admitted completion keeps thinking for the next round"
+            `Quick
+            test_an_admitted_completion_keeps_thinking_for_the_next_round
+        ; Alcotest.test_case
+            "an admitted stream keeps thinking for the next round"
+            `Quick
+            test_an_admitted_stream_keeps_thinking_for_the_next_round
+        ; Alcotest.test_case
+            "prefix binding keeps thinking on a stable prefix"
+            `Quick
+            test_prefix_binding_keeps_thinking_on_a_stable_prefix
+        ; Alcotest.test_case
+            "prefix binding drops thinking when the carrier block is gone"
+            `Quick
+            test_prefix_binding_drops_thinking_when_the_carrier_block_is_gone
+        ; Alcotest.test_case
+            "prefix binding drops thinking edited in place"
+            `Quick
+            test_prefix_binding_drops_thinking_edited_in_place
+        ; Alcotest.test_case
+            "prefix binding drops legacy thinking without a digest"
+            `Quick
+            test_prefix_binding_drops_legacy_thinking_without_a_digest
+        ; Alcotest.test_case
+            "prefix entry round-trip and classification"
+            `Quick
+            test_prefix_entry_round_trip_and_classification
+        ; Alcotest.test_case
+            "prefix unreadable entry drops with its own cause"
+            `Quick
+            test_prefix_unreadable_entry_drops_with_its_own_cause
+        ; Alcotest.test_case
+            "a corrupted tag in history does not block requests"
+            `Quick
+            test_a_corrupted_tag_in_history_does_not_block_requests
+        ; Alcotest.test_case
+            "a cut counts once per request and later blocks survive"
+            `Quick
+            test_a_cut_counts_once_per_request_and_later_blocks_survive
+        ; Alcotest.test_case
+            "admitted sync path records a digest the next request honors"
+            `Quick
+            (test_admitted_path_records_a_digest_the_next_request_honors ~stream:false)
+        ; Alcotest.test_case
+            "admitted stream path records a digest the next request honors"
+            `Quick
+            (test_admitted_path_records_a_digest_the_next_request_honors ~stream:true)
+        ; Alcotest.test_case
+            "admitted sync digest survives a restart"
+            `Quick
+            (test_admitted_path_digest_survives_a_restart ~stream:false)
+        ; Alcotest.test_case
+            "admitted stream digest survives a restart"
+            `Quick
+            (test_admitted_path_digest_survives_a_restart ~stream:true)
+        ; Alcotest.test_case
+            "admitted sync path drops thinking when the tool set grows"
+            `Quick
+            (test_admitted_path_drops_thinking_when_the_tool_set_grows
+               ~stream:false
+               ~reload_history:false)
+        ; Alcotest.test_case
+            "admitted sync path drops thinking when the tool set grows after a restart"
+            `Quick
+            (test_admitted_path_drops_thinking_when_the_tool_set_grows
+               ~stream:false
+               ~reload_history:true)
+        ; Alcotest.test_case
+            "admitted stream path drops thinking when the tool set grows after a restart"
+            `Quick
+            (test_admitted_path_drops_thinking_when_the_tool_set_grows
+               ~stream:true
+               ~reload_history:true)
+        ; Alcotest.test_case
+            "admitted path drops thinking when the system prompt changes"
+            `Quick
+            test_admitted_path_drops_thinking_when_the_system_prompt_changes
+        ; Alcotest.test_case
+            "a stable earlier drop does not hide the first real mismatch"
+            `Quick
+            test_a_stable_earlier_drop_does_not_hide_the_first_real_mismatch
+        ; Alcotest.test_case
+            "prefix binding drops thinking when the request head changes"
+            `Quick
+            test_prefix_binding_drops_thinking_when_the_request_head_changes
+        ; Alcotest.test_case
+            "prefix binding keeps thinking when only sampling changes"
+            `Quick
+            test_prefix_binding_keeps_thinking_when_only_sampling_changes
+        ; Alcotest.test_case
+            "prefix binding keeps thinking when tool choice changes"
+            `Quick
+            test_prefix_binding_keeps_thinking_when_tool_choice_changes
+        ; Alcotest.test_case
+            "prefix binding drops thinking when the system form changes"
+            `Quick
+            test_prefix_binding_drops_thinking_when_the_system_form_changes
+        ; Alcotest.test_case
+            "prefix binding keeps thinking when the cached system form is unchanged"
+            `Quick
+            test_prefix_binding_keeps_thinking_when_the_cached_system_form_is_unchanged
+        ; Alcotest.test_case
+            "prefix binding keeps thinking across chained rounds"
+            `Quick
+            test_prefix_binding_keeps_thinking_across_chained_rounds
         ; Alcotest.test_case
             "a malformed tag anywhere refuses the projection"
             `Quick

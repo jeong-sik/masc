@@ -78,9 +78,12 @@ let is_trailing_blank_assistant (message : Agent_core.Types.message) =
     List.for_all
       (function
         | Agent_core.Types.Text text -> String.trim text = ""
-        | _ -> false)
+        | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+        | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+        | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+        | Agent_core.Types.Audio _ -> false)
       blocks
-  | _, _ -> false
+  | (Agent_core.Types.System, _) | (Agent_core.Types.User, _) | (Agent_core.Types.Tool, _) -> false
 ;;
 
 let drop_trailing_blank_assistants messages =
@@ -101,18 +104,40 @@ let suffix_records_tool_activity (messages : Agent_core.Types.message list) =
        List.exists
          (function
            | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ -> true
-           | _ -> false)
+           | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+           | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+           | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> false)
          message.Agent_core.Types.content)
     messages
 ;;
 
 let drop_trailing_assistants messages =
+  let retained_context (message : Agent_core.Types.message) =
+    match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
+    | Historical -> true
+    | Absent | Present | Invalid | Duplicate -> false
+  in
   let rec drop dropped = function
     | ({ Agent_core.Types.role = Agent_core.Types.Assistant; _ } :
         Agent_core.Types.message)
       :: rest ->
+      (* Collection stored this context immediately before the response whose
+         signed reasoning needed it. Once that response is excluded from
+         replay, its context must not survive as a standalone User message.
+         Never consume an ordinary input or context belonging to an earlier
+         retained response. *)
+      let rest =
+        match rest with
+        | context :: rest when retained_context context -> rest
+        | _ -> rest
+      in
       drop true rest
-    | reversed -> List.rev reversed, dropped
+    | ([]
+      | { Agent_core.Types.role =
+            ( Agent_core.Types.System | Agent_core.Types.User | Agent_core.Types.Tool )
+        ; _
+        }
+        :: _) as reversed -> List.rev reversed, dropped
   in
   drop false (List.rev messages)
 ;;

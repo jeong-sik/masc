@@ -61,6 +61,9 @@ export default defineConfig({
 					translations: { 'ko': '사용 가이드' },
 					items: [
 						{ label: 'Terminal UI (TUI)', translations: { 'ko': '터미널에서 조작하기' }, slug: 'guides/tui' },
+						{ label: 'TUI Collab Hub', translations: { 'ko': 'TUI Collab 허브' }, slug: 'guides/tui-collab' },
+						{ label: 'Browser Lane BiDi Auto-Start', translations: { 'ko': 'Browser Lane BiDi 자동 기동' }, slug: 'guides/browser-bidi' },
+						{ label: 'Keeper Runtime Configuration', translations: { 'ko': 'Keeper 런타임 설정' }, slug: 'guides/keeper-config' },
 						{ label: 'Running Keepers', translations: { 'ko': 'Keeper 사용하기' }, slug: 'guides/keeper' },
 						{ label: 'Connecting MCP clients', translations: { 'ko': 'MCP 클라이언트 연결' }, slug: 'guides/mcp-clients' },
 					],

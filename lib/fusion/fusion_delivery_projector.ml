@@ -132,8 +132,7 @@ let project_entry ~registry ~base_path (entry : Keeper_msg_async.entry) =
         ~keeper:payload.keeper_name ~run_id:entry.request_id ~channel:payload.channel
         ~failure:Fusion_sink.Evidence_unavailable
       |> Result.map_error (fun detail -> Projection_failed detail)
-    | status ->
-      (match failure_of_status status with
+    | (Keeper_msg_async.Done { ok = false; data = _;_} | Keeper_msg_async.Queued | Keeper_msg_async.Running | Keeper_msg_async.Cancelling _ | Keeper_msg_async.Lost _ | Keeper_msg_async.Cancelled _ | Keeper_msg_async.Persistence_failed _) as status -> (match failure_of_status status with
        | Some failure ->
          Fusion_sink.emit_failure ~registry ~base_dir:base_path
            ~keeper:payload.keeper_name ~run_id:entry.request_id

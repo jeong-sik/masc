@@ -40,7 +40,6 @@ let with_eio_backends f =
     { (Backend.default_config ()) with
       base_path = tmp_dir
     ; node_id = "test-node"
-    ; cluster_name = "test-cluster"
     }
   in
   Fun.protect
@@ -360,7 +359,6 @@ let with_eio_alias_backends f =
     { (Backend.default_config ()) with
       base_path
     ; node_id = "test-node"
-    ; cluster_name = "test-cluster"
     }
   in
   Fun.protect

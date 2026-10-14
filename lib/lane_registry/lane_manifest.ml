@@ -94,20 +94,7 @@ let lanes_of_misc_operation : Tool_schemas_misc.misc_operation -> Lane_id.builti
   | Tool_schemas_misc.Misc_browser_session | Tool_schemas_misc.Misc_browser_goto ->
     server_browser_backends
   | Tool_schemas_misc.Misc_browser_instruct -> [ Lane_id.Browser Browser_lane.Lane_name.Stagehand ]
-  | Tool_schemas_misc.Misc_msx_load
-  | Tool_schemas_misc.Misc_msx_eject
-  | Tool_schemas_misc.Misc_msx_export_disk
-  | Tool_schemas_misc.Misc_msx_save
-  | Tool_schemas_misc.Misc_msx_restore
-  | Tool_schemas_misc.Misc_msx_change_disk
-  | Tool_schemas_misc.Misc_msx_screen
-  | Tool_schemas_misc.Misc_msx_press
-  | Tool_schemas_misc.Misc_msx_step
-  | Tool_schemas_misc.Misc_msx_step_until_change
-  | Tool_schemas_misc.Misc_msx_peek
-  | Tool_schemas_misc.Misc_msx_ram_diff
-  | Tool_schemas_misc.Misc_msx_meta
-  | Tool_schemas_misc.Misc_msx_checkpoint_info -> [ Lane_id.Machine Machine_lane.Msx ]
+  | Tool_schemas_misc.Misc_msx _ -> [ Lane_id.Machine Machine_lane.Msx ]
   | Tool_schemas_misc.Misc_dos_load
   | Tool_schemas_misc.Misc_dos_meta
   | Tool_schemas_misc.Misc_dos_inventory

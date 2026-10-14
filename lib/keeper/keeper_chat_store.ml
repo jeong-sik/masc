@@ -2018,7 +2018,13 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
               ~path:file_path
               ~detail:"tool chat row missing non-empty tool_call_name";
             None
-        | Ok (), Some role ->
+        | Ok (),
+          Some
+            (( Role.User
+             | Role.Assistant
+             | Role.System
+             | Role.Request_failure
+             | Role.Tool ) as role) ->
             (match opt_string "id", ts with
              | None, _ ->
                  report_persistence_read_drop
@@ -2096,7 +2102,9 @@ let drop_leading_orphan_tool_messages messages =
        persisted upstream or may fall just outside this page, so the terminal
        marker—not a guessed missing parent—proves these leading rows belong. *)
     anonymous_tools @ rest
-  | _, rest -> rest
+  | _ :: _,
+    (([] | { role = Role.User | Role.Assistant | Role.System | Role.Tool; _ } :: _) as rest) ->
+    rest
 
 (* RFC-0226 P2: [load] serves a fixed window ([max_total_lines]) but
    used to read and JSON-parse the whole file to build it, so its cost
@@ -2684,7 +2692,18 @@ let existing_approval_lifecycle_at_slot
       when String.equal (Request_id.to_string existing_approval_id) approval_id
            && transcript_slot_equal existing_slot transcript_slot ->
       Some (message.id, existing_lifecycle)
-    | _ -> None)
+    | ( ( None
+        | Some
+            { delivery_key =
+                ( Operation _
+                | Operation_checkpoint _
+                | Operation_native _
+                | Fusion_run _
+                | Workspace_message _
+                | Approval_lifecycle _ )
+            ; _
+            } )
+      , (None | Some _) ) -> None)
 ;;
 
 let reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
@@ -2734,7 +2753,7 @@ let reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
               (approval_lifecycle_phase_to_label previous.phase)
               (approval_lifecycle_phase_to_label lifecycle.phase);
             Ok result
-          | Ok (Approval_lifecycle_exact result) -> Ok result
+          | Ok (Approval_lifecycle_exact (Already_present _ as result)) -> Ok result
           | Ok (Approval_lifecycle_conflict _) ->
             Error "approval replay correction exists with conflicting content"))
 ;;
@@ -2853,13 +2872,14 @@ let trace_block_for_turn ~trace_block_by_turn_ref (m : chat_message) =
   | None, _ | Some _, None -> None
 
 let to_json_array ?base_dir ?trace_block_by_turn_ref
+    ?(omit_stream_contract = false)
     (messages : chat_message list) : Yojson.Safe.t =
   `List
     (List.map
        (fun (m : chat_message) ->
           let trace_block = trace_block_for_turn ~trace_block_by_turn_ref m in
           let audio = resolve_audio_expiry ~base_dir m.audio in
-          Keeper_chat_projection.message_to_json
+          Keeper_chat_projection.message_to_json ~omit_stream_contract
             ~trace_lookup_available:(Option.is_some trace_block_by_turn_ref)
             ~trace_block { m with audio })
        messages)

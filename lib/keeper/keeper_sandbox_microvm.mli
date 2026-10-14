@@ -505,7 +505,26 @@ val plan_build_link : target:string -> build_link_state -> build_link_plan
     ({!build_output_removal_script}). Retargeting a stale symlink is
     different: removing a symlink loses no data. *)
 
-val apple_build_volume_delete_argv : volume_name:string -> string list
+val apple_volume_delete_argv : volume_name:string -> string list
+(** [container volume delete NAME]: the build volume's boot-time recreation
+    and a dissolved keeper's volume removal both delete through it. *)
+
+val apple_volume_list_argv : unit -> string list
+(** [container volume list --format json]: the listing the volume probe and
+    the volume removal both read. *)
+
+val remove_apple_keeper_volumes :
+  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
+  -> timeout_sec:float
+  -> keeper_name:string
+  -> (unit, string) result
+(** Delete [keeper_name]'s work and build volumes, named by
+    {!work_volume_name} and {!build_volume_name}, then prove both absent from
+    one volume listing. Both deletes are attempted whatever either returns;
+    an already-absent volume is a success. A volume still listed, an
+    unreadable listing, or a keeper name those functions refuse is [Error].
+    Called only when the keeper is dissolved: a paused keeper keeps its work
+    volume. *)
 
 val recreate_apple_build_volume
   :  volume_name:string

@@ -3,7 +3,7 @@
 
     Pure-text status summary for the [masc_status] tool.  The
     main entry point ({!status_summary_string}) renders the
-    full operator-visible terminal block (cluster header,
+    full operator-visible terminal block (project header,
     snapshot line, you-line, task-binding line, planning state,
     credential state, attention items, players,
     quest board, messages).
@@ -37,7 +37,6 @@ val status_summary_string :
   credential_state:Workspace_types.credential_state ->
   credential_blocked:bool ->
   current_task:string option ->
-  effective_cluster_name:string ->
   agents:Masc_domain.agent list ->
   active_tasks:Masc_domain.task list ->
   todo_count:int ->
@@ -69,20 +68,19 @@ val status_summary_string :
 
     {2 Output structure (line order pinned)}
 
-    1. Cluster header (icon + name)
-    2. Project line (only when project ≠ cluster)
-    3. Scope + path
-    4. Snapshot line (counters)
-    5. You-line (agent / bound / owned / current)
-    6. Task binding line (assigned set / drift reason)
-    7. Planning lines (missing-task)
-    8. Credential line (only when required)
-    9. Attention block (only when non-empty)
-    10. Players block (capped at 40)
-    11. Quest Board (capped at 30)
-    12. Summary line
-    13. Messages line
+    1. Project line
+    2. Scope + path
+    3. Snapshot line (counters)
+    4. You-line (agent / bound / owned / current)
+    5. Task binding line (assigned set / drift reason)
+    6. Planning lines (missing-task)
+    7. Credential line (only when required)
+    8. Attention block (only when non-empty)
+    9. Players block (capped at 40)
+    10. Quest Board (capped at 30)
+    11. Summary line
+    12. Messages line
 
-    The icon set (🏢 / 📦 / 📍 / 📁 / ⚡ / 🧭 / 🔎 / 📝 / 🔐 /
+    The icon set (📦 / 📍 / 📁 / ⚡ / 🧭 / 🔎 / 📝 / 🔐 /
     💡 / ⚠️ / 📌 / 📋 / 💬) is operator-visible — runbook
     screenshots reference these symbols. *)

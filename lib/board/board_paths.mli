@@ -1,9 +1,9 @@
 (** Board persistence paths.
 
-    Unbound path helpers are derived from [Env_config_core.base_path] +
-    [Env_config_core.cluster_name] via [Workspace_utils.masc_root_dir_from],
-    so they reflect the active cluster at call time. Bound store loads use
-    the workspace directory captured before their global store was loaded. *)
+    Unbound path helpers are derived from [Env_config_core.base_path] via
+    [Common.masc_dir_from_base_path] at call time. Bound store loads
+    use the workspace directory captured before their global store was
+    loaded. *)
 
 val board_base_path : unit -> string
 val board_masc_dir : unit -> string

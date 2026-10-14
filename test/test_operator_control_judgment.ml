@@ -14,7 +14,7 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
       ignore (Workspace.bind_session config ~agent_name:"operator" ~capabilities:[] ());
-      record_operator_judgment config ~surface:"command.namespace"
+      record_operator_judgment config ~surface:Operator_judgment.Command_namespace
         ~target_type:Operator_judgment.Workspace ~target_id:None
         ~summary:"Pause the namespace before taking any destructive action."
         ~recommended_action:
@@ -32,7 +32,7 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
       Alcotest.(check int) "stored judgments" 1
         (List.length (Operator_judgment.load_all config));
       (match
-         Operator_judgment.latest_active config ~surface:"command.namespace"
+         Operator_judgment.latest_active config ~surface:Operator_judgment.Command_namespace
            ~target_type:Operator_judgment.Workspace ~target_id:None
        with
       | Some _ -> ()
@@ -86,7 +86,7 @@ let test_digest_workspace_ignores_stale_operator_judgment () =
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
       ignore (Workspace.bind_session config ~agent_name:"operator" ~capabilities:[] ());
-      record_operator_judgment config ~surface:"command.namespace"
+      record_operator_judgment config ~surface:Operator_judgment.Command_namespace
         ~target_type:Operator_judgment.Workspace ~target_id:None
         ~summary:"This judgment is stale." ~fresh_for_sec:(-5.0) ();
       let ctx = operator_ctx env sw config "operator" in
@@ -119,7 +119,7 @@ let test_guidance_ignores_unsupported_target_type () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
-      record_operator_judgment config ~surface:"command.namespace"
+      record_operator_judgment config ~surface:Operator_judgment.Command_namespace
         ~target_type:Operator_judgment.Workspace ~target_id:None
         ~summary:"Root guidance must not leak to keeper targets."
         ~fresh_for_sec:90.0 ();
@@ -143,11 +143,9 @@ let test_guidance_ignores_unsupported_target_type () =
         (List.length fields.recommended_actions))
 
 (* Each surface carries its own freshness default: a namespace judgment goes
-   stale in 60s, an intervention in 300s. The selection used to match the
-   normalized surface string with a wildcard default of 120s — unreachable,
-   because normalize_judgment_surface rejects everything else first, but it
-   would have absorbed a third surface in silence. Nothing pinned the two
-   values, so collapsing or swapping them was invisible. *)
+   stale in 60s, an intervention in 300s. Nothing else pins the two values,
+   so collapsing or swapping them would be invisible. A window the caller
+   sets to zero or less is refused. *)
 let test_judgment_freshness_default_is_per_surface () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -181,7 +179,21 @@ let test_judgment_freshness_default_is_per_surface () =
       Alcotest.(check (float 0.5))
         "command.namespace default ttl" 60.0 (ttl_for "command.namespace");
       Alcotest.(check (float 0.5))
-        "intervene default ttl" 300.0 (ttl_for "intervene"))
+        "intervene default ttl" 300.0 (ttl_for "intervene");
+      match
+        Operator_control.judgment_write_json ctx
+          (`Assoc
+            [ ("surface", `String "intervene")
+            ; ("target_type", `String "workspace")
+            ; ("summary", `String "zero freshness probe")
+            ; ("confidence", `Float 0.5)
+            ; ("fresh_ttl_sec", `Int 0)
+            ])
+      with
+      | Error err ->
+        Alcotest.(check string) "zero ttl is refused"
+          "fresh_ttl_sec must be at least 1" err
+      | Ok _ -> Alcotest.fail "a zero freshness window was recorded")
 
 let test_operator_judgment_write_and_latest_roundtrip () =
   Eio_main.run @@ fun env ->
@@ -317,6 +329,45 @@ let test_operator_judgment_requires_numeric_timestamps () =
     (Error "invalid generated_at_unix")
     (Operator_judgment.of_yojson invalid)
 
+(* Every member [record] writes is required on read. A missing [surface] used
+   to read as [""], a key no lookup matches, and a non-string evidence ref was
+   dropped without a word. *)
+let test_operator_judgment_requires_every_written_member () =
+  let complete =
+    [ ("judgment_id", `String "judg-1")
+    ; ("surface", `String "command.namespace")
+    ; ("target_type", `String "workspace")
+    ; ("target_id", `Null)
+    ; ("summary", `String "summary")
+    ; ("confidence", `Float 0.5)
+    ; ("generated_at", `String "1970-01-01T00:00:01Z")
+    ; ("generated_at_unix", `Float 1.0)
+    ; ("fresh_until", `String "1970-01-01T00:00:02Z")
+    ; ("fresh_until_unix", `Float 2.0)
+    ; ("keeper_name", `String "operator-judge")
+    ; ("model_name", `Null)
+    ; ("runtime_name", `Null)
+    ; ("evidence_refs", `List [])
+    ; ("recommended_action", `Null)
+    ; ("supersedes", `List [])
+    ; ("fallback_used", `Bool false)
+    ; ("disagreement_with_truth", `Bool false)
+    ]
+  in
+  Alcotest.(check bool) "a complete record reads" true
+    (Result.is_ok (Operator_judgment.of_yojson (`Assoc complete)));
+  Alcotest.(check (result reject string))
+    "missing surface is rejected"
+    (Error "missing surface")
+    (Operator_judgment.of_yojson (`Assoc (List.remove_assoc "surface" complete)));
+  Alcotest.(check (result reject string))
+    "a non-string evidence ref is rejected"
+    (Error "invalid evidence_refs")
+    (Operator_judgment.of_yojson
+       (`Assoc
+         (("evidence_refs", `List [ `Int 1 ])
+          :: List.remove_assoc "evidence_refs" complete)))
+
 (* [confidence] used to default to 0.5 when omitted and was clamped into range
    on the way to disk. Both spellings put a number the judge never stated into
    the operator digest, next to ["authoritative": true]. No code compares the
@@ -377,6 +428,8 @@ let tests =
       test_operator_judgment_rejects_retired_target_type_aliases;
     Alcotest.test_case "requires numeric timestamps" `Quick
       test_operator_judgment_requires_numeric_timestamps;
+    Alcotest.test_case "requires every written member" `Quick
+      test_operator_judgment_requires_every_written_member;
     Alcotest.test_case "requires a stated confidence" `Quick
       test_operator_judgment_requires_stated_confidence;
   ]

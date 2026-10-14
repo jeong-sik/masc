@@ -68,6 +68,14 @@ module KeeperReactive = struct
   let enabled () = get_bool ~default:true "MASC_KEEPER_REACTIVE_ENABLED"
 end
 
+module KeeperWikiContents = struct
+  (** Whether each Keeper turn carries the wiki table of contents (RFC
+      keepers-see-the-wiki-table-of-contents). On by default; off, the turn
+      neither lists the wiki nor carries the paragraph. *)
+  let enabled_env_key = "MASC_KEEPER_WIKI_CONTENTS_ENABLED"
+  let enabled () = get_bool ~default:true enabled_env_key
+end
+
 (** {1 Keeper Turn Configuration} *)
 
 (* The process layer (env > runtime.toml > default) under the

@@ -96,7 +96,7 @@ RUN npm install --global --no-fund --no-audit pnpm@10.31.0 \
 #   md5         macOS spelling. `md5sum` is present but prints a different
 #               format, so a symlink would produce output that parses wrong --
 #               worse than the command being absent.
-#   masc, sb    Host operator wrappers under /Users/dancer/me/scripts. They are
+#   masc, sb    Host operator wrappers outside this repository. They are
 #               not a toolchain; a keeper reaching for them is reaching outside
 #               its sandbox, which is the thing being closed.
 

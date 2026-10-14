@@ -28,6 +28,17 @@ let tmpdir prefix =
   dir
 ;;
 
+
+(* Every store here is a listed store under a fresh temporary root. The
+   store's directory is [Dated_jsonl.Store.dir location]; it exists, as the
+   temporary directory did before. *)
+let store_under root = Dated_jsonl.Store.(at (root_of_masc_dir root) Root.Audit)
+
+let temp_store prefix =
+  let location = store_under (tmpdir prefix) in
+  Fs_compat.mkdir_p (Dated_jsonl.Store.dir location);
+  location
+
 let write_jsonl_line path line =
   let dir = Filename.dirname path in
   if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
@@ -68,9 +79,10 @@ let seed_store base_dir n =
 
 let test_growth_is_visible_immediately () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_incr_growth" in
+  let location = temp_store "count_incr_growth" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 10;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   check int "first call counts 10" 10 (Dated_jsonl.count_entries t);
   (* Append behind the populated cache: the incremental scan must pick the
      delta up on the very next call — no TTL staleness window exists. *)
@@ -85,12 +97,13 @@ let test_growth_is_visible_immediately () =
 
 let test_unterminated_trailing_line () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_incr_partial" in
+  let location = temp_store "count_incr_partial" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 2;
   let path = today_day_path base in
   (* Simulate a writer that flushed half a line: no trailing newline. *)
   write_raw path "{\"seq\":3";
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   check int "partial line not counted" 2 (Dated_jsonl.count_entries t);
   check int "uncached counts the partial tail" 3 (Dated_jsonl.count_entries_uncached t);
   (* Writer completes the line: both paths agree again. *)
@@ -101,9 +114,10 @@ let test_unterminated_trailing_line () =
 
 let test_shrunk_file_rescans () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_incr_shrink" in
+  let location = temp_store "count_incr_shrink" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 6;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   check int "baseline 6" 6 (Dated_jsonl.count_entries t);
   (* Rewrite the day-file smaller (prune/rotation shape): the cached
      boundary now exceeds the file size, forcing a full rescan. *)
@@ -116,9 +130,10 @@ let test_shrunk_file_rescans () =
 
 let test_directory_recreation_forgets_old_file_identity () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_incr_recreated" in
+  let location = temp_store "count_incr_recreated" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 2;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   check int "old file counts 2" 2 (Dated_jsonl.count_entries t);
   Dated_jsonl.prepare_for_directory_removal t;
   Fs_compat.remove_tree base;
@@ -136,9 +151,10 @@ let test_directory_recreation_forgets_old_file_identity () =
 
 let test_reset_clears_cache () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_incr_reset" in
+  let location = temp_store "count_incr_reset" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 3;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   let _ = Dated_jsonl.count_entries t in
   seed_store base 2;
   Dated_jsonl.reset_count_cache_for_testing ();
@@ -148,12 +164,14 @@ let test_reset_clears_cache () =
 
 let test_distinct_stores_have_independent_caches () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base_a = tmpdir "count_incr_a" in
-  let base_b = tmpdir "count_incr_b" in
+  let base_a_location = temp_store "count_incr_a" in
+  let base_a = Dated_jsonl.Store.dir base_a_location in
+  let base_b_location = temp_store "count_incr_b" in
+  let base_b = Dated_jsonl.Store.dir base_b_location in
   seed_store base_a 4;
   seed_store base_b 7;
-  let ta = Dated_jsonl.create ~base_dir:base_a () in
-  let tb = Dated_jsonl.create ~base_dir:base_b () in
+  let ta = Dated_jsonl.open_store base_a_location in
+  let tb = Dated_jsonl.open_store base_b_location in
   check int "store a counts 4" 4 (Dated_jsonl.count_entries ta);
   check int "store b counts 7 (no cross-key contamination)" 7 (Dated_jsonl.count_entries tb)
 ;;
@@ -172,11 +190,12 @@ let write_to_day base ~ym ~day n =
    grown file must be reflected without any cache reset. *)
 let test_per_file_cache_matches_uncached_across_days () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_incr_perfile" in
+  let location = temp_store "count_incr_perfile" in
+  let base = Dated_jsonl.Store.dir location in
   write_to_day base ~ym:"2026-05" ~day:"01" 4;
   write_to_day base ~ym:"2026-05" ~day:"02" 3;
   write_to_day base ~ym:"2026-06" ~day:"09" 2;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   check
     int
     "multi-day cached count equals uncached"
@@ -201,9 +220,10 @@ let test_per_file_cache_matches_uncached_across_days () =
    restart: it is exactly the state a fresh process has. *)
 let test_saved_cache_survives_a_restart () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_cache_persist" in
+  let location = temp_store "count_cache_persist" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 12;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   check int "warm count" 12 (Dated_jsonl.count_entries t);
   let cache_file = Filename.concat (tmpdir "count_cache_file") "counts.json" in
   (match Dated_jsonl.save_count_cache ~path:cache_file with
@@ -220,9 +240,10 @@ let test_saved_cache_survives_a_restart () =
    show up, or the cache would serve a number the store no longer has. *)
 let test_a_restored_entry_still_sees_growth () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_cache_growth" in
+  let location = temp_store "count_cache_growth" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 4;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   check int "warm count" 4 (Dated_jsonl.count_entries t);
   let cache_file = Filename.concat (tmpdir "count_cache_file2") "counts.json" in
   (match Dated_jsonl.save_count_cache ~path:cache_file with
@@ -242,9 +263,10 @@ let test_a_restored_entry_still_sees_growth () =
    the existing rescan path already handles. It must not survive as a count. *)
 let test_a_restored_entry_rescans_a_shrunk_file () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_cache_shrink" in
+  let location = temp_store "count_cache_shrink" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 9;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   check int "warm count" 9 (Dated_jsonl.count_entries t);
   let cache_file = Filename.concat (tmpdir "count_cache_file3") "counts.json" in
   (match Dated_jsonl.save_count_cache ~path:cache_file with
@@ -264,9 +286,10 @@ let test_a_restored_entry_rescans_a_shrunk_file () =
    correct -- just slower. Neither may fail a count. *)
 let test_missing_and_corrupt_cache_files_are_survivable () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_cache_absent" in
+  let location = temp_store "count_cache_absent" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 5;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   let missing = Filename.concat (tmpdir "count_cache_file4") "absent.json" in
   (match Dated_jsonl.load_count_cache ~path:missing with
    | Ok rows -> check int "a missing cache restores nothing" 0 rows
@@ -293,9 +316,10 @@ let test_missing_and_corrupt_cache_files_are_survivable () =
    wrong number. *)
 let test_a_restored_entry_is_actually_used () =
   Dated_jsonl.reset_count_cache_for_testing ();
-  let base = tmpdir "count_cache_consumed" in
+  let location = temp_store "count_cache_consumed" in
+  let base = Dated_jsonl.Store.dir location in
   seed_store base 6;
-  let t = Dated_jsonl.create ~base_dir:base () in
+  let t = Dated_jsonl.open_store location in
   check int "warm count" 6 (Dated_jsonl.count_entries t);
   let cache_file = Filename.concat (tmpdir "count_cache_file6") "counts.json" in
   (match Dated_jsonl.save_count_cache ~path:cache_file with

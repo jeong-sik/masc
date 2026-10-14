@@ -79,6 +79,21 @@ shim 을 `--probe` 해서 그 shim 이 말하는 프로토콜 major(v2 또는 v3
 거부하므로, 서버는 모든 shim 이 아는 키만 설정에 쓴다. 두 major 밖의 shim 만
 `remote_shim_version_skew` 로 거부된다.
 
+shim 이 서버와 다른 릴리즈에서 나온 것이면 서버는 `remote_shim_outdated` WARN 을
+남기고 계속 돈다. 그 줄에는 이 호스트에서 바꿀 파일 경로가 적혀 있다
+(`<base>/.masc/microvm/shim/masc-exec-shim` 과 옆의 `.sha256`). 바꾸는 방법은 아래
+"shim 받기"다. SSH 엔드포인트용 `masc-exec-ssh-bootstrap` 은 게스트에 쓰지 않는다.
+게스트는 이 디렉터리를 마운트로 읽고 서버는 요청마다 shim 을 새로 실행하므로
+(`Keeper_sandbox_remote.transport_argv`), 켜져 있는 게스트도 다음 요청부터 새 shim 을
+쓴다. 2026-10-13 에 0.49.0 을 0.52.0 으로 바꿨을 때 재시작 없이 게스트 18개가 새
+릴리즈로 답했다(#42726). 다만 서버는 probe 답을 프로세스가 사는 동안 들고 있고
+게스트는 다시 probe 하지 않는다. 그래서 `keeper_lane_status` 의 `shim_release` 와 이
+WARN 은 서버를 다시 띄운 뒤에야 새 shim 을 반영한다.
+
+바이너리와 `.sha256` 은 파일 두 개라, 하나만 바뀐 순간에 부팅하는 게스트는
+`microvm_shim_hash_mismatch` 로 한 번 거절된다. 둘 다 같은 디렉터리의 임시 이름으로
+받아 놓고 `mv` 두 번으로 바꾸면 그 순간이 가장 짧다.
+
 게스트가 마운트하는 것: 설정 디렉터리(읽기 전용, `/tmp/masc-runtime/.masc/config`),
 GitHub identity 스냅샷, 작업 볼륨(`masc-keeper-work-<keeper>` →
 `/masc-work`), shim 디렉터리(읽기 전용, `/opt/masc-exec-shim`), 그리고
@@ -99,6 +114,24 @@ shim 은 서버 릴리즈의 자산이고(RFC-0427 B-1), 설치기가 놓는다(
 해시를 `masc-exec-shim.sha256` 으로 남긴다. 부팅은 그 두 파일을 맞춰 보고,
 다르면 `microvm_shim_hash_mismatch` 로 거절한다. 따로 할 일은 없다. microvm
 keeper 를 돌리지 않는 호스트는 `--no-guest-shim` 으로 건너뛴다.
+
+로컬 빌드로 배포할 때는 `scripts/install-local-build.sh` 가 이미 있는 릴리즈 shim 을
+맞춘다. 새로 놓지는 않는다. workspace 에 바이너리와 sidecar 가 둘 다 있으면, 빌드한
+서버가 말하는 버전의 릴리즈에서 같은 자산을 받아 `SHA256SUMS` 와 맞춰 보고 두 파일을
+바꾼다. 어느 자산(arm64, amd64)인지는 sidecar 에 적힌 이름에서 읽는다. `--no-guest-shim`
+을 주면 이 단계를 건너뛴다.
+
+| 경우 | 하는 일 |
+|---|---|
+| shim 이 없다 | 아무것도 안 한다 |
+| shim 이 이미 그 릴리즈의 것 | 받지 않는다 |
+| sidecar 가 없다 (손으로 빌드한 shim) | 건드리지 않는다 |
+| sidecar 에 릴리즈 자산 이름이 없다 | shim 을 그대로 두고 WARN 한 줄, 설치는 계속 |
+| 릴리즈를 읽을 수 없거나, 릴리즈에 그 자산이 없다 | shim 을 그대로 두고 WARN 한 줄(curl 이 말한 이유 포함), 설치는 계속. 다음 설치 때 다시 받는다 |
+| 받은 자산이 `SHA256SUMS` 와 다르다 | 아무것도 설치하지 않고 멈춘다 |
+
+켜져 있는 게스트는 다음 요청부터 새 shim 을 쓴다. 서버는 옛 shim 이 probe 에 답한
+릴리즈와 기능 목록을 다시 띄울 때까지 들고 있다.
 
 설치기 없이 자산만 바꿔 넣을 때는 sidecar 도 같이 바꾼다. 안 바꾸면 다음 부팅이
 옛 해시와 새 바이너리를 보고 거절한다.

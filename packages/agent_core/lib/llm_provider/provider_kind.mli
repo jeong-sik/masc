@@ -23,13 +23,6 @@ type t =
     checks. *)
 val all : t list
 
-(** Canonical environment variable conventionally consulted for the kind's
-    API key (e.g. [Anthropic -> Some "ANTHROPIC_API_KEY"]). Returns [None]
-    for kinds that do not have a universally-agreed env var — either the
-    kind is local ({!Ollama}) or shares a space where
-    AGENT_CORE does not dictate the env name ({!OpenAI_compat}). *)
-val default_api_key_env : t -> string option
-
 (** Canonical lowercase wire form (e.g. [Anthropic -> "anthropic"]).
     Exhaustive — adding a new variant forces a compile error. *)
 val to_string : t -> string

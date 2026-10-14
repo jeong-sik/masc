@@ -487,7 +487,7 @@ let test_transaction_recovery_is_relevant_and_committed () = with_registry (fun 
 let credential_snapshot ~curator_key ~other_key =
   let module Exact = Agent_core.Exact_output in
   let overlay = Exact_output_fixture.catalog_document
-      ~api_key_envs:["curator-test", "CURATOR_TEST_KEY"; "other-test", "OTHER_TEST_KEY"]
+      ~requires_api_keys:["curator-test", true; "other-test", true]
       ~source:"curator-credential-publication-test"
       [ { Exact_output_fixture.id = "curator-test"; base_url = "http://127.0.0.1:9/v1" }
       ; { Exact_output_fixture.id = "other-test"; base_url = "http://127.0.0.1:9/v1" } ] in
@@ -674,6 +674,7 @@ let check_delivery ~base_path ~freshness expected =
   let direct = Masc.Keeper_turn.For_testing.direct_turn_dynamic_context
     ~lane_updates:(Ok (`List [])) ~workspace_memory:observation
     ~workspace_memory_access:(Some access)
+    ~wiki_contents:Masc.Keeper_wiki_contents.Off
     ~current_task:Inputs.No_current_task ~held_task_skills:[] ~task_skill_surfaces:[]
     ~approval_authority_text:"" ~recent_direct_conversation_text:""
     ~worktree_text:"" ~telemetry_feedback_text:"" ~turn_instructions_text:"" in

@@ -21,5 +21,7 @@ let capture = function
         (* An output read failure must still reap this child. There is no forced
            termination policy hidden in an installer I/O helper. *)
         let result = wait pid in
-        (match result, output with Ok (), Ok body -> Ok body | _ -> Error ())
+        (match result, output with
+         | Ok (), Ok body -> Ok body
+         | Ok (), Error _ | Error _, (Ok _ | Error _) -> Error ())
     with Unix.Unix_error _ -> Error ()

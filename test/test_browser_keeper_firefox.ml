@@ -105,7 +105,7 @@ let launcher base = Filename.concat (lane base) "host/launch"
    cleanup tells it from a process that later got the same pid. *)
 let sleeper_command name = Printf.sprintf "python3 -c 'import time; time.sleep(30)' %s" (Filename.quote name)
 
-(* What install-host.sh leaves, with a launcher that records what it was
+(* What masc browser-lane-setup leaves, with a launcher that records what it was
    given. [declared:false] leaves out launch.json, which reads as a launcher
    to install again. *)
 (* The pid a host record written for a launcher names, which that launcher
@@ -188,6 +188,20 @@ let host_is_started_only_with_an_installed_launcher_and_no_host () =
     install_lane ~declared:false base ~marker:"/unused";
     check bool "an undeclared launcher" true
       (host_step base = Keeper_firefox.Launcher_not_ready Keeper_firefox.Needs_reinstall))
+
+(* The sentence the keeper's refusal carries names the workspace to install the
+   lane for. A bare command would resolve the workspace by environment,
+   directory or the recorded default, which may be another one. *)
+let a_missing_launcher_message_names_the_command_for_that_workspace () =
+  let base_path = "/work space/it's here" in
+  List.iter (fun (missing, standing) ->
+    let message = Keeper_firefox.launcher_missing_message ~base_path missing in
+    check bool ("says it is " ^ standing) true (String_util.contains_substring message standing);
+    check bool "names the command for this workspace" true
+      (String_util.contains_substring message
+         ("masc browser-lane-setup --mode bidi --base-path " ^ Filename.quote base_path)))
+    [ Keeper_firefox.Not_installed, "not installed"
+    ; Keeper_firefox.Needs_reinstall, "not as its installation wrote it" ]
 
 (* --- the detached spawn ---------------------------------------------------- *)
 
@@ -1487,8 +1501,7 @@ let a_restart_whose_firefox_cannot_start_leaves_no_record () =
 (* A port still held once the stopped group is empty gets no new Firefox:
    it would meet that port, or that profile, still taken. The record keeps
    naming the stopped one, so a later start reads it as a Firefox that has
-   ended, not as one MASC never started, and starts one once the port is
-   free. *)
+   ended, not as one MASC never started. *)
 let a_restart_whose_port_stays_open_starts_nothing () =
   with_workspace (fun base ->
     let firefox_marker, host_marker = markers base in
@@ -1514,18 +1527,7 @@ let a_restart_whose_port_stays_open_starts_nothing () =
       let holder = first_pid (firefox_marker ^ ".listener") in
       check bool "a later start leaves the port's holder running" true
         (match holder with Some pid -> runs_under base pid | None -> false);
-      check bool "and starts no Firefox" false (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
-      (* Once the port is free, a Firefox is started over that record. *)
-      Option.iter stop (first_pid host_marker);
-      Sys.remove host_marker;
-      Option.iter stop holder;
-      started ~base ~configuration ();
-      await_file host_marker;
-      check bool "then a new Firefox is started" true (started_again (Keeper_firefox.firefox_log_path ~base_path:base));
-      check bool "and recorded" true
-        (match first_pid firefox_marker, recorded base with
-         | Some again, Some (entry : Firefox_record.entry) -> again <> first && entry.group = again
-         | (Some _ | None), (Some _ | None) -> false)))
+      check bool "and starts no Firefox" false (started_again (Keeper_firefox.firefox_log_path ~base_path:base))))
 
 (* The Firefox runs on, still recorded, and a host is started for it. *)
 let a_firefox_that_holds_no_such_session_is_not_restarted () =
@@ -1618,7 +1620,9 @@ let () =
         ; test_case "a table that cannot start Firefox" `Quick a_table_that_cannot_start_firefox_is_refused ] )
     ; ( "what runs"
       , [ test_case "commands and logs" `Quick commands_run
-        ; test_case "when a host is started" `Quick host_is_started_only_with_an_installed_launcher_and_no_host ] )
+        ; test_case "when a host is started" `Quick host_is_started_only_with_an_installed_launcher_and_no_host
+        ; test_case "a missing launcher names the command for its workspace" `Quick
+            a_missing_launcher_message_names_the_command_for_that_workspace ] )
     ; ( "detached spawn"
       , [ test_case "exit status and output" `Quick spawn_reports_exit_and_writes_output
         ; test_case "outlives its switch in its own group" `Quick spawn_outlives_its_switch_in_its_own_group

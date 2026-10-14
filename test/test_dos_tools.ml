@@ -13,9 +13,9 @@ open Masc
 module Dos_tools = Dos_machine_tools.Make (Machine_dos_host_events)
 
 let dispatch ~base_path ?(agent = "dos-test") name assoc =
-  match Dos_tools.dispatch ~base_path ~agent ~name ~arguments:(`Assoc assoc) with
-  | Some result -> result
-  | None -> fail (name ^ " is not dispatched by the machine worker")
+  match Machine_controller_contract.dos_tool_of_name name with
+  | Some tool -> Dos_tools.dispatch ~base_path ~agent ~tool ~arguments:(`Assoc assoc)
+  | None -> fail (name ^ " is not a DOS tool")
 ;;
 
 (* Ejects whatever machine is there, as whoever holds it: the machine is
@@ -1684,6 +1684,28 @@ let test_a_restore_leaves_the_saves_directory () =
       (In_channel.with_open_bin kept In_channel.input_all))
 ;;
 
+(* A refusal is a failure that provably changed nothing, so a Keeper turn that
+   called the tool reads it and goes on. Without that declaration a bad slot
+   name read as effect-outcome-unknown and ended the turn (msx-retro-mania,
+   2026-10-14, masc_dos_save). *)
+let test_refusals_declare_no_effect () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let refused name result =
+      match result with
+      | Tool_result.Failed { Tool_result.class_ = Tool_result.Workflow_rejection;
+                             effect_disposition = Tool_result.Proven_pre_effect; _ } -> ()
+      | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+        fail (name ^ " is not a refusal that declares no effect")
+    in
+    refused "a slot name with a dot" (save_as ~base_path "no.dots");
+    refused "an empty-looking path slot" (save_as ~base_path "a/b");
+    refused "a slot never saved" (restore_as ~base_path "never");
+    refused "a key the machine has no key for"
+      (dispatch ~base_path "masc_dos_press" [ ("keys", `List [ `String "no-such-key" ]) ]))
+;;
+
 (* What the caller can get wrong is refused before anything changes: a name
    that is not a slot, a slot never saved, a file that is not a DOS
    checkpoint. With no slot the tool lists what there is. *)
@@ -2187,6 +2209,7 @@ let () =
         ; test_case "ledger continues" `Quick test_the_ledger_continues_from_the_checkpoint
         ; test_case "restore leaves saves" `Quick test_a_restore_leaves_the_saves_directory
         ; test_case "restore refusals and listing" `Quick test_restore_refusals_and_listing
+        ; test_case "refusals declare no effect" `Quick test_refusals_declare_no_effect
         ; test_case "autosave after a step" `Quick test_autosave_written_after_a_successful_step
         ; test_case "every tool that moves the guest autosaves" `Quick
             test_every_tool_that_moves_the_guest_autosaves

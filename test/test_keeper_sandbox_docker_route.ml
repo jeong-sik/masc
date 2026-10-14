@@ -2407,7 +2407,7 @@ let test_execute_rewrites_host_path_command_for_docker () =
 
 let test_docker_mount_failure_message_preserves_path () =
   let mount_path =
-    "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/masc/.worktrees/"
+    "/host_mnt/Users/worker/ws/.masc/playground/docker/repos/masc/.worktrees/"
     ^ String.make 320 'a'
     ^ "/repo"
   in
@@ -2436,7 +2436,7 @@ let test_docker_mount_failure_message_preserves_path () =
 
 let test_docker_mount_failure_structured_details () =
   let mount_path =
-    "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/agent_core/.worktrees/"
+    "/host_mnt/Users/worker/ws/.masc/playground/docker/repos/agent_core/.worktrees/"
     ^ String.make 280 'b'
   in
   let output =

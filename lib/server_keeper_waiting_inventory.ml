@@ -315,7 +315,13 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
       (fun (selection : Keeper_event_queue_state.pending_selection) ->
          match selection.source.payload with
          | Keeper_event_queue.Connector_attention _ -> Some selection
-         | _ -> None)
+         | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+         | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+         | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Task_outcome _ -> None)
       selections
   in
   let connector_count = List.length connector_selections in
@@ -330,7 +336,13 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
       (fun (selection : Keeper_event_queue_state.pending_selection) ->
          match selection.source.payload with
          | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
-         | _ -> None)
+         | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+         | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+         | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Task_outcome _ -> None)
       connector_selections
     |> List.sort String.compare
   in
@@ -401,7 +413,13 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
         match stimulus.payload with
         | Keeper_event_queue.Schedule_due wake ->
           Option.map (fun members -> wake, members) (schedule_group wake.schedule_id)
-        | _ -> None
+        | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+        | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+        | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
+        | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+        | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+        | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+        | Keeper_event_queue.Task_outcome _ -> None
       in
       (match grouped_schedule with
        | Some (wake, _) when Hashtbl.mem schedules_emitted wake.schedule_id ->
@@ -489,8 +507,13 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
        | Keeper_event_queue.Connector_attention _ when connector_count > 1 ->
          (* Already represented by the aggregate row above. *)
          go (queue_index + 1) acc rest
-       | _ ->
-         go
+       | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+       | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+       | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+       | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+       | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+       | Keeper_event_queue.Task_outcome _ | Connector_attention _ -> go
            (queue_index + 1)
            (row
               ~what:(stimulus_what stimulus)

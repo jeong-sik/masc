@@ -41,8 +41,7 @@ Options:
   --no-clear-tool-results  keep ToolResult payloads
   -h, --help               print this help
 
-The runtime root is the selected cluster under {workspace}/.masc.
-MASC_CLUSTER_NAME selects the cluster. Backups are stored in its runtime root.
+The runtime root is {workspace}/.masc. Backups are stored in it.
 
 --apply requires the keeper to be stopped (masc_keeper_down); a live keeper
 overwrites the purge on its next save. It also requires that no server owns
@@ -177,7 +176,7 @@ let () =
   Masc.Runtime_params.restore ~base_path;
   let session_store = Masc.Keeper_fs.session_store_path_for_base_path base_path in
   let runtime_root = Filename.dirname session_store in
-  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir_for_base_path base_path in
+  let runtime_keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
   (* The keeper names the trace, as the dashboard purge does. A checkpoint's
      own [agent_name] is the agent-core agent's name, the runtime id, not the
      keeper, so nothing under keepers/<name>/ can be found from it (#37770).

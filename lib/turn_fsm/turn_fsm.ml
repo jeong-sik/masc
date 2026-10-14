@@ -104,7 +104,14 @@ let turn_state_label : type a. a turn_state -> string = function
       to_tla_symbol (Failed reason) ^ ":" ^ failure_reason_label reason
   | Cancelled reason ->
       to_tla_symbol (Cancelled reason) ^ ":" ^ cancel_reason_label reason
-  | state -> to_tla_symbol state
+  | Idle -> to_tla_symbol Idle
+  | Phase_gating -> to_tla_symbol Phase_gating
+  | Runtime_routing -> to_tla_symbol Runtime_routing
+  | Awaiting_provider -> to_tla_symbol Awaiting_provider
+  | Streaming -> to_tla_symbol Streaming
+  | Awaiting_tool_result -> to_tla_symbol Awaiting_tool_result
+  | Completing -> to_tla_symbol Completing
+  | Done -> to_tla_symbol Done
 
 let pp_failure_reason fmt = function
   | Failure_runtime_unavailable { base; resolved } ->
@@ -201,11 +208,17 @@ type transition_context = {
 let default_transition_context =
   { stop_signaled_before = false; stop_signaled_after = false }
 
+type any_state = Any : _ turn_state -> any_state
+
+let any_state_label (Any s) = turn_state_label s
+let any_state_tla_symbol (Any s) = to_tla_symbol s
+
 type transition_violation = {
-  from_state : string;
-  to_state : string;
-  reason : string;
+  from_state : any_state;
+  to_state : any_state;
 }
+
+let transition_violation_reason = "not_in_keeper_turn_fsm_next"
 
 let same_tla_state a b =
   String.equal (to_tla_symbol a) (to_tla_symbol b)
@@ -213,10 +226,6 @@ let same_tla_state a b =
 let same_observable_state a b =
   String.equal (turn_state_label a) (turn_state_label b)
 
-
-type any_state = Any : _ turn_state -> any_state
-
-let any_state_label (Any s) = turn_state_label s
 let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_state) () =
   let stop_signaled_before =
     match ctx with
@@ -306,18 +315,53 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
          && stop_unchanged
          && same_observable_state from_state to_state ->
       Some TerminalStutter
-  | _ -> None
+  | Any
+      ( Idle
+      | Phase_gating
+      | Runtime_routing
+      | Awaiting_provider
+      | Streaming
+      | Awaiting_tool_result
+      | Completing
+      | Done
+      | Failed
+          ( Failure_runtime_unavailable _
+          | Failure_provider_error _
+          | Failure_receipt_lost _
+          | Failure_runtime_error _
+          | Failure_unexpected_exception _ )
+      | Cancelled
+          ( Cancelled_supervisor_stop
+          | Cancelled_external
+          | Cancelled_provider_timeout
+          | Cancelled_input_required ) ),
+    Any
+        ( Idle
+        | Phase_gating
+        | Runtime_routing
+        | Awaiting_provider
+        | Streaming
+        | Awaiting_tool_result
+        | Completing
+        | Done
+        | Failed
+          ( Failure_runtime_unavailable _
+          | Failure_provider_error _
+          | Failure_receipt_lost _
+          | Failure_runtime_error _
+          | Failure_unexpected_exception _ )
+        | Cancelled
+          ( Cancelled_supervisor_stop
+          | Cancelled_external
+          | Cancelled_provider_timeout
+          | Cancelled_input_required ) ) ->
+      None
 
 let assert_transition_allowed ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_state) () =
   match classify_transition ?ctx ~from_state ~to_state () with
   | Some action -> Ok action
   | None ->
-      Error
-        {
-          from_state = to_tla_symbol from_state;
-          to_state = to_tla_symbol to_state;
-          reason = "not_in_keeper_turn_fsm_next";
-        }
+      Error { from_state = Any from_state; to_state = Any to_state }
 
 (* NOTE: [require_active_state] is NOT here — its [@@fsm_guard] ppx_tla
    expansion injects a call to [Keeper_fsm_guard_runtime], which would couple

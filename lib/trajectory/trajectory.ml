@@ -225,38 +225,57 @@ let tool_call_entry_of_json (json : Yojson.Safe.t) : tool_call_entry option =
     match Json_util.assoc_member_opt "type" json with
     | Some (`String "trajectory_summary") -> None
     | Some (`String "thinking") -> None
-    | _ -> (
-        match
-          gate_decision_of_json
-            (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
-        with
-        | None -> None
-        | Some gate_decision ->
+    | _ ->
+        (* Every member [entry_to_json] writes is required with its JSON type,
+           as the gate already is. A missing [ts] used to read as [0.0] and a
+           missing [tool_name] as [""]: a call the keeper never made, sorted
+           before every real one in the dashboard. [result] and [error] are
+           written as null when absent, and [execution_id] only when known. *)
+        let ( let* ) = Option.bind in
+        let member key = Json_util.assoc_member_opt key json in
+        let number key =
+          match member key with
+          | Some (`Float value) -> Some value
+          | Some (`Int value) -> Some (Float.of_int value)
+          | _ -> None
+        in
+        let int key = match member key with Some (`Int value) -> Some value | _ -> None in
+        let string key =
+          match member key with Some (`String value) -> Some value | _ -> None
+        in
+        let optional_string key =
+          match member key with
+          | None | Some `Null -> Some None
+          | Some (`String value) -> Some (Some value)
+          | Some _ -> None
+        in
+        let* gate_decision =
+          gate_decision_of_json (Option.value ~default:`Null (member "gate"))
+        in
+        let* ts = number "ts" in
+        let* ts_iso = string "ts_iso" in
+        let* turn = int "turn" in
+        let* round = int "round" in
+        let* tool_name = string "tool_name" in
+        let* args = member "args" in
+        let* result = optional_string "result" in
+        let* duration_ms = int "duration_ms" in
+        let* error = optional_string "error" in
+        let* execution_id = optional_string "execution_id" in
         Some
-          ({
-              ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
-              ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
-              turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
-              round = (match Json_util.assoc_member_opt "round" json with Some (`Int n) -> n | _ -> 0);
-              tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "");
-              args_json = Option.value ~default:`Null (Json_util.assoc_member_opt "args" json) |> Yojson.Safe.to_string;
-              gate_decision;
-              result =
-                (match Json_util.assoc_member_opt "result" json with
-                 | None | Some `Null -> None
-                 | Some (`String s) -> Some s
-                 | Some _ -> None);
-              duration_ms = (match Json_util.assoc_member_opt "duration_ms" json with Some (`Int n) -> n | _ -> 0);
-              error =
-                (match Json_util.assoc_member_opt "error" json with
-                 | None | Some `Null -> None
-                 | Some (`String s) -> Some s
-                 | Some _ -> None);
-              execution_id =
-                (match Json_util.assoc_member_opt "execution_id" json with
-                 | Some (`String s) -> Some s
-                 | _ -> None);
-            }))
+          {
+            ts;
+            ts_iso;
+            turn;
+            round;
+            tool_name;
+            args_json = Yojson.Safe.to_string args;
+            gate_decision;
+            result;
+            duration_ms;
+            error;
+            execution_id;
+          }
   with
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 

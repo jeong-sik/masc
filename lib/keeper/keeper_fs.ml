@@ -785,7 +785,7 @@ let session_store_path_for_runtime_root runtime_root =
 ;;
 
 let session_store_path (config : Workspace.config) : string =
-  session_store_path_for_runtime_root (Workspace.masc_root_dir config)
+  session_store_path_for_runtime_root (Workspace.masc_dir config)
 ;;
 
 let session_store_path_for_base_path base_path =

@@ -223,8 +223,10 @@ let test_execution_identity_joins_exact_occurrence () =
   let selected_run = { (run_ref ~path ~worker_run_id ~start_seq:1) with end_seq = 7 } in
   write_turn_record ~execution_ids config ~absolute_turn:428 ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:(Some selected_run);
-  let ledger = Dated_jsonl.create
-    ~base_dir:(Filename.concat (Workspace.masc_root_dir config) "tool_calls") () in
+  let ledger =
+    Dated_jsonl.open_store
+      (Dated_jsonl.Store.at (Workspace.dated_store_root config) Tool_calls)
+  in
   let row ~id ~invocation_turn ~keeper_turn =
     `Assoc [ "record_kind", `String "tool_call"; "ts", `Float 2005.;
       "keeper", `String keeper_name; "execution_id", `String id;
@@ -651,6 +653,50 @@ let test_dashboard_history_autonomous_rows_carry_id () =
   | _ -> Alcotest.fail "history body is not a list"
 ;;
 
+let test_transcript_rows_keep_stream_contract () =
+  (* Positive control for the page route's omission (#42200): the transcript
+     route keeps [stream_contract] because the dashboard reads it there.
+     Threading [~omit_stream_contract:true] into the transcript call site
+     fails this. *)
+  with_workspace @@ fun config ->
+  let base_dir = (config : Workspace.config).base_path in
+  let masc_dir = Common.masc_dir_from_base_path ~base_path:base_dir in
+  let rec mkdir_p path =
+    if not (Sys.file_exists path)
+    then (
+      mkdir_p (Filename.dirname path);
+      try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  let dir = Filename.concat masc_dir "keeper_chat" in
+  mkdir_p dir;
+  let oc = open_out (Filename.concat dir (keeper_name ^ ".jsonl")) in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ "id", `String "t1"
+            ; "role", `String "user"
+            ; "content", `String "hi"
+            ; "ts", `Float 1.0
+            ])
+       ^ "\n"));
+  match
+    Server_dashboard_http_keeper_api.keeper_chat_history_json config keeper_name
+  with
+  | `List rows ->
+    Alcotest.(check int) "one direct row in history" 1 (List.length rows);
+    List.iter
+      (fun row ->
+        Alcotest.(check bool)
+          "transcript row keeps stream_contract"
+          true
+          (match row with
+           | `Assoc fields -> List.mem_assoc "stream_contract" fields
+           | _ -> false))
+      rows
+  | _ -> Alcotest.fail "history body is not a list"
+;;
+
 let () =
   Alcotest.run "keeper_autonomous_turn_source"
     [ ( "load_recent"
@@ -692,6 +738,8 @@ let () =
     ; ( "dashboard_history"
       , [ Alcotest.test_case "autonomous rows carry a schema-required id" `Quick
             test_dashboard_history_autonomous_rows_carry_id
+        ; Alcotest.test_case "transcript rows keep stream_contract" `Quick
+            test_transcript_rows_keep_stream_contract
         ] )
     ; ( "wake_prompt"
       , [ Alcotest.test_case "rejects blank and over-bound values" `Quick

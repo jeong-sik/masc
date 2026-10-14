@@ -195,6 +195,167 @@ let test_a_second_request_replaces_the_first () =
     (frame [ first; second ]);
   ignore (frame [])
 
+(* An evidence picture is a PNG file, placed by the same bookkeeping as a
+   candle: transmitted when new or changed, put when moved, retransmitted
+   after a clear screen, deleted when a frame stops asking. *)
+let evidence_id = Masc_tui_graphics.image_id Masc_tui_graphics.Evidence_image_1
+
+let png ?(row = 6) ?(column = 8) ?(rows = 10) ?crop ?(key = "key-a")
+    ?(data = "png-file-bytes-a") () =
+  { View.png_image_id = evidence_id; png_row = row; png_column = column; png_cols = 30
+  ; png_rows = rows; png_crop = crop; png_key = key; png_data = data }
+
+let frame_png ?(presented = Presenter.Unchanged) ?(held = []) pngs =
+  View.begin_frame ();
+  List.iter View.request_png pngs;
+  List.iter (fun key -> View.hold_png ~image_id:evidence_id ~key) held;
+  let written = Buffer.create 4096 in
+  View.flush presented ~write:(Buffer.add_string written);
+  Buffer.contents written
+
+(* The view keeps one placement per image, under this id. *)
+let only_placement = 1
+
+let evidence_deleted = Masc_tui_graphics.delete_image ~image_id:evidence_id
+
+let test_a_png_file_is_placed_kept_moved_and_deleted () =
+  ignore (frame_png []);
+  let p = png () in
+  let first = frame_png [ p ] in
+  check bool "a new picture is transmitted as a PNG file" true (contains ~sub:"f=100" first);
+  check bool "under its slot's id" true (contains ~sub:(Printf.sprintf "i=%d," evidence_id) first);
+  check bool "at the 1-based corner" true (contains ~sub:"\027[7;9H" first);
+  check bool "as many rows as laid out" true (contains ~sub:"r=10," first);
+  check string "the same picture on an unchanged frame is left alone" "" (frame_png [ p ]);
+  check string "a clear screen took it, so it is transmitted again" first
+    (frame_png ~presented:cleared [ p ]);
+  let moved = png ~row:7 () in
+  let put = frame_png [ moved ] in
+  check bool "a moved picture is put" true (contains ~sub:"a=p," put);
+  check bool "without its bytes" false (contains ~sub:"f=100" put);
+  let changed = png ~row:7 ~key:"key-b" ~data:"png-file-bytes-b" () in
+  check bool "a changed picture is transmitted" true
+    (contains ~sub:"f=100" (frame_png [ changed ]));
+  check string "a frame that no longer asks deletes it" evidence_deleted (frame_png []);
+  check string "and then there is nothing to delete" "" (frame_png [])
+
+(* The key is what stands for the bytes, so a 200 KB file is not compared on
+   every frame; two files under one key are the same picture. *)
+let test_a_png_file_is_compared_by_its_key () =
+  ignore (frame_png []);
+  ignore (frame_png [ png ~key:"same" ~data:"first bytes" () ]);
+  check string "same key, same picture" ""
+    (frame_png [ png ~key:"same" ~data:"other bytes" () ]);
+  ignore (frame_png [])
+
+let test_a_rewritten_row_puts_back_only_the_png_it_crosses () =
+  ignore (frame_png []);
+  let p = png () in
+  let top = p.View.png_row and bottom = p.View.png_row + p.View.png_rows - 1 in
+  ignore (frame_png [ p ]);
+  check string "a row above leaves it alone" ""
+    (frame_png ~presented:(rows_written [ top - 1 ]) [ p ]);
+  check string "a row below leaves it alone" ""
+    (frame_png ~presented:(rows_written [ bottom + 1 ]) [ p ]);
+  check bool "its top row puts it back" true
+    (contains ~sub:"a=p," (frame_png ~presented:(rows_written [ top ]) [ p ]));
+  check bool "its bottom row puts it back" true
+    (contains ~sub:"a=p," (frame_png ~presented:(rows_written [ bottom ]) [ p ]));
+  ignore (frame_png [])
+
+(* A candle and a PNG share the bookkeeping and nothing else: taking one
+   down leaves the other where it is. *)
+let test_a_png_and_a_candle_are_kept_apart () =
+  ignore (frame []);
+  let candle = placement 6 in
+  View.begin_frame ();
+  View.request candle;
+  View.request_png (png ());
+  let written = Buffer.create 4096 in
+  View.flush Presenter.Unchanged ~write:(Buffer.add_string written);
+  check bool "both were transmitted" true
+    (contains ~sub:(Printf.sprintf "i=%d," mascot_id) (Buffer.contents written)
+     && contains ~sub:(Printf.sprintf "i=%d," evidence_id) (Buffer.contents written));
+  check string "dropping the PNG deletes only the PNG" evidence_deleted (frame [ candle ]);
+  check string "dropping the candle deletes only the candle" deleted (frame []);
+  check string "nothing left" "" (frame_png [])
+
+(* A picture the window cuts is the same pixels in a smaller place: scrolling
+   it is a put with the new rectangle, never a transfer. *)
+let test_a_scrolled_png_is_put_with_its_new_crop () =
+  ignore (frame_png []);
+  let whole = png () in
+  ignore (frame_png [ whole ]);
+  let cut = png ~row:6 ~rows:6 ~crop:{ Masc_tui_graphics.top_px = 160; height_px = 240 } () in
+  let put = frame_png [ cut ] in
+  check bool "the pixels do not travel again" false (contains ~sub:"f=100" put);
+  check bool "a put" true (contains ~sub:"a=p," put);
+  check bool "of the new rectangle" true (contains ~sub:"y=160" put && contains ~sub:"h=240" put);
+  check bool "over the rows that show" true (contains ~sub:"r=6," put);
+  check string "the same crop on the next frame is left alone" "" (frame_png [ cut ]);
+  let moved_crop = png ~row:6 ~rows:6 ~crop:{ Masc_tui_graphics.top_px = 200; height_px = 240 } () in
+  let put_again = frame_png [ moved_crop ] in
+  check bool "another rectangle in the same cells is a put too" true
+    (contains ~sub:"a=p," put_again && contains ~sub:"y=200" put_again);
+  ignore (frame_png [])
+
+(* A picture wholly out of the window loses its placement and keeps its pixels
+   while the view holds it, so scrolling back is a put. Without the hold, or
+   with other bytes, the pixels are freed. *)
+let test_a_held_png_keeps_its_pixels_without_a_placement () =
+  ignore (frame_png []);
+  let p = png () in
+  let first = frame_png [ p ] in
+  check bool "transmitted once" true (contains ~sub:"f=100" first);
+  let hidden = frame_png ~held:[ "key-a" ] [] in
+  check string "scrolled out: only the placement goes"
+    (Masc_tui_graphics.delete_placement ~image_id:evidence_id ~placement_id:only_placement)
+    hidden;
+  check string "still held: nothing more is sent" "" (frame_png ~held:[ "key-a" ] []);
+  let back = frame_png [ p ] in
+  check bool "scrolled back: a put" true (contains ~sub:"a=p," back);
+  check bool "no pixels travel" false (contains ~sub:"f=100" back);
+  ignore (frame_png ~held:[ "key-a" ] []);
+  check string "the view lets go: the pixels are freed" evidence_deleted (frame_png []);
+  check string "and then there is nothing to delete" "" (frame_png [])
+
+let test_a_hold_for_other_bytes_does_not_keep_these () =
+  ignore (frame_png []);
+  ignore (frame_png [ png () ]);
+  check string "a hold under another key frees the pixels" evidence_deleted
+    (frame_png ~held:[ "key-other" ] []);
+  ignore (frame_png [])
+
+let test_a_clear_screen_takes_held_pixels_too () =
+  ignore (frame_png []);
+  let p = png () in
+  ignore (frame_png [ p ]);
+  ignore (frame_png ~held:[ "key-a" ] []);
+  let back = frame_png ~presented:cleared [ p ] in
+  check bool "after a clear screen the return is a transfer" true (contains ~sub:"f=100" back);
+  ignore (frame_png []);
+  (* The clear came while the picture was placed and held in the same frame
+     the screen was cleared: nothing remains to put back. *)
+  ignore (frame_png [ p ]);
+  ignore (frame_png ~presented:cleared ~held:[ "key-a" ] []);
+  let again = frame_png [ p ] in
+  check bool "held through a clear screen is not held" true (contains ~sub:"f=100" again);
+  ignore (frame_png [])
+
+let test_a_held_png_replaced_by_a_candle_id_is_not_confused () =
+  (* A hold names an image id and a key; a candle under another id is not
+     touched by it. *)
+  ignore (frame []);
+  let candle = placement 6 in
+  ignore (frame [ candle ]);
+  View.begin_frame ();
+  View.hold_png ~image_id:evidence_id ~key:"key-a";
+  View.request candle;
+  let written = Buffer.create 64 in
+  View.flush Presenter.Unchanged ~write:(Buffer.add_string written);
+  check string "the candle stays and nothing is written" "" (Buffer.contents written);
+  ignore (frame [])
+
 let () =
   run "tui_portrait_view"
     [ ( "display"
@@ -215,5 +376,23 @@ let () =
             test_a_row_rewritten_every_step_never_resends_the_pixels
         ; test_case "a second request replaces the first" `Quick
             test_a_second_request_replaces_the_first
+        ; test_case "a PNG file is placed, kept, moved and deleted" `Quick
+            test_a_png_file_is_placed_kept_moved_and_deleted
+        ; test_case "a PNG file is compared by its key" `Quick
+            test_a_png_file_is_compared_by_its_key
+        ; test_case "a rewritten row puts back only the PNG it crosses" `Quick
+            test_a_rewritten_row_puts_back_only_the_png_it_crosses
+        ; test_case "a PNG and a candle are kept apart" `Quick
+            test_a_png_and_a_candle_are_kept_apart
+        ; test_case "a scrolled PNG is put with its new crop" `Quick
+            test_a_scrolled_png_is_put_with_its_new_crop
+        ; test_case "a held PNG keeps its pixels without a placement" `Quick
+            test_a_held_png_keeps_its_pixels_without_a_placement
+        ; test_case "a hold for other bytes does not keep these" `Quick
+            test_a_hold_for_other_bytes_does_not_keep_these
+        ; test_case "a clear screen takes held pixels too" `Quick
+            test_a_clear_screen_takes_held_pixels_too
+        ; test_case "a hold leaves a candle alone" `Quick
+            test_a_held_png_replaced_by_a_candle_id_is_not_confused
         ] )
     ]

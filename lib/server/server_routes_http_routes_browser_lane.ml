@@ -10,7 +10,7 @@
 
    Auth is a lane token, not a dashboard session: the host process is not a
    person. The token lives at <base>/.masc/browser-lane/token (0600, written
-   by connectors/browser/install-host.sh). No token file means the lane is
+   by masc browser-lane-setup). No token file means the lane is
    not installed, and every request fails closed — port 8935 is what the
    public tunnel points at, so an unauthenticated lane would publish the
    user's browser to the internet. *)
@@ -27,10 +27,10 @@ let lane_token_path () =
 let lane_token () =
   match
     In_channel.with_open_bin (lane_token_path ()) (fun ic ->
-        String.trim (In_channel.input_all ic))
+        Browser_lane.Lane_token.of_text (In_channel.input_all ic))
   with
-  | token when String.length token >= 16 -> Some token
-  | _ -> None
+  | Ok token -> Some (Browser_lane.Lane_token.to_string token)
+  | Error (Browser_lane.Lane_token.Too_short | Browser_lane.Lane_token.Not_printable) -> None
   | exception Sys_error _ -> None
 ;;
 

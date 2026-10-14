@@ -103,7 +103,7 @@ runtime 5-state(`Idle/Selecting/Trying/Done/Exhausted`)는 다중후보 selectio
 - **R2 (eager-init crash):** 메모리 2026-05-30 B3 `runtime_id_for_use` gut이 fail-fast raise + eager module-level binding으로 config-less 바이너리(테스트) startup crash 때문에 DEFER됨. Runtime 싱글톤도 동일 위험 — init을 lazy/explicit로 유지하고 test runtime fixture 제공.
 - **R3 (병렬 충돌):** 다른 세션이 동일 파일에서 runtime purge 진행 중(feat/runtime-name-cleanup 174파일, host load 110+). P4 전 `masc_broadcast` + in-flight PR scan 필수(broken-main race #19424 재발 방지).
 - **R4 (재성장):** runtime_toml/runtime_adapter를 minimal하게. aliases/routes/profiles 파싱 전면 drop, validator dual-mode·longest-prefix model matching은 binding이 실제 fuzzy resolution을 요구하기 전엔 포팅 금지.
-- **R5 (frozen seam):** `keeper_meta_contract`의 `blocker_class_to_string` literal을 operator 대시보드가 파싱. `Runtime_exhausted` rename은 alerting을 깬다. reuse, refactor 금지.
+- **R5 (frozen seam):** `Keeper_status_bridge_blocker.runtime_blocker_class_to_string` 의 라벨(`runtime_exhausted` 등)을 operator 대시보드가 파싱. 라벨을 바꾸면 alerting 을 깬다. reuse, refactor 금지.
 - **R6 (CI surface gate):** `Detect Changed Surfaces`가 types-only P1을 no-surface로 오분류해 Build/Test skip한 전례(2026-05-28). gate가 `lib/runtime/`에 trigger되는지 검증.
 
 ## 8. 검증

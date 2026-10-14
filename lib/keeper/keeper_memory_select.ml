@@ -105,7 +105,9 @@ let handle ?turn_ref ~clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~
         (List.map (fun row -> row.choice,row.detail) before.candidates) in
       let after=collect ~config ~meta ~keepers_dir in
       let publication_policy=Typesafeai_config.workspace_memory_selection_destinations ~keeper_id:meta.name in
-      let ordinary_unchanged=match before.ordinary,after.ordinary with Ok a,Ok b -> a=b | _ -> false in
+      let ordinary_unchanged=match before.ordinary,after.ordinary with
+        | Ok a,Ok b -> a=b
+        | Ok _,Error _ | Error _,(Ok _ | Error _) -> false in
       let fresh row=match row.identity with
         | Ordinary _ -> ordinary_unchanged
         | File fact -> (match after.source with Error _ -> false | Ok projection ->
@@ -146,7 +148,9 @@ let handle ?turn_ref ~clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~
         "not_needed_count",`Int (List.length !not_needed);"truncated_count",`Int (List.length selected-List.length delivered);
         "incomplete",`Bool (!deferred<>[] || unavailable<>[]);
         "selection_id",`String (Io.selection_id io);
-        "snapshot_revision",(match after.ordinary with Ok {snapshot=Some snapshot;_} -> `Int snapshot.revision | _ -> `Null);
+        "snapshot_revision",(match after.ordinary with
+          | Ok {snapshot=Some snapshot;_} -> `Int snapshot.revision
+          | Ok {snapshot=None;_} | Error _ -> `Null);
         "guidance",`String "Current-decision and comparison are retrieval roles, not truth verification. Omitted or unavailable results do not establish absence. Comparison retains its original scope."] in
       match Io.retain_result io ~purpose (Ok output) with
       | Error detail -> Keeper_tool_execution.success_data (`Assoc ["status",`String "unavailable";

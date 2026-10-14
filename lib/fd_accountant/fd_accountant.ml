@@ -39,11 +39,16 @@ let resource_error_to_string = function
   | Storage_space_exhausted -> "storage_space_exhausted"
 ;;
 
-let resource_error_of_exn = function
-  | Unix.Unix_error (Unix.EMFILE, _, _) -> Some Process_fd_exhausted
-  | Unix.Unix_error (Unix.ENFILE, _, _) -> Some System_fd_exhausted
-  | Unix.Unix_error (Unix.ENOSPC, _, _) -> Some Storage_space_exhausted
-  | _ -> None
+let resource_error_of_exn exn =
+  match System_error_class.errno_of_exn exn with
+  | Some System_error_class.Emfile -> Some Process_fd_exhausted
+  | Some System_error_class.Enfile -> Some System_fd_exhausted
+  | Some System_error_class.Enospc -> Some Storage_space_exhausted
+  | Some
+      System_error_class.(
+        Eacces | Eperm | Enoent | Econnrefused | Etimedout | Epipe | Eaddrinuse
+        | Eaddrnotavail | Other_errno _)
+  | None -> None
 ;;
 
 type observers =

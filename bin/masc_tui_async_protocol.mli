@@ -469,6 +469,7 @@ type async_msg =
   | Board_new_post_done of {
       reply_to : string option;
       sent_draft : string;
+      sent_attachments : Masc_tui_types.board_staged_attachment list;
       result : (string, string) result;
     }
   | Board_vote_done of (string, string) result
@@ -499,7 +500,7 @@ type async_msg =
       string * (Masc.Tui_decode.task_history_event list, string) result
   | Task_cancel_done of string * Masc.Tui_decode.server_identity * (string, string) result
   | Verification_evidence_loaded of
-      string * (Masc.Tui_decode.verification_evidence,
+      string * (Masc_tui_evidence_picture.evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result
   | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Keeper_items_loaded of
@@ -550,7 +551,8 @@ type async_msg =
   | Play_invite_issued of Masc_tui_types.play_change_request * play_sink * Masc.Tui_decode.play_invite_issued play_mutation
   | Play_invite_revoked of Masc_tui_types.play_change_request * play_sink * string * play_revoke
   | Librarian_input_loaded of string * (string list, string) result
-  | Resources_listed of (Masc_tui_mcp.resource list, string) result
+  | Resources_listed of
+      (Masc_tui_mcp.resource list * Masc_tui_mcp.resources_walk_stop, string) result
   (* The scope travels with the directory. Without it a reply names a
      relative path, which two scopes can both have, and the handler had no
      way to tell a late answer for the scope just left from an answer for the

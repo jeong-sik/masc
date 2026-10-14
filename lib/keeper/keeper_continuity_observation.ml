@@ -83,7 +83,11 @@ let valid_stop_reason state reason =
       | Indivisible_unit_uncommitted | Observed_capacity_unfit | Raised_during_pass)
   | Capacity_refused, Some (Observed_capacity_unfit | Observed_capacity_disagrees) -> true
   | (Checking | Running | Committed | No_source | Disabled | Cancelled
-    | Source_unavailable | Input_unavailable | Not_committed | Capacity_refused), _ -> false
+    | Source_unavailable | Input_unavailable | Not_committed | Capacity_refused),
+    (None
+    | Some (Source_read_failed | Input_build_failed | No_smaller_range_evidence
+      | Narrowed_for_next_signal | Indivisible_unit_uncommitted
+      | Observed_capacity_unfit | Observed_capacity_disagrees | Raised_during_pass)) -> false
 
 let synthesis_to_json (value : synthesis) =
   `Assoc ["observed_at", `Float value.observed_at;
@@ -138,6 +142,13 @@ let synthesis_of_json json =
         Ok (Some {start_atom; end_atom; completed_end_atom})
       | _ -> Error "invalid synthesis atom range" in
   if (Option.is_some range && Option.is_none trace_id)
-     || (match state, range with (Running | Committed), None -> true | _ -> false)
+     || (match state, range with
+         | (Running | Committed), None -> true
+         | (Running | Committed), Some _ -> false
+         (* The range payload (a single-shape atom record) does not take part
+            in this decision, so [Some _] stands: the option itself is fully
+            enumerated. *)
+         | ( Checking | No_source | Disabled | Source_unavailable | Input_unavailable
+           | Not_committed | Capacity_refused | Cancelled ), (None | Some _) -> false)
   then Error "synthesis state lacks source evidence"
   else Ok {observed_at; trace_id; state; stop_reason; range}

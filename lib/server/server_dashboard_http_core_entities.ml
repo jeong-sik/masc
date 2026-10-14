@@ -12,12 +12,10 @@ let namespace_pause_status_json (config : Workspace.config) =
 
 let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
   let workspace_state = Workspace.read_state config in
-  let cluster = Env_config_core.cluster_name () in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
   `Assoc
-    [ "cluster", `String cluster
-    ; "base_path", `String config.base_path
+    [ "base_path", `String config.base_path
     ; "workspace_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
@@ -93,7 +91,7 @@ let active_agent_summary_json json =
 ;;
 
 let dashboard_general_agent_count_light config =
-  if not (Workspace.root_is_initialized config)
+  if not (Workspace.is_initialized config)
   then 0
   else
     Workspace.list_dir config (Workspace.agents_dir config)

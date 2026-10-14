@@ -38,6 +38,23 @@ type effective =
   | Reader of (unit -> string)
   | Credential_presence
 
+(** The operator-facing group a row is listed under. *)
+type category =
+  | Spawn
+  | Turn
+  | Bootstrap
+  | Lifecycle
+  | Heartbeat
+  | Diagnostics
+  | Supervisor
+  | Metrics
+  | Memory
+  | Media
+  | Transport
+  | Sandbox
+  | Web_search
+  | Otel
+
 type setting =
   { env_name : string
   ; exposure : exposure
@@ -47,7 +64,7 @@ type setting =
   ; default_display : string
   ; reload_class : reload_class
   ; consumers : string list
-  ; category : string
+  ; category : category
   ; description : string
   }
 
@@ -76,6 +93,7 @@ val effective_value : setting -> string
 val value_kind_label : value_kind -> string
 val value_range_label : value_range -> string
 val reload_class_label : reload_class -> string
+val category_label : category -> string
 
 val requires_restart : setting -> bool
 (** [true] for settings whose next effect boundary requires a fiber or process

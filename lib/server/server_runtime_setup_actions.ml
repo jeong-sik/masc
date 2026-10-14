@@ -121,20 +121,25 @@ let source_template ?(use=Observe_source) ~sw ~pending ~workspace config request
        | Some (Runtime_setup_accounts.Antigravity_account selected), None
          when provider.credentials <> Some (Runtime_schema.File selected.credential_file) -> Ok ()
        | None, Some (`String _) when http -> Ok ()
-       | _ -> Error Disabled_connection)
+       | Some (Runtime_setup_accounts.Native_home _ | Antigravity_account _), (None | Some _)
+       | None, (None | Some _) -> Error Disabled_connection)
     | Some _ | None -> Ok () in
   let existing_inline = match use, account, List.assoc_opt "api_key" request,
       declared_provider config id with
     | Save_source, None, None, Some ({credentials=Some (Runtime_schema.Inline _); _} as provider)
       when http -> Some provider
-    | _ -> None in
+    | (Save_source, None, None, Some { credentials = Some (Runtime_schema.Env _ | Runtime_schema.File _);_})
+    | (Save_source, None, None, Some { credentials = None;_}) | (Save_source, None, None, None)
+    | (Save_source, None, Some _, _) | (Save_source, Some _, _, _) | (Observe_source, _, _, _)
+    | (Save_source, None, None, Some {credentials=Some (Inline _); _ }) -> None in
   let* credentials = match account,List.assoc_opt "api_key" request with
     | Some (Runtime_setup_accounts.Antigravity_account account),None
       when choice=Runtime_setup_spec.Antigravity -> Ok ["credential_file",`String account.credential_file]
     | Some (Runtime_setup_accounts.Native_home _),None
       when choice<>Runtime_setup_spec.Antigravity -> Ok []
     | Some _,None -> Error Invalid_request
-    | Some _,Some _ -> Error Invalid_request
+    | (Some (Runtime_setup_accounts.Antigravity_account _), Some _)
+    | (Some (Runtime_setup_accounts.Native_home _), Some _) -> Error Invalid_request
 
     | None,Some (`String secret) when http -> private_key ~sw pending secret
     | None,Some _ -> Error Invalid_request
@@ -178,7 +183,8 @@ let native_json ~binary args =
   match Process_eio.run_argv_with_status_split_or_refusal (binary::args) with
   | Ok (Unix.WEXITED 0,body,_) ->
     (try Ok (Yojson.Safe.from_string body) with Yojson.Json_error _ -> Error Unsupported_connection)
-  | Ok _ | Error _ -> Error Unsupported_connection
+  | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) | Error _ ->
+    Error Unsupported_connection
 let positive = function `Int n when n>0 -> Some n | _ -> None
 type reasoning_efforts = { supported : string list; default : string }
 type client_model = { id : string; label : string; context : int option; reasoning_efforts : reasoning_efforts option; supports_image_input : bool option }
@@ -368,7 +374,8 @@ let bound_model_names (config : Runtime_schema.config) template id choice =
       (match value "account_home" template with `String home -> Some home | _ -> None) in
   let selected_credential = match choice, value "credential_file" template with
     | Runtime_setup_spec.Antigravity, `String path -> Some path
-    | _ -> None in
+    | ( Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
+      | Claude_code | Codex | Antigravity | Muse ), _ -> None in
   let same_account (provider : Runtime_schema.provider) =
     provider.enabled
     && (match choice_of_api_format provider.api_format with
@@ -377,7 +384,8 @@ let bound_model_names (config : Runtime_schema.config) template id choice =
         | Some selected, _ -> Option.equal String.equal (Some selected)
             (effective_home provider.account_home)
         | None, Some selected -> (match provider.credentials with
-            | Some (Runtime_schema.File path) -> String.equal selected path | _ -> false)
+            | Some (Runtime_schema.File path) -> String.equal selected path | Some (Runtime_schema.Env _ | Runtime_schema.Inline _)
+                                                                            | None -> false)
         | None, None -> String.equal provider.id id) in
   List.filter_map (fun (binding : Runtime_schema.binding) ->
     if binding.enabled
@@ -458,7 +466,7 @@ let context ~binary ~net ~base_path request =
       | _ -> None in
     (match observed with
        | Ok json when verified json<>None -> Ok json
-       | _ ->
+       | Ok _ | Error _ ->
          (* API catalog metadata is provider-scoped. Local transports and CLI
             windows must be observed; they never inherit model architecture. *)
          let declared = match choice with
@@ -518,16 +526,17 @@ let save ~binary ~base_path request =
         let* template,provider_id,choice,existing_inline=source_template ~use:Save_source ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
+        let native_client_models client =
+          let* catalog = native_client_catalog ~binary client in
+          (* A refreshed CLI model may be absent from the installed catalog;
+             preserve unknown capability without accepting a browser assertion. *)
+          let* selected = client_models ~catalog:false (`Assoc ["models",`List models]) in
+          Ok (Some (with_catalog_image_capabilities selected catalog)) in
         let* reported_models=match choice with
           | Runtime_setup_spec.Muse ->
             let* _,models=muse_catalog ~binary template in Ok (Some models)
-          | Claude_code | Codex ->
-            let client = match choice with Claude_code -> "claude-code" | _ -> "codex" in
-            let* catalog = native_client_catalog ~binary client in
-            (* A refreshed CLI model may be absent from the installed catalog;
-               preserve unknown capability without accepting a browser assertion. *)
-            let* selected = client_models ~catalog:false (`Assoc ["models",`List models]) in
-            Ok (Some (with_catalog_image_capabilities selected catalog))
+          | Claude_code -> native_client_models "claude-code"
+          | Codex -> native_client_models "codex"
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages
           | Antigravity -> Ok None in
         let rec specs = function [] -> Ok [] | model::tail ->

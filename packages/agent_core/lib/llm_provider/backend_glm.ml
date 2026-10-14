@@ -245,7 +245,28 @@ let%test "glm quota envelopes promote to hard quota" =
          | Some
              (Http_client.ProviderFailure
                 { kind = Http_client.Hard_quota { retry_after = None }; _ }) -> true
-         | Some _ | None -> false)
+         | Some (Http_client.HttpError _) | None | Some (Http_client.NetworkError _)
+         | Some (Http_client.TimeoutError _) | Some (Http_client.AcceptRejected _)
+         | Some (Http_client.ProviderTerminal _)
+         | Some
+             (Http_client.ProviderFailure
+                { kind =
+                    ( Http_client.Hard_quota { retry_after = Some _ }
+                    | Http_client.Capacity_exhausted _
+                    | Http_client.Capability_mismatch _
+                    | Http_client.Cli_policy_invalid _
+                    | Http_client.Cli_startup_failed _
+                    | Http_client.Provider_parse_error _
+                    | Http_client.Provider_wire_error _
+                    | Http_client.Provider_reported_error _
+                    | Http_client.Provider_interrupted
+                    | Http_client.Response_body_too_large _
+                    | Http_client.Empty_completion _
+                    | Http_client.Context_overflow _
+                    | Http_client.Repeating_generation _
+                    | Http_client.Unknown_provider_failure _ )
+                ; _
+                }) -> false)
       | None -> false)
     [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313" ]
 ;;
@@ -272,8 +293,8 @@ let extract_reasoning_content_json (resp : api_response) (json : Yojson.Safe.t)
        | Some r when String.trim r <> "" ->
          (match resp.content with
           | Thinking { content; _ } :: _ when String.equal content r -> resp
-          | _ ->
-            let thinking_block = Thinking { signature = None; content = r } in
+          | (Text _ | (ReasoningDetails _ | (RedactedThinking _ | (ToolUse _ | (ToolResult _ | (Image _ | (Document _ | Audio _)))))))::_
+          | [] | Thinking _::_ -> let thinking_block = Thinking { signature = None; content = r } in
             { resp with content = thinking_block :: resp.content })
        | Some _ | None -> resp)
     | `List [] | `Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
@@ -691,7 +712,11 @@ let%test "extract_reasoning_content prepends thinking block" =
   let result = extract_reasoning_content resp body in
   match result.content with
   | [ Thinking { content = "step by step"; _ }; Text "answer" ] -> true
-  | [] | [ _ ] | [ _; _ ] | _ :: _ :: _ -> false
+  | []
+  | [ (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+      | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _) ]
+  | [ _; _ ]
+  | _ :: _ :: _ :: _ -> false
 ;;
 
 let%test "extract_reasoning_content skips empty reasoning" =

@@ -232,7 +232,7 @@ Board exposes exact Like/Unlike/Emoji/vote events and current counters. It
 also keeps two derived views:
 
 - **Karma**: one `karma_event` per upvote another agent gives a post or comment
-  (`Board_types.karma_event`). A self-upvote, a downvote, and a vote on a deleted
+  (`Board_votes.karma_event`, reached as `Board.karma_event`). A self-upvote, a downvote, and a vote on a deleted
   target make no event. The ledger is rebuilt from the vote log.
 - **Flair**: a display tag the author writes as `[flair:<name>]` in the body,
   read against the fixed catalog `Board_votes.available_flairs`

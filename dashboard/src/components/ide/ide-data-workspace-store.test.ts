@@ -184,7 +184,7 @@ describe('resolveActiveIdeRepositoryId', () => {
   // authority. The path-shape heuristic is gone — when neither the live
   // selection nor the persisted one is usable, the answer is none.
   const repositories = [
-    repo('repo-a', '/Users/dancer/me/workspace/repo-a'),
+    repo('repo-a', '/Users/worker/ws/workspace/repo-a'),
     repo('repo-b', '.masc/repos/repo-b'),
   ]
 
@@ -887,8 +887,8 @@ describe('workspaceTreeIdentity', () => {
   })
 
   it('uses basePath as part of project-source identity', () => {
-    const left = workspaceTreeIdentity({ kind: 'project' }, '/Users/dancer/me')
-    const right = workspaceTreeIdentity({ kind: 'project' }, '/Users/dancer/me/workspace/yousleepwhen/masc')
+    const left = workspaceTreeIdentity({ kind: 'project' }, '/Users/worker/ws')
+    const right = workspaceTreeIdentity({ kind: 'project' }, '/Users/worker/ws/workspace/yousleepwhen/masc')
 
     expect(sameWorkspaceTreeIdentity(left, right)).toBe(false)
   })

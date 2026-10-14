@@ -32,6 +32,23 @@ type effective =
   | Reader of (unit -> string)
   | Credential_presence
 
+(* The operator-facing group a row is listed under. *)
+type category =
+  | Spawn
+  | Turn
+  | Bootstrap
+  | Lifecycle
+  | Heartbeat
+  | Diagnostics
+  | Supervisor
+  | Metrics
+  | Memory
+  | Media
+  | Transport
+  | Sandbox
+  | Web_search
+  | Otel
+
 type setting =
   { env_name : string
   ; exposure : exposure
@@ -41,7 +58,7 @@ type setting =
   ; default_display : string
   ; reload_class : reload_class
   ; consumers : string list
-  ; category : string
+  ; category : category
   ; description : string
   }
 
@@ -111,7 +128,7 @@ let all =
       ~value_kind:Integer
       ~default:"1048576"
       ~consumers:[ "Keeper_agent_run spawn registry" ]
-      ~category:"spawn"
+      ~category:Spawn
       "Bytes of each spawned process stream kept for reading"
   ; setting
       (* The clamp in Env_config_keeper.KeeperLaneGate is [0.001, 600], which
@@ -124,7 +141,7 @@ let all =
       ~value_kind:Float
       ~default:"60"
       ~consumers:[ "Keeper_msg_async submit lane" ]
-      ~category:"turn"
+      ~category:Turn
       "Seconds a submit waits for its lane before reporting it unavailable"
   ; setting
       ~range:(float_range ~min:0.05 ())
@@ -138,7 +155,7 @@ let all =
       ~value_kind:Float
       ~default:"0.25"
       ~consumers:[ "Server_bootstrap_loops lazy-startup poll" ]
-      ~category:"bootstrap"
+      ~category:Bootstrap
       "Lazy-startup completion poll interval in seconds"
   ; setting
       ~range:(float_range ~min:0.05 ())
@@ -152,7 +169,7 @@ let all =
       ~value_kind:Float
       ~default:"0.25"
       ~consumers:[ "Server_bootstrap_loops lifecycle-listener retry" ]
-      ~category:"bootstrap"
+      ~category:Bootstrap
       "Keeper lifecycle-listener retry interval in seconds"
   ; setting
       ~range:(float_range ~min:0.0 ())
@@ -162,7 +179,7 @@ let all =
       ~value_kind:Float
       ~default:"5.0"
       ~consumers:[ "Server_bootstrap_loops post-startup settle" ]
-      ~category:"bootstrap"
+      ~category:Bootstrap
       "Delay between lazy startup completion and keeper bootstrap"
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperReactive.enabled ())))
@@ -171,7 +188,7 @@ let all =
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Keeper_lifecycle_gate_env"; "Keeper_world_observation" ]
-      ~category:"lifecycle"
+      ~category:Lifecycle
       "Global kill-switch for reactive keeper turns"
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperBootstrap.enabled ())))
@@ -180,7 +197,7 @@ let all =
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Keeper_lifecycle_gate_env"; "Keeper_activation_readiness" ]
-      ~category:"lifecycle"
+      ~category:Lifecycle
       "Global switch for automatic Keeper startup and spontaneous turns"
   ; setting
       ~effective:
@@ -195,7 +212,7 @@ let all =
       ~default:Env_config_keeper.KeeperAutonomous.default_wake_prompt
       ~reload_class:Next_turn
       ~consumers:[ "Keeper_unified_prompt" ]
-      ~category:"lifecycle"
+      ~category:Lifecycle
       "User message an autonomous turn is woken with, before any keeper override"
   ; setting
       ~range:(int_range ~min:1 ())
@@ -205,7 +222,7 @@ let all =
       ~value_kind:Integer
       ~default:"300"
       ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
-      ~category:"heartbeat"
+      ~category:Heartbeat
       "Keeper heartbeat cycle interval in seconds"
   ; setting
       ~range:(int_range ~min:15 ~max:3600 ())
@@ -215,7 +232,7 @@ let all =
       ~value_kind:Integer
       ~default:"300"
       ~consumers:[ "Env_config_keeper.KeeperRuntime"; "Keeper_heartbeat_loop" ]
-      ~category:"heartbeat"
+      ~category:Heartbeat
       "Keepalive snapshot interval in seconds"
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.WorkAsHeartbeat.enabled ())))
@@ -224,7 +241,7 @@ let all =
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Env_config_keeper.WorkAsHeartbeat"; "Keeper_heartbeat_loop" ]
-      ~category:"heartbeat"
+      ~category:Heartbeat
       "Count successful workspace work heartbeat as presence proof"
   ; setting
       ~range:(float_range ~min:0.1 ~max:10.0 ())
@@ -234,7 +251,7 @@ let all =
       ~value_kind:Float
       ~default:"0.5"
       ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
-      ~category:"heartbeat"
+      ~category:Heartbeat
       "Interruptible heartbeat sleep chunk in seconds"
   ; setting
       ~range:
@@ -253,7 +270,7 @@ let all =
         ; "Keeper_turn_driver"
         ; "Keeper_heartbeat_loop"
         ]
-      ~category:"heartbeat"
+      ~category:Heartbeat
       "Fallback cap for provider rests without usable reset hints, in seconds; provider hints are preserved"
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperWireCapture.enabled ())))
@@ -262,7 +279,7 @@ let all =
       ~value_kind:Boolean
       ~default:"false"
       ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture" ]
-      ~category:"diagnostics"
+      ~category:Diagnostics
       "Enable diagnostic provider wire capture"
   ; (* Sized in TOML beside the switch that turns the feature on. These two were
        [Env_only] while [wire_capture.enabled] was [Toml_and_env], so the table
@@ -284,7 +301,7 @@ let all =
       ~value_kind:Integer
       ~default:"3"
       ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture retention" ]
-      ~category:"diagnostics"
+      ~category:Diagnostics
       "Wire-capture retention in days"
   ; setting
       ~range:(int_range ~min:1 ~max:1073741824 ())
@@ -294,7 +311,7 @@ let all =
       ~value_kind:Integer
       ~default:"67108864"
       ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture retention" ]
-      ~category:"diagnostics"
+      ~category:Diagnostics
       "Maximum active and retained wire-capture bytes"
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperRuntime.debug ())))
@@ -303,7 +320,7 @@ let all =
       ~value_kind:Boolean
       ~default:"false"
       ~consumers:[ "Env_config_keeper.KeeperRuntime"; "Keeper logging" ]
-      ~category:"diagnostics"
+      ~category:Diagnostics
       "Enable keeper debug logging"
   ; setting
       ~range:
@@ -317,7 +334,7 @@ let all =
       ~value_kind:Integer
       ~default:(display_int Env_config_keeper.KeeperTurn.batch_limit_default)
       ~consumers:[ "Keeper_config.keeper_batch_limit"; "Keeper unified turn" ]
-      ~category:"turn"
+      ~category:Turn
       "Maximum batch size processed by one keeper cycle"
   ; setting
       ~range:
@@ -331,7 +348,7 @@ let all =
       ~value_kind:Float
       ~default:(display_float Env_config_keeper.KeeperTurn.temperature_default)
       ~consumers:[ "Keeper_config.keeper_unified_temperature"; "Runtime_inference" ]
-      ~category:"turn"
+      ~category:Turn
       "Fallback sampling temperature for keeper turns"
   ; setting
       ~effective:
@@ -345,7 +362,7 @@ let all =
       ~value_kind:Boolean
       ~default:provider_default_display
       ~consumers:[ "Keeper_config.keeper_enable_thinking"; "Keeper_agent_run" ]
-      ~category:"turn"
+      ~category:Turn
       "Pass the thinking-mode request to the selected runtime"
   ; setting
       ~range:
@@ -369,7 +386,7 @@ let all =
            "(failsafe %g)"
            Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec)
       ~consumers:[ "Keeper_runtime_resolved"; "Runtime_agent_context" ]
-      ~category:"turn"
+      ~category:Turn
       "Streaming provider inter-line idle timeout"
   ; setting
       ~range:
@@ -393,7 +410,7 @@ let all =
            "(failsafe %g)"
            Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec)
       ~consumers:[ "Keeper_runtime_resolved"; "Runtime_agent_context" ]
-      ~category:"turn"
+      ~category:Turn
       "Streaming provider first-event (TTFT/prefill) timeout"
   ; setting
       ~range:
@@ -422,7 +439,7 @@ let all =
         ; "Keeper_provider_subcall"
         ; "Keeper_identity_tools MCP transport"
         ]
-      ~category:"turn"
+      ~category:Turn
       "No-progress threshold for a provider call attempt and a tool's provider sub-call"
   ; setting
       ~range:
@@ -440,7 +457,7 @@ let all =
       ~value_kind:Float
       ~default:"(none)"
       ~consumers:[ "Keeper_runtime_resolved"; "Runtime_agent_context sync body reader" ]
-      ~category:"turn"
+      ~category:Turn
       "Non-streaming provider response-body deadline"
   ; setting
       ~range:(float_range ~min:0.1 ())
@@ -450,7 +467,7 @@ let all =
       ~value_kind:Float
       ~default:"2.0"
       ~consumers:[ "Keeper_crash_persistence drain fiber" ]
-      ~category:"turn"
+      ~category:Turn
       "Crash persistence drain interval in seconds"
   ; setting
       ~range:(int_range ~min:10 ~max:1000 ())
@@ -460,7 +477,7 @@ let all =
       ~value_kind:Integer
       ~default:"100"
       ~consumers:[ "Keeper proactive stage timing" ]
-      ~category:"turn"
+      ~category:Turn
       "Stage timing telemetry ring capacity"
   ; setting
       ~range:(float_range
@@ -472,7 +489,7 @@ let all =
       ~value_kind:Float
       ~default:"30.0"
       ~consumers:[ "Env_config_keeper_supervisor"; "Keeper_supervisor" ]
-      ~category:"supervisor"
+      ~category:Supervisor
       "Supervisor sweep interval in seconds"
   ; setting
       ~range:(int_range ~min:0 ())
@@ -482,7 +499,7 @@ let all =
       ~value_kind:Integer
       ~default:"10485760"
       ~consumers:[ "Env_config_keeper.KeeperMetrics"; "Keeper_types_support.append_jsonl_line" ]
-      ~category:"metrics"
+      ~category:Metrics
       "Auxiliary Keeper JSONL log size before rotation (bytes; 0 disables)"
   ; setting
       ~range:(int_range ~min:Env_config_keeper.KeeperMetrics.max_rotated_files_min ())
@@ -492,7 +509,7 @@ let all =
       ~value_kind:Integer
       ~default:"1"
       ~consumers:[ "Env_config_keeper.KeeperMetrics"; "Keeper_types_support.append_jsonl_line" ]
-      ~category:"metrics"
+      ~category:Metrics
       "Auxiliary Keeper JSONL log backups retained (0 discards old versions)"
   ; setting
       ~range:(int_range ~min:0 ())
@@ -502,7 +519,7 @@ let all =
       ~value_kind:Integer
       ~default:"0"
       ~consumers:[ "Keeper_types_support.keeper_metrics_storage"; "Keeper_metrics_storage" ]
-      ~category:"metrics"
+      ~category:Metrics
       "Date-sharded Keeper metric byte target (0 keeps all; oldest completed files pruned)"
   ; setting
       ~reload_class:Next_turn
@@ -512,7 +529,7 @@ let all =
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Env_config_keeper.KeeperMemoryOs"; "Keeper memory recall" ]
-      ~category:"memory"
+      ~category:Memory
       "Enable memory recall prompt injection"
   ; setting
       ~range:(int_range ~min:1 ())
@@ -523,7 +540,7 @@ let all =
       ~value_kind:Integer
       ~default:"524288"
       ~consumers:[ "Env_config_keeper.KeeperMemoryOs"; "Keeper memory commits" ]
-      ~category:"memory"
+      ~category:Memory
       "Maximum rendered current facts bytes per Keeper"
   ; setting
       ~range:(int_range ~min:1 ())
@@ -533,7 +550,7 @@ let all =
       ~value_kind:Integer
       ~default:"30"
       ~consumers:[ "Keeper_librarian"; "Keeper_tool_memory_runtime" ]
-      ~category:"memory"
+      ~category:Memory
       "Ordinary current category count target, including custom categories; advisory"
   ; setting
       ~range:(int_range ~min:1 ())
@@ -543,8 +560,17 @@ let all =
       ~value_kind:Integer
       ~default:"30"
       ~consumers:[ "Keeper_librarian"; "Keeper_tool_memory_runtime" ]
-      ~category:"memory"
+      ~category:Memory
       "Ordinary current items per category target; advisory, not a token budget"
+  ; setting
+      ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperWikiContents.enabled ())))
+      ~env_name:Env_config_keeper.KeeperWikiContents.enabled_env_key
+      ~exposure:(Toml_and_env "wiki_contents.enabled")
+      ~value_kind:Boolean
+      ~default:"true"
+      ~consumers:[ "Keeper_wiki_contents" ]
+      ~category:Turn
+      "Whether each Keeper turn carries the wiki table of contents"
   ; setting
       ~reload_class:Next_turn
       ~effective:
@@ -562,7 +588,7 @@ let all =
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Env_config_keeper.KeeperMemoryOs"; "Keeper memory librarian" ]
-      ~category:"memory"
+      ~category:Memory
       "Enable post-turn memory librarian extraction"
   ; setting
       ~range:(int_range ~min:1 ~max:10485760 ())
@@ -572,7 +598,7 @@ let all =
       ~value_kind:Integer
       ~default:"5242880"
       ~consumers:[ "Keeper vision tool" ]
-      ~category:"media"
+      ~category:Media
       "Maximum image bytes accepted by the vision tool"
   ; setting
       ~range:(int_range ~min:4096 ~max:131072 ())
@@ -582,7 +608,7 @@ let all =
       ~value_kind:Integer
       ~default:"65536"
       ~consumers:[ "Keeper vision tool" ]
-      ~category:"media"
+      ~category:Media
       "Output-token budget for the vision tool, shared by reasoning and answer"
   ; setting
       ~range:(float_range ~min:0.0 ~max:5.0 ())
@@ -592,7 +618,7 @@ let all =
       ~value_kind:Float
       ~default:"0.05"
       ~consumers:[ "Keeper vision runtime failover" ]
-      ~category:"media"
+      ~category:Media
       "Base delay between vision runtime candidates"
   ; setting
       ~range:(float_range ~min:0.0 ~max:30.0 ())
@@ -602,7 +628,7 @@ let all =
       ~value_kind:Float
       ~default:"0.25"
       ~consumers:[ "Keeper vision runtime failover" ]
-      ~category:"media"
+      ~category:Media
       "Maximum delay between vision runtime candidates"
   ; setting
       ~range:(int_range ~min:256 ~max:8192 ())
@@ -612,7 +638,7 @@ let all =
       ~value_kind:Integer
       ~default:"1568"
       ~consumers:[ "Keeper_vision_downscale" ]
-      ~category:"media"
+      ~category:Media
       "Maximum image dimension (longest edge) sent to vision models before downscaling"
   ; setting
       ~range:(int_range ~min:1 ~max:52428800 ())
@@ -622,7 +648,7 @@ let all =
       ~value_kind:Integer
       ~default:"10485760"
       ~consumers:[ "Keeper generated-media store" ]
-      ~category:"media"
+      ~category:Media
       "Maximum bytes accepted for one generated-media artifact"
   ; setting
       ~range:(int_range ~min:1 ~max:268435456 ())
@@ -632,7 +658,7 @@ let all =
       ~value_kind:Integer
       ~default:"67108864"
       ~consumers:[ "Keeper peer artifact export" ]
-      ~category:"media"
+      ~category:Media
       "Maximum bytes a Keeper may hand to a peer as one exported artifact"
   ; setting
       ~range:(int_range ~min:1 ~max:5368709120 ())
@@ -642,7 +668,7 @@ let all =
       ~value_kind:Integer
       ~default:"524288000"
       ~consumers:[ "Keeper generated-media cleanup" ]
-      ~category:"media"
+      ~category:Media
       "Maximum retained generated-media directory bytes"
   ; setting
       ~range:(float_range ~min:1.0 ~max:2592000.0 ())
@@ -652,7 +678,7 @@ let all =
       ~value_kind:Float
       ~default:"86400.0"
       ~consumers:[ "Keeper generated-media cleanup" ]
-      ~category:"media"
+      ~category:Media
       "Maximum generated-media artifact age in seconds"
   ; setting
       ~range:(float_range ~min:1.0 ~max:60.0 ())
@@ -662,7 +688,7 @@ let all =
       ~value_kind:Float
       ~default:"5.0"
       ~consumers:[ "Keeper gRPC heartbeat client" ]
-      ~category:"transport"
+      ~category:Transport
       "Backoff between keeper gRPC reconnect attempts"
   ; setting
       ~range:(int_range ~min:1 ~max:256 ())
@@ -676,7 +702,7 @@ let all =
         [ "Env_config_keeper.KeeperAdmissionBounds"
         ; "Keeper_heartbeat_stimulus_intake ready_batch"
         ]
-      ~category:"turn"
+      ~category:Turn
       "Maximum durable queue selections admitted into one turn; the rest stay pending for a later turn (#29365)"
   ; (* The workspace default for a microVM guest's size. A keeper's own
        [microvm_memory] / [microvm_cpus] wins per dimension. Read at each
@@ -698,7 +724,7 @@ let all =
         [ "Keeper_turn_sandbox_runtime microvm boot"
         ; "Keeper_sandbox_control resource_config"
         ]
-      ~category:"sandbox"
+      ~category:Sandbox
       "MicroVM guest memory: a whole number followed by m or g"
   ; setting
       ~range:(int_range ~min:1 ())
@@ -717,7 +743,7 @@ let all =
         [ "Keeper_turn_sandbox_runtime microvm boot"
         ; "Keeper_sandbox_control resource_config"
         ]
-      ~category:"sandbox"
+      ~category:Sandbox
       "MicroVM guest CPU count"
   ; setting
       ~effective:
@@ -731,7 +757,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "SearXNG base URL"
   ; setting
       ~effective:(Reader (fun () -> display_string_option (Env_config_runtime.Tools.web_search_provider_opt ())))
@@ -740,7 +766,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Web-search provider override"
   ; setting
       ~effective:
@@ -753,7 +779,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Web-search provider fallback order"
   ; setting
       ~effective:(Reader (fun () -> display_string_option (Env_config_runtime.Tools.web_search_fallbacks_opt ())))
@@ -762,7 +788,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Web-search fallback provider list"
     (* Provider credentials are Env_only on purpose: runtime.toml is
        committed, so secrets never gain a TOML key. Presence of a key
@@ -774,7 +800,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Brave Search API key (admits the brave and brave_llm_context providers)"
   ; setting
       ~effective:Credential_presence
@@ -783,7 +809,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Tavily API key (admits the tavily provider)"
   ; setting
       ~effective:Credential_presence
@@ -792,7 +818,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Exa API key (admits the exa provider)"
   ; setting
       ~effective:Credential_presence
@@ -801,7 +827,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Bing Search API key (admits the bing_api provider)"
   ; setting
       ~effective:Credential_presence
@@ -810,7 +836,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Azure-issued Bing Search API key (same admission as BING_SEARCH_API_KEY)"
   ; setting
       ~effective:Credential_presence
@@ -819,7 +845,7 @@ let all =
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Ollama account API key (admits the ollama provider)"
   ; setting
       ~range:(int_range ~min:1 ~max:60 ())
@@ -829,7 +855,7 @@ let all =
       ~value_kind:Integer
       ~default:"15"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Web-search request timeout in seconds"
   ; setting
       ~range:(float_range ~min:0.0 ())
@@ -839,7 +865,7 @@ let all =
       ~value_kind:Float
       ~default:"900.0"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
-      ~category:"web_search"
+      ~category:Web_search
       "Web-search result cache TTL in seconds"
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_runtime.Otel.enabled ())))
@@ -848,7 +874,7 @@ let all =
       ~value_kind:Boolean
       ~default:"false"
       ~consumers:[ "Otel_config.enabled"; "Otel_spans" ]
-      ~category:"otel"
+      ~category:Otel
       "Export OpenTelemetry spans and metrics to the OTLP endpoint"
   ]
 ;;
@@ -909,6 +935,23 @@ let value_range_label = function
       "%s, %s]"
       lower
       (Option.fold ~none:"+inf" ~some:(Printf.sprintf "%g") max_inclusive)
+;;
+
+let category_label = function
+  | Spawn -> "spawn"
+  | Turn -> "turn"
+  | Bootstrap -> "bootstrap"
+  | Lifecycle -> "lifecycle"
+  | Heartbeat -> "heartbeat"
+  | Diagnostics -> "diagnostics"
+  | Supervisor -> "supervisor"
+  | Metrics -> "metrics"
+  | Memory -> "memory"
+  | Media -> "media"
+  | Transport -> "transport"
+  | Sandbox -> "sandbox"
+  | Web_search -> "web_search"
+  | Otel -> "otel"
 ;;
 
 let reload_class_label = function
@@ -1001,7 +1044,7 @@ let setting_to_yojson row =
     ; "reload_class", `String (reload_class_label row.reload_class)
     ; "requires_restart", `Bool (requires_restart row)
     ; "consumers", `List (List.map (fun value -> `String value) row.consumers)
-    ; "category", `String row.category
+    ; "category", `String (category_label row.category)
     ; "description", `String row.description
     ]
 ;;

@@ -183,15 +183,12 @@ let params_object stage fields =
 
 let protocol_version params =
   let stage = "MCP initialize" in
-  let* () =
-    Mcp_transport_protocol.validate_initialize_params (Some params)
+  let* requested =
+    Mcp_transport_protocol.initialize_protocol_version (Some params)
     |> Result.map_error (fun detail -> { stage; detail })
   in
-  match Mcp_transport_protocol.get_field "protocolVersion" params with
-  | Some (`String requested) ->
-    Mcp_transport_protocol.validate_protocol_version requested
-    |> Result.map_error (fun detail -> { stage; detail })
-  | None | Some _ -> error stage "invalid protocolVersion"
+  Mcp_transport_protocol.validate_protocol_version requested
+  |> Result.map_error (fun detail -> { stage; detail })
 ;;
 
 let tool_result_json ~id (result : tool_result) =

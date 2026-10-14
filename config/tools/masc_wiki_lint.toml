@@ -1,0 +1,29 @@
+name = "masc_wiki_lint"
+description = """
+Check the wiki and report what is wrong with it, without changing anything.
+
+Reads every page and returns counts and a list of findings: broken_link (a [text](page.md) link to a page that does not exist), unsupported_link (a link shape the check does not follow: an anchor, a relative path, a [[wikilink]]), orphan (no page links to it), orphan_unconfirmed (no readable page links to it, but a page whose header does not read could), missing_sources (no ## Sources section with a repo:, board:, artifact: or url: line), hearsay_only (only said: lines), unreadable_page (its header does not read, with the reason). Writes nothing and calls no model. Findings are sorted by page and carry the line number; when the list is long the response ends with a next_cursor to pass back as cursor."""
+
+# Held back from the request until the model asks for it by name.
+defer_loading = true
+
+[[params]]
+name = "page"
+type = "string"
+description = "Only findings about this page (the page name, without .md). The whole wiki is still read, because an orphan is decided from every page."
+
+[[params]]
+name = "kind"
+type = "string"
+description = "Only findings of this kind."
+enum = ["broken_link", "unsupported_link", "orphan", "orphan_unconfirmed", "missing_sources", "hearsay_only", "unreadable_page"]
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "How many findings to return at most (default 50, at most 200). The response also stops early when it reaches about 12 KB."
+
+[[params]]
+name = "cursor"
+type = "string"
+description = "The next_cursor of the previous response, to read the findings after it."

@@ -54,6 +54,10 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "lib"))
+
+import masc_base_path  # noqa: E402
+
 # GOLD: the single irreducible HUMAN-anchored calibration set — the one manual
 # artifact left after moving all measurement to the LLM judge. It exists to keep the
 # judge honest (anti-rig): a judge that cannot reproduce these labels is not trusted.
@@ -432,6 +436,16 @@ def deterministic_sample(items: list, n: int) -> list:
     return [items[int(i * stride)] for i in range(n)]
 
 
+def config_path(
+    ap: argparse.ArgumentParser, named: str | None, leaf: str, flag: str
+) -> str:
+    """[named] as given; unnamed, [leaf] under MASC_BASE_PATH/.masc/config.
+    A usage error when it is unnamed and no base is set."""
+    if named is not None:
+        return named
+    return str(masc_base_path.require(ap, None, flag) / ".masc" / "config" / leaf)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -439,22 +453,14 @@ def main() -> int:
     )
     ap.add_argument(
         "--store-dir",
-        default=os.path.join(
-            os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"),
-            ".masc",
-            "config",
-            "keepers",
-        ),
+        default=None,
+        help="keeper fact store (default: MASC_BASE_PATH/.masc/config/keepers)",
     )
     ap.add_argument(
         "--runtime-config",
-        default=os.path.join(
-            os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"),
-            ".masc",
-            "config",
-            "runtime.toml",
-        ),
-        help="masc runtime.toml that defines the judge provider",
+        default=None,
+        help="masc runtime.toml that defines the judge provider "
+        "(default: MASC_BASE_PATH/.masc/config/runtime.toml)",
     )
     ap.add_argument(
         "--judge-provider",
@@ -475,7 +481,16 @@ def main() -> int:
     ap.add_argument("--out", default="", help="relabel mode: output JSONL path")
     args = ap.parse_args()
 
-    cfg = load_runtime_cfg(args.runtime_config)
+    runtime_config = config_path(ap, args.runtime_config, "runtime.toml", "--runtime-config")
+    # A calibrate run reads no fact store, so it is not refused for lacking
+    # one. The other modes learn it before any judge call is paid for.
+    store_dir = (
+        None
+        if args.mode == "calibrate"
+        else config_path(ap, args.store_dir, "keepers", "--store-dir")
+    )
+
+    cfg = load_runtime_cfg(runtime_config)
     if args.judge_provider or args.judge_model:
         if not (args.judge_provider and args.judge_model):
             sys.exit("--judge-provider and --judge-model must be given together")
@@ -492,11 +507,11 @@ def main() -> int:
     acc = calibrate(backend, args.min_accuracy)
     if acc < args.min_accuracy:
         return 2  # anti-rig: refuse to report live numbers with an untrustworthy judge
-    if args.mode == "calibrate":
+    if store_dir is None:
         return 0
 
-    shared_facts = load_facts(args.store_dir, only_shared=True)
-    keeper_facts = load_facts(args.store_dir, include_shared=False)
+    shared_facts = load_facts(store_dir, only_shared=True)
+    keeper_facts = load_facts(store_dir, include_shared=False)
 
     if args.mode == "measure":
         if shared_facts:

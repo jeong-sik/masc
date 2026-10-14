@@ -213,10 +213,7 @@ let exact_action (observation : observation) =
   | { identity = Some identity; tool_name = Some tool_name; origin = Built_in }
     when valid_identity identity && String.trim tool_name <> "" ->
     Some (identity, tool_name)
-  | { origin = Mcp_wrapper; _ }
-  | { identity = None; _ }
-  | { tool_name = None; _ }
-  | { identity = Some _; tool_name = Some _ } -> None
+  | { identity = Some _ | None; tool_name = Some _ | None; origin = Built_in | Mcp_wrapper } -> None
 ;;
 
 let observe_exact_action ~official_turn ~observe observation =
@@ -271,7 +268,8 @@ let degrade_on_admission ~posture ~none_supported () =
   match (posture, none_supported) with
   | Native_full, _ -> Native_read
   | Native_none, false -> Native_read
-  | posture, _ -> posture
+  | Native_none, true -> Native_none
+  | Native_read, (true | false) -> Native_read
 ;;
 
 (* Claude Code's own schema lookup, and the reason every posture names it.

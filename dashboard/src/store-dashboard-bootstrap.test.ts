@@ -527,7 +527,7 @@ describe('refreshKeeperRuntimeStatus', () => {
   it('preserves omitted shell Keeper and configured counts as missing', async () => {
     apiMocks.fetchDashboardShell.mockResolvedValue({
       generated_at: '2026-06-25T12:00:00Z',
-      status: { project: 'me' },
+      status: { project: 'ws' },
       counts: { agents: 2, tasks: 7 },
       auth: null,
       config_resolution: null,
@@ -535,7 +535,7 @@ describe('refreshKeeperRuntimeStatus', () => {
     })
     apiMocks.fetchDashboardExecution.mockResolvedValue({
       generated_at: '2026-06-25T12:00:00Z',
-      status: { project: 'me' },
+      status: { project: 'ws' },
       agents: [],
       tasks: [],
       messages: [],
@@ -556,7 +556,7 @@ describe('refreshKeeperRuntimeStatus', () => {
   it('force-refreshes post-action runtime status by default', async () => {
     apiMocks.fetchDashboardShell.mockResolvedValue({
       generated_at: '2026-06-25T12:00:00Z',
-      status: { project: 'me' },
+      status: { project: 'ws' },
       counts: { agents: 0, tasks: 0, keepers: 1, total_runtimes: 1 },
       configured_keepers: 1,
       auth: null,
@@ -565,7 +565,7 @@ describe('refreshKeeperRuntimeStatus', () => {
     })
     apiMocks.fetchDashboardExecution.mockResolvedValue({
       generated_at: '2026-06-25T12:00:00Z',
-      status: { project: 'me' },
+      status: { project: 'ws' },
       agents: [],
       tasks: [],
       messages: [],
@@ -585,7 +585,7 @@ describe('refreshKeeperRuntimeStatus', () => {
   it('refreshes execution and light shell runtime status without full bootstrap', async () => {
     apiMocks.fetchDashboardShell.mockResolvedValue({
       generated_at: '2026-06-25T12:00:00Z',
-      status: { project: 'me' },
+      status: { project: 'ws' },
       counts: { agents: 0, tasks: 7, keepers: 1, total_runtimes: 1 },
       configured_keepers: 13,
       auth: null,
@@ -593,11 +593,11 @@ describe('refreshKeeperRuntimeStatus', () => {
       runtime_resolution: {
         status: 'ready',
         warnings: [],
-        base_path: { path: '/tmp/me', exists: true, source: 'input' },
-        workspace_path: { path: '/tmp/me', exists: true, source: 'workspace' },
-        resolved_base_path: { path: '/tmp/me', exists: true, source: 'resolved_base' },
-        data_root: { path: '/tmp/me/.masc', exists: true, source: 'runtime_data' },
-        prompt_markdown_dir: { path: '/tmp/me/.masc/config/prompts', exists: true, source: 'prompt_registry' },
+        base_path: { path: '/tmp/ws', exists: true, source: 'input' },
+        workspace_path: { path: '/tmp/ws', exists: true, source: 'workspace' },
+        resolved_base_path: { path: '/tmp/ws', exists: true, source: 'resolved_base' },
+        data_root: { path: '/tmp/ws/.masc', exists: true, source: 'runtime_data' },
+        prompt_markdown_dir: { path: '/tmp/ws/.masc/config/prompts', exists: true, source: 'prompt_registry' },
         build: {
           release_version: '0.19.48',
           commit: 'abcdef1',
@@ -612,7 +612,7 @@ describe('refreshKeeperRuntimeStatus', () => {
     })
     apiMocks.fetchDashboardExecution.mockResolvedValue({
       generated_at: '2026-06-25T12:00:00Z',
-      status: { project: 'me' },
+      status: { project: 'ws' },
       agents: [],
       tasks: [],
       messages: [],

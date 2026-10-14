@@ -46,6 +46,18 @@ let subscription_model_rows =
   ; "gpt-6-astra", "gpt-6-astra"
   ; "gpt-6-luna", "gpt-6-luna"
   ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
+  ; "claude-opus-5-5-high", "claude-opus-5-5"
+  ; "claude-opus-5-5-medium", "claude-opus-5-5"
+  ; "claude-opus-5-5-low", "claude-opus-5-5"
+  ; "claude-sonnet-5-5-high", "claude-sonnet-5-5"
+  ; "claude-sonnet-5-5-medium", "claude-sonnet-5-5"
+  ; "claude-sonnet-5-5-low", "claude-sonnet-5-5"
+  ; "gemini-4-argon-high", "gemini-4-argon"
+  ; "gemini-4-argon-medium", "gemini-4-argon"
+  ; "gemini-4-argon-low", "gemini-4-argon"
+  ; "gemini-3.8-flash-high", "gemini-3.8-flash"
+  ; "gemini-3.8-flash-medium", "gemini-3.8-flash"
+  ; "gemini-3.8-flash-low", "gemini-3.8-flash"
   ; "gemini-3.7-flash-high", "gemini-3.7-flash"
   ; "gemini-3.7-flash-medium", "gemini-3.7-flash"
   ; "gemini-3.7-flash-low", "gemini-3.7-flash"
@@ -56,6 +68,27 @@ let subscription_model_rows =
   ; "gemini-3.1-pro-high", "gemini-3.1-pro"
   ; "gpt-oss-120b-medium", "gpt-oss-120b"
   ]
+;;
+
+(* An adaptive completion request on a 5.5 row carries the server-side
+   thinking-block binding (#42713): [type] stays "adaptive" and
+   [block_binding.prefix_mismatch_behavior] is "drop_block". The field is only
+   valid with the [thinking-binding-controls-2026-08-01] beta header, which the
+   request headers must add for exactly these bodies.
+   https://platform.claude.com/docs/en/build-with-claude/preserved-thinking *)
+let is_adaptive_with_drop_block thinking =
+  Yojson.Safe.Util.member "type" thinking = `String "adaptive"
+  && Yojson.Safe.Util.member "block_binding" thinking
+     = `Assoc [ "prefix_mismatch_behavior", `String "drop_block" ]
+;;
+
+let beta_header_values headers =
+  List.concat_map
+    (fun (name, value) ->
+      if String.equal (String.lowercase_ascii name) "anthropic-beta"
+      then String.split_on_char ',' value |> List.map String.trim
+      else [])
+    headers
 ;;
 
 (* Haiku 5.5 departs from the "anthropic" base in three places, and each one is
@@ -91,9 +124,20 @@ let test_haiku_5_5_row_reaches_the_wire () =
          (Capabilities.for_model_id_catalog model_id));
     check bool "default leaves adaptive choice to the provider" true
       (thinking (body (config ())) = `Null);
-    check bool "thinking on asks for adaptive" true
-      (thinking (body (config ~enable_thinking:true ()))
-       = `Assoc [ "type", `String "adaptive" ]);
+    check bool "thinking on asks for adaptive and binds its blocks" true
+      (is_adaptive_with_drop_block (thinking (body (config ~enable_thinking:true ()))));
+    (let adaptive_body =
+       Backend.build_request ~config:(config ~enable_thinking:true ()) ~messages ()
+     in
+     check bool "the binding field brings its beta header" true
+       (List.mem "thinking-binding-controls-2026-08-01"
+          (beta_header_values (Backend.request_headers ~body:adaptive_body []))));
+    check bool "a request without the binding sends no beta header" true
+      (beta_header_values
+         (Backend.request_headers
+            ~body:(Backend.build_request ~config:(config ~enable_thinking:false ()) ~messages ())
+            [])
+       = []);
     let off = body (config ~enable_thinking:false ()) in
     check bool "thinking off sends disabled" true
       (thinking off = `Assoc [ "type", `String "disabled" ]);
@@ -226,7 +270,7 @@ let test_subscription_models_resolve_their_own_rows () =
   in
   List.iter
     (fun (model_id, expected_prefix) ->
-       match Model_catalog.lookup catalog model_id with
+       match Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) with
        | None ->
          failf
            "%s resolves to no catalog row; Runtime disables uncatalogued runtimes at boot"
@@ -284,8 +328,8 @@ let test_sonnet_5_5_thinking_modes_reach_the_wire () =
           ; (fun ~config ~messages () -> Backend.build_count_tokens_request ~config ~messages ())
           ];
         check bool "higher efforts remain available with adaptive thinking" true
-          (thinking (body (config ~enable_thinking:true ~reasoning_effort:effort ()))
-           = `Assoc [ "type", `String "adaptive" ]))
+          (is_adaptive_with_drop_block
+             (thinking (body (config ~enable_thinking:true ~reasoning_effort:effort ())))))
       [ Effort.XHigh; Max ])
 ;;
 
@@ -324,6 +368,8 @@ let subscription_model_efforts =
   ; None, "gpt-6.1-sol", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-astra", [ "low"; "medium"; "high"; "xhigh"; "max"; "ultra" ]
   ; None, "gpt-6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gemini-4-argon-high", [ "low"; "medium"; "high" ]
+  ; None, "gemini-3.8-flash-high", [ "low"; "medium"; "high" ]
   ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
   ; None, "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
   ]
@@ -338,8 +384,9 @@ let test_subscription_models_admit_their_reasoning_efforts () =
     (fun (provider_name, model_id, expected) ->
        let entry =
          match provider_name with
-         | None -> Model_catalog.lookup catalog model_id
-         | Some provider_name -> Model_catalog.lookup_for_provider catalog ~provider_name ~model_id
+         | None -> Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
+         | Some provider_name -> Model_catalog.lookup_for_provider catalog ~provider_name
+             ~model_id:(Llm_provider.Model_identifiers.Model_id.of_string_exn model_id)
        in
        match entry with
        | None -> failf "%s resolves to no catalog row" model_id
@@ -401,7 +448,7 @@ let test_anthropic_rows_price_cache_tokens () =
   in
   List.iter
     (fun (model_id, expected_write, expected_read) ->
-       match Model_catalog.lookup catalog model_id with
+       match Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) with
        | None -> failf "%s resolves to no catalog row" model_id
        | Some (entry : Model_catalog.model_entry) ->
          check

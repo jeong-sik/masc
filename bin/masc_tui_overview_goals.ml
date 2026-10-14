@@ -107,7 +107,11 @@ let is_overdue ~now (goal : Tui_decode.overview_goal) =
   match (goal.og_phase, goal.og_due_date, now) with
   | (Goal_phase.Executing | Goal_phase.Verifying), Some raw, Some now ->
       Goal_due.is_overdue ~now (Goal_due.read (Some raw))
-  | _ -> false
+  | ( ( Goal_phase.Executing | Goal_phase.Verifying
+      | Goal_phase.Awaiting_confirmation | Goal_phase.Completed
+      | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ )
+    , (None | Some _)
+    , (None | Some _) ) -> false
 
 let overdue_text ~now (goal : Tui_decode.overview_goal) =
   if is_overdue ~now goal then Some (Theme.warn () ^ "overdue" ^ Ansi.reset)

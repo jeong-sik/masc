@@ -84,7 +84,13 @@ let observation_to_yojson = function
 
 let permits_publication = function
   | Complete {result = Judged {verdict = Needs_revision; _}; _} -> false
-  | Skipped _ | Checking _ | Complete _ -> true
+  | Skipped _ | Checking _
+  | Complete
+      { result =
+          ( Judged { verdict = Faithful | Insufficient_evidence; _ }
+          | Invalid_answer _ | Failed _ )
+      ; _
+      } -> true
 
 let run ?(observe = fun _ -> ()) ?clock ~keeper_id ~input ~proposed () =
   let finish observation = observe observation; observation in

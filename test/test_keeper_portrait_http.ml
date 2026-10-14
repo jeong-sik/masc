@@ -594,7 +594,7 @@ let test_router_strict_auth_needs_a_read_token () =
     check int "roster refuses changed base before dispatch" 409
       (get ~router ~token:reader (roster_bound (base ^ "/other") root)).status;
     check int "same base with a different MASC root is refused" 409
-      (get ~router ~token:reader (roster_bound base (root ^ "/clusters/other"))).status;
+      (get ~router ~token:reader (roster_bound base (root ^ "/other-store"))).status;
     check int "roster refuses blank workspace authority" 400
       (get ~router ~token:reader (roster_bound " " root)).status;
     check int "roster refuses incomplete workspace identity" 400
@@ -697,7 +697,7 @@ let test_directives_bind_full_workspace_before_effects () =
           check int (label ^ " " ^ url ^ " " ^ action) status response.status;
           check bool "workspace refusal leaves metadata unchanged" true
             (before = file_state meta_path))
-          [ "changed root", 409, ["expected_workspace", expected base (root ^ "/clusters/other")]
+          [ "changed root", 409, ["expected_workspace", expected base (root ^ "/other-store")]
           ; "changed base", 409, ["expected_workspace", expected (base ^ "/other") root]
           ; "partial identity", 400, ["expected_workspace", `Assoc ["base_path", `String base]]
           ; "duplicate identity", 400, ["expected_workspace", expected base root; "expected_workspace", expected base root]

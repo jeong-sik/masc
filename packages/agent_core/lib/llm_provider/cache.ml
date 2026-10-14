@@ -19,12 +19,10 @@ let opt_json f = function
   | Some v -> f v
 ;;
 
-(* The key decides whether a stored response may answer a later request, so
-   every field that changes what the provider is asked must reach it. The
-   record is destructured field by field with warning 9 on: a field added to
-   [Provider_config.t] stops the build here until someone decides which side
-   it is on. Over-separating only costs a cache hit; under-separating returns
-   a response produced under a different request (#27906). *)
+(* Conservative caller and endpoint identity. Provider projection and catalog
+   defaults are bound by [http_request_fingerprint] below; this component
+   alone does not identify a completed HTTP request. The exhaustive config
+   pattern keeps additions explicit. *)
 let request_fingerprint
       ~(config : Provider_config.t)
       ~(messages : Types.message list)
@@ -60,6 +58,7 @@ let request_fingerprint
                      ; cache_extended_ttl
                      ; supports_structured_output_override
                      ; model_capabilities_override
+                     ; request_policy_snapshot
                      ; keep_alive
                      ; return_progress
                      ; internal_model_rotation_count
@@ -82,9 +81,9 @@ let request_fingerprint
      limits and queueing enforced on this side;
      [return_progress] and [tool_stream] select how the answer is delivered,
      not what is asked; [internal_model_rotation_count] is a local attempt
-     counter; [supports_*_override] and [model_capabilities_override] gate
-     which of the fields below may be sent at all, and those fields are
-     already in the key; [credential_source] is where the credential came from
+     counter; capability overrides and the request policy snapshot are
+     reflected in the exact body bound by [http_request_fingerprint];
+     [credential_source] is where the credential came from
      rather than what it is, and a refreshable one has no stable account
      identity in this snapshot -- Complete disables response caching for those
      before calling this function. [reasoning_uncontrolled] only says whether a
@@ -103,6 +102,7 @@ let request_fingerprint
   ignore internal_model_rotation_count;
   ignore supports_structured_output_override;
   ignore model_capabilities_override;
+  ignore request_policy_snapshot;
   ignore reasoning_uncontrolled;
   let json =
     `Assoc
@@ -156,16 +156,25 @@ let request_fingerprint
   Digest.string canonical |> Digest.to_hex
 ;;
 
+let http_request_fingerprint ~config ~messages ?(tools = []) ~http_codec ~body () =
+  let canonical =
+    `Assoc
+      [ "request", `String (request_fingerprint ~config ~messages ~tools ())
+      ; "http_codec", `String (Provider_http_codec.fingerprint_tag http_codec)
+      ; "body", `String body
+      ]
+    |> Yojson.Safe.to_string
+  in
+  Digest.string canonical |> Digest.to_hex
+;;
+
 (* ── Serialization ──────────────────────────────────── *)
 
-let schema_version = "2"
+let schema_version = "3"
 
-(* stop_reason wire serialization is the SSOT [Types.stop_reason_to_string]
-   (this module's former local copy was byte-identical). schema_version "2":
-   [api_usage.input_tokens] became the inclusive prompt total (Anthropic wire
-   normalization) — entries written under "1" hold exclusive input for
-   Anthropic responses, so the version guard retires them instead of
-   replaying mixed semantics. *)
+(* A cached response retains its original inference telemetry, including the
+   source needed to persist signed reasoning. Incompatible payloads are misses;
+   a cache hit must never manufacture provenance from the current config. *)
 
 (* Cache replay routes through [Types.stop_reason_of_string] so that a cached
    response parses identically to a live one. A local copy here previously
@@ -195,6 +204,7 @@ let response_to_json (resp : Types.api_response) : Yojson.Safe.t =
     ; "stop_reason", `String (Types.stop_reason_to_string resp.stop_reason)
     ; "content", `List (List.map Api_common.content_block_to_json resp.content)
     ; "usage", usage_json
+    ; "telemetry", opt_json Types.inference_telemetry_to_yojson resp.telemetry
     ]
 ;;
 
@@ -222,17 +232,36 @@ let response_of_json (json : Yojson.Safe.t) : Types.api_response option =
         json
         |> member "content"
         |> to_list
-        |> List.filter_map Api_common.content_block_of_json
+        |> List.fold_left (fun result block ->
+          Result.bind result (fun blocks ->
+            Api_common.content_block_of_json_result block
+            |> Result.map (fun decoded -> decoded :: blocks))) (Ok [])
+        |> Result.map List.rev
+        |> Result.to_option
       in
-      Some
-        { Types.id = json |> member "id" |> to_string
-        ; model = json |> member "model" |> to_string
-        ; stop_reason =
-            json |> member "stop_reason" |> to_string |> Types.stop_reason_of_string
-        ; content
-        ; usage
-        ; telemetry = None
-        })
+      let telemetry =
+        match List.assoc "telemetry" (to_assoc json) with
+        | `Null -> Some None
+        | value ->
+          Types.inference_telemetry_of_yojson value
+          |> Result.to_option
+          |> Option.map Option.some
+      in
+      match content, telemetry with
+      | Some content, Some telemetry ->
+        let response =
+          { Types.id = json |> member "id" |> to_string
+          ; model = json |> member "model" |> to_string
+          ; stop_reason =
+              json |> member "stop_reason" |> to_string |> Types.stop_reason_of_string
+          ; content
+          ; usage
+          ; telemetry
+          } in
+        (match Types.assistant_message_of_response response with
+         | Ok _ -> Some response
+         | Error _ -> None)
+      | None, _ | _, None -> None)
   with
   | Yojson.Safe.Util.Type_error _ | Not_found | Yojson.Json_error _ -> None
 ;;

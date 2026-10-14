@@ -500,7 +500,7 @@ let leave_running ~env (config : Browser_configuration.live_bidi) =
    §5), so it is started only when a host is started with it. *)
 let bring_up ~sw ~env ~ready_timeout_s ~ending_host_wait_s ~base_path (config : Browser_configuration.live_bidi) =
   match Keeper_firefox.host_step ~port:config.port (host_report ~base_path) with
-  | Keeper_firefox.Launcher_not_ready missing -> neither operator (Keeper_firefox.launcher_missing_message missing)
+  | Keeper_firefox.Launcher_not_ready missing -> neither operator (Keeper_firefox.launcher_missing_message ~base_path missing)
   | Keeper_firefox.Host_on_another_port address ->
     neither operator (Keeper_firefox.host_on_another_port_message ~port:config.port address)
   | Keeper_firefox.Host_address_unknown ->

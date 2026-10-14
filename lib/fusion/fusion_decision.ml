@@ -81,7 +81,11 @@ let validate_event json =
   if value "actor_kind" <> `String "keeper" then Error "invalid decision actor kind"
   else Ok json
 
-let events_root config = Filename.concat (Workspace.masc_dir config) "events"
+let events_location config =
+  Dated_jsonl.Store.at
+    (Workspace.dated_store_root config)
+    Dated_jsonl.Store.Root.Events
+let events_root config = Dated_jsonl.Store.dir (events_location config)
 let protect f = try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Sys_error _ | Unix.Unix_error _ | Eio.Io _ | Yojson.Json_error _) as exn -> Error (Storage_failure (Printexc.to_string exn))
@@ -168,7 +172,7 @@ let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
     | Some _ -> Error (Storage_failure "invalid existing decision event")
     | None ->
       let event = `Assoc (fields @ ["ts", `String (Masc_domain.now_iso ())]) in
-      let dated = Jsonl_writer.dated_path_now ~base_dir:(events_root config) in
+      let dated = Dated_jsonl.Store.dated_path_now (events_location config) in
       (match Fs_compat.append_private_jsonl_durable_locked_result dated.path (Yojson.Safe.to_string event ^ "\n") with
        | Fs_compat.Private_file_succeeded () -> Ok {event; cleanup_warning=None}
        | Fs_compat.Private_file_succeeded_with_cleanup_failure {cleanup_failure; _} ->

@@ -121,8 +121,8 @@ let handle_filesystem ctx descriptor args =
   | Tool_constitution_write
   | Tool_constitution_read
   | Tool_constitution_remove
-  | Tool_library_search
-  | Tool_library_read
+  | Tool_wiki_search
+  | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
   | Tool_person_note_set
@@ -155,7 +155,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_fusion_status
   | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
-  | Tool_masc_library_dispatch
+  | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_lane_addon _
   | Tool_analyze_image -> None
@@ -208,8 +208,8 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_constitution_write
   | Tool_constitution_read
   | Tool_constitution_remove
-  | Tool_library_search
-  | Tool_library_read
+  | Tool_wiki_search
+  | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
   | Tool_person_note_set
@@ -243,7 +243,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_fusion_status
   | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
-  | Tool_masc_library_dispatch
+  | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_lane_addon _
   | Tool_analyze_image -> None
@@ -372,15 +372,15 @@ let handle_in_process ctx descriptor args =
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
-  | Tool_library_search ->
+  | Tool_wiki_search ->
     Some
-      (Keeper_tool_in_process_runtime.handle_library_search_with_outcome
+      (Keeper_tool_in_process_runtime.handle_wiki_search_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
-  | Tool_library_read ->
+  | Tool_wiki_read ->
     Some
-      (Keeper_tool_in_process_runtime.handle_library_read_with_outcome
+      (Keeper_tool_in_process_runtime.handle_wiki_read_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
@@ -604,7 +604,7 @@ let handle_in_process ctx descriptor args =
          ~name
          ~args
          ())
-  | Tool_masc_library_dispatch ->
+  | Tool_masc_wiki_dispatch ->
     Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
       ~config:ctx.config
       ~keeper_name:ctx.meta.name

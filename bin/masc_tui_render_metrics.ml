@@ -672,7 +672,9 @@ let render_section_tools ~cols (state : state) : string list =
       (match gate, held with
        | Current [], Current [] ->
          [ "    (no active pending gate operations or held approval requests)" ]
-       | _ -> [ "    Pending tool totals unavailable; no empty queue inferred" ])
+       | (Current [], Current (_::_))
+       | (Current [], (Not_observed | (Read_failed _ | (Unavailable _ | Stale _))))
+       | (Current (_::_), _) | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) -> [ "    Pending tool totals unavailable; no empty queue inferred" ])
     else
       let items =
         Hashtbl.fold
@@ -684,7 +686,8 @@ let render_section_tools ~cols (state : state) : string list =
       in
       let scope = match gate, held with
         | Current _, Current _ -> []
-        | _ -> [ "    Tool distribution: observed queues only (partial coverage)" ] in
+        | (Current _, (Not_observed | (Read_failed _ | (Unavailable _ | Stale _))))
+        | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) -> [ "    Tool distribution: observed queues only (partial coverage)" ] in
       scope @ (Chart.distribution_bars ~width:bar_w items
         |> List.map (fun l -> "    " ^ l))
   in

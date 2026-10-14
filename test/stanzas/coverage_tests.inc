@@ -33,7 +33,7 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_library_coverage
+  test_tool_wiki_coverage
   test_tool_shard_coverage
   test_field_validation
   test_tool_args_envelope
@@ -72,7 +72,7 @@
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_library_coverage
+  test_tool_wiki_coverage
   test_tool_shard_coverage
   test_field_validation
   test_tool_args_envelope

@@ -173,13 +173,16 @@ let test_absent_lane_names_its_setup () =
 let answer data = Browser_lane.Answered (`Assoc ["ok", `Bool true; "data", data])
 let tab id url active = `Assoc ["id", `Int id; "title", `String "Page";
   "url", `String url; "active", `Bool active]
-let with_browser tabs f =
+let with_browser ?unavailable tabs f =
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
       let reads = ref [] in
       Browser_lane.install_automation_executor (Some (function
-        | Browser_lane.Tabs_list -> answer (`List tabs)
+        | Browser_lane.Tabs_list -> answer (match unavailable with
+            | None -> `List tabs
+            | Some unavailable -> `Assoc ["tabs",`List tabs;"complete",`Bool false;
+                               "unavailableTabs",`List unavailable])
         | Browser_lane.Page_read { tab_id = Some id; max_chars = Some 50_000 } ->
           reads := id :: !reads;
           answer (`Assoc ["tabId", `Int id; "url", `String "https://example.org/page";
@@ -192,6 +195,49 @@ let request tab_id : Surface.request = { route = Browser_lane.Automation_route; 
 let read_ok request = match Surface.read request with
   | Ok data -> data | Error failure -> fail (Surface.failure_message failure)
 let selection data = Yojson.Safe.Util.member "selection" data
+let test_partial_inventory_preserves_requested_work () =
+  let unavailable = [`Assoc ["id",`Int 12;"error",`String "unsupported operation"]] in
+  with_browser ~unavailable [tab 41 "https://example.org/page" true] (fun reads ->
+    let data = read_ok (request (Some 41)) in
+    check bool "successful read retains incomplete inventory" true
+      (Yojson.Safe.Util.member "complete" data = `Bool false);
+    check bool "unreadable tab evidence is retained" true
+      (Yojson.Safe.Util.member "unavailableTabs" data = `List unavailable);
+    (match Surface.read (request (Some 12)) with
+     | Error (Surface.Unobserved detail) ->
+       check string "present is distinguished from closed"
+         "selected tab 12 is present but unreadable: unsupported operation" detail
+     | _ -> fail "unreadable requested tab was substituted or silently lost");
+    check (list int) "only the requested readable tab was read" [41] !reads)
+
+let test_partial_inventory_without_unavailable_tabs () =
+  with_browser ~unavailable:[] [tab 41 "https://example.org/page" true] (fun reads ->
+    let data = read_ok (request (Some 41)) in
+    check bool "empty unavailable list does not claim a complete inventory" true
+      (Yojson.Safe.Util.member "complete" data = `Bool false
+       && Yojson.Safe.Util.member "unavailableTabs" data = `List []);
+    check (list int) "the requested readable tab is still read" [41] !reads);
+  with_browser ~unavailable:[] [] (fun reads ->
+    let data = read_ok (request None) in
+    check bool "an empty partial inventory remains explicitly incomplete" true
+      (Yojson.Safe.Util.member "complete" data = `Bool false
+       && Yojson.Safe.Util.member "unavailableTabs" data = `List []
+       && selection data = `String "none_active"
+       && Yojson.Safe.Util.member "page" data = `Null);
+    check (list int) "no page is guessed for an empty partial inventory" [] !reads)
+
+let test_transport_unavailability_is_not_a_workflow_refusal () =
+  List.iter (fun answer ->
+    (match Surface.observe_answer ~lane:Browser_lane.Lane_name.Live answer with
+     | Error (Surface.Unavailable _) -> ()
+     | _ -> fail "transport unavailability lost its type");
+    let result = Masc.Tool_misc_browser_lane.answer_to_result
+      ~lane:Browser_lane.Lane_name.Live ~tool_name:"BrowserRead"
+      ~start_time:(Tool_timing.start ()) answer in
+    check bool "tool asks for dependency recovery rather than a rule change" true
+      (Tool_result.failure_class result = Some Tool_result.Dependency_unavailable))
+    [Browser_lane.Timed_out; Browser_lane.Lane_absent]
+
 let test_any_website_selection () =
   with_browser [tab 41 "https://docs.example.org/guide" false;
                 tab 73 "https://app.example.org/dashboard" true] (fun reads ->
@@ -728,8 +774,7 @@ let test_keeper_hears_which_connection_serves_the_work () =
         (* This workspace has no browser lane, so its launcher is not there yet. *)
         ; "then runs " ^ Filename.quote (Filename.concat workspace ".masc/browser-lane/host/launch")
           ^ " --bidi-url ws://127.0.0.1:PORT/session"
-        ; "the operator first installs the lane by running the MASC browser host installer, \
-           install-host.sh" ];
+        ; "the operator first installs the lane by running masc browser-lane-setup --mode host" ];
       (* Readers that keep the beginning of a rejection keep what decides. *)
       let position key =
         let rec find index = function
@@ -1065,6 +1110,9 @@ let test_compound_read_keeps_admission () =
          Browser_lane.Stagehand_route,Browser_lane.install_stagehand_executor]))
 
 let () = run "browser surface" ["behavior",[
+  test_case "unreadable tabs do not block the requested readable tab" `Quick test_partial_inventory_preserves_requested_work;
+  test_case "partial inventories remain incomplete without unavailable tabs" `Quick test_partial_inventory_without_unavailable_tabs;
+  test_case "transport availability keeps its failure class" `Quick test_transport_unavailability_is_not_a_workflow_refusal;
   test_case "compound read retains its original admission" `Quick test_compound_read_keeps_admission;
   test_case "input correction resumes on the same connected browser" `Quick test_tool_input_recovery;
   test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;

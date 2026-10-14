@@ -79,7 +79,8 @@
     | [] ->
       (match first with
        | Shell_ir.Lit (s, meta) -> WORD (s, meta)
-       | piece -> MIXED_WORD piece)
+       | (Shell_ir.Concat _ | Shell_ir.Var _ | Shell_ir.Subst _) as piece ->
+         MIXED_WORD piece)
     | rest -> MIXED_WORD (Shell_ir.Concat (first :: rest))
   ;;
 }
@@ -376,7 +377,8 @@ and subst_piece = parse
       let body = subst_body 1 (Buffer.create 256) lexbuf in
       match !subst_parse_hook body with
       | Parsed.Parsed ir -> Shell_ir.Subst ir
-      | refusal -> raise (Subst_inner_refusal refusal)
+      | (Parsed.Parse_error _ | Parsed.Parse_aborted _ | Parsed.Too_complex _)
+        as refusal -> raise (Subst_inner_refusal refusal)
     }
 
 (* Balanced scan from just after a [$(] to the paren that closes it,

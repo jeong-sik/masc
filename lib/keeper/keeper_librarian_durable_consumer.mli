@@ -113,7 +113,7 @@ val consume_one
   -> (outcome, error) result
 (** The first attempt reads all unread cut points and official lines. A
     failed commit, typed error, or cancellation keeps a process-local marker;
-    the next attempt for that cluster-scoped Keeper reads only the oldest
+    the next attempt for that Keeper reads only the oldest
     unread turn, of whichever kind ends first in the log. A small successful
     cut keeps that mode until the backlog is empty; a successful all-unread
     pass or a baseline also clears the marker. Durable progress remains the
@@ -151,8 +151,8 @@ val consume_one
     [commit]. If the separate progress write then fails, the next pass first
     checks the original all-unread selection, before process-local retry
     narrowing, and advances to the committed endpoint without calling [commit]
-    again. Later Memory writers preserve every runtime cluster's receipt until
-    a newer durable range in that same cluster replaces it.
+    again. Later Memory writers preserve every receipt scope's receipt until
+    a newer durable range in that same scope replaces it.
 
     The continuity round saves Memory itself for a completed range this
     consumer has not committed, under its own receipt scope

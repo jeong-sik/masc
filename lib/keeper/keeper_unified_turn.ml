@@ -16,9 +16,6 @@ include Keeper_turn_helpers
 include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
-
-include Keeper_unified_turn_phase_plan
-
 type source_disposition =
   | Follow_failure_route
 
@@ -168,7 +165,14 @@ let make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name =
       |> List.filter_map (fun (s : Keeper_event_queue.stimulus) ->
              match s.Keeper_event_queue.payload with
              | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
-             | _ -> None)
+             | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+             | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+             | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+             | Keeper_event_queue.Ask_answered _
+             | Keeper_event_queue.Completion_authority_rejected _
+             | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+             | Keeper_event_queue.Task_outcome _ -> None)
       |> List.sort_uniq String.compare
     in
     match event_ids with
@@ -214,7 +218,14 @@ let make_connector_pointer_filter ~on_attention_read ~base_path ~keeper_name =
                match s.Keeper_event_queue.payload with
                | Keeper_event_queue.Connector_attention { event_id; _ } ->
                  Hashtbl.mem table event_id
-               | _ -> true)
+               | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+               | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+               | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+               | Keeper_event_queue.Ask_answered _
+               | Keeper_event_queue.Completion_authority_rejected _
+               | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+               | Keeper_event_queue.Delegate_completed _
+               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Task_outcome _ -> true)
         |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
 ;;
 
@@ -623,7 +634,6 @@ let run_keeper_cycle
   let initial_turn_state : Keeper_unified_turn_types.turn_state =
     { cycle_completed = false
     ; manifest_seq = 0
-    ; current_turn_blocker_info = None
     ; last_execution = None
     ; degraded_retry_settled = None
     ; deferred_runtime_lane = None
@@ -865,6 +875,12 @@ let run_keeper_cycle
                   Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
                 | Missing | Available _ -> ());
                Keeper_workspace_memory_observation_metrics.record workspace_memory;
+               let wiki_contents = Domain_pool_ref.submit_io_or_inline (fun () ->
+                 Keeper_wiki_contents.observe ~base_path:config.base_path) in
+               (match wiki_contents with
+                | Keeper_wiki_contents.Unlisted detail ->
+                  Log.Keeper.warn "wiki listing unavailable keeper=%s: %s" meta.name detail
+                | Off | Listed _ -> ());
                (* Repository freshness projection (context only, never a
                   gate): where each playground checkout stands against its
                   upstream default branch. A failed scan is logged and the
@@ -900,6 +916,7 @@ let run_keeper_cycle
                      ~active_goal_summaries
                      ~workspace_memory
                      ?workspace_memory_access
+                     ~wiki_contents
                      ~lane_updates
                      ~repository_freshness
                      ~recent_work
@@ -930,7 +947,7 @@ let run_keeper_cycle
                       base_dir
                       (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                in
-               let masc_root = Workspace.masc_root_dir config in
+               let masc_root = Workspace.masc_dir config in
                let trajectory_acc =
                  Trajectory.create_accumulator
                    ~masc_root
@@ -1318,7 +1335,12 @@ let run_keeper_cycle
                           Keeper_metrics.(to_string Agent_coreTimeoutClassifications)
                           ~labels:[ "classification", "transient_network" ]
                           ()
-                      | _ -> ());
+                      | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | Llm_provider.Retry.NetworkError _))))))))))
+                      | Agent_core.Error.Provider _ | Agent_core.Error.Agent _
+                      | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+                      | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+                      | Agent_core.Error.Orchestration _ | Agent_core.Error.Internal _
+                      | Agent_core.Error.Internal_carried _ -> ());
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_provider_wire_error = EC.is_provider_wire_error err in
                   Otel_metric_store.inc_counter
@@ -1504,7 +1526,7 @@ let run_keeper_cycle
                     ~turn_ctx_cell
                     ~observation
                     ~latency_ms
-                    ~outcome:"error"
+                    ~outcome:Keeper_decision_outcome.Failed
                     ~execution_path
                     ~degraded_retry_applied
                     ~degraded_retry_deferred

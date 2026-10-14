@@ -315,12 +315,24 @@ module Extra_system_context_provenance = struct
   type classification =
     | Absent
     | Present
+    | Historical
     | Invalid
     | Duplicate
 
   let key = "agent_core.extra_system_context.v1"
   let entry = key, `Bool true
   let metadata = [ entry ]
+
+  (* The round-trip value all three historical sites share: [classify]
+     decides by JSON shape, so one spelling keeps them from silently
+     flipping to [Invalid]. *)
+  let historical_value = "historical"
+  let historical_metadata = [ key, `String historical_value ]
+  let as_historical metadata =
+    List.map (fun (name, value) ->
+      if String.equal name key then name, `String historical_value else name, value)
+      metadata
+  ;;
 
   let classify metadata =
     let values =
@@ -332,6 +344,7 @@ module Extra_system_context_provenance = struct
     match values with
     | [] -> Absent
     | [ `Bool true ] -> Present
+    | [ `String s ] when String.equal s historical_value -> Historical
     | [ _ ] -> Invalid
     | _ -> Duplicate
   ;;
@@ -486,6 +499,77 @@ module Reasoning_source = struct
     | Present _ -> Error "conflicting reasoning source"
     | Invalid -> Error "malformed reasoning source"
     | Duplicate -> Error "duplicate reasoning source"
+  ;;
+end
+
+(** Creation-prefix identity for a stored reasoning artifact. See the mli. *)
+module Reasoning_prefix = struct
+  type t =
+    { request_digest : string
+    ; message_digest : string
+    }
+  [@@deriving show]
+
+  type classification =
+    | Absent
+    | Present of t
+    | Invalid
+    | Duplicate
+  [@@deriving show]
+
+  let key = "agent_core.reasoning_prefix.v1"
+  let sha256_hex_length = 64
+
+  let digest_is_canonical value =
+    String.length value = sha256_hex_length
+    && String.for_all
+         (function
+           | '0' .. '9' | 'a' .. 'f' -> true
+           | _ -> false)
+         value
+  ;;
+
+  let to_json (prefix : t) =
+    `Assoc
+      [ "request_digest", `String prefix.request_digest
+      ; "message_digest", `String prefix.message_digest
+      ]
+  ;;
+
+  let of_json = function
+    | `Assoc fields ->
+      (match
+         ( Reasoning_source.values_for "request_digest" fields
+         , Reasoning_source.values_for "message_digest" fields )
+       with
+       | [ `String request_digest ], [ `String message_digest ]
+         when List.length fields = 2
+              && digest_is_canonical request_digest
+              && digest_is_canonical message_digest ->
+         Some { request_digest; message_digest }
+       | _ -> None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+  ;;
+
+  let entry prefix = key, to_json prefix
+  let metadata prefix = [ entry prefix ]
+  let to_yojson = to_json
+
+  let of_yojson json =
+    match of_json json with
+    | Some prefix -> Ok prefix
+    | None -> Error "Reasoning_prefix: invalid JSON"
+  ;;
+
+  let classify metadata =
+    let values = Reasoning_source.values_for key metadata in
+    match values with
+    | [] -> Absent
+    | [ value ] ->
+      (match of_json value with
+       | Some prefix -> Present prefix
+       | None -> Invalid)
+    | _ -> Duplicate
   ;;
 end
 
@@ -788,6 +872,7 @@ type inference_telemetry =
   ; reasoning_effort : string option
   ; canonical_model_id : string option
   ; reasoning_source : Reasoning_source.t option
+  ; reasoning_prefix : Reasoning_prefix.t option [@default None]
   ; effective_context_window : int option
   ; provider_internal_action_count : int option
   ; ttfrc_ms : float option
@@ -805,6 +890,7 @@ let default_inference_telemetry : inference_telemetry =
   ; reasoning_effort = None
   ; canonical_model_id = None
   ; reasoning_source = None
+  ; reasoning_prefix = None
   ; effective_context_window = None
   ; provider_internal_action_count = None
   ; ttfrc_ms = None
@@ -851,8 +937,14 @@ let assistant_message_of_response (response : api_response) =
     match response.telemetry with
     | None -> Error Reasoning_source_telemetry_missing
     | Some { reasoning_source = None; _ } -> Error Reasoning_source_missing
-    | Some { reasoning_source = Some source; _ } ->
-      Ok (message (Reasoning_source.metadata source)))
+    | Some { reasoning_source = Some source; reasoning_prefix; _ } ->
+      let metadata = Reasoning_source.metadata source in
+      let metadata =
+        match reasoning_prefix with
+        | None -> metadata
+        | Some prefix -> Reasoning_prefix.metadata prefix @ metadata
+      in
+      Ok (message metadata))
 ;;
 
 (** {1 SSE Streaming Types} *)
@@ -1201,7 +1293,8 @@ let validate_tool_result_shape
           (* Both allowed — any JSON is fine *)
           Ok ())
     else Ok ()
-  | _ -> Ok ()
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
+  | Audio _ -> Ok ()
 ;;
 
 (** Extract text from content blocks, concatenating with newlines.
@@ -1211,7 +1304,8 @@ let text_of_content content =
   |> List.filter_map (function
     | Text s -> Some s
     | ToolResult { content; _ } -> Some content
-    | _ -> None)
+    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
+    | Audio _ -> None)
   |> String.concat "\n"
 ;;
 

@@ -352,46 +352,6 @@ and masc_internal_error =
 let masc_internal_error_prefix = "[masc_agent_core_error] "
 let runtime_runner_execute_site = "runtime_runner.execute"
 
-(* #9933: a keeper [blocker_info] detail string may carry a structured
-   [masc_agent_core_error] JSON payload — [masc_internal_error_prefix] above,
-   possibly wrapped by Agent_core.Error.to_string's "Internal error: ".
-   Truncating it at the narrative budget slices the JSON mid-key, so
-   downstream consumers (dashboard, retry classifier, log search) lose the
-   diagnostic fields (budget_sec, source, …). [cap_blocker_detail] keeps a
-   payload that begins with the prefix up to
-   [blocker_detail_structured_max_chars] and truncates plain narrative text
-   to [blocker_detail_narrative_max_chars]. Idempotent. Applied where the
-   runtime builds a blocker detail string
-   (keeper_unified_metrics_failure). *)
-let blocker_detail_narrative_max_chars = 200
-
-(* ~2000 chars fit the small variants whole. Two do not fit reliably: a
-   terminal effect failure carries a composition's failure object as JSON
-   (RFC-0454 P1a), and a fence carries a cause that can nest one (P1b), and
-   neither is bounded. Those are truncated here, which cuts the JSON mid-key
-   for a reader that parses this string back. Bounding the composition object
-   at its producer is RFC-0454 P2; this cap stays a blob ceiling, not a
-   promise that a payload survives it. *)
-let blocker_detail_structured_max_chars = 2000
-
-let masc_agent_core_error_bare_prefix = String.trim masc_internal_error_prefix
-let masc_agent_core_error_wrapped_prefix = "Internal error: " ^ masc_agent_core_error_bare_prefix
-
-let has_masc_agent_core_error_prefix (s : string) : bool =
-  String.starts_with ~prefix:masc_agent_core_error_bare_prefix s
-  || String.starts_with ~prefix:masc_agent_core_error_wrapped_prefix s
-
-let cap_blocker_detail (s : string) : string =
-  (* +3 bytes of headroom for the "…" ellipsis suffix. *)
-  let truncate ~max_chars s =
-    String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s
-    |> String_util.to_string
-  in
-  if has_masc_agent_core_error_prefix (String.trim s) then
-    if String.length s <= blocker_detail_structured_max_chars then s
-    else truncate ~max_chars:blocker_detail_structured_max_chars s
-  else truncate ~max_chars:blocker_detail_narrative_max_chars s
-
 let string_opt_of_assoc key json =
   Json_field.string json key |> Json_field.to_option
 ;;
@@ -644,7 +604,22 @@ let summary_of_masc_internal_error = function
          (nonempty_or_unknown scope)
          shape
          (short_accept_rejection_reason reason))
-  | Accept_rejected { scope; reason_kind; response_shape; reason; _ } ->
+  | Accept_rejected
+      { scope
+      ; reason_kind = (None | Some Accept_no_usable_progress) as reason_kind
+      ; response_shape
+      ; stop_reason =
+          ( None
+          | Some
+              ( Agent_core.Types.EndTurn | Agent_core.Types.StopToolUse
+              | Agent_core.Types.MaxTokens | Agent_core.Types.StopSequence
+              | Agent_core.Types.Refusal | Agent_core.Types.ContentFilter
+              | Agent_core.Types.RepetitionTruncation | Agent_core.Types.PauseTurn
+              | Agent_core.Types.Compaction | Agent_core.Types.ContextWindowExceeded
+              | Agent_core.Types.UnmatchedToolCalls | Agent_core.Types.Unknown _ ) )
+      ; reason
+      ; _
+      } ->
     let reason_kind = accept_rejection_kind_display reason_kind in
     let response_shape = accept_response_shape_display response_shape in
     Some
@@ -888,7 +863,19 @@ let accept_no_progress_retry_kind = function
       ; _
       } ->
     Some `Truncated_no_progress
-  | Accept_rejected _
+  | Accept_rejected
+      { reason_kind = None | Some (Accept_no_usable_progress | Accept_predicate_rejected)
+      ; stop_reason =
+          ( None
+          | Some
+              ( Agent_core.Types.EndTurn | Agent_core.Types.StopToolUse
+              | Agent_core.Types.MaxTokens | Agent_core.Types.StopSequence
+              | Agent_core.Types.Refusal | Agent_core.Types.ContentFilter
+              | Agent_core.Types.RepetitionTruncation | Agent_core.Types.PauseTurn
+              | Agent_core.Types.Compaction | Agent_core.Types.ContextWindowExceeded
+              | Agent_core.Types.UnmatchedToolCalls | Agent_core.Types.Unknown _ ) )
+      ; _
+      }
   | Official_client_recovery_required _
   | Runtime_exhausted _
   | Resumable_cli_session _
@@ -1082,7 +1069,9 @@ and parse_masc_internal_error_json (json : Yojson.Safe.t) :
                Some
                  (Terminal_effect_failed
                     { failure_class; effect_disposition; detail })
-             | _ -> None)
+             | (None, _, (Ok _ | Error _))
+             | (Some _, None, (Ok _ | Error _))
+             | (Some _, Some _, Error _) -> None)
           | _ -> None)
       | Some (`String kind)
         when String.equal kind provider_attempt_effect_fenced_kind
@@ -1238,4 +1227,7 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
       (Agent_core.Error.TerminalToolDurabilityFailed
         { effect_disposition; detail; _ }) ->
     terminal_effect_failed ~effect_disposition ~detail
-  | _ -> None
+  | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _ | (Agent_core.Error.ToolRoundLimitExceeded _ | (Agent_core.Error.HookExecutionFailed _ | (Agent_core.Error.GuardrailViolation _ | (Agent_core.Error.TripwireViolation _ | Agent_core.Error.InputRequired _)))))
+  | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ -> None

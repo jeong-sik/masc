@@ -10,12 +10,11 @@ type recoverability =
 type tool_host_cause =
   | Tool_host_timeout
   | Tool_host_transport_unavailable
+[@@deriving enumerate]
 
 type t = {
-  surface : string;
-  entity_kind : string;
   entity_id : string option;
-  cause_code : string;
+  cause : tool_host_cause;
   severity : severity;
   summary : string;
   recoverability : recoverability;
@@ -24,6 +23,17 @@ type t = {
 }
 
 let tool_host_log_module_name = "ToolHost"
+
+(* Every envelope is a tool-host failure on one tool call. The JSON still
+   names both, so a reader of the log does not have to know that. *)
+let tool_host_surface = "tool_host"
+let tool_call_entity_kind = "tool_call"
+
+let require_constant ~field expected value =
+  if String.equal value expected then Ok ()
+  else
+    Error
+      (Printf.sprintf "failure %s must be %S (received %S)" field expected value)
 
 let severity_to_string = function
   | Warn -> "warn"
@@ -49,10 +59,16 @@ let tool_host_cause_code = function
   | Tool_host_timeout -> "tool_host_timeout"
   | Tool_host_transport_unavailable -> "tool_host_transport_unavailable"
 
-let tool_host_cause_of_code = function
-  | "tool_host_timeout" -> Ok Tool_host_timeout
-  | "tool_host_transport_unavailable" -> Ok Tool_host_transport_unavailable
-  | other -> Error (Printf.sprintf "unknown tool host cause_code: %S" other)
+(* Read off [tool_host_cause_code] and the derived list, so a new cause is
+   decoded as soon as it has a code. *)
+let tool_host_cause_of_code code =
+  match
+    List.find_opt
+      (fun cause -> String.equal (tool_host_cause_code cause) code)
+      all_of_tool_host_cause
+  with
+  | Some cause -> Ok cause
+  | None -> Error (Printf.sprintf "unknown tool host cause_code: %S" code)
 
 let first_non_empty values =
   List.find_map (fun value -> Option.bind value String_util.trim_nonempty) values
@@ -70,10 +86,8 @@ let summary_for_tool_host ~client_name ~tool_name ~transport = function
 let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
     ?request_id ?session_id ?trace_id ?timeout_ms ~cause ~message () =
   {
-    surface = "tool_host";
-    entity_kind = "tool_call";
     entity_id = first_non_empty [ request_id; session_id; trace_id ];
-    cause_code = tool_host_cause_code cause;
+    cause;
     severity = Bad;
     summary = summary_for_tool_host ~client_name ~tool_name ~transport phase;
     recoverability =
@@ -102,10 +116,10 @@ let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
 let to_yojson (envelope : t) =
   `Assoc
     [
-      ("surface", `String envelope.surface);
-      ("entity_kind", `String envelope.entity_kind);
+      ("surface", `String tool_host_surface);
+      ("entity_kind", `String tool_call_entity_kind);
       ("entity_id", Json_util.option_to_yojson (fun value -> `String value) envelope.entity_id);
-      ("cause_code", `String envelope.cause_code);
+      ("cause_code", `String (tool_host_cause_code envelope.cause));
       ("severity", `String (severity_to_string envelope.severity));
       ("summary", `String envelope.summary);
       ("recoverability", `String (recoverability_to_string envelope.recoverability));
@@ -129,52 +143,40 @@ let optional_string json key =
   | _ -> None
 
 let of_yojson json =
+  let ( let* ) = Result.bind in
   match json with
-  | `Assoc _ -> (
-      match required_string json "surface" with
-      | Error _ as err -> err
-      | Ok surface -> (
-          match required_string json "entity_kind" with
-          | Error _ as err -> err
-          | Ok entity_kind -> (
-              match required_string json "cause_code" with
-              | Error _ as err -> err
-              | Ok cause_code -> (
-                  match required_string json "severity" with
-                  | Error _ as err -> err
-                  | Ok severity_raw -> (
-                      match severity_of_string severity_raw with
-                      | Error _ as err -> err
-                      | Ok severity -> (
-                          match required_string json "summary" with
-                          | Error _ as err -> err
-                          | Ok summary -> (
-                              match required_string json "recoverability" with
-                              | Error _ as err -> err
-                              | Ok recoverability_raw -> (
-                                  match
-                                    recoverability_of_string recoverability_raw
-                                  with
-                                  | Error _ as err -> err
-                                  | Ok recoverability ->
-                                      Ok
-                                        {
-                                          surface;
-                                          entity_kind;
-                                          entity_id =
-                                            optional_string json "entity_id";
-                                          cause_code;
-                                          severity;
-                                          summary;
-                                          recoverability;
-                                          operator_action =
-                                            optional_string json
-                                              "operator_action";
-                                          evidence_ref =
-                                            Option.value ~default:`Null
-                                              (Json_util.assoc_member_opt
-                                                 "evidence_ref" json);
-                                        }))))))))
+  | `Assoc _ ->
+      let* () =
+        Result.bind (required_string json "surface")
+          (require_constant ~field:"surface" tool_host_surface)
+      in
+      let* () =
+        Result.bind (required_string json "entity_kind")
+          (require_constant ~field:"entity_kind" tool_call_entity_kind)
+      in
+      let* cause =
+        Result.bind (required_string json "cause_code") tool_host_cause_of_code
+      in
+      let* severity =
+        Result.bind (required_string json "severity") severity_of_string
+      in
+      let* summary = required_string json "summary" in
+      let* recoverability =
+        Result.bind (required_string json "recoverability")
+          recoverability_of_string
+      in
+      Ok
+        {
+          entity_id = optional_string json "entity_id";
+          cause;
+          severity;
+          summary;
+          recoverability;
+          operator_action = optional_string json "operator_action";
+          evidence_ref =
+            Option.value ~default:`Null
+              (Json_util.assoc_member_opt "evidence_ref" json);
+        }
   | other ->
       Error
         (Printf.sprintf "failure envelope must be a JSON object (received %s)"

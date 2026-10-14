@@ -497,7 +497,9 @@ let remote_cwd t cwd =
 let transport_failure t status =
   match t.transport, status with
   | Openssh _, Unix.WEXITED 255 -> Some "ssh client exited 255"
-  | (Openssh _ | Container_exec _ | Docker_exec _), _ -> None
+  | ((Openssh _ | Container_exec _ | Docker_exec _), Unix.WEXITED _)
+  | ((Openssh _ | Container_exec _ | Docker_exec _), Unix.WSIGNALED _)
+  | ((Openssh _ | Container_exec _ | Docker_exec _), Unix.WSTOPPED _) -> None
 ;;
 
 let log_first_dispatch t =
@@ -518,6 +520,41 @@ let log_first_dispatch t =
 
 let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
 
+(* Where a shim is installed is the transport's, so the repair is too. An
+   OpenSSH endpoint keeps its shim on the remote host and the bootstrap
+   uploads it. A microVM guest runs the host's copy through a read-only mount
+   ({!Config_dir_resolver.microvm_shim_dir}), so the repair is on this host
+   and reaches a running guest's next request, which execs the shim anew
+   ([transport_argv]). For a Docker container the server knows only the path
+   it execs: nothing in this tree starts one or places its shim. One line for
+   all three sent the operator of a microVM to the SSH bootstrap (#42726). *)
+let outdated_shim_repair t =
+  let asset =
+    Printf.sprintf "the masc-exec-shim-linux-ARCH asset of %s" Build_version.current
+  in
+  match t.transport with
+  | Openssh _ ->
+    Printf.sprintf
+      "reinstall it with masc-exec-ssh-bootstrap --endpoint %s --shim <%s>"
+      t.name asset
+  | Container_exec c ->
+    let host_shim =
+      Filename.concat
+        (Config_dir_resolver.microvm_shim_dir ~base_path:t.base_path)
+        (Filename.basename c.shim_path)
+    in
+    Printf.sprintf
+      "on this host, replace %s with %s and the .sha256 beside it with that \
+       asset's SHA256SUMS line (docs/MICROVM-REMOTE-RUNBOOK.md); guests run \
+       that copy through a mount, so their next request uses it"
+      host_shim asset
+  | Docker_exec c ->
+    Printf.sprintf
+      "replace the shim container %s runs at %s with %s; whatever started that \
+       container put it there"
+      c.container_name c.shim_path asset
+;;
+
 (* RFC-0427 B-3. The shim names the release it was built from and the server
    compares it with its own. A difference is what 2026-09-05 looked like from
    the inside: an endpoint one release behind, found by symptom because
@@ -530,14 +567,12 @@ let preflight_timeout_sec t = float_of_int t.connect_timeout_sec +. 5.0
    an alarm and not a fix.
 
    It fires per probe. Two of the three probe sites run once per endpoint per
-   process; the third is the keeper preflight, so an outdated endpoint says so
-   once per keeper boot. *)
+   process; the third is the keeper preflight, so an outdated OpenSSH endpoint
+   says so once per keeper boot. A guest lane runs no preflight
+   ([Keeper_sandbox_remote_lane.microvm_endpoint]), so a guest says so once
+   per server process, and a shim replaced since is seen after a restart. *)
 let warn_on_release_skew t release =
-  let repair =
-    Printf.sprintf
-      "reinstall it with masc-exec-ssh-bootstrap --endpoint %s --shim <the masc-exec-shim-linux-ARCH asset of %s>"
-      t.name Build_version.current
-  in
+  let repair = outdated_shim_repair t in
   match release with
   | Some release when String.equal release Build_version.current -> ()
   | Some release ->
@@ -819,7 +854,9 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                    | Ok outcome, Ok (Some receipt) -> Execution_observed (receipt, outcome)
                    | Ok _, Ok None -> Execution_unavailable Peer_receipt_missing
                    | Error detail, _ | _, Error detail -> Execution_unavailable (Invalid_receipt detail))
-              | Dispatch_failed _ -> ());
+              | Dispatch_failed
+                  { failure = Local_timeout | Transport_failed | Trailer_disagreement; _ }
+                -> ());
              Atomic.set t.shared.last_dispatch (Some record);
              triple
            in

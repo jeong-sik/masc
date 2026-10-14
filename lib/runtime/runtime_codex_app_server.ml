@@ -427,7 +427,11 @@ let input_capacity_refusal = function
      | Some (`String "input_too_large"), Some (`Int actual_chars), Some (`Int max_chars)
        when max_chars > 0 && actual_chars > max_chars -> Some {actual_chars; max_chars}
      | _ -> None)
-  | _ -> None
+  | Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+  | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Subscription_required _
+  | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _
+  | Stopped_by_host _ | Turn_interrupted | Runtime_shutting_down | Process_exited _
+  | Timeout _ -> None
 ;;
 
 let error_to_string = function
@@ -1675,7 +1679,7 @@ let rec await_turn_terminal io ~handoff ~terminal_tools_closed ~tools ~tool_call
         when !handoff = Handoff_pending || !handoff = Handoff_accepted ->
         terminal_tools_closed := true;
         Ok ()
-      | result -> result
+      | (Error (Stopped_by_host (Terminal_tool_boundary { outcome = (Durable_stimulus_deferred | Terminal_failed _);_})) | Error (Stopped_by_host (Repeated_tool_call _)) | Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | (Process_exited _ | Timeout _))))))))))))) | Ok _ | Error (Stopped_by_host (Terminal_tool_boundary {outcome=Terminal_completed; _ }))) as result -> result
     in
     await_turn_terminal
       io ~handoff ~terminal_tools_closed
@@ -2157,7 +2161,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
     (try f () with Idle_timeout seconds -> Error (Timeout { seconds; turn_accepted = false }))
     |> Result.map_error (function
       | (Runtime_shutting_down | Turn_interrupted | Stopped_by_host _) as stop -> stop
-      | error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
+      | (Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _ | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _ | Subscription_required _ | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _ | Process_exited _ | Timeout _) as error -> Reasoning_effort_admission_failed {model;detail=error_to_string error}) in
   (* New persistent threads are created only after explicit effort is admitted.
      Pin the advertised default when no model was configured, so thread/start
      and the admitted account metadata name the same model. Resume creates no
@@ -2315,7 +2319,7 @@ let run_protocol io (config : config) ~await_handoff ~protocol_cwd ~dynamic_tool
          the app-server rejected it, so rotating here could duplicate a turn
          that is already executing upstream. *)
       Error (Timeout { seconds; turn_accepted = true })
-    | response -> response
+    | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | (Stopped_by_host _ | Process_exited _))))))))))))) | Ok _) as response -> response
   in
   let* turn_id = parse_turn_start turn in
   let* () =
@@ -2389,13 +2393,18 @@ let configured_auth_environment_keys home =
       let toml = Otoml.Parser.from_file path in
       let table = function
         | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> fields
-        | _ -> raise (Invalid_argument "table") in
+        | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+        | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+        | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ -> raise (Invalid_argument "table") in
       let env_name = function
         | Otoml.TomlString name when String.length name > 0 ->
           let initial = function 'a'..'z' | 'A'..'Z' | '_' -> true | _ -> false in
           if initial name.[0] && String.for_all (function 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' -> true | _ -> false) name
           then name else raise (Invalid_argument "environment name")
-        | _ -> raise (Invalid_argument "environment name") in
+        | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+        | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+        | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _
+        | TomlString _ -> raise (Invalid_argument "environment name") in
       let providers = match Otoml.find_opt toml Fun.id [ "model_providers" ] with
         | None -> [] | Some value -> table value in
       let names = List.concat_map (fun (_, value) ->
@@ -2641,7 +2650,8 @@ let context_fragments method_ json payload =
       selected Dynamic_tools value
     | Thread_inject_items,"items",`List values -> list (fun index -> selected (Injected_item index)) values
     | (Turn_start | Turn_steer),"input",`List values -> list turn_item values
-    | _ -> ordinary value in
+    | (Thread_start | Thread_resume | Thread_inject_items | Turn_start | Turn_steer
+      | Dynamic_tool_response), _, _ -> ordinary value in
   match
     (match json with
      | `Assoc fields -> assoc (fun key value -> match key,value with
@@ -3065,7 +3075,7 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
               { detail
               ; turn_accepted = dispatch_ambiguous || !turn_accepted
               })
-       | other -> other)
+       | (Error (Turn_interrupted | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Reasoning_effort_admission_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Subscription_required _ | (Unsupported_server_request _ | (Context_window_exceeded _ | (Turn_failed _ | Stopped_by_host _)))))))))))) | Ok _) as other -> other)
   in
   (match result with
    | Ok turn ->
@@ -3082,7 +3092,12 @@ let run_turn ?await_handoff ?(dynamic_tools = []) ?reasoning_effort ?(thread_mod
      Log.Runtime_agent.info
        "Codex app-server turn stopped by host: %s"
        (error_to_string stopped)
-   | Error error ->
+   | Error
+       (( Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+        | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
+        | Subscription_required _ | Unsupported_server_request _
+        | Context_window_exceeded _ | Turn_failed _ | Stopped_by_host _
+        | Turn_interrupted | Runtime_shutting_down | Process_exited _ | Timeout _ ) as error) ->
      Log.Runtime_agent.warn
        "Codex app-server subscription turn failed (kind=%s): %s"
        (error_kind error)

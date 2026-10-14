@@ -77,7 +77,9 @@ type pending_event = {
 val event_kind_to_string : event_kind -> string
 val pending_event_to_yojson : pending_event -> Yojson.Safe.t
 
-type notification_delivery = Awaiting_recipients | Pending_recipients of string list
+type notification_delivery =
+  | Awaiting_recipients
+  | Pending_recipients of Keeper_id.Keeper_name.t list
 
 type pending_notification = {
   notification_id : string;
@@ -392,7 +394,7 @@ val pending_notifications : Workspace_utils.config -> (pending_notification list
 val snapshot_notification_recipients : Workspace_utils.config -> pending_notification ->
   recipients:string list -> (pending_notification option, write_error) result
 val acknowledge_notification_recipient : Workspace_utils.config -> pending_notification ->
-  recipient:string -> (unit, write_error) result
+  recipient:Keeper_id.Keeper_name.t -> (unit, write_error) result
 val acknowledge_notification : Workspace_utils.config -> pending_notification -> (unit, write_error) result
 (** Acknowledge only after the exact workspace row is committed and every
     snapshotted recipient was durably accepted. Refuses uninitialised/nonempty

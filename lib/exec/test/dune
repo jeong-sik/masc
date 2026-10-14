@@ -26,3 +26,9 @@
   re)
  (deps
   (glob_files fixtures/shell_ir_oracle/*.json)))
+
+; Test assertions match the one case they check; see warning 4 in the root dune.
+(env
+ (_
+  (flags
+   (:standard -w -4))))

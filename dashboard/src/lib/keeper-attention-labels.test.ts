@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import bridgeAttention from '../api/fixtures/keeper-attention-reasons.json'
 import {
+  ATTENTION_REASONS,
+  NEXT_HUMAN_ACTIONS,
   attentionReasonLabel,
   nextHumanActionLabel,
 } from './keeper-attention-labels'
@@ -52,5 +55,20 @@ describe('keeper attention labels', () => {
       '[keeper-attention-labels] unknown attention_reason:',
       'future_state',
     )
+  })
+})
+
+describe('keeper attention vocabularies', () => {
+  // test_keeper_attention_reason pins this fixture to every reason the
+  // status bridge writes. These lists are wider (trust and goal surfaces add
+  // their own), so they must contain the fixture rather than equal it.
+  it('label every attention reason the status bridge writes', () => {
+    const known: readonly string[] = ATTENTION_REASONS
+    expect(bridgeAttention.attention_reasons.filter(reason => !known.includes(reason))).toEqual([])
+  })
+
+  it('label every first action the status bridge writes', () => {
+    const known: readonly string[] = NEXT_HUMAN_ACTIONS
+    expect(bridgeAttention.next_human_actions.filter(action => !known.includes(action))).toEqual([])
   })
 })

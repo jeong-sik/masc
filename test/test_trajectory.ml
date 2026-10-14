@@ -518,6 +518,30 @@ let test_read_entries_since () =
     let all = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
     Alcotest.(check int) "all entries" 3 (List.length all))
 
+(* The other members [entry_to_json] writes are required the same way. A row
+   without [ts] used to arrive at 0.0 and one with a numeric [tool_name] as
+   [""]; neither is a call the keeper recorded. *)
+let test_rows_missing_a_written_member_are_not_read () =
+  with_tmpdir (fun dir ->
+    let masc_root = dir in
+    let keeper = "test-keeper" in
+    let traj_dir = Filename.concat masc_root (Printf.sprintf "trajectories/%s" keeper) in
+    Fs_compat.mkdir_p traj_dir;
+    let path = Filename.concat traj_dir "trace-102.jsonl" in
+    let rows =
+      [
+        {|{"ts":1000.0,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":1,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null}|};
+        {|{"ts_iso":"2026-04-06T10:01:00Z","turn":1,"round":2,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null}|};
+        {|{"ts":3000.0,"ts_iso":"2026-04-06T10:02:00Z","turn":1,"round":3,"tool_name":7,"args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null}|};
+      ]
+    in
+    let oc = open_out path in
+    List.iter (Printf.fprintf oc "%s\n") rows;
+    close_out oc;
+    let entries = Trajectory.read_entries_since ~masc_root ~keeper_name:keeper ~since:0.0 in
+    Alcotest.(check (list (float 0.0))) "only the complete row is read" [ 1000.0 ]
+      (List.map (fun (entry : Trajectory.tool_call_entry) -> entry.ts) entries))
+
 let test_rows_without_a_gate_object_are_not_read () =
   with_tmpdir (fun dir ->
     let masc_root = dir in
@@ -984,6 +1008,8 @@ let () =
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;
       Alcotest.test_case "rows without a gate object are not read" `Quick
         test_rows_without_a_gate_object_are_not_read;
+      Alcotest.test_case "rows missing a written member are not read" `Quick
+        test_rows_missing_a_written_member_are_not_read;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
       Alcotest.test_case "read_recent_lines/read_all_lines skip malformed rows" `Quick
         test_read_recent_lines_skips_malformed_rows;

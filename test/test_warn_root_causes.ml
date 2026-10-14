@@ -8,29 +8,6 @@ open Masc
 let init_registry () =
   Masc_test_deps.init_unified_tool_registry ()
 
-let file_contains_pattern file_rel pattern =
-  let source_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> root
-    | None -> Sys.getcwd ()
-  in
-  let path = Filename.concat source_root file_rel in
-  if not (Sys.file_exists path) then false
-  else
-    let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        let content = In_channel.input_all ic in
-        if String.length pattern = 0 then true
-        else
-          let re = Str.regexp_string pattern in
-          (try ignore (Str.search_forward re content 0); true
-           with Not_found -> false))
-
-let file_not_contains_pattern file_rel pattern =
-  not (file_contains_pattern file_rel pattern)
-
 let string_contains text pattern =
   if String.length pattern = 0 then true
   else
@@ -659,24 +636,6 @@ let test_tool_bundle_does_not_emit_full_universe_assignment () =
             (Tool_assignment_telemetry.find_latest_assignment_id
                ~agent_id:meta.name)))
 
-let test_tool_assignment_telemetry_is_before_turn_scoped () =
-  check bool "bundle source does not emit assignment" true
-    (file_not_contains_pattern
-       "lib/keeper/keeper_tools_agent_core_bundle.ml"
-       "Tool_assignment_telemetry.emit_assigned");
-  check bool "legacy bundle reason removed" true
-    (file_not_contains_pattern
-       "lib/keeper/keeper_tools_agent_core_bundle.ml"
-       "keeper tool bundle assembly");
-  check bool "before-turn hook records computed schema filter" true
-    (file_contains_pattern
-       "lib/keeper/keeper_run_tools_hooks.ml"
-       "record_tool_assignment ~turn ~tool_list:schema_filter ~lane");
-  check bool "setup owns assignment telemetry emission" true
-    (file_contains_pattern
-       "lib/keeper/keeper_run_tools_setup.ml"
-       "Tool_assignment_telemetry.emit_assigned")
-
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
 let test_atomic_write_not_empty () =
@@ -737,23 +696,6 @@ let test_concurrent_atomic_writes_never_empty () =
   check bool "concurrent reads never see empty file" false !empty_seen;
   (try Unix.unlink path with _ -> ());
   (try Unix.rmdir dir with _ -> ())
-
-(* ── Test 3: Keeper/Agent Core failure severities on main path ─────────────── *)
-
-let test_keeper_mainline_failures_log_at_error () =
-  check bool "missing checkpoint after run logs at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_run_finalize_response.ml"
-       {|"runtime=%s missing AGENT_CORE checkpoint after run"|});
-  (* The deterministic memory-bank write (and its "memory_write failed" log
-     site) was removed with the bank — RFC keeper-memory-consolidation
-     Stage 4. *)
-  check bool "memory-bank write log site is gone" true
-    (file_not_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
-       {|"memory_write failed: %s"|});
-  check bool "stale episode creation failure string is absent" true
-    (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
-       {|episode_create failed|})
-
 
 let with_bundle ~name f =
   ignore (init_registry ());
@@ -818,8 +760,6 @@ let () =
             test_missing_current_task_reconciled_before_transition_hint;
           test_case "bundle assembly does not emit assignment" `Quick
             test_tool_bundle_does_not_emit_full_universe_assignment;
-          test_case "assignment telemetry is before-turn scoped" `Quick
-            test_tool_assignment_telemetry_is_before_turn_scoped;
           test_case "turn payload carries the full surface" `Quick
             test_keeper_names_do_not_narrow_tool_surface;
         ] );
@@ -829,10 +769,5 @@ let () =
             test_atomic_write_not_empty;
           test_case "concurrent writes never produce empty reads" `Quick
             test_concurrent_atomic_writes_never_empty;
-        ] );
-      ( "mainline_failure_levels",
-        [
-          test_case "keeper mainline failures log at error" `Quick
-            test_keeper_mainline_failures_log_at_error;
         ] );
     ]

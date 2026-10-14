@@ -494,6 +494,46 @@ let cleanup_dir path =
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
+(* A hook that raises on a phase change leaves a coverage-gap row. The
+   registry handed the hook runner its base path where the runner takes the
+   [.masc] directory, so the row landed at the top of the workspace, where
+   no reader looks. *)
+let test_failed_phase_hook_records_its_gap_under_the_masc_directory () =
+  let dir = temp_dir "registry_hook_gap_root" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      KLH.reset_for_testing ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       KLH.reset_for_testing ();
+       let meta = make_meta "hook-gap" in
+       (* Registered offline, so [Fiber_started] is a real phase change. *)
+       let _registered = KR.register_offline ~base_path:dir meta.name meta in
+       let hook_calls = ref 0 in
+       KLH.register (fun ~keeper_id:_ _ ->
+         incr hook_calls;
+         failwith "synthetic phase hook failure");
+       (match KR.dispatch_event ~base_path:dir "hook-gap" KSM.Fiber_started with
+        | Ok _ -> ()
+        | Error error -> fail (KSM.transition_error_to_string error));
+       check int "the phase change ran the hook" 1 !hook_calls;
+       let masc_root = Filename.concat dir ".masc" in
+       check
+         int
+         "the row is where coverage gaps are read"
+         1
+         (List.length (Telemetry_coverage_gap.read_recent ~masc_root ~n:10));
+       check
+         bool
+         "nothing is written at the top of the workspace"
+         false
+         (Sys.file_exists (Filename.concat dir "telemetry-coverage-gaps")))
+;;
+
 let test_tool_usage_restore_uses_lifecycle_authority () =
   let dir = temp_dir "registry_tool_usage_restore" in
   Fun.protect
@@ -852,6 +892,10 @@ let () =
             "exact dispatch preserves replacement lane"
             `Quick
             test_dispatch_event_exact_preserves_replacement_lane
+        ; test_case
+            "a failed phase hook records its gap under .masc"
+            `Quick
+            test_failed_phase_hook_records_its_gap_under_the_masc_directory
         ] )
     ; ( "keeper_lane"
       , [ test_case

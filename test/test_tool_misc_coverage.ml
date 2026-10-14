@@ -158,7 +158,7 @@ let () = test "keeper_tool_help_uses_descriptor_projection" (fun () ->
 let () = test "dispatch_dashboard" (fun () ->
   let ctx = make_test_ctx () in
   ignore (Workspace.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
-  Workspace.ensure_workspace_bootstrap ctx.config;
+  ignore (Workspace.init ctx.config ~agent_name:None);
   let second_workspace = ctx.config in
   ignore (Workspace.add_task second_workspace ~title:"second task" ~priority:1 ~description:"");
   let args = `Assoc [] in
@@ -188,7 +188,7 @@ let () = test "dispatch_dashboard_compact" (fun () ->
 
 let () = test "dispatch_dashboard_current_scope" (fun () ->
   let ctx = make_test_ctx () in
-  Workspace.ensure_workspace_bootstrap ctx.config;
+  ignore (Workspace.init ctx.config ~agent_name:None);
   let focused = ctx.config in
   ignore (Workspace.add_task focused ~title:"focus task" ~priority:2 ~description:"");
   let args = `Assoc [("scope", `String "current")] in
@@ -204,7 +204,7 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
 
 let () = test "dispatch_keeper_waiting_inventory" (fun () ->
   let ctx = make_test_ctx () in
-  Workspace.ensure_workspace_bootstrap ctx.config;
+  ignore (Workspace.init ctx.config ~agent_name:None);
   let args = `Assoc [] in
   match Tool_misc.dispatch ctx ~name:"masc_keeper_waiting_inventory" ~args with
   | Some result ->

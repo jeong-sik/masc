@@ -643,6 +643,7 @@ let candidate_rejection_measurement_outcome (receipt : candidate_rejection_recei
 
 let target_selection_error_disposition = function
   | Missing_target_credential _
+  | Missing_declared_target_credential _
   | Target_credential_invalid _
   | Target_credential_read_failed _ -> Runtime_slot_unavailable
 ;;
@@ -1021,6 +1022,11 @@ let target_selection_error_reason = function
       "missing_target_credential(target_ref=%s environment_variable=%s)"
       (quoted_dynamic target_ref)
       (quoted_dynamic environment_variable)
+  | Missing_declared_target_credential { target_ref; provider_id } ->
+    Printf.sprintf
+      "missing_declared_target_credential(target_ref=%s provider_id=%s)"
+      (quoted_dynamic target_ref)
+      (quoted_dynamic provider_id)
   | Target_credential_invalid { target_ref; environment_variable } ->
     Printf.sprintf
       "target_credential_invalid(target_ref=%s environment_variable=%s)"
@@ -1045,6 +1051,12 @@ let target_selection_error_evidence_json = function
       [ "kind", `String "missing_target_credential"
       ; "target_ref", `String target_ref
       ; "environment_variable", `String environment_variable
+      ]
+  | Missing_declared_target_credential { target_ref; provider_id } ->
+    `Assoc
+      [ "kind", `String "missing_declared_target_credential"
+      ; "target_ref", `String target_ref
+      ; "provider_id", `String provider_id
       ]
   | Target_credential_invalid { target_ref; environment_variable } ->
     `Assoc
@@ -1230,7 +1242,28 @@ let evidence_transport_failure ~ordinal = function
     -> Ok (Validated_flow_evidence.Output_limit_reached, raw_response_sha256)
   | Flow_advance_execution_failed { cause = Invalid_json_output; raw_response_sha256; _ }
     -> Ok (Validated_flow_evidence.Invalid_json_output, raw_response_sha256)
-  | Flow_advance_execution_failed { cause; _ } ->
+  | Flow_advance_execution_failed
+      { cause =
+          ( Provider_response_refused
+              { refusal =
+                  ( Refusal_body_not_received
+                  | Auth_failed
+                  | Authorization_refused
+                  | Payment_required
+                  | Invalid_request
+                  | Not_found
+                  | Context_overflow
+                  | Input_capacity
+                  | Network_error
+                  | Timeout )
+              ; _
+              }
+          | Incomplete_output
+          | Missing_output
+          | Ambiguous_output _
+          | Unexpected_output_content ) as cause
+      ; _
+      } ->
     let detail =
       match cause with
       | Completion_failed _ -> "completion_failed"
@@ -1703,7 +1736,13 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
     Request_body_refused
   | Retry.InvalidRequest { reason = Retry.Refusal_body_not_received; _ } ->
     Refusal_body_not_received
-  | Retry.InvalidRequest _ -> Invalid_request
+  | Retry.InvalidRequest
+      { reason =
+          ( Retry.Json_parse_error
+          | Retry.Attempt_rejected
+          | Retry.Unknown_invalid_request )
+      ; _
+      } -> Invalid_request
   | Retry.RateLimited _ -> Rate_limited
   | Retry.Overloaded _ -> Overloaded
   | Retry.ServerError _ -> Server_error
@@ -1778,11 +1817,37 @@ let execution_error_cause ~http_status ~dispatch = function
   | Exec.Provider_error
       (( Http_client.NetworkError _ | Http_client.TimeoutError _
        | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _
-       | Http_client.ProviderFailure _ ) as error) -> Completion_failed { error; dispatch }
+       | Http_client.ProviderFailure
+           { kind =
+               ( Http_client.Capacity_exhausted _
+               | Http_client.Hard_quota _
+               | Http_client.Capability_mismatch _
+               | Http_client.Cli_policy_invalid _
+               | Http_client.Cli_startup_failed _
+               | Http_client.Provider_parse_error _
+               | Http_client.Provider_wire_error _
+               | Http_client.Provider_reported_error _
+               | Http_client.Provider_interrupted
+               | Http_client.Response_body_too_large _
+               | Http_client.Repeating_generation _
+               | Http_client.Unknown_provider_failure _ )
+           ; _
+           } ) as error) -> Completion_failed { error; dispatch }
   | Exec.Output_normalization_failed (Exec.Incomplete_structured_response Types.MaxTokens) ->
     Output_limit_reached
-  | Exec.Output_normalization_failed (Exec.Incomplete_structured_response _) ->
-    Incomplete_output
+  | Exec.Output_normalization_failed
+      (Exec.Incomplete_structured_response
+         ( Types.EndTurn
+         | Types.StopToolUse
+         | Types.StopSequence
+         | Types.Refusal
+         | Types.ContentFilter
+         | Types.RepetitionTruncation
+         | Types.PauseTurn
+         | Types.Compaction
+         | Types.ContextWindowExceeded
+         | Types.UnmatchedToolCalls
+         | Types.Unknown _ )) -> Incomplete_output
   | Exec.Output_normalization_failed Exec.Missing_structured_text -> Missing_output
   | Exec.Output_normalization_failed (Exec.Ambiguous_structured_text count) ->
     Ambiguous_output count
@@ -2067,7 +2132,7 @@ let execute_flow_candidate
             (match Generation_receipt.phase attempt.receipt with
              | Generation_receipt.Not_started ->
                Generation_receipt.start attempt.receipt
-             | _ -> ());
+             | Before_dispatch | Dispatch_started | Response_received | Terminal -> ());
             publish ();
             let cause =
               { call_id = receipt_call_id attempt.receipt

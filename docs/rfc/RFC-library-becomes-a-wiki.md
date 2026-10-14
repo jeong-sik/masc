@@ -37,7 +37,7 @@ llm-wiki 는 세 층(원재료, 위키, 스키마)과 안내 파일 둘(index, l
 - D4. 고치기: `masc_wiki_update` 를 새로 둔다. 읽었던 판(`revision`)을 같이 보내야 하고, 그 사이 누가 고쳤으면 거절한다.
 - D5. `index.md`: 서버가 페이지마다 한 줄씩 만든다. 아무도 손으로 고치지 않는다.
 - D6. `log.md`: 만들기와 고치기마다 한 줄을 붙인다. 붙이기만 한다.
-- D7. Keeper 는 이번에도 읽기와 검색만 한다. 쓰기는 다음 RFC 에서 정한다.
+- D7. Keeper 는 지금도 도서관에 문서를 넣는다(`masc_library_add`). 그래서 만들기와 고치기도 Keeper 에게 그대로 열린다. Librarian 이 위키를 정리하게 하는 일은 이번에 하지 않는다.
 
 ## 2. 무슨 일이 났나
 
@@ -59,7 +59,7 @@ llm-wiki 는 세 층(원재료, 위키, 스키마)과 안내 파일 둘(index, l
 
 ## 3. 지금 구조
 
-- 도구: `masc_library_list`, `masc_library_read`, `masc_library_search`, `masc_library_add`. Keeper 에게는 `keeper_library_read`, `keeper_library_search` 만 열려 있다.
+- 도구: `masc_library_list`, `masc_library_read`, `masc_library_search`, `masc_library_add`. Keeper 는 이 가운데 `masc_library_list` 와 `masc_library_add` 를 그대로 부르고, 읽기와 검색은 `keeper_library_read`, `keeper_library_search` 라는 이름으로 부른다(`Keeper_tool_descriptor.masc_library_descriptor`). 라이브 문서 41개의 작성자도 대부분 Keeper 다. 용어집의 "Keeper 쪽에는 read-only 투영만 있다" 는 문장은 틀렸다.
 - 리소스: `masc://library`, `masc://library.json` (`config/mcp/resources.toml`).
 - 저장: `<base_path>/docs/library/<slug>-<YYYYMMDD>.md` (`lib/tool_library.ml`). slug 는 제목을 소문자로 바꾸고 `a-z`, `0-9`, `-` 밖의 글자를 버린 것이다.
 - 쓰기: `Out_channel.with_open_text` 로 바로 쓴다. 같은 파일이 있으면 내용을 비우고 새로 쓴다. 잠금도 임시 파일도 없다.
@@ -76,11 +76,15 @@ llm-wiki 는 세 층(원재료, 위키, 스키마)과 안내 파일 둘(index, l
 | `masc_library_list`, `read`, `search`, `add` | `masc_wiki_list`, `read`, `search`, `create`, `update` |
 | `keeper_library_read`, `search` | `keeper_wiki_read`, `search` |
 | `masc://library`, `masc://library.json` | `masc://wiki`, `masc://wiki.json` |
-| `<base_path>/docs/library/` | `<base_path>/docs/wiki/` |
+| `<base_path>/docs/library/` | `<base_path>/.masc/wiki/` |
 | `Tool_library`, `tool_schemas_library*`, `tool_shard_types_schemas_library*` | `Tool_wiki`, `tool_schemas_wiki*`, `tool_shard_types_schemas_wiki*` |
-| 용어집 `Library` | 용어집 `Wiki`. `Librarian` 항목은 그대로 둔다 |
+| 용어집 `Library` | 용어집 `Wiki`, `Page revision`. `Librarian` 항목은 그대로 둔다 |
 
-옛 이름을 받는 별칭은 만들지 않는다. 옛 경로를 읽는 코드도 만들지 않는다.
+옛 이름을 받는 별칭은 만들지 않는다. 옛 경로를 읽는 코드도 만들지 않는다. 용어집에도 옛 이름을 안내하는 줄을 남기지 않는다.
+
+용어집 `Wiki` 항목에는 경계를 한 줄로 적는다: Wiki 는 이름 붙은 공유 페이지이고 사람과 Keeper 가 같이 본다. Keeper 한 명의 기억(Memory OS, Librarian)과는 다른 것이다.
+
+용어집에는 `revision` 이 이미 여럿 있다(`Backlog revision`, `content_revision` 등). 위키의 것은 `Page revision` 으로 부른다.
 
 지난 기록(`docs/evidence`, 지난 RFC, 감사 문서, changelog)은 그 날짜에 있었던 일이라 고치지 않는다.
 
@@ -90,8 +94,10 @@ llm-wiki 는 세 층(원재료, 위키, 스키마)과 안내 파일 둘(index, l
 
 - `page` 는 `a-z`, `0-9`, `-` 로만 된 문자열이다. 비어 있으면 안 되고 `-` 로 시작하거나 끝나면 안 된다.
 - 쓰는 쪽이 정한다. 규칙에 안 맞으면 고쳐 주지 않고 거절한다. 지금처럼 글자를 몰래 버리면 서로 다른 제목이 같은 이름으로 모인다.
-- 파일은 `<base_path>/docs/wiki/<page>.md` 다. 이름에 날짜를 넣지 않는다. 날짜는 frontmatter 와 log 에 있다.
-- `title` 에는 아무 글자나 쓸 수 있다. 한글도 된다.
+- 파일은 `<base_path>/.masc/wiki/<page>.md` 다. 이름에 날짜를 넣지 않는다. 날짜는 frontmatter 와 log 에 있다. 위키는 서버가 자기 세계를 위해 쓰는 상태라 다른 상태와 함께 `.masc/` 아래에 둔다. workspace 의 `docs/` 에 두면 그 workspace 가 속한 저장소의 파일로 섞인다.
+- `title` 은 어느 나라 글자로든 쓸 수 있다. 한글도 된다.
+- 머리말에 한 줄로 들어가는 값(`title`, `summary`, 쓴 사람 이름, 태그 하나하나)은 비어 있지 않은 한 줄이어야 하고 앞뒤에 공백이 없어야 한다. 읽을 때 앞뒤 공백을 잘라 내므로, 그렇지 않은 값은 쓴 것과 다르게 읽힌다. 태그에는 쉼표도 쓸 수 없다. 쉼표가 태그를 나누기 때문이다. 이 규칙에 안 맞는 값은 고쳐 쓰지 않고 거절한다.
+- 한글로 찾을 때는 `title` 이 그 구실을 한다. `masc_wiki_read` 는 지금처럼 제목의 일부로도 페이지를 찾고, `masc_wiki_search` 는 frontmatter 를 포함한 파일 전체에서 찾는다. 그래서 따로 한글 별칭 칸을 두지 않는다.
 - `index` 와 `log` 는 페이지 이름으로 쓸 수 없다.
 
 ### 4.3 D3·D4 — 만들기와 고치기
@@ -111,11 +117,12 @@ tags: [band, song]
 ---
 ```
 
-- `revision` 은 1 에서 시작해서 고칠 때마다 1 씩 는다.
+- `revision` 은 1 에서 시작해서 고칠 때마다 1 씩 는다. 용어집 이름은 `Page revision` 이다.
 - `summary` 는 한 줄이다. 비어 있거나 줄바꿈이 있으면 거절한다. index 에 이 줄이 들어간다.
+- `source` 는 지금 도서관의 네 가지(`direct_experience`, `research`, `experiment`, `observation`)를 그대로 쓴다. 만들 때 꼭 넣어야 하고, 고칠 때는 바꾸지 않는다. 페이지가 처음 어떤 일에서 나왔는지를 적는 칸이기 때문이다.
 - `masc_wiki_create(page, title, summary, source, tags, body)`: `page` 가 이미 있으면 거절한다.
 - `masc_wiki_update(page, base_revision, body, note, title?, summary?, tags?)`:
-  - 파일의 `revision` 이 `base_revision` 과 다르면 거절하고 지금 `revision` 을 알려 준다. 쓰는 쪽은 다시 읽고 합쳐서 다시 보낸다.
+  - 파일의 `revision` 이 `base_revision` 과 다르면 거절한다. 거절 응답에는 지금 `revision` 과 지금 본문을 같이 싣는다. 쓰는 쪽은 다시 읽지 않고 그 본문에 자기 변경을 합쳐서, 받은 `revision` 을 `base_revision` 으로 다시 보낸다. 합치기는 쓰는 쪽이 한다. 서버는 본문을 합치지 않는다. Keeper 도 같은 규칙을 따른다. 도구 설명에 이 순서를 적는다. geek-scout 가 낸 쓰임새(며칠에 걸쳐 사실이 쌓이는 조사를 페이지 하나로 계속 고치기)가 이 경로다.
   - 같으면 본문을 통째로 바꾼다. `revision` 을 1 올리고 `updated` 를 오늘로 바꾼다.
   - `note` 는 log 에 들어갈 한 줄이다. 무엇을 왜 고쳤는지 적는다. 비어 있으면 거절한다.
 - `masc_wiki_read` 는 본문과 함께 `revision` 을 돌려준다.
@@ -155,8 +162,8 @@ tags: [band, song]
 
 ## 5. 하지 않는 것
 
-- **Keeper 쓰기** (`keeper_wiki_create`, `keeper_wiki_update`): 뼈대가 실제로 돌아가는 걸 본 다음 RFC 에서 정한다. Librarian 이 위키를 고치게 할지도 그때 정한다.
-- **게시판 글을 위키로 옮기기**: 게시판 글은 기본 7일 뒤 사라진다. 남길 글을 페이지로 옮기는 동작은 이 RFC 다음 단계다. 지금 board 첨부 작업이 같은 TUI board 화면을 고치고 있어서 겹치지 않게 뒤로 둔다.
+- **Librarian 이 위키를 정리하기**: Keeper 가 턴 안에서 직접 쓰는 것과 달리, Librarian 이 대화에서 내용을 뽑아 페이지를 고치는 일은 이번에 하지 않는다. 뼈대가 실제로 돌아가는 걸 본 다음 RFC 에서 정한다.
+- **게시판 글을 위키로 옮기기**: 게시판 글은 기본으로 사라지지 않는다(`Board_types.Limits.default_ttl_hours = 0`). 대신 주제별로 모이지 않고 흩어진다. 남길 내용을 정리된 페이지로 옮겨 적는 동작은 이 RFC 다음 단계다. 지금 board 첨부 작업이 같은 TUI board 화면을 고치고 있어서 겹치지 않게 뒤로 둔다.
 - **원재료 층과 점검(lint)**: llm-wiki 의 나머지 두 부분이다. 이번에는 만들지 않는다.
 - **공유 기억의 원장과 log**: #41957 이 따로 다룬다. 두 log 는 다른 것이다. 위키 log 는 페이지가 바뀐 기록이고, #41957 의 log 는 Keeper 들이 낸 사실의 기록이다. 용어집에 둘을 나눠 적는다.
 - **검색 개선**: 지금처럼 부분 문자열로 찾는다.
@@ -166,7 +173,8 @@ tags: [band, song]
 단위 테스트는 저장된 파일만 본다. 화면 문구는 보지 않는다.
 
 - create 가 이미 있는 page 를 거절하고, 그 파일은 그대로다.
-- update 가 낡은 `base_revision` 을 거절하고, 그 파일은 그대로다.
+- update 가 낡은 `base_revision` 을 거절하고, 그 파일은 그대로다. 거절 응답에 지금 `revision` 과 지금 본문이 들어 있다.
+- update 로 `source` 를 바꿀 수 없다.
 - update 가 `revision` 을 1 올리고 본문을 바꾼다.
 - 규칙에 안 맞는 page 를 거절한다: 대문자, 한글, 빈 값, `-` 로 시작, `index`, `log`.
 - 한글 `title` 이 frontmatter 와 index 에 그대로 남는다.
@@ -183,7 +191,7 @@ tags: [band, song]
 ## 7. 확신도
 
 - 문제(§2, §3): 높음. 라이브 파일과 `lib/tool_library.ml` 을 직접 읽었다.
-- 설계: 중간. `revision` 으로 동시 수정을 막는 방식은 task 의 `expected_version` 과 같은 모양이다. 위키에 맞는지는 Keeper 쓰기를 열 때 다시 본다.
+- 설계: 중간. `revision` 으로 동시 수정을 막는 방식은 task 의 `expected_version` 과 같은 모양이다. Keeper 가 실제로 거절을 받고 다시 보내는지는 배포 뒤 log 로 확인한다.
 - 이름 바꾸기에서 놓치는 곳: 낮음. §6 의 `git grep` 이 잡는다.
 
 ## 8. 열어 둔 물음
@@ -192,8 +200,10 @@ tags: [band, song]
   - (a) 하드컷: 위키는 빈 채로 시작한다. 남길 문서만 새 페이지로 옮겨 적는다. 같은 주제의 여러 문서는 이때 하나로 합친다. 옛 `docs/library/` 는 읽는 코드가 없어지고, 운영자가 지운다.
   - (b) 옮기기: 배포 때 스크립트로 `summary` 와 `revision: 1` 을 붙여서 옮긴다.
   - 제안은 (a) 다. 41개 중 11개가 시험 문서이고, 남길 만한 문서는 v2 로 갈라져 있어서 어차피 합쳐야 한다.
+  - Keeper 의견(2026-10-13 게시판): geek-scout 가 (a) 에 찬성했다. 스크립트로 옮기면 시험 문서까지 옮긴다는 이유다.
 - **Q2. page 를 ASCII 로만 받을지**: 한글 파일 이름은 macOS 가 자모를 풀어서(NFD) 저장한다. 같은 이름이 두 가지로 보일 수 있다. 제안은 ASCII 다.
-- **Q3. Keeper 쓰기를 언제 열지**: §5 참고.
+  - Keeper 의견: geek-scout 와 glossary-maniac 이 ASCII 에 찬성했다. 한글로 찾는 문제는 `title` 로 푼다(§4.2).
+- **Q3. (닫힘) Keeper 쓰기**: 초안은 "Keeper 는 읽기만 한다" 고 적었는데 틀렸다. Keeper 는 지금도 `masc_library_add` 를 부른다. 그래서 따로 열 것이 없고, create 와 update 가 같은 경로로 Keeper 에게 간다.
 
 ## 9. 구현 순서
 
@@ -202,3 +212,10 @@ Native Stack 으로 올리고, 맨 위 PR 로 한 번에 병합한다.
 1. 이름 바꾸기 (D1). 동작은 그대로 둔다.
 2. page 이름, create, update, `revision`, 잠금, 원자적 쓰기 (D2–D4).
 3. `index.md` 와 `log.md` (D5–D6).
+
+구현은 스택 #42706 (#42703, #42704, #42705) 이다. 설계와 다르게 한 곳이 둘 있다.
+
+- `masc_wiki_list` 는 `index.md` 파일을 읽어 돌려주지 않고, 부를 때 페이지에서 바로 만든다. 파일에 쓰는 것과 같은 함수를 쓰므로 내용은 같다. 손으로 고친 페이지가 있어도 목록이 맞게 나온다.
+- `masc://wiki` 리소스는 지금 모양을 그대로 둔다. 리소스의 줄에는 `masc://wiki/<topic>` 주소가 들어 있고, 리소스를 읽는 쪽은 그 주소가 필요하다.
+
+`note` 는 고치기에만 받는다. 만들기는 페이지의 `summary` 를 log 에 적는다.

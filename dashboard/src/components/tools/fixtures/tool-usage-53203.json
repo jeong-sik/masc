@@ -92,11 +92,11 @@
       "visibility": "hidden"
     },
     {
-      "name": "keeper_library_read",
+      "name": "keeper_wiki_read",
       "visibility": "hidden"
     },
     {
-      "name": "keeper_library_search",
+      "name": "keeper_wiki_search",
       "visibility": "hidden"
     },
     {
@@ -500,19 +500,19 @@
       "visibility": "default"
     },
     {
-      "name": "masc_library_add",
+      "name": "masc_wiki_create",
       "visibility": "default"
     },
     {
-      "name": "masc_library_list",
+      "name": "masc_wiki_list",
       "visibility": "default"
     },
     {
-      "name": "masc_library_read",
+      "name": "masc_wiki_read",
       "visibility": "default"
     },
     {
-      "name": "masc_library_search",
+      "name": "masc_wiki_search",
       "visibility": "default"
     },
     {
@@ -875,7 +875,7 @@
         "call_count": 5
       },
       {
-        "name": "masc_library_add",
+        "name": "masc_wiki_create",
         "call_count": 5
       },
       {
@@ -919,7 +919,7 @@
         "call_count": 3
       },
       {
-        "name": "masc_library_list",
+        "name": "masc_wiki_list",
         "call_count": 2
       },
       {
@@ -939,7 +939,7 @@
         "call_count": 2
       },
       {
-        "name": "keeper_library_search",
+        "name": "keeper_wiki_search",
         "call_count": 2
       },
       {
@@ -999,8 +999,8 @@
       "masc_tasks",
       "masc_transition",
       "masc_update_priority",
-      "masc_library_read",
-      "masc_library_search",
+      "masc_wiki_read",
+      "masc_wiki_search",
       "masc_lane_attach",
       "masc_lane_inspect",
       "masc_lane_observe",

@@ -5,10 +5,12 @@
     log, and durable telemetry coverage gap. *)
 
 val record :
-  base_dir:string ->
+  masc_root:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   callback:string ->
   exn ->
   unit
-(** Record one lifecycle callback failure. Re-raises
-    [Eio.Cancel.Cancelled] to preserve cooperative cancellation. *)
+(** Record one lifecycle callback failure. [masc_root] is [<base>/.masc],
+    the root the coverage-gap store lives under, as
+    {!Telemetry_coverage_gap.record} takes it. Re-raises [Eio.Cancel.Cancelled] to preserve cooperative
+    cancellation. *)

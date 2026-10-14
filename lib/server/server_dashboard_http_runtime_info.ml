@@ -99,7 +99,7 @@ let set_dashboard_runtime_probe_cache_for_tests ~probe ~age_sec () =
 ;;
 
 (* Per-path TTL cache for `git rev-parse --short HEAD`.  Each miss forks
-   git and can take seconds on large worktrees (~/me etc.), yet HEAD
+   git and can take seconds on large worktrees, yet HEAD
    changes infrequently, and every dashboard shell refresh calls this
    twice (workspace + base).  Serving cached values keeps snapshot_json
    off the 5 s git-probe budget on the hot path. *)
@@ -254,8 +254,9 @@ let git_probe_command_available ?(getenv = Sys.getenv_opt) () =
 ;;
 
 (* Bumped 5s → 15s for large repos (#9765, #9775).
-   `~/me` repeatedly trips the 5s budget on first probe after TTL
-   expiry (3 occurrences in issue #9775 logs at 18:29/18:41/18:50).
+   A large base-path repository repeatedly trips the 5s budget on the
+   first probe after TTL expiry (3 occurrences in issue #9775 logs at
+   18:29/18:41/18:50).
    The probe runs on a background fiber via
    [maybe_refresh_git_rev_parse_short_in_background], so the extra
    wall-time does not affect the hot dashboard path — cached values
@@ -277,7 +278,7 @@ let git_rev_parse_short_probe dir =
          argv
      with
      | Unix.WEXITED 0, output -> String_util.trim_nonempty output
-     | _ -> None)
+     | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None)
 ;;
 
 let git_rev_parse_short_refresh dir =
@@ -370,7 +371,7 @@ let git_probe_trimmed dir args =
       argv
   with
   | Unix.WEXITED 0, output -> String_util.trim_nonempty output
-  | _ -> None
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> None
 ;;
 
 let parse_ahead_behind raw =
@@ -2136,7 +2137,7 @@ let runtime_resolution_json (config : Workspace.config) =
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
-      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
       ; ( "server_repo_path"
         , match server_repo_path with
@@ -2239,7 +2240,7 @@ let light_runtime_resolution_json ?profile_snapshot (config : Workspace.config) 
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
-      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
       ; ( "server_repo_path"
         , match server_repo_path with
@@ -2333,7 +2334,7 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
         |> fun metrics ->
         `Assoc (("non_public_call_log",
           Tool_usage_log.source_metadata_json
-             ~masc_root:(Workspace.masc_root_dir config))
+             ~masc_root:(Workspace.masc_dir config))
           :: Yojson.Safe.Util.to_assoc metrics))
     in
     `Assoc

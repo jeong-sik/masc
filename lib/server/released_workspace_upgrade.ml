@@ -32,7 +32,16 @@ let assess_keeper ~path original =
           Ok Keeper_activation_mode.On_demand
         | Some (Toml_bool true), Some (Toml_bool true), None ->
           Ok Keeper_activation_mode.Autonomous
-        | _ -> Error "activation values have no unambiguous released mapping"
+        | (Some (Toml_bool true), Some (Toml_bool true), Some _)
+        | (Some (Toml_bool true), Some (Toml_bool false), Some _)
+        | (Some (Toml_bool true), Some (Toml_string _ | (Toml_int _ | (Toml_float _ | (Toml_string_array _ | (Toml_array _ | (Toml_table _ | (Toml_inline_table _ | (Toml_table_array _ | (Toml_offset_datetime _ | (Toml_local_datetime _ | (Toml_local_date _ | Toml_local_time _))))))))))), _)
+        | (Some (Toml_bool true), None, _)
+        | (Some (Toml_bool false), Some (Toml_bool false), Some _)
+        | (Some (Toml_bool false), Some (Toml_bool true), _)
+        | (Some (Toml_bool false), Some (Toml_string _ | (Toml_int _ | (Toml_float _ | (Toml_string_array _ | (Toml_array _ | (Toml_table _ | (Toml_inline_table _ | (Toml_table_array _ | (Toml_offset_datetime _ | (Toml_local_datetime _ | (Toml_local_date _ | Toml_local_time _))))))))))), _)
+        | (Some (Toml_bool false), None, _)
+        | (Some (Toml_string _ | (Toml_int _ | (Toml_float _ | (Toml_string_array _ | (Toml_array _ | (Toml_table _ | (Toml_inline_table _ | (Toml_table_array _ | (Toml_offset_datetime _ | (Toml_local_datetime _ | (Toml_local_date _ | Toml_local_time _))))))))))), _, _)
+        | (None, _, _) -> Error "activation values have no unambiguous released mapping"
       in
       let* updated =
         edit_keeper_fields_in_content

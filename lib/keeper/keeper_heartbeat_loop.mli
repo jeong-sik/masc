@@ -390,8 +390,7 @@ module For_testing : sig
     | Lane_missing
     | Lane_unavailable
 
-  (** Load the durable hint for [keeper_name] under the cluster-aware
-      [keepers_dir]. A missing file is no hint; a
+  (** Load the durable hint for [keeper_name] under [keepers_dir]. A missing file is no hint; a
       store error is logged with its path and also yields no hint, leaving the
       file in place as evidence. A suffix naming an id the assignment no
       longer has as a candidate, or an assignment no longer configured, is

@@ -127,13 +127,19 @@ let schedules_dir config =
   Filename.concat (Workspace_utils.masc_dir config) "schedules"
 ;;
 
-let signals_dir config = Filename.concat (schedules_dir config) "signals"
+let signal_location config =
+  Dated_jsonl.Store.at
+    (Workspace_utils.dated_store_root config)
+    Dated_jsonl.Store.Root.Schedule_signals
+;;
+
+let signals_dir config = Dated_jsonl.Store.dir (signal_location config)
 
 let signal_seen_path config =
   Filename.concat (schedules_dir config) "signal_keys.json"
 ;;
 
-let signal_store config = Dated_jsonl.create ~base_dir:(signals_dir config) ()
+let signal_store config = Dated_jsonl.open_store (signal_location config)
 
 let string_field name fields =
   match List.assoc_opt name fields with

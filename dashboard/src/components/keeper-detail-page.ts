@@ -68,9 +68,7 @@ const LazyKeeperConfigPanel = lazy(async () => ({
 // sticky page header (`KeeperDetailHeaderInfo`) — same keeper name and
 // status — and the CLEAR navigation it offered is covered by the existing
 // header close button. `agent_name` was the only unique field; it is
-// surfaced in the 정체성 / 세대 section. Plan reference:
-// ~/me/memory/project_dashboard_keeper_detail_ssot_reconciliation_2026_05_19.md
-// Phase 5 (layout retune).
+// surfaced in the 정체성 / 세대 section.
 
 export function KeeperDetailPage() {
   const routeSurface = route.value.tab === 'keepers' ? 'keepers' : 'monitoring'
@@ -278,7 +276,6 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   // `컨텍스트` duplicated KpiGrid (rendered inside 운영 상태 개요), and
   // `런타임 / runtime` was the literal hardcoded placeholder string with no
   // real data behind it. `최근 활동` duplicated the page header subtitle.
-  // Plan reference: ~/me/memory/.../ssot-reconciliation/Phase 5.
 
   const submitClearContext = () => {
     void (async () => {

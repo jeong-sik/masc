@@ -98,7 +98,7 @@ let create_supported_interface_at ~path ~url ~protocol_binding ~protocol_version
     | Ok absolute_uri
       when Uri.Absolute_http.scheme absolute_uri = `Https
            && not (String.equal (Uri.Absolute_http.host absolute_uri) "") -> Ok ()
-    | _ ->
+    | Ok _ | Error _ ->
       invalid_config
         ~field:(path ^ ".url")
         ~detail:"must be an absolute HTTPS URL with a non-empty host"
@@ -187,7 +187,7 @@ let to_json (card : agent_card) : Yojson.Safe.t =
              @
              match a.credential_ref with
              | No_credential -> []
-             | _ -> [ "credential_ref", credential_json ]) )
+             | Env _ | File _ -> [ "credential_ref", credential_json ]) )
       ]
   in
   let interfaces_json =

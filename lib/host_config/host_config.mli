@@ -49,8 +49,10 @@ type t =
             Maps to [<tmp>] from [host ()] and [<base_path>/.masc/runtime/agent]
             from [resolve]. *)
   ; sandbox_workspace_root : string
-        (** Fleet sandbox root.  Defaults through [MASC_BASE_PATH], then
-            [ME_ROOT], then [<tmp>/masc-fleet] from [host ()]. *)
+        (** Fleet sandbox root.  [host ()] takes the base path
+            ([MASC_BASE_PATH], else the one an install recorded), then
+            [<tmp>/masc-fleet].  [resolve] takes [MASC_SANDBOX_ROOT], then
+            [MASC_BASE_PATH], then [<base_path>/fleet]. *)
   ; test_mode : test_mode_kind
         (** Typed test-mode boundary. *)
   ; log_dir : string
@@ -83,8 +85,6 @@ type t =
             PR-9 replaces [Env_config_core.base_path_raw_opt]. *)
   ; config_dir : string option
         (** Resolved [MASC_CONFIG_DIR].  [None] when unset. *)
-  ; data_dir : string option
-        (** Resolved [MASC_DATA_DIR].  [None] when unset. *)
   ; home : string option
         (** Operator [$HOME] directory, trimmed.  [None] when unset or
             empty.  RFC-0085 PR-10 replaces
@@ -113,7 +113,7 @@ val resolve : ?base_path:string -> unit -> (t, string) result
 val host : unit -> t
 
 (** [from_env ()] is an alias for [host ()] emphasising that the
-    [base_path]/[config_dir]/[data_dir] fields are
+    [base_path]/[config_dir] fields are
     populated by reading the corresponding [MASC_*] environment
     variables.  RFC-0085 PR-6 introduces this surface so callers (today
     in [Config_dir_resolver]) can route env-derived path decisions

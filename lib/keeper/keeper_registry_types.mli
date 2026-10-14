@@ -348,7 +348,6 @@ type registry_entry = {
           not resolve this field directly; use {!resolve_done} so
           double-resolve races return the prior terminal outcome. *)
   restart_count : int;
-  last_restart_ts : float;
   crash_log : (float * string) list;
   last_error : string option;
   last_failure_reason : failure_reason option;

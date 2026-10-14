@@ -385,10 +385,17 @@ module Extra_system_context_provenance : sig
   type classification =
     | Absent
     | Present
+    | Historical
     | Invalid
     | Duplicate
 
   val metadata : metadata
+  val historical_metadata : metadata
+  (** A previously transmitted context retained in the conversation. Unlike
+      [Present], this is ordinary history, not the current request's pinned
+      context or a second contribution to its prompt-context metrics. *)
+  val as_historical : metadata -> metadata
+  (** Replace only the carrier marker, preserving all other metadata. *)
   val classify : metadata -> classification
 end
 
@@ -441,6 +448,34 @@ module Reasoning_source : sig
   val entry : t -> string * Yojson.Safe.t
   val metadata : t -> metadata
   val add : t -> metadata -> (metadata, string) result
+  val classify : metadata -> classification
+end
+
+(** Creation-prefix identity stamped beside a stored reasoning artifact: the
+    wire the producing request actually sent, hashed so replay can prove the
+    current prefix is byte-identical before returning a signed block to an
+    endpoint that verifies the binding. [request_digest] covers the fields
+    the API's own prefix check covers — the system prompt, the tools, and
+    every transmitted message before this one; [message_digest] covers this
+    message's own wire bytes, so an in-message edit fails closed too. A
+    separate entry from {!Reasoning_source.t} so previously stored artifacts
+    keep parsing: they carry no digest and fail closed on binding wires. *)
+module Reasoning_prefix : sig
+  type t =
+    { request_digest : string
+    ; message_digest : string
+    }
+  [@@deriving show]
+
+  type classification =
+    | Absent
+    | Present of t
+    | Invalid
+    | Duplicate
+  [@@deriving show]
+
+  val entry : t -> string * Yojson.Safe.t
+  val metadata : t -> metadata
   val classify : metadata -> classification
 end
 
@@ -574,6 +609,10 @@ type inference_telemetry =
     (** Model ID used for the API request after alias resolution (e.g. "glm-4.7") *)
   ; reasoning_source : Reasoning_source.t option
     (** Exact replay provenance stamped by the live inference boundary. *)
+  ; reasoning_prefix : Reasoning_prefix.t option
+    (** Creation-prefix identity for the response's reasoning, when the wire
+        binds signatures to the prefix. [None] on wires without a binding,
+        and on responses whose request predates the digest. *)
   ; effective_context_window : int option
     (** Context window in tokens the request was sized against, as
         [Provider_config.context_window] reports it for the request config. *)
@@ -684,9 +723,14 @@ type assistant_message_error =
   | Reasoning_source_missing
 [@@deriving show]
 
+(** Whether any block is a reasoning artifact a replay boundary must justify. *)
+val content_has_reasoning_artifact : content_block list -> bool
+
 (** Convert a provider response into the Assistant history message callers
     should append. Reasoning-bearing responses require exact replay
-    provenance; plain responses remain metadata-free. *)
+    provenance; plain responses remain metadata-free. A carried
+    [reasoning_prefix] is stamped alongside the source; its absence is not
+    an error here — replay fails closed on binding wires instead. *)
 val assistant_message_of_response
   :  api_response
   -> (message, assistant_message_error) result

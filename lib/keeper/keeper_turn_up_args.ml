@@ -18,12 +18,12 @@ type parsed_args = {
   board_interests_opt : string list option;
   max_context_override_opt : int option;
   max_context_override_present : bool;
-  sandbox_profile_opt : string option;
+  sandbox_profile_opt : sandbox_profile option;
   sandbox_image_patch : string option option;
   microvm_backend_patch : Keeper_microvm_backend.t option option;
   remote_endpoint_opt : string option;
   remote_endpoint_present : bool;
-  network_mode_opt : string option;
+  network_mode_opt : network_mode option;
   egress_allow_opt : string list option;
   skill_names_opt : string list option;
   skill_names_present : bool;
@@ -215,9 +215,9 @@ let parse_max_context_override args =
    [network_mode] is the exception, and carries the empty string. "none"
    blocks the guest's network and "inherit" opens it; a form that suggests
    either makes that choice for an operator who is not reading it, which is
-   how a keeper built to search the web was created unable to. The empty
-   string is refused by name, so the form teaches the two spellings through
-   the rejection rather than deciding for the reader.
+   how a keeper built to search the web was created unable to. [parse]
+   refuses the empty string by name, so the form teaches every accepted
+   spelling through the rejection rather than deciding for the reader.
 
    [sandbox_image] follows the rule, not the exception (#37523): a docker
    keeper is refused without one, and the line the operator reads in the
@@ -303,6 +303,58 @@ let parse_microvm_backend_patch args =
   | Some _ -> Error "microvm_backend must be a string or null"
 ;;
 
+let parse_sandbox_profile args =
+  match Json_util.assoc_member_opt "sandbox_profile" args with
+  | None -> Ok None
+  | Some (`String raw) ->
+    (match sandbox_profile_of_string raw with
+     | Some profile -> Ok (Some profile)
+     | None ->
+       Error
+         (Printf.sprintf
+            "invalid sandbox_profile: %S (expected: %s)"
+            raw
+            (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings)))
+  | Some _ -> Error "sandbox_profile must be a string"
+;;
+
+(* An unparseable value is an error naming every accepted spelling, rendered
+   from [valid_network_mode_strings] rather than a hand-typed list, so a new
+   mode reaches the message without an edit here. *)
+let parse_network_mode args =
+  match Json_util.assoc_member_opt "network_mode" args with
+  | None -> Ok None
+  | Some (`String raw) ->
+    (match network_mode_of_string raw with
+     | Some mode -> Ok (Some mode)
+     | None ->
+       Error
+         (Printf.sprintf
+            "invalid network_mode: %S (expected: %s)"
+            raw
+            (String.concat ", " Keeper_types_profile.valid_network_mode_strings)))
+  | Some _ -> Error "network_mode must be a string"
+;;
+
+(* Free text, so only the shape is checked. The empty string reads as absent,
+   so the keeper TOML's instructions stay; a whitespace-only string is
+   instructions like any other text. A non-string is refused rather than read
+   as absent. *)
+let parse_instructions args =
+  match Json_util.assoc_member_opt "instructions" args with
+  | None | Some (`String "") -> Ok None
+  | Some (`String text) -> Ok (Some text)
+  | Some _ -> Error "instructions must be a string"
+;;
+
+(* An explicit request wins over the TOML default. Neither source stating one
+   returns [None]: omission is not a choice of isolation boundary, and callers
+   report the missing field instead. *)
+let resolve_sandbox_profile ?requested ~fallback () =
+  match requested with
+  | Some stated -> Some stated
+  | None -> fallback
+
 let parse
     ?(docker_preflight = docker_preflight_default)
     (ctx : _ context)
@@ -361,12 +413,18 @@ let parse
     match parse_sandbox_image_patch args with
     | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
     | Ok sandbox_image_patch ->
+    match parse_sandbox_profile args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok sandbox_profile_opt ->
+    match parse_network_mode args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok network_mode_opt ->
+    match parse_instructions args with
+    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
+    | Ok instructions_arg ->
     let max_context_override_res = parse_max_context_override args in
-    let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let remote_endpoint_res = parse_remote_endpoint args in
-    let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let egress_allow_opt_res = parse_present_string_list_opt args "egress_allow" in
-    let instructions_arg = get_string_opt args "instructions" in
     match
       load_declarative_materialization_defaults
         ~base_path:ctx.config.base_path
@@ -387,40 +445,28 @@ let parse
       | None -> profile_defaults
       | Some sandbox_image -> { profile_defaults with sandbox_image } in
     let effective_profile =
-      match sandbox_profile_opt with
-      | Some raw -> sandbox_profile_of_string raw
-      | None -> profile_defaults.sandbox_profile
+      resolve_sandbox_profile
+        ?requested:sandbox_profile_opt
+        ~fallback:profile_defaults.sandbox_profile
+        ()
     in
     match profile_defaults.microvm_backend, effective_profile with
     | Some _, (None | Some (Docker | Remote_ssh)) ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection
         "microvm_backend_requires_microvm: microvm_backend is only valid with sandbox_profile = microvm; pass null to clear it when changing profiles")
     | None, _ | Some _, Some Micro_vm ->
-    (* An explicit profile must be valid, and one of the call, the keeper TOML,
-       or the manifest has to state it. There is no fallback: the arm that used
-       to take [None, None, None] resolved to [Local], and the only thing
-       between that and host execution was a feature flag defaulting to off. *)
+    (* One of the call, the keeper TOML, or the manifest has to state a
+       profile. There is no fallback. *)
     let sandbox_profile_error =
-      match sandbox_profile_opt, profile_defaults.sandbox_profile,
-        profile_defaults.manifest_path
-      with
-      | Some raw, _, _ when Option.is_none (sandbox_profile_of_string raw) ->
-        Some
-          (Printf.sprintf
-             "invalid sandbox_profile: %S (expected: %s)"
-             raw
-             (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings))
-      | Some _, _, _ | None, Some _, _ ->
+      match effective_profile with
+      | Some profile ->
         (* A stated profile that runs a container also has to name its
            image (#37523). [profile_defaults] already carries this call's
            [sandbox_image] patch, so the call, the TOML or the manifest can
            each supply it; none of them is filled in for the caller. *)
-        (match effective_profile with
-         | Some profile ->
-           missing_required_sandbox_image_error ~keeper_name:name profile
-             profile_defaults
-         | None -> None)
-      | None, None, None | None, None, Some _ ->
+        missing_required_sandbox_image_error ~keeper_name:name profile
+          profile_defaults
+      | None ->
         Some
           (missing_required_sandbox_profile_error
              ~keeper_name:name
@@ -440,23 +486,16 @@ let parse
       | None, Error error -> Some error
       | None, Ok (remote_endpoint_present, remote_endpoint_opt) ->
         (* [sandbox_profile_error] is [None] only when a profile was stated,
-           so this is a [Some] every time control reaches here. Naming the
-           other arm rather than defaulting keeps it that way: a later edit
-           that admits an unstated profile has to answer this match. *)
-        let sandbox_profile =
-          match
-            Option.bind sandbox_profile_opt sandbox_profile_of_string,
-            profile_defaults.sandbox_profile
-          with
-          | Some profile, _ | None, Some profile -> Some profile
-          | None, None -> None
-        in
+           so [effective_profile] is a [Some] every time control reaches
+           here. Naming the other arm rather than defaulting keeps it that
+           way: a later edit that admits an unstated profile has to answer
+           this match. *)
         let endpoint_name =
           if remote_endpoint_present
           then remote_endpoint_opt
           else profile_defaults.remote_endpoint
         in
-        (match sandbox_profile, endpoint_name with
+        (match effective_profile, endpoint_name with
          | None, _ -> None
          | Some Remote_ssh, None ->
            Some
@@ -571,15 +610,13 @@ let parse
        the mode. *)
     let effective_network_mode =
       match network_mode_opt with
-      | Some mode -> Some (String.trim mode)
-      | None ->
-        Option.map
-          Keeper_types_profile_sandbox.network_mode_to_string
-          profile_defaults.network_mode
+      | Some _ -> network_mode_opt
+      | None -> profile_defaults.network_mode
     in
     (match egress_allow_opt, effective_network_mode with
-     | Some _, Some "policy" | None, _ -> Ok ()
-     | Some _, mode ->
+     | Some _, Some Network_policy
+     | None, (None | Some (Network_none | Network_inherit | Network_policy)) -> Ok ()
+     | Some _, ((None | Some (Network_none | Network_inherit)) as mode) ->
        Error
          (tool_result_error
             ~class_:Tool_result.Policy_rejection
@@ -587,7 +624,10 @@ let parse
                "egress_allow needs network_mode = \"policy\"; this keeper's mode \
                 is %s. An allowlist outside the policy lane is never consulted, \
                 so it is refused rather than stored."
-               (match mode with None -> "unset" | Some mode -> "\"" ^ mode ^ "\"")))
+               (match mode with
+                | None -> "unset"
+                | Some mode ->
+                  "\"" ^ Keeper_types_profile_sandbox.network_mode_to_string mode ^ "\"")))
      )
     |> Result.map (fun () ->
     {
@@ -631,34 +671,20 @@ let resolve_board_interests ~board_interests_opt ~fallback_interests =
   | None -> Keeper_types_profile_toml.normalize_board_interests fallback_interests
 ;;
 
-(* An explicit request wins over the TOML default. Neither source stating one
-   returns [None] rather than [Local]: omission is not a choice of isolation
-   boundary. Substituting [Local] here sent every omission through the
-   playground gate, which answered "local is disabled" about a profile the
-   caller never named. Callers report the missing field instead. *)
-let resolve_sandbox_profile ?requested ~fallback () =
-  match Option.bind requested sandbox_profile_of_string with
-  | Some stated -> Some stated
-  | None -> fallback
-
 let resolve_network_mode ~sandbox_profile ~fallback =
   fallback
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
 
-(* Which network mode a keeper lands on, from the caller's raw argument, the
-   keeper TOML declaration, and the profile's own default. One function
+(* Which network mode a keeper lands on, from the caller's argument (read by
+   [parse]), the keeper TOML declaration, and the profile's own default. One function
    because create and update disagreed: update read the caller's value, create
    computed one from [profile_defaults] and dropped the caller's, so the same
    declaration produced a different keeper depending on whether the name
    already existed -- and the create side said nothing about the drop. A
    keeper created for web search landed on "none" and failed inside the guest.
 
-   An unparseable value is an error naming every accepted spelling, rendered
-   from [valid_network_mode_strings] rather than a hand-typed pair, so a third
-   mode reaches the message without an edit here.
-
-   A parseable value the profile cannot hold is an error too. Honouring the
+   A mode the profile cannot hold is an error too. Honouring the
    caller's mode without that check wrote [remote_ssh] with [network_mode =
    "none"] into a keeper TOML, which booted from the in-memory meta and
    reported success -- and was then refused by
@@ -673,12 +699,4 @@ let resolve_requested_network_mode ~requested ~sandbox_profile ~fallback =
   in
   match requested with
   | None -> accepted (resolve_network_mode ~sandbox_profile ~fallback)
-  | Some raw ->
-    (match network_mode_of_string raw with
-     | Some mode -> accepted mode
-     | None ->
-       Error
-         (Printf.sprintf
-            "invalid network_mode: %S (expected: %s)"
-            raw
-            (String.concat ", " Keeper_types_profile.valid_network_mode_strings)))
+  | Some mode -> accepted mode

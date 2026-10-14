@@ -27,7 +27,7 @@ type catalog_fixture =
   ; base_url : string
   ; kind : string
   ; request_path : string
-  ; api_key_env : string
+  ; requires_api_key : bool
   ; native : bool
   ; json : bool
   ; body_timeout_s : float option
@@ -53,7 +53,7 @@ let catalog_entry
       ?(serving_rejected_from_tokens = 524299)
       ?(kind = "openai_compat")
       ?(request_path = "/v1/chat/completions")
-      ?(api_key_env = "")
+      ?(requires_api_key = false)
       ?model_id
       ?anthropic_thinking_control
       ?enable_thinking
@@ -67,7 +67,7 @@ let catalog_entry
   ; base_url
   ; kind
   ; request_path
-  ; api_key_env
+  ; requires_api_key
   ; native
   ; json
   ; body_timeout_s
@@ -123,7 +123,7 @@ let catalog_fixture_toml entry =
      kind = %S\n\
      base_url = %S\n\
      request_path = %S\n\
-     api_key_env = %S\n\n\
+     auth = %S\n\n\
      [[models]]\n\
      id_prefix = %S\n\
      provider_name = %S\n\
@@ -140,7 +140,7 @@ let catalog_fixture_toml entry =
     entry.kind
     entry.base_url
     entry.request_path
-    entry.api_key_env
+    (if entry.requires_api_key then "api-key" else "none")
     entry.model_id
     entry.id
     (serving_options ^ model_options)
@@ -490,7 +490,8 @@ let rec atomic_prepend target value =
   then atomic_prepend target value
 ;;
 
-let with_counted_server ?measurement_delay_s ~measurement_reply ~response f =
+let with_counted_server ?measurement_delay_s ?(check_request = fun _ _ -> ())
+    ~measurement_reply ~response f =
   let measurement_posts = Atomic.make 0 in
   let generation_posts = Atomic.make 0 in
   let journal_posts = Atomic.make 0 in
@@ -506,6 +507,7 @@ let with_counted_server ?measurement_delay_s ~measurement_reply ~response f =
     let port = fresh_port () in
     let handler _conn request body =
       let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+      check_request request request_body;
       let path = Uri.path (Cohttp.Request.uri request) in
       match path with
       | path
@@ -801,7 +803,7 @@ let test_later_missing_credential_does_not_block_current_success () =
       ~getenv:credential_getenv
       [ catalog_entry ~id:"current-good" ~base_url ~native:true ~json:true ()
       ; catalog_entry
-          ~api_key_env:"MISSING_FLOW_KEY"
+          ~requires_api_key:true
           ~id:"later-missing"
           ~base_url
           ~native:true
@@ -1235,7 +1237,7 @@ let test_missing_current_credential_advances_after_durable_settlement () =
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry
-          ~api_key_env:"MISSING_FLOW_KEY"
+          ~requires_api_key:true
           ~id:"current-missing"
           ~base_url
           ~native:true
@@ -1352,7 +1354,7 @@ let test_read_failed_current_credential_advances_to_good_successor () =
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry
-          ~api_key_env:"READ_FAILED_FLOW_KEY"
+          ~requires_api_key:true
           ~id:"read-failed-current"
           ~base_url
           ~native:true
@@ -1410,21 +1412,21 @@ let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry
-          ~api_key_env:"MISSING_FLOW_KEY\nSECOND_LINE"
+          ~requires_api_key:true
           ~id:"credential-missing"
           ~base_url
           ~native:true
           ~json:true
           ()
       ; catalog_entry
-          ~api_key_env:"INVALID_FLOW_KEY"
+          ~requires_api_key:true
           ~id:"credential-invalid"
           ~base_url
           ~native:true
           ~json:true
           ()
       ; catalog_entry
-          ~api_key_env:"READ_FAILED_FLOW_KEY"
+          ~requires_api_key:true
           ~id:"credential-read-failed"
           ~base_url
           ~native:true
@@ -1504,19 +1506,19 @@ let test_credential_rejections_are_ordered_zero_dispatch_terminal () =
      ; EO.Candidate_rejected read_failed
      ] ->
      check_rejection
-       ~id:"credential-missing" ~visit:1 ~reason_prefix:"missing_target_credential" missing;
+       ~id:"credential-missing" ~visit:1 ~reason_prefix:"missing_declared_target_credential" missing;
      check_rejection
-       ~id:"credential-invalid" ~visit:2 ~reason_prefix:"target_credential_invalid" invalid;
+       ~id:"credential-invalid" ~visit:2 ~reason_prefix:"missing_declared_target_credential" invalid;
      check_rejection
        ~id:"credential-read-failed"
        ~visit:3
-       ~reason_prefix:"target_credential_read_failed"
+       ~reason_prefix:"missing_declared_target_credential"
        read_failed;
      check
        string
-       "invalid credential reason contains identity, never the credential value"
-       "target_credential_invalid(target_ref=\"credential-invalid\" \
-        environment_variable=\"INVALID_FLOW_KEY\")"
+       "declared-key credential reason contains identity, never the credential value"
+       "missing_declared_target_credential(target_ref=\"credential-invalid\" \
+        provider_id=\"credential-invalid\")"
        (EO.candidate_rejection_reason invalid)
    | _ -> fail "credential evidence did not retain three typed rejections");
   match result with
@@ -1648,7 +1650,7 @@ let test_unmeasured_constraint_advances_only_after_durable_settlement () =
 let test_request_body_projection_is_exact_and_credential_free () =
   let id = "body-projection" in
   let base_url = "https://projection.invalid" in
-  let api_key_env = "MISSING_FLOW_KEY" in
+  let requires_api_key = true in
   let requirement =
     EO.make_output_requirement ~schema ~minimum_guarantee:EO.Provider_schema
   in
@@ -1656,7 +1658,7 @@ let test_request_body_projection_is_exact_and_credential_free () =
   let project () =
     with_catalog
       ~getenv:credential_getenv
-      [ catalog_entry ~api_key_env ~id ~base_url ~native:true ~json:true () ]
+      [ catalog_entry ~requires_api_key ~id ~base_url ~native:true ~json:true () ]
     @@ fun snapshot ->
     let target = admitted_target snapshot id in
     let projection =
@@ -3037,14 +3039,24 @@ let test_exact_anthropic_frozen_artifact_parity () =
     {|{"id":"msg-flow","type":"message","role":"assistant","model":"thinking-parity-model","content":[{"type":"text","text":"{\"name\":\"accepted\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}|}
   in
   let successes, posts =
-    with_counted_server ~measurement_reply:(Measurement_tokens 1) ~response
+    with_counted_server
+      ~check_request:(fun request body ->
+        let open Yojson.Safe.Util in
+        let thinking = Yojson.Safe.from_string body |> member "thinking" in
+        match thinking with
+        | `Assoc fields when List.mem_assoc "block_binding" fields ->
+          let beta = Cohttp.Header.get (Cohttp.Request.headers request) "anthropic-beta" in
+          check (option string) "frozen generation includes required beta"
+            (Some "thinking-binding-controls-2026-08-01") beta
+        | _ -> ())
+      ~measurement_reply:(Measurement_tokens 1) ~response
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
       [ catalog_entry
           ~kind:"anthropic"
           ~request_path:"/v1/messages"
           ~model_id:"thinking-parity-model"
-          ~anthropic_thinking_control:"adaptive_preferred"
+          ~anthropic_thinking_control:"adaptive_between_tools"
           ~enable_thinking:true
           ~id:"thinking-unmeasured"
           ~base_url
@@ -3055,7 +3067,7 @@ let test_exact_anthropic_frozen_artifact_parity () =
           ~kind:"anthropic"
           ~request_path:"/v1/messages"
           ~model_id:"thinking-parity-model"
-          ~anthropic_thinking_control:"adaptive_preferred"
+          ~anthropic_thinking_control:"adaptive_between_tools"
           ~enable_thinking:true
           ~serving_constraint:true
           ~serving_accepted_through_tokens:10
@@ -3153,7 +3165,9 @@ let test_exact_anthropic_frozen_artifact_parity () =
     bool
     "catalog thinking control reaches actual generation bytes"
     true
-    (thinking measured_json = `Assoc [ "type", `String "adaptive" ]);
+    (thinking measured_json = `Assoc [
+       "block_binding", `Assoc ["prefix_mismatch_behavior", `String "drop_block"];
+       "type", `String "adaptive" ]);
   check
     bool
     "measured and unmeasured generation use the same frozen thinking control"
@@ -3163,7 +3177,7 @@ let test_exact_anthropic_frozen_artifact_parity () =
     bool
     "count request derives thinking from the frozen generation artifact"
     true
-    (thinking measurement_json = thinking measured_json);
+    (thinking measurement_json = `Assoc [ "type", `String "adaptive" ]);
   check
     bool
     "unset target thinking policy emits no thinking control"
@@ -3192,7 +3206,10 @@ let test_exact_anthropic_frozen_artifact_parity () =
                 (List.mem
                    name
                    [ "max_tokens"; "stream"; "temperature"; "top_p"; "top_k" ]))
-           fields)
+           fields
+         |> List.map (function
+           | "thinking", `Assoc fields -> "thinking", `Assoc (List.remove_assoc "block_binding" fields)
+           | field -> field))
     | _ -> fail "Anthropic generation request must be a JSON object"
   in
   check
@@ -3318,7 +3335,7 @@ let test_exception_after_durable_rejection_stops_before_successor () =
          with_catalog
            ~getenv:credential_getenv
            [ catalog_entry
-               ~api_key_env:"MISSING_FLOW_KEY"
+               ~requires_api_key:true
                ~id:"rejection-committed"
                ~base_url
                ~native:true
@@ -4801,7 +4818,7 @@ let test_admission_and_semantic_rejections_share_one_declared_walk () =
     with_catalog
       ~getenv:credential_getenv
       [ catalog_entry
-          ~api_key_env:"MISSING_FLOW_KEY"
+          ~requires_api_key:true
           ~id:"mixed-missing"
           ~base_url
           ~native:true

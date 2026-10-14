@@ -55,8 +55,7 @@ let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 let restart_keepalive_after_message_turn ctx meta =
   match start_keepalive ctx meta with
   | Keepalive_started _ | Keepalive_already_registered _ -> ()
-  | outcome ->
-    Log.Keeper.error
+  | (Keepalive_lane_ownership_lost | Keepalive_lifecycle_denied _ | Keepalive_registration_rejected _ | Keepalive_fiber_start_rejected _ | Keepalive_launch_callback_failed _ | Keepalive_fork_rejected _) as outcome -> Log.Keeper.error
       "keeper message turn did not restore keepalive name=%s outcome=%s"
       meta.name
       (start_keepalive_outcome_to_string outcome)
@@ -98,6 +97,7 @@ let direct_turn_dynamic_context
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
       ~(workspace_memory : Workspace_memory_ledger.observation)
       ~(workspace_memory_access : Keeper_request_tool_access.t option)
+      ~(wiki_contents : Keeper_wiki_contents.t)
       ~(lane_updates : (Yojson.Safe.t,string) result)
       ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
@@ -109,6 +109,8 @@ let direct_turn_dynamic_context
   ([ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces ]
    @ Option.to_list
        (Keeper_unified_prompt.format_workspace_memory_observation ?access:workspace_memory_access workspace_memory)
+   @ Option.to_list
+       (Keeper_unified_prompt.format_wiki_observation ?access:workspace_memory_access wiki_contents)
    @ Option.to_list (Lane_addon_subscription.render lane_updates)
    @ [ approval_authority_text
   ; recent_direct_conversation_text
@@ -442,7 +444,15 @@ let run_keeper_invocation_turn_admitted_inner
          | Some cb -> Some (fun (evt : Agent_core.Types.sse_event) ->
              match evt with
              | Agent_core.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
-             | _ -> ()))
+             | Agent_core.Types.ContentBlockDelta { delta = (Agent_core.Types.TextSnapshot _ | (Agent_core.Types.ThinkingDelta _ | (Agent_core.Types.ThinkingSignatureDelta _ | (Agent_core.Types.RedactedThinkingSnapshot _ | (Agent_core.Types.ReasoningDetailsDelta _ | (Agent_core.Types.InputJsonDelta _ | (Agent_core.Types.InputJsonSnapshot _ | Agent_core.Types.MediaDelta _)))))));_}
+             | Agent_core.Types.MessageStop | Agent_core.Types.Ping | Agent_core.Types.Connected
+             | Agent_core.Types.MessageStart _ | Agent_core.Types.ContentBlockStart _
+             | Agent_core.Types.ContentBlockStop _ | Agent_core.Types.MessageDelta _
+             | Agent_core.Types.SSEError _ | Agent_core.Types.NDJSONError _
+             | Agent_core.Types.SSEParseFailed _ | Agent_core.Types.NDJSONParseFailed _
+             | Agent_core.Types.SSEUnknownEventType _ | Agent_core.Types.SSEUnsupportedPart _
+             | Agent_core.Types.SSEUnsupportedResponse _ | Agent_core.Types.Timeout _
+             | Agent_core.Types.StreamIncomplete _ | Agent_core.Types.StreamRepeating _ -> ()))
   in
   let name = Keeper_invocation_contract.target_name request in
   let message = Keeper_invocation_contract.prompt request in
@@ -639,7 +649,7 @@ let run_keeper_invocation_turn_admitted_inner
          slots, starving the synchronous run_turn call (Issue #2610). *)
       (* auto execution session interception removed in #2908 *)
       (* === Harness: trajectory accumulator + eval gate config === *)
-      let masc_root = Workspace.masc_root_dir ctx.config in
+      let masc_root = Workspace.masc_dir ctx.config in
       let trajectory_acc =
         Trajectory.create_accumulator
           ~masc_root
@@ -715,6 +725,12 @@ let run_keeper_invocation_turn_admitted_inner
                Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
              | Missing | Available _ -> ());
             Keeper_workspace_memory_observation_metrics.record workspace_memory;
+            let wiki_contents = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Keeper_wiki_contents.observe ~base_path:ctx.config.base_path) in
+            (match wiki_contents with
+             | Keeper_wiki_contents.Unlisted detail ->
+               Log.Keeper.warn "wiki listing unavailable keeper=%s: %s" meta.name detail
+             | Off | Listed _ -> ());
             let build_turn_prompt ~base_system_prompt:_ ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -780,6 +796,7 @@ let run_keeper_invocation_turn_admitted_inner
                   ~task_skill_surfaces
                   ~workspace_memory
                   ~workspace_memory_access
+                  ~wiki_contents
                   ~lane_updates
                   ~approval_authority_text:
                     (Keeper_unified_prompt.format_approval_authority_observation
@@ -801,6 +818,7 @@ let run_keeper_invocation_turn_admitted_inner
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let settlement, latency_ms =
+	              Keeper_direct_native_continuation.reconcile_after_dispatch native_binding @@ fun () ->
 	              Inference_utils.timed (fun () ->
                       let consume = match direct_resume with
                         | None | Some (Keeper_agent_run.Gate_continuation _) -> Ok ()

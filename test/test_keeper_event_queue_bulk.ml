@@ -200,10 +200,48 @@ let test_census_read_failure_is_an_error () =
       | Error _ -> ())
 ;;
 
+(* The backup of a bulk operation is state this server writes, so it is kept
+   with the rest under [.masc]. A workspace that never ran a bulk operation
+   has no backup folder; the write makes it. *)
+let test_backup_is_written_on_a_workspace_without_the_folder () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = Filename.temp_file "bulk_backup_write" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      match
+        Bulk.write_backup ~base_path:dir ~operation_id:"op-1" (`Assoc [ "rows", `List [] ])
+      with
+      | Error detail -> fail detail
+      | Ok path ->
+        check
+          string
+          "backup path"
+          (Filename.concat dir ".masc/event-queue-bulk-backups/op-1.json")
+          path;
+        let ic = open_in path in
+        let written =
+          Fun.protect
+            ~finally:(fun () -> close_in_noerr ic)
+            (fun () -> really_input_string ic (in_channel_length ic))
+        in
+        check string "backup content" {|{"rows":[]}|} written)
+;;
+
 let () =
   run
     "keeper_event_queue_bulk"
-    [ ( "parse"
+    [ ( "backup"
+      , [ test_case
+            "is written under .masc on a workspace without the folder"
+            `Quick
+            test_backup_is_written_on_a_workspace_without_the_folder
+        ] )
+    ; ( "parse"
       , [ test_case "defaults to dry run" `Quick test_parse_defaults_to_dry_run
         ; test_case "rejects unknown schema" `Quick test_parse_rejects_unknown_schema
         ; test_case

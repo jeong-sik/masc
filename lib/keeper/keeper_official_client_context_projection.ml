@@ -28,7 +28,10 @@ let text_and_images_of_blocks ~runtime_label ~field blocks =
            (config_error
               ~field
               (runtime_label ^ " image projection admits base64 sources only")))
-    | _ :: _ ->
+    | Agent_core.Types.(
+        Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Document _ | Audio _)
+      :: _ ->
       Error
         (config_error
            ~field
@@ -41,7 +44,10 @@ let text_of_blocks ~runtime_label ~field blocks =
   let rec loop texts = function
     | [] -> Ok (String.concat "\n" (List.rev texts))
     | Agent_core.Types.Text text :: rest -> loop (text :: texts) rest
-    | _ :: _ ->
+    | Agent_core.Types.(
+        Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Document _ | Image _ | Audio _)
+      :: _ ->
       Error
         (config_error
            ~field
@@ -106,6 +112,7 @@ let is_composed_system_context (message : Agent_core.Types.message) =
   (match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
    | Agent_core.Types.Extra_system_context_provenance.Present -> true
    | Agent_core.Types.Extra_system_context_provenance.Absent
+   | Agent_core.Types.Extra_system_context_provenance.Historical
    | Agent_core.Types.Extra_system_context_provenance.Invalid
    | Agent_core.Types.Extra_system_context_provenance.Duplicate -> false)
   || Runtime_model_input_tail_window.is_working_state message
@@ -169,7 +176,13 @@ let carried_of_message ~composed_context (message : Agent_core.Types.message) =
       match composed_context, message.content with
       | Some assembly, [ Agent_core.Types.Text text ] ->
         Keeper_context_assembly.blocks_for_carrier assembly text
-      | Some _, _ | None, _ -> None
+      | Some _,
+        ( []
+        | [ Agent_core.Types.(
+              Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+              | ToolResult _ | Document _ | Image _ | Audio _) ]
+        | _ :: _ :: _ )
+      | None, _ -> None
     in
     match blocks with
     | Some blocks ->
@@ -240,11 +253,17 @@ let is_block item =
 let block_text item =
   match item.message.Agent_core.Types.content with
   | [ Agent_core.Types.Text text ] -> Some text
-  | _ -> None
+  | []
+  | [ Agent_core.Types.(
+        Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult _ | Document _ | Image _ | Audio _) ]
+  | _ :: _ :: _ -> None
 ;;
 
 let block_id item = match item.held.Session_store.context with
-  | Session_store.Context_block id -> Some id | _ -> None
+  | Session_store.Context_block id -> Some id | Session_store.Context_carrier
+                                              | Session_store.Librarian_working_state
+                                              | Session_store.Historical_task_reference -> None
 
 let rec rendered_messages = function
   | [] -> []
@@ -290,7 +309,15 @@ let resume_prompt ~goal ~held ?composed_context messages =
     | Session_store.Context_carrier, Session_store.Context_block _
     | Session_store.Context_block _, Session_store.Context_carrier ->
       true
-    | current_context, previous_context -> current_context = previous_context
+    | ( (( Session_store.Context_block _
+         | Session_store.Context_carrier
+         | Session_store.Librarian_working_state
+         | Session_store.Historical_task_reference ) as current_context)
+      , (( Session_store.Context_block _
+         | Session_store.Context_carrier
+         | Session_store.Librarian_working_state
+         | Session_store.Historical_task_reference ) as previous_context) ) ->
+      current_context = previous_context
   in
   let held_context =
     composed
@@ -323,7 +350,10 @@ let last_tool_results messages =
            (function
              | Agent_core.Types.ToolResult { content; content_blocks; outcome; _ } ->
                Some (Agent_core.Types.tool_result_of_outcome ?content_blocks ~content outcome)
-             | _ -> None)
+             | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+             | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+             | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _ | Agent_core.Types.Document _
+             | Agent_core.Types.Audio _ -> None)
            message.content)
     | System | User | Assistant -> None)
   |> Option.value ~default:[]

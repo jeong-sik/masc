@@ -72,5 +72,5 @@ let classify_drop ~path =
   match of_file ~path with
   | Ok attachment -> Attach attachment
   | Error (Unsupported _) -> Keep_path
-  | Error error -> Refuse error
+  | Error ((Unreadable _ | Empty _ | Too_large _) as error) -> Refuse error
 ;;

@@ -2,4 +2,5 @@
 (library
  (name machine_controller_contract)
  (public_name masc.machine_controller_contract)
- (libraries yojson))
+ (libraries yojson)
+ (preprocess (pps ppx_enumerate)))

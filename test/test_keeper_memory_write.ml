@@ -13,6 +13,13 @@ let ordinary_facts_for ~keepers_dir ~keeper_id () =
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
+let recall_history config ~keeper =
+  Dated_jsonl.open_store
+    (Dated_jsonl.Store.keeper
+       (Masc.Workspace.dated_store_root config)
+       ~keeper
+       Memory_recall_artifacts)
+
 let make_args ~title ~content =
   `Assoc [ "title", `String title; "content", `String content ]
 ;;
@@ -1069,9 +1076,7 @@ let test_recall_artifacts_follow_history_retention () =
   Alcotest.(check bool) "historical snapshot survives GC" true (present first);
   Alcotest.(check bool) "latest snapshot survives GC" true (present latest);
   let keeper_dir = Filename.concat (Masc.Workspace.keepers_runtime_dir config) meta.name in
-  let history_dir = Filename.concat keeper_dir
-      (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
-  ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+  ignore (Dated_jsonl.prune (recall_history config ~keeper:(Filename.basename keeper_dir)) ~days:1);
   sweep Tool_blob_maintenance.Observe_only;
   sweep Tool_blob_maintenance.Delete_previous_candidates;
   Alcotest.(check bool) "expired historical snapshot becomes collectable" false (present first);
@@ -1148,9 +1153,7 @@ let test_superseded_recall_pin_releases_only_after_history_retention () =
       | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error) in
     sweep ();
     Alcotest.(check bool) "retirement preserves dated historical artifact" true (present ());
-    let history_dir = Filename.concat keeper_dir
-        (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
-    ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+    ignore (Dated_jsonl.prune (recall_history config ~keeper:(Filename.basename keeper_dir)) ~days:1);
     sweep ();
     Alcotest.(check bool) "normal history retention makes retired artifact collectable" false (present ()))
     [true; false]
@@ -1181,9 +1184,7 @@ let test_late_pin_retirement_preserves_new_same_artifact_publication () =
   let newer = Fs_compat.load_file pin in
   ok (Pin.retire_current ~config ~keeper_id:"keeper" ~kind:Memory_os observed);
   Alcotest.(check string) "late retirement cannot release newer same-hash publication" newer (Fs_compat.load_file pin);
-  let history_dir = Filename.concat keeper_dir
-      (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
-  ignore (Dated_jsonl.prune (Dated_jsonl.create ~base_dir:history_dir ()) ~days:1);
+  ignore (Dated_jsonl.prune (recall_history config ~keeper:(Filename.basename keeper_dir)) ~days:1);
   let sweep () = List.iter (fun mode -> match Tool_blob_maintenance.run ~base_path
         ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
     | Ok _ -> () | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error))
@@ -1976,6 +1977,83 @@ let test_history_search_deduplicates_identical_messages () =
   Alcotest.(check (list string))
     "the same complete message appears once across stores"
     [ text ] (search "shared-endpoint")
+;;
+
+let test_history_search_excludes_runtime_context () =
+  let module Context = Agent_core.Types.Extra_system_context_provenance in
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "history-provenance" in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let user ~metadata text =
+    Agent_core.Types.make_message ~role:Agent_core.Types.User ~metadata
+      [ Agent_core.Types.Text text ]
+  in
+  let carrier_metadata =
+    let invalid =
+      match Context.metadata with
+      | [ key, _ ] -> [ key, `Bool false ]
+      | _ -> Alcotest.fail "expected the canonical runtime-context marker"
+    in
+    [ "present", Context.metadata
+    ; "historical", Context.historical_metadata
+    ; "invalid", invalid
+    ; "duplicate", Context.metadata @ Context.historical_metadata
+    ]
+  in
+  let carriers location =
+    List.map
+      (fun (kind, metadata) ->
+         user ~metadata ("history-provenance runtime-context-only-sentinel " ^ location ^ " " ^ kind))
+      carrier_metadata
+  in
+  let ordinary location =
+    user ~metadata:[ "unrelated", `String "preserve user text" ]
+      ("history-provenance ordinary " ^ location)
+  in
+  let ctx_work =
+    List.fold_left Masc.Keeper_context_runtime.append
+      (Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      (ordinary "checkpoint" :: carriers "checkpoint")
+  in
+  let session =
+    Masc.Keeper_context_runtime.create_session ~session_id:trace_id
+      ~base_dir:(Masc.Keeper_types_support.session_base_dir_ config)
+  in
+  List.iteri
+    (fun index message ->
+       Masc.Keeper_context_runtime.persist_message ~keeper_name:meta.name
+         ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:(index + 1))
+         session message)
+    (ordinary "disk" :: carriers "disk");
+  let malformed_metadata =
+    match Masc.Keeper_context_core.message_to_json
+            (user ~metadata:[] "history-provenance runtime-context-only-sentinel malformed") with
+    | `Assoc fields -> `Assoc (("metadata", `List []) :: fields)
+    | _ -> Alcotest.fail "message serializer returned a non-object"
+  in
+  Out_channel.with_open_gen [ Open_wronly; Open_append ] 0o600
+    (Masc.Keeper_types_support.keeper_history_path config trace_id)
+    (fun output ->
+       output_string output (Yojson.Safe.to_string malformed_metadata ^ "\n"));
+  List.iter
+    (fun source ->
+       let search query =
+         Runtime.keeper_memory_search_json ~config ~meta ~ctx_work
+           ~args:(`Assoc [ "source", `String source; "query", `String query ])
+         |> Yojson.Safe.from_string
+       in
+       let result = search "history-provenance" in
+       Alcotest.(check (list string))
+         "only user text is searchable from checkpoint and disk"
+         [ "history-provenance ordinary checkpoint"; "history-provenance ordinary disk" ]
+         (List.sort String.compare (match_texts result));
+       Alcotest.(check int) "invalid provenance and malformed metadata are reported" 3
+         (int_field "unreadable_rows" (json_field "history_read_errors" result));
+       Alcotest.(check (list string)) "context alone cannot become a history match" []
+         (match_texts (search "runtime-context-only-sentinel")))
+    [ "history"; "all" ]
 ;;
 
 let history_search_noise count =
@@ -3967,33 +4045,37 @@ let test_dropped_originals_are_historical_and_searchable () =
         ~memory_id:(Masc.Keeper_memory_os_types.memory_id retired) ~reason () with
     | Ok _ -> () | Error _ -> Alcotest.fail "retraction failed" in
   retract "deployment rule superseded";
+  let pending_receipts =
+    [ Current.publication_receipt_path ~keepers_dir ~keeper_id:meta.name
+    ; Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:meta.name
+    ] in
+  List.iter (fun path ->
+    Alcotest.(check bool) "journal failure preserves pending evidence" true
+      (Sys.file_exists path)) pending_receipts;
   let search source =
     Runtime.keeper_memory_search_json ~config ~meta ~ctx_work:(empty_ctx ())
       ~args:(`Assoc ["query",`String "canary deployment";
                     "source",`String source;"limit",`Int 10])
     |> Yojson.Safe.from_string in
-  Alcotest.(check string) "pending archive is an explicit search failure"
-    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
-  let partial = search "all" in
-  Alcotest.(check bool) "pending archive does not report a clean miss" false
-    (Yojson.Safe.Util.member "no_match" partial = `Bool true);
-  Alcotest.(check bool) "pending archive is exposed in all search" true
-    (Yojson.Safe.Util.member "dropped_store_unavailable" partial <> `Null);
+  List.iter (fun source ->
+    let result = search source in
+    Alcotest.(check string) "pending publication prevents an authoritative snapshot read"
+      "snapshot_read_failed" (string_field "error_kind" result);
+    Alcotest.(check bool) "pending publication does not report a clean miss" false
+      (Yojson.Safe.Util.member "no_match" result = `Bool true)) ["dropped";"all"];
   Unix.rmdir journal;
-  Alcotest.(check string) "missing journal cannot hide pending archive evidence"
-    "dropped_read_failed" (string_field "error_kind" (search "dropped"));
-  (match Current.upsert_fact ~keepers_dir ~keeper_id:meta.name ~now:3.5
-      ~source:{kind=Current.Explicit_write;trace_id="resume"} current with
-   | Ok _ -> () | Error _ -> Alcotest.fail "pending archive recovery failed");
-  Alcotest.(check (list string)) "default current corpus has no retired body"
-    [] (match_texts (search "current"));
   let result = search "dropped" in
-  Alcotest.(check (list string)) "archive recalls exact original"
+  Alcotest.(check (list string)) "first public read recovers the exact archived original"
     [retired.claim] (match_texts result);
   let row = Yojson.Safe.Util.(member "matches" result |> to_list |> List.hd) in
   Alcotest.(check bool) "explicitly non-current" true (json_field "current" row = `Bool false);
   Alcotest.(check string) "reason travels with original" "deployment rule superseded"
     (string_field "reason" row);
+  List.iter (fun path ->
+    Alcotest.(check bool) "public read clears finalized publication and removal evidence" false
+      (Sys.file_exists path)) pending_receipts;
+  Alcotest.(check (list string)) "default current corpus has no retired body"
+    [] (match_texts (search "current"));
   Alcotest.(check (list string)) "all includes removed originals"
     [retired.claim] (match_texts (search "all"));
   Alcotest.(check int) "search does not restore memory" 1
@@ -4138,6 +4220,10 @@ let () =
             "history search deduplicates identical messages"
             `Quick
             test_history_search_deduplicates_identical_messages
+        ; Alcotest.test_case
+            "history and all search exclude runtime context from checkpoint and disk"
+            `Quick
+            test_history_search_excludes_runtime_context
         ; Alcotest.test_case "history search reaches retained current messages" `Quick
             (check_retained_history_match ~checkpoint_texts:[]
                ~current_texts:("Migration prerequisite: amber database" :: history_search_noise 75))

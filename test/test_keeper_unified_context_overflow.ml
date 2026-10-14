@@ -118,7 +118,7 @@ let test_input_capacity_is_not_context_overflow () =
      | Masc.Keeper_unified_turn_execution.For_testing
        .Declared_runtime_lane_exhausted -> true
      | Masc.Keeper_unified_turn_execution.For_testing
-       .Provider_context_overflow _ -> false)
+       .Provider_context_overflow -> false)
 ;;
 
 (* ContextOverflow counts toward the ordinary crash threshold: nothing
@@ -205,8 +205,8 @@ let test_unusable_capacity_evidence_is_ignored () =
 ;;
 
 (* The classifier feeding the cascade path publishes
-   reason="provider_context_overflow" and the Agent_core_context_window_exceeded blocker
-   class, so admitting a byte refusal there would label it as a window exceedance. *)
+   reason="provider_context_overflow" and the execution-error phase of the same
+   name, so admitting a byte refusal there would label it as a window exceedance. *)
 let test_lane_classifier_admits_only_the_token_axis () =
   let module E = Masc.Keeper_unified_turn_execution.For_testing in
   (match
@@ -214,14 +214,13 @@ let test_lane_classifier_admits_only_the_token_axis () =
        (request_body_refused_by_provider ~status:413)
    with
    | E.Declared_runtime_lane_exhausted -> ()
-   | E.Provider_context_overflow _ ->
+   | E.Provider_context_overflow ->
      fail "a provider byte refusal was classified as a token overflow");
   match
     E.declared_lane_failure_of_error
       (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = None }))
   with
-  | E.Provider_context_overflow { limit_tokens = None } -> ()
-  | E.Provider_context_overflow { limit_tokens = Some _ }
+  | E.Provider_context_overflow -> ()
   | E.Declared_runtime_lane_exhausted ->
     fail "the context overflow lane classification regressed"
 ;;

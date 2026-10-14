@@ -1298,7 +1298,13 @@ let rec converge_requeue_conflict
                 partition.generation ->
       Ok ()
     | Candidate.Direct_resumable _
-    | Candidate.Requeued_resumable _
+    | Candidate.Requeued_resumable
+        { quarantine =
+            { phase = Candidate.Quarantined | Candidate.Requeue_requested _ | Candidate.Requeued _
+            ; _
+            }
+        ; _
+        }
     | Candidate.Suspended_quarantine _ ->
       Error
         ("candidate quarantine generation changed during requeue convergence: "

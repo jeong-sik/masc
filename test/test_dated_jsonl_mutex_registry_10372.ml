@@ -31,32 +31,44 @@ let tmpdir prefix =
   Fs_compat.mkdir_p dir;
   dir
 
+
+(* Every store here is a listed store under a fresh temporary root. The
+   store's directory is [D.Store.dir location]; it exists, as the
+   temporary directory did before. *)
+let store_under root = D.Store.(at (root_of_masc_dir root) Root.Audit)
+
+let temp_store prefix =
+  let location = store_under (tmpdir prefix) in
+  Fs_compat.mkdir_p (D.Store.dir location);
+  location
+
 (* --- 1. same base_dir → identical mutex ---------------- *)
 
 let test_same_base_dir_shares_mutex () =
-  let dir = tmpdir "djmr_same" in
-  let a = D.create ~base_dir:dir () in
-  let b = D.create ~base_dir:dir () in
+  let location = temp_store "djmr_same" in
+  let a = D.open_store location in
+  let b = D.open_store location in
   check bool "same base_dir → physically identical mutex" true
     (D.For_testing.mutex a == D.For_testing.mutex b)
 
 (* --- 2. different base_dir → distinct mutexes ---------- *)
 
 let test_different_base_dir_distinct_mutex () =
-  let dir_a = tmpdir "djmr_diff_a" in
-  let dir_b = tmpdir "djmr_diff_b" in
-  let a = D.create ~base_dir:dir_a () in
-  let b = D.create ~base_dir:dir_b () in
+  let dir_a_location = temp_store "djmr_diff_a" in
+  let dir_b_location = temp_store "djmr_diff_b" in
+  let a = D.open_store dir_a_location in
+  let b = D.open_store dir_b_location in
   check bool "distinct base_dir → distinct mutex" false
     (D.For_testing.mutex a == D.For_testing.mutex b)
 
 (* --- 3. explicit ?mutex bypasses the registry --------- *)
 
 let test_explicit_mutex_overrides_registry () =
-  let dir = tmpdir "djmr_explicit" in
+  let location = temp_store "djmr_explicit" in
+  let dir = D.Store.dir location in
   let registry_mutex = D.For_testing.mutex_for_base_dir dir in
   let injected = Eio.Mutex.create () in
-  let store = D.create ~base_dir:dir ~mutex:injected () in
+  let store = D.open_store ~mutex:injected location in
   check bool "explicit mutex used verbatim" true
     (D.For_testing.mutex store == injected);
   check bool "explicit mutex differs from registry entry" false
@@ -65,11 +77,11 @@ let test_explicit_mutex_overrides_registry () =
 (* --- 4. trailing-slash variants share the mutex -------- *)
 
 let test_trailing_slash_normalizes () =
-  let dir = tmpdir "djmr_slash" in
-  let a = D.create ~base_dir:dir () in
-  let b = D.create ~base_dir:(dir ^ "/") () in
+  let location = temp_store "djmr_slash" in
+  let dir = D.Store.dir location in
+  let a = D.open_store location in
   check bool "trailing slash normalises to same mutex" true
-    (D.For_testing.mutex a == D.For_testing.mutex b)
+    (D.For_testing.mutex a == D.For_testing.mutex_for_base_dir (dir ^ "/"))
 
 (* --- 5. concurrent appends produce all-parseable lines  *)
 
@@ -104,11 +116,12 @@ let read_today_lines dir =
 let test_concurrent_two_instances_no_corruption () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "djmr_concurrent" in
+  let location = temp_store "djmr_concurrent" in
+  let dir = D.Store.dir location in
   (* Two instances at the same dir — pre-fix this would mint
      two distinct mutexes; post-fix the registry forces sharing. *)
-  let store_a = D.create ~base_dir:dir () in
-  let store_b = D.create ~base_dir:dir () in
+  let store_a = D.open_store location in
+  let store_b = D.open_store location in
   check bool "registry shares mutex across instances" true
     (D.For_testing.mutex store_a == D.For_testing.mutex store_b);
   let n = 40 in
@@ -136,10 +149,10 @@ let test_concurrent_two_instances_no_corruption () =
 let test_append_failure_does_not_poison_registry_mutex () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "djmr_retry" in
-  let base_dir = Filename.concat dir "blocked" in
+  let location = store_under (tmpdir "djmr_retry") in
+  let base_dir = D.Store.dir location in
   Out_channel.with_open_text base_dir (fun oc -> output_string oc "blocked");
-  let store = D.create ~base_dir () in
+  let store = D.open_store location in
   let failed =
     try
       D.append store (`Assoc [ ("phase", `String "initial") ]);
@@ -151,7 +164,7 @@ let test_append_failure_does_not_poison_registry_mutex () =
   check bool "initial append failed" true failed;
   Sys.remove base_dir;
   Unix.mkdir base_dir 0o755;
-  let retry_store = D.create ~base_dir () in
+  let retry_store = D.open_store location in
   D.append retry_store (`Assoc [ ("phase", `String "retry") ]);
   let records = D.read_recent retry_store 1 in
   check int "retry append persisted" 1 (List.length records)

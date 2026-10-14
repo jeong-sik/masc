@@ -41,6 +41,37 @@ let test_subdirs_pruned_and_stray_files_skipped () =
   Alcotest.(check bool)
     "return sums prune_dir results" true (n = String.length keeper_a + String.length keeper_b)
 
+(* A broken link under the root is not a keeper folder and does not stop
+   the fold; a link to a folder is one (#42891). *)
+let test_broken_link_is_skipped () =
+  counter := 0;
+  let root = fresh_dir "masc_prune_children_links" in
+  let target = fresh_dir "masc_prune_children_target" in
+  Fs_compat.mkdir_p (Filename.concat root "keeper-a");
+  Unix.symlink target (Filename.concat root "keeper-b");
+  Unix.symlink (Filename.concat root "gone") (Filename.concat root "ghost");
+  ignore (SM.prune_children_dirs ~prune_dir:record_prune root : int);
+  Alcotest.(check int) "prune called for the folder and the linked folder" 2 !counter
+
+(* The flat pass reads and unlinks on a system thread, so another fiber runs
+   while it is in flight (#42935). *)
+let test_flat_prune_leaves_the_fiber_free () =
+  Eio_main.run @@ fun _env ->
+  let dir = fresh_dir "masc_prune_flat_off_fiber" in
+  let old_file = Filename.concat dir "trace-old.jsonl" in
+  Out_channel.with_open_text old_file (fun oc -> output_string oc "{}\n");
+  let old_ts = Unix.gettimeofday () -. (40. *. 86400.) in
+  Unix.utimes old_file old_ts old_ts;
+  let finished = ref false in
+  let ran_during_prune = ref false in
+  Eio.Fiber.both
+    (fun () ->
+       ignore (SM.prune_flat_jsonl_older_than ~days:30 dir : int);
+       finished := true)
+    (fun () -> ran_during_prune := not !finished);
+  Alcotest.(check bool) "another fiber ran during the prune" true !ran_during_prune;
+  Alcotest.(check bool) "old file removed" false (Sys.file_exists old_file)
+
 let test_prune_flat_jsonl_removes_old_files () =
   (* Regression guard for the trajectories no-op: populated
      trajectories/<keeper>/ layout must yield pruned > 0. *)
@@ -69,48 +100,6 @@ let test_prune_flat_jsonl_removes_old_files () =
   Alcotest.(check bool) "old file removed" false (Sys.file_exists old_file);
   Alcotest.(check bool) "recent file kept" true (Sys.file_exists recent_file);
   Alcotest.(check bool) "non-jsonl file kept" true (Sys.file_exists stray)
-
-let visited = ref []
-
-let record_visit dir =
-  visited := dir :: !visited;
-  0
-
-let test_keeper_scoped_store_list_is_ssot () =
-  (* Drift guard: every keeper-scoped dated store has one retention owner. *)
-  Alcotest.(check (list string))
-    "keeper-scoped dated stores"
-    [ "crash-events"
-    ; "execution-receipts"
-    ; "memory-recall-artifacts"
-    ; "metrics"
-    ; "provider-inputs"
-    ; "turn-records"
-    ]
-    (List.sort String.compare SM.keeper_scoped_dated_stores)
-
-let test_top_level_store_list_is_ssot () =
-  (* Drift guard for the top-level list: the startup and periodic passes
-     kept separate inline sums that drifted (startup lacked
-     tool_calls/transition-audit). Pin the shared list. *)
-  Alcotest.(check (list string))
-    "top-level dated stores pinned"
-    (* Compared against List.sort String.compare, so this literal is sorted.
-       agent-core-events sits second because a < u; its previous name sorted
-       after messages until #27945. *)
-    [ "activity-events"
-    ; "agent-core-events"
-    ; "audit"
-    ; "audit-approvals"
-    ; "costs"
-    ; "events"
-    ; "telemetry"
-    ; "tool_calls"
-    ; "tool_usage"
-    ; "transition-audit"
-    ; "voice_sessions"
-    ]
-    (List.sort String.compare SM.top_level_dated_stores)
 
 let test_keeper_scoped_flat_store_list_is_ssot () =
   Alcotest.(check (list string))
@@ -153,7 +142,8 @@ let test_prune_shared_jsonl_stores_production_geometry () =
      dual-path derivation no-ops): every covered store gets one stale file
      and, where meaningful, one fresh sibling. prune_dir is the same
      Dated_jsonl-based closure both production passes build. *)
-  let masc_root = fresh_dir "masc_shared_prune" in
+  let base_path = fresh_dir "masc_shared_prune" in
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
   let write path =
     Fs_compat.mkdir_p (Filename.dirname path);
     let oc = open_out path in
@@ -177,9 +167,8 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   let raw_old = p [ "keepers"; "keeper-a"; "raw-traces"; "turn-old.jsonl" ] in
   let manifest_old = p [ "keepers"; "keeper-a"; "runtime-manifests"; "trace-x.jsonl.1" ] in
   let manifest_fresh = p [ "keepers"; "keeper-a"; "runtime-manifests"; "trace-x.jsonl" ] in
-  (* Stores that were on no prune list until 2026-08-05. costs and
-     audit-approvals are top-level dated; decision_audit is keeper-scoped at
-     the masc root, like resilience_audit. *)
+  (* costs and audit-approvals are dated stores at the root; decision_audit
+     keeps one folder per keeper at the masc root. *)
   let costs_old = p [ "costs"; "2020-01"; "01.jsonl" ] in
   let costs_fresh = p [ "costs"; "2999-01"; "01.jsonl" ] in
   let approvals_old = p [ "audit-approvals"; "2020-01"; "01.jsonl" ] in
@@ -191,6 +180,19 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   let message_fresh = p [ "messages"; "000000002_bravo_wmsg-new_broadcast.json" ] in
   (* tool_usage: dated layout, was on no list (own retention env is opt-in). *)
   let tool_usage_old = p [ "tool_usage"; "2020-01"; "01.jsonl" ] in
+  (* Pruned on append by their own handle until the pass took them over:
+     provider usage history at 16 days, wire capture at its own setting
+     (3 days by default). *)
+  let provider_usage_old = p [ "provider_usage_history"; "2020-01"; "01.jsonl" ] in
+  let wire_capture_old = p [ "wire-capture"; "2020-01"; "01.jsonl" ] in
+  (* Written under <base>/.masc and on no prune list until the store list
+     gave them rules: tool events and continuity requests follow the
+     window, verdicts are kept. *)
+  let tool_events_old = p [ "tool-events"; "2020-01"; "01.jsonl" ] in
+  let verdicts_old = p [ "verdicts"; "2020-01"; "01.jsonl" ] in
+  let continuity_old =
+    p [ "keepers"; "keeper-a"; "continuity-requests"; "2020-01"; "01.jsonl" ]
+  in
   (* reaction-ledger: versioned generation dir between store and months. *)
   let reaction_old = p [ "keepers"; "keeper-a"; "reaction-ledger"; "v7"; "2020-01"; "01.jsonl" ] in
   let reaction_fresh = p [ "keepers"; "keeper-a"; "reaction-ledger"; "v7"; "2999-01"; "01.jsonl" ] in
@@ -215,17 +217,26 @@ let test_prune_shared_jsonl_stores_production_geometry () =
     ; tool_usage_old
     ; reaction_old
     ; reaction_fresh
+    ; provider_usage_old
+    ; wire_capture_old
+    ; tool_events_old
+    ; verdicts_old
+    ; continuity_old
     ];
   List.iter
     (fun f -> Unix.utimes f old_ts old_ts)
     [ logs_old; raw_old; manifest_old; message_old ];
-  let prune_dir dir =
-    if Sys.file_exists dir
-    then Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days:30
-    else 0
-  in
-  let n = SM.prune_shared_jsonl_stores ~prune_dir ~days:30 ~masc_root in
-  Alcotest.(check int) "twelve stale files pruned" 12 n;
+  let n = SM.prune_shared_jsonl_stores ~days:30 ~masc_root in
+  Alcotest.(check int) "sixteen stale files pruned" 16 n;
+  Alcotest.(check bool)
+    "stale provider usage day removed" false (Sys.file_exists provider_usage_old);
+  Alcotest.(check bool)
+    "stale wire capture day removed" false (Sys.file_exists wire_capture_old);
+  Alcotest.(check bool)
+    "stale tool-events day removed" false (Sys.file_exists tool_events_old);
+  Alcotest.(check bool) "kept verdicts day stays" true (Sys.file_exists verdicts_old);
+  Alcotest.(check bool)
+    "stale continuity-requests day removed" false (Sys.file_exists continuity_old);
   Alcotest.(check bool) "stale message removed" false (Sys.file_exists message_old);
   Alcotest.(check bool) "fresh message kept" true (Sys.file_exists message_fresh);
   Alcotest.(check bool) "stale tool_usage day removed" false (Sys.file_exists tool_usage_old);
@@ -254,44 +265,6 @@ let test_prune_shared_jsonl_stores_production_geometry () =
   Alcotest.(check bool)
     "stale manifest rotation removed" false (Sys.file_exists manifest_old);
   Alcotest.(check bool) "fresh manifest kept" true (Sys.file_exists manifest_fresh)
-
-let test_prune_keeper_scoped_stores_visits_all_stores () =
-  (* Regression for the 24h loop drift: both loops call this function, so
-     every keeper must visit every dated store in the shared registry. *)
-  visited := [];
-  let masc_root = fresh_dir "masc_keeper_scoped" in
-  let keepers = Filename.concat masc_root "keepers" in
-  List.iter
-    (fun name -> Fs_compat.mkdir_p (Filename.concat keepers name))
-    [ "keeper-a"; "keeper-b" ];
-  let stray = Filename.concat keepers "stray.txt" in
-  let oc = open_out stray in
-  output_string oc "x";
-  close_out oc;
-  let n = SM.prune_keeper_scoped_stores ~prune_dir:record_visit ~masc_root in
-  Alcotest.(check int) "returns summed prune counts" 0 n;
-  let expected =
-    List.concat_map
-      (fun keeper ->
-        List.map
-          (fun store -> Filename.concat (Filename.concat keepers keeper) store)
-          SM.keeper_scoped_dated_stores)
-      [ "keeper-a"; "keeper-b" ]
-  in
-  Alcotest.(check (list string))
-    "every dated store pruned for every keeper"
-    (List.sort String.compare expected)
-    (List.sort String.compare !visited)
-
-let test_prune_keeper_scoped_stores_missing_root () =
-  visited := [];
-  let n =
-    SM.prune_keeper_scoped_stores
-      ~prune_dir:record_visit
-      ~masc_root:"/nonexistent/masc-keeper-scoped"
-  in
-  Alcotest.(check int) "missing keepers root counts 0" 0 n;
-  Alcotest.(check int) "prune_dir never called" 0 (List.length !visited)
 
 (* An excluded keeper is named; the names a base path declares are the .toml
    basenames of its keepers directory, and every other file there (memory
@@ -330,6 +303,9 @@ let () =
         [
           Alcotest.test_case "missing root counts zero" `Quick
             test_missing_root_counts_zero;
+          Alcotest.test_case "broken link skipped" `Quick test_broken_link_is_skipped;
+          Alcotest.test_case "flat prune leaves the fiber free" `Quick
+            test_flat_prune_leaves_the_fiber_free;
           Alcotest.test_case "subdirs pruned, stray files skipped" `Quick
             test_subdirs_pruned_and_stray_files_skipped;
         ] );
@@ -340,15 +316,6 @@ let () =
           Alcotest.test_case "numeric rotation siblings prune, others kept" `Quick
             test_prune_flat_jsonl_rotation_siblings;
         ] );
-      ( "prune_keeper_scoped_stores",
-        [
-          Alcotest.test_case "store list is SSOT (4 stores)" `Quick
-            test_keeper_scoped_store_list_is_ssot;
-          Alcotest.test_case "visits every dated store per keeper" `Quick
-            test_prune_keeper_scoped_stores_visits_all_stores;
-          Alcotest.test_case "missing keepers root counts zero" `Quick
-            test_prune_keeper_scoped_stores_missing_root;
-        ] );
       ( "typesafeai exclusions",
         [
           Alcotest.test_case "unknown names come from the declarations" `Quick
@@ -356,8 +323,6 @@ let () =
         ] );
       ( "prune_shared_jsonl_stores",
         [
-          Alcotest.test_case "top-level store list pinned" `Quick
-            test_top_level_store_list_is_ssot;
           Alcotest.test_case "keeper-scoped flat store list pinned" `Quick
             test_keeper_scoped_flat_store_list_is_ssot;
           Alcotest.test_case "production geometry round-trip" `Quick

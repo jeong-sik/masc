@@ -23,7 +23,7 @@ Frames:
 
 Usage:
     python3 scripts/capture-tui-lane-runs.py \
-        --base-path ~/me \
+        --base-path "$MASC_BASE_PATH" \
         --token-file /path/to/operator.token \
         --out /tmp/tui-lane-runs
 
@@ -49,6 +49,10 @@ import time
 from typing import Iterator
 
 from playwright.sync_api import Browser, Page, sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+
+import masc_base_path  # noqa: E402
 
 WORKTREE = Path(__file__).resolve().parents[1]
 TTYD = Path("/opt/homebrew/bin/ttyd")
@@ -490,7 +494,7 @@ def capture(page: Page, pairs: list[list[str]], out: Path, stem: str) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base-path", default=str(Path.home() / "me"))
+    ap.add_argument("--base-path", default=None, help="MASC base path (default: MASC_BASE_PATH)")
     ap.add_argument("--api-port", type=int, default=8935)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--cols", type=int, default=170)
@@ -507,6 +511,10 @@ def main() -> int:
     ap.add_argument("--executable", type=Path, default=DEFAULT_EXECUTABLE)
     args = ap.parse_args()
 
+    base = masc_base_path.require(ap, args.base_path, "--base-path")
+    if not (base / ".masc").is_dir():
+        print(f"not a MASC base path (no .masc directory): {base}", file=sys.stderr)
+        return 1
     if not TTYD.is_file():
         print(f"missing ttyd: {TTYD}", file=sys.stderr)
         return 1
@@ -515,7 +523,6 @@ def main() -> int:
         print(f"missing TUI executable: {executable}", file=sys.stderr)
         return 1
 
-    base = Path(args.base_path).expanduser()
     workspace = args.workspace or base.name
     try:
         token = (

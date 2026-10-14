@@ -277,8 +277,8 @@ let emit_tool_calls ~provider ~model_id ~count =
 let invalid_ms_reason value =
   match classify_float value with
   | FP_nan | FP_infinite -> Some "not_finite"
-  | _ when value <= 0.0 -> Some "non_positive"
-  | _ -> None
+  | (FP_normal | FP_subnormal | FP_zero) when value <= 0.0 -> Some "non_positive"
+  | FP_normal | FP_subnormal | FP_zero -> None
 ;;
 
 let streaming_attrs ~provider ~model_id extra =

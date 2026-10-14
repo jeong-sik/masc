@@ -24,15 +24,22 @@ let close_flow_best_effort label flow =
    Returns [true] for the downstream-closed-pipe case so callers can demote
    the log severity.  Does not match Connection_failure (genuine reach
    failure) or other [Eio.Net.error] variants. *)
-let is_downstream_pipe_closed = function
-  | Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> true
-  | Unix.Unix_error (Unix.EPIPE, _, _) -> true
-  | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EPIPE, _, _)), _) -> true
-  | Sys_error msg
-    when String_util.contains_substring (String.lowercase_ascii msg) "broken pipe" ->
-    true
+let is_downstream_pipe_closed =
+  let is_epipe code =
+    match System_error_class.errno_of_unix_error code with
+    | System_error_class.Epipe -> true
+    | System_error_class.(
+        Emfile | Enfile | Enospc | Eacces | Eperm | Enoent | Econnrefused
+        | Etimedout | Eaddrinuse | Eaddrnotavail | Other_errno _) -> false
+  in
+  function
+  | Eio.Io (Eio.Net.E net_error, _) ->
+    (match net_error with
+     | Eio.Net.Connection_reset _ -> true
+     | Eio.Net.Connection_failure _ -> false)
+  | Unix.Unix_error (code, _, _) -> is_epipe code
+  | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (code, _, _)), _) -> is_epipe code
   | _ -> false
-[@@warning "-4"]
 
 let unix_status_of_eio_status = function
   | `Exited n -> Unix.WEXITED n

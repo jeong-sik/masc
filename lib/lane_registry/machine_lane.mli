@@ -1,6 +1,7 @@
-(** The machines that live in the server process, one shared instance each:
-    MSX (RFC-0439) and DOS ([Dos_lane]). A new machine is a constructor here,
-    and every exhaustive match over this type then says what it means. *)
+(** The machines a workspace shares, one instance each, each in its own
+    attached add-on worker: MSX (RFC-0439) and DOS ([Dos_lane]). A new machine
+    is a constructor here, and every exhaustive match over this type then says
+    what it means. *)
 
 (** [all] (derived) lists every machine once, in constructor order. *)
 type t =

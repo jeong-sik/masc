@@ -110,10 +110,7 @@ let rewrite_docker_command_paths_for_host_validation
 
 (* Invariant: the declared sandbox profile is the execution contract. *)
 let effective_sandbox_profile ~(meta : keeper_meta) =
-  match meta.sandbox_profile with
-  | Docker -> Docker, meta.network_mode
-  | Micro_vm -> Micro_vm, meta.network_mode
-  | Remote_ssh -> Remote_ssh, meta.network_mode
+  meta.sandbox_profile, meta.network_mode
 ;;
 
 (* ── Sandbox runtime preflight ─────────────────────────── *)
@@ -184,7 +181,7 @@ let cleanup_oneshot_container ~container_name =
   let status, output = run_rm () in
   match status with
   | Unix.WEXITED 0 -> ()
-  | _ ->
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
     let retry_after_failure ?probe_error () =
       (* The machine-oriented state probe is authoritative. Retry only while
          the target is still present or its state could not be established. *)
@@ -204,7 +201,7 @@ let cleanup_oneshot_container ~container_name =
       let retry_status, retry_output = run_rm () in
       match retry_status with
       | Unix.WEXITED 0 -> ()
-      | _ ->
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
         (match cleanup_target_state ~container_name with
          | Cleanup_target_absent -> ()
          | Cleanup_target_present ->
@@ -786,7 +783,13 @@ let run_docker_bash
               ~output:out
               ~cwd_response
               ))
-    | _ ->
+    | ( None
+      , ( Keeper_types_profile_sandbox.Network_none
+        | Keeper_types_profile_sandbox.Network_inherit
+        | Keeper_types_profile_sandbox.Network_policy ) )
+    | ( Some _
+      , ( Keeper_types_profile_sandbox.Network_inherit
+        | Keeper_types_profile_sandbox.Network_policy ) ) ->
       (match turn_sandbox_runtime with
        | Some _ ->
          Otel_metric_store.inc_counter

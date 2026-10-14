@@ -123,7 +123,13 @@ let reconcile_home_request_detail state =
         state.home_opened_request <- None;
         (match state.followed_from with
          | Some (Overview, _) -> state.followed_from <- None
-         | Some _ | None -> ())
+         | Some
+             ( ( Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+               | Approvals | Planning | Schedules | Verification | Harness
+               | Fusion | Repositories | Code | Changes | Connectors | Runtime
+               | Config | Resources | Tools | System_logs )
+             , _ )
+         | None -> ())
       end else if
         (match request with
          | Home_question _ ->
@@ -135,7 +141,10 @@ let reconcile_home_request_detail state =
          | Home_goal_confirmation _ | Home_operator_task _ -> false)
       then ()
       else if not (List.mem_assoc (Home_request request) (home_decision_rows state)) then begin
-        (match request with Home_question _ -> clear_ask_answering state | _ -> ());
+        (match request with
+          | Home_question _ -> clear_ask_answering state
+          | Home_held_call _ | Home_gate_request _ | Home_operator_request _
+          | Home_goal_confirmation _ | Home_operator_task _ -> ());
         state.home_opened_request <- None;
         state.approval_detail_open <- false;
         state.pending_approval_action <- None;
@@ -204,8 +213,10 @@ let home_continue_rows (state : state) =
                ^ Masc_tui_ansi.Terminal_text.single_line name ^ " unavailable"
            | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _), None ->
                "Create a Keeper  · choose who will take the work") ]
-    | _ ->
-        [ Home_choose_keeper,
+    | (Workspace_identity_match, Local_workspace_read, None, _::_)
+    | (Workspace_identity_match, Local_workspace_read, Some _, _)
+    | (Workspace_identity_match, Local_workspace_unread, _, _)
+    | ((Workspace_identity_unread | (Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _)), _, _, _) -> [ Home_choose_keeper,
           (match resume with
            | [] ->
                (match state.home_last_chat, last with
@@ -246,7 +257,9 @@ let home_initial_reading_ready state selected =
   | Some (Home_choose_keeper | Home_create_keeper) ->
       approvals_reading_current state
       && (match state.operator_stalled with Masc_tui_agenda.Read _ -> true | Not_read | Read_failed _ -> false)
-      && (match state.goals_to_confirm with Masc_tui_agenda.Read _ -> true | _ -> false)
+      && (match state.goals_to_confirm with
+        | Masc_tui_agenda.Read _ -> true
+        | Masc_tui_agenda.Not_read | Read_failed _ -> false)
   | Some Home_agenda | None -> false
 
 let home_notice_lines state =

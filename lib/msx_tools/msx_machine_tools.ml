@@ -75,10 +75,17 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
   | Error ((Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->
     let code = match e with
       | Msx_lane.Activity_disabled -> "activity_disabled"
-      | _ -> "activity_unobserved" in
+      | Msx_lane.Activity_unobserved | Msx_lane.No_machine | Msx_lane.Invalid_request _
+      | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ -> "activity_unobserved" in
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
     |> Tool_result.with_metadata (`Assoc ["io.github.jeong-sik/masc.machine.errorCode", `String code])
-  | Error ((Msx_lane.No_machine | Msx_lane.Invalid_request _) as e) ->
+  | Error (Msx_lane.No_machine as e) ->
+    (* A typed marker: a caller that treats an absent machine as an empty
+       observation (the spectator tick) must not read the message text. *)
+    reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+    |> Tool_result.with_metadata
+         (`Assoc ["io.github.jeong-sik/masc.machine.errorCode", `String "no_machine"])
+  | Error (Msx_lane.Invalid_request _ as e) ->
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
   | Error (Msx_lane.Effect_unknown message) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
@@ -504,22 +511,23 @@ let handle_export_disk ~tool_name ~start_time ~base_path args =
   | _ -> reject ~tool_name ~start_time "filename must name one new catalog .dsk image"
 ;;
 
-let dispatch ~relay ~base_path ~agent ~name ~arguments =
-  let tool_name = name and start_time = Tool_timing.start () in
-  match name with
-  | "masc_msx_load" -> Some (handle_load ~relay ~tool_name ~start_time ~base_path ~agent_name:agent arguments)
-  | "masc_msx_eject" -> Some (handle_eject ~relay ~tool_name ~start_time ~agent_name:agent arguments)
-  | "masc_msx_save" -> Some (handle_checkpoint ~restore:false ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_restore" -> Some (handle_checkpoint ~restore:true ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_export_disk" -> Some (handle_export_disk ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_change_disk" -> Some (handle_change_disk ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_meta" -> Some (handle_meta ~tool_name ~start_time
-      ?inventory_base_path:(if get_bool arguments "include_inventory" false then Some base_path else None) ())
-  | "masc_msx_checkpoint_info" -> Some (handle_checkpoint_info ~tool_name ~start_time ~base_path arguments)
-  | "masc_msx_press" -> Some (handle_press ~tool_name ~start_time ~who:agent arguments)
-  | "masc_msx_step" -> Some (handle_step ~tool_name ~start_time arguments)
-  | "masc_msx_step_until_change" -> Some (handle_step_until_change ~tool_name ~start_time arguments)
-  | "masc_msx_peek" -> Some (handle_peek ~tool_name ~start_time arguments)
-  | "masc_msx_ram_diff" -> Some (handle_ram_diff ~tool_name ~start_time ())
-  | "masc_msx_screen" -> Some (handle_screen ~tool_name ~start_time arguments)
-  | _ -> None
+(* The worker parses a call's tool name once with [Msx_tool.of_name]. *)
+let dispatch ~relay ~base_path ~agent ~(tool : Msx_tool.t) ~arguments =
+  let module T = Msx_tool in
+  let tool_name = T.name tool and start_time = Tool_timing.start () in
+  match tool with
+  | T.Load -> handle_load ~relay ~tool_name ~start_time ~base_path ~agent_name:agent arguments
+  | T.Eject -> handle_eject ~relay ~tool_name ~start_time ~agent_name:agent arguments
+  | T.Save -> handle_checkpoint ~restore:false ~tool_name ~start_time ~base_path arguments
+  | T.Restore -> handle_checkpoint ~restore:true ~tool_name ~start_time ~base_path arguments
+  | T.Export_disk -> handle_export_disk ~tool_name ~start_time ~base_path arguments
+  | T.Change_disk -> handle_change_disk ~tool_name ~start_time ~base_path arguments
+  | T.Meta -> handle_meta ~tool_name ~start_time
+      ?inventory_base_path:(if get_bool arguments "include_inventory" false then Some base_path else None) ()
+  | T.Checkpoint_info -> handle_checkpoint_info ~tool_name ~start_time ~base_path arguments
+  | T.Press -> handle_press ~tool_name ~start_time ~who:agent arguments
+  | T.Step -> handle_step ~tool_name ~start_time arguments
+  | T.Step_until_change -> handle_step_until_change ~tool_name ~start_time arguments
+  | T.Peek -> handle_peek ~tool_name ~start_time arguments
+  | T.Ram_diff -> handle_ram_diff ~tool_name ~start_time ()
+  | T.Screen -> handle_screen ~tool_name ~start_time arguments

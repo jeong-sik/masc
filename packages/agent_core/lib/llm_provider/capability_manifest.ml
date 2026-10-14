@@ -21,7 +21,7 @@ let base_label_of_string raw =
 let base_label_to_string label = label
 
 type entry =
-  { id_prefix : string
+  { id_prefix : Model_identifiers.Id_prefix.t
   ; base_label : base_label option
   ; max_context_tokens : int option
   ; max_output_tokens : int option
@@ -153,22 +153,6 @@ let member_string_closed key json =
   | `Null -> Ok None
   | actual ->
     Error (Printf.sprintf "entry field %S expected string, got %s" key (json_kind actual))
-;;
-
-let non_empty_member_string key json =
-  let open Result_syntax in
-  let* value = member_string_closed key json in
-  match value with
-  | None -> Ok None
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if trimmed = ""
-    then Error (Printf.sprintf "entry field %S must not be empty" key)
-    else if raw <> trimmed
-    then
-      Error
-        (Printf.sprintf "entry field %S must not have leading or trailing whitespace" key)
-    else Ok (Some raw)
 ;;
 
 let member_string_list key json =
@@ -423,10 +407,10 @@ let parse_entry json =
   let open Result_syntax in
   let* () = validate_closed_object ~scope:"entry" ~known:known_entry_keys json in
   let* id_prefix =
-    match non_empty_member_string "id_prefix" json with
+    match member_string_closed "id_prefix" json with
     | Error _ as error -> error
     | Ok None -> Error "entry missing required \"id_prefix\" field"
-    | Ok (Some id_prefix) -> Ok id_prefix
+    | Ok (Some raw) -> Model_identifiers.Id_prefix.of_string raw
   in
   (* Validate [base] against the closed preset vocab at parse time (mirrors the
      other canonical fields below) so an unknown label fails closed instead of
@@ -453,7 +437,7 @@ let parse_entry json =
     |> Result.map_error (fun error ->
       Printf.sprintf
         "entry %S %s"
-        id_prefix
+        (Model_identifiers.Id_prefix.to_string id_prefix)
         (Capability_vocab.thinking_control_format_codec_error_to_string error))
   in
   let* anthropic_thinking_control =
@@ -637,11 +621,8 @@ let load_file path =
 (* ── Lookup ─────────────────────────────────────────────── *)
 
 let lookup (t : t) model_id =
-  let m = String.lowercase_ascii model_id in
   List.find_opt
-    (fun entry ->
-       let prefix = String.lowercase_ascii entry.id_prefix in
-       String.starts_with ~prefix m)
+    (fun entry -> Model_identifiers.Model_id.starts_with ~prefix:entry.id_prefix model_id)
     t
 ;;
 
@@ -667,7 +648,7 @@ let%test "of_json: valid manifest parses successfully" =
   in
   match of_json json with
   | Ok [ entry ] ->
-    entry.id_prefix = "my-llm"
+    Model_identifiers.Id_prefix.to_string entry.id_prefix = "my-llm"
     && entry.base_label = Some "openai_chat"
     && entry.max_context_tokens = Some 131072
     && entry.supports_tools = Some true
@@ -680,8 +661,9 @@ let%test "of_json: parses Anthropic thinking policy as typed declaration" =
       {|{"schema_version":1,"models":[{"id_prefix":"claude-future","anthropic_thinking_control":"adaptive_only"}]}|}
   in
   match of_json json with
-  | Ok [ { anthropic_thinking_control = Some Capability_vocab.Adaptive_only; _ } ] -> true
-  | Ok _ | Error _ -> false
+  | Ok [ { anthropic_thinking_control; _ } ] ->
+    anthropic_thinking_control = Some Capability_vocab.Adaptive_only
+  | Ok ([] | _ :: _ :: _) | Error _ -> false
 ;;
 
 let%test "of_json: rejects unknown Anthropic thinking policy" =
@@ -745,7 +727,7 @@ let%test "lookup: prefix match is case-insensitive" =
   in
   match of_json json with
   | Ok manifest ->
-    (match lookup manifest "my-model-q4" with
+    (match lookup manifest (Model_identifiers.Model_id.of_string_exn "my-model-q4") with
      | Some entry -> entry.supports_tools = Some true
      | None -> false)
   | Error _ -> false
@@ -756,7 +738,7 @@ let%test "lookup: no match returns None" =
     Yojson.Safe.from_string {|{"schema_version":1,"models":[{"id_prefix":"model-a"}]}|}
   in
   match of_json json with
-  | Ok manifest -> lookup manifest "model-b" = None
+  | Ok manifest -> lookup manifest (Model_identifiers.Model_id.of_string_exn "model-b") = None
   | Error _ -> false
 ;;
 
@@ -767,7 +749,7 @@ let%test "lookup: first matching entry wins" =
   in
   match of_json json with
   | Ok manifest ->
-    (match lookup manifest "model-v1" with
+    (match lookup manifest (Model_identifiers.Model_id.of_string_exn "model-v1") with
      | Some entry -> entry.max_context_tokens = Some 8192
      | None -> false)
   | Error _ -> false
@@ -780,8 +762,8 @@ let%test "lookup: exact prefix match" =
   in
   match of_json json with
   | Ok manifest ->
-    Option.is_some (lookup manifest "exact-model")
-    && Option.is_none (lookup manifest "other-model")
+    Option.is_some (lookup manifest (Model_identifiers.Model_id.of_string_exn "exact-model"))
+    && Option.is_none (lookup manifest (Model_identifiers.Model_id.of_string_exn "other-model"))
   | Error _ -> false
 ;;
 
@@ -833,7 +815,11 @@ let%test "set_global / clear_global: runtime override roundtrips" =
       let observed_after_set =
         match global () with
         | Some entries ->
-          List.exists (fun e -> e.id_prefix = "runtime-override-token-9fX") entries
+          List.exists
+            (fun e ->
+               Model_identifiers.Id_prefix.to_string e.id_prefix
+               = "runtime-override-token-9fX")
+            entries
         | None -> false
       in
       clear_global ();
@@ -858,5 +844,6 @@ let%test "set_global installs runtime override and returns it from global ()" =
              skip [clear_global] — Fun.protect's finally restores state
              either way, but matching explicitly avoids relying on
              exception flow. *)
-        Option.is_some (lookup m "override-precedence-test-v2"))
+        Option.is_some
+          (lookup m (Model_identifiers.Model_id.of_string_exn "override-precedence-test-v2")))
 ;;

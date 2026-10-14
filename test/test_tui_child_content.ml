@@ -86,7 +86,9 @@ let test_snapshots_suffix_identity_and_idle () =
   check int "unchanged Poll only hints" 0 (List.length requests);
   check bool "idle keeps actual immutable state identity" true (idle==second);
   check bool "idle keeps exact rows list" true (Consumer.records (one idle)==Consumer.records (one second));
-  check bool "coverage is explicitly unavailable" true ((one idle).coverage=Read.Unavailable)
+  check bool "coverage is explicitly unavailable" true ((one idle).coverage=Read.Unavailable);
+  check (list string) "constant coverage notice is not a health diagnostic" []
+    (Consumer.diagnostics idle)
 
 let test_newer_receipt_does_not_repeat_full_reads () =
   let first=initial () in
@@ -146,6 +148,17 @@ let test_audit_redaction_disappearance_and_replacement () =
   let absent,_=read Consumer.Poll fresh [] (fun _ -> fail "absent inventory must not invent store") in
   check int "disappeared history retained" 1 (records_count absent);
   check bool "last-observed absent body not claimed currently redacted" true (Consumer.diagnostics absent<>Consumer.diagnostics fresh);
+  check int "collector-lifetime caveat accompanies a real diagnostic" 2
+    (List.length (Consumer.diagnostics absent));
+  check (list string) "no caveat without a real failure" [] (Consumer.diagnostics fresh);
+  let server_failure=match Read.failure Read.Store_corrupt with
+    | Read.Failure failure -> failure
+    | Read.Records _ | Read.Receivers _ | Read.Hints _ -> fail "failure constructor returned a non-failure" in
+  let service=Consumer.failed fresh (Consumer.Service server_failure) in
+  check int "server failure code gets exactly one caveat line" 1
+    (List.length (Consumer.diagnostics service));
+  let unreadable=Consumer.failed fresh (Consumer.Transport "refused") in
+  check (list string) "unreadable server answer gets no caveat" [] (Consumer.diagnostics unreadable);
   let replacement,_=read Consumer.Poll absent [receiver,Ok ("replacement",1)] (fun uri ->
     check (option string) "new incarnation begins without old cursor" None (after uri);
     Ok (200,json (page "replacement" 1 [row 1 (observation "first")]))) in

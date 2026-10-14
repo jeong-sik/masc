@@ -257,7 +257,13 @@ let palette_matches (state : state) =
              List.filter (function
                | _, Palette_lsp (candidate_question, _) ->
                    String.equal question candidate_question
-               | _ -> false) entries
+               | ( _
+                 , ( Palette_browser_lane | Palette_hide_browser_lane
+                   | Palette_connectors | Palette_collab | Palette_msx
+                   | Palette_dos | Palette_lane_addons | Palette_goto _
+                   | Palette_config _ | Palette_gate_mode _ | Palette_chat _
+                   | Palette_task _ | Palette_board_hearth _
+                   | Palette_board_post _ ) ) -> false) entries
          | Some (_, Some _) -> [])
     | Palette_choice { choice_question; _ } ->
         List.map

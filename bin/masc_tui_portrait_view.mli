@@ -89,6 +89,39 @@ val put_bytes : placement -> string
     already holds under the placement's id ({!Masc_tui_graphics.put}),
     restore the cursor. No pixels travel. *)
 
+(** {2 Pictures that arrive as PNG files}
+
+    An evidence picture is a PNG file as the server sent it, not a frame this
+    process drew. It goes through the same {!request}, {!send} and {!flush}
+    bookkeeping as a candle portrait, so a clear screen, a moved or rewritten
+    row and a view that no longer asks for it are handled once. *)
+
+type png_placement = {
+  png_image_id : int;  (** the picture's {!Masc_tui_graphics.image_id} *)
+  png_row : int;  (** 0-based frame line of the picture's top edge *)
+  png_column : int;  (** 0-based cell of its left edge *)
+  png_cols : int;  (** cells across *)
+  png_rows : int;  (** cells down *)
+  png_crop : Masc_tui_graphics.crop option;
+      (** the part of the picture that shows, for one the window cuts; [None]
+          for all of it *)
+  png_key : string;
+      (** equal keys mean equal bytes (a digest), so the bytes are not
+          compared on every frame *)
+  png_data : string;  (** a PNG file's bytes *)
+}
+
+val request_png : png_placement -> unit
+(** The frame being built wants this picture on screen. Like {!request}, a
+    second request under one image id replaces the first. *)
+
+val hold_png : image_id:int -> key:string -> unit
+(** The frame being built has this picture but none of it is in view. When
+    the terminal holds its pixels they stay, without a placement, and the
+    picture's return is a {!Masc_tui_graphics.put_png}. Without a hold, or
+    with a different [key], the pixels are freed. A clear screen takes held
+    pixels too, and the return is then a transfer. *)
+
 val set_display : display -> unit
 (** What this terminal draws. Set once, after the start-up probe. Until then
     {!No_picture}. *)
@@ -124,7 +157,8 @@ val send :
 val flush : Masc_tui_frame_presenter.present_result -> write:(string -> unit) -> unit
 (** After a frame reached the terminal, or after nothing did ([Unchanged]).
     Sends each requested picture what {!send} says, and deletes every
-    picture the frame no longer asks for. A picture the protocol encoder
+    picture the frame no longer asks for, except one the frame holds
+    ({!hold_png}), which loses only its placement. A picture the protocol encoder
     refuses is not counted as on screen, so the next frame tries it again.
     [write] must carry the bytes to the terminal as they are (wrapped for
     tmux by the caller). A screen that takes the whole terminal -- a

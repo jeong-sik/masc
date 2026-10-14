@@ -18,23 +18,17 @@ let gen_context_overflow_error =
 
 (* ── Properties ──────────────────────────────────────────── *)
 
-let prop_overflow_preserves_provider_limit =
+let prop_overflow_classifies_as_context_overflow =
   QCheck.Test.make ~count:200
-    ~name:"overflow classification preserves the provider-declared optional limit"
+    ~name:"a provider context overflow classifies as a context overflow with or without a limit"
     (QCheck.make gen_context_overflow_error)
     (fun err ->
-      let expected_limit =
-        match err with
-        | Agent_core.Error.Api (ContextOverflow { limit; _ }) -> limit
-        | _ -> assert false
-      in
       match
         Masc.Keeper_unified_turn_execution.For_testing
         .declared_lane_failure_of_error err
       with
       | Masc.Keeper_unified_turn_execution.For_testing
-        .Provider_context_overflow { limit_tokens } ->
-          Option.equal Int.equal expected_limit limit_tokens
+        .Provider_context_overflow -> true
       | Masc.Keeper_unified_turn_execution.For_testing
         .Declared_runtime_lane_exhausted -> false)
 
@@ -149,7 +143,7 @@ let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
 let () =
   let qcheck_tests =
     List.map QCheck_alcotest.to_alcotest [
-      prop_overflow_preserves_provider_limit;
+      prop_overflow_classifies_as_context_overflow;
     ]
   in
   Alcotest.run "pbt_context_overflow" [

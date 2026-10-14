@@ -215,29 +215,26 @@ let assert_no_queue_action label outcome =
 ;;
 
 let test_every_failure_route_preserves_batch () =
-  let exhausted label terminal =
-    KFR.Exhausted_visible_alive
-      { terminal; detail = label }
-  in
+  let exhausted terminal = KFR.Exhausted_visible_alive { terminal } in
   [ ( "network transient"
     , KFR.Retry_after_observed
         { retry_class = KFR.Network_transient; retry_after = None } )
   ; "rotate now", KFR.Rotate_now { rotate = KFR.Model_unavailable }
   ; "context overflow", KFR.Rotate_now { rotate = KFR.Context_window_exceeded }
-  ; "deterministic request", exhausted "deterministic request" KFR.Deterministic_request
-  ; "configuration mismatch", exhausted "configuration mismatch" KFR.Config_mismatch
-  ; "provider integration", exhausted "provider integration" KFR.Provider_integration
+  ; "deterministic request", exhausted KFR.Deterministic_request
+  ; "configuration mismatch", exhausted KFR.Config_mismatch
+  ; "provider integration", exhausted KFR.Provider_integration
   ; ( "effect fenced"
-    , exhausted "effect fenced"
+    , exhausted
         (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted) )
   ; ( "effect fenced without observation"
-    , exhausted "effect fenced without observation"
+    , exhausted
         (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable) )
   ; ( "tool correction lost"
-    , exhausted "tool correction lost"
+    , exhausted
         (KFR.Tool_correction_lost KFR.Fenced_effect_attempted) )
   ; ( "tool correction lost without observation"
-    , exhausted "tool correction lost without observation"
+    , exhausted
         (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable) )
   ]
   |> List.iter (fun (label, route) ->
@@ -252,10 +249,7 @@ let test_every_failure_route_preserves_batch () =
    These are the routes the driver produces after an answer: the accept gate
    rejected it, a tool it called failed terminally, or an attempt was fenced
    after a tool effect. *)
-let exhausted_route label terminal =
-  KFR.Exhausted_visible_alive
-    { terminal; detail = label }
-;;
+let exhausted_route terminal = KFR.Exhausted_visible_alive { terminal }
 
 let observed_failure_routes =
   let empty_completion =
@@ -272,14 +266,14 @@ let observed_failure_routes =
   ; "no progress empty", KFR.Rotate_now { rotate = KFR.No_progress_empty }
   ; ( "no progress thinking only"
     , KFR.Rotate_now { rotate = KFR.No_progress_thinking_only } )
-  ; "contract violation", exhausted_route "contract violation" KFR.Contract_violation
+  ; "contract violation", exhausted_route KFR.Contract_violation
   ; ( "terminal effect runtime failure"
-    , exhausted_route "terminal effect runtime failure" KFR.Terminal_effect_runtime_failure )
+    , exhausted_route KFR.Terminal_effect_runtime_failure )
   ; ( "effect fenced after a tool effect"
-    , exhausted_route "effect fenced"
+    , exhausted_route
         (KFR.Provider_attempt_effect_fenced KFR.Fenced_effect_attempted) )
   ; ( "tool correction lost after a tool effect"
-    , exhausted_route "tool correction lost"
+    , exhausted_route
         (KFR.Tool_correction_lost KFR.Fenced_effect_attempted) )
   ]
 ;;
@@ -299,21 +293,21 @@ let unobserved_failure_routes =
   ; ( "refusal body not received"
     , KFR.Rotate_now { rotate = KFR.Refusal_body_not_received } )
   ; "context overflow", KFR.Rotate_now { rotate = KFR.Context_window_exceeded }
-  ; "configuration mismatch", exhausted_route "configuration mismatch" KFR.Config_mismatch
-  ; "provider integration", exhausted_route "provider integration" KFR.Provider_integration
-  ; "internal opaque", exhausted_route "internal opaque" KFR.Internal_opaque
+  ; "configuration mismatch", exhausted_route KFR.Config_mismatch
+  ; "provider integration", exhausted_route KFR.Provider_integration
+  ; "internal opaque", exhausted_route KFR.Internal_opaque
     (* The history was refused before dispatch (#38456). A rejected Gate
        resolution reaches this refusal; retiring its wake would leave the
        model never told of the rejection. *)
-  ; "transcript refused", exhausted_route "transcript refused" KFR.Transcript_refused
+  ; "transcript refused", exhausted_route KFR.Transcript_refused
     (* The lanes set this before any answer: claude-code on spawn, codex when
        the turn input could not be written. A continuation that fails this
        way must keep its wake, or the model never sees the replay. *)
   ; ( "effect fenced without observation"
-    , exhausted_route "effect fenced without observation"
+    , exhausted_route
         (KFR.Provider_attempt_effect_fenced KFR.Fenced_observation_unavailable) )
   ; ( "tool correction lost without observation"
-    , exhausted_route "tool correction lost without observation"
+    , exhausted_route
         (KFR.Tool_correction_lost KFR.Fenced_observation_unavailable) )
   ]
 ;;

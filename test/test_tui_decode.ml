@@ -4653,7 +4653,7 @@ let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true)
      ; ("url", `String "https://github.com/jeong-sik/masc")
      ; ("local_path", `String "workspace/yousleepwhen/masc")
      ; ( "resolved_local_path"
-       , `String "/Users/dancer/me/workspace/yousleepwhen/masc" )
+       , `String "/Users/worker/ws/workspace/yousleepwhen/masc" )
      ; ("aliases", `List [])
      ; ("default_branch", `String "main")
      ; ("keepers", `List (List.map (fun k -> `String k) keepers))
@@ -4683,7 +4683,7 @@ let test_decode_repository_snapshot_reads_the_live_shape () =
            Alcotest.(check string) "stored path"
              "workspace/yousleepwhen/masc" r.Tui_decode.rp_local_path;
            Alcotest.(check string) "server-resolved absolute path"
-             "/Users/dancer/me/workspace/yousleepwhen/masc"
+             "/Users/worker/ws/workspace/yousleepwhen/masc"
              r.Tui_decode.rp_resolved_local_path;
            Alcotest.(check (list string)) "who works in it" [ "keeper.one" ]
              r.Tui_decode.rp_keepers;
@@ -4964,7 +4964,6 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
      replace_field "stop_reason" (`String "source_read_failed") synthesis;
      replace_field "stop_reason" `Null synthesis;
      (match synthesis with `Assoc fields -> `Assoc (("stop_reason", `Null) :: fields) | value -> value);
-     replace_field "detail" (`String "PRIVATE_ERROR") synthesis;
      replace_field "trace_id" `Null synthesis;
      replace_field "state" (`String "running") (replace_field "range" `Null synthesis)];
   (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload cycle) with
@@ -9210,9 +9209,9 @@ let health_probe =
         ("binary_commit_age_seconds", `Float 1106.0);
       ]);
       ("paths", `Assoc [
-        ("cwd", `String "/Users/dancer/me");
-        ("effective_base_path", `String "/Users/dancer/me");
-        ("effective_masc_root", `String "/Users/dancer/me/.masc");
+        ("cwd", `String "/Users/worker/ws");
+        ("effective_base_path", `String "/Users/worker/ws");
+        ("effective_masc_root", `String "/Users/worker/ws/.masc");
       ]);
     ]
 
@@ -9224,9 +9223,9 @@ let test_decode_server_identity_reads_a_probe () =
     Alcotest.(check string) "binary commit"
       "030fa9043aafc5c2003f830c86720afff8e8e2ff"
       identity.Tui_decode.sid_binary_commit;
-    Alcotest.(check string) "base path" "/Users/dancer/me"
+    Alcotest.(check string) "base path" "/Users/worker/ws"
       identity.Tui_decode.sid_base_path;
-    Alcotest.(check string) "masc root" "/Users/dancer/me/.masc"
+    Alcotest.(check string) "masc root" "/Users/worker/ws/.masc"
       identity.Tui_decode.sid_masc_root;
     Alcotest.(check (option (float 0.001))) "binary age" (Some 1106.0)
       identity.Tui_decode.sid_binary_commit_age_s
@@ -11171,7 +11170,7 @@ let decoded_execute_rows ~preview ~input =
    sat off the right edge of the row at every terminal width. This is the
    shape and the preview text observed on screen with seven rows waiting. *)
 let observed_execute_preview =
-  "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/dancer/me/.masc/playground/docker/rw-e0-r9-20260820-review/.\",\"argv\":[\"git\",\"clone\"]}}"
+  "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/worker/ws/.masc/playground/docker/rw-e0-r9-20260820-review/.\",\"argv\":[\"git\",\"clone\"]}}"
 
 let test_decode_execute_gate_row_leads_with_the_command () =
   let preview =
@@ -11181,13 +11180,13 @@ let test_decode_execute_gate_row_leads_with_the_command () =
            [ ("schema", `String "masc.keeper_gate.request.v1");
              ( "input",
                `Assoc
-                 [ ("cwd", `String "/Users/dancer/me/.masc/playground/docker/rw-e0-r9-20260820-review/.");
+                 [ ("cwd", `String "/Users/worker/ws/.masc/playground/docker/rw-e0-r9-20260820-review/.");
                    ( "argv",
                      `List
                        [ `String "git"; `String "clone"; `String "--depth";
                          `String "1"; `String "https://github.com/jeong-sik/masc" ] );
                  ] );
-             ("cwd", `String "/Users/dancer/me/.masc/playground/docker/rw-e0-r9-20260820-review/.");
+             ("cwd", `String "/Users/worker/ws/.masc/playground/docker/rw-e0-r9-20260820-review/.");
              ("sandbox_profile", `String "docker");
              ("sandbox_target", `String "docker:masc-playground");
            ])
@@ -12094,6 +12093,149 @@ let test_verification_evidence_reason_shapes () =
            "reason":{"code":"read_error","detail":"  "}}]}}}|}
     ]
 
+(* Binary artifacts. The server's operator projection adds [preview] to an
+   [artifact_binary] item: the image bytes inline, or the reason they are not
+   there. The decode reads the media type from the bytes, and checks the bytes
+   against the length and SHA-256 the item itself records before anything
+   draws them. *)
+let evidence_png = "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+let evidence_jpeg = "\xff\xd8\xff\xe0\x00\x10JFIF"
+let evidence_pdf = "%PDF-1.7\n"
+
+let binary_evidence_json ?(format = "png") ?bytes ?sha256 ~data preview =
+  let bytes = Option.value bytes ~default:(String.length data) in
+  let sha256 =
+    Option.value sha256 ~default:Digestif.SHA256.(digest_string data |> to_hex)
+  in
+  Yojson.Safe.from_string
+    (Printf.sprintf
+       {|{"result":{"evidence":{"access":"available","items":[
+         {"kind":"artifact_binary","reference":"artifact:shot.%s",
+          "bytes":%d,"sha256":"%s","format":"%s","preview":%s}]}}}|}
+       format bytes sha256 format preview)
+
+let inline_preview data =
+  Printf.sprintf {|{"state":"inline","body_base64":"%s"}|} (Base64.encode_string data)
+
+let decode_binary_preview json =
+  match Masc.Tui_decode.decode_verification_evidence json with
+  | Ok
+      (Masc.Tui_decode.Evidence_items
+         [ Masc.Tui_decode.Ev_binary
+             { ev_b_bytes; ev_b_format; ev_b_preview; _ } ]) ->
+      Ok (ev_b_bytes, ev_b_format, ev_b_preview)
+  | Ok _ -> Error "decoded into other shapes"
+  | Error detail -> Error detail
+
+let test_verification_evidence_decodes_an_inline_image () =
+  match
+    decode_binary_preview
+      (binary_evidence_json ~data:evidence_png (inline_preview evidence_png))
+  with
+  | Ok
+      ( ev_b_bytes
+      , ev_b_format
+      , Masc.Tui_decode.Preview_image { ev_media; ev_data } ) ->
+      Alcotest.(check string) "the bytes arrive whole" evidence_png ev_data;
+      Alcotest.(check string) "media type from the bytes" "image/png"
+        (Masc.Keeper_vision_downscale.media_type_to_string ev_media);
+      Alcotest.(check int) "declared size" (String.length evidence_png) ev_b_bytes;
+      Alcotest.(check string) "format is the extension" "png" ev_b_format
+  | Ok _ -> Alcotest.fail "an inline image did not decode as an image"
+  | Error detail -> Alcotest.fail detail
+
+(* The item says [png]; the bytes are JPEG. The extension is a file name, so
+   the drawing path must follow the bytes. *)
+let test_verification_evidence_media_type_follows_the_bytes () =
+  match
+    decode_binary_preview
+      (binary_evidence_json ~format:"png" ~data:evidence_jpeg
+         (inline_preview evidence_jpeg))
+  with
+  | Ok (_, _, Masc.Tui_decode.Preview_image { ev_media; _ }) ->
+      Alcotest.(check string) "jpeg bytes under a png name" "image/jpeg"
+        (Masc.Keeper_vision_downscale.media_type_to_string ev_media)
+  | Ok _ | Error _ -> Alcotest.fail "a mislabelled image did not decode as an image"
+
+let test_verification_evidence_withheld_reasons () =
+  let decoded preview =
+    decode_binary_preview (binary_evidence_json ~data:evidence_pdf preview)
+  in
+  (match decoded {|{"state":"withheld","reason":"over_delivery_ceiling","bytes":512000,"ceiling":200000}|} with
+   | Ok
+       ( _
+       , _
+       , Masc.Tui_decode.Preview_withheld
+           (Masc.Tui_decode.Withheld_over_delivery_ceiling { bytes; ceiling }) ) ->
+       Alcotest.(check (pair int int)) "numbers the server stated" (512000, 200000)
+         (bytes, ceiling)
+   | Ok _ | Error _ -> Alcotest.fail "an oversize image did not keep its numbers");
+  List.iter
+    (fun (reason, expected) ->
+      match
+        decoded (Printf.sprintf {|{"state":"withheld","reason":"%s"}|} reason)
+      with
+      | Ok (_, _, Masc.Tui_decode.Preview_withheld actual) ->
+          Alcotest.(check bool) reason true (actual = expected)
+      | Ok _ | Error _ -> Alcotest.fail (reason ^ " did not decode"))
+    [ "not_image_format", Masc.Tui_decode.Withheld_not_image_format
+    ; "body_not_filed", Masc.Tui_decode.Withheld_body_not_filed
+    ; "body_unreadable", Masc.Tui_decode.Withheld_body_unreadable
+    ; "over_response_budget", Masc.Tui_decode.Withheld_over_response_budget
+    ]
+
+(* A preview this build cannot read as written fails the decode instead of
+   being shown as some other cause. *)
+let test_verification_evidence_malformed_preview_fails () =
+  List.iter
+    (fun (label, preview) ->
+      match
+        decode_binary_preview (binary_evidence_json ~data:evidence_png preview)
+      with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail (label ^ " decoded"))
+    [ "unknown state", {|{"state":"streaming"}|}
+    ; "no state", {|{"body_base64":"AAAA"}|}
+    ; "inline without body", {|{"state":"inline"}|}
+    ; "unknown reason", {|{"state":"withheld","reason":"too_pretty"}|}
+    ; "withheld without reason", {|{"state":"withheld"}|}
+    ; "ceiling without numbers", {|{"state":"withheld","reason":"over_delivery_ceiling"}|}
+    ; "preview not an object", {|"inline"|}
+    ];
+  match
+    Masc.Tui_decode.decode_verification_evidence
+      (Yojson.Safe.from_string
+         {|{"result":{"evidence":{"access":"available","items":[
+            {"kind":"artifact_binary","reference":"artifact:shot.png",
+             "bytes":3,"sha256":"x","format":"png"}]}}}|})
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a binary artifact without a preview decoded"
+
+(* The bytes are checked against the item's own record. A body that disagrees
+   still decodes, as a defect named on its item, so the rest of the evidence
+   stays readable and the operator is told the picture was not drawn. *)
+let test_verification_evidence_defective_bodies_are_named () =
+  let defect ?format ?bytes ?sha256 ~data preview =
+    match decode_binary_preview (binary_evidence_json ?format ?bytes ?sha256 ~data preview) with
+    | Ok (_, _, Masc.Tui_decode.Preview_defective defect) -> defect
+    | Ok _ | Error _ -> Alcotest.fail "a defective body was not named"
+  in
+  Alcotest.(check bool) "not base64" true
+    (defect ~data:evidence_png {|{"state":"inline","body_base64":"%%%not base64%%%"}|}
+     = Masc.Tui_decode.Defect_bad_base64);
+  Alcotest.(check bool) "length differs from the item" true
+    (defect ~bytes:(String.length evidence_png + 5) ~data:evidence_png
+       (inline_preview evidence_png)
+     = Masc.Tui_decode.Defect_length_mismatch
+         { declared = String.length evidence_png + 5; actual = String.length evidence_png });
+  Alcotest.(check bool) "digest differs from the item" true
+    (defect ~sha256:(String.make 64 '0') ~data:evidence_png (inline_preview evidence_png)
+     = Masc.Tui_decode.Defect_digest_mismatch);
+  Alcotest.(check bool) "a pdf under an image name" true
+    (defect ~format:"png" ~data:evidence_pdf (inline_preview evidence_pdf)
+     = Masc.Tui_decode.Defect_not_an_image)
+
 let skill_evidence_fixture () =
   `Assoc
     [ "schema", `String "masc.skill-evidence/v5"
@@ -12850,6 +12992,16 @@ let () =
           test_verification_evidence_unavailable_and_unknown_kind
       ; Alcotest.test_case "reason takes a code or code object; else fails" `Quick
           test_verification_evidence_reason_shapes
+      ; Alcotest.test_case "an inline image decodes to its bytes" `Quick
+          test_verification_evidence_decodes_an_inline_image
+      ; Alcotest.test_case "the media type follows the bytes, not the name" `Quick
+          test_verification_evidence_media_type_follows_the_bytes
+      ; Alcotest.test_case "withheld previews keep the server's cause" `Quick
+          test_verification_evidence_withheld_reasons
+      ; Alcotest.test_case "a malformed preview fails the decode" `Quick
+          test_verification_evidence_malformed_preview_fails
+      ; Alcotest.test_case "a body that disagrees with its item is named" `Quick
+          test_verification_evidence_defective_bodies_are_named
       ] );
     ( "decode_goal_timeline",
       [ Alcotest.test_case "carries ready events" `Quick

@@ -1,3 +1,0 @@
-(test
- (name test_shared_audit)
- (libraries alcotest shared_audit yojson unix digestif))

@@ -528,12 +528,6 @@ let parse_json_value ~stage text =
   | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
 ;;
 
-let parse_json ~stage text =
-  let* json = parse_json_value ~stage text in
-  let* () = validate_unique_object_keys ~stage ~path:"$" json in
-  Ok json
-;;
-
 let optional_int stage name fields =
   match List.assoc_opt name fields with
   | None | Some `Null -> Ok None
@@ -604,27 +598,144 @@ let parse_subscription json =
     Ok { authentication; subscription_type; api_provider }
 ;;
 
-let read_subscription ~mgr ~cwd config =
-  try
-    Eio.Process.parse_out
-      mgr
-      Eio.Buf_read.take_all
-      ~is_success:(fun code -> code = 0 || code = 1)
-      ~cwd
-      ~env:(client_environment config.account_home)
-      [ config.cli_path
-      ; Runtime_native_tools.claude_setting_sources_arg
-      ; "auth"; "status"; "--json" ]
+(* The CLI's stderr is the only witness when its stdout stops mid-document:
+   keep an excerpt with the probe's failures so the next truncated probe
+   names the crash instead of only the cut. The excerpt is flattened to one
+   line, capped at 300 bytes on a UTF-8 boundary, with control bytes
+   neutralised: the detail is shown in the UI. *)
+let subscription_stderr_limit = 300
+
+(* Back a byte cut up to a UTF-8 character boundary, so the excerpt never
+   ends mid-codepoint on valid input. *)
+let utf8_cut text limit =
+  let limit = min limit (String.length text) in
+  if limit = String.length text then limit
+  else begin
+    let pos = ref limit in
+    while !pos > 0 && Char.code text.[!pos] land 0xC0 = 0x80 do
+      decr pos
+    done;
+    let lead = Char.code text.[!pos] in
+    let width =
+      if lead land 0x80 = 0 then 1
+      else if lead land 0xE0 = 0xC0 then 2
+      else if lead land 0xF0 = 0xE0 then 3
+      else 4
+    in
+    if !pos + width > limit then !pos else limit
+  end
+
+let subscription_stderr_excerpt stderr_buf =
+  let mapped =
+    Buffer.contents stderr_buf
     |> String.trim
-    |> parse_json ~stage:"auth status"
-    |> fun result -> Result.bind result parse_subscription
+    |> String.map (fun char ->
+      if char = '\n' || char = '\r' || char = '\t' then ' '
+      else if Char.code char < 0x20 || char = '\x7f' then '?'
+      else char)
+  in
+  if mapped = "" then None
+  else if String.length mapped <= subscription_stderr_limit then Some mapped
+  else Some (String.sub mapped 0 (utf8_cut mapped subscription_stderr_limit) ^ "…")
+
+(* A document the CLI stopped in the middle names no reason by itself. The
+   byte count tells a cut at the very start from one near the end. The probe
+   decides "cut" where the text fails to parse, not from the error's wording,
+   so this only annotates a failure it was already told is a cut document. *)
+let note_cut_document ~bytes = function
+  | Error (Protocol_error { stage; detail }) ->
+      Error (Protocol_error { stage; detail = Printf.sprintf "%s (stdout %d bytes)" detail bytes })
+  | ( Ok _
+    | Error
+        ( Invalid_config _ | Spawn_failed _ | Subscription_required _
+        | Unsupported_control_request _ | Turn_transport_interrupted _
+        | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Unhandled_exception _ | Timeout _ ) ) as result -> result
+
+(* The boolean is true when the CLI exited cleanly but its stdout was not a
+   complete JSON document. *)
+let probe_auth_status ~mgr ~cwd config =
+  let stderr_buf = Buffer.create 256 in
+  let enrich ~excerpt result =
+    match result, excerpt with
+    | Error (Protocol_error { stage; detail }), Some text ->
+        true, Error (Protocol_error { stage; detail = detail ^ "; stderr: " ^ text })
+    | Error (Protocol_error _), None -> false, result
+    | ( Ok _
+      | Error
+          ( Invalid_config _ | Spawn_failed _ | Subscription_required _
+          | Unsupported_control_request _ | Turn_transport_interrupted _
+          | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Unhandled_exception _ | Timeout _ ) ),
+      (None | Some _) -> false, result
+  in
+  try
+    let stdout =
+      Eio.Process.parse_out
+        mgr
+        Eio.Buf_read.take_all
+        ~is_success:(fun code -> code = 0 || code = 1)
+        ~cwd
+        ~stderr:(Eio.Flow.buffer_sink stderr_buf)
+        ~env:(client_environment config.account_home)
+        [ config.cli_path
+        ; Runtime_native_tools.claude_setting_sources_arg
+        ; "auth"; "status"; "--json" ]
+    in
+    (* parse_out joins its stderr copier before it returns, so the buffer is
+       drained here. *)
+    let excerpt = subscription_stderr_excerpt stderr_buf in
+    let parsed = parse_json_value ~stage:"auth status" (String.trim stdout) in
+    let cut_document = Result.is_error parsed in
+    let result =
+      let* json = parsed in
+      let* () = validate_unique_object_keys ~stage:"auth status" ~path:"$" json in
+      parse_subscription json
+    in
+    let result =
+      if cut_document then note_cut_document ~bytes:(String.length stdout) result else result
+    in
+    let attached, result = enrich ~excerpt result in
+    (* Stderr that the detail does not carry still reaches the debug log:
+       success-path warnings were inherited by the server log before this
+       probe captured its stderr. *)
+    if not attached then Option.iter (Log.Runtime_agent.debug "auth probe stderr: %s") excerpt;
+    result, cut_document
   with
   | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Exn.Io
       (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
-    Error (Invalid_config (Printf.sprintf "executable %S was not found" executable))
-  | exn -> Error (Spawn_failed (Printexc.to_string exn))
+    Error (Invalid_config (Printf.sprintf "executable %S was not found" executable)), false
+  | exn ->
+      (* A crashed probe may still have told its stderr why: keep what the
+         copier had drained, best-effort past this point. *)
+      let detail = Printexc.to_string exn in
+      (match subscription_stderr_excerpt stderr_buf with
+       | None -> Error (Spawn_failed detail), false
+       | Some text -> Error (Spawn_failed (detail ^ "; stderr: " ^ text)), false)
+;;
+
+(* [auth status] only reads. A CLI that exits cleanly with a cut document is
+   usually a transient failure (two probes racing on one account home, or the
+   process dying mid-write), so one more probe is cheaper than failing the
+   Keeper request. A second cut document is reported as the failure it is. *)
+let read_subscription ~mgr ~cwd config =
+  let first, cut_document = probe_auth_status ~mgr ~cwd config in
+  if cut_document
+  then (
+    (* [cut_document] is only true for a [Protocol_error], so the first result
+       carries the reason. *)
+    (match first with
+     | Ok _ -> ()
+     | Error error ->
+       Log.Runtime_agent.warn
+         "auth probe returned a cut document, retrying once: %s"
+         (error_to_string error));
+    fst (probe_auth_status ~mgr ~cwd config))
+  else first
 ;;
 
 (* Claude Code reads two keys from a tools/list entry's [_meta]
@@ -936,6 +1047,51 @@ let api_retry_observation_candidate fields =
   && List.for_all (fun (key,_) -> List.mem key api_retry_fields) fields
 ;;
 
+(* The [type] tag of a stream-json frame, parsed once. Both dispatch loops and
+   the progress-observation gate match on this value without a wildcard, so a
+   tag this client learns to read is a compile error in each of them until it
+   has an arm. A tag no arm decodes stays [Frame_other] and fails closed. *)
+type frame_kind =
+  | Frame_control_request
+  | Frame_control_response
+  | Frame_stream_event
+  | Frame_assistant
+  | Frame_rate_limit_event
+  | Frame_result
+  | Frame_user
+  | Frame_system
+  | Frame_tool_progress
+  | Frame_command_lifecycle
+  | Frame_other of string
+
+let frame_kind_of_tag = function
+  | "control_request" -> Frame_control_request
+  | "control_response" -> Frame_control_response
+  | "stream_event" -> Frame_stream_event
+  | "assistant" -> Frame_assistant
+  | "rate_limit_event" -> Frame_rate_limit_event
+  | "result" -> Frame_result
+  | "user" -> Frame_user
+  | "system" -> Frame_system
+  | "tool_progress" -> Frame_tool_progress
+  | "command_lifecycle" -> Frame_command_lifecycle
+  | other -> Frame_other other
+;;
+
+let frame_kind_to_tag = function
+  | Frame_control_request -> "control_request"
+  | Frame_control_response -> "control_response"
+  | Frame_stream_event -> "stream_event"
+  | Frame_assistant -> "assistant"
+  | Frame_rate_limit_event -> "rate_limit_event"
+  | Frame_result -> "result"
+  | Frame_user -> "user"
+  | Frame_system -> "system"
+  | Frame_tool_progress -> "tool_progress"
+  | Frame_command_lifecycle -> "command_lifecycle"
+  | Frame_other tag -> tag
+;;
+
 let parse_wire_line line =
   let stage = "stream-json message" in
   let* json = parse_json_value ~stage line in
@@ -956,14 +1112,25 @@ let parse_wire_line line =
           fields
       in
       (match type_values with
-       | [ `String "tool_progress" ] ->
-         List.exists (function `Bool true -> true | _ -> false) heartbeat_values
-         || (heartbeat_values = []
-             && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
-             && List.mem_assoc "subagent_type" fields
-             && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
-       | [ `String "system" ] ->
-           task_observation_candidate fields || api_retry_observation_candidate fields
+       | [ `String tag ] ->
+         (match frame_kind_of_tag tag with
+          | Frame_tool_progress ->
+            List.exists (function `Bool true -> true | _ -> false) heartbeat_values
+            || (heartbeat_values = []
+                && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
+                && List.mem_assoc "subagent_type" fields
+                && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
+          | Frame_system ->
+            task_observation_candidate fields || api_retry_observation_candidate fields
+          | Frame_control_request
+          | Frame_control_response
+          | Frame_stream_event
+          | Frame_assistant
+          | Frame_rate_limit_event
+          | Frame_result
+          | Frame_user
+          | Frame_command_lifecycle
+          | Frame_other _ -> false)
        | _ -> false)
     | _ -> false
   in
@@ -978,8 +1145,8 @@ let parse_wire_line line =
 let wire_fields json =
   let stage = "stream-json message" in
   let* fields = assoc_at stage json in
-  let* type_ = required_string stage "type" fields in
-  Ok (type_, fields)
+  let* tag = required_string stage "type" fields in
+  Ok (frame_kind_of_tag tag, fields)
 ;;
 
 let initialize_request request_id =
@@ -1018,11 +1185,11 @@ let parse_control_response ~expected_request_id fields =
 let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id
     ~on_stream_event =
   let* json = io.receive () in
-  let* type_, fields = wire_fields json in
-  match type_ with
-  | "control_response" ->
+  let* kind, fields = wire_fields json in
+  match kind with
+  | Frame_control_response ->
     parse_control_response ~expected_request_id:request_id fields
-  | "control_request" ->
+  | Frame_control_request ->
     let* () =
       handle_control_request
         io
@@ -1036,7 +1203,7 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
     in
     await_initialize
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
-  | "system" | "rate_limit_event" | "command_lifecycle" ->
+  | Frame_system | Frame_rate_limit_event | Frame_command_lifecycle ->
     (* Informational frames before the control response. The admission
        deadline bounds a client that never answers; a count of these frames
        does not change what
@@ -1049,10 +1216,12 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
       ~assistant_usage
       ~request_id
       ~on_stream_event
-  | other ->
+  | Frame_stream_event | Frame_assistant | Frame_result | Frame_user | Frame_tool_progress | Frame_other _ ->
     protocol_error
       "initialize"
-      (Printf.sprintf "unexpected message type %S before control response" other)
+      (Printf.sprintf
+         "unexpected message type %S before control response"
+         (frame_kind_to_tag kind))
 ;;
 
 (* The stream-json user message always carries a content-block array, never the
@@ -1259,7 +1428,21 @@ let root_native_agent_parent registry ~call_id : native_agent_parent_witness opt
       Some {invocation=registry.invocation;call_id;
         call_envelope_uuid=envelope_uuid;call_ordinal=ordinal}
   | (Native_full | Native_read | Native_none),
-    (Some (Native_open _ | Native_closed _ | Native_ambiguous) | None) -> None
+    ( Some
+        ( Native_open
+            { observation = { identity = Some _ | None
+                            ; tool_name = Some _ | None
+                            ; origin = Built_in | Mcp_wrapper }
+            ; scope = Root_response | Child_response _
+            ; envelope_uuid = _; ordinal = _ }
+        | Native_closed
+            { observation = { identity = Some _ | None
+                            ; tool_name = Some _ | None
+                            ; origin = Built_in | Mcp_wrapper }
+            ; scope = Root_response | Child_response _
+            ; envelope_uuid = _; ordinal = _ }
+        | Native_ambiguous )
+    | None ) -> None
 ;;
 
 type heartbeat_ignored =
@@ -1308,7 +1491,8 @@ let project_native_heartbeat registry ~expected_session_id fields =
   | Ok heartbeat ->
     match Hashtbl.find_opt registry.progress_uuids heartbeat.uuid with
     | Some (Heartbeat_frame previous) when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
-    | Some _ -> Heartbeat_ignored Conflicting_heartbeat
+    | Some (Heartbeat_frame _ | Agent_retry_frame _ | Task_frame _) ->
+      Heartbeat_ignored Conflicting_heartbeat
     | None ->
       Hashtbl.add registry.progress_uuids heartbeat.uuid (Heartbeat_frame heartbeat);
       match Hashtbl.find_opt registry.calls heartbeat.parent_id with
@@ -1316,7 +1500,21 @@ let project_native_heartbeat registry ~expected_session_id fields =
           observation={origin=Runtime_native_tools.Built_in; tool_name=Some name; _}; _})
         when name=heartbeat.tool_name ->
           Heartbeat_observed (Runtime_native_tools.Call_id heartbeat.parent_id, heartbeat.elapsed_seconds)
-      | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None ->
+      | Some
+          ( Native_open
+              { observation = { identity = Some _ | None
+                              ; tool_name = Some _ | None
+                              ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+              ; scope = Root_response | Child_response _
+              ; envelope_uuid = _; ordinal = _ }
+          | Native_closed
+              { observation = { identity = Some _ | None
+                              ; tool_name = Some _ | None
+                              ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+              ; scope = Root_response | Child_response _
+              ; envelope_uuid = _; ordinal = _ }
+          | Native_ambiguous )
+      | None ->
           Heartbeat_ignored No_active_root_call
 ;;
 
@@ -1347,7 +1545,10 @@ let parse_agent_retry ~expected_session_id fields =
           (match Runtime_native_tools.progress_of_json
             (`Assoc (("kind",`String "retry_reported")::("subagent_type",`String subagent_type)::note_fields)) with
            | Ok (Runtime_native_tools.Retry_observed (Retry_reported note)) -> Some (Some note)
-           | Ok _ | Error _ -> None)
+           | Ok (Runtime_native_tools.Output_observed _) | Error _
+           | Ok (Runtime_native_tools.Message_reported _)
+           | Ok (Runtime_native_tools.Heartbeat_reported _)
+           | Ok (Runtime_native_tools.Retry_observed (Runtime_native_tools.Retry_cleared _)) -> None)
       | [_] | _::_ -> None in
     Some {retry_uuid;progress_id;parent_id;subagent_type;note}
 ;;
@@ -1380,7 +1581,22 @@ let project_agent_retry registry ~expected_session_id fields =
              | None, Some binding when matches binding && binding.pending ->
                  binding.pending <- false; report (Runtime_native_tools.Retry_cleared binding.agent)
              | Some _, Some _ | None, (Some _ | None) -> Retry_ignored)
-        | (Native_full | Native_read | Native_none), _ -> Retry_ignored
+        | (Native_full | Native_read | Native_none),
+          ( Some
+              ( Native_open
+                  { observation = { identity = Some _ | None
+                                  ; tool_name = Some _ | None
+                                  ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+                  ; scope = Root_response | Child_response _
+                  ; envelope_uuid = _; ordinal = _ }
+              | Native_closed
+                  { observation = { identity = Some _ | None
+                                  ; tool_name = Some _ | None
+                                  ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+                  ; scope = Root_response | Child_response _
+                  ; envelope_uuid = _; ordinal = _ }
+              | Native_ambiguous )
+          | None ) -> Retry_ignored
       end
 ;;
 
@@ -1979,26 +2195,28 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* block = required_member stage "content_block" event in
         let* block = assoc_at stage block in
         let* kind = required_string stage "type" block in
+        let start_text_block channel =
+          let* text = partial_text_value stage channel block in
+          let* message_id = match partial.message_id with
+            | Some id -> Ok id
+            | None -> protocol_error stage "content block has no message start" in
+          if List.exists (fun (held : partial_block) -> held.message_id = message_id && held.index = index)
+              partial.blocks then
+            protocol_error stage "content block index already started"
+          else begin
+            let buffer = Buffer.create 256 in
+            Buffer.add_string buffer text;
+            let identity = Partial_block {message_id; index} in
+            partial.blocks <- partial.blocks @
+              [{identity; message_id; index; channel; buffer; phase=Streaming}];
+            emit_content ~on_stream_event ~response_emitted
+              ~message_id:partial.message_id ~block:identity channel text;
+            Ok ()
+          end
+        in
         (match kind with
-         | ("text" | "thinking") as kind ->
-             let channel = if kind = "text" then Text_content else Thinking_content in
-             let* text = partial_text_value stage channel block in
-             let* message_id = match partial.message_id with
-               | Some id -> Ok id
-               | None -> protocol_error stage "content block has no message start" in
-             if List.exists (fun (held : partial_block) -> held.message_id = message_id && held.index = index)
-                 partial.blocks then
-               protocol_error stage "content block index already started"
-             else begin
-               let buffer = Buffer.create 256 in
-               Buffer.add_string buffer text;
-               let identity = Partial_block {message_id; index} in
-               partial.blocks <- partial.blocks @
-                 [{identity; message_id; index; channel; buffer; phase=Streaming}];
-               emit_content ~on_stream_event ~response_emitted
-                 ~message_id:partial.message_id ~block:identity channel text;
-               Ok ()
-             end
+         | "text" -> start_text_block Text_content
+         | "thinking" -> start_text_block Thinking_content
          | "tool_use" | "redacted_thinking" -> Ok ()
          | other -> protocol_error stage ("unsupported content block type " ^ other))
     | "content_block_delta" ->
@@ -2006,20 +2224,22 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
         let* delta = required_member stage "delta" event in
         let* delta = assoc_at stage delta in
         let* kind = required_string stage "type" delta in
+        let append_text_delta channel =
+          let* text = partial_text_value stage channel delta in
+          let held = List.find_opt (fun (held : partial_block) ->
+            Some held.message_id = partial.message_id && held.index = index
+            && held.channel = channel) partial.blocks in
+          (match held with
+           | Some held when held.phase = Streaming ->
+               Buffer.add_string held.buffer text;
+               emit_content ~on_stream_event ~response_emitted
+                 ~message_id:partial.message_id ~block:held.identity channel text;
+               Ok ()
+           | _ -> protocol_error stage "content delta has no matching open message/channel block")
+        in
         (match kind with
-         | ("text_delta" | "thinking_delta") as kind ->
-             let channel = if kind = "text_delta" then Text_content else Thinking_content in
-             let* text = partial_text_value stage channel delta in
-             let held = List.find_opt (fun (held : partial_block) ->
-               Some held.message_id = partial.message_id && held.index = index
-               && held.channel = channel) partial.blocks in
-             (match held with
-              | Some held when held.phase = Streaming ->
-                  Buffer.add_string held.buffer text;
-                  emit_content ~on_stream_event ~response_emitted
-                    ~message_id:partial.message_id ~block:held.identity channel text;
-                  Ok ()
-              | _ -> protocol_error stage "content delta has no matching open message/channel block")
+         | "text_delta" -> append_text_delta Text_content
+         | "thinking_delta" -> append_text_delta Thinking_content
          | "input_json_delta" | "signature_delta" | "citations_delta" -> Ok ()
          | other -> protocol_error stage ("unsupported content delta type " ^ other))
     | "content_block_stop" ->
@@ -2165,9 +2385,9 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
     ~input_observer ~partial_stream ~stream_started ~response_emitted =
   let* json = io.receive () in
-  let* type_, fields = wire_fields json in
-  match type_ with
-  | "control_request" ->
+  let* kind, fields = wire_fields json in
+  match kind with
+  | Frame_control_request ->
     let* () =
       handle_control_request
         io
@@ -2185,9 +2405,9 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | "control_response" ->
+  | Frame_control_response ->
     protocol_error "turn" "received an unsolicited control response"
-  | "stream_event" ->
+  | Frame_stream_event ->
     let* scope = partial_stream_scope fields in
     let* () = match scope with
       | Root_response ->
@@ -2199,7 +2419,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model
       ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_turn_started
       ~on_stream_event ~input_observer ~partial_stream ~stream_started ~response_emitted
-  | "assistant" ->
+  | Frame_assistant ->
     let* scope, origin, uuid, model, blocks, message_id, usage =
       parse_assistant ~expected_session_id ~tools fields
     in
@@ -2271,7 +2491,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
-  | "rate_limit_event" ->
+  | Frame_rate_limit_event ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     (* The usage windows ride the same event. They are an observation for
        operators: a shape this client cannot read is logged and the turn goes
@@ -2289,7 +2509,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
-  | "result" ->
+  | Frame_result ->
     (* The result frame is the only place the turn's spend is reported, and
        it arrives on failures too (a quota refusal, a provider error after
        tool calls). Once the frame is known to be this session's turn, the
@@ -2325,7 +2545,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | Ok _ -> Some Input_attribution.Provider_success
       | Error (Quota_blocked _ | Context_window_exceeded _
           | Turn_failed _ | Turn_failed_with_observation _) -> Some Input_attribution.Provider_error
-      | Error _ -> None in
+      | Error (Invalid_config _) | Error (Spawn_failed _) | Error (Protocol_error _)
+      | Error (Subscription_required _) | Error (Unsupported_control_request _)
+      | Error (Turn_transport_interrupted _) | Error (Stopped_by_host _) | Error (Process_exited _)
+      | Error (Unhandled_exception _) | Error (Timeout _) -> None in
     observe_input input_observer ~session_id:expected_session_id
       ~frame:(Input_attribution.Result {uuid=Some turn_id;outcome}) fields;
     let* turn_id, result, usage =
@@ -2336,7 +2559,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         if !stream_started
         then emit_stream_event on_stream_event (Turn_finished { text = "" });
         Error error
-      | result -> result
+      | (Error (Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_}) | Error (Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_}) | Error (Invalid_config _ | (Spawn_failed _ | (Protocol_error _ | (Subscription_required _ | (Unsupported_control_request _ | (Turn_transport_interrupted _ | (Turn_failed _ | (Turn_failed_with_observation _ | (Stopped_by_host _ | (Quota_blocked _ | (Process_exited _ | (Unhandled_exception _ | Timeout _)))))))))))) | Ok _) as result -> result
     in
     let* () =
       invoke_state_callback ~stage:"turn started callback" (fun () ->
@@ -2385,7 +2608,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ; resumed
       ; usage
       }
-  | "user" ->
+  | Frame_user ->
     let* finished = native_tool_results ~expected_session_id fields in
     let scope = Result.to_option (assistant_scope ~stage:"native result scope" fields) in
     List.iter (fun (call_id, completion) ->
@@ -2398,7 +2621,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | "system" ->
+  | Frame_system ->
     (* [compact_boundary] is the client's own record that it summarised the
        conversation: what the session held as sent before it is now a
        summary. Exact task edge kinds have their own observation registry;
@@ -2421,7 +2644,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | "tool_progress" ->
+  | Frame_tool_progress ->
     (* An observation cannot fail a healthy turn. Only the exact open root
        call owns this heartbeat; the progress id is opaque, not a call id. *)
     (match project_native_heartbeat native_tool_calls ~expected_session_id fields with
@@ -2441,7 +2664,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | "command_lifecycle" ->
+  | Frame_command_lifecycle ->
     (* Claude Code reports the fate of a queued inbound command
        (queued/started/completed/cancelled/discarded/refused). The frame also
        names commands this client never sent, and [completed] can arrive
@@ -2453,10 +2676,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
-  | other ->
+  | Frame_other tag ->
     protocol_error
       "turn"
-      (Printf.sprintf "unsupported stream message type %S" other)
+      (Printf.sprintf "unsupported stream message type %S" tag)
 ;;
 
 let mcp_config tools =
@@ -3040,7 +3263,12 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
      Log.Runtime_agent.info
        "Claude Code turn stopped by host: %s"
        (error_to_string stopped)
-   | Error error ->
+   | Error
+       (( Invalid_config _ | Spawn_failed _ | Protocol_error _ | Subscription_required _
+        | Unsupported_control_request _ | Turn_transport_interrupted _
+        | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Unhandled_exception _ | Timeout _ ) as error) ->
      (* The sibling branches above pass [error_to_string]; this one passed only
         the kind, so every failure that does not stop at a host boundary landed
         in the log as a bare "kind=turn_failed". [Turn_failed] carries its

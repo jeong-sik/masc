@@ -691,7 +691,7 @@ let key t key =
   | Finished {saved; activation = Activation_failed _; _}
     when List.mem key ["r"; "\r"; "\n"; "enter"] -> Activate_saved saved
   | Finished {activation = Activation_failed _; _} -> Nothing
-  | Providers _ | Models | Finished _ | Failed ->
+  | Providers _ | Models | Finished {activation = Active _; _} | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
       let count = match t.phase with
@@ -713,7 +713,10 @@ let key t key =
          (match t.phase, account_members t provider with
           | Providers (Accounts client), (_ :: _ :: _ as members) ->
               show_account_providers t client (List.map (fun (p:provider) -> p.id) members); Nothing
-          | _ -> Preview_removal {provider; refused = None})
+          | Providers (Accounts _), ([] | [_])
+          | (Providers (Clients | Account_providers _) | Loading | Logging | Models
+            | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _), _ ->
+              Preview_removal {provider; refused = None})
        | Some (New_account _) | None -> Nothing)
     else if key="n" then
       (match t.phase with
@@ -865,7 +868,10 @@ let visible_lines ~height ~width t =
   let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
     | [] -> [Text ""]
     | wrapped -> List.map (fun line -> Text line) wrapped in
-  let results = match t.phase with Finished _ | Failed -> true | _ -> false in
+  let results = match t.phase with
+    | Finished _ | Failed -> true
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Removing
+    | Removal _ -> false in
   let body = if results then
     List.concat_map (function
       | Text text -> List.map (fun line -> Text line)

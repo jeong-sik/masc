@@ -2317,6 +2317,35 @@ val decode_task_history : Yojson.Safe.t -> (task_history_event list, string) res
     only — a bare non-empty code string or an object carrying [code]. A
     [read_error] object also carries a non-empty [detail], which is included
     in the rendered cause. Malformed reasons fail the decode. *)
+(** Why the server did not send a binary artifact's bytes, in the closed set
+    the operator projection writes
+    ({!Workspace_verification_operator_evidence.withheld_reason}). *)
+type evidence_withheld =
+  | Withheld_not_image_format
+      (** not an image the terminal can show: a PDF, audio, video or archive *)
+  | Withheld_body_not_filed
+  | Withheld_body_unreadable
+  | Withheld_over_delivery_ceiling of { bytes : int; ceiling : int }
+  | Withheld_over_response_budget
+
+(** Why inline bytes were not trusted. Each is checked against what the same
+    item declares, so a body the server mangled is named instead of drawn. *)
+type evidence_preview_defect =
+  | Defect_bad_base64
+  | Defect_length_mismatch of { declared : int; actual : int }
+  | Defect_digest_mismatch  (** the bytes are not the SHA-256 the item states *)
+  | Defect_not_an_image
+      (** the bytes carry no PNG, JPEG, GIF or WebP signature, whatever the
+          file extension said *)
+
+(** What a binary artifact shows. [ev_media] comes from the bytes' own
+    signature ({!Keeper_vision_tool.sniff_image_media_type}), never from the
+    item's [format] or from a server-stated media type. *)
+type evidence_preview =
+  | Preview_image of { ev_media : Keeper_vision_downscale.media_type; ev_data : string }
+  | Preview_withheld of evidence_withheld
+  | Preview_defective of evidence_preview_defect
+
 type verification_evidence_item =
   | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string
@@ -2330,6 +2359,16 @@ type verification_evidence_item =
       ev_u_reference : string option;
       ev_u_reason : string;
     }
+  | Ev_binary of {
+      ev_b_reference : string;
+      ev_b_bytes : int;
+      ev_b_sha256 : string;
+      ev_b_format : string;  (** the file extension, ["unknown"] when bare *)
+      ev_b_preview : evidence_preview;
+    }
+      (** A non-text artifact. The operator projection always carries a
+          [preview]; one without it, an unknown state or an unknown withheld
+          reason fails the decode. *)
 
 type verification_evidence =
   | Evidence_items of verification_evidence_item list

@@ -502,9 +502,13 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                 ; "checkpoint_version", `Int got
                 ; "readable_version", `Int expected
                 ]
-            | Error
-                (( Keeper_checkpoint_store.Removal_refused _
-                 | Keeper_checkpoint_store.Removal_failed _ ) as removal_error) ->
+            | Error (Keeper_checkpoint_store.Removal_refused (Keeper_checkpoint_store.Not_found) | Keeper_checkpoint_store.Removal_failed _ as removal_error)
+            | Error (Keeper_checkpoint_store.Removal_refused (Keeper_checkpoint_store.Store_error _) as removal_error)
+            | Error (Keeper_checkpoint_store.Removal_refused (Keeper_checkpoint_store.Parse_error _) as removal_error)
+            | Error (Keeper_checkpoint_store.Removal_refused (Keeper_checkpoint_store.Superseded_version _) as removal_error)
+            | Error (Keeper_checkpoint_store.Removal_refused (Keeper_checkpoint_store.Io_error _) as removal_error)
+            | Error (Keeper_checkpoint_store.Removal_refused (Keeper_checkpoint_store.Read_failed _) as removal_error)
+            | Error (Keeper_checkpoint_store.Removal_refused (Keeper_checkpoint_store.Agent_core_error _) as removal_error) ->
               not_removed ~class_:Tool_result.Runtime_failure
                 ~effect_disposition:Tool_result.Proven_post_effect ~code:Tool_args.Internal_error
                 (Keeper_checkpoint_store.undecodable_removal_error_to_string removal_error)

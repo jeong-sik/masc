@@ -20,6 +20,7 @@
   masc.lane_addon_call_context
   masc.machine_pad_layout
   masc.machine_controller_contract
+  masc.msx_tool
   masc.workspace_connection
   ;; The server start logs whether Candle is on (RFC-goal-candle-ledger 3.9), and
   ;; POST /api/v1/goals/confirmation writes the confirmed pass's PayoutOwed row
@@ -221,7 +222,6 @@
   ambient-context
   ambient-context-eio
   masc.autonomous
-  masc.shared_audit
   masc.shared_types
   masc.multimodal
   masc.repo_manager
@@ -231,6 +231,12 @@
   masc.otel_spans
   masc.pool_metrics)
  (preprocess
-  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
+  (pps
+   ppx_deriving_yojson
+   ppx_deriving.show
+   ppx_deriving.eq
+   ppx_enumerate
+   ppx_let
+   ppx_tla))
  (instrumentation
   (backend bisect_ppx)))

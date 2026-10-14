@@ -227,11 +227,20 @@ let with_image_followups messages =
                let followup = result_label tool_use_id outcome :: List.concat_map media_parts blocks in
                (ToolResult { tool_use_id; content = summary; outcome; json; content_blocks = None } :: content,
                 List.rev_append followup pending)
-             | _ -> block :: content, pending)
+             | ( Text _
+               | Thinking _
+               | ReasoningDetails _
+               | RedactedThinking _
+               | ToolUse _
+               | ToolResult _
+               | Image _
+               | Document _
+               | Audio _ ) as block -> block :: content, pending)
           ([], pending) message.content
       in
       loop ({ message with content = List.rev content } :: reversed) pending rest
-    | message :: rest -> loop (message :: flush pending reversed) [] rest
+    | ({ role = System | User | Assistant; _ } as message) :: rest ->
+      loop (message :: flush pending reversed) [] rest
   in
   loop [] [] messages
 ;;
@@ -278,7 +287,9 @@ let%test "duplicate identity in one assistant batch is rejected" =
       [ message Assistant [ tool_use "call-1" "lookup"; tool_use "call-1" "lookup" ] ]
   with
   | Error (Duplicate_tool_use_id { tool_use_id = "call-1"; tool_name = "lookup" }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Duplicate_tool_use_id _) | Error (Conflicting_tool_use_id _)
+  | Error (Duplicate_tool_result_id _) | Error (Missing_tool_use_id _)
+  | Error (Invalid_tool_use_role _) | Error (Invalid_tool_result_role _) -> false
 ;;
 
 let%test "conflicting identity in one assistant batch is rejected" =
@@ -290,7 +301,9 @@ let%test "conflicting identity in one assistant batch is rejected" =
       (Conflicting_tool_use_id
          { tool_use_id = "call-1"; first_name = "lookup"; conflicting_name = "write" }) ->
     true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Duplicate_tool_use_id _) | Error (Conflicting_tool_use_id _)
+  | Error (Duplicate_tool_result_id _) | Error (Missing_tool_use_id _)
+  | Error (Invalid_tool_use_role _) | Error (Invalid_tool_result_role _) -> false
 ;;
 
 let%test "duplicate result in one active batch is rejected" =
@@ -301,11 +314,15 @@ let%test "duplicate result in one active batch is rejected" =
       ]
   with
   | Error (Duplicate_tool_result_id { tool_use_id = "call-1" }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Duplicate_tool_use_id _) | Error (Conflicting_tool_use_id _)
+  | Error (Duplicate_tool_result_id _) | Error (Missing_tool_use_id _)
+  | Error (Invalid_tool_use_role _) | Error (Invalid_tool_result_role _) -> false
 ;;
 
 let%test "missing active tool identity is explicit" =
   match of_messages [ message Tool [ tool_result "absent" ] ] with
   | Error (Missing_tool_use_id { tool_use_id = "absent" }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ | Error (Duplicate_tool_use_id _) | Error (Conflicting_tool_use_id _)
+  | Error (Duplicate_tool_result_id _) | Error (Missing_tool_use_id _)
+  | Error (Invalid_tool_use_role _) | Error (Invalid_tool_result_role _) -> false
 ;;

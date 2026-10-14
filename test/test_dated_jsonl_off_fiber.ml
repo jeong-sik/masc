@@ -19,6 +19,16 @@ let tmpdir prefix =
   dir
 ;;
 
+(* Every store here is a listed store under a fresh temporary root. The
+   store's directory is [Dated_jsonl.Store.dir location]; it exists, as the
+   temporary directory did before. *)
+let store_under root = Dated_jsonl.Store.(at (root_of_masc_dir root) Root.Audit)
+
+let temp_store prefix =
+  let location = store_under (tmpdir prefix) in
+  Unix.mkdir (Dated_jsonl.Store.dir location) 0o755;
+  location
+
 let entry_to_string = function
   | Dated_jsonl.Parsed json -> "parsed:" ^ Yojson.Safe.to_string json
   | Dated_jsonl.Malformed_json _ -> "malformed"
@@ -85,8 +95,9 @@ let with_pool env f =
 let test_pool_and_inline_read_the_same () =
   Eio_main.run @@ fun env ->
   Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
-  let base_dir = tmpdir "dated_jsonl_off_fiber" in
-  let store = Dated_jsonl.create ~base_dir () in
+  let location = temp_store "dated_jsonl_off_fiber" in
+  let base_dir = Dated_jsonl.Store.dir location in
+  let store = Dated_jsonl.open_store location in
   List.iter (fun n -> Dated_jsonl.append store (`Assoc [ ("n", `Int n) ])) [ 1; 2; 3 ];
   let day_file = only_day_file base_dir in
   (* One malformed row, newest: the strict reader reports it, the others skip it. *)

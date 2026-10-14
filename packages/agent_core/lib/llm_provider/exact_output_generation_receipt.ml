@@ -167,7 +167,28 @@ let state_equal left right =
   | Terminal_state left, Terminal_state right ->
     Int.equal left.status right.status
     && Option.equal Trace.equal left.provider_trace right.provider_trace
-  | _ -> false
+  | Not_started_state
+  , ( Before_dispatch_state
+    | Dispatch_started_state
+    | Response_received_state _
+    | Terminal_state _ )
+  | Before_dispatch_state
+  , ( Not_started_state
+    | Dispatch_started_state
+    | Response_received_state _
+    | Terminal_state _ )
+  | Dispatch_started_state
+  , ( Not_started_state
+    | Before_dispatch_state
+    | Response_received_state _
+    | Terminal_state _ )
+  | Response_received_state _
+  , (Not_started_state | Before_dispatch_state | Dispatch_started_state | Terminal_state _)
+  | Terminal_state _
+  , ( Not_started_state
+    | Before_dispatch_state
+    | Dispatch_started_state
+    | Response_received_state _ ) -> false
 ;;
 
 (* The state shape comes from the higher rank, while response knowledge is an
@@ -196,7 +217,21 @@ let merge_state current desired =
         (Some desired.status, desired.provider_trace)
     in
     Terminal_state { status = desired.status; provider_trace }
-  | _ -> desired
+  | ( ( Not_started_state
+      | Before_dispatch_state
+      | Dispatch_started_state )
+    , ( Not_started_state
+      | Before_dispatch_state
+      | Dispatch_started_state
+      | Response_received_state _
+      | Terminal_state _ ) )
+  | ( Response_received_state _
+    , (Not_started_state | Before_dispatch_state | Dispatch_started_state) )
+  | ( Terminal_state _
+    , ( Not_started_state
+      | Before_dispatch_state
+      | Dispatch_started_state
+      | Response_received_state _ ) ) -> desired
 ;;
 
 let rec advance_atomic

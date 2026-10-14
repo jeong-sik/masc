@@ -81,7 +81,9 @@ let decode ~root ~source_path bytes =
           | Some (Reassigned before), Owned after when before.revision <> after.revision ->
               Error "completed reassignment does not match the observed revision"
           | Some before, after when keeper before = keeper after -> Ok ()
-          | _ -> Error "declaration ownership changed without authority" in
+          | None, (Owned _ | Reassigned _ | Revoked)
+          | Some (Pending _ | Owned _ | Reassigned _ | Revoked), (Pending _ | Owned _) ->
+              Error "declaration ownership changed without authority" in
         loop (Some state) rest in
   if bytes = "" then Ok None else loop None (String.split_on_char '\n' bytes)
 let cleanup failure = Fs_compat.private_jsonl_operation_failure_to_string failure
@@ -91,7 +93,9 @@ let read ~root ~source_path = protect (fun () ->
   | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing -> Ok None
   | Private_file_succeeded (Rows_present {rows;rows_end;end_offset}) ->
       if rows_end <> end_offset then Error "incomplete declaration ownership journal"
-      else Result.map (function Some Revoked -> None | value -> value) (decode ~root ~source_path rows)
+      else Result.map (function
+        | Some Revoked -> None
+        | (Some (Pending _ | Owned _ | Reassigned _) | None) as value -> value) (decode ~root ~source_path rows)
   | Private_file_failed error -> Error (Fs_compat.Private_jsonl_rows.error_to_string error)
   | Private_file_succeeded_with_cleanup_failure {cleanup_failure;_}
   | Private_file_failed_with_cleanup_failure {cleanup_failure;_} -> Error (cleanup cleanup_failure))
@@ -124,7 +128,8 @@ let prepare ~root ~source_path ~keeper:caller ~prior_revision ~proposed_revision
         Ok (Some (Pending {keeper=caller;
           prior=(if p.repair then p.prior else prior_revision);
           proposed=proposed_revision;repair=p.repair}))
-    | Some _ -> Error "declaration is owned by another caller or admission is unconfirmed"))
+    | Some (Owned _ | Pending _ | Reassigned _) ->
+        Error "declaration is owned by another caller or admission is unconfirmed"))
 let complete ~root ~source_path ~keeper:caller ~source_revision =
   update ~root ~source_path (function
     | Some (Owned owner) when String.equal owner.keeper caller && owner.revision = source_revision -> Ok None
@@ -132,14 +137,16 @@ let complete ~root ~source_path ~keeper:caller ~source_revision =
         Ok (Some (Owned {keeper=caller;revision=source_revision}))
     | Some (Reassigned p) when String.equal p.keeper caller && p.revision = source_revision ->
         Ok (Some (Owned {keeper=caller;revision=source_revision}))
-    | None | Some _ -> Error "declaration ownership has no matching pending admission")
+    | None | Some (Owned _ | Pending _ | Reassigned _ | Revoked) ->
+        Error "declaration ownership has no matching pending admission")
 let reassign ~root ~source_path ~keeper:caller ~source_revision =
   update ~root ~source_path (function
     | None -> Ok (Some (Pending {keeper=caller;prior=Some source_revision;
         proposed=source_revision;repair=false}))
     | Some (Owned owner) when String.equal owner.keeper caller && owner.revision = source_revision -> Ok None
-    | Some _ -> Ok (Some (Reassigned {keeper=caller;revision=source_revision})))
+    | Some (Owned _ | Pending _ | Reassigned _ | Revoked) ->
+        Ok (Some (Reassigned {keeper=caller;revision=source_revision})))
 
 let revoke ~root ~source_path = update ~root ~source_path (function
   | None | Some Revoked -> Ok None
-  | Some _ -> Ok (Some Revoked))
+  | Some (Pending _) | Some (Owned _) | Some (Reassigned _) -> Ok (Some Revoked))

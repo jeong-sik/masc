@@ -188,8 +188,7 @@ let partition ?(quarantine = false) messages =
                     stop_with_units ~units_rev ~open_cycle ~message ~rest
                   else
                     Error (Non_assistant_tool_use { message_index = index; tool_use_id })
-              | _ ->
-                  (match open_cycle, tool_ids, result_ids with
+              | ((T.System | T.User | T.Tool), []) | (T.Assistant, _) -> (match open_cycle, tool_ids, result_ids with
                    | Some _, tool_use_id :: _, _ ->
                        if quarantine then
                          stop_with_units ~units_rev ~open_cycle ~message ~rest

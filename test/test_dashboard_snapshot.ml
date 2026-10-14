@@ -184,7 +184,7 @@ let test_tools_component_reuses_complete_representations () =
   Alcotest.(check string) "ETag describes final decorated bytes"
     (Http_server_eio.Response.weak_etag_value raw) first.etag;
   Alcotest.(check string) "resolved root captured with projection"
-    (Workspace.masc_root_dir config) first.masc_root;
+    (Workspace.masc_dir config) first.masc_root;
   List.iter (fun (accept_encoding, encoding) ->
     let body, headers = Http_response_payload.select_prepared ~accept_encoding first.encoded in
     Alcotest.(check (option string)) "selected encoding" encoding

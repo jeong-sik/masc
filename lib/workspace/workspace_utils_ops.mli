@@ -48,12 +48,6 @@ val read_json_local_result : string -> (Yojson.Safe.t, string) result
 val write_json_local :
   string -> Yojson.Safe.t -> (unit, string) result
 
-(** {1 JSON I/O — root-scoped (cluster registry)} *)
-
-val read_json_root : config -> string -> Yojson.Safe.t
-val write_json_root : config -> string -> Yojson.Safe.t -> unit
-val path_exists_root : config -> string -> bool
-
 (** {1 JSON I/O — backend-routed} *)
 
 (** Read a JSON value via the active backend (or local FS when

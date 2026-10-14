@@ -832,7 +832,13 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
       Array.exists
         (fun schedule_id -> String.equal wake.schedule_id schedule_id)
         schedule_ids
-    | _ -> false
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+    | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+    | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Task_outcome _ -> false
   in
   match
     Keeper_event_queue_persistence.pending_selections_result

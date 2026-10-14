@@ -171,7 +171,8 @@ let remove_prompt_context ~prompt_context_present messages =
          Agent_core.Types.Extra_system_context_provenance.classify
            message.metadata
        with
-       | Agent_core.Types.Extra_system_context_provenance.Absent ->
+       | Agent_core.Types.Extra_system_context_provenance.Absent
+       | Agent_core.Types.Extra_system_context_provenance.Historical ->
          walk seen (message :: rev_retained) rest
        | Agent_core.Types.Extra_system_context_provenance.Present
          when prompt_context_present && not seen -> walk true rev_retained rest

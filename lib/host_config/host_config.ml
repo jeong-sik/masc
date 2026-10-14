@@ -41,7 +41,6 @@ type t =
   ; base_path : string option
   ; base_path_raw : string option
   ; config_dir : string option
-  ; data_dir : string option
   ; home : string option
   ; assets_dir : string option
   }
@@ -102,7 +101,6 @@ let host () =
       base_path
   ; base_path_raw
   ; config_dir = get_opt "MASC_CONFIG_DIR"
-  ; data_dir = get_opt "MASC_DATA_DIR"
   ; home = get_opt "HOME"
   ; assets_dir = get_opt "MASC_ASSETS_DIR"
   }
@@ -217,7 +215,6 @@ let resolve ?base_path () =
           | other -> other)
     ; base_path_raw = get_opt "MASC_BASE_PATH"
     ; config_dir = get_opt "MASC_CONFIG_DIR"
-    ; data_dir = get_opt "MASC_DATA_DIR"
     ; home = get_opt "HOME"
     ; assets_dir = get_opt "MASC_ASSETS_DIR"
     }

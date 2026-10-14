@@ -90,6 +90,7 @@ type operator_disposition_reason =
   | Reason_accept_rejected
   | Reason_terminal_effect_failed
   | Reason_unmapped_runtime_state
+[@@deriving enumerate]
 
 let operator_disposition_reason_to_string = function
   | Reason_healthy -> "healthy"
@@ -115,6 +116,12 @@ let operator_disposition_reason_to_string = function
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
 ;;
 
+let operator_disposition_reason_of_string value =
+  List.find_opt
+    (fun reason -> String.equal (operator_disposition_reason_to_string reason) value)
+    all_of_operator_disposition_reason
+;;
+
 let operator_disposition (receipt : t)
   : operator_disposition_kind * operator_disposition_reason
   =
@@ -138,7 +145,14 @@ let operator_disposition (receipt : t)
   let provider_runtime_failure =
     match terminal_reason with
     | Keeper_terminal_reason.Provider_runtime_failure _ -> true
-    | _ -> false
+    | Keeper_terminal_reason.Runtime_exhausted _ | Keeper_terminal_reason.Config_invalid _
+    | Keeper_terminal_reason.Authorization_refused _
+    | Keeper_terminal_reason.Transcript_corruption _
+    | Keeper_terminal_reason.Official_client_recovery_required _
+    | Keeper_terminal_reason.Provider_attempt_effect_fenced _
+    | Keeper_terminal_reason.Tool_correction_lost _ | Keeper_terminal_reason.Accept_rejected _
+    | Keeper_terminal_reason.Terminal_effect_failed _ | Keeper_terminal_reason.Internal_error _
+    | Keeper_terminal_reason.Pre_dispatch_success _ | Keeper_terminal_reason.Unknown _ -> false
   in
   (* Either half puts this turn on a degraded-retry lane: it dispatched on a
      lane an earlier turn deferred to, or it deferred one itself. The

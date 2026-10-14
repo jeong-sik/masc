@@ -15,7 +15,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   match tag with
   | Mod_external -> "external"
   | Mod_keeper_task -> "keeper_task"
-  | Mod_library -> "library"
+  | Mod_wiki -> "wiki"
   | Mod_task -> "task"
   | Mod_plan -> "plan"
   | Mod_local_runtime -> "local_runtime"
@@ -143,9 +143,9 @@ let dispatch
            { Tool_misc.config; agent_name;
              help_schemas = Keeper_tool_descriptor.model_visible_schemas () }
            ~name ~args)
-    | Mod_library ->
-      Tool_library.dispatch
-        { Tool_library.base_path = config.base_path; agent_name }
+    | Mod_wiki ->
+      Tool_wiki.dispatch
+        { Tool_wiki.base_path = config.base_path; agent_name }
         ~name
         ~args
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)

@@ -153,7 +153,7 @@ let test_repeated_current_does_not_rehash_the_executable () =
 (* `masc start` from the masc checkout produced five of these at every boot:
 
      build_identity: Unix.realpath failed for
-       /Users/dancer/me/workspace/yousleepwhen/masc/masc
+       /Users/worker/ws/workspace/yousleepwhen/masc/masc
 
    argv0 is "masc", which is relative -- but relative to PATH, not to the cwd,
    so joining it to the cwd names a file that does not exist. The cost is not
@@ -165,7 +165,7 @@ let test_bare_argv0_is_not_resolved_against_the_cwd () =
     "a PATH launch answers the runtime's own resolution"
     "/opt/homebrew/bin/masc"
     (Build_identity.executable_candidate
-       ~cwd:"/Users/dancer/me/workspace/yousleepwhen/masc"
+       ~cwd:"/Users/worker/ws/workspace/yousleepwhen/masc"
        ~executable_name:"/opt/homebrew/bin/masc"
        ~argv0:"masc")
 
@@ -371,19 +371,17 @@ let test_executable_provenance_requires_exact_identity () =
       ; build_input_file_count = 12
       ; build_input_matches_head = true
       ; build_lock_sha256 = String.make 64 'b'
-      ; build_mode = "production"
       ; build_environment_path = "/verified"
       ; build_environment_path_identity_sha256 = String.make 64 '4'
       ; build_environment_path_executable_sha256 = String.make 64 '5'
       ; build_environment_path_executable_count = 73
       ; build_environment_profile_sha256 = String.make 64 'c'
-      ; build_producer = "scripts/build-dashboard-if-needed.sh --prepare-exact + --build-exact"
       ; build_node_executable = "/verified/node"
       ; build_node_executable_sha256 = String.make 64 '1'
       ; build_node_version = "v24.0.0"
       ; build_node_platform = "darwin"
       ; build_node_arch = "arm64"
-      ; build_package_manager_kind = "pnpm"
+      ; build_package_manager_kind = Build_identity.Pnpm
       ; build_package_manager_executable = "/verified/pnpm"
       ; build_package_manager_executable_sha256 = String.make 64 '2'
       ; build_pnpm_version = "10.0.0"
@@ -494,7 +492,46 @@ let test_executable_provenance_rejects_mismatches () =
     "executable provenance has unsupported fields"
     (map_top_fields
        (fun fields -> ("binary_commit", `String commit) :: fields)
-       exact)
+       exact);
+  (* The build receipt names one producer, one build mode and one of two
+     package managers. The parser reads the package manager into a type and
+     keeps neither of the other two, so a refusal here is the only place their
+     spelling is checked. *)
+  let map_receipt_field name value raw =
+    let replace_in (fields : (string * Yojson.Safe.t) list) key f =
+      List.map (fun (field, v) -> if String.equal field key then field, f v else field, v) fields
+    in
+    map_top_fields
+      (fun fields ->
+        replace_in fields "dashboard_assets" (function
+          | `Assoc asset_fields ->
+            `Assoc
+              (replace_in asset_fields "build_receipt" (function
+                 | `Assoc receipt_fields -> `Assoc (replace_in receipt_fields name (fun _ -> value))
+                 | _ -> Alcotest.fail "fixture build receipt is not an object"))
+          | _ -> Alcotest.fail "fixture dashboard assets is not an object"))
+      raw
+  in
+  check_error
+    "unknown package manager"
+    "executable provenance dashboard package-manager kind is invalid"
+    (map_receipt_field "package_manager_kind" (`String "npm") exact);
+  check_error
+    "non-production build"
+    "executable provenance dashboard build mode is unsupported"
+    (map_receipt_field "build_mode" (`String "development") exact);
+  check_error
+    "other producer"
+    "executable provenance dashboard build producer is unsupported"
+    (map_receipt_field "producer" (`String "make dashboard") exact);
+  match parse (map_receipt_field "package_manager_kind" (`String "corepack") exact) with
+  | Ok { Build_identity.dashboard_assets = Some assets; _ } ->
+    (match assets.build_package_manager_kind with
+     | Build_identity.Corepack -> ()
+     | Build_identity.Pnpm -> Alcotest.fail "a corepack receipt was read as pnpm")
+  | Ok { Build_identity.dashboard_assets = None; _ } ->
+    Alcotest.fail "a corepack receipt lost its dashboard assets"
+  | Error message -> Alcotest.fail ("a corepack receipt was refused: " ^ message)
 ;;
 
 let test_executable_provenance_binding_rejects_replacement_and_forgery () =
@@ -668,16 +705,17 @@ let test_dashboard_resolution_is_bound_and_fails_closed_after_replacement () =
 ;;
 
 let test_pick_repo_candidates_exe_first_when_distinct () =
-  (* Regression for the bug where running `cd ~/me && .../masc/main_eio.exe`
-     reported ~/me's commit instead of masc's. exe_dir must come first. *)
+  (* Regression for the bug where running the binary from inside another
+     repository reported that repository's commit instead of masc's.
+     exe_dir must come first. *)
   let result =
     Build_identity.pick_repo_candidates
       ~exe_dir:"/Users/dev/masc/_build/default/bin"
-      ~cwd:"/Users/dev/me"
+      ~cwd:"/Users/dev/ws"
   in
   Alcotest.(check (list string))
     "exe_dir before cwd"
-    [ "/Users/dev/masc/_build/default/bin"; "/Users/dev/me" ]
+    [ "/Users/dev/masc/_build/default/bin"; "/Users/dev/ws" ]
     result
 
 let test_pick_repo_candidates_dedups_equal () =
@@ -693,20 +731,20 @@ let test_pick_repo_candidates_dedups_equal () =
 
 let test_pick_repo_candidates_not_sorted_alphabetically () =
   (* The old implementation used List.sort_uniq String.compare which
-     sorted alphabetically, causing /Users/dancer/me to win over
-     /Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin
+     sorted alphabetically, causing /Users/worker/ws to win over
+     /Users/worker/ws/workspace/yousleepwhen/masc/_build/default/bin
      because the shorter prefix is lexicographically smaller. Assert
      that we now preserve the logical order instead. *)
   let result =
     Build_identity.pick_repo_candidates
-      ~exe_dir:"/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin"
-      ~cwd:"/Users/dancer/me"
+      ~exe_dir:"/Users/worker/ws/workspace/yousleepwhen/masc/_build/default/bin"
+      ~cwd:"/Users/worker/ws"
   in
   match result with
   | first :: _ ->
       Alcotest.(check string)
         "exe_dir wins over shorter cwd prefix"
-        "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin"
+        "/Users/worker/ws/workspace/yousleepwhen/masc/_build/default/bin"
         first
   | [] -> Alcotest.fail "pick_repo_candidates returned empty list"
 

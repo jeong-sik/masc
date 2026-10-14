@@ -730,7 +730,8 @@ let rec await_response ?(on_view_gap = fun _ -> ())
     when response_id = id -> Error (Rpc_error { method_; code; message })
   | Msp.Response_error { id = None; code; message; _ } ->
     Error (Rpc_error { method_; code; message })
-  | Msp.Response _ | Msp.Response_error _ ->
+  | Msp.Response { id = Msp.Int_id _ | Msp.String_id _; _ }
+  | Msp.Response_error { id = Some (Msp.Int_id _ | Msp.String_id _); _ } ->
     protocol_error method_ "received a response to another request"
   | Msp.Notification {method_=notification_method; params} ->
     let* notification = lift (Msp.parse_notification ~method_:notification_method params) in
@@ -891,7 +892,8 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
   | Msp.Response_error { id = Some (Msp.Int_id response_id); code; message; _ }
     when List.mem response_id state.pending_decisions ->
     Error (Rpc_error { method_ = "approval/decide"; code; message })
-  | Msp.Response _ | Msp.Response_error _ ->
+  | Msp.Response { id = Msp.Int_id _ | Msp.String_id _; _ }
+  | Msp.Response_error { id = Some (Msp.Int_id _ | Msp.String_id _) | None; _ } ->
     protocol_error "turn" "received an unsolicited JSON-RPC response"
   | Msp.Server_request { id = request_id; method_; params } ->
     let* request = lift (Msp.parse_server_request ~method_ params) in
@@ -953,7 +955,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; open_tool_items = state.open_tool_items + 1
             ; tool_calls = state.tool_calls + 1
             }
-        | kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items })
+        | (Msp.User_message | Msp.Agent_message | Msp.Reasoning | Msp.User_shell | Msp.Subagent | Msp.Workflow | Msp.Reminder_child | Msp.Compaction | Msp.Unrecognized_item_kind _) as kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items })
      | Msp.Item_delta { session_id = sid; item_id; field = Msp.Delta_text; delta }
        when ours sid ->
        (match List.assoc_opt item_id state.open_items with
@@ -963,7 +965,9 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
              items are still open. *)
           io.set_receive_phase Model_turn;
           continue state
-        | Some _ | None -> continue state)
+        | Some (Msp.User_message) | None | Some (Msp.Reasoning) | Some (Msp.Tool_call)
+        | Some (Msp.User_shell) | Some (Msp.Subagent) | Some (Msp.Workflow)
+        | Some (Msp.Reminder_child) | Some (Msp.Compaction) | Some (Msp.Unrecognized_item_kind _) -> continue state)
      | Msp.Item_completed { session_id = sid; item } when ours sid && item_in_turn ~turn_id item
        ->
        let was_open = List.mem_assoc item.Msp.item_id state.open_items in
@@ -998,7 +1002,8 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
           Option.iter (fun compaction -> emit (Compaction_observed compaction))
             item.Msp.compaction;
           continue { state with open_items }
-        | _ -> continue { state with open_items })
+        | Msp.User_message | Msp.Reasoning | Msp.User_shell | Msp.Subagent | Msp.Workflow
+        | Msp.Reminder_child | Msp.Unrecognized_item_kind _ -> continue { state with open_items })
      | Msp.Usage_changed usage ->
        emit (Subscription_usage_observed usage);
        continue state
@@ -1050,7 +1055,13 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
         | Msp.Terminal_completed -> Ok (state, usage)
         | Msp.Terminal_failed { kind = Msp.Auth_required; message; _ } ->
           Error (Auth_required message)
-        | Msp.Terminal_failed turn_error -> Error (Turn_failed turn_error)
+        | Msp.Terminal_failed
+            ({ kind =
+                 ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error | Msp.Log_error
+                 | Msp.Workflow_launch_error | Msp.Environment_error | Msp.Model_error
+                 | Msp.Launch_error | Msp.Unrecognized_error_kind _ )
+             ; _
+             } as turn_error) -> Error (Turn_failed turn_error)
         | Msp.Terminal_cancelled -> Error Turn_cancelled
         | Msp.Unrecognized_terminal terminal ->
           protocol_error "turn/completed" ("unrecognized terminal " ^ terminal))
@@ -1059,7 +1070,12 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.Item_started _
      | Msp.Item_updated _
      | Msp.Item_completed _
-     | Msp.Item_delta _
+     | Msp.Item_delta
+         { field =
+             ( Msp.Delta_text | Msp.Delta_output | Msp.Delta_summary _
+             | Msp.Unrecognized_delta_field _ )
+         ; _
+         }
      | Msp.Model_usage_reported _
      | Msp.Unhandled_notification _ -> continue state)
 ;;
@@ -1268,7 +1284,13 @@ let run_protocol
       Error (Timeout { seconds; turn_accepted = true })
     | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
     | Ok response -> Ok response
-    | Error error -> Error error
+    | Error
+        (( Invalid_config _ | Spawn_failed _ | Turn_input_write_failed _ | Protocol_error _
+         | Rpc_error _ | Capability_not_granted _ | Session_not_durable
+         | Session_model_mismatch _ | Session_workspace_mismatch _
+         | Session_approval_mode_mismatch _ | Auth_required _ | Turn_failed _
+         | Turn_cancelled | Unsupported_server_request _ | Runtime_shutting_down ) as error) ->
+      Error error
   in
   let* ack = lift (Msp.parse_turn_start_result ack) in
   let* () =
@@ -1310,7 +1332,7 @@ let run_protocol
     | Error (Timeout { seconds; turn_accepted = _ }) ->
       Error (Timeout { seconds; turn_accepted = true })
     | Error (Process_exited exited) -> Error (Process_exited { exited with turn_accepted = true })
-    | outcome -> outcome
+    | (Error (Session_not_durable | (Turn_cancelled | (Runtime_shutting_down | (Invalid_config _ | (Spawn_failed _ | (Turn_input_write_failed _ | (Protocol_error _ | (Rpc_error _ | (Capability_not_granted _ | (Session_model_mismatch _ | (Session_workspace_mismatch _ | (Session_approval_mode_mismatch _ | (Auth_required _ | (Turn_failed _ | Unsupported_server_request _)))))))))))))) | Ok _) as outcome -> outcome
   in
   let text = state.final_text in
   (* The stream terminal closes presentation; durable consumers retain the
@@ -1354,7 +1376,9 @@ let prepare_account_config config =
      | Ok home -> Ok { config with prepared_home = Some home }
      | Error (Runtime_muse_home.Sign_in_required _ as error) ->
        Error (Auth_required (Runtime_muse_home.error_to_string error))
-     | Error error -> Error (Invalid_config (Runtime_muse_home.error_to_string error)))
+     | Error
+         (( Runtime_muse_home.Invalid_account_home _ | Runtime_muse_home.State_unavailable _ )
+          as error) -> Error (Invalid_config (Runtime_muse_home.error_to_string error)))
 ;;
 
 let run_turn

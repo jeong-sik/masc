@@ -53,12 +53,6 @@ type docker_preflight = {
   failure_classes : string list;
   next_actions : string list;
 }
-type cleanup_result =
-  { scanned : int
-  ; removed : int
-  ; already_absent : int
-  ; errors : string list
-  }
 val sandbox_component_label_key : string
 val sandbox_component_label_value : string
 val sandbox_base_path_hash_label_key : string

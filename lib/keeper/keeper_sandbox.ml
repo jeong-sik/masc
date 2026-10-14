@@ -1,10 +1,10 @@
 (** Keeper sandbox contract.
 
-    Keeper-facing tools expose exactly one logical sandbox.  The current
-    local storage implementation is still under [.masc/playground/], but
-    that path is an implementation detail of the local/docker backends. *)
+    Keeper-facing tools expose exactly one logical sandbox.  Its host side
+    lives under [.masc/playground/], and that path is an implementation
+    detail of the backends. *)
 
-type backend =
+type backend = Keeper_types_profile_sandbox.sandbox_profile =
   | Docker
   | Micro_vm
   | Remote_ssh
@@ -13,8 +13,7 @@ type t =
   { keeper_name : string
   ; sandbox_id : string
   ; backend : backend
-  ; sandbox_profile : string
-  ; network_mode : string
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; host_root_rel : string
   ; host_root_abs : string
   ; container_root : string option
@@ -70,59 +69,23 @@ module Path = struct
   ;;
 end
 
-let backend_of_profile = function
-  | Keeper_types_profile_sandbox.Docker -> Docker
-  | Keeper_types_profile_sandbox.Micro_vm -> Micro_vm
-  | Keeper_types_profile_sandbox.Remote_ssh -> Remote_ssh
-
-let backend_to_string = function
-  | Docker -> "docker"
-  | Micro_vm -> "microvm"
-  | Remote_ssh -> "remote_ssh"
-
-let profile_of_backend = function
-  | Docker -> Keeper_types_profile_sandbox.Docker
-  | Micro_vm -> Keeper_types_profile_sandbox.Micro_vm
-  | Remote_ssh -> Keeper_types_profile_sandbox.Remote_ssh
-
 (* Where the tree is decides every projection below: a shared mount has a
    guest spelling for each host path, a tree the endpoint owns has only the
    host bookkeeping bundle on this side, and the remote lane's path
    translation ([Keeper_remote_path]) owns the endpoint spelling. *)
-let tree_location_of_backend backend =
-  Keeper_types_profile_sandbox.tree_location_of_profile (profile_of_backend backend)
+let tree_location_of_backend = Keeper_types_profile_sandbox.tree_location_of_profile
 
 let backend_of_config_agent ~(config : Workspace.config) ~(agent_name : string) =
-  match
-    Keeper_sandbox_config.sandbox_profile_of_agent
-      ~base_path:config.Workspace.base_path
-      ~agent_name
-  with
-  | Keeper_sandbox_config.Docker -> Docker
-  | Keeper_sandbox_config.Micro_vm -> Micro_vm
-  | Keeper_sandbox_config.Remote_ssh -> Remote_ssh
+  Keeper_sandbox_config.sandbox_profile_of_agent
+    ~base_path:config.Workspace.base_path
+    ~agent_name
 
 let sandbox_id_of_name name =
   "keeper:" ^ Playground_paths.sanitize_keeper_name name
 
-(* The Local/Docker split of the playground root is spelled once, in
-   [Keeper_sandbox_config]. It used to be written here as well, so the two
-   roots a keeper can own ([.masc/playground/<k>/] and
-   [.masc/playground/docker/<k>/]) were constructed in two places (#21837).
-   The match stays exhaustive, so a new backend still has to declare its
-   root. *)
-let host_root_rel_of_backend ~(backend : backend) name =
-  Keeper_sandbox_config.host_root_rel_of_profile
-    (match backend with
-     | Docker -> Keeper_sandbox_config.Docker
-     | Micro_vm -> Keeper_sandbox_config.Micro_vm
-     | Remote_ssh -> Keeper_sandbox_config.Remote_ssh)
-    name
-
-let host_root_rel_of_profile sandbox_profile name =
-  host_root_rel_of_backend
-    ~backend:(backend_of_profile sandbox_profile)
-    name
+(* The playground root of each profile is spelled once, in
+   [Keeper_sandbox_config] (#21837). *)
+let host_root_rel_of_profile = Keeper_sandbox_config.host_root_rel_of_profile
 
 let host_root_rel_of_config_agent ~config ~agent_name =
   Keeper_sandbox_config.host_root_rel_of_agent
@@ -183,12 +146,11 @@ let keeper_visible_root_abs_of_meta ~(config : Workspace.config)
   | Endpoint_owned -> host_root_abs_of_meta ~config meta
 
 let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : t =
-  let backend = backend_of_profile meta.sandbox_profile in
+  let backend = meta.sandbox_profile in
   { keeper_name = meta.name
   ; sandbox_id = sandbox_id_of_name meta.name
   ; backend
-  ; sandbox_profile = Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile
-  ; network_mode = Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode
+  ; network_mode = meta.network_mode
   ; host_root_rel = host_root_rel_of_meta ~meta
   ; host_root_abs = host_root_abs_of_meta ~config meta
   ; container_root =
@@ -215,11 +177,11 @@ let keeper_visible_root_abs (t : t) : string =
    this replaces, and both hand the keeper a plausible string it then acts on
    as if the directory existed.
 
-   Projection is not containment. For a Local backend the keeper runs on the
-   host filesystem, so every host path is already visible and the answer is
-   the input — that this returns an out-of-sandbox path unchanged is correct
-   here and is decided elsewhere, by Keeper_alerting_path. For Docker the two
-   coordinate systems are disjoint, so an out-of-root path has no visible
+   Projection is not containment. For a tree the endpoint owns, the visible
+   spelling on this side is the host bookkeeping path, so the answer is the
+   input — that this returns an out-of-sandbox path unchanged is correct here
+   and is decided elsewhere, by Keeper_alerting_path. For a shared mount the
+   two coordinate systems are disjoint, so an out-of-root path has no visible
    spelling at all and must be an error. *)
 let visible_path_of_host (t : t) (p : Path.host Path.t)
   : (Path.visible Path.t, Path.conversion_error) result
@@ -291,9 +253,9 @@ let storage_lifetime = "persistent_backend_task_overlay"
 
 let context_status_fields (t : t) : (string * Yojson.Safe.t) list =
   [ "sandbox_id", `String t.sandbox_id
-  ; "sandbox_backend", `String (backend_to_string t.backend)
-  ; "sandbox_profile", `String t.sandbox_profile
-  ; "sandbox_network_mode", `String t.network_mode
+  ; "sandbox_backend", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string t.backend)
+  ; "sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string t.backend)
+  ; "sandbox_network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string t.network_mode)
   ; "sandbox_lifetime", `String storage_lifetime
   ; "sandbox_root", `String t.root_arg
   ; "sandbox_paths", `Assoc [ "root", `String t.root_arg ]

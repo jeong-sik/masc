@@ -1377,7 +1377,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             let workspace_state = Workspace.read_state config in
             let tempo = Tempo.get_tempo config in
             let json = `Assoc [
-              ("cluster", `String (Env_config_core.cluster_name ()));
               ("project", `String workspace_state.project);
               ("tempo_interval_s", `Float tempo.current_interval_s);
               ("paused", `Bool workspace_state.paused);
@@ -1756,7 +1755,11 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                     h2_respond_json_value h2_reqd
                       (Server_routes_http_routes_artifacts.too_large_response actual maximum)
                       ~status:`Payload_too_large ~extra_headers:cors
-                  | Error error ->
+                  | Error
+                      ((Tool_blob_store.Invalid_sha256 _
+                       | Tool_blob_store.Owned_read_failed _
+                       | Tool_blob_store.Invalid_max_bytes _
+                       | Tool_blob_store.Integrity_mismatch _) as error) ->
                     Log.Misc.error "tool blob raw read failed sha256=%s cause=%s"
                       sha256 (Tool_blob_store.fetch_error_to_string error);
                     h2_respond_json_value h2_reqd

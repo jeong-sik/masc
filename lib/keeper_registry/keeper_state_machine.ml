@@ -340,7 +340,6 @@ let apply_event ~current_phase ~conditions ~event ~now =
         ; new_phase
         ; updated_conditions
         ; entry_actions = []
-        ; event_applied = event
         ; timestamp = now
         }
     else if can_transition ~from_phase:current_phase ~to_phase:new_phase
@@ -350,7 +349,6 @@ let apply_event ~current_phase ~conditions ~event ~now =
         ; new_phase
         ; updated_conditions
         ; entry_actions = entry_actions_for ~prev_phase:current_phase ~new_phase ~event
-        ; event_applied = event
         ; timestamp = now
         }
     else
@@ -381,8 +379,8 @@ let apply_event ~current_phase ~conditions ~event ~now =
 (** Maps a phase to the capitalized state ID used in the Mermaid diagram. *)
 (* Mermaid rendering extracted to [Keeper_state_machine_mermaid]
    (godfile decomp).  No reverse alias here: wrapped-library sibling
-   would create an import cycle (Keeper_state_machine_rendering attempt
-   2026-05; see ~/me memory). Callers must use the sibling directly. *)
+   would create an import cycle (the Keeper_state_machine_rendering
+   attempt of 2026-05 hit it). Callers must use the sibling directly. *)
 
 (* --- Attribution envelope conversion (Layer 1) ---
    Keeper FSM is Det by design: non-deterministic measurements are

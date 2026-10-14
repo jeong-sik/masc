@@ -19,8 +19,13 @@ import argparse
 import json
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass, field, asdict
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+
+import masc_base_path  # noqa: E402
 
 
 FEATURE_ROW_RE = re.compile(
@@ -168,17 +173,6 @@ name is a hint about why it exists.
 """
 
 
-def default_masc_root() -> str | None:
-    """Runtime store root from the environment, or nothing.
-
-    The store lives under whatever base path the deployment chose, so this
-    returns None rather than guessing a home directory; the caller then has to
-    pass --masc-root explicitly.
-    """
-    base = os.environ.get("MASC_BASE_PATH")
-    return os.path.join(base, ".masc") if base else None
-
-
 def keeper_role(name: str) -> str:
     if name.startswith("rw-e0-"):
         return "campaign_round"
@@ -243,7 +237,7 @@ def main() -> None:
     parser.add_argument("--reports-dir")
     parser.add_argument(
         "--masc-root",
-        default=default_masc_root(),
+        default=None,
         help=(
             "runtime store root; defaults to <MASC_BASE_PATH>/.masc when that "
             "is set. There is no built-in path — this tool is not tied to one "
@@ -257,6 +251,14 @@ def main() -> None:
     parser.add_argument("--out")
     args = parser.parse_args()
 
+    # The keeper store path is deployment-specific: --masc-root, or .masc
+    # under MASC_BASE_PATH, and nothing else. An empty --masc-root names
+    # nothing; it does not hand the choice back to the environment.
+    if args.masc_root is None:
+        args.masc_root = str(masc_base_path.require(parser, None, "--masc-root") / ".masc")
+    elif not args.masc_root.strip():
+        parser.error(masc_base_path.required("--masc-root"))
+
     repo = args.repo_root
     reports_dir = args.reports_dir or os.path.join(repo, "reports")
     matrix_path = os.path.join(
@@ -265,11 +267,6 @@ def main() -> None:
     with open(matrix_path, encoding="utf-8") as handle:
         matrix_html = handle.read()
 
-    if not args.masc_root:
-        parser.error(
-            "--masc-root is required (or set MASC_BASE_PATH); the keeper store "
-            "path is deployment-specific"
-        )
 
     payload = {
         "feature_rows": [asdict(r) for r in read_feature_rows(matrix_html)],

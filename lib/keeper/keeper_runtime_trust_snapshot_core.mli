@@ -10,21 +10,49 @@ type approval_queue =
 
 type raw =
   { approval_queue : approval_queue
-  ; runtime_blocker_class :
-      (Keeper_meta_contract.blocker_class, string) result option
+  ; runtime_blocker_class : Keeper_status_bridge_blocker.runtime_blocker_class option
   ; receipt_operator_disposition :
-      (Keeper_execution_receipt.operator_disposition_kind * string) option
-  ; attention_needs_attention : bool
-  ; attention_reason : string option
-  ; attention_next_human_action : string option
+      (Keeper_execution_receipt.operator_disposition_kind
+      * Keeper_execution_receipt.operator_disposition_reason)
+        option
+  ; status_attention : Keeper_attention_reason.t option
+  (** What {!Keeper_status_bridge.attention_of_surface} decided for the
+      Keeper's status surface. *)
   ; terminal_next_human_action : string option
   }
 
+(** Why the snapshot shows its disposition. Either the snapshot's own verdict
+    (from the approval queue, a runtime blocker, or a row the dashboard could
+    not build) or the reason of the receipt it shows. *)
+type disposition_reason =
+  | Healthy
+  | Approval_queue_unreadable
+  | Pending_operator_decision
+  | Runtime_exhausted
+  | Critical_block
+  | Unknown_runtime_blocker
+  | Keeper_dashboard_worker_exception
+  | Receipt_reason of Keeper_execution_receipt.operator_disposition_reason
+
+val disposition_reason_to_wire : disposition_reason -> string
+
+(** Why the snapshot needs attention: the status surface's reason, the
+    disposition's own reason, or the error text of a dashboard row that could
+    not be built. *)
+type attention_reason =
+  | Status_attention of Keeper_attention_reason.t
+  | Disposition_attention of disposition_reason
+  | Dashboard_worker_error of string
+
+val attention_reason_to_wire : attention_reason -> string
+
 type t =
-  { disposition : string
-  ; disposition_reason : string
+  { disposition : Keeper_trust_disposition.t
+  ; disposition_reason : disposition_reason
   ; receipt_operator_disposition :
-      (Keeper_execution_receipt.operator_disposition_kind * string) option
+      (Keeper_execution_receipt.operator_disposition_kind
+      * Keeper_execution_receipt.operator_disposition_reason)
+        option
   (** The operator disposition kind and reason of the receipt the snapshot
       shows, parsed once where the receipt is read:
       [raw.receipt_operator_disposition] when the
@@ -36,7 +64,7 @@ type t =
       ([Keeper_runtime_trust_snapshot]), so the blocker's verdict shows and
       this is [None]. *)
   ; needs_attention : bool
-  ; attention_reason : string option
+  ; attention_reason : attention_reason option
   ; next_human_action : string option
   }
 

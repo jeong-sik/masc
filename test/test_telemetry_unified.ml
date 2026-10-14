@@ -18,8 +18,15 @@ let tmpdir prefix =
   Fs_compat.mkdir_p dir;
   dir
 
-let write_jsonl dir entries =
-  let store = Dated_jsonl.create ~base_dir:dir () in
+(* Listed stores of a workspace whose base path is [base_path]. The path is
+   spelled out here, not taken from the code under test. *)
+let masc_root_of base_path = Dated_jsonl.Store.root_of_masc_dir (Filename.concat base_path ".masc")
+let root_store base_path store = Dated_jsonl.Store.at (masc_root_of base_path) store
+let keeper_store base_path ~keeper store =
+  Dated_jsonl.Store.keeper (masc_root_of base_path) ~keeper store
+
+let write_jsonl location entries =
+  let store = Dated_jsonl.open_store location in
   List.iter (fun json -> Dated_jsonl.append store json) entries
 
 let today_jsonl_path dir =
@@ -107,14 +114,14 @@ let test_empty_returns_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_empty" in
-  let entries = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir) () in
+  let entries = Telemetry_unified.read_unified ~masc_root:(masc_root dir) () in
   Alcotest.(check int) "no entries" 0 (List.length entries)
 
 let test_summary_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_sum_empty" in
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let json = Telemetry_unified.summary_json ~masc_root:(masc_root dir) () in
   match json with
   | `Assoc fields ->
     let total = match List.assoc_opt "total_entries" fields with
@@ -128,14 +135,15 @@ let test_agent_event_source () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_agent_event" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
-  write_jsonl telemetry_dir [
+  write_jsonl telemetry_location [
     `Assoc [("timestamp", `Float 1000.0); ("event", `String "test1")];
     `Assoc [("timestamp", `Float 2000.0); ("event", `String "test2")];
   ];
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event] ()
   in
   Alcotest.(check int) "two entries" 2 (List.length entries);
@@ -151,9 +159,10 @@ let test_agent_core_event_source_and_scope_filter () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_agent_core_event" in
-  let agent_core_events_dir = Filename.concat dir ".masc/agent-core-events" in
+  let agent_core_events_location = root_store dir Agent_core_events in
+  let agent_core_events_dir = Dated_jsonl.Store.dir agent_core_events_location in
   Fs_compat.mkdir_p agent_core_events_dir;
-  write_jsonl agent_core_events_dir [
+  write_jsonl agent_core_events_location [
     `Assoc
       [
         ("ts_unix", `Float 1000.0);
@@ -174,7 +183,7 @@ let test_agent_core_event_source_and_scope_filter () =
       ];
   ];
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_core_event]
       ~session_id:"sess-2" ~worker_run_id:"run-2" ()
   in
@@ -193,9 +202,10 @@ let test_keeper_tool_called_scope_promoted_for_filters () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_keeper_tool_scope" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
-  write_jsonl telemetry_dir
+  write_jsonl telemetry_location
     [
       `Assoc
         [
@@ -218,7 +228,7 @@ let test_keeper_tool_called_scope_promoted_for_filters () =
         ];
     ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Agent_event ]
       ~session_id:"mcp-session-1" ~operation_id:"op-1"
       ~worker_run_id:"worker-1" ()
@@ -242,11 +252,13 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_shadow_tool_called" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
-  let tool_calls_dir = Filename.concat dir ".masc/tool_calls" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
+  let tool_calls_location = root_store dir Tool_calls in
+  let tool_calls_dir = Dated_jsonl.Store.dir tool_calls_location in
   Fs_compat.mkdir_p telemetry_dir;
   Fs_compat.mkdir_p tool_calls_dir;
-  write_jsonl telemetry_dir [
+  write_jsonl telemetry_location [
     `Assoc
       [
         ("timestamp", `Float 1000.2);
@@ -265,7 +277,7 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
             ] );
       ];
   ];
-  write_jsonl tool_calls_dir [
+  write_jsonl tool_calls_location [
     `Assoc
       [
         ("ts", `Float 1000.0);
@@ -277,7 +289,7 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
       ];
   ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
       ()
@@ -289,7 +301,7 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
   Alcotest.(check string) "full tool call row preserved" "tool_call_io"
     (json_string_field "source" (List.hd result.entries));
   let raw_agent_entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event ] ()
   in
   Alcotest.(check int) "source-filtered agent event remains available" 1
@@ -304,8 +316,10 @@ let test_distinct_calls_within_the_old_window_are_both_kept () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_distinct_calls" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
-  let tool_calls_dir = Filename.concat dir ".masc/tool_calls" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
+  let tool_calls_location = root_store dir Tool_calls in
+  let tool_calls_dir = Dated_jsonl.Store.dir tool_calls_location in
   Fs_compat.mkdir_p telemetry_dir;
   Fs_compat.mkdir_p tool_calls_dir;
   let agent_event ~ts ~execution_id =
@@ -338,14 +352,14 @@ let test_distinct_calls_within_the_old_window_are_both_kept () =
         ("execution_id", `String execution_id);
       ]
   in
-  write_jsonl telemetry_dir
+  write_jsonl telemetry_location
     [ agent_event ~ts:1000.2 ~execution_id:"exec-1"
     ; agent_event ~ts:1001.2 ~execution_id:"exec-2"
     ];
   (* Only the first call reached the durable tool_calls store. *)
-  write_jsonl tool_calls_dir [ io_row ~ts:1000.0 ~execution_id:"exec-1" ];
+  write_jsonl tool_calls_location [ io_row ~ts:1000.0 ~execution_id:"exec-1" ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
       ()
@@ -364,11 +378,13 @@ let test_agent_event_without_execution_id_is_kept () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_unidentified_call" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
-  let tool_calls_dir = Filename.concat dir ".masc/tool_calls" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
+  let tool_calls_location = root_store dir Tool_calls in
+  let tool_calls_dir = Dated_jsonl.Store.dir tool_calls_location in
   Fs_compat.mkdir_p telemetry_dir;
   Fs_compat.mkdir_p tool_calls_dir;
-  write_jsonl telemetry_dir
+  write_jsonl telemetry_location
     [ `Assoc
         [ ("timestamp", `Float 1000.2)
         ; ( "event"
@@ -381,7 +397,7 @@ let test_agent_event_without_execution_id_is_kept () =
                   ; ("agent_id", `String "keeper-alpha-agent")
                   ] ] ) ]
     ];
-  write_jsonl tool_calls_dir
+  write_jsonl tool_calls_location
     [ `Assoc
         [ ("ts", `Float 1000.0)
         ; ("keeper", `String "alpha")
@@ -392,7 +408,7 @@ let test_agent_event_without_execution_id_is_kept () =
         ]
     ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
       ()
@@ -406,24 +422,26 @@ let test_keeper_metrics_per_keeper () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_keeper_metrics" in
-  let beta_dir = Filename.concat dir ".masc/keepers/beta/metrics" in
-  let alpha_dir = Filename.concat dir ".masc/keepers/alpha/metrics" in
+  let beta_location = keeper_store dir ~keeper:"beta" Metrics in
+  let beta_dir = Dated_jsonl.Store.dir beta_location in
+  let alpha_location = keeper_store dir ~keeper:"alpha" Metrics in
+  let alpha_dir = Dated_jsonl.Store.dir alpha_location in
   Fs_compat.mkdir_p beta_dir;
   Fs_compat.mkdir_p alpha_dir;
-  write_jsonl beta_dir [
+  write_jsonl beta_location [
     `Assoc [("ts_unix", `Float 3000.0); ("name", `String "beta");
             ("channel", `String "turn")];
   ];
-  write_jsonl alpha_dir [
+  write_jsonl alpha_location [
     `Assoc [("ts_unix", `Float 4000.0); ("name", `String "alpha");
             ("channel", `String "turn")];
   ];
   (* All keepers *)
-  let all = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+  let all = Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Keeper_metric] () in
   Alcotest.(check int) "two keeper entries" 2 (List.length all);
   (* Filter by keeper *)
-  let beta_only = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+  let beta_only = Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Keeper_metric]
       ~keeper_name:"beta" () in
   Alcotest.(check int) "one beta entry" 1 (List.length beta_only)
@@ -432,11 +450,13 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_keeper_fast_top" in
-  let hot_dir = Filename.concat dir ".masc/keepers/hot/metrics" in
-  let old_dir = Filename.concat dir ".masc/keepers/old/metrics" in
+  let hot_location = keeper_store dir ~keeper:"hot" Metrics in
+  let hot_dir = Dated_jsonl.Store.dir hot_location in
+  let old_location = keeper_store dir ~keeper:"old" Metrics in
+  let old_dir = Dated_jsonl.Store.dir old_location in
   Fs_compat.mkdir_p hot_dir;
   Fs_compat.mkdir_p old_dir;
-  write_jsonl hot_dir
+  write_jsonl hot_location
     (List.init 120 (fun i ->
          `Assoc
            [
@@ -444,7 +464,7 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
              ("name", `String "hot");
              ("i", `Int i);
            ]));
-  write_jsonl old_dir
+  write_jsonl old_location
     (List.init 50 (fun i ->
          `Assoc
            [
@@ -453,7 +473,7 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
              ("i", `Int i);
            ]));
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
       ~limit:(Telemetry_unified.read_limit_of_int 100) ()
   in
@@ -472,9 +492,10 @@ let test_keeper_metrics_fast_path_sets_truncated_with_marker () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_keeper_fast_marker" in
   let write_keeper name ts =
-    let metrics_dir = Filename.concat dir (".masc/keepers/" ^ name ^ "/metrics") in
+    let metrics_location = keeper_store dir ~keeper:name Metrics in
+    let metrics_dir = Dated_jsonl.Store.dir metrics_location in
     Fs_compat.mkdir_p metrics_dir;
-    write_jsonl metrics_dir
+    write_jsonl metrics_location
       [
         `Assoc
           [
@@ -488,7 +509,7 @@ let test_keeper_metrics_fast_path_sets_truncated_with_marker () =
   write_keeper "beta" 2_000.0;
   write_keeper "gamma" 1_000.0;
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
       ~limit:(Telemetry_unified.read_limit_of_int 2) ()
   in
@@ -505,15 +526,16 @@ let test_sorted_newest_first () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_sorted" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
-  write_jsonl telemetry_dir [
+  write_jsonl telemetry_location [
     `Assoc [("timestamp", `Float 1000.0); ("event", `String "old")];
     `Assoc [("timestamp", `Float 3000.0); ("event", `String "new")];
     `Assoc [("timestamp", `Float 2000.0); ("event", `String "mid")];
   ];
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event] ()
   in
   Alcotest.(check int) "three entries" 3 (List.length entries);
@@ -530,14 +552,15 @@ let test_n_limits_output () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_limit" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
-  write_jsonl telemetry_dir (
+  write_jsonl telemetry_location (
     List.init 50 (fun i ->
       `Assoc [("timestamp", `Float (Float.of_int (i * 100))); ("i", `Int i)])
   );
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event] ~limit:(Telemetry_unified.read_limit_of_int 10) ()
   in
   Alcotest.(check int) "limited to 10" 10 (List.length entries)
@@ -546,14 +569,14 @@ let test_offset_windows_final_page () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_offset_final_page" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
-  write_jsonl telemetry_dir
+  write_jsonl telemetry_location
     (List.init 3 (fun i ->
        `Assoc [ "timestamp", `Float (Float.of_int i); "i", `Int i ]));
   let read offset =
     Telemetry_unified.read_unified_result
-      ~base_path:dir
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event ]
       ~limit:(Telemetry_unified.read_limit_of_int 2)
@@ -573,17 +596,18 @@ let test_time_window_reports_total_before_limit () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_window_limit" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let now = Unix.gettimeofday () in
-  write_jsonl telemetry_dir [
+  write_jsonl telemetry_location [
     `Assoc [("timestamp", `Float (now -. 7_200.0)); ("event", `String "too_old")];
     `Assoc [("timestamp", `Float (now -. 1_800.0)); ("event", `String "within_1")];
     `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "within_2")];
     `Assoc [("timestamp", `Float (now -. 60.0)); ("event", `String "within_3")];
   ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified_result ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
       ~since_ts:(now -. 3_600.0) ~until_ts:now ~limit:(Telemetry_unified.read_limit_of_int 2) ()
   in
@@ -606,7 +630,8 @@ let test_time_window_reads_matching_day_files () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_window_days" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let now = Unix.gettimeofday () in
   let yesterday = now -. 86_400.0 in
@@ -615,7 +640,7 @@ let test_time_window_reads_matching_day_files () =
   append_jsonl_entry_for_ts telemetry_dir now
     (`Assoc [("timestamp", `Float now); ("event", `String "today")]);
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
       ~since_ts:(yesterday -. 60.0) ~until_ts:(now +. 60.0) ()
   in
@@ -634,16 +659,17 @@ let test_time_window_n_zero_is_bounded () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_window_unbounded" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let now = Unix.gettimeofday () in
-  write_jsonl telemetry_dir [
+  write_jsonl telemetry_location [
     `Assoc [("timestamp", `Float (now -. 900.0)); ("event", `String "a")];
     `Assoc [("timestamp", `Float (now -. 600.0)); ("event", `String "b")];
     `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
   ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
+    Telemetry_unified.read_unified_result ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
       ~since_ts:(now -. 3_600.0) ~until_ts:now ~limit:(Telemetry_unified.read_limit_of_int 0) ()
   in
@@ -667,16 +693,17 @@ let test_n_zero_no_window_returns_bounded () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_n0_no_window" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let now = Unix.gettimeofday () in
-  write_jsonl telemetry_dir [
+  write_jsonl telemetry_location [
     `Assoc [("timestamp", `Float (now -. 900.0)); ("event", `String "a")];
     `Assoc [("timestamp", `Float (now -. 600.0)); ("event", `String "b")];
     `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
   ];
   let result =
-    Telemetry_unified.read_unified_result ~base_path:dir
+    Telemetry_unified.read_unified_result
       ~masc_root:(masc_root dir)
       ~sources:[ Telemetry_unified.Agent_event ] ~limit:(Telemetry_unified.read_limit_of_int 0) ()
   in
@@ -706,12 +733,13 @@ let test_summary_with_data () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_summary" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
-  write_jsonl telemetry_dir [
+  write_jsonl telemetry_location [
     `Assoc [("timestamp", `Float 1000.0); ("event", `String "test")];
   ];
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let json = Telemetry_unified.summary_json ~masc_root:(masc_root dir) () in
   match json with
   | `Assoc fields ->
     let total = match List.assoc_opt "total_entries" fields with
@@ -723,12 +751,13 @@ let test_summary_includes_freshness_metadata () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_summary_freshness" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   let recent_ts = Unix.gettimeofday () -. 42.0 in
-  write_jsonl telemetry_dir
+  write_jsonl telemetry_location
     [ `Assoc [ ("timestamp", `Float recent_ts); ("event", `String "fresh") ] ];
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let json = Telemetry_unified.summary_json ~masc_root:(masc_root dir) () in
   let source_fields =
     match json with
     | `Assoc fields -> (
@@ -797,7 +826,6 @@ let test_keeper_metric_summary_freshness_tracks_runtime_cadence () =
   let json =
     Telemetry_unified.summary_json
       ~keeper_keepalive_interval_s:300.0
-      ~base_path:dir
       ~masc_root:(masc_root dir)
       ()
   in
@@ -836,7 +864,6 @@ let test_keeper_metric_summary_stays_healthy_while_producer_active () =
     Telemetry_unified.summary_json
       ~keeper_keepalive_interval_s:300.0
       ~keeper_metric_producer_active:producer_active
-      ~base_path:dir
       ~masc_root:(masc_root dir)
       ()
     |> source_summary "keeper_metric"
@@ -872,7 +899,6 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
            });
       let json =
         Telemetry_unified.summary_json
-          ~base_path:dir
           ~masc_root:(masc_root dir)
           ()
       in
@@ -887,7 +913,6 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
         (json_int_field "entry_count" summary);
       let rows =
         Telemetry_unified.read_unified
-          ~base_path:dir
           ~masc_root:(masc_root dir)
           ~sources:[ Tool_metric ]
           ()
@@ -928,9 +953,15 @@ let test_summary_includes_trajectory_and_execution_receipt_sources () =
               `Assoc [ ("tool_name", `String "tool_execute") ] );
           ])
      ^ "\n");
-  let receipt_dir = Filename.concat root "keepers/alice/execution-receipts" in
+  let receipt_location =
+    Dated_jsonl.Store.keeper
+      (Dated_jsonl.Store.root_of_masc_dir root)
+      ~keeper:"alice"
+      Execution_receipts
+  in
+  let receipt_dir = Dated_jsonl.Store.dir receipt_location in
   Fs_compat.mkdir_p receipt_dir;
-  write_jsonl receipt_dir
+  write_jsonl receipt_location
     [ `Assoc
         [
           ("recorded_at", `String (Masc_domain.iso8601_of_unix_seconds now));
@@ -939,7 +970,7 @@ let test_summary_includes_trajectory_and_execution_receipt_sources () =
           ("trace_id", `String "trace-1");
           ("outcome", `String "completed");
         ] ];
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let json = Telemetry_unified.summary_json ~masc_root:root () in
   let trajectory_summary = source_summary "trajectory_tool_call" json in
   let receipt_summary = source_summary "execution_receipt" json in
   Alcotest.(check int) "trajectory count" 1
@@ -990,9 +1021,15 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
               `Assoc [ ("tool_name", `String "tool_execute") ] );
           ])
      ^ "\n");
-  let receipt_dir = Filename.concat root "keepers/alice/execution-receipts" in
+  let receipt_location =
+    Dated_jsonl.Store.keeper
+      (Dated_jsonl.Store.root_of_masc_dir root)
+      ~keeper:"alice"
+      Execution_receipts
+  in
+  let receipt_dir = Dated_jsonl.Store.dir receipt_location in
   Fs_compat.mkdir_p receipt_dir;
-  write_jsonl receipt_dir
+  write_jsonl receipt_location
     [ `Assoc
         [
           ("recorded_at", `String "1970-01-01T00:16:40Z");
@@ -1003,7 +1040,6 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
         ] ];
   let entries =
     Telemetry_unified.read_unified
-      ~base_path:dir
       ~masc_root:root
       ~sources:
         [
@@ -1061,7 +1097,6 @@ let test_scope_filter_matches_runtime_contract_fields () =
      ^ "\n");
   let result =
     Telemetry_unified.read_unified_result
-      ~base_path:dir
       ~masc_root:root
       ~sources:[ Telemetry_unified.Trajectory_tool_call ]
       ~session_id:"sess-nested"
@@ -1111,7 +1146,6 @@ let test_goal_event_source_and_summary () =
      ^ "\n");
   let entries =
     Telemetry_unified.read_unified
-      ~base_path:dir
       ~masc_root:root
       ~sources:[ Telemetry_unified.Goal_event ]
       ~limit:(Telemetry_unified.read_limit_of_int 10)
@@ -1123,7 +1157,7 @@ let test_goal_event_source_and_summary () =
   Alcotest.(check string) "newest event" "transition_completed"
     (List.hd entries |> json_string_field "event_type");
   let summary =
-    Telemetry_unified.summary_json ~base_path:dir ~masc_root:root ()
+    Telemetry_unified.summary_json ~masc_root:root ()
   in
   let goal_summary = source_summary "goal_event" summary in
   Alcotest.(check int) "goal event count" 2
@@ -1146,7 +1180,7 @@ let test_goal_event_missing_reports_not_yet () =
   let root = masc_root dir in
   Fs_compat.mkdir_p root;
   (* Intentionally do NOT create goal_events.jsonl. *)
-  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let summary = Telemetry_unified.summary_json ~masc_root:root () in
   let goal_summary = source_summary "goal_event" summary in
   Alcotest.(check int) "no goal events yet" 0
     (json_int_field "entry_count" goal_summary);
@@ -1168,7 +1202,7 @@ let test_tool_call_io_missing_still_reports_missing () =
   let root = masc_root dir in
   Fs_compat.mkdir_p root;
   (* Intentionally do NOT create tool_calls/. *)
-  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let summary = Telemetry_unified.summary_json ~masc_root:root () in
   let tool_summary = source_summary "tool_call_io" summary in
   Alcotest.(check string) "non-optional missing source stays loud"
     "missing"
@@ -1187,14 +1221,14 @@ let test_fixed_source_bad_store_type_is_observed () =
   Fs_compat.append_file telemetry_path "not a directory\n";
   let before = source_read_failure_metric "agent_event" "read_fixed_source_dir" in
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+    Telemetry_unified.read_unified ~masc_root:root
       ~sources:[ Telemetry_unified.Agent_event ] ()
   in
   Alcotest.(check int) "bad store reads as empty" 0 (List.length entries);
   Alcotest.(check (float 0.001)) "read failure counter increments"
     (before +. 1.0)
     (source_read_failure_metric "agent_event" "read_fixed_source_dir");
-  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let summary = Telemetry_unified.summary_json ~masc_root:root () in
   let agent_summary = source_summary "agent_event" summary in
   Alcotest.(check string) "bad store is an error, not empty"
     "error"
@@ -1214,7 +1248,7 @@ let test_keeper_discovery_bad_root_is_observed () =
     source_read_failure_metric "keeper_metric" "discover_keeper_metric_root"
   in
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+    Telemetry_unified.read_unified ~masc_root:root
       ~sources:[ Telemetry_unified.Keeper_metric ] ()
   in
   Alcotest.(check int) "bad keeper root reads as empty" 0 (List.length entries);
@@ -1248,7 +1282,7 @@ let test_trajectory_parse_errors_are_aggregated_per_file () =
       "read_trajectory_file_parse"
   in
   let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:root
+    Telemetry_unified.read_unified ~masc_root:root
       ~sources:[ Telemetry_unified.Trajectory_tool_call ] ()
   in
   Alcotest.(check int) "valid trajectory row still read" 1
@@ -1274,7 +1308,7 @@ let test_summary_bad_trajectory_root_observed_once () =
     source_read_failure_metric "trajectory_tool_call"
       "discover_trajectory_root"
   in
-  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let summary = Telemetry_unified.summary_json ~masc_root:root () in
   let trajectory_summary = source_summary "trajectory_tool_call" summary in
   Alcotest.(check string) "bad trajectory root is error"
     "error"
@@ -1318,7 +1352,7 @@ let test_summary_surfaces_coverage_gaps () =
     "coverage gap Otel_metric_store counter increments" (before +. 1.0)
     (Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_telemetry_coverage_gap
        ~labels ());
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let json = Telemetry_unified.summary_json ~masc_root:root () in
   match json with
   | `Assoc fields ->
     let gaps =
@@ -1359,7 +1393,7 @@ let test_summary_ignores_recovered_coverage_gap () =
     ();
   let recovered_ts = Unix.gettimeofday () +. 10.0 in
   write_jsonl
-    (Filename.concat root "tool_calls")
+    (Dated_jsonl.Store.at (Dated_jsonl.Store.root_of_masc_dir root) Tool_calls)
     [
       `Assoc
         [
@@ -1369,7 +1403,7 @@ let test_summary_ignores_recovered_coverage_gap () =
           ("success", `Bool true);
         ];
     ];
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let json = Telemetry_unified.summary_json ~masc_root:root () in
   let tool_summary = source_summary "tool_call_io" json in
   Alcotest.(check string) "recovered gap health" "ok"
     (json_string_field "health" tool_summary);
@@ -1393,10 +1427,11 @@ let test_summary_counts_all_entries_beyond_recent_cap () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_summary_full_count" in
-  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let telemetry_location = root_store dir Telemetry in
+  let telemetry_dir = Dated_jsonl.Store.dir telemetry_location in
   Fs_compat.mkdir_p telemetry_dir;
   write_raw_jsonl_rows telemetry_dir 10_050;
-  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:(masc_root dir) () in
+  let json = Telemetry_unified.summary_json ~masc_root:(masc_root dir) () in
   match json with
   | `Assoc fields ->
     let total = match List.assoc_opt "total_entries" fields with
@@ -1448,89 +1483,6 @@ let test_replay_retention_lists_selected_sources () =
       "/api/v1/dashboard/telemetry"
       (json_string_field "dashboard_surface" agent_core_store)
   | _ -> Alcotest.fail "expected Assoc"
-
-(* ── Cluster-aware path ─────────────────────────── *)
-
-let test_cluster_aware_read () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_cluster" in
-  (* Simulate cluster layout: masc_root is NOT base_path/.masc but
-     base_path/.masc/clusters/my-cluster — the scenario that was broken. *)
-  let cluster_masc = Filename.concat dir ".masc/clusters/my-cluster" in
-  let telemetry_dir = Filename.concat cluster_masc "telemetry" in
-  Fs_compat.mkdir_p telemetry_dir;
-  write_jsonl telemetry_dir [
-    `Assoc [("timestamp", `Float 5000.0); ("event", `String "cluster_event")];
-  ];
-  (* Read with cluster-aware masc_root — should find the entry *)
-  let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:cluster_masc
-      ~sources:[Telemetry_unified.Agent_event] ()
-  in
-  Alcotest.(check int) "cluster entry found" 1 (List.length entries);
-  (* Read with default masc_root — should NOT find it (old bug behavior) *)
-  let default_entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
-      ~sources:[Telemetry_unified.Agent_event] ()
-  in
-  Alcotest.(check int) "default masc_root misses cluster data" 0 (List.length default_entries)
-
-let test_cluster_keeper_metrics () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_cluster_keeper" in
-  let cluster_masc = Filename.concat dir ".masc/clusters/prod" in
-  let keeper_dir = Filename.concat cluster_masc "keepers/alpha/metrics" in
-  Fs_compat.mkdir_p keeper_dir;
-  write_jsonl keeper_dir [
-    `Assoc [("ts_unix", `Float 6000.0); ("name", `String "alpha"); ("channel", `String "turn")];
-  ];
-  let entries =
-    Telemetry_unified.read_unified ~base_path:dir ~masc_root:cluster_masc
-      ~sources:[Telemetry_unified.Keeper_metric] ()
-  in
-  Alcotest.(check int) "cluster keeper metric found" 1 (List.length entries)
-
-let test_cluster_tool_metrics () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_cluster_tool_metrics" in
-  let cluster_masc = Filename.concat dir ".masc/clusters/prod" in
-  Tool_metrics_persist.reset_for_testing ();
-  Fun.protect
-    ~finally:Tool_metrics_persist.reset_for_testing
-    (fun () ->
-      Tool_metrics_persist.enqueue
-        ~masc_root:cluster_masc
-        (Tool_result.Completed
-           { retained_artifacts = []; content_blocks = None; tool_name = "cluster_tool"
-           ; data = `Null
-           ; metadata = None
-           ; duration_ms = 4.0
-           });
-      let cluster_entries =
-        Telemetry_unified.read_unified
-          ~base_path:dir
-          ~masc_root:cluster_masc
-          ~sources:[ Telemetry_unified.Tool_metric ]
-          ()
-      in
-      Alcotest.(check int)
-        "cluster tool metric found"
-        1
-        (List.length cluster_entries);
-      let default_entries =
-        Telemetry_unified.read_unified
-          ~base_path:dir
-          ~masc_root:(masc_root dir)
-          ~sources:[ Telemetry_unified.Tool_metric ]
-          ()
-      in
-      Alcotest.(check int)
-        "default root misses cluster tool metric"
-        0
-        (List.length default_entries))
 
 (* ── Trajectory summary incremental cache ─────────── *)
 
@@ -1818,11 +1770,5 @@ let () =
             `Quick test_missing_and_corrupt_trajectory_cache_are_survivable;
           Alcotest.test_case "replay retention selected sources" `Quick
             test_replay_retention_lists_selected_sources;
-        ] );
-      ( "cluster",
-        [
-          Alcotest.test_case "cluster-aware read" `Quick test_cluster_aware_read;
-          Alcotest.test_case "cluster keeper metrics" `Quick test_cluster_keeper_metrics;
-          Alcotest.test_case "cluster tool metrics" `Quick test_cluster_tool_metrics;
         ] );
     ]

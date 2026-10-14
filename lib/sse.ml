@@ -571,7 +571,12 @@ let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.
         Error (Invalid_token { reason })
     | Error (Auth (Auth_error.TokenExpired agent_name)) ->
         Error (Token_expired { agent_name })
-    | Error e ->
+    | Error
+        ((Task _ | Agent _ | System _
+         | Auth
+             (Auth_error.Unauthorized _ | Auth_error.Forbidden _
+             | Auth_error.SameOriginBlocked))
+         as e) ->
         Log.Server.warn "SSE registration auth lookup failed: %s"
           (masc_error_to_string e);
         Error (Auth_lookup_error { reason = e })

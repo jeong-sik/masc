@@ -537,34 +537,22 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args)
     (old : keeper_meta) : update_outcome
     =
-  match
-    match p.sandbox_profile_opt with
-    (* Same precedence as [effective_meta_of_profile_defaults]: the TOML owns
-       this field, and [old.sandbox_profile] is only a fallback. Reading [old]
-       first meant a keeper whose meta came back from JSON carried the
-       decoder's placeholder rather than its declaration -- so updating a
-       keeper that states "microvm" in its TOML was refused for a profile it
-       never asked for. *)
-    | None ->
-      (match p.profile_defaults.sandbox_profile with
-       | Some profile -> Ok profile
-       | None -> Ok old.sandbox_profile)
-    | Some raw ->
-      match sandbox_profile_of_string raw with
-      | Some sp -> Ok sp
-      | None ->
-        Error
-          (Printf.sprintf
-             "invalid sandbox_profile: %S (expected: %s)"
-             raw
-             (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings))
-  with
-  | Error msg ->
-    Update_refused
-      { result = tool_result_error ~class_:Tool_result.Policy_rejection msg
-      ; refusal = Profile_resolution_refused msg
-      }
-  | Ok sandbox_profile ->
+  (* Same precedence as [effective_meta_of_profile_defaults]: the TOML owns
+     this field, and [old.sandbox_profile] is only a fallback. Reading [old]
+     first meant a keeper whose meta came back from JSON carried the
+     decoder's placeholder rather than its declaration -- so updating a
+     keeper that states "microvm" in its TOML was refused for a profile it
+     never asked for. *)
+  let sandbox_profile =
+    match
+      resolve_sandbox_profile
+        ?requested:p.sandbox_profile_opt
+        ~fallback:p.profile_defaults.sandbox_profile
+        ()
+    with
+    | Some profile -> profile
+    | None -> old.sandbox_profile
+  in
   (* Same non-durable pin as [sandbox_profile] above: [fallback] is the TOML
      declaration, never [old.network_mode]. The meta decoder fixes that field
      to the profile default, so reading it back would flip a declared "none"
@@ -654,9 +642,6 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
        else old.max_context_override);
     updated_at = now_iso ();
   } in
-  (* The sandbox-profile gate that stood here rejected exactly one profile,
-     [Local], and that profile no longer exists. What remains is reached the
-     same way. *)
          (match
             Keeper_shutdown_supersession.preflight
               ~config:ctx.config

@@ -95,7 +95,7 @@
   masc.machine_configuration
   masc.lane_addon_tool_result masc.lane_addon_call_context
   masc.tool_input_contract
-  masc.machine_input_history masc.machine_controller_contract
+  masc.machine_input_history masc.machine_controller_contract masc.msx_tool
   masc.machine_checkpoint
   masc.tool_metrics_store
   masc.crypto_rng
@@ -250,12 +250,12 @@
   ambient-context
   ambient-context-eio
   masc.autonomous
-  masc.shared_audit
   masc.shared_types
   masc.multimodal
   masc.repo_manager
   masc.parse_outcome
   masc.embedded_config
+  masc.embedded_browser_extension
   masc.fusion_core)
  (preprocess
   (pps

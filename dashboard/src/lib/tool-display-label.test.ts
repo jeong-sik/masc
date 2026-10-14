@@ -19,6 +19,16 @@ describe('toolDisplayLabel', () => {
     expect(toolDisplayLabel('shell')).toBe('Shell')
   })
 
+  it('lifts only ASCII a-z so the mirror stays byte-faithful on non-ASCII input', () => {
+    // task-2327: unregistered inputs carry no ASCII promise (skill slugs pass
+    // package_id_of_directory, MCP names come from outside the process), and
+    // toUpperCase() would lift 'ü' where String.capitalize_ascii leaves it.
+    // Both sides must render the same bytes for any input.
+    expect(toolDisplayLabel('über_agent')).toBe('überAgent')
+    expect(toolDisplayLabel('ünïcode_名')).toBe('ünïcode名')
+    expect(toolDisplayLabel('Ωmega')).toBe('Ωmega')
+  })
+
   it('is injective on the name shapes in use', () => {
     const names = [
       'keeper_task_done',

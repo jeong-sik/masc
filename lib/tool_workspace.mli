@@ -12,8 +12,7 @@
     Callers can interleave these types freely with the source
     modules' types.
 
-    Internal: ~50+ helpers stay private — [effective_cluster_name],
-    [unique_trimmed_nonblank], [credential_state],
+    Internal: ~50+ helpers stay private — [unique_trimmed_nonblank], [credential_state],
     [safe_resolve_agent_name] / [safe_current_task] / [safe_get_agents],
     [resolve_current_binding], [planning_context_state],
     [assertion_kind_to_string], [all_assertion_kinds], plus per-tool handlers

@@ -451,24 +451,13 @@ let with_optional_board_reaction_actor ~base_path request reqd f =
   | Ok actor -> f (Option.map board_actor_author_for_write actor)
   | Error err -> respond_auth_error request reqd err
 
-let activity_http_deps ~sw ~clock : Server_activity_http.deps =
-  {
-    query_param;
-    int_query_param;
-    get_origin;
-    cors_headers;
-    get_switch = (fun () -> Some sw);
-    get_clock = (fun () -> Some clock);
-    get_session_id_any = Server_mcp_transport_http.get_session_id_any;
-  }
+let activity_http_deps : Server_activity_http.deps = { query_param; int_query_param }
 
-let activity_events_http_json ~sw ~clock ~state request =
-  Server_activity_http.events_http_json
-    ~deps:(activity_http_deps ~sw ~clock) ~state request
+let activity_events_http_json ~state request =
+  Server_activity_http.events_http_json ~deps:activity_http_deps ~state request
 
-let activity_graph_http_json ~sw ~clock ~state request =
-  Server_activity_http.graph_http_json
-    ~deps:(activity_http_deps ~sw ~clock) ~state request
+let activity_graph_http_json ~state request =
+  Server_activity_http.graph_http_json ~deps:activity_http_deps ~state request
 
 let json_upsert_string_field name value = function
   | `Assoc fields ->
@@ -832,19 +821,19 @@ let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = activity_events_http_json ~sw ~clock ~state req in
+         let json = activity_events_http_json ~state req in
          Http.Response.json_value json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/activity/graph" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = activity_graph_http_json ~sw ~clock ~state req in
+         let json = activity_graph_http_json ~state req in
          Http.Response.json_value json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/activity/swimlane" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
            Server_activity_http.swimlane_http_json
-             ~deps:(activity_http_deps ~sw ~clock) ~state req
+             ~deps:activity_http_deps ~state req
          in
          Http.Response.json_value json reqd
        ) request reqd)
@@ -1515,33 +1504,6 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/board/karma/ledger" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          respond_board_json reqd (board_karma_ledger_json req)
-       ) request reqd)
-
-  (* Mention Inbox API *)
-  |> Http.Router.prefix_get "/api/v1/mentions/" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
-         let path = Http.Request.path request in
-         (match extract_path_param ~prefix:"/api/v1/mentions/" path with
-          | None ->
-              Http.Response.json_value
-                (`Assoc [("error", `String "agent_name is required")])
-                ~status:`Bad_request reqd
-          | Some agent_name ->
-              let limit = standard_limit request in
-              let mentions =
-                Mention_inbox.read_mentions (Mcp_server.workspace_config state)
-                  ~target_agent:agent_name ~limit
-              in
-              let unread =
-                Mention_inbox.unread_count (Mcp_server.workspace_config state)
-                  ~target_agent:agent_name
-              in
-              let json = `Assoc [
-                ("agent", `String agent_name);
-                ("unread_count", `Int unread);
-                ("mentions", `List (List.map Mention_inbox.mention_record_to_json mentions));
-              ] in
-              Http.Response.json_value json reqd)
        ) request reqd)
 
   (* Prompt Registry API *)

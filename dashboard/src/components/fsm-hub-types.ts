@@ -3,6 +3,7 @@ import type {
   KeeperCompositeInvariants,
 } from '../api/schemas/keeper-composite'
 import { PHASE_LABEL_KO } from '../lib/fleet-tone'
+import type { TrustDisposition } from '../types'
 
 export type CompositeObservation = {
   ts: number
@@ -250,26 +251,19 @@ export function executionOutcomeLabel(value: string | null | undefined): string 
 }
 
 
-/** Korean labels for `trust.disposition`. Backend emits 4 closed-sum
- *  values via `display_disposition_of_operator`
- *  (lib/keeper/keeper_runtime_trust_snapshot.ml:687-697):
- *  Alert / Blocked / Pause / Pass. Kept separate from
+/** Korean labels for `trust.disposition`. Kept separate from
  *  `STATE_DISPLAY_NAMES` to avoid collision on generic PascalCase
- *  tokens that other axes also emit. Two prior inline copies of this
- *  map (`keeper-detail-alert-strip.ts:201-205` and
- *  `goals/goal-tree.ts:194-199`) were identical 4-entry literals —
- *  consolidating here closes the duplicate-definition surface in the
- *  same spirit as #16343 (5th invariant grid). */
-const TRUST_DISPOSITION_LABELS: Record<string, string> = {
+ *  tokens that other axes also emit. `Degraded` shows as the server
+ *  sends it. */
+const TRUST_DISPOSITION_LABELS: Record<TrustDisposition, string> = {
+  Pass: '통과',
   Alert: '경보',
   Blocked: '차단',
-  Pause: '일시정지',
-  Pass: '통과',
+  Degraded: 'Degraded',
 }
 
-export function trustDispositionLabel(value: string | null | undefined): string | null {
-  if (!value) return null
-  return TRUST_DISPOSITION_LABELS[value] ?? value
+export function trustDispositionLabel(value: TrustDisposition | null | undefined): string | null {
+  return value ? TRUST_DISPOSITION_LABELS[value] : null
 }
 
 /** Scope tag for runtime-outcome rendering.

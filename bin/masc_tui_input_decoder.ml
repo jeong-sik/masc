@@ -158,7 +158,7 @@ let x10_event t ~button ~column ~row =
       | [ Held_left ] when not t.x10_ambiguous ->
           t.x10_held <- [];
           [ Mouse_left_release (row, column) ]
-      | _ :: rest ->
+      | (Held_left)::rest | (Held_other)::rest ->
           t.x10_held <- rest;
           (match rest with [] -> t.x10_ambiguous <- false | _ :: _ -> ());
           key "unknown-esc")

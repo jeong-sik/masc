@@ -16,16 +16,15 @@ type t =
     (** Store a response with a TTL in seconds. *)
   }
 
-(** Compute a deterministic cache key from request parameters.
+(** Compute a deterministic identity component from request parameters.
 
-    Every {!Provider_config.t} field that changes what the provider is asked
-    reaches the key, along with the messages and tools. Transport limits,
-    delivery-shape flags, the local rotation counter, and the capability
-    overrides that gate which fields may be sent are excluded; [cache.ml]
-    names each exclusion at the destructuring. The record is matched field by
-    field, so a new field stops the build until it is placed on one side.
+    This retains conservative caller parameters, endpoint and secret identity.
+    Transport-only settings are excluded; the config record is matched field
+    by field so a new field requires an explicit decision.
 
-    Two identical requests always produce the same key. *)
+    This component does not include provider projection or resolved catalog
+    defaults. Use {!http_request_fingerprint} for HTTP response-cache lookup.
+    Two identical inputs always produce the same component. *)
 val request_fingerprint
   :  config:Provider_config.t
   -> messages:Types.message list
@@ -33,9 +32,22 @@ val request_fingerprint
   -> unit
   -> string
 
-(** Serialize an [api_response] to JSON for caching. *)
+(** Bind the parameter identity, including endpoint and credential identity,
+    to the exact serialized HTTP body that will be dispatched. *)
+val http_request_fingerprint
+  :  config:Provider_config.t
+  -> messages:Types.message list
+  -> ?tools:Yojson.Safe.t list
+  -> http_codec:Provider_http_codec.t
+  -> body:string
+  -> unit
+  -> string
+
+(** Serialize an [api_response] to JSON for caching, preserving its original
+    inference telemetry and reasoning source. *)
 val response_to_json : Types.api_response -> Yojson.Safe.t
 
 (** Deserialize a cached JSON back to [api_response].
-    Returns [None] if the JSON is malformed or schema-incompatible. *)
+    Returns [None] if the JSON or telemetry is malformed, missing required
+    fields, or schema-incompatible. No source is inferred from a new request. *)
 val response_of_json : Yojson.Safe.t -> Types.api_response option

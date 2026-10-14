@@ -409,53 +409,18 @@ type keeper_phase_counts =
 let empty_keeper_phase_counts =
   { running = 0; failing = 0; recovering = 0 }
 
-type keeper_phase_detail =
-  { phase : string
-  ; last_failure_reason : string option
-  ; last_error : string option
-  ; restart_count : int
-  ; latest_crash_at : float option
-  ; latest_crash_reason : string option
-  }
-
 type keeper_phase_snapshot =
   { counts : keeper_phase_counts
   ; running_names : string list
   ; recovering_names : string list
   ; configuration_blocked_names : string list
   ; official_client_recovery_required_names : string list
-  ; phase_values : (string * Keeper_state_machine.phase) list
-  ; phase_details : (string * keeper_phase_detail) list
-  }
-
-let keeper_phase_detail_of_entry (entry : Keeper_registry.registry_entry) =
-  let latest_crash_at, latest_crash_reason =
-    match entry.crash_log with
-    | (ts, reason) :: _ -> (Some ts, Some reason)
-    | [] -> (None, None)
-  in
-  {
-    phase = Keeper_state_machine.phase_to_string entry.phase;
-    last_failure_reason =
-      Option.map Keeper_registry.failure_reason_to_string entry.last_failure_reason;
-    last_error = entry.last_error;
-    restart_count = entry.restart_count;
-    latest_crash_at;
-    latest_crash_reason;
   }
 
 let keeper_phase_snapshot ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.fold_left
        (fun acc (entry : Keeper_registry.registry_entry) ->
-         let acc =
-            {
-              acc with
-              phase_values = (entry.name, entry.phase) :: acc.phase_values;
-              phase_details =
-                (entry.name, keeper_phase_detail_of_entry entry) :: acc.phase_details;
-            }
-          in
           let counts = acc.counts in
           let capacity_eligible = not entry.meta.paused in
           let is_configuration_blocked =
@@ -464,14 +429,20 @@ let keeper_phase_snapshot ?base_path () =
               , Some (Keeper_registry.Turn_configuration_error _) )
               when capacity_eligible ->
               true
-            | _ -> false
+            | (Keeper_state_machine.Failing, Some (Keeper_registry_types.Operator_interrupt | (Keeper_registry_types.Heartbeat_consecutive_failures _ | (Keeper_registry_types.Turn_consecutive_failures _ | (Keeper_registry_types.Provider_runtime_error _ | (Keeper_registry_types.Official_client_recovery_required _ | (Keeper_registry_types.Fiber_unresolved _ | Keeper_registry_types.Exception _)))))))
+            | (Keeper_state_machine.Failing, None)
+            | ((Keeper_state_machine.Offline | (Keeper_state_machine.Running | (Keeper_state_machine.Draining | (Keeper_state_machine.Paused | (Keeper_state_machine.Stopped | (Keeper_state_machine.Crashed | Keeper_state_machine.Restarting)))))), _)
+            | (Failing, Some (Turn_configuration_error _)) -> false
           in
           let requires_session_recovery =
             match entry.phase, entry.last_failure_reason with
             | ( Keeper_state_machine.Failing
               , Some (Keeper_registry.Official_client_recovery_required _) )
               when capacity_eligible -> true
-            | _ -> false
+            | (Keeper_state_machine.Failing, Some (Keeper_registry_types.Operator_interrupt | (Keeper_registry_types.Heartbeat_consecutive_failures _ | (Keeper_registry_types.Turn_consecutive_failures _ | (Keeper_registry_types.Provider_runtime_error _ | (Keeper_registry_types.Turn_configuration_error _ | (Keeper_registry_types.Fiber_unresolved _ | Keeper_registry_types.Exception _)))))))
+            | (Keeper_state_machine.Failing, None)
+            | ((Keeper_state_machine.Offline | (Keeper_state_machine.Running | (Keeper_state_machine.Draining | (Keeper_state_machine.Paused | (Keeper_state_machine.Stopped | (Keeper_state_machine.Crashed | Keeper_state_machine.Restarting)))))), _)
+            | (Failing, Some (Official_client_recovery_required _)) -> false
           in
           (* Phase inventory is not execution truth. Executability is projected
              separately through the shared closed owner-execution ADT. A
@@ -486,7 +457,10 @@ let keeper_phase_snapshot ?base_path () =
               when capacity_eligible && not is_configuration_blocked
                    && not requires_session_recovery ->
               true
-            | _ -> false
+            | Keeper_state_machine.Offline | Keeper_state_machine.Running
+            | Keeper_state_machine.Draining | Keeper_state_machine.Paused
+            | Keeper_state_machine.Stopped | Keeper_state_machine.Crashed
+            | Keeper_state_machine.Restarting | Failing -> false
           in
           let recovering =
             if is_recovering then counts.recovering + 1 else counts.recovering
@@ -508,7 +482,6 @@ let keeper_phase_snapshot ?base_path () =
           match entry.phase with
           | Keeper_state_machine.Running when capacity_eligible ->
             {
-              acc with
               counts = { counts with running = counts.running + 1 };
               running_names = entry.name :: acc.running_names;
               recovering_names;
@@ -541,8 +514,6 @@ let keeper_phase_snapshot ?base_path () =
          recovering_names = [];
          configuration_blocked_names = [];
          official_client_recovery_required_names = [];
-         phase_values = [];
-         phase_details = [];
        }
   |> fun snapshot ->
   {
@@ -553,10 +524,6 @@ let keeper_phase_snapshot ?base_path () =
       sorted_unique_strings snapshot.configuration_blocked_names;
     official_client_recovery_required_names =
       sorted_unique_strings snapshot.official_client_recovery_required_names;
-    phase_values =
-      List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_values;
-    phase_details =
-      List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_details;
   }
 
 let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
@@ -854,8 +821,7 @@ let active_task_assignment (task : Masc_domain.task) =
       Some
         (Completion_authority_pending
            { producer_agent_name = assignee; submitted_at; verification_id })
-  | task_status ->
-      Masc_domain.task_assignee_of_status task_status
+  | (Types_core.Todo | Types_core.Claimed _ | Types_core.InProgress _ | Types_core.Done _ | Types_core.Cancelled _) as task_status -> Masc_domain.task_assignee_of_status task_status
       |> Option.map (fun assignee ->
              Keeper_task_owner
                {

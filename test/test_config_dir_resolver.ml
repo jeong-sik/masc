@@ -129,9 +129,9 @@ let test_sanitize_inherited_test_base_path_opt_drops_captured_home_path () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_base_path_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/tmp/captured-home/me")
-      ~current:(Some "/tmp/captured-home/me")
-      ~home:(Some "/tmp/captured-home/me")
+      ~initial:(Some "/tmp/captured-home/ws")
+      ~current:(Some "/tmp/captured-home/ws")
+      ~home:(Some "/tmp/captured-home/ws")
   in
   check (option string) "same captured MASC_BASE_PATH ignored" None actual
 
@@ -139,12 +139,12 @@ let test_sanitize_inherited_test_base_path_opt_keeps_sibling_prefix_path () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_base_path_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/tmp/captured-home/me2")
-      ~current:(Some "/tmp/captured-home/me2")
-      ~home:(Some "/tmp/captured-home/me")
+      ~initial:(Some "/tmp/captured-home/ws2")
+      ~current:(Some "/tmp/captured-home/ws2")
+      ~home:(Some "/tmp/captured-home/ws")
   in
   check (option string) "sibling path preserved"
-    (Some "/tmp/captured-home/me2") actual
+    (Some "/tmp/captured-home/ws2") actual
 
 let test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path () =
   let actual =
@@ -152,7 +152,7 @@ let test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path () =
       ~running_under_test_executable:true ~allow_inherited:false
       ~initial:(Some "/tmp/test-agent_core-worker-base")
       ~current:(Some "/tmp/test-agent_core-worker-base")
-      ~home:(Some "/tmp/captured-home/me")
+      ~home:(Some "/tmp/captured-home/ws")
   in
   check (option string) "process temp base preserved"
     (Some "/tmp/test-agent_core-worker-base") actual
@@ -409,10 +409,15 @@ let test_rfc0121_locks_dir () =
     "/x/.masc/locks"
     (Config_dir_resolver.locks_dir ~base_path:"/x")
 
-let test_rfc0121_data_dir () =
-  check string "data is sibling of .masc"
-    "/x/data"
-    (Config_dir_resolver.data_dir ~base_path:"/x")
+let test_wiki_dir () =
+  check string "wiki under .masc"
+    "/x/.masc/wiki"
+    (Config_dir_resolver.wiki_dir ~base_path:"/x")
+
+let test_event_queue_bulk_backups_dir () =
+  check string "bulk backups under .masc"
+    "/x/.masc/event-queue-bulk-backups"
+    (Config_dir_resolver.event_queue_bulk_backups_dir ~base_path:"/x")
 
 let test_rfc0121_repositories_toml () =
   check string "repositories.toml under .masc/config"
@@ -424,6 +429,23 @@ let test_runtime_toml_path_uses_explicit_base_path () =
     check string "runtime.toml under explicit workspace config root"
       "/x/.masc/config/runtime.toml"
       (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:"/x"))
+
+let test_child_workspace_does_not_inherit_parent_config () =
+  let inherited =
+    [| "PATH=/bin"; "MASC_CONFIG_DIR=/mounted/read-only-config";
+       "MASC_BASE_PATH=/mounted/parent"; "MASC_CONFIG_DIR=/other/parent";
+       "MODEL_CREDENTIAL=value=with=equals" |]
+  in
+  let original = Array.copy inherited in
+  let child = Config_dir_resolver.environment_for_workspace
+      ~cwd:"/sandbox" ~base_path:"capture/.masc" ~env:inherited in
+  check (list string) "child uses the workspace it will validate and start"
+    [ "PATH=/bin"; "MODEL_CREDENTIAL=value=with=equals";
+      "MASC_BASE_PATH=/sandbox/capture";
+      "MASC_CONFIG_DIR=/sandbox/capture/.masc/config" ]
+    (Array.to_list child);
+  check (list string) "parent environment is unchanged"
+    (Array.to_list original) (Array.to_list inherited)
 
 let test_rfc0121_masc_root_agrees_with_common () =
   (* SSOT bridge — resolver helper must produce the same path as the
@@ -583,11 +605,15 @@ let () =
           test_case "repos_dir" `Quick test_rfc0121_repos_dir;
           test_case "tmp_dir" `Quick test_rfc0121_tmp_dir;
           test_case "locks_dir" `Quick test_rfc0121_locks_dir;
-          test_case "data_dir sibling of .masc" `Quick test_rfc0121_data_dir;
+          test_case "wiki_dir" `Quick test_wiki_dir;
+          test_case "event_queue_bulk_backups_dir" `Quick
+            test_event_queue_bulk_backups_dir;
           test_case "repositories_toml under config" `Quick
             test_rfc0121_repositories_toml;
           test_case "runtime.toml uses explicit workspace config root" `Quick
             test_runtime_toml_path_uses_explicit_base_path;
+          test_case "child workspace does not inherit parent config" `Quick
+            test_child_workspace_does_not_inherit_parent_config;
           test_case "masc_root agrees with Common" `Quick
             test_rfc0121_masc_root_agrees_with_common;
         ] );

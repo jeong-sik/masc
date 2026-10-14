@@ -139,13 +139,18 @@ val footer_hints_config : pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
     the union, with pane restrictions explained by each binding. *)
 
-val footer_hints_board_compose_writing : string
+val footer_hints_board_compose_writing : reply:bool -> string
 (** The Board draft while it takes letters: a literal "type to write" and the
-    keys that are not letters. *)
+    keys that are not letters. [reply] drops the attach key a comment has no
+    wire for. *)
 
 val footer_hints_goal_drop_reason : string
 (** A Goal drop reason while it takes letters: a literal "type why" and the
     keys that are not letters. *)
+
+val footer_hints_board_attach_input : string
+(** The Board attach path input while it takes letters: a literal "type the
+    file path" and its two keys. The path itself is drawn on the pane. *)
 
 val footer_hints_board_compose_armed : reply:bool -> string
 (** The Board draft's send menu after Esc. [reply] drops the hearth cycle a

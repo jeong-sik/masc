@@ -445,8 +445,7 @@ let invoke_post_hook
       Some
         (Deferred_hook_failure
            (hook_execution_error ~hook_name ~stage ~tool_name ~invocation ~detail))
-    | decision ->
-      let stage = Hooks.stage_of_event event in
+    | (Hooks.AdjustParams _ | Hooks.ElicitInput _ | Hooks.ElicitToolApproval _ | Hooks.Nudge _ | Hooks.Block _) as decision -> let stage = Hooks.stage_of_event event in
       Some
         (Deferred_hook_failure
            (hook_execution_error
@@ -517,7 +516,7 @@ let find_and_execute_tool_with_index
         | Deferred_hook_failure _, Deferred_observer_failure _ ->
           first_deferred_failure := Some failure;
           failure, primary
-        | _ -> primary, failure
+        | (Deferred_hook_failure _, Deferred_hook_failure _) | (Deferred_observer_failure _, _) -> primary, failure
       in
       Log.error
         _log

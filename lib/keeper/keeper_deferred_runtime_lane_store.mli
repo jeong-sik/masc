@@ -12,9 +12,9 @@ type error =
 
 val error_to_string : error -> string
 
-(** [keepers_dir] is the cluster-aware keeper runtime directory
-    ({!Workspace.keepers_runtime_dir}); two named clusters with the same keeper
-    name keep separate hints. [base_path] is the durable-write ownership root. *)
+(** [keepers_dir] is the keeper runtime directory
+    ({!Workspace.keepers_runtime_dir}). [base_path] is the durable-write
+    ownership root. *)
 val path_for : keepers_dir:string -> keeper_name:string -> string
 
 val load :

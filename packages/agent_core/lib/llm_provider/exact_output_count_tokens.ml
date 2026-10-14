@@ -67,6 +67,10 @@ let count_tokens_body_of_generation_artifact generation_artifact =
     | `Assoc fields ->
       fields
       |> List.filter (fun (name, _) -> not (generation_only_field name))
+      |> List.map (function
+        | "thinking", `Assoc thinking ->
+          "thinking", `Assoc (List.remove_assoc "block_binding" thinking)
+        | field -> field)
       |> fun fields -> Ok (Yojson.Safe.to_string (`Assoc fields))
     | _ ->
       Error

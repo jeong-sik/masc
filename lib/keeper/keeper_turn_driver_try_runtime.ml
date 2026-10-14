@@ -84,11 +84,8 @@ let candidate_access_should_try_next error =
      | Llm_provider.Candidate_fault.Unknown_after_dispatch -> false)
   | None ->
     (match error with
-     | Agent_core.Error.Provider
-         ( Llm_provider.Error.AuthError _
-         | Llm_provider.Error.AuthorizationError _
-         | Llm_provider.Error.NotFound _ ) -> true
-     | Agent_core.Error.Provider _
+     | Agent_core.Error.Provider provider_error ->
+       Llm_provider.Error.is_candidate_access_rejection provider_error
      | Agent_core.Error.Agent _
      | Agent_core.Error.Mcp _
      | Agent_core.Error.Config _

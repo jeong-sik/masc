@@ -21,6 +21,11 @@ val append_keeper_metrics : Workspace.config -> string -> Yojson.Safe.t -> unit
 (** Canonical base directory of {!keeper_metrics_store}. *)
 val keeper_metrics_dir : Workspace.config -> string -> string
 
+val keeper_store_location :
+  Workspace.config -> string -> Dated_jsonl.Store.Keeper.t -> Dated_jsonl.Store.location
+(** Where one of a keeper's date-split stores lives. Makes the keepers
+    directory when it is missing. *)
+
 val execution_receipts_dirname : string
 (** Runtime subdirectory under each keeper directory for date-split execution
     receipt JSONL. *)

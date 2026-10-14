@@ -651,7 +651,7 @@ Every keeper under `.masc/keepers/`, sorted by name.
 
 `Mode` is how the keeper is started — `M` manual, `D` on demand, `A`
 autonomous — and `S` is the sandbox profile as a letter — `D` docker, `M`
-microvm, `L` local — because a sandbox is a name, not an on/off. `Mode S` and
+microvm, `R` remote_ssh — because a sandbox is a name, not an on/off. `Mode S` and
 `LIFECYCLE / RUNTIME` are shown only when the pane has room for them. A keeper
 whose tool gate is YOLO draws its name in red; the stance has no column of its
 own. `TURN` is the time since the keeper's last turn (the lifetime turn

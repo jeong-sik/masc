@@ -32,8 +32,8 @@ let register (h : hook) : unit =
   in
   loop ()
 
-let record_coverage_gap ?base_dir ?meta ~callback ~error () =
-  match base_dir, meta with
+let record_coverage_gap ?masc_root ?meta ~callback ~error () =
+  match masc_root, meta with
   | Some masc_root, Some (meta : Keeper_meta_contract.keeper_meta) -> (
       try
         Telemetry_coverage_gap.record
@@ -55,7 +55,7 @@ let record_coverage_gap ?base_dir ?meta ~callback ~error () =
           (Printexc.to_string gap_exn))
   | _ -> ()
 
-let run ?base_dir ?meta ~keeper_id (ev : event) : unit =
+let run ?masc_root ?meta ~keeper_id (ev : event) : unit =
   (* Reverse once at run time so call order matches registration order
      (the documented contract). The reversal is O(n) but n is tiny in
      practice (a handful of subsystem hooks). *)
@@ -78,7 +78,7 @@ let run ?base_dir ?meta ~keeper_id (ev : event) : unit =
         Log.Server.warn
           "[KeeperLifecycleHooks] hook raised on keeper_id=%s: %s"
           keeper_id error;
-        record_coverage_gap ?base_dir ?meta ~callback:callback_label ~error ())
+        record_coverage_gap ?masc_root ?meta ~callback:callback_label ~error ())
     hs
 
 let registered_count () : int = List.length (Atomic.get hooks)

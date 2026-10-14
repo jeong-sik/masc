@@ -47,8 +47,6 @@ val composite_claim_attempt_json :
 (** The claim attempt for [keeper_name] inside the window. An unreadable
     window renders [status = "tool_log_unavailable"] with the index's
     [detail], not the [not_observed] shape. *)
-val find_override_field_source :
-  string -> Yojson.Safe.t -> Yojson.Safe.t option
 val composite_config_drift_json :
   config:Workspace.config ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
@@ -93,14 +91,12 @@ val runtime_attention_state_to_wire : runtime_attention_state -> string
 type composite_runtime_attention = {
   cra_is_live : bool;
   cra_fiber_stop_requested : bool;
-  cra_stale_long_enough : bool;
   cra_idle_attention : bool;
   cra_blocked : bool;
   cra_execution_current : bool;
   cra_stale_execution_receipt : bool;
   cra_live_turn_started_at : float option;
   cra_live_turn_last_progress_at : float option;
-  cra_stale_without_live_turn : bool;
   cra_needs_attention : bool;
   cra_reason : string option;
   cra_state : runtime_attention_state;

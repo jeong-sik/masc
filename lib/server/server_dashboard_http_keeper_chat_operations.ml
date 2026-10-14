@@ -125,6 +125,7 @@ let api_error_of_command_error error =
      | Unknown_operation -> unknown_operation message
      | Operation_not_queued -> conflict "not_queued" message
      | Operation_idempotency_conflict -> conflict "idempotency_conflict" message
+     | Operation_native_call_unsettled -> conflict "native_call_unsettled" message
      | Operation_store_unavailable ->
        unavailable "store_unavailable" message)
   | Command_rejected (Owner.Store_unavailable _) ->

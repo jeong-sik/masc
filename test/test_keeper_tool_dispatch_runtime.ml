@@ -5420,9 +5420,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              (match exact_route with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
-                     Keeper_runtime_failure_route.Terminal_effect_runtime_failure
-                 ; _
-                 } ->
+                     Keeper_runtime_failure_route.Terminal_effect_runtime_failure } ->
                ()
              | _ -> fail "typed terminal failure did not reach its exact route");
             let transient_terminal_error =
@@ -5444,9 +5442,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
-                     Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable
-                 ; _
-                 } ->
+                     Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable } ->
                ()
              | Keeper_runtime_failure_route.Retry_after_observed _ ->
                fail "unknown transient terminal effect was requeued"
@@ -7435,7 +7431,7 @@ value = {surface="dashboard", content="must not run"}
       Masc.Keeper_tool_call_log.reset_for_testing ();
       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
       if break_evidence then (
-        let path = Filename.concat (Masc.Workspace.masc_root_dir config) "skill-composition-evidence-v1" in
+        let path = Filename.concat (Masc.Workspace.masc_dir config) "skill-composition-evidence-v1" in
         Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
       Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
       Browser_lane.install_automation_executor (Some (function
@@ -7892,7 +7888,7 @@ default = "local.sample"
        if break_evidence
        then (
          let path =
-           Filename.concat (Masc.Workspace.masc_root_dir config) "skill-composition-evidence-v1"
+           Filename.concat (Masc.Workspace.masc_dir config) "skill-composition-evidence-v1"
          in
          Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
        let lane_addon_exports = (Masc.Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name).exports in
@@ -8021,14 +8017,24 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
          Config_dir_resolver.keepers_dir_for_base_path
            ~base_path:config.base_path
        in
-       let snapshot_path =
-         Masc.Keeper_memory_os_current.path_for_keepers_dir
-           ~keepers_dir
-           ~keeper_id:meta.name
-       in
-       (* A directory at the canonical snapshot path forces the writable
-          producer to report its exact unknown-effect persistence failure. *)
-       Fs_compat.mkdir_p snapshot_path;
+       (* An ordinary observation is saved to the pending admission queue while
+          the Librarian runs (the default), and to the current snapshot only
+          when it is off or the write is source-bound. A directory at the
+          canonical path of either store makes that store's open for writing
+          fail whatever user the test runs as, so the writable producer
+          reports its exact unknown-effect persistence failure whichever
+          route the write takes (pending_admission_persistence_failed or
+          persistence_failed). A directory at the snapshot path alone no
+          longer fails the default route: the write succeeds into the queue. *)
+       List.iter
+         (fun path -> Fs_compat.mkdir_p path)
+         [ Masc.Keeper_memory_os_current.path_for_keepers_dir
+             ~keepers_dir
+             ~keeper_id:meta.name
+         ; Masc.Keeper_memory_admission_queue.path
+             ~keepers_dir
+             ~keeper_id:meta.name
+         ];
        let skill_catalog =
          skill_catalog_of_composition ~name:"unknown-write-before-post" unknown_effect_terminal_failure_composition
        in

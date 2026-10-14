@@ -39,7 +39,7 @@ let recent_tool_host_failures ~now () =
               let fingerprint =
                 String.concat "|"
                   [
-                    envelope.cause_code;
+                    Failure_envelope.tool_host_cause_code envelope.cause;
                     Option.value ~default:"" envelope.entity_id;
                     envelope.summary;
                   ]
@@ -49,7 +49,7 @@ let recent_tool_host_failures ~now () =
               else
                 let item =
                   {
-                    kind = envelope.cause_code;
+                    kind = Failure_envelope.tool_host_cause_code envelope.cause;
                     severity =
                       operator_severity_of_failure_envelope envelope.severity;
                     summary = envelope.summary;
@@ -93,43 +93,21 @@ let build_workspace_attention_items config =
     (recent_tool_host_failures ~now:(Time_compat.now ()) ()
     @ pending_items)
 
-let assoc_bool_field ~default key fields =
-  match List.assoc_opt key fields with
-  | Some (`Bool value) -> value
-  | _ -> default
-
-let assoc_string_field key fields =
-  match List.assoc_opt key fields with
-  | Some (`String value) ->
-      let value = String.trim value in
-      if String.equal value "" then None else Some value
-  | _ -> None
-
+(* [Paused_on_blocker] and [Paused] share the wire reason, so both are
+   [keeper_paused]; the row's [next_human_action] tells them apart. *)
 let keeper_attention_kind reason =
-  match reason with
-  | Some reason -> "keeper_" ^ reason
-  | None -> "keeper_attention"
-
-let keeper_attention_severity ~reason ~runtime_blocker_class =
-  match reason, runtime_blocker_class with
-  | Some "runtime_blocked", _
-  | Some "provider_timeout", _ -> Sev_bad
-  | _, Some _ -> Sev_bad
-  | _ -> Sev_warn
+  "keeper_" ^ Keeper_attention_reason.to_wire reason
 
 (* Which Keeper and why. Every item in this projection needs operator
    attention, and every surface that draws one titles its list for that, so
    the row carries only what differs between rows: the Keeper's name, the
    attention reason after a colon, and the runtime blocker summary in
-   parentheses. The two readings keep their own marks so a row with only one
-   of them still says which it is. An item with neither has nothing else to
-   say, and the phrase is its whole reading. *)
+   parentheses when there is one. *)
 let keeper_attention_summary ~name ~reason ~runtime_blocker_summary =
-  match reason, runtime_blocker_summary with
-  | Some reason, Some summary -> Printf.sprintf "%s: %s (%s)" name reason summary
-  | Some reason, None -> Printf.sprintf "%s: %s" name reason
-  | None, Some summary -> Printf.sprintf "%s (%s)" name summary
-  | None, None -> Printf.sprintf "%s needs operator attention" name
+  let reason = Keeper_attention_reason.to_wire reason in
+  match runtime_blocker_summary with
+  | Some summary -> Printf.sprintf "%s: %s (%s)" name reason summary
+  | None -> Printf.sprintf "%s: %s" name reason
 
 (* Waiting connector messages are read off the event queue, not off the
    attention log. The queue is what makes a Keeper judge a message: a turn
@@ -151,7 +129,13 @@ let connector_attention_pending_selections ~base_path ~keeper_name =
   |> List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
     match selection.Keeper_event_queue_state.source.payload with
     | Keeper_event_queue.Connector_attention _ -> true
-    | _ -> false)
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+    | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+    | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+    | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+    | Keeper_event_queue.Task_outcome _ -> false)
 
 let connector_attention_evidence ~keeper_name selections =
   let event_ids =
@@ -161,7 +145,13 @@ let connector_attention_evidence ~keeper_name selections =
             match selection.Keeper_event_queue_state.source.payload with
             | Keeper_event_queue.Connector_attention { event_id; _ } ->
               Some (`String event_id)
-            | _ -> None)
+            | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+            | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
+            | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
+            | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
+            | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+            | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+            | Keeper_event_queue.Task_outcome _ -> None)
   in
   let oldest =
     List.fold_left
@@ -202,26 +192,36 @@ let connector_attention_projection ~base_path ~keeper_name =
       }
 
 let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta) =
-  let attention_fields = Keeper_status_bridge.attention_fields_json config meta in
-  if not (assoc_bool_field ~default:false "needs_attention" attention_fields)
-  then None
-  else
-    let blocker_fields = Keeper_status_bridge.runtime_blocker_fields_json config meta in
-    let reason = assoc_string_field "attention_reason" attention_fields in
-    let runtime_blocker_class =
-      assoc_string_field "runtime_blocker_class" blocker_fields
+  let runtime_blocker = Keeper_status_bridge.runtime_blocker_surface_opt config meta in
+  let approval_queue = Keeper_status_bridge.read_approval_queue_attention config meta in
+  let attention =
+    Keeper_status_bridge.attention_of_surface config meta runtime_blocker approval_queue
+  in
+  match attention with
+  | None -> None
+  | Some reason ->
+    let blocker_fields =
+      Keeper_status_bridge.runtime_blocker_fields_json_of_surface meta runtime_blocker
     in
     let runtime_blocker_summary =
-      assoc_string_field "runtime_blocker_summary" blocker_fields
+      Option.map
+        (fun (blocker : Keeper_status_bridge.runtime_blocker_surface) ->
+           String.trim (Lazy.force blocker.summary))
+        runtime_blocker
     in
-    let severity = keeper_attention_severity ~reason ~runtime_blocker_class in
+    (* A runtime blocker is the bad case. The reason "runtime_blocked" comes
+       only with one, so the blocker alone decides. *)
+    let severity = if Option.is_some runtime_blocker then Sev_bad else Sev_warn in
     let evidence =
       `Assoc
         [
           ("source", `String "keeper_status_bridge");
           ("keeper_name", `String meta.name);
           ("paused", `Bool meta.paused);
-          ("attention", `Assoc attention_fields);
+          ( "attention",
+            `Assoc
+              (Keeper_status_bridge.attention_fields_json_of meta approval_queue attention)
+          );
           ("runtime_blocker", `Assoc blocker_fields);
         ]
     in
@@ -267,7 +267,6 @@ let workspace_state_json config =
     `Assoc
       [
         ("project", `String (Filename.basename config.base_path));
-        ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool false);
         ("pause_reason", `Null);
       ]
@@ -276,7 +275,6 @@ let workspace_state_json config =
     `Assoc
       [
         ("project", `String state.project);
-        ("cluster", `String (Env_config_core.cluster_name ()));
         ("paused", `Bool state.paused);
         ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
       ]

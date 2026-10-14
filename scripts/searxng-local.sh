@@ -11,8 +11,6 @@ CONTAINER="${MASC_SEARXNG_CONTAINER:-masc-searxng}"
 HOST="${MASC_SEARXNG_HOST:-127.0.0.1}"
 PORT="${MASC_SEARXNG_PORT:-8888}"
 CONTAINER_PORT="${MASC_SEARXNG_CONTAINER_PORT:-8080}"
-BASE_PATH="${MASC_BASE_PATH:-$HOME/me}"
-CONFIG_DIR="${MASC_SEARXNG_CONFIG_DIR:-$BASE_PATH/.local/share/masc-searxng}"
 TIMEOUT_SEC="${MASC_SEARXNG_SMOKE_TIMEOUT_SEC:-10}"
 
 usage() {
@@ -21,6 +19,7 @@ Usage: scripts/searxng-local.sh <start|status|smoke|logs|stop> [args]
 
 Commands:
   start          Create settings.yml if needed and start the Docker container.
+                 Needs MASC_SEARXNG_CONFIG_DIR or MASC_BASE_PATH.
   status         Print container status and probe /healthz when running.
   smoke [query]  Run a JSON search request. Defaults to "Tortoise Glass Museum".
   logs [lines]   Show recent container logs. Defaults to 80 lines.
@@ -38,6 +37,20 @@ EOF
 die() {
   echo "error: $*" >&2
   exit 1
+}
+
+# Only `start` reads the config directory, so the other commands run
+# without MASC_BASE_PATH.
+config_dir() {
+  local named="${MASC_SEARXNG_CONFIG_DIR:-}" base="${MASC_BASE_PATH:-}"
+  # A value of only spaces names nothing.
+  if [ -n "${named//[[:space:]]/}" ]; then
+    printf '%s\n' "$named"
+  elif [ -n "${base//[[:space:]]/}" ]; then
+    printf '%s\n' "$base/.local/share/masc-searxng"
+  else
+    die "MASC_SEARXNG_CONFIG_DIR or MASC_BASE_PATH is required"
+  fi
 }
 
 require_docker() {
@@ -95,6 +108,7 @@ container_running() {
 }
 
 cmd_start() {
+  CONFIG_DIR="$(config_dir)"
   require_docker
   ensure_settings
 

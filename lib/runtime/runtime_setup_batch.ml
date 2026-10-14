@@ -107,12 +107,8 @@ let observe_inventory ~base_path = io (fun () ->
   Ok (revision files,Runtime.config_observation ~path (content files)))
 let observe ~base_path = observe_inventory ~base_path |> Result.map fst
 let stage_env base =
-  let config,_ = paths base in
-  let replaced = ["MASC_BASE_PATH";"MASC_CONFIG_DIR"] in
-  let kept = Unix.environment () |> Array.to_list |> List.filter (fun value ->
-    let key = match String.index_opt value '=' with None -> value | Some n -> String.sub value 0 n in
-    not (List.mem key replaced)) in
-  Array.of_list (kept @ ["MASC_BASE_PATH="^base;"MASC_CONFIG_DIR="^config])
+  Config_dir_resolver.environment_for_workspace
+    ~cwd:(Sys.getcwd ()) ~base_path:base ~env:(Unix.environment ())
 type child = { status : Unix.process_status; stdout : string; stderr : string }
 let run ~binary ~base args =
   match Process_eio.run_argv_with_status_split_or_refusal ~env:(stage_env base)

@@ -348,15 +348,19 @@ let test_attention_grades_the_operators_tasks () =
           }
       ]
   in
-  Alcotest.(check (list string)) "graded by who is blocked and on what"
-    [ "held_without_actor"; "producer_record_unreadable" ]
-    (List.map (fun (item : Dashboard_attention.attention_item) -> item.category) items);
-  Alcotest.(check (list bool)) "a repair is not an operator decision"
-    [ true; false ]
-    (List.map
-       (fun (item : Dashboard_attention.attention_item) ->
-          item.severity = Dashboard_attention.Critical)
-       items)
+  let severity =
+    Alcotest.testable
+      (fun ppf (severity : Dashboard_attention.severity) ->
+         Format.pp_print_string ppf
+           (match severity with
+            | Critical -> "Critical"
+            | Warning -> "Warning"
+            | Info -> "Info"))
+      ( = )
+  in
+  Alcotest.(check (list severity)) "a repair is a warning, not an operator decision"
+    [ Dashboard_attention.Critical; Dashboard_attention.Warning ]
+    (List.map (fun (item : Dashboard_attention.attention_item) -> item.severity) items)
 
 let test_attention_compact_empty () =
   let result = Dashboard_attention.compact_summary [] in

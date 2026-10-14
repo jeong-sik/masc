@@ -49,11 +49,53 @@ not the activity control.
 
 ## Incomplete and rejected readings
 
-The reconciler requires a complete declaration and retained-binding inventory
-before applying changes. An unrelated unreadable file can therefore defer a
-valid off request; the configuration reports that cleanup awaits a complete
-reading. The observed worker remains visible. Malformed or duplicate declarations
-keep the last applied worker; invalid input is never interpreted as off.
+The reconciler requires a complete declaration reading and a retained binding
+directory it can list before applying changes. An unrelated unreadable
+declaration file or a binding directory that cannot be listed can therefore
+defer a valid off request; the configuration reports that cleanup awaits a
+complete reading. The observed worker remains visible. Malformed or duplicate
+declarations keep the last applied worker; invalid input is never interpreted
+as off.
+
+Each retained binding file is read on its own. A file that cannot be read
+(it is not JSON, it records no read visibility or source access, or it has no
+instance id or observation sequence) is reported in the configuration issues
+with its path. The record is not rewritten, retired or cleaned up. What waits
+depends on whose record it is:
+
+- A record that names an installation holds back only that installation, and
+  only while the record is not detached. A detached record holds no worker, so
+  the installation applies. Persistent state is still checked against the
+  runtime recorded in a detached record.
+- A record whose configuration cannot be read could belong to any
+  installation, so every enabled installation waits. A record with no
+  configuration (a manual attach) holds none back.
+
+A detached record that names an installation stays listed under the
+configuration issues, and `slice` reports `complete: false` while any record
+cannot be read. Moving the file away clears both. A detached record that still
+states a valid `visibility` counts toward the installation's document owner. A
+disabled installation does not change its document owner while a record that
+may belong to it cannot be read; worker cleanup continues.
+
+To release a held installation, repair the record by adding `visibility` and
+`source_access`, or move the file away. Move only a detached file: the
+container of a record that is not detached is cleaned up only through a
+readable record.
+
+Both fields are JSON objects with a `kind` field. Any other shape, an extra
+field, or an empty keeper name makes the record unreadable again.
+
+- `visibility` says who may read the instance: `{"kind": "shared"}`,
+  `{"kind": "operator"}` or `{"kind": "keeper", "keeper": "<keeper name>"}`.
+- `source_access` says whose authority reads the sources:
+  `{"kind": "operator_configuration"}`,
+  `{"kind": "keeper", "keeper": "<keeper name>"}` or
+  `{"kind": "unauthenticated"}`.
+
+Records written by v0.48.0 or earlier have neither field. List them with
+`rg --files-without-match '"visibility"' <base-path>/.masc/lane-addons/bindings`
+and the same command with `'"source_access"'`.
 
 New Skill publications exclude workers that are stopping, including those whose
 cleanup failed and will retry. A complete declaration reading also withdraws

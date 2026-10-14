@@ -8,11 +8,6 @@ val json_string_opt_member : string -> Yojson.Safe.t -> string option
 
 val json_bool_opt_member : string -> Yojson.Safe.t -> bool option
 
-val assoc_bool_default :
-  string -> default:bool -> (string * Yojson.Safe.t) list -> bool
-
-val assoc_string_opt : string -> (string * Yojson.Safe.t) list -> string option
-
 val take : int -> 'a list -> 'a list
 
 val goal_ids_of_json : Yojson.Safe.t -> string list
@@ -54,7 +49,7 @@ val blocker_timeline_event :
   ?trace_id:string ->
   ?observed_at_unix:float ->
   ts_unix:float ->
-  runtime_blocker_fields:(string * Yojson.Safe.t) list ->
+  runtime_blocker:Keeper_status_bridge_blocker.runtime_blocker_surface option ->
   next_human_action:string option ->
   ?observation_only:bool ->
   unit ->

@@ -432,7 +432,59 @@ type collection =
 let collection = function
   | PersistenceLaneWaits | PersistenceLanePending | PersistenceLaneInFlight ->
     External_observable
-  | _ -> Metric_store
+  | Turns | InputTokens | OutputTokens | CacheCreationTokens | CacheReadTokens | UsageAnomalies
+  | TotalCostUsd | TurnScheduled | TurnCompleted | FailureRoute | IdleSeconds
+  | InFlightElapsedSeconds | SinceLastProgressSeconds | StreamProjectionEventCutoff
+  | MetricEmitDropped | ContextMaxObserved | TurnStarts | TurnReattempts | TurnRegressions
+  | TurnLatencyBucket | TurnLatencyByModelBucket | ProviderCooldownRemainingSec
+  | ProviderBlockDurationSec | TurnQueueDepth | SupervisorSweepStarts | SupervisorLastSweepUnixtime
+  | TurnHolderBookkeepingFailures | OperatorCompact | OperatorClear | ToolEmissionRegistrySize
+  | ToolEmissionPushes | ToolUnderusedAllowedCount | ToolUnderusedAllowed | PathRejection
+  | PathResolverIdentityMismatch | KeeperMetaOverlayDrift | HeartbeatSuccesses | HeartbeatFailures
+  | CleanupTrackingFailures | DispatchEventFailures | DirectiveFailures | ToolCallDuration
+  | ToolCallDurationBucket | WriteMetaFailures | MetaReadFailures | ApprovalQueueFailures
+  | ApprovalResolutionSignal | ProfileLoadFailures | FsFailures
+  | PersistencePreparationStageDuration | PersistencePreparationExamined | PersistenceLaneDuration
+  | CrashPersistenceFailures | KeepaliveSignalFailures | BoardSignalRoutedTotal
+  | BoardSignalCursorDeferredTotal | BoardSignalDeliveryTotal | BoardSignalNoWakeTotal
+  | BoardSignalAttentionCandidateTotal | MetaJsonFailures | ToolsAgent_coreFailures
+  | TurnUpUpdateFailures | AgentToolDispatchRuntimeFailures | PromptFailures | RunContextFailures
+  | SearchFilesFailures | TagDispatchFailures | TraceEmitFailures | TransitionAuditFailures
+  | ExecutionReceiptFailures | SessionCleanupFailures | ToolExecuteFailures
+  | LifecycleDispatchRejections | LifecycleTransactions | RecordingErrorDedup
+  | PausedStatePersistErrors | UnexpectedToolPartialTolerance | ToolCallTotal
+  | ProfileConfigConflicts | Agent_coreTimeoutClassifications | NoToolProvider | ProactiveOutcome
+  | TaskLoadFailures | ToolSelectionFailures | ReconcileFailures | DecisionAuditFlushFailures
+  | Agent_coreCancel | ClaimAutoProvision | WorkspaceInitFailures | PresenceSyncFailures
+  | StaleStormPaused | CycleExceptions | SnapshotReadFailures | SnapshotWriteFailures
+  | SseBroadcastFailures | WorkspaceHeartbeatFailures | TurnMetricsSnapshotFailures
+  | Agent_coreExecutionErrors | MemoryOsLibrarianFailures | MemoryActivityEmitFailures
+  | SupervisorSweepFailures | TomlReconcileSweepFailures | ToolUsageFlushFailures
+  | TurnTimeoutCommitted | TurnErrorAfterTools | RuntimeSyncFailures | LocalDiscoveryFailures
+  | ThinkingPersistFailures | CheckpointFailures | DecisionAuditRingOverflows | HitlSummaryOutcomes
+  | Agent_coreEnvKeyRejections | MemoryLaneUnitFailures | MemoryLaneSubmitted | MemoryLaneRanInline
+  | MemoryLaneDropped | MemoryLaneCoalesced | MemoryLanePending | MemoryLaneInFlight
+  | MemoryLaneLatestPending | MemoryLaneExecutionSlotBusy | WriteMetaCycleFailures
+  | MetricsSseFailures | ChatStoreFailures | ChatJournalAuditMismatches | ChatTransportFailures
+  | PersonNoteStoreFailures | KeeperMaterializationFailures | ObservationQueryFailures
+  | Agent_coreOnStop | InvariantViolations | FsmEdgeTransitions | TurnFsmTransitions
+  | TurnPhaseDuration | LifecycleTransitions | LifecycleCallbackFailures | EventBusDrain
+  | SupervisorCleanupFailures | RegistryUpdateDropped | RegistryOrphanThresholdBreached
+  | RegistryInvalidEntry | StimulusConsumed | UnsupportedStimulus | RestartAttempts
+  | RestartOutcomes | Agent_coreRunTimeout | RuntimeSelected | ToolUseFailure | ToolNotAllowed
+  | ReceiptUnmappedDisposition | ExecuteNetworkUpgrade | ExecuteLocalExecution
+  | DockerRuntimeDiscarded | ProactiveSkip | NoProgressStreak | UsageTrust | UsageAnomalyReason
+  | ConfigEnvParseFailures | PostTurnWireinFailures | TurnCleanupFailures
+  | MemoryRecallHistorySwallowedExceptions | MemoryRecallReadErrors | MemoryOsRecallUnavailable
+  | MemoryOsExplicitFactWrite | MemorySearch | RuntimeRequestWireBytes
+  | RuntimeHttpProbeJsonParseFailures | VisionAnalyze | VisionCandidateAttempts
+  | VisionIngestEvictions | VisionIngestErrors | VisionDownscale | PromptSegmentBytes
+  | PromptTemplateRenderOutcome | ToolCallParamCompleteness | KeeperTurnInstructionHash
+  | KeeperToolCallRetryLoop | ShellIrEffectTotal | RawTraceSinkDegraded | RawTraceRetentionDeleted
+  | RawTraceRetentionSkipped | RawTraceRetentionUnlinkFailed | WireCaptureResponseSuppressed
+  | WireCaptureWriteFailures | WireCaptureRecordSkipped | TurnBoundaryFailures
+  | HistoryFragmentFailures | QuietFinals | WorkingStateNotCarried | WorkspaceMemoryBriefingBytes
+  | WorkspaceMemoryLedgerClaims -> Metric_store
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

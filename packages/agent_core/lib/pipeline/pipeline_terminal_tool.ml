@@ -122,7 +122,31 @@ let recovered_report ~response ~turn ~invocations ~tool_results tool_uses =
       else
         Error (resume_topology_error "restored ToolResult identity differs from ToolUse")
     | [], [], [] -> Ok (List.rev acc)
-    | _ ->
+    | ( _ :: _
+      , ToolUse _ :: _
+      , ( Text _
+        | Thinking _
+        | ReasoningDetails _
+        | RedactedThinking _
+        | ToolUse _
+        | Image _
+        | Document _
+        | Audio _ )
+        :: _ )
+    | ( _ :: _
+      , ( Text _
+        | Thinking _
+        | ReasoningDetails _
+        | RedactedThinking _
+        | ToolResult _
+        | Image _
+        | Document _
+        | Audio _ )
+        :: _
+      , _ :: _ )
+    | [], _, _
+    | _, [], _
+    | _, _, [] ->
       Error
         (resume_topology_error
            "persisted invocation count differs from restored topology")

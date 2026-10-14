@@ -107,20 +107,7 @@ type misc_operation =
   | Misc_browser_act
   | Misc_browser_interact
   | Misc_browser_instruct
-  | Misc_msx_load
-  | Misc_msx_eject
-  | Misc_msx_export_disk
-  | Misc_msx_save
-  | Misc_msx_restore
-  | Misc_msx_change_disk
-  | Misc_msx_screen
-  | Misc_msx_meta
-  | Misc_msx_checkpoint_info
-  | Misc_msx_press
-  | Misc_msx_step
-  | Misc_msx_step_until_change
-  | Misc_msx_peek
-  | Misc_msx_ram_diff
+  | Misc_msx of Msx_tool.t
   | Misc_portrait_read
   | Misc_candle_balance
   | Misc_candle_catalog
@@ -154,11 +141,13 @@ val misc_operation_of_tool_name : string -> misc_operation option
 (** Parse a canonical misc wire name at the dispatch boundary. *)
 
 (** What a call does with the shared DOS machine's controller (RFC
-    play-link-for-the-shared-machine §2.8). *)
-type dos_controller_need =
-  | Takes_controller  (** moves the machine, so it needs the controller *)
-  | Hands_controller  (** [masc_dos_pass]: gives the controller to someone *)
-  | No_controller  (** reads or saves the machine, or is not a DOS call *)
+    play-link-for-the-shared-machine §2.8): the
+    {!Machine_controller_contract.controller_need} of the DOS tool the
+    operation runs, [No_controller] for an operation that runs none. *)
+type dos_controller_need = Machine_controller_contract.controller_need =
+  | Takes_controller
+  | Hands_controller
+  | No_controller
 
 val dos_controller_need : misc_operation -> dos_controller_need
 

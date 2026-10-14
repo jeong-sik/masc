@@ -5,10 +5,8 @@
     [Channel_gate_connector.register (module Channel_gate_discord_state)].
 
     Internal helpers (the [U] / [Store] aliases, the [binding] record,
-    the [default_*_path] resolvers, the shared binding-store wrappers,
-    the [string_member] / [int_member] / [bool_member] /
-    [bool_option_member] yojson lookups, and binding transaction
-    helpers) are hidden — only the {!Channel_gate_connector.S} surface
+    the [default_*_path] resolvers, the shared binding-store wrappers, and
+    binding transaction helpers) are hidden — only the {!Channel_gate_connector.S} surface
     is public.  The status label comes from
     {!Channel_gate_connector.connector_state_label} and the observed
     channel row from {!Json_util.find_assoc_row_by_string_field}. *)

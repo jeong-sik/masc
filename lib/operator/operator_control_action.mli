@@ -12,9 +12,7 @@
     {b Include runtime:} starts with [include Operator_control_snapshot]
     so {!Operator_control}'s [include] propagates the snapshot
     surface (notably the [\\'a context] type) through.  Internal
-    helpers ([normalize_judgment_*],
-    [default_fresh_ttl_sec], [normalize_action_target_type],
-    [default_target_type_for]) stay
+    helpers ([normalize_judgment_*], [default_fresh_ttl_sec]) stay
     private. *)
 
 include module type of struct
@@ -36,7 +34,7 @@ val judgment_write_json :
     The judgment's [keeper_name] is the caller's authenticated name.
 
     Optional: [target_id], [fresh_ttl_sec] (default 60s for
-    command.namespace, 300s for intervene; floored at 1),
+    command.namespace, 300s for intervene; a value below 1 is an error),
     [evidence_refs] (string list), [recommended_action] (object),
     [model_name], [runtime_name], [fallback_used] (bool, default
     false), [disagreement_with_truth] (bool, default false).
@@ -56,12 +54,13 @@ val judgment_latest_json :
 
 type action_request = {
   actor : string;
-  action_type : string;
-  target_type : string;
+  action : Operator_action_catalog.t;
   target_id : string option;
   payload : Yojson.Safe.t;
 }
-(** Parsed operator action — output of {!action_request_of_args}. *)
+(** Parsed operator action — output of {!action_request_of_args}. The action
+    is a catalog member; its target type is
+    {!Operator_action_catalog.target_type} and is not carried here. *)
 
 val require_payload_field :
   Yojson.Safe.t -> string -> string -> (string, string) result
@@ -93,26 +92,20 @@ val action_request_of_args :
   Yojson.Safe.t ->
   (action_request, string) result
 (** [action_request_of_args ?actor_hint ctx args] parses an
-    [action_request] from raw JSON.  Applies trim/lowercase
-    normalization to [action_type] and falls back to the type-specific
-    default target_type (see internal [default_target_type_for]) when
-    [args.target_type] is missing. *)
+    [action_request] from raw JSON.  [action_type] is trimmed, lowercased
+    and looked up in {!Operator_action_catalog}: an empty value is
+    [Error "action_type is required"], any other unknown value
+    [Error "unsupported action_type: <value>"].  [target_type] may be absent
+    or name the action's own target type; a value outside the operator
+    target-type set is the canonical target validation error, and a valid
+    one the action does not address is
+    [Error "invalid target_type for <action_type> (expected <expected>)"]. *)
 
-val normalize_request_target_type :
-  action_request -> (action_request, string) result
-(** [normalize_request_target_type r] returns [r] with [target_type]
-    validated against the allowed set ([workspace] / [keeper] / [goal] / [""]).
-    Empty [target_type] is replaced by the action-type default.
-    Invalid inputs return the canonical operator-target validation error. *)
-
-val delegated_tool_for : string -> (string, string) result
-(** [delegated_tool_for action_type] returns the tool name for an
-    action type from {!Operator_pending_confirm.available_actions} or rejects
-    an action without a registered tool contract. *)
-
-val confirm_required : string -> bool
-(** Re-export of {!Operator_action_catalog.requires_confirmation}. Pinned here
-    to keep the action contract surface in one place. *)
+val action_request_of_pending_confirm :
+  pending_confirm -> (action_request, string) result
+(** The request a stored pending confirm stands for.  The store only holds
+    entries whose [action_type] is in the catalog, so [Error] reports a store
+    that broke that contract. *)
 
 val preview_of_action : action_request -> Yojson.Safe.t
 (** [preview_of_action r] renders a JSON preview for UI
@@ -127,14 +120,6 @@ val preview_of_action : action_request -> Yojson.Safe.t
         "payload": <object>  (* empty when payload is not [`Assoc] *)
       }
     ]} *)
-
-val validate_target_type :
-  Operator_action_constants.target_type -> action_request -> (unit, string) result
-(** [validate_target_type expected r] returns [Ok ()] iff
-    [r.target_type] decodes to [expected] through the operator target-type
-    SSOT; otherwise
-    [Error "invalid target_type for <action_type> (expected
-    <expected>)"]. *)
 
 val require_target_id : action_request -> (string, string) result
 (** [require_target_id r] returns [Ok id] iff

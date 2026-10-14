@@ -1,0 +1,53 @@
+name = "masc_wiki_create"
+description = """
+Create a new wiki page under a name you choose.
+
+Use when recording a \
+finding, experiment result, or pattern that other agents should know about. \
+The page name stays fixed. A name that already exists is refused: read that \
+page and call masc_wiki_update to change it, rather than creating a second \
+page on the same subject. The summary becomes the page's line in the wiki \
+index (index.md)."""
+
+# Held back from the request until the model asks for it by name.
+defer_loading = true
+
+[[params]]
+name = "page"
+type = "string"
+required = true
+description = """
+Page name: lowercase a-z, digits and '-', not starting or ending with '-'. \
+It becomes the file name. 'index' and 'log' are reserved."""
+
+[[params]]
+name = "title"
+type = "string"
+required = true
+description = "Page title on one line. Any language."
+
+[[params]]
+name = "summary"
+type = "string"
+required = true
+description = "One line that says what the page holds."
+
+[[params]]
+name = "source"
+type = "string"
+required = true
+description = """
+Source type: direct_experience, research, experiment, observation"""
+enum = ["direct_experience", "research", "experiment", "observation"]
+
+[[params]]
+name = "tags"
+type = "array"
+items = { type = "string" }
+description = "List of tags. A tag is one line with no comma and no whitespace at either end."
+
+[[params]]
+name = "body"
+type = "string"
+required = true
+description = "Page body (markdown)"

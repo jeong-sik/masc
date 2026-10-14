@@ -2770,6 +2770,43 @@ let test_handle_request_resources_list_includes_tool_help () =
   Alcotest.(check bool) "tool help index listed" true tool_help_index_present;
   cleanup_dir base_path
 
+(* The wiki pages are otherwise reachable only through the
+   [masc://wiki/{topic}] template. A client that lists resources, the TUI
+   Resources screen among them, has to find each page in the listing. *)
+let test_handle_request_resources_list_includes_wiki_pages () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let wiki_dir = Masc.Tool_wiki.wiki_root ~base_path in
+  let ensure_dir dir = if not (Sys.file_exists dir) then Unix.mkdir dir 0o755 in
+  ensure_dir (Filename.dirname wiki_dir);
+  ensure_dir wiki_dir;
+  let oc = open_out (Filename.concat wiki_dir "alpha.md") in
+  output_string oc
+    "---\ntitle: Alpha Doc\nsummary: What alpha holds\nsource: research\nauthor: codex\n\
+     created: 2026-09-22\nrevision: 1\ntags: []\n---\nAlpha body\n";
+  close_out oc;
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
+  let resources = resources_list_all ~clock ~sw state [] in
+  let field name = function
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  (match
+     List.find_opt
+       (fun resource -> field "uri" resource = Some (`String "masc://wiki/alpha"))
+       resources
+   with
+   | None -> Alcotest.fail "the page was not in the resources/list answer"
+   | Some resource ->
+     Alcotest.(check bool) "title is the page title" true
+       (field "title" resource = Some (`String "Alpha Doc"));
+     Alcotest.(check bool) "description is the page summary" true
+       (field "description" resource = Some (`String "What alpha holds")));
+  cleanup_dir base_path
+
 let test_handle_request_resources_list_paginates () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2815,11 +2852,11 @@ let handled_resource_id id =
   match id with
   | "tool-help-index" | "status" | "status.json" | "tasks" | "tasks.json"
   | "who" | "who.json" | "messages" | "messages.json" | "events"
-  | "events.json" | "library" | "library.json" ->
+  | "events.json" | "wiki" | "wiki.json" ->
       true
   | _ ->
       String.starts_with ~prefix:"tool-help/" id
-      || String.starts_with ~prefix:"library/" id
+      || String.starts_with ~prefix:"wiki/" id
 
 let concrete_uri_of_template uri_template =
   (* RFC 6570: a query expression ({?...}) drops out; a path variable
@@ -2954,18 +2991,19 @@ let test_handle_request_resources_read_matrix () =
   let ensure_dir path =
     if not (Sys.file_exists path) then Unix.mkdir path 0o755
   in
-  let library_dir = Filename.concat base_path "docs/library" in
+  let wiki_dir = Masc.Tool_wiki.wiki_root ~base_path in
   let masc_dir = Filename.concat base_path Common.masc_dirname in
-  ensure_dir (Filename.concat base_path "docs");
-  ensure_dir library_dir;
   ensure_dir masc_dir;
-  write_text_file (Filename.concat library_dir "alpha.md")
+  ensure_dir wiki_dir;
+  write_text_file (Filename.concat wiki_dir "alpha.md")
     {|---
 title: Alpha Doc
+summary: What alpha holds
 source: research
 author: codex
 created: 2026-03-12
 updated: 2026-03-12
+revision: 1
 tags: [alpha, keeper]
 ---
 Alpha body
@@ -2977,10 +3015,10 @@ Alpha body
       ("masc://who.json", "application/json", "[");
       ("masc://messages.json", "application/json", "[");
       ("masc://events.json", "application/json", "[");
-      ("masc://library", "text/markdown", "`masc://library/alpha` (research)");
-      ("masc://library.json", "application/json", "\"source\":\"research\"");
-      ("masc://library/alpha", "text/markdown", "Alpha body");
-      ("masc://library/alpha.json", "application/json", "\"Alpha body\"");
+      ("masc://wiki", "text/markdown", "`masc://wiki/alpha` (research)");
+      ("masc://wiki.json", "application/json", "\"source\":\"research\"");
+      ("masc://wiki/alpha", "text/markdown", "Alpha body");
+      ("masc://wiki/alpha.json", "application/json", "\"Alpha body\"");
     ]
   in
   List.iter
@@ -3170,6 +3208,8 @@ let eio_tests = [
     test_handle_request_prompts_list_rejects_invalid_cursor;
   "handle prompts/get tool_help", `Quick, test_handle_request_prompts_get_tool_help;
   "handle resources/list includes tool-help", `Quick, test_handle_request_resources_list_includes_tool_help;
+  "handle resources/list includes wiki pages", `Quick,
+    test_handle_request_resources_list_includes_wiki_pages;
   "handle resources/list rejects unknown field", `Quick,
     test_handle_request_resources_list_rejects_unknown_field;
   "handle resources/list paginates", `Quick,

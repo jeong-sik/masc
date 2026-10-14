@@ -53,7 +53,7 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
         ~url:(Printf.sprintf "http://127.0.0.1:%d/health?full=1" port) () with
         | Ok (200, body) -> Upgrade.authorize_initial ~base_path ~expected_version ~body
             ~login:(fun () -> login () = 0)
-        | _ -> Error Upgrade.Invalid_health in
+        | Ok _ | Error _ -> Error Upgrade.Invalid_health in
       let* token = match Auth_login.read_persisted_token ~base_path ~agent_name:agent with
         | None -> Error Upgrade.Admin_required | Some token -> Ok token in
       let run_dir = (Host_config.host ()).base_path_lease_dir in

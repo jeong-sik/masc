@@ -51,13 +51,15 @@ val register : hook -> unit
 (** Run every registered hook with the given event. Non-cancellation
     exceptions raised from a hook are caught, counted via
     [metric_keeper_lifecycle_callback_failures], and logged via
-    [Log.Server.warn]. When [base_dir] and [meta] are supplied, the
-    failure also writes a durable telemetry coverage-gap row so the
-    best-effort hook contract is visible outside process-local logs.
+    [Log.Server.warn]. When [masc_root] and [meta] are supplied, the
+    failure also writes a durable telemetry coverage-gap row under
+    [masc_root] (the workspace's [.masc] directory, where
+    [Telemetry_coverage_gap.read_recent] reads), so the best-effort hook
+    contract is visible outside process-local logs.
     [Eio.Cancel.Cancelled] is re-raised to preserve cooperative
     cancellation. *)
 val run :
-  ?base_dir:string ->
+  ?masc_root:string ->
   ?meta:Keeper_meta_contract.keeper_meta ->
   keeper_id:string ->
   event ->

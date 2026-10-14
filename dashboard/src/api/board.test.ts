@@ -1104,6 +1104,37 @@ describe('normalizeBoardAttachments', () => {
       { ok: false, raw: { ...old, origin_url: 'http://example.com/old.png' } },
     ])
   })
+
+  it('passes an optional name through on url and artifact entries', () => {
+    const sha256 = 'a'.repeat(64)
+    expect(normalizeBoardAttachments([
+      { kind: 'image', url: 'https://cdn.example.com/a.png', name: 'a.png' },
+      { kind: 'external_link', name: 'trace.log', artifact: { _blob: {
+        sha256, bytes: 12, mime: 'text/plain', preview: '',
+      } } },
+    ])).toEqual([
+      { ok: true, attachment: { kind: 'image', source: {
+        kind: 'url', url: 'https://cdn.example.com/a.png', name: 'a.png',
+      } } },
+      { ok: true, attachment: { kind: 'external_link', source: {
+        kind: 'artifact', sha256, bytes: 12, mime: 'text/plain', name: 'trace.log',
+      } } },
+    ])
+  })
+
+  it('reads the file, audio, score and midi kinds the handler stores', () => {
+    const artifact = { _blob: { sha256: 'b'.repeat(64), bytes: 3, mime: 'audio/midi', preview: '' } }
+    const kinds = ['file', 'audio', 'score', 'midi']
+    expect(
+      normalizeBoardAttachments(kinds.map((kind) => ({ kind, artifact })))
+        ?.map((entry) => (entry.ok ? entry.attachment.kind : null)),
+    ).toEqual(kinds)
+  })
+
+  it('shows a failure card for an entry whose name is not a string', () => {
+    const entry = { kind: 'image', url: 'https://cdn.example.com/a.png', name: 42 }
+    expect(normalizeBoardAttachments([entry])).toEqual([{ ok: false, raw: entry }])
+  })
 })
 
 describe('createPost', () => {

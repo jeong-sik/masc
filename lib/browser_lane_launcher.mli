@@ -4,7 +4,7 @@
     the dashboard's onboarding check and the browser tools answer from this
     one observation and its {!verdict}. *)
 
-(** What install-host.sh left under [<base-path>/.masc/browser-lane/host]:
+(** What a lane installation left under [<base-path>/.masc/browser-lane/host]:
     the [launch] script Firefox runs and the [launch.json] declaration the
     same installation wrote beside it.
 
@@ -76,9 +76,34 @@ val message : t -> string
     installed. *)
 val launcher_path : base_path:string -> string
 
-(** The installer and what it is given for this workspace, as the words that
-    follow "the operator runs". *)
-val install : base_path:string -> string
+(** Where this workspace's [launch.json] is, beside {!launcher_path}. *)
+val declaration_path : base_path:string -> string
+
+(** The directory holding both, [<base-path>/.masc/browser-lane/host]. *)
+val host_directory_path : base_path:string -> string
+
+(** The text of the [launch.json] that goes with a [launch] script of exactly
+    these bytes: the one object {!observe} accepts, whose digest ties the
+    declaration to that script. The installer writes this and nothing else, so
+    the reader and the writer cannot disagree on the fields. *)
+val declaration : launcher_script:string -> string
+
+(** What [masc browser-lane-setup] sets up, by {!route_name}: the MASC extension
+    Firefox loads, the Firefox MASC starts itself with a BiDi host, or the host
+    and its launcher alone. The last connects no browser. It is for a browser
+    the operator attaches by hand, and for bringing an installed lane's host up
+    to the build that is running. It writes no extension, no manifest and no
+    [runtime.toml]. *)
+type route = Extension | Bidi | Host
+
+val routes : route list
+
+(** The [--mode] value that names the route. *)
+val route_name : route -> string
+
+(** The command that installs the lane for this workspace for a route, as the
+    words that follow "the operator runs". *)
+val install : route:route -> base_path:string -> string
 
 (** [launcher], [workspace_port], [workspace_port_error], [serving_port],
     [polling_hosts], [verdict] and [message], for a tool result a Keeper

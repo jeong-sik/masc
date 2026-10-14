@@ -478,13 +478,18 @@ function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
   return Object.keys(next).length > 0 ? next : null
 }
 
-// Board post entries use the handler's closed {kind,url|artifact} carrier.
-// Every other stored value becomes a failure card.
+// Board post entries use the handler's closed {kind,url|artifact} carrier
+// plus an optional string `name` label. Every other stored value becomes a
+// failure card.
 const BOARD_ATTACHMENT_KINDS: ReadonlySet<string> = new Set([
   'image',
   'video',
   'youtube',
   'external_link',
+  'file',
+  'audio',
+  'score',
+  'midi',
 ])
 
 function isHttpsAttachmentUrl(raw: unknown): raw is string {
@@ -506,10 +511,15 @@ function normalizeBoardAttachment(raw: unknown): BoardAttachmentDecode {
     return { ok: false, raw }
   }
   const kind = kindRaw as BoardAttachmentKind
-  const keys = Object.keys(raw)
+  // `name` is the only optional key; a non-string label is malformed.
+  if (raw.name !== undefined && typeof raw.name !== 'string') {
+    return { ok: false, raw }
+  }
+  const name = typeof raw.name === 'string' ? { name: raw.name } : {}
+  const keys = Object.keys(raw).filter((key) => key !== 'name')
 
   if (keys.length === 2 && keys.includes('url') && isHttpsAttachmentUrl(raw.url)) {
-    return { ok: true, attachment: { kind, source: { kind: 'url', url: raw.url } } }
+    return { ok: true, attachment: { kind, source: { kind: 'url', url: raw.url, ...name } } }
   }
 
   if (keys.length === 2 && keys.includes('artifact') && isRecord(raw.artifact)) {
@@ -530,7 +540,7 @@ function normalizeBoardAttachment(raw: unknown): BoardAttachmentDecode {
           ok: true,
           attachment: {
             kind,
-            source: { kind: 'artifact', sha256: blob.sha256 as string, bytes: blob.bytes, mime: blob.mime },
+            source: { kind: 'artifact', sha256: blob.sha256 as string, bytes: blob.bytes, mime: blob.mime, ...name },
           },
         }
       }

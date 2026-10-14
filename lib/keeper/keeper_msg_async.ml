@@ -816,7 +816,9 @@ let read_active_inventory_record ~base_path ~dir name =
           | Record_file_found
               ({ status = (Queued | Running | Cancelling _); _ } as entry) ->
             Ok entry
-          | Record_file_found entry ->
+          | Record_file_found
+              ({ status = (Lost _ | Cancelled _ | Persistence_failed _ | Done _); _ }
+               as entry) ->
             Error
               (active_inventory_record_error
                  ~request_id
@@ -834,7 +836,10 @@ let read_active_inventory_record ~base_path ~dir name =
                  ~request_id
                  ~path
                  (Record_unreadable reason)))
-       | { Unix.st_kind; _ } ->
+       | { Unix.st_kind =
+             (Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK) as st_kind)
+         ; _
+         } ->
          Error
            (active_inventory_record_error
               ~request_id
@@ -1469,7 +1474,7 @@ let project_canonical_integrity_failure_locked ~ops key transition_lock
       ; durability = Durable
       ; origin = Canonical_reconciliation
       }
-  | poll_result -> Settlement_projection_error { attempted_entry; poll_result }
+  | (Absent | Unreadable _ | Rejected _ | Found _) as poll_result -> Settlement_projection_error { attempted_entry; poll_result }
 ;;
 
 let persist_failure_locked ~ops key transition_lock (attempted_entry : entry) reason =
@@ -1540,7 +1545,17 @@ let set_status ~ops ?(preserve_terminal = false) key status =
       | None -> None
       | Some entry when preserve_terminal && is_terminal_status entry.status -> None
       | Some { status = Cancelling _; _ } when status = Running -> None
-      | Some entry ->
+      | Some
+          ({ status =
+               ( Queued
+               | Running
+               | Cancelling _
+               | Lost _
+               | Cancelled _
+               | Persistence_failed _
+               | Done _ )
+           ; _
+           } as entry) ->
         let completed_at =
           match status with
           | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
@@ -2180,7 +2195,7 @@ let cancel_with_ops ops ~base_path ~caller request_id : cancel_result =
                         Ok
                           (`Volatile
                               (Keeper_fs.durable_write_error_to_string error))
-                      | Error error ->
+                      | Error ((Write_failed (Not_published _) | Integrity_failed _) as error) ->
                         Error
                           (Cancel_persistence_failed
                              { reason = persist_error_to_string error })

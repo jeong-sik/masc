@@ -11,7 +11,6 @@ import type { PendingConfirmEnvelope, OperatorActionDescriptor } from './gate'
 
 export interface DashboardMissionSummary {
   workspace_health?: string
-  cluster?: string
   project?: string
   paused?: boolean
   tempo_interval_s?: number
@@ -211,7 +210,6 @@ export interface DashboardProofWorkerRunEvidence {
 
 export interface OperatorNamespaceSnapshot {
   project?: string
-  cluster?: string
   paused?: boolean
   pause_reason?: string | null
   paused_by?: string | null

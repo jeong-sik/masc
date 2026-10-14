@@ -1964,7 +1964,7 @@ describe('fetchTelemetrySummary', () => {
       entries_truncated_to: 50,
       entry_details: [
         {
-          key: 'telemetry:/Users/dancer/me/.masc:src=tool_metric:n=100',
+          key: 'telemetry:/Users/worker/ws/.masc:src=tool_metric:n=100',
           kind: 'fresh',
           ttl_remaining_ms: 750,
           stale_remaining_ms: 10_000,
@@ -1991,7 +1991,7 @@ describe('fetchTelemetrySummary', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/cache-stats')
     expect(result.hit_ratio).toBe(0.8)
     expect(result.entry_details[0]).toMatchObject({
-      key: 'telemetry:/Users/dancer/me/.masc:src=tool_metric:n=100',
+      key: 'telemetry:/Users/worker/ws/.masc:src=tool_metric:n=100',
       kind: 'fresh',
       ttl_remaining_ms: 750,
       stale_remaining_ms: 10_000,
@@ -3806,11 +3806,8 @@ describe('fetchKeeperConfig', () => {
       ['runtime_exhausted', '런타임 후보 소진'],
       ['provider_runtime_error', '런타임 호출 오류'],
       ['fiber_unresolved', 'Fiber 미해결'],
-      ['fiber_unresolved', 'Fiber 미해결'],
-      ['agent_core_context_window_exceeded', 'Agent Core 컨텍스트 윈도 초과'],
-      ['agent_core_unrecognized_stop_reason', 'Agent Core 미식별 정지 사유'],
-      ['agent_core_guardrail_violation', 'Agent Core 가드레일 위반'],
-      ['agent_core_tripwire_violation', 'Agent Core Tripwire 위반'],
+      ['turn_configuration_error', '실행 설정 오류'],
+      ['operator_interrupt', '운영자가 턴을 멈춤'],
     ] as const
 
     for (const [blockerClass, label] of cases) {

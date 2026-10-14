@@ -1,6 +1,6 @@
 ---
 name: browser-lanes
-description: Use MASC Browser tools to read or operate Firefox/Zen tabs or the Stagehand Chromium, inspect images, and verify requested web actions. Use for Browser Lane work, Slack Web channel and message collection, public Reddit or X/Twitter-style feeds and threads, and session, selector, or browser connection failures.
+description: "Reads and operates the requested browser page, reusing its observed clientId, tabId and document. Use for Browser tools, Slack Web collection, public feeds, screenshots and connection failures. Keeps readable tabs usable when another tab is unavailable; selects a transport supporting the requested action and verifies the resulting page. Read the connection reference only for a connection failure, and the site reference only for that site."
 ---
 
 # Browser Lane
@@ -34,8 +34,9 @@ scope가 null이면 생략한다. 선택 요소와 읽기 범위는 다르므로
 
 사이트별 지침은 이 스킬의 참조 파일에 있다. 요청한 사이트에 맞는 파일만 읽고, 다른
 사이트나 모든 참조를 미리 읽지 않는다. 같은 턴에서 이미 읽은 참조는 다시 읽지 않는다.
-참조 파일은 턴 사이에 바뀔 수 있고 바뀌었다는 표시가 오지 않으므로, 새 턴에서 필요한
-참조는 다시 읽는다. `keeper_skill`의 Available 목록에 요청한 사이트용 스킬이 따로 있으면
+SKILL.md 본문은 보존한 content_revision이 현재 선택된 revision과 같고 본문도 보존했다면 재사용한다.
+그 revision에는 참조 파일 내용이 포함되지 않는다. 참조는 새 턴에서 필요할 때 다시 읽고,
+해당 참조 내용이 별도로 최신임을 확인한 경우에만 재사용한다. `keeper_skill`의 Available 목록에 요청한 사이트용 스킬이 따로 있으면
 (운영자가 추가한 사이트 스킬 등) 그것도 읽어 이 스킬과 함께 쓴다. identity는 그 목록에서
 복사한다. 그 스킬과 이 스킬의 사이트 참조가 어긋나면 그 스킬을 따른다.
 
@@ -106,7 +107,9 @@ scene/regions 읽기에서도 유지한다. 탭이 사라졌을 때만 같은 �
 ## 연결·추가 기능은 필요할 때
 
 운영자의 화면·로그인 세션은 live다. 연결 정보가 없으면 BrowserTabs로 선택해
-clientId/tabId 쌍을 유지한다. 독립 조사에는 automation의 BrowserSession open과
+clientId/tabId 쌍을 유지한다. `complete=false`이면 `unavailableTabs`의 ID와 오류를
+확인한다. 목록의 다른 탭은 계속 사용할 수 있고, 읽지 못한 탭을 닫힌 탭으로 해석하지 않는다.
+독립 조사에는 automation의 BrowserSession open과
 BrowserGoto를 사용한다. 자동화 읽기는 lane=automation이며 clientId는 생략한다.
 BrowserSession·BrowserGoto에 스키마에 없는 lane을 추가하지 않는다.
 live 인증 화면을 연결 오류 때문에 automation이나 별도 API·수집 버퍼로 대체하지 않는다.

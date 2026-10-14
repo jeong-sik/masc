@@ -29,7 +29,7 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
   let mode_letters = List.map Mark.activation_letter modes in
   check_int "each activation mode draws its own letter" (List.length modes)
     (List.length (List.sort_uniq String.compare mode_letters));
-  let sandboxes = List.filter_map Mark.sandbox_of_profile [ "docker"; "microvm"; "local" ] in
+  let sandboxes = List.filter_map Mark.sandbox_of_profile [ "docker"; "microvm"; "remote_ssh" ] in
   check_int "the three declared profiles are sandboxes" 3 (List.length sandboxes);
   check_bool "a profile this build does not know is not one of them" true
     (Option.is_none (Mark.sandbox_of_profile "mock"));

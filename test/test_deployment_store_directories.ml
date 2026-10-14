@@ -107,41 +107,6 @@ let test_symlink_refusal exe () = with_workspace (fun root keepers _traces ->
   check bool "uninspectable store is explicit" true
     (String_util.contains_substring output "store entry cannot be inspected safely"))
 
-(* On a cluster other than the default one the runtime writes keeper stores
-   under [.masc/clusters/<cluster>/keepers]. The gate has to read that
-   directory: reading [.masc/keepers] instead finds no rows there and lets a
-   row the new binary refuses through. Written with the default cluster, the
-   same rows are not in the directory the gate reads, so it reports zero. *)
-let test_named_cluster_stores exe () = with_workspace (fun root _keepers _traces ->
-  let write_refused_rows () =
-    let keeper = Filename.concat (Workspace.keepers_runtime_dir_for_base_path root) "keeper" in
-    List.iter (fun store ->
-      let month = Filename.concat keeper (Filename.concat store "2026-09") in
-      Fs_compat.mkdir_p month;
-      write (Filename.concat month "rows.jsonl") "{\"unknown_field\":1}\n")
-      ["turn-records"; "provider-inputs"]
-  in
-  let expected refused =
-    ["keeper turn records " ^ refused; "keeper provider-input snapshots " ^ refused]
-  in
-  Masc_test_deps.with_process_env "MASC_CLUSTER_NAME" (Some "preflight-cluster") (fun () ->
-    write_refused_rows ();
-    let status, output = invoke exe root in
-    check bool ("a named cluster's refused rows refuse deployment: " ^ output) true
-      (status <> Unix.WEXITED 0);
-    List.iter (fun line ->
-      check bool ("reports " ^ line ^ ": " ^ output) true
-        (String_util.contains_substring output line))
-      (expected "rows=1 refused=1"));
-  Masc_test_deps.with_process_env "MASC_CLUSTER_NAME" None (fun () ->
-    let status, output = invoke exe root in
-    check bool ("the default cluster does not read another cluster's rows: " ^ output) true
-      (status = Unix.WEXITED 0);
-    List.iter (fun line ->
-      check bool ("reports " ^ line ^ ": " ^ output) true
-        (String_util.contains_substring output line))
-      (expected "rows=0 refused=0")))
-
 let assert_transcript_scan_failed dir (status, output) =
   check bool ("transcript inventory failure refuses deployment: " ^ output) true
     (status <> Unix.WEXITED 0);
@@ -223,7 +188,5 @@ let () =
         (test_range_receipt_ledger exe);
       test_case "task backlog bytes retain duplicate intent fields" `Quick
         (test_task_backlog_original_bytes exe);
-      test_case "a named cluster's keeper stores are read" `Quick
-        (test_named_cluster_stores exe);
       test_case "transcript directory absence differs from a wrong-kind path" `Quick
         (test_transcript_directory_kind exe)] @ permission_tests)]

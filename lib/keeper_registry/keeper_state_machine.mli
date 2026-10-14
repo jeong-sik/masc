@@ -119,7 +119,6 @@ type transition_result = {
   new_phase : phase;
   updated_conditions : conditions;
   entry_actions : entry_action list;
-  event_applied : event;
   timestamp : float;
 }
 
@@ -183,8 +182,7 @@ val can_execute_turn : phase -> bool
    no reverse alias due to wrapped-library cycle).  Use:
      Keeper_state_machine_json.{phase_to_json,
                                 conditions_to_json,
-                                event_to_json,
-                                transition_result_to_json} *)
+                                event_to_json} *)
 
 (** {1 Mermaid Visualization} *)
 

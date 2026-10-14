@@ -28,10 +28,15 @@ type output = { rows : row list; coverage : coverage list }
 type output_selection = All_lanes | Selected_lanes of string list
 (** Package-local lane IDs, matched exactly after instance namespacing. *)
 type output_ports = (string * output_selection) list
+type runtime = Docker | Apple_container
+val runtime_to_string : runtime -> string
+val runtime_of_string : string -> runtime option
 type resources = {
   cpus : float;
   memory_bytes : int64;
-  pids : int;
+  pids : int option;
+  (** Docker requires a PID limit. Apple microVMs omit it: their kernel is
+      bounded by VM memory, not a Docker PID cgroup. *)
   max_reply_bytes : int;
   (** Declared once and read by several unrelated bounds: the size of a worker
       message the host accepts, the combined input the host acquires for the
@@ -44,7 +49,7 @@ type resources = {
 (** The one definition of a resource declaration the host can run. The manifest
     reader, the retained binding reader and the Docker worker all use it, so a
     declaration is refused where it is read rather than where it is installed. *)
-val check_resources : resources -> (unit, string) result
+val check_resources : ?runtime:runtime -> resources -> (unit, string) result
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
 type state_storage = Ephemeral | Persistent
@@ -54,6 +59,7 @@ type package = {
   revision : string;
   title : string;
   contributions : contribution list;
+  runtime : runtime;
   image : string;
   command : string list;
   directory : string;

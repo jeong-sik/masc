@@ -207,11 +207,7 @@ type route =
             none. The value is preserved rather than clamped or replaced. *)
       }
   | Rotate_now of { rotate : rotate_class }
-  | Exhausted_visible_alive of
-      { terminal : terminal_class
-      ; detail : string
-        (** Display-only bounded failure summary. Never matched. *)
-      }
+  | Exhausted_visible_alive of { terminal : terminal_class }
 
 val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
 (** Total over every [core_error] class. The caller supplies the actual execution

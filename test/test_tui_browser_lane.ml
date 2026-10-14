@@ -709,14 +709,14 @@ let test_bidi_host_rows () =
      @ ["Could not ask Firefox to end the session · restart it if it still runs";
         "Reason: stopped without learning whether Firefox still holds its BiDi";
         "        session"] @ attach_again);
-  let long_launcher = "/Users/someone/me/workspace/yousleepwhen/masc/.masc/browser-lane/host/launch" in
+  let long_launcher = "/Users/someone/ws/workspace/yousleepwhen/masc/.masc/browser-lane/host/launch" in
   let wide_launcher = "/Users/상수/文書/画面/masc/.masc/browser-lane/host/launch" in
   let launched_from launcher =
     Host_reported { (host_report Record.Never_started) with attach = { host_attach with launcher } } in
   says "a launcher path longer than the row breaks before a slash, with every name whole"
     (launched_from long_launcher)
     ["BiDi host: none has run for this workspace";
-     "Attach: '/Users/someone/me/workspace/yousleepwhen/masc/.masc/browser-lane";
+     "Attach: '/Users/someone/ws/workspace/yousleepwhen/masc/.masc/browser-lane";
      "        /host/launch'";
      "        --bidi-url ws://127.0.0.1:PORT/session";
      "        PORT: the --remote-debugging-port Firefox was started with"; setup];
@@ -866,6 +866,50 @@ let test_bidi_host_discovery () =
     (waiting.clients = None && bidi_host_rows ~width:74 waiting = []
      && waiting = { reported with clients = None; bidi_host = Host_not_reported })
 
+(* One value per operation constructor. [expected_refresh] names every
+   constructor with no catch-all, so a new operation breaks this build until
+   its class here is decided, like it does in [operation_is_refresh]. *)
+let test_operation_is_refresh () =
+  let node : Browser_lane.node_ref = {document_id="observed-document";node_id="region"} in
+  let guard = { expected_url = "https://example.org/";
+                navigation_source = { url = "https://example.org/"; document_id = "observed-document" } } in
+  let operations =
+    [ Discover Choose_client; Discover Read_after_discovery; Read; Open_session; Close_session
+    ; Goto "https://example.org/"; Screenshot 2; Read_refresh; Scene_read 2; Scene_regions 2
+    ; Scene_refresh {tab_id=2;scene_view=Browser_lane.Content;scope=None}
+    ; Scene_scroll {tab_id=2;document_id="observed-document";expected_url="https://example.org/";
+                    scene_view=Browser_lane.Content;scope=None;delta_y=1}
+    ; Scene_focus {tab_id=2;target=node}
+    ; Scene_click {tab_id=2;document_id="observed-document";node_id="region";
+                   expected_url="https://example.org/";scope=None}
+    ; Scene_follow {tab_id=2;document_id="observed-document";node_id="region";
+                    expected_url="https://example.org/"}
+    ; Scene_follow_refresh {tab_id=2;guard;scene_view=Browser_lane.Content}
+    ; Viewport_refresh {tab_id=2;expected_url="https://example.org/"}
+    ; Viewport_cadence 2
+    ; Viewport_pointer {tab_id=2;expected_url="https://example.org/";action=Browser_lane.Activate_tab} ] in
+  let expected_refresh = function
+    | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> true
+    | Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _
+    | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _
+    | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _ -> false in
+  expect "the list holds one value for each constructor, two for Discover"
+    (List.length operations = 19);
+  List.iter (fun operation ->
+    expect "an operation is a refresh exactly when the table says"
+      (operation_is_refresh operation = expected_refresh operation);
+    let loading = {(create ()) with load = Loading (7, operation)} in
+    let yielded = yield_refresh_to_input loading in
+    expect "operator input drops a refresh and leaves every other operation loading"
+      (if expected_refresh operation then yielded.load = Idle else yielded = loading))
+    operations;
+  expect "the operator's own viewport refresh is not a refresh the cadence owns"
+    (not (operation_is_refresh (Viewport_refresh {tab_id=2;expected_url="https://example.org/"})));
+  List.iter (fun load ->
+    let t = {(create ()) with load} in
+    expect "input leaves a lane with nothing loading alone" (yield_refresh_to_input t = t))
+    [Idle; No_browser; Failed "x"]
+
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
     ["unified browser picker", test_unified_browser_picker;
@@ -891,4 +935,5 @@ let () =
      "HTTP read status provenance", test_http_read_status_provenance;
      "source switch", test_source_switch;
      "malformed response", test_malformed_response;
-     "empty tabs", test_empty_tabs]
+     "empty tabs", test_empty_tabs;
+     "which operations are refreshes", test_operation_is_refresh]

@@ -146,7 +146,24 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
                  ]
                 @ stream_delivery_receipt_field "no_delivery_receipt"
                 @ base_fields)
-          | Some _ | None ->
+          | Some
+              (Keeper_chat_blocks.Trace _
+              | Keeper_chat_blocks.Text _
+              | Keeper_chat_blocks.Heading _
+              | Keeper_chat_blocks.Unordered_list _
+              | Keeper_chat_blocks.Callout _
+              | Keeper_chat_blocks.Table _
+              | Keeper_chat_blocks.Code _
+              | Keeper_chat_blocks.Mermaid _
+              | Keeper_chat_blocks.Svg _
+              | Keeper_chat_blocks.Voice _
+              | Keeper_chat_blocks.Attach _
+              | Keeper_chat_blocks.Image _
+              | Keeper_chat_blocks.Link _
+              | Keeper_chat_blocks.Fusion _
+              | Keeper_chat_blocks.Status _
+              | Keeper_chat_blocks.Thinking _)
+          | None ->
               let reason =
                 if trace_lookup_available then
                   "turn_ref persisted but no retained trajectory/internal-history events were available"
@@ -160,7 +177,8 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
                 @ stream_delivery_receipt_field "no_delivery_receipt"
                 @ base_fields)))
 
-let message_to_json ~trace_lookup_available ~trace_block (m : chat_message) : Yojson.Safe.t =
+let message_to_json ?(omit_stream_contract = false) ~trace_lookup_available
+    ~trace_block (m : chat_message) : Yojson.Safe.t =
   `Assoc
     ([ ("id", `String m.id);
        ("role", `String (Role.to_label m.role));
@@ -199,11 +217,12 @@ let message_to_json ~trace_lookup_available ~trace_block (m : chat_message) : Yo
               ) atts in
               [("attachments", `List att_json)])
        @ audio_fields m.audio
-       @ [ ("stream_contract",
+       @ (if omit_stream_contract then [] else
+          [ ("stream_contract",
              chat_stream_contract_json
                ~trace_lookup_available
                ~trace_block m )
-         ]
+          ])
        @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
        @ Json_util.string_field_if_present "turn_ref"
            (Option.map Ids.Turn_ref.to_string m.turn_ref)
@@ -245,7 +264,21 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
                } )
            when matches_turn_ref m ->
            Some delivery_key
-         | (Role.Assistant | Role.System | Role.User | Role.Tool | Role.Request_failure), _ -> None)
+         | (Role.Assistant | Role.System | Role.User | Role.Tool | Role.Request_failure),
+           ( None
+    | Some
+        { Keeper_chat_delivery_identity.transcript_slot =
+            ( Keeper_chat_delivery_identity.Accepted_user
+            | Keeper_chat_delivery_identity.Tool_call _
+            | Keeper_chat_delivery_identity.Tool_delivery _
+            | Keeper_chat_delivery_identity.Terminal_result
+            | Keeper_chat_delivery_identity.Approval_request
+            | Keeper_chat_delivery_identity.Approval_resolution
+            | Keeper_chat_delivery_identity.Approval_replay
+            | Keeper_chat_delivery_identity.Approval_replay_correction
+            | Keeper_chat_delivery_identity.Approval_continuation )
+        ; _
+        } ) -> None)
       messages
   in
   let matches_accepted_user_delivery (m : chat_message) =
@@ -258,7 +291,21 @@ let transcript_of_messages (messages : chat_message list) ~turn_ref :
       List.exists
         (Keeper_chat_delivery_identity.delivery_key_equal delivery_key)
         terminal_delivery_keys
-    | (Role.Assistant | Role.System | Role.User | Role.Tool | Role.Request_failure), _ -> false
+    | (Role.Assistant | Role.System | Role.User | Role.Tool | Role.Request_failure),
+      ( None
+    | Some
+        { Keeper_chat_delivery_identity.transcript_slot =
+            ( Keeper_chat_delivery_identity.Accepted_user
+            | Keeper_chat_delivery_identity.Tool_call _
+            | Keeper_chat_delivery_identity.Tool_delivery _
+            | Keeper_chat_delivery_identity.Terminal_result
+            | Keeper_chat_delivery_identity.Approval_request
+            | Keeper_chat_delivery_identity.Approval_resolution
+            | Keeper_chat_delivery_identity.Approval_replay
+            | Keeper_chat_delivery_identity.Approval_replay_correction
+            | Keeper_chat_delivery_identity.Approval_continuation )
+        ; _
+        } ) -> false
   in
   let user, assistant =
     List.fold_left

@@ -1,8 +1,10 @@
 (** Msx_lane — the one MSX machine the workspace plays on (RFC-0439 §3.1).
 
-    The machine lives here, in the server process, so the TUI and every
-    keeper tool put keys into the same [Msx.t]. The core is turn-based: only
-    {!step} and {!press} move time, and each call is capped at
+    The machine lives here, in the MSX add-on worker's process
+    ([masc-msx-addon-worker]); the server reaches it through the attached
+    worker, so the TUI and every keeper tool put keys into the same [Msx.t].
+    The core is turn-based: only {!step} and {!press} move time, and each
+    call is capped at
     {!max_frames_per_call} so a tool call stays inside the domain-0 budget
     (the real-time ticker is RFC-0439 §6.2, not this module).
 

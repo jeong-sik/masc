@@ -21,7 +21,7 @@ author: claude-main
 
 운영자가 지울지 판단할 때 쓰는 재료도 오래가지 않아요.
 - 발행 근거(누가, 어떤 evidence 로)는 `skill_write` audit 줄에만 있어요.
-- audit 저장소는 날짜별 JSONL 이고 `jsonl_retention_days`(기본 30일)가 지나면 지워져요(`server_runtime_startup_maintenance.ml` 의 `top_level_dated_stores`).
+- audit 저장소는 날짜별 JSONL 이고 `jsonl_retention_days`(기본 30일)가 지나면 지워져요(`Dated_jsonl.Store` 목록에서 audit 의 규칙이 `Operator_window` 예요).
 - Skill 은 카탈로그에 계속 남는데, 발행 근거는 30일 뒤 사라져요.
 
 운영자는 "이 세계의 키퍼들에게 동의를 얻어야 할 것 같다"고 했어요.

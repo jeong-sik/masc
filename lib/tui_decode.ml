@@ -5608,7 +5608,7 @@ let decode_librarian_preflight_attempt json =
           let* total_bytes = required_int_field body "total_bytes" in
           (match encoding, Base64.decode content with
            | "base64", Ok decoded when String.length decoded = total_bytes -> Ok decoded
-           | _ -> Error "invalid encoded preflight refusal body")
+           | _, (Ok _ | Error _) -> Error "invalid encoded preflight refusal body")
         | _ -> Error "preflight refusal body must be text or encoded bytes" in
       Ok (Typesafeai_client.Http_response_failure {status; destination_uri; body; detail})
     | _ -> Error ("unknown preflight refusal kind " ^ kind) in
@@ -5677,14 +5677,21 @@ let decode_librarian_preflight output =
       | Generation_not_entered, false, Preflight_awaiting -> Ok ()
       | Generation_full_lane, false, Preflight_awaiting -> Error "awaiting preflight cannot enter generation"
       | Generation_full_lane, false, _ -> Ok ()
-      | _ -> Error "Librarian preflight decision and generation path disagree"
+      | (Generation_full_lane, true, _)
+      | (Generation_not_entered, false, (Preflight_not_called _ | (Preflight_failed _ | (Preflight_invalid _ | Preflight_judged _))))
+      | (Generation_not_entered, true, _)
+      | (Generation_jev_no_change, true, Preflight_judged { choice = (Typesafeai_librarian_preflight.Needs_generation | Typesafeai_librarian_preflight.Uncertain);_})
+      | (Generation_jev_no_change, true, (Preflight_awaiting | (Preflight_not_called _ | (Preflight_failed _ | Preflight_invalid _))))
+      | (Generation_jev_no_change, false, _) -> Error "Librarian preflight decision and generation path disagree"
     in
     let* lp_elapsed_s = required_nullable_float_field preflight "elapsed_s" in
     let* () = match lp_status, lp_elapsed_s with
       | (Preflight_awaiting | Preflight_not_called _), None -> Ok ()
       | (Preflight_failed _ | Preflight_invalid _ | Preflight_judged _), Some elapsed
         when Float.is_finite elapsed && elapsed >= 0. -> Ok ()
-      | _ -> Error "preflight elapsed time must match the observation status and be finite and nonnegative" in
+      | (Preflight_failed _, None) | (Preflight_invalid _, None) | (Preflight_judged _, None)
+      | (Preflight_awaiting, Some _) | (Preflight_not_called _, Some _)
+      | (Preflight_failed _, Some _) | (Preflight_invalid _, Some _) | (Preflight_judged _, Some _) -> Error "preflight elapsed time must match the observation status and be finite and nonnegative" in
     let* lp_model = match lp_status with
       | Preflight_judged _ | Preflight_invalid _ ->
         let* model = required_string_field preflight "model" in
@@ -5700,7 +5707,7 @@ let decode_librarian_preflight output =
         let* () = preflight_fields_absent preflight
           (match lp_status with
            | Preflight_invalid _ -> ["failure"; "decision"; "confidence"; "reported_probabilities"; "reported_probability_sum"]
-           | _ -> ["failure"; "reason"]) in
+           | Preflight_awaiting | Preflight_not_called _ | Preflight_failed _ | Preflight_judged _ -> ["failure"; "reason"]) in
         Ok (Some model)
       | Preflight_awaiting | Preflight_not_called _ | Preflight_failed _ ->
         let* () = preflight_fields_absent preflight
@@ -5709,7 +5716,7 @@ let decode_librarian_preflight output =
            @ (match lp_status with
               | Preflight_awaiting -> ["reason"; "failure"]
               | Preflight_not_called _ -> ["failure"]
-              | _ -> ["reason"])) in
+              | Preflight_failed _ | Preflight_invalid _ | Preflight_judged _ -> ["reason"])) in
         Ok None in
     let* lp_domain_rejection = required_nullable_nonblank_string_field output "preflight_domain_rejection" in
     let* () = match lp_status, lp_generation_path, lp_domain_rejection with
@@ -5720,7 +5727,9 @@ let decode_librarian_preflight output =
         Error "fallback to full lane on Keep_current requires domain rejection"
       | _, _, Some _ ->
         Error "domain rejection is only valid when Keep_current falls back to full lane"
-      | _ -> Ok ()
+      | (Preflight_judged { choice = Typesafeai_librarian_preflight.Keep_current;_}, (Generation_not_entered | Generation_jev_no_change), None)
+      | (Preflight_judged { choice = (Typesafeai_librarian_preflight.Needs_generation | Typesafeai_librarian_preflight.Uncertain);_}, _, None)
+      | ((Preflight_awaiting | (Preflight_not_called _ | (Preflight_failed _ | Preflight_invalid _))), _, None) -> Ok ()
     in
     let* lp_context_only = match Json_util.assoc_member_opt "memory_write" output with
       | None -> Ok false
@@ -5770,7 +5779,7 @@ let decode_librarian_preflight output =
           | Context_write, "withheld" -> Ok Side_withheld
           | Context_write, "answer_refused" ->
             let+ detail = required_string_field record "detail" in Side_answer_refused detail
-          | _ -> Error ("unknown " ^ key ^ " status " ^ status) in
+          | (Context_write | Continuity_write), _ -> Error ("unknown " ^ key ^ " status " ^ status) in
         Ok (Some (kind, status)) in
     let* context_write = decode_side_write Context_write "context_write" in
     let* continuity_write = decode_side_write Continuity_write "continuity_write" in
@@ -5815,7 +5824,13 @@ let decode_lane_run_summary json =
     | Lane_run_running, None -> Ok None
     | Lane_run_running, Some _ ->
       Error "running lane run must not report selected_slot"
-    | _, _ -> required_nullable_nonblank_string_field json "selected_slot"
+    | (Lane_run_succeeded, _) | (Lane_run_cancelled, _) | (Lane_run_failed, _)
+    | (Lane_run_completion_persistence_failed, _) | (Lane_run_completion_durability_unknown, _)
+    | (Lane_run_approved, _) | (Lane_run_reviewed, _) | (Lane_run_committed, _)
+    | (Lane_run_superseded, _) | (Lane_run_rejected, _) | (Lane_run_deferred, _)
+    | (Lane_run_review_cancelled, _) | (Lane_run_infrastructure_unavailable, _)
+    | (Lane_run_not_reviewed, _) | (Lane_run_commit_failed, _) | (Lane_run_raised, _)
+    | (Lane_run_other _, _) -> required_nullable_nonblank_string_field json "selected_slot"
   in
   let lrs_run_kind =
     match lrs_run_kind with
@@ -5828,9 +5843,24 @@ let decode_lane_run_summary json =
       let* code = required_string_field json "code" in
       let* detail = required_string_field json "detail" in
       Ok (Some { lrf_code = code; lrf_detail = detail })
-    | ( (Lane_run_task_verification | Lane_run_goal_verification
-        | Lane_run_kind_other _ | Lane_run_exact_output)
-      , _ ) -> Ok None
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_running)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_succeeded)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_cancelled)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _), Lane_run_failed)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_completion_persistence_failed)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_completion_durability_unknown)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_approved)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_reviewed)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_committed)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_superseded)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_rejected)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_deferred)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_review_cancelled)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_infrastructure_unavailable)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_not_reviewed)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_commit_failed)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_raised)
+    | ((Lane_run_task_verification | Lane_run_goal_verification | Lane_run_kind_other _ | Lane_run_exact_output), Lane_run_other _) -> Ok None
   in
   Ok
     { lrs_run_id
@@ -5893,8 +5923,21 @@ let decode_lane_run_detail json =
     match summary.lrs_status, lrd_output_availability with
     | Lane_run_running, None -> Ok ()
     | Lane_run_running, Some _ -> Error "running lane run cannot report output availability"
-    | _, None -> Error "terminal lane run must report output availability"
-    | _, Some _ -> Ok ()
+    | (Lane_run_succeeded, None) | (Lane_run_cancelled, None) | (Lane_run_failed, None)
+    | (Lane_run_completion_persistence_failed, None)
+    | (Lane_run_completion_durability_unknown, None) | (Lane_run_approved, None)
+    | (Lane_run_reviewed, None) | (Lane_run_committed, None) | (Lane_run_superseded, None)
+    | (Lane_run_rejected, None) | (Lane_run_deferred, None) | (Lane_run_review_cancelled, None)
+    | (Lane_run_infrastructure_unavailable, None) | (Lane_run_not_reviewed, None)
+    | (Lane_run_commit_failed, None) | (Lane_run_raised, None) | (Lane_run_other _, None) -> Error "terminal lane run must report output availability"
+    | (Lane_run_succeeded, Some _) | (Lane_run_cancelled, Some _) | (Lane_run_failed, Some _)
+    | (Lane_run_completion_persistence_failed, Some _)
+    | (Lane_run_completion_durability_unknown, Some _) | (Lane_run_approved, Some _)
+    | (Lane_run_reviewed, Some _) | (Lane_run_committed, Some _) | (Lane_run_superseded, Some _)
+    | (Lane_run_rejected, Some _) | (Lane_run_deferred, Some _)
+    | (Lane_run_review_cancelled, Some _) | (Lane_run_infrastructure_unavailable, Some _)
+    | (Lane_run_not_reviewed, Some _) | (Lane_run_commit_failed, Some _) | (Lane_run_raised, Some _)
+    | (Lane_run_other _, Some _) -> Ok ()
   in
   let* lrd_output =
     match lrd_output_availability with
@@ -5983,33 +6026,98 @@ let decode_lane_run_detail json =
   in
   let* lrd_librarian_preflight = match summary.lrs_lane, lrd_output with
     | Standalone_lane.Librarian, Some output -> decode_librarian_preflight output
-    | _, _ -> Ok None
+    | (Standalone_lane.Librarian, _) | (Standalone_lane.Hitl_auto_judge, _)
+    | (Standalone_lane.Board_attention, _) | (Standalone_lane.Workspace_curator, _)
+    | (Standalone_lane.Verifier, _) | (Standalone_lane.Browser_stagehand, _)
+    | (Standalone_lane.Candle_appraiser, _) -> Ok None
   in
   let* () = match lrd_librarian_preflight, answer_succeeded with
     | Some {lp_generation_path = Generation_not_entered; _}, true ->
       Error "successful Librarian run cannot await preflight without entering generation"
-    | _, _ -> Ok () in
+    | Some {lp_generation_path = Generation_not_entered; _}, false
+    | Some {lp_generation_path = (Generation_full_lane | Generation_jev_no_change); _}, (true | false)
+    | None, (true | false) -> Ok () in
   let* () = match lrd_librarian_preflight, answer_succeeded, summary.lrs_selected_slot with
     | Some {lp_generation_path = Generation_full_lane; _}, true, None ->
       Error "successful Librarian generation requires its selected slot"
-    | _, _, _ -> Ok () in
+    | Some {lp_generation_path = Generation_full_lane; _}, true, Some _
+    | Some {lp_generation_path = Generation_full_lane; _}, false, (None | Some _)
+    | Some {lp_generation_path = (Generation_not_entered | Generation_jev_no_change); _}, _, _
+    | None, _, _ -> Ok () in
   let* () = match lrd_librarian_preflight, summary.lrs_selected_slot with
     | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, Some _ ->
       Error "run without generation must not have a selected generation slot"
-    | _, _ -> Ok () in
+    | Some {lp_generation_path = (Generation_jev_no_change | Generation_not_entered); _}, None
+    | Some {lp_generation_path = Generation_full_lane; _}, (None | Some _)
+    | None, (None | Some _) -> Ok () in
   let* lrd_decision =
     match summary.lrs_run_kind, summary.lrs_status, lrd_output with
     | Lane_run_goal_verification, Lane_run_running, _ -> Ok Lane_run_decision_pending
-    | Lane_run_goal_verification, _, None -> Ok Lane_run_decision_unknown
-    | Lane_run_goal_verification, status, Some output ->
+    | Lane_run_goal_verification,
+      ( Lane_run_succeeded | Lane_run_cancelled | Lane_run_failed
+      | Lane_run_completion_persistence_failed | Lane_run_completion_durability_unknown
+      | Lane_run_approved | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
+      | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
+      | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
+      | Lane_run_commit_failed | Lane_run_raised | Lane_run_other _ ),
+      None -> Ok Lane_run_decision_unknown
+    | Lane_run_goal_verification,
+      (( Lane_run_succeeded | Lane_run_cancelled | Lane_run_failed
+       | Lane_run_completion_persistence_failed | Lane_run_completion_durability_unknown
+       | Lane_run_approved | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
+       | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
+       | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
+       | Lane_run_commit_failed | Lane_run_raised | Lane_run_other _ ) as status),
+      Some output ->
       let* raw = required_member output "evaluated_verdict" in
       let* verdict = Goal_verification_run_registry.evaluated_verdict_of_yojson raw in
       (match verdict, status with
-       | Some (Goal_verification_run_registry.Approved _), _ -> Ok Lane_run_decision_approved
-       | Some (Goal_verification_run_registry.Rejected _), _ -> Ok Lane_run_decision_rejected
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_running)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_succeeded)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_cancelled)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_failed)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_completion_persistence_failed)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_completion_durability_unknown)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_approved)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_reviewed)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_committed)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_superseded)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_rejected)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_deferred)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_review_cancelled)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_infrastructure_unavailable)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_not_reviewed)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_commit_failed)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_raised)
+       | (Some (Goal_verification_run_registry.Approved _), Lane_run_other _) -> Ok Lane_run_decision_approved
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_running)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_succeeded)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_cancelled)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_failed)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_completion_persistence_failed)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_completion_durability_unknown)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_approved)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_reviewed)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_committed)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_superseded)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_rejected)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_deferred)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_review_cancelled)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_infrastructure_unavailable)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_not_reviewed)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_commit_failed)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_raised)
+       | (Some (Goal_verification_run_registry.Rejected _), Lane_run_other _) -> Ok Lane_run_decision_rejected
        | None, (Lane_run_reviewed | Lane_run_committed) -> Error "judged Goal run has no evaluated verdict"
-       | None, _ -> Ok Lane_run_decision_not_reached)
-    | _, _, _ -> Ok (lane_run_decision ~run_kind:summary.lrs_run_kind ~status:summary.lrs_status)
+       | (None, Lane_run_running) | (None, Lane_run_succeeded) | (None, Lane_run_cancelled)
+       | (None, Lane_run_failed) | (None, Lane_run_completion_persistence_failed)
+       | (None, Lane_run_completion_durability_unknown) | (None, Lane_run_approved)
+       | (None, Lane_run_superseded) | (None, Lane_run_rejected) | (None, Lane_run_deferred)
+       | (None, Lane_run_review_cancelled) | (None, Lane_run_infrastructure_unavailable)
+       | (None, Lane_run_not_reviewed) | (None, Lane_run_commit_failed) | (None, Lane_run_raised)
+       | (None, Lane_run_other _) -> Ok Lane_run_decision_not_reached)
+    | (Lane_run_exact_output, _, _) | (Lane_run_task_verification, _, _)
+    | (Lane_run_kind_other _, _, _) -> Ok (lane_run_decision ~run_kind:summary.lrs_run_kind ~status:summary.lrs_status)
   in
   let* lrd_skill_evidence = decode_lane_run_skill_evidence run in
   let* lrd_gate_judgment =
@@ -7051,6 +7159,24 @@ let decode_task_history json =
    be read. The item vocabulary is the producer's closed set
    (Workspace_verification_store.submitted_evidence_item_to_yojson), so an
    unknown kind fails the decode rather than rendering as an empty row. *)
+type evidence_withheld =
+  | Withheld_not_image_format
+  | Withheld_body_not_filed
+  | Withheld_body_unreadable
+  | Withheld_over_delivery_ceiling of { bytes : int; ceiling : int }
+  | Withheld_over_response_budget
+
+type evidence_preview_defect =
+  | Defect_bad_base64
+  | Defect_length_mismatch of { declared : int; actual : int }
+  | Defect_digest_mismatch
+  | Defect_not_an_image
+
+type evidence_preview =
+  | Preview_image of { ev_media : Keeper_vision_downscale.media_type; ev_data : string }
+  | Preview_withheld of evidence_withheld
+  | Preview_defective of evidence_preview_defect
+
 type verification_evidence_item =
   | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string
@@ -7064,10 +7190,80 @@ type verification_evidence_item =
       ev_u_reference : string option;
       ev_u_reason : string;
     }
+  | Ev_binary of {
+      ev_b_reference : string;
+      ev_b_bytes : int;
+      ev_b_sha256 : string;
+      ev_b_format : string;
+      ev_b_preview : evidence_preview;
+    }
 
 type verification_evidence =
   | Evidence_items of verification_evidence_item list
   | Evidence_access_unavailable of string
+
+(* The server states what it withheld and why, in a closed set. A reason this
+   build does not know fails the decode: showing it as some other cause would
+   tell the operator something the server did not say. *)
+let decode_evidence_withheld preview =
+  let int_field name =
+    match member name preview with
+    | `Int value when value >= 0 -> Ok value
+    | _ -> Error ("withheld preview has no " ^ name)
+  in
+  match member "reason" preview with
+  | `String "not_image_format" -> Ok Withheld_not_image_format
+  | `String "body_not_filed" -> Ok Withheld_body_not_filed
+  | `String "body_unreadable" -> Ok Withheld_body_unreadable
+  | `String "over_delivery_ceiling" ->
+      let* bytes = int_field "bytes" in
+      let* ceiling = int_field "ceiling" in
+      Ok (Withheld_over_delivery_ceiling { bytes; ceiling })
+  | `String "over_response_budget" -> Ok Withheld_over_response_budget
+  | `String reason -> Error ("unknown withheld preview reason: " ^ reason)
+  | _ -> Error "withheld preview has no reason"
+
+(* The inline bytes are checked against what the same item declares before
+   anything draws them: the length and the SHA-256 the store recorded, and the
+   format the bytes themselves carry (the item's [format] is a file extension
+   and says nothing about the content). A body that fails any of these is a
+   defect named on the item, so the operator sees that the picture was not
+   shown and why, and the rest of the evidence stays readable. *)
+let decode_inline_preview ~declared_bytes ~declared_sha256 encoded =
+  match Base64.decode encoded with
+  | Error (`Msg _) -> Preview_defective Defect_bad_base64
+  | Ok data ->
+      let actual = String.length data in
+      if actual <> declared_bytes then
+        Preview_defective (Defect_length_mismatch { declared = declared_bytes; actual })
+      else if
+        not
+          (String.equal declared_sha256
+             Digestif.SHA256.(digest_string data |> to_hex))
+      then Preview_defective Defect_digest_mismatch
+      else
+        match Keeper_vision_tool.sniff_image_media_type data with
+        | Error _ -> Preview_defective Defect_not_an_image
+        | Ok media_type -> (
+            match Keeper_vision_downscale.media_type_of_string media_type with
+            | Some ev_media -> Preview_image { ev_media; ev_data = data }
+            | None -> Preview_defective Defect_not_an_image)
+
+let decode_evidence_preview ~declared_bytes ~declared_sha256 item =
+  match member "preview" item with
+  | `Assoc _ as preview -> (
+      match member "state" preview with
+      | `String "inline" -> (
+          match member "body_base64" preview with
+          | `String encoded ->
+              Ok (decode_inline_preview ~declared_bytes ~declared_sha256 encoded)
+          | _ -> Error "inline preview has no body_base64")
+      | `String "withheld" ->
+          let* reason = decode_evidence_withheld preview in
+          Ok (Preview_withheld reason)
+      | `String state -> Error ("unknown preview state: " ^ state)
+      | _ -> Error "preview has no state")
+  | _ -> Error "evidence binary artifact has no preview"
 
 let decode_verification_evidence json =
   let result = member "result" json in
@@ -7089,7 +7285,11 @@ let decode_verification_evidence json =
             (match Workspace_verification_store.submitted_evidence_item_of_yojson item with
              | Ok (Workspace_verification_store.Evidence_collaboration {reference; content; sha256}) ->
                  Ok (Ev_collaboration {ev_reference=reference; ev_content=content; ev_sha256=sha256})
-             | Ok _ -> Error "evidence collaboration has a different kind"
+             | Ok (Workspace_verification_store.Evidence_note _)
+             | Ok (Workspace_verification_store.Evidence_artifact _)
+             | Ok (Workspace_verification_store.Evidence_invalid_reference)
+             | Ok (Workspace_verification_store.Evidence_artifact_unreadable _)
+             | Ok (Workspace_verification_store.Evidence_artifact_binary _) -> Error "evidence collaboration has a different kind"
              | Error detail -> Error detail)
         | `String "note" ->
             (match str "content" with
@@ -7124,6 +7324,19 @@ let decode_verification_evidence json =
               | _ -> Error "unreadable artifact has an invalid reason"
             in
             Ok (Ev_artifact_unreadable { ev_u_reference = str "reference"; ev_u_reason })
+        | `String "artifact_binary" -> (
+            (* Not decoded through the store: the operator projection adds
+               [preview], which the persisted decoder rejects as unknown. *)
+            match str "reference", str "sha256", str "format", member "bytes" item with
+            | Some ev_b_reference, Some ev_b_sha256, Some ev_b_format, `Int ev_b_bytes
+              when ev_b_bytes >= 0 ->
+                let* ev_b_preview =
+                  decode_evidence_preview ~declared_bytes:ev_b_bytes
+                    ~declared_sha256:ev_b_sha256 item
+                in
+                Ok (Ev_binary { ev_b_reference; ev_b_bytes; ev_b_sha256; ev_b_format; ev_b_preview })
+            | _ ->
+                Error "evidence binary artifact is missing reference/bytes/sha256/format")
         | `String kind -> Error ("unknown evidence item kind: " ^ kind)
         | _ -> Error "evidence item is missing kind"
       in

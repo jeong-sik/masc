@@ -183,9 +183,9 @@ val handle_browser_act_with_outcome :
   config:Workspace.config -> meta:keeper_meta ->
   args:Yojson.Safe.t -> Keeper_tool_execution.t
 
-val handle_library_search_with_outcome
+val handle_wiki_search_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
-val handle_library_read_with_outcome
+val handle_wiki_read_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 
 val handle_surface_read_with_outcome

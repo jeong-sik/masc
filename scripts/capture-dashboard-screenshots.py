@@ -13,7 +13,7 @@ redacted, so a reader never mistakes a placeholder for a real name.
 
 Usage:
     python3 scripts/capture-dashboard-screenshots.py \
-        --base-path ~/me --out docs/screenshots/dashboard/$(date -u +%Y-%m-%d)
+        --base-path "$MASC_BASE_PATH" --out docs/screenshots/dashboard/$(date -u +%Y-%m-%d)
 """
 
 from __future__ import annotations
@@ -165,7 +165,14 @@ def main() -> int:
 
     health = read_health(args.base_url)
     paths = health.get("paths", {})
-    base_path = Path(args.base_path or paths.get("effective_base_path") or ".").expanduser()
+    # The server being captured names its own base path. With neither that
+    # nor a flag there is no folder to read keeper names from, and a capture
+    # without them would publish the names it is meant to replace.
+    named = args.base_path or paths.get("effective_base_path")
+    if not named:
+        print(f"{args.base_url} reports no base path; pass --base-path", file=sys.stderr)
+        return 1
+    base_path = Path(named).expanduser()
     keeper_names = discover_keeper_names(base_path)
     if not keeper_names:
         print(f"no keepers found below {base_path}/.masc/keepers", file=sys.stderr)

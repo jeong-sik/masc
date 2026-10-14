@@ -25,14 +25,13 @@ MASC has three browser sources:
 
 ## Setup: live
 
-Install a built OCaml native host on the browser's machine. `--binary` here names
-**masc-browser-host**, not the Firefox or Zen executable. `--base-path` is the
-workspace containing `.masc`, not the `.masc` directory itself.
+Install the OCaml native host and the extension on the browser's machine.
+`--base-path` is the workspace containing `.masc`, not the `.masc` directory
+itself. The host is the `masc-browser-host` installed beside `masc`; `--binary`
+names another one, and is never the Firefox or Zen executable.
 
 ```bash
-bash connectors/browser/install-host.sh \
-  --binary /path/to/masc-browser-host \
-  --base-path /path/to/workspace
+masc browser-lane-setup --mode extension --base-path /path/to/workspace
 ```
 
 The launcher records no server address: the host reads the port from the
@@ -41,10 +40,27 @@ file again and moves to the port it names only when the current server no
 longer answers and the new port does, so a server restarted on another port is
 found without reinstalling.
 
-The installer supports macOS and Linux and registers a Mozilla native-messaging
+To connect without the extension, let the MASC server start a Firefox of its own
+and attach the host to it:
+
+```bash
+masc browser-lane-setup --mode bidi --base-path /path/to/workspace
+```
+
+This installs the host and writes `[browser.live.bidi]` into the workspace's
+`runtime.toml`. `--firefox`, `--profile` and `--port` name its values. A table
+that is already there keeps its values. Restart the MASC server so it reads the
+table, then log in once in that Firefox: its profile keeps the login. The port
+has no authentication, so any program on the computer can drive that Firefox.
+Give `--mode` twice for both routes. `--mode host` installs only the host and
+its launcher, for a browser you attach yourself or to bring an installed lane's
+host up to the running build; it writes no extension, manifest or `runtime.toml`.
+
+The `--mode extension` command supports macOS and Linux and registers a Mozilla native-messaging
 manifest. `--manifest-dir` selects a different manifest directory when needed.
-In Firefox or Zen, open `about:debugging` → **Load Temporary Add-on** and select `connectors/browser/extension/manifest.json`. Temporary loading
-ends when that browser exits.
+It also writes the extension to `<base-path>/.masc/browser-lane/extension/`. In
+Firefox or Zen, open `about:debugging` → **Load Temporary Add-on** and select
+`manifest.json` there. Temporary loading ends when that browser exits.
 
 Each running connection reports its browser identity and a `clientId` UUID. One
 live connection can be selected automatically; with several, choose the desired

@@ -13,5 +13,6 @@ val parse_model_string
   -> string
   -> Llm_provider.Provider_config.t option
 (** Resolve a model label to a hot-path provider config. [None] when the
-    provider is unregistered, unavailable, or the spec is malformed. Unknown
-    specs are never flattened to a default kind (Provider_kind_resolver SSOT). *)
+    provider is unregistered, unavailable, or the spec is malformed, or when
+    a keyed entry has no supplied credential. Unknown specs are never
+    flattened to a default kind (Provider_kind_resolver SSOT). *)

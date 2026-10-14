@@ -8,8 +8,11 @@ val project_history
   :  Provider_config.t
   -> Types.message list
   -> (Reasoning_history_projection.t, Reasoning_history_projection.error) result
-(** The history this codec will actually serialize: reasoning blocks it cannot
-    carry, and blocks the config's replay policy excludes, are already gone.
+(** The history this codec will actually serialize, before prefix-binding
+    verification: reasoning blocks it cannot carry, and blocks the config's
+    replay policy excludes, are already gone, and on the Anthropic kind the
+    fold can only remove further reasoning, so sizing from this answer
+    stays conservative.
 
     Exported so a caller that must size a request before building it asks the
     same function the wire does, rather than keeping a second opinion about
@@ -18,6 +21,19 @@ val project_history
 
 
 val parse_response : Yojson.Safe.t -> Types.api_response
+
+val drop_block_env_var : string
+(** Name of the environment switch that withholds
+    [thinking.block_binding.prefix_mismatch_behavior = "drop_block"] when set
+    to a false value. Unset keeps the default (send it). Measurement only. *)
+
+val request_headers : body:string -> (string * string) list -> (string * string) list
+(** Add the binding-controls beta only when this exact serialized request
+    contains [thinking.block_binding]. Preserve other caller beta values. *)
+
+val observe_input_transformations : Yojson.Safe.t -> unit
+(** Record provider-reported thinking transformations without recording block
+    contents or signatures. Accepts a response or an SSE message_start body. *)
 
 (** Build the canonical {!Types.api_usage} from Anthropic Messages wire
     counts. The wire's [input_tokens] is exclusive — it counts only tokens
@@ -139,6 +155,24 @@ val build_request
   -> ?tools:Yojson.Safe.t list
   -> unit
   -> string
+
+(** Creation-prefix identity for a response produced by this wire: the digest
+    chain over the API-checked head members plus every projected, merged
+    message, and over the response content. Returns [None] for kinds
+    this backend serves without a binding (Kimi), for responses without
+    reasoning, and when the history refuses projection. Every [None] fails
+    closed at replay instead of recording a digest the wire cannot honor.
+    Pure: it replays the same projection, merge, and fold {!build_request}
+    runs on the same messages and tools, so the value matches the bytes the
+    provider verified, for a request whose body was admitted before dispatch
+    as for one serialized at dispatch. *)
+val transmitted_reasoning_prefix
+  :  config:Provider_config.t
+  -> messages:Types.message list
+  -> tools:Yojson.Safe.t list
+  -> response_content:Types.content_block list
+  -> unit
+  -> Types.Reasoning_prefix.t option
 
 (** Build an Anthropic-compatible Messages count-tokens request from the same
     provider-specific canonical input projection as {!build_request}.

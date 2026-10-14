@@ -27,6 +27,14 @@ let with_temp_dir prefix f =
   in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
+let with_base_path dir f =
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" dir;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_BASE_PATH" (Option.value previous ~default:""))
+    f
+
 let reset_after f =
   H.reset_runtime_stores_for_testing ();
   Fun.protect ~finally:H.reset_runtime_stores_for_testing f
@@ -44,6 +52,19 @@ let record_wake_payload ~trace_id =
     ~role_counts:[ "user", 1; "assistant", 2 ]
     ~tool_count:4
 
+(* A store nobody bound by hand opens where the workspace keeps its state.
+   It used to open in the workspace's own [data/] folder, beside [.masc]. *)
+let test_wake_payloads_live_under_the_masc_directory () =
+  reset_after @@ fun () ->
+  with_temp_dir "wake-payload-home" @@ fun dir ->
+  with_base_path dir @@ fun () ->
+  ignore (record_wake_payload ~trace_id:"home");
+  check int "the row is read back" 1 (List.length (H.read_wake_payload_events ()));
+  check bool "the store is under .masc" true
+    (Sys.is_directory (Filename.concat dir ".masc/keeper-wake-payload"));
+  check bool "nothing is written beside .masc" false
+    (Sys.file_exists (Filename.concat dir "data"))
+
 (* The reader capped an unfiltered read and did not cap a filtered one, so
    supplying a date — which narrows the request — removed the row bound and
    scanned every day-file in range. Both branches must read at most the same
@@ -52,7 +73,7 @@ let record_wake_payload ~trace_id =
 let test_a_date_filter_does_not_remove_the_row_cap () =
   reset_after @@ fun () ->
   with_temp_dir "wake-payload-cap" @@ fun dir ->
-  H.set_wake_payload_store_for_testing ~base_dir:dir;
+  H.set_wake_payload_store_for_testing ~base_path:dir;
   let store = H.get_wake_payload_store () in
   ignore (record_wake_payload ~trace_id:"cap-seed");
   (* Copy the recorded row instead of hand-writing the schema, so this test
@@ -76,7 +97,7 @@ let test_a_date_filter_does_not_remove_the_row_cap () =
 let test_wake_payload_store_round_trip () =
   reset_after @@ fun () ->
   with_temp_dir "wake-payload-store" @@ fun dir ->
-  H.set_wake_payload_store_for_testing ~base_dir:dir;
+  H.set_wake_payload_store_for_testing ~base_path:dir;
   ignore (H.get_wake_payload_store ());
   ignore (record_wake_payload ~trace_id:"trace-round-trip");
   match H.read_wake_payload_events () with
@@ -96,10 +117,10 @@ let test_reset_rebinds_wake_payload_store () =
   reset_after @@ fun () ->
   with_temp_dir "wake-payload-store-a" @@ fun first_dir ->
   with_temp_dir "wake-payload-store-b" @@ fun second_dir ->
-  H.set_wake_payload_store_for_testing ~base_dir:first_dir;
+  H.set_wake_payload_store_for_testing ~base_path:first_dir;
   ignore (record_wake_payload ~trace_id:"trace-first");
   H.reset_runtime_stores_for_testing ();
-  H.set_wake_payload_store_for_testing ~base_dir:second_dir;
+  H.set_wake_payload_store_for_testing ~base_path:second_dir;
   ignore (record_wake_payload ~trace_id:"trace-second");
   match H.read_wake_payload_events () with
   | [ event ] -> check string "trace after reset" "trace-second" event.trace_id
@@ -108,7 +129,7 @@ let test_reset_rebinds_wake_payload_store () =
 let test_wake_payload_reader_rejects_malformed_exact_records () =
   reset_after @@ fun () ->
   with_temp_dir "wake-payload-strict-reader" @@ fun dir ->
-  H.set_wake_payload_store_for_testing ~base_dir:dir;
+  H.set_wake_payload_store_for_testing ~base_path:dir;
   let valid_fields =
     [ "record_type", `String "wake_payload"
     ; "timestamp", `Float 1.0
@@ -228,6 +249,8 @@ let () =
       ( "runtime_stores",
         [
           test_case "wake payload round trip" `Quick test_wake_payload_store_round_trip;
+          test_case "wake payloads live under .masc" `Quick
+            test_wake_payloads_live_under_the_masc_directory;
           test_case "a date filter does not remove the row cap" `Quick
             test_a_date_filter_does_not_remove_the_row_cap;
           test_case "wake payload reset rebinds store" `Quick

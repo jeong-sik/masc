@@ -9,7 +9,13 @@ val blocks_fields : chat_block list option -> (string * Yojson.Safe.t) list
 val stream_lifecycle_fields : stream_lifecycle_event list option -> (string * Yojson.Safe.t) list
 val approval_lifecycle_fields : approval_lifecycle option -> (string * Yojson.Safe.t) list
 
+(** A chat row as JSON. When [omit_stream_contract] is true the
+    [stream_contract] object is left out: the keeper-chat page route serves
+    only the TUI, which never reads that object, and it is about a quarter
+    of a page's bytes (#42200). The transcript route keeps it -- the
+    dashboard reads it there. *)
 val message_to_json :
+  ?omit_stream_contract:bool ->
   trace_lookup_available:bool -> trace_block:chat_block option ->
   chat_message -> Yojson.Safe.t
 

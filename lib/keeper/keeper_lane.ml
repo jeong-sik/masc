@@ -122,7 +122,12 @@ let crossed_start_boundary t =
   | Exited ->
     (match Eio.Promise.peek t.exited_p with
      | Some { outcome = Shutdown_before_start; _ } -> false
-     | Some _ -> true
+     | Some
+         { outcome =
+             ( Completed | Shutdown_requested | Shutdown_cancel_failed _
+             | Cancelled_by_parent _ | Failed _ )
+         ; _
+         } -> true
      | None -> true)
 ;;
 

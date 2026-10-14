@@ -26,6 +26,7 @@ type image =
   | Mascot
   | Keeper_portrait
   | About_keeper_1 | About_keeper_2 | About_keeper_3 | About_keeper_4
+  | Evidence_image_1 | Evidence_image_2 | Evidence_image_3 | Evidence_image_4
 [@@deriving enumerate]
 
 (* Fixed, so a query reply arriving late -- after the deadline, into the key
@@ -39,6 +40,13 @@ let image_id = function
   | About_keeper_2 -> 44
   | About_keeper_3 -> 45
   | About_keeper_4 -> 46
+  | Evidence_image_1 -> 51
+  | Evidence_image_2 -> 52
+  | Evidence_image_3 -> 53
+  | Evidence_image_4 -> 54
+
+let evidence_images =
+  [ Evidence_image_1; Evidence_image_2; Evidence_image_3; Evidence_image_4 ]
 
 let query_id = image_id Graphics_query
 
@@ -153,10 +161,30 @@ let replace_rgb ~image_id ~placement_id =
 let put ~image_id ~placement_id ~rows =
   Printf.sprintf "%sa=p%s,r=%d,q=2%s" apc (identity ~image_id ~placement_id) (max 1 rows) st
 
+type crop = { top_px : int; height_px : int }
+
+(* The cells a picture covers and the part of it that shows. Both c and r are
+   sent: with one of them the terminal derives the other from the whole
+   image's shape, and a cropped picture is not that shape. y and h are source
+   pixels; w stays unset, which is the full width. *)
+let extent ~rows ~cols ~crop =
+  Printf.sprintf ",r=%d,c=%d%s" (max 1 rows) (max 1 cols)
+    (match crop with
+     | None -> ""
+     | Some { top_px; height_px } ->
+         Printf.sprintf ",y=%d,h=%d" (max 0 top_px) (max 1 height_px))
+
+let put_png ~image_id ~placement_id ~rows ~cols ~crop =
+  Printf.sprintf "%sa=p%s%s,q=2%s" apc (identity ~image_id ~placement_id)
+    (extent ~rows ~cols ~crop) st
+
+let delete_placement ~image_id ~placement_id =
+  Printf.sprintf "%sa=d,d=i,i=%d,p=%d,q=2%s" apc image_id placement_id st
+
 let delete_image ~image_id =
   Printf.sprintf "%sa=d,d=I,i=%d,q=2%s" apc image_id st
 
-let place_png ~identity ~data ~rows =
+let place_png ~identity ~extent ~data =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in
   let out = Buffer.create (length + (length / chunk_bytes * 32) + 64) in
@@ -169,8 +197,8 @@ let place_png ~identity ~data ~rows =
        complete and may be drawn. *)
     if offset = 0 then
       Buffer.add_string out
-        (Printf.sprintf "%sf=100,a=T%s,r=%d,q=2,m=%d;%s%s" apc identity
-           (max 1 rows) more
+        (Printf.sprintf "%sf=100,a=T%s%s,q=2,m=%d;%s%s" apc identity extent
+           more
            (String.sub encoded offset size)
            st)
     else
@@ -185,7 +213,7 @@ let place_png ~identity ~data ~rows =
     Buffer.contents out
   end
 
-let place = place_png ~identity:""
+let place ~data ~rows = place_png ~identity:"" ~extent:(Printf.sprintf ",r=%d" (max 1 rows)) ~data
 
 (* Ghostty 1.3.1 crashes in its Kitty o=z inflater for portrait-sized data
    (compress.flate.Decompress.streamInner -> Io.Writer.unreachableRebase).
@@ -194,7 +222,16 @@ let place = place_png ~identity:""
 let replace_rgba ~image_id ~placement_id ~data ~pixel_width ~pixel_height ~rows =
   match Rgb_png.encode_rgba ~width:pixel_width ~height:pixel_height ~rgba:data with
   | Error _ -> ""
-  | Ok png -> place_png ~identity:(identity ~image_id ~placement_id) ~data:png ~rows
+  | Ok png ->
+      place_png ~identity:(identity ~image_id ~placement_id)
+        ~extent:(Printf.sprintf ",r=%d" (max 1 rows)) ~data:png
+
+(* [data] is a PNG file's bytes, sent as they are. The caller identifies the
+   bytes first ([payload_media_type]): a terminal drops what it cannot decode
+   and says nothing. *)
+let replace_png ~image_id ~placement_id ~data ~rows ~cols ~crop =
+  place_png ~identity:(identity ~image_id ~placement_id)
+    ~extent:(extent ~rows ~cols ~crop) ~data
 
 let delete_all = Printf.sprintf "%sa=d%s" apc st
 

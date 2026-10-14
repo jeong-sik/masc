@@ -158,20 +158,32 @@ let source_metadata_fields () =
   Dashboard_tool_source_freshness.keeper_tool_call_io_fields
     ~dashboard_surface ()
 
-let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~unsettled ~malformed =
+(* What the records are a sample of: every call of the last [hours], or the
+   most recent [n]. It used to travel as a label string beside an optional
+   window and a limit, which could name one mode and carry the other's
+   number. *)
+type sampling =
+  | Window_hours of float
+  | Recent_n of int
+
+let sampling_fields = function
+  | Window_hours hours ->
+    [ ("sampling_mode", `String "window_hours")
+    ; ("sample_limit", `Null)
+    ; ("window_hours", `Float hours)
+    ]
+  | Recent_n n ->
+    [ ("sampling_mode", `String "recent_n")
+    ; ("sample_limit", `Int n)
+    ; ("window_hours", `Null)
+    ]
+
+let empty_summary ~sampling ~deferred ~unsettled ~malformed =
   `Assoc
     (source_metadata_fields ()
-    @ [ ("generated_at", `String (Masc_domain.now_iso ()))
-    ; ("sampling_mode", `String sampling_mode)
-    ; ( "sample_limit",
-        match sampling_mode with
-        | "recent_n" -> `Int n
-        | _ -> `Null )
-    ; ( "window_hours",
-        match window_hours with
-        | Some hours -> `Float hours
-        | None -> `Null )
-    ; ("total", `Int 0)
+    @ [ ("generated_at", `String (Masc_domain.now_iso ())) ]
+    @ sampling_fields sampling
+    @ [ ("total", `Int 0)
     ; ("success", `Int 0)
     ; ("failure", `Int 0)
     ; ("deferred", `Int deferred)
@@ -190,7 +202,7 @@ let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~unsettled ~malforme
     ])
 
 (* The payload over already-read [records]; the read is [aggregate]'s. *)
-let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
+let summarize ~sampling records : Yojson.Safe.t =
   let deferred, unsettled, malformed, records =
     List.fold_left
       (fun (deferred, unsettled, malformed, acc) record ->
@@ -206,7 +218,7 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
   in
   let records = List.rev records in
   if records = [] then
-    empty_summary ~window_hours ~n ~sampling_mode ~deferred ~unsettled ~malformed
+    empty_summary ~sampling ~deferred ~unsettled ~malformed
   else
   let total = ref 0 in
   let success = ref 0 in
@@ -400,17 +412,9 @@ let summarize ~n ~sampling_mode ~window_hours records : Yojson.Safe.t =
   in
   `Assoc (
     source_metadata_fields ()
+    @ [ ("generated_at", `String (Masc_domain.now_iso ())) ]
+    @ sampling_fields sampling
     @ [
-    ("generated_at", `String (Masc_domain.now_iso ()));
-    ("sampling_mode", `String sampling_mode);
-    ( "sample_limit",
-      match sampling_mode with
-      | "recent_n" -> `Int n
-      | _ -> `Null );
-    ( "window_hours",
-      match window_hours with
-      | Some hours -> `Float hours
-      | None -> `Null );
     ("total", `Int total_n);
     ("success", `Int success_n);
     ("failure", `Int (total_n - success_n));
@@ -435,11 +439,11 @@ let aggregate ?(n = 5000) ?window_hours ()
   match window_hours with
   | Some hours when hours > 0.0 ->
     Ok
-      (summarize ~n ~sampling_mode:"window_hours" ~window_hours:(Some hours)
+      (summarize ~sampling:(Window_hours hours)
          (Keeper_tool_call_log.read_window ~window_hours:hours ()))
   | _ ->
     (match Keeper_tool_call_log.read_recent ~n () with
      | Ok records ->
-       Ok (summarize ~n ~sampling_mode:"recent_n" ~window_hours:None records)
+       Ok (summarize ~sampling:(Recent_n n) records)
      | Error (Keeper_tool_call_log.Index_unavailable _ as error) -> Error error)
 ;;

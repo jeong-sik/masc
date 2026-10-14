@@ -111,7 +111,7 @@ let skill_action_lines actions =
          "       action turn=%d runtime=%s tool=%s %s at=%s"
          action.agent_core_turn
          (Terminal_text.single_line action.runtime_id)
-         (Terminal_text.single_line action.tool_name)
+         (Terminal_text.single_line (Masc.Tool_display.list_label action.tool_name))
          (Terminal_text.single_line identity)
          (Terminal_text.single_line action.observed_at))
     actions
@@ -299,7 +299,10 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
          (fun (source : Masc.Tui_decode_tools.skill_catalog_source) ->
             match source.scso_observation with
             | Masc.Tui_decode_tools.Skill_source_ready count -> count > 0
-            | _ -> false)
+            | Masc.Tui_decode_tools.Skill_source_missing
+            | Masc.Tui_decode_tools.Skill_source_unresolved
+            | Masc.Tui_decode_tools.Skill_source_not_directory _
+            | Masc.Tui_decode_tools.Skill_source_unavailable _ -> false)
          sources)
   in
   let heading =
@@ -1154,7 +1157,8 @@ let tools_display_lines ?(cols = 80) (state : state) =
                         ( act.observed_at,
                           Printf.sprintf "%-8s action    %-20s turn#%d %s"
                             (time_of act.observed_at)
-                            (Terminal_text.single_line act.tool_name)
+                            (Terminal_text.single_line
+                               (Masc.Tool_display.list_label act.tool_name))
                             act.agent_core_turn
                             (Terminal_text.single_line act.runtime_id) ))
                      activation.actions)

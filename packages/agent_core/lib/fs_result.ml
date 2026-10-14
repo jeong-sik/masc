@@ -36,7 +36,7 @@ let ensure_dir_recursive ?(mode = 0o700) path =
     try
       match (Unix.stat p).st_kind with
       | Unix.S_DIR -> Ok ()
-      | _ -> file_error p "path exists and is not a directory"
+      | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> file_error p "path exists and is not a directory"
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> io_error_of_exn ~op ~path:p exn

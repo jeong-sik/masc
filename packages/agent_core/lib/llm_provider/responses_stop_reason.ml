@@ -7,7 +7,9 @@ let incomplete_stop_reason incomplete_reason =
   | Some reason ->
     (match Types.stop_reason_of_string (String.lowercase_ascii reason) with
      | Types.ContextWindowExceeded -> Types.ContextWindowExceeded
-     | _ -> Types.Unknown reason)
+     | Types.EndTurn | Types.StopToolUse | Types.MaxTokens | Types.StopSequence | Types.Refusal
+     | Types.ContentFilter | Types.RepetitionTruncation | Types.PauseTurn | Types.Compaction
+     | Types.UnmatchedToolCalls | Types.Unknown _ -> Types.Unknown reason)
   | None -> Types.Unknown "incomplete"
 ;;
 

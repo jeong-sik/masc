@@ -399,7 +399,10 @@ let classify_image_probe
         | None -> Image_missing
         | Some reason ->
           probe_failure ~phase:Image_list ~status ~stdout ~stderr ~reason)
-     | Some (status, stdout, stderr) ->
+     | Some
+         ( ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status)
+         , stdout
+         , stderr ) ->
        probe_failure
          ~phase:Image_list
          ~status
@@ -413,7 +416,7 @@ let classify_image_probe
          ~stdout:inspect_stdout
          ~stderr:inspect_stderr
          ~reason:"image store listing evidence was not collected")
-  | status ->
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status ->
     probe_failure
       ~phase:Image_inspect
       ~status
@@ -636,7 +639,9 @@ let classify_image_probe_for backend ~image ~inspect ~listing =
                "native image %s target digest %s differs from requested reference %s"
                row.image_name row.target_digest digest))
         | _ -> invalid "invalid digest-qualified image reference"))
-  | _ ->
+  | (Backend.Apple_container | Backend.Microsandbox), _
+  | ( Backend.Nerdctl_kata
+    , ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) ) ->
     classify_image_probe
       ~inspect_shape:(image_inspect_shape_for backend)
       ~listing_shape:(image_listing_shape_for backend)
@@ -656,7 +661,7 @@ let image_probe_with_inspect_for backend ~image ~timeout_sec =
         (Process_eio.run_argv_with_status_split
            ~timeout_sec
            (image_listing_argv_for backend))
-    | _ -> None
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _ -> None
   in
   classify_image_probe_for backend ~image ~inspect ~listing, inspect
 ;;
@@ -1250,7 +1255,7 @@ let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_
      | `List entries -> absent entries
      | _ -> Error "trim cleanup inventory is not a JSON array"
      | exception Yojson.Json_error detail -> Error ("trim cleanup inventory is invalid JSON: " ^ detail))
-  | status, stdout, stderr ->
+  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
     Error (Printf.sprintf "cannot verify trim container %s was removed (%s): %s"
       name (Keeper_sandbox_exec_failure.status_label status) (output_for_log ~stdout ~stderr))
 ;;
@@ -1396,6 +1401,10 @@ let volume_names_of_json = function
   | _ -> Error "container volume list did not return a JSON array"
 ;;
 
+let apple_volume_list_argv () =
+  command_argv_for Backend.Apple_container @ [ "volume"; "list"; "--format"; "json" ]
+;;
+
 type volume_probe_outcome =
   | Volume_present
   | Volume_absent
@@ -1436,8 +1445,11 @@ let classify_volume_probe ~volume_name ~inspect ~listing =
              if List.exists (String.equal volume_name) names
              then Volume_present
              else Volume_absent))
-     | Some outcome -> Volume_probe_failed (described "list" outcome))
-  | outcome -> Volume_probe_failed (described "inspect" outcome)
+     | Some
+         (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) as outcome) ->
+       Volume_probe_failed (described "list" outcome))
+  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) as outcome ->
+    Volume_probe_failed (described "inspect" outcome)
 ;;
 
 (** Create the work volume when absent, for whichever runtime the keeper
@@ -1458,9 +1470,8 @@ let apple_volume_probe ~volume_name ~timeout_sec =
   let listing =
     match inspect with
     | Unix.WEXITED 1, _, _ ->
-      let list_argv = cli @ [ "volume"; "list"; "--format"; "json" ] in
-      Some (Process_eio.run_argv_with_status_split ~timeout_sec list_argv)
-    | _ -> None
+      Some (Process_eio.run_argv_with_status_split ~timeout_sec (apple_volume_list_argv ()))
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _ -> None
   in
   classify_volume_probe ~volume_name ~inspect ~listing
 ;;
@@ -1494,7 +1505,7 @@ let ensure_apple_volume role ~volume_name ~size ~timeout_sec =
     let argv = apple_volume_create_argv ~volume_name ~size in
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
      | Unix.WEXITED 0, _, _ -> Ok `Created
-     | status, stdout, stderr ->
+     | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
        Error
          (Printf.sprintf
             "%s_create_failed: %s (%s; %s)"
@@ -1548,7 +1559,7 @@ let msb_volume_probe ~volume_name ~timeout_sec =
           if List.exists (String.equal volume_name) names
           then Volume_present
           else Volume_absent))
-  | status, stdout, stderr ->
+  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
     Volume_probe_failed
       (Printf.sprintf
          "msb volume list: %s (%s)"
@@ -1571,7 +1582,7 @@ let ensure_msb_work_volume ~volume_name ~timeout_sec =
     let argv = msb_volume_create_argv ~volume_name in
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
      | Unix.WEXITED 0, _, _ -> Ok `Created
-     | status, stdout, stderr ->
+     | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
        Error
          (Printf.sprintf
             "microvm_work_volume_create_failed: %s (%s; %s)"
@@ -1632,8 +1643,10 @@ let ensure_nerdctl_work_volume ~volume_name ~size ~timeout_sec =
            (Printf.sprintf
               "microvm_work_volume_probe_failed: nerdctl inspect did not confirm exactly one named volume with an absolute mountpoint: %s"
               volume_name)
-     | outcome -> failure "probe" outcome)
-  | outcome -> failure "create" outcome
+     | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) as outcome ->
+       failure "probe" outcome)
+  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _, _) as outcome ->
+    failure "create" outcome
 ;;
 
 (** Apple takes a sized guest disk; msb and nerdctl use persistent managed
@@ -1675,8 +1688,62 @@ let build_volume_mount_args ~volume_name =
   [ "--volume"; volume_name ^ ":" ^ build_volume_guest_root ]
 ;;
 
-let apple_build_volume_delete_argv ~volume_name =
+let apple_volume_delete_argv ~volume_name =
   command_argv_for Backend.Apple_container @ [ "volume"; "delete"; volume_name ]
+;;
+
+(* Both volumes are named by the same functions that created them, so the
+   removal reaches exactly this keeper's volumes and nothing that merely
+   shares a prefix. Each delete is attempted whatever the other returned. A
+   delete's exit code cannot prove absence: an already-absent volume and one
+   a guest still holds can both exit non-zero. One listing after both deletes
+   settles it, the same way the trim helper's removal is settled. *)
+let remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name =
+  match work_volume_name ~keeper_name, build_volume_name ~keeper_name with
+  | Error detail, _ | _, Error detail -> Error detail
+  | Ok work, Ok build ->
+    let deletions =
+      List.map
+        (fun volume_name ->
+           volume_name, run ~timeout_sec (apple_volume_delete_argv ~volume_name))
+        [ work; build ]
+    in
+    (match run ~timeout_sec (apple_volume_list_argv ()) with
+     | Unix.WEXITED 0, listing, _ ->
+       (match Yojson.Safe.from_string listing with
+        | exception Yojson.Json_error detail ->
+          Error ("keeper volume inventory is invalid JSON: " ^ detail)
+        | json ->
+          (match volume_names_of_json json with
+           | Error _ as error -> error
+           | Ok names ->
+             (match
+                List.filter
+                  (fun (volume_name, _) -> List.exists (String.equal volume_name) names)
+                  deletions
+              with
+              | [] -> Ok ()
+              | remaining ->
+                Error
+                  (String.concat
+                     "; "
+                     (List.map
+                        (fun (volume_name, (status, stdout, stderr)) ->
+                           Printf.sprintf
+                             "volume %s remains after removal (%s): %s"
+                             volume_name
+                             (Keeper_sandbox_exec_failure.status_label status)
+                             (output_for_log ~stdout ~stderr))
+                        remaining)))))
+     | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
+       Error
+         (Printf.sprintf
+            "cannot verify keeper %s's volumes %s and %s were removed (%s): %s"
+            keeper_name
+            work
+            build
+            (Keeper_sandbox_exec_failure.status_label status)
+            (output_for_log ~stdout ~stderr)))
 ;;
 
 (** Recreate the build volume fresh on every boot rather than reusing one
@@ -1695,11 +1762,11 @@ let recreate_apple_build_volume ~volume_name ~size ~timeout_sec =
     Error (Printf.sprintf "%s_probe_failed: %s" error_code message)
   | Volume_absent -> ensure_apple_volume Build_volume ~volume_name ~size ~timeout_sec
   | Volume_present ->
-    let argv = apple_build_volume_delete_argv ~volume_name in
+    let argv = apple_volume_delete_argv ~volume_name in
     (match Process_eio.run_argv_with_status_split ~timeout_sec argv with
      | Unix.WEXITED 0, _, _ ->
        ensure_apple_volume Build_volume ~volume_name ~size ~timeout_sec
-     | status, stdout, stderr ->
+     | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
        Error
          (Printf.sprintf
             "%s_delete_failed: %s (%s; %s)"
@@ -2380,7 +2447,7 @@ let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
             | Unix.WEXITED 0, state, _ ->
               let* running = running_of_nerdctl_state_json state in
               Ok ({ container with running = Some running } :: rest)
-            | status, out, err ->
+            | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), out, err ->
               Error (Printf.sprintf "nerdctl inventory state for %s failed (%s): %s"
                        container.id (Keeper_sandbox_exec_failure.status_label status)
                        (output_for_log ~stdout:out ~stderr:err))) containers (Ok [])
@@ -2390,7 +2457,7 @@ let list_live_containers_for backend ~base_path ~keeper_name ~timeout_sec =
            | exception Yojson.Json_error detail ->
              Error ("microvm container list returned invalid JSON: " ^ detail))
         | Listing_not_established reason -> Error reason)
-     | status, stdout, stderr ->
+     | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), stdout, stderr ->
        Error
          (Printf.sprintf
             "microvm container list failed (%s): %s"
@@ -2471,11 +2538,11 @@ let sweep_one_backend backend ~base_path ~timeout_sec ~is_pid_alive ~run_argv li
             (delete_force_argv_for backend ~container_name:candidate.container_id)
         with
         | Unix.WEXITED 0, _ -> { acc with removed = candidate.container_id :: acc.removed }
-        | _, detail ->
+        | (Unix.WEXITED _, detail) | (Unix.WSIGNALED _, detail) | (Unix.WSTOPPED _, detail) ->
           { acc with failed = (candidate.container_id, detail) :: acc.failed })
       { removed = []; failed = [] }
       candidates
-  | status, detail ->
+  | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), detail ->
     Log.Keeper.warn "microvm abandoned guest inventory failed backend=%s status=%s: %s"
       (Backend.to_string backend) (Keeper_sandbox_exec_failure.status_label status) detail;
     { removed = []; failed = [] }

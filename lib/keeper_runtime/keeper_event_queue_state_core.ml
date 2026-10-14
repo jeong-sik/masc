@@ -687,7 +687,9 @@ let transition_equal left right =
   | Transfer_accepted left, Transfer_accepted right -> left = right
   | Ack_source_terminal left, Ack_source_terminal right ->
     left = right
-  | _ -> false
+  | Cancel_accepted _, (Transfer_accepted _ | Ack_source_terminal _)
+  | Transfer_accepted _, (Cancel_accepted _ | Ack_source_terminal _)
+  | Ack_source_terminal _, (Cancel_accepted _ | Transfer_accepted _) -> false
 ;;
 
 let transition_receipt_equal (left : transition_receipt) (right : transition_receipt) =
@@ -1132,12 +1134,17 @@ let terminalize_pending_turn
                  ; operator_operation_id
                  ; source_receipt
                  }))
-             | Projected_cancel _, _
-             | Projected_transfer _, _
-             | Projected_fusion_terminal, _
-             | Projected_hitl_terminal, _
-             | Projected_turn_completed, _
-             | Projected_turn_attempt_terminal, _ -> false) ->
+             | ( (Projected_cancel _ | Projected_transfer _)
+               , (Fusion_terminal _ | Hitl_terminal _ | Turn_completed
+                 | Turn_attempt_terminal _) )
+             | Projected_fusion_terminal
+               , (Hitl_terminal _ | Turn_completed | Turn_attempt_terminal _)
+             | Projected_hitl_terminal
+               , (Fusion_terminal _ | Turn_completed | Turn_attempt_terminal _)
+             | Projected_turn_completed
+               , (Fusion_terminal _ | Hitl_terminal _ | Turn_attempt_terminal _)
+             | Projected_turn_attempt_terminal
+               , (Fusion_terminal _ | Hitl_terminal _ | Turn_completed) -> false) ->
     let transition =
       Ack_source_terminal
         { source
@@ -1154,7 +1161,13 @@ let terminalize_pending_turn
       }
     in
     Ok (state, Transition_already_applied receipt)
-  | Some _ ->
+  | Some
+      (Current_receipt
+         { transition =
+             Cancel_accepted _ | Transfer_accepted _ | Ack_source_terminal _
+         ; _
+         }
+      | Projected_witness _) ->
     Error
       (Printf.sprintf
          "turn-attempt terminal operation conflict: %s"

@@ -32,6 +32,15 @@ type dispatch_credential_error =
       { provider_id : string
       ; carrier : Agent_core.Error.credential_carrier
       }
+  | Undeclared_credential of { provider_id : string }
+
+let undeclared_credential_detail ~provider_id =
+  Printf.sprintf
+    "provider %S requires an API key and declares no credential: add \
+     [providers.%s.credentials] with the environment variable that holds it"
+    provider_id
+    provider_id
+;;
 
 let dispatch_credential_error_to_string = function
   | Required_env_credential_missing { provider_id; env_key } ->
@@ -43,9 +52,12 @@ let dispatch_credential_error_to_string = function
     Printf.sprintf
       "provider %S declares an unavailable %s credential"
       provider_id
-      (match carrier with
+       (match carrier with
        | Agent_core.Error.InlineCredential -> "inline"
-       | Agent_core.Error.FileCredential -> "file")
+       | Agent_core.Error.FileCredential -> "file"
+       | Agent_core.Error.UndeclaredCredential -> "undeclared")
+  | Undeclared_credential { provider_id } ->
+    undeclared_credential_detail ~provider_id
 ;;
 
 let dispatch_credential_error_to_core_error = function
@@ -54,6 +66,10 @@ let dispatch_credential_error_to_core_error = function
   | Declared_credential_unavailable { provider_id; carrier } ->
     Agent_core.Error.Config
       (Agent_core.Error.CredentialUnavailable { provider_id; carrier })
+  | Undeclared_credential { provider_id } ->
+    Agent_core.Error.Config
+      (Agent_core.Error.CredentialUnavailable
+         { provider_id; carrier = Agent_core.Error.UndeclaredCredential })
 ;;
 
 let validate_dispatch_credential
@@ -77,13 +93,22 @@ let validate_dispatch_credential
     else
       match requirement with
       | Not_required -> Ok ()
-      (* An unknown provider is not turned away here. This is a pre-dispatch
-         check, and [Runtime_adapter.resolve_api_key] is where the absence is
-         answered with a refusal that names it; failing twice for one cause
-         would report the same thing in two vocabularies. What changed is that
-         the two absences are no longer one value, so this arm now says which
-         one it is letting through. *)
+      (* An unknown provider is not turned away here: nothing says whether it
+         needs a key, and [Runtime_adapter.resolve_api_key] answers that case
+         where it names the missing catalog entry. A catalog row that states
+         [requires_api_key] while the runtime row declares no credential is
+         turned away before the request leaves, the same way a declared but
+         empty one is: dispatching would send no auth header at all.
+
+         Do not close this arm before runtime.toml can declare "no key" for a
+         row (task-2314, [credentials] [type = "none"]). The v0.54.0 Known
+         issues tell an operator whose catalog row points at a keyless proxy
+         to rename the row to an id the catalog does not know; that rename
+         passes through here. Closing it first would stop those rows with no
+         declaration left to add. *)
       | Unknown_provider -> Ok ()
+      | Missing_declared_credential { provider_id } ->
+        Error (Undeclared_credential { provider_id })
       | Reference (Env env_key) ->
         Error
           (Required_env_credential_missing

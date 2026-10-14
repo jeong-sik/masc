@@ -7,9 +7,9 @@
     {b Usage:}
     {[
       let spec = Tool_spec.create
-        ~name:"masc_library_search"
-        ~description:"Search stored library entries"
-        ~module_tag:Mod_library
+        ~name:"masc_wiki_search"
+        ~description:"Search wiki pages"
+        ~module_tag:Mod_wiki
         ~input_schema:(...)
         ~is_read_only:true
         ~is_idempotent:true

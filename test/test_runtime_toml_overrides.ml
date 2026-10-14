@@ -143,6 +143,34 @@ let test_applies_lifecycle_enabled_overrides () =
   check (option string) "single autonomy setting" (Some "true")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_ENABLED" overrides)
 
+(* RFC keepers-see-the-wiki-table-of-contents: the operator turns the wiki
+   paragraph off in runtime.toml. A wiki that lists a page before the switch
+   lists nothing after it, and the turn carries no paragraph. *)
+let test_wiki_contents_switch_turns_the_wiki_paragraph_off () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let ctx = { Tool_wiki.base_path; agent_name = "wiki-fixture" } in
+  ignore
+    (Tool_wiki.dispatch ctx ~name:"masc_wiki_create"
+       ~args:
+         (`Assoc
+           [ "page", `String "pm-setlist"; "title", `String "Setlist"
+           ; "summary", `String "Usual song order"; "source", `String "research"
+           ; "body", `String "page body" ]));
+  (match Keeper_wiki_contents.observe ~base_path with
+   | Keeper_wiki_contents.Listed (_ :: _) -> ()
+   | Listed [] | Unlisted _ | Off -> fail "the fixture wiki lists its page while the switch is on");
+  write_toml base_path "[wiki_contents]\nenabled = false\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok _ -> ()
+   | Error failure ->
+     failf "load failed: %s" (Keeper_runtime_config.load_failure_to_string failure));
+  (match Keeper_wiki_contents.observe ~base_path with
+   | Keeper_wiki_contents.Off -> ()
+   | Listed _ | Unlisted _ -> fail "wiki_contents.enabled = false still lists the wiki");
+  check (option string) "switched off, the turn carries no wiki paragraph" None
+    (Keeper_unified_prompt.format_wiki_observation (Keeper_wiki_contents.observe ~base_path))
+
 let test_parse_error_returns_error () =
   with_base_path @@ fun base_path ->
   write_toml base_path "this is not valid TOML [[[\n";
@@ -1315,5 +1343,7 @@ let () =
             test_preview_precondition_matches_save
         ; test_case "wake prompt is readable in the settings panel (#28413)" `Quick
             test_wake_prompt_is_readable_in_the_settings_projection
+        ; test_case "wiki contents switch turns the wiki paragraph off" `Quick
+            test_wiki_contents_switch_turns_the_wiki_paragraph_off
         ] )
     ]

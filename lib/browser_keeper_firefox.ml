@@ -56,7 +56,8 @@ let firefox_failure_message (config : Browser_configuration.live_bidi) = functio
       "Firefox exited (%s) before port %d answered. Another Firefox may have %s open; \
        quit it and the next server start opens this one."
       (status_text status) config.port config.profile
-  | Exited_before_listening status ->
+  | Exited_before_listening
+      (( None | Some (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ) as status) ->
     Printf.sprintf "Firefox exited (%s) before port %d answered." (status_text status) config.port
   | Not_listening seconds ->
     Printf.sprintf "Firefox did not open port %d within %.0f s." config.port seconds
@@ -74,11 +75,12 @@ type host_step =
   | Start_host of string
   | Launcher_not_ready of launcher_missing
 
-let launcher_missing_message missing =
-  Printf.sprintf "the browser lane is %s; run connectors/browser/install-host.sh for this workspace"
+let launcher_missing_message ~base_path missing =
+  Printf.sprintf "the browser lane is %s; run %s"
     (match missing with
      | Not_installed -> "not installed"
      | Needs_reinstall -> "not as its installation wrote it")
+    (Browser_lane_launcher.install ~route:Browser_lane_launcher.Bidi ~base_path)
 
 let host_on_another_port_message ~port address =
   Printf.sprintf

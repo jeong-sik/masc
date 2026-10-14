@@ -10,25 +10,6 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
-let make_runtime ?model ?(max_concurrency = 2) id base_url =
-  {
-    Local_runtime_pool.id;
-    base_url;
-    model;
-    max_concurrency;
-    active_slots = 0;
-    queue_depth = 0;
-    failure_streak = 0;
-    cooldown_until = None;
-    last_error = None;
-    total_started = 0;
-    total_success = 0;
-    total_failure = 0;
-  }
-
-let install_pool runtimes =
-  Local_runtime_pool.For_testing.install_pool runtimes
-
 let test_parse_runtime_env () =
   Local_runtime_pool.reset ();
   (* AGENT_CORE 0.112.0 auto-appends Ollama endpoint (http://127.0.0.1:11434) to

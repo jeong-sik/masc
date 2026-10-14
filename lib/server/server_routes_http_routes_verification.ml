@@ -90,7 +90,11 @@ let awaiting_task config task_id =
       ; _
       } ->
     Ok (assignee, verification_id)
-  | Some task ->
+  | Some
+      ({ task_status =
+           Masc_domain.(Todo | Claimed _ | InProgress _ | Done _ | Cancelled _)
+       ; _
+       } as task) ->
     Error
       (Printf.sprintf
          "Task %s is %s; operator evidence and verdicts require \
@@ -121,7 +125,8 @@ let operator_evidence_json ~config ~operator_id ~task_id =
       ; ( "authority_actor"
         , `String (Masc_domain.completion_authority_actor authority) )
       ; ( "evidence"
-        , Workspace_verification_store.submitted_evidence_access_to_yojson
+        , Workspace_verification_operator_evidence.access_to_yojson
+            ~base_path:config.Workspace.base_path
             evidence )
       ])
 ;;

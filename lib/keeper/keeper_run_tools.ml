@@ -15,7 +15,7 @@ open Keeper_agent_prompt_metrics
 
     AGENT_CORE hooks (before_turn, on_tool_executed) cannot return values, so
     they write into this single mutable record during Agent.run execution.
-    After execution completes, {!freeze} produces an immutable snapshot. *)
+    After the run returns, the turn reads its fields directly. *)
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
@@ -35,17 +35,6 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable extra_system_context_assembly : Keeper_context_assembly.t option
   ; mutable assistant_turn_texts : string list
   ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
-  }
-
-type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
-  { out_meta : Keeper_meta_contract.keeper_meta
-  ; out_tool_calls : tool_call_detail list
-  ; out_tool_surface : tool_surface_metrics
-  ; out_requested_tool_names : string list
-  ; out_receipt_completion_contract_result :
-      Keeper_execution_receipt.completion_contract_result
-  ; out_receipt_actionable_signal :
-      Keeper_contract_classifier.actionable_signal option
   }
 
 type agent_setup = Keeper_run_tools_hooks.agent_setup =

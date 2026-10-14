@@ -127,6 +127,33 @@ masc prerequisite-actions pdf-tools --execute poppler_install
 나타내며, PDF 검사나 검증 통과를 뜻하지 않습니다. MASC를 서비스로 실행한다면 PDF
 검증을 요청하기 전에 서비스의 PATH에서도 두 명령을 찾을 수 있게 설정하세요.
 
+### 브라우저 도구 (geckodriver, Firefox)
+
+브라우저 레인은 portable 릴리스에 들어 있지 않은 호스트 프로그램 둘을 실행합니다.
+automation 레인이 서버와 함께 띄우는 geckodriver와, geckodriver와 attached-Firefox
+레인이 움직이는 Firefox입니다.
+
+```bash
+masc prerequisite-actions geckodriver                       # 상태와 동작 확인
+masc prerequisite-actions geckodriver --execute geckodriver_brew_install
+masc prerequisite-actions firefox
+masc prerequisite-actions firefox --execute firefox_brew_install
+```
+
+macOS에서는 기존 Homebrew의 [`geckodriver`](https://formulae.brew.sh/formula/geckodriver)
+formula와 [`firefox`](https://formulae.brew.sh/cask/firefox) cask를 사용합니다.
+Linux에서는 배포판마다 패키지 이름이 달라서 프로젝트의 다운로드·설치 안내 페이지를
+엽니다. 기본 MASC 설치 과정은 Homebrew나 이 프로그램들을 자동으로 설치하지 않습니다.
+`/Applications`에 `Firefox.app`이 이미 있으면 Homebrew가 Firefox cask 설치를
+거절합니다. 그때는 `firefox` 결과가 그 Firefox를 이미 보여 주므로 설치가 필요
+없습니다.
+
+결과는 현재 프로세스 환경에서 프로그램이 `--version`에 답하는지와 그 절대 경로를
+알려 줍니다. 프로그램은 PDF 검사와 같이 일부만 남긴 환경 변수로 실행합니다.
+버전을 출력하는 데 `DISPLAY` 같은 변수가 필요한 프로그램은 답하지 않는 것으로
+나옵니다. `runtime.toml`은 고치지 않습니다. `[browser.automation]`에 실행 파일을
+적는 일과 서버 재시작은 별도 단계입니다.
+
 ## 설치
 
 위의 빠른 시작이 보통의 설치입니다. 묻는 과정 없이 workspace를 정하려면 이렇게
@@ -142,7 +169,7 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
 
 ```bash
-TAG=v0.52.0
+TAG=v0.55.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"

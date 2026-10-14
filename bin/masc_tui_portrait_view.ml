@@ -70,6 +70,45 @@ type placement = {
   image : Draw.image;
 }
 
+(* A picture the terminal is asked to show: where, how many cells, and what
+   the pixels are. The candle portraits are RGBA frames this process drew; an
+   evidence picture is a PNG file as it arrived. Both are placed, kept, moved
+   and deleted by the same bookkeeping below, so the two kinds cannot disagree
+   about when a clear screen or a rewritten row costs a picture. *)
+type source =
+  | Candle_pixels of Draw.image
+  | Png_file of { data : string; key : string }
+
+type entry = {
+  e_id : int;
+  e_row : int;
+  e_column : int;
+  e_cols : int;
+  e_rows : int;
+  e_crop : Masc_tui_graphics.crop option;
+  e_source : source;
+}
+
+let entry_of_placement p =
+  { e_id = p.image_id; e_row = p.row; e_column = p.column; e_cols = p.box.cols;
+    e_rows = p.box.rows; e_crop = None; e_source = Candle_pixels p.image }
+
+type png_placement = {
+  png_image_id : int;
+  png_row : int;
+  png_column : int;
+  png_cols : int;
+  png_rows : int;
+  png_crop : Masc_tui_graphics.crop option;
+  png_key : string;
+  png_data : string;
+}
+
+let entry_of_png p =
+  { e_id = p.png_image_id; e_row = p.png_row; e_column = p.png_column;
+    e_cols = p.png_cols; e_rows = p.png_rows; e_crop = p.png_crop;
+    e_source = Png_file { data = p.png_data; key = p.png_key } }
+
 (* One placement per image: a second transfer or put under the same pair
    replaces the picture instead of stacking a copy. *)
 let placement_id = 1
@@ -77,21 +116,35 @@ let placement_id = 1
 let save_cursor = "\0277"
 let restore_cursor = "\0278"
 
-let at_corner p bytes =
+let at_corner e bytes =
   save_cursor
-  ^ Printf.sprintf "\027[%d;%dH" (p.row + 1) (p.column + 1)
+  ^ Printf.sprintf "\027[%d;%dH" (e.e_row + 1) (e.e_column + 1)
   ^ bytes ^ restore_cursor
 
-let placement_bytes p =
-  match
-    Masc_tui_graphics.replace_rgba ~image_id:p.image_id ~placement_id ~data:p.image.Draw.rgba
-      ~pixel_width:p.image.Draw.edge ~pixel_height:p.image.Draw.edge ~rows:p.box.rows
-  with
+let entry_bytes e =
+  let pixels =
+    match e.e_source with
+    | Candle_pixels image ->
+        Masc_tui_graphics.replace_rgba ~image_id:e.e_id ~placement_id ~data:image.Draw.rgba
+          ~pixel_width:image.Draw.edge ~pixel_height:image.Draw.edge ~rows:e.e_rows
+    | Png_file { data; key = _ } ->
+        Masc_tui_graphics.replace_png ~image_id:e.e_id ~placement_id ~data ~rows:e.e_rows
+          ~cols:e.e_cols ~crop:e.e_crop
+  in
+  match pixels with
   | "" -> ""
-  | bytes -> at_corner p bytes
+  | bytes -> at_corner e bytes
 
-let put_bytes p =
-  at_corner p (Masc_tui_graphics.put ~image_id:p.image_id ~placement_id ~rows:p.box.rows)
+let entry_put_bytes e =
+  at_corner e
+    (match e.e_source with
+     | Candle_pixels _ -> Masc_tui_graphics.put ~image_id:e.e_id ~placement_id ~rows:e.e_rows
+     | Png_file _ ->
+         Masc_tui_graphics.put_png ~image_id:e.e_id ~placement_id ~rows:e.e_rows
+           ~cols:e.e_cols ~crop:e.e_crop)
+
+let placement_bytes p = entry_bytes (entry_of_placement p)
+let put_bytes p = entry_put_bytes (entry_of_placement p)
 
 let display = ref No_picture
 let set_display d = display := d
@@ -99,25 +152,48 @@ let current_display () = !display
 
 (* What the frame being built asked for, newest first, and what the terminal
    was last sent, one entry per image id. *)
-let requested : placement list ref = ref []
-let on_screen : placement list ref = ref []
+let requested : entry list ref = ref []
+let on_screen : entry list ref = ref []
 
-let begin_frame () = requested := []
+(* Pictures the view still has but shows none of this frame (scrolled wholly
+   out of the window), as (image id, key). Their pixels stay with the terminal
+   without a placement, so scrolling back is a [put], not a transfer. *)
+let held : (int * string) list ref = ref []
 
-let request p =
-  requested := p :: List.filter (fun q -> q.image_id <> p.image_id) !requested
+(* Pictures whose pixels the terminal holds without a placement. *)
+let unplaced : entry list ref = ref []
+
+let begin_frame () =
+  requested := [];
+  held := []
+
+let request_entry e =
+  requested := e :: List.filter (fun q -> q.e_id <> e.e_id) !requested
+
+let request p = request_entry (entry_of_placement p)
+let request_png p = request_entry (entry_of_png p)
+
+let hold_png ~image_id ~key = held := (image_id, key) :: !held
 
 type send =
   | Keep
   | Put
   | Transmit
 
+(* Equal keys stand for equal bytes, so a 200 KB picture is not compared
+   byte by byte on every frame. *)
 let same_pixels a b =
-  a.image.Draw.edge = b.image.Draw.edge && String.equal a.image.Draw.rgba b.image.Draw.rgba
+  match a.e_source, b.e_source with
+  | Candle_pixels x, Candle_pixels y ->
+      x.Draw.edge = y.Draw.edge && String.equal x.Draw.rgba y.Draw.rgba
+  | Png_file x, Png_file y -> String.equal x.key y.key
+  | Candle_pixels _, Png_file _ | Png_file _, Candle_pixels _ -> false
 
-let same_place a b = a.row = b.row && a.column = b.column && a.box = b.box
+let same_place a b =
+  a.e_row = b.e_row && a.e_column = b.e_column && a.e_cols = b.e_cols && a.e_rows = b.e_rows
+  && a.e_crop = b.e_crop
 
-let crosses rows p = List.exists (fun row -> row >= p.row && row < p.row + p.box.rows) rows
+let crosses rows e = List.exists (fun row -> row >= e.e_row && row < e.e_row + e.e_rows) rows
 
 (* The protocol (kitty graphics-protocol, "Interaction with other terminal
    actions"): the clear screen escape clears every image, and "the other
@@ -129,46 +205,90 @@ let crosses rows p = List.exists (fun row -> row >= p.row && row < p.row + p.box
    text written over them takes those parts of the picture (wezterm #986);
    a put restores them from the pixels it still holds, in a few dozen
    bytes, and is a no-op replacement where nothing was taken. *)
-let send presented ~shown p =
+let send_entry presented ~shown e =
   match shown with
   | None -> Transmit
   | Some shown -> (
-      if not (same_pixels shown p) then Transmit
+      if not (same_pixels shown e) then Transmit
       else
         match presented with
         | Masc_tui_frame_presenter.Presented Masc_tui_frame_presenter.Whole_screen -> Transmit
         | Masc_tui_frame_presenter.Presented (Masc_tui_frame_presenter.Rows rows) ->
-            if same_place shown p && not (crosses rows p) then Keep else Put
-        | Masc_tui_frame_presenter.Unchanged -> if same_place shown p then Keep else Put)
+            if same_place shown e && not (crosses rows e) then Keep else Put
+        | Masc_tui_frame_presenter.Unchanged -> if same_place shown e then Keep else Put)
+
+let send presented ~shown p =
+  send_entry presented ~shown:(Option.map entry_of_placement shown) (entry_of_placement p)
+
+let is_held e =
+  match e.e_source with
+  | Png_file { key; _ } -> List.exists (fun (id, k) -> id = e.e_id && String.equal k key) !held
+  | Candle_pixels _ -> false
 
 let flush presented ~write =
   let wanted = !requested in
-  let shown_under image_id = List.find_opt (fun shown -> shown.image_id = image_id) !on_screen in
+  let is_wanted e = List.exists (fun w -> w.e_id = e.e_id) wanted in
+  (* A clear screen takes the pixels of an image left without placements, so
+     after one nothing is held. *)
+  let cleared =
+    match presented with
+    | Masc_tui_frame_presenter.Presented Masc_tui_frame_presenter.Whole_screen -> true
+    | Masc_tui_frame_presenter.Presented (Masc_tui_frame_presenter.Rows _)
+    | Masc_tui_frame_presenter.Unchanged -> false
+  in
+  if cleared then unplaced := [];
+  let shown_under id = List.find_opt (fun shown -> shown.e_id = id) !on_screen in
+  let previously_unplaced = !unplaced in
+  let unplaced_under id = List.find_opt (fun held -> held.e_id = id) previously_unplaced in
+  let newly_unplaced = ref [] in
   List.iter
     (fun shown ->
-      if not (List.exists (fun p -> p.image_id = shown.image_id) wanted) then
-        write (Masc_tui_graphics.delete_image ~image_id:shown.image_id))
+      if not (is_wanted shown) then
+        if is_held shown && not cleared then begin
+          write (Masc_tui_graphics.delete_placement ~image_id:shown.e_id ~placement_id);
+          newly_unplaced := shown :: !newly_unplaced
+        end
+        else write (Masc_tui_graphics.delete_image ~image_id:shown.e_id))
     !on_screen;
+  (* Pixels held for a picture the view dropped, or replaced by other bytes. *)
+  List.iter
+    (fun kept ->
+      if (not (is_wanted kept)) && not (is_held kept) then
+        write (Masc_tui_graphics.delete_image ~image_id:kept.e_id))
+    previously_unplaced;
+  unplaced :=
+    List.filter (fun kept -> (not (is_wanted kept)) && is_held kept) previously_unplaced
+    @ !newly_unplaced;
   on_screen :=
     List.filter_map
-      (fun p ->
-        let shown = shown_under p.image_id in
-        match send presented ~shown p with
-        | Keep -> Some p
-        | Put ->
-            write (put_bytes p);
-            Some p
-        | Transmit -> (
-            match placement_bytes p with
-            | "" ->
-                (* Nothing of this picture reached the terminal. An older one
-                   under the same id would stand where this one is not, so it
-                   comes down, and the next frame tries this one again. *)
-                Option.iter
-                  (fun shown -> write (Masc_tui_graphics.delete_image ~image_id:shown.image_id))
-                  shown;
-                None
-            | bytes ->
-                write bytes;
-                Some p))
+      (fun e ->
+        let transmit ~stale =
+          match entry_bytes e with
+          | "" ->
+              (* Nothing of this picture reached the terminal. An older one
+                 under the same id would stand where this one is not, so it
+                 comes down, and the next frame tries this one again. *)
+              Option.iter
+                (fun stale -> write (Masc_tui_graphics.delete_image ~image_id:stale.e_id))
+                stale;
+              None
+          | bytes ->
+              write bytes;
+              Some e
+        in
+        match shown_under e.e_id, unplaced_under e.e_id with
+        | Some shown, _ -> (
+            match send_entry presented ~shown:(Some shown) e with
+            | Keep -> Some e
+            | Put ->
+                write (entry_put_bytes e);
+                Some e
+            | Transmit -> transmit ~stale:(Some shown))
+        | None, Some kept ->
+            if same_pixels kept e then begin
+              write (entry_put_bytes e);
+              Some e
+            end
+            else transmit ~stale:(Some kept)
+        | None, None -> transmit ~stale:None)
       wanted

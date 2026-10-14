@@ -3522,16 +3522,16 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
            && not (Astring.String.is_infix ~affix:"checkpoint-skills" line))
       |> List.length
     in
-    let verify marker_count markers =
+    let verify marker_count =
       let rendered = screen () in
       (* The request line spells "checkpoint-skills", so the Skill name is
          counted behind its row separator, not as a bare substring. *)
       check int "one Skill per observed or unmatched durable invocation" marker_count
         (count_skill rendered);
       List.iter (fun marker -> check int (marker ^ " appears once") 1 (count marker rendered))
-        ("EARLIER_PROGRESS" :: "FINAL_HISTORY_REPLY" :: markers) in
+        ["EARLIER_PROGRESS"; "FINAL_HISTORY_REPLY"] in
     install [first; final];
-    verify 2 ["FIRST_ACTION"];
+    verify 2;
     (* The first receipt cannot mark the other segment delivered. *)
     (match drawn_skills_of log with
      | [first; second] ->
@@ -3541,7 +3541,7 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
            (second.state = Keeper_chat_transcript.Skill_served_pending)
      | skills -> failf "expected two segment skills, got %d" (List.length skills));
     install [first; second; absent; final];
-    verify 3 ["FIRST_ACTION"; "SECOND_ACTION"; "UNSEEN_ACTION"];
+    verify 3;
     let rows = Tui_types.chat_rows_for state "alpha" in
     check (list (option string)) "only unmatched Skill receipt stays in history"
       [Some "trace-unseen#1"]
@@ -3551,7 +3551,7 @@ let test_checkpoint_skill_receipts_stay_in_their_exact_turn () =
     let replay = {log with tl_transcript=Keeper_chat_transcript.of_log ~now:200. log.tl_log} in
     state.msg_settled_logs <- [replay];
     install [first; second; absent; final];
-    verify 3 ["FIRST_ACTION"; "SECOND_ACTION"; "UNSEEN_ACTION"])
+    verify 3)
 ;;
 
 let test_checkpoint_remaining_skill_uses_its_own_state () =

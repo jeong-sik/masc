@@ -11,11 +11,15 @@ type tool_host_cause =
   | Tool_host_timeout
   | Tool_host_transport_unavailable
 
+(** A tool-host failure on one tool call. The JSON carries
+    [surface = "tool_host"] and [entity_kind = "tool_call"]; {!of_yojson}
+    refuses any other value for either, as it refuses a [cause_code] that is
+    not a tool-host cause. *)
 type t = {
-  surface : string;
-  entity_kind : string;
   entity_id : string option;
-  cause_code : string;
+  cause : tool_host_cause;
+      (** Written as [cause_code] ({!tool_host_cause_code}). Decoding refuses a
+          code that is not a tool host cause. *)
   severity : severity;
   summary : string;
   recoverability : recoverability;

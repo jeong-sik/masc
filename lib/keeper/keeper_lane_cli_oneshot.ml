@@ -275,5 +275,16 @@ let input_capacity = function
   | Execution_failed { runtime_id; cause = Fusion_official_client.Codex_failure error } ->
     Runtime_codex_app_server.input_capacity_refusal error
     |> Option.map (fun capacity -> {runtime_id; capacity})
-  | _ -> None
+  | Execution_failed
+      { cause =
+          ( Fusion_official_client.Missing_reply
+          | Fusion_official_client.Setup_failure _
+          | Fusion_official_client.Claude_failure _
+          | Fusion_official_client.Claude_admission_failure _
+          | Fusion_official_client.Antigravity_failure _
+          | Fusion_official_client.Muse_failure _ )
+      ; _
+      }
+  | Unknown_runtime _ | Not_an_official_client _ | Invalid_json_output _
+  | Invalid_domain_output _ -> None
 ;;

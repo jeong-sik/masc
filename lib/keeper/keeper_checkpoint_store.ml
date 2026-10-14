@@ -513,7 +513,14 @@ let canonical_message_count ~(session_dir : string) ~(session_id : string)
       (match load_agent_core ~session_dir ~session_id with
        | Ok checkpoint -> Ok (Some (List.length checkpoint.messages))
        | Error Not_found -> Ok None
-       | Error error -> Error error)
+       | Error
+           (( Store_error _
+            | Parse_error _
+            | Superseded_version _
+            | Newer_version _
+            | Io_error _
+            | Read_failed _
+            | Agent_core_error _ ) as error) -> Error error)
 
 let canonical_byte_count ~(session_dir : string) ~(session_id : string)
   : (int option, checkpoint_load_error) result =
@@ -660,7 +667,15 @@ let canonical_session_location session_dir =
              raise
                (Unix.Unix_error
                   (Unix.ELOOP, "checkpoint_session_leaf", location))
-           | _ -> ()
+           | { Unix.st_kind =
+                 ( Unix.S_REG
+                 | Unix.S_DIR
+                 | Unix.S_CHR
+                 | Unix.S_BLK
+                 | Unix.S_FIFO
+                 | Unix.S_SOCK )
+             ; _
+             } -> ()
            | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
           location)
       in
@@ -823,7 +838,14 @@ let judge_canonical ~(session_dir : string) ~(session_id : string) : canonical_j
     | exception (Unix.Unix_error (errno, _, _) as exn) -> raised (Os_error errno) exn
     | exception exn -> raised Read_raised exn
     | Error Not_found -> Judged_absent
-    | Error error -> Judged_inconclusive error
+    | Error
+        (( Store_error _
+         | Parse_error _
+         | Superseded_version _
+         | Newer_version _
+         | Io_error _
+         | Read_failed _
+         | Agent_core_error _ ) as error) -> Judged_inconclusive error
     | Ok bytes ->
       (match decode_checkpoint_off_scheduler bytes with
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -1595,7 +1617,7 @@ let save_agent_core_classified_typed
              turn's checkpoint replaces it"
             canonical_path got expected;
           Ok None
-        | answer -> answer
+        | (Error (Not_found | (Store_error _ | (Parse_error _ | (Newer_version _ | (Io_error _ | (Read_failed _ | Agent_core_error _)))))) | Ok _) as answer -> answer
       with
       | Error error -> Error (Existing_checkpoint_unreadable error)
       | Ok (Some existing) when not (String.equal existing.session_id session_id) ->
@@ -1652,7 +1674,18 @@ let save_agent_core_classified_typed
               | Error retry_error -> Error (Canonical_write_failed retry_error)
               | Ok () ->
                 save_outcome_after_write ~session_dir ~canonical_path ~known ~history_retained recovered))
-         | Error error -> Error (Canonical_write_failed error)))
+         | Error
+             ({ stage =
+                  ( Keeper_fs.Directory_prepare
+                  | Keeper_fs.Temp_file_create
+                  | Keeper_fs.Payload_write
+                  | Keeper_fs.Payload_fsync
+                  | Keeper_fs.Temp_file_close
+                  | Keeper_fs.Atomic_rename
+                  | Keeper_fs.Parent_directory_fsync_after_rename
+                  | Keeper_fs.Temp_directory_fsync_after_rename )
+              ; _
+              } as error) -> Error (Canonical_write_failed error)))
 
 let save_agent_core_classified_with_encoding_memo
     ~(session_dir : string)

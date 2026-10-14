@@ -631,14 +631,29 @@ let flow_input_capacity_evidence error =
    walk's advances, so the caller adds it. *)
 let flow_has_invalid_output error =
   let evidence, _ = flow_evidence_and_final_verdict error in
-  let invalid_json = function Exact_output.Invalid_json_output -> true | _ -> false in
+  let invalid_json = function
+    | Exact_output.Invalid_json_output -> true
+    | Exact_output.Completion_failed _
+    | Exact_output.Response_body_deadline_exceeded
+    | Exact_output.Provider_response_refused _
+    | Exact_output.Output_limit_reached
+    | Exact_output.Incomplete_output
+    | Exact_output.Missing_output
+    | Exact_output.Ambiguous_output _
+    | Exact_output.Unexpected_output_content -> false
+  in
   let invalid_advance (receipt : Exact_output.flow_advance_receipt) =
     match receipt.failed with
     | Exact_output.Flow_advance_execution_failed { cause; _ } -> invalid_json cause
     | Exact_output.Flow_advance_candidate_rejected _ -> false in
   let invalid_final = match error with
     | Exact_output.Flow_exact_execution_failed { cause; _ } -> invalid_json cause.Exact_output.cause
-    | _ -> false in
+    | Exact_output.Flow_attempt_already_started _ | Exact_output.Flow_attempt_start_failed _
+    | Exact_output.Flow_measurement_start_failed _
+    | Exact_output.Flow_before_measurement_dispatch_callback_failed _
+    | Exact_output.Flow_measurement_terminal_callback_failed _
+    | Exact_output.Flow_before_dispatch_callback_failed _
+    | Exact_output.Flow_before_advance_callback_failed _ | Exact_output.Flow_candidates_exhausted _ -> false in
   invalid_final || List.exists invalid_advance evidence.Exact_output.advances
 ;;
 
@@ -717,7 +732,8 @@ let rec extraction_has_invalid_output = function
     List.exists (function
       | Keeper_lane_cli_oneshot.Invalid_json_output _
       | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
-      | _ -> false) failures
+      | Keeper_lane_cli_oneshot.Unknown_runtime _ | Keeper_lane_cli_oneshot.Not_an_official_client _
+      | Keeper_lane_cli_oneshot.Execution_failed _ -> false) failures
     || Option.fold ~none:false ~some:extraction_has_invalid_output prior_error
   | Cli_prompt_unavailable { prior_error } ->
     Option.fold ~none:false ~some:extraction_has_invalid_output prior_error
@@ -767,7 +783,46 @@ let cli_refuses_input_capacity failure =
       {cause=Fusion_official_client.Claude_failure
         (Runtime_claude_code.Context_window_exceeded
           {tool_effect_attempted=false; response_emitted=false; _}); _} -> true
-  | Execution_failed _ -> Option.is_some (Keeper_lane_cli_oneshot.input_capacity failure)
+  | Execution_failed
+      { cause =
+          ( Fusion_official_client.Missing_reply
+          | Fusion_official_client.Setup_failure _
+          | Fusion_official_client.Codex_failure
+              ( Runtime_codex_app_server.Invalid_config _
+              | Runtime_codex_app_server.Spawn_failed _
+              | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+              | Runtime_codex_app_server.Turn_input_write_failed _
+              | Runtime_codex_app_server.Protocol_error _
+              | Runtime_codex_app_server.Rpc_error _
+              | Runtime_codex_app_server.Subscription_required _
+              | Runtime_codex_app_server.Unsupported_server_request _
+              | Runtime_codex_app_server.Context_window_exceeded _
+              | Runtime_codex_app_server.Turn_failed _
+              | Runtime_codex_app_server.Stopped_by_host _
+              | Runtime_codex_app_server.Turn_interrupted
+              | Runtime_codex_app_server.Runtime_shutting_down
+              | Runtime_codex_app_server.Process_exited _
+              | Runtime_codex_app_server.Timeout _ )
+          | Fusion_official_client.Claude_failure
+              ( Runtime_claude_code.Invalid_config _
+              | Runtime_claude_code.Spawn_failed _
+              | Runtime_claude_code.Protocol_error _
+              | Runtime_claude_code.Subscription_required _
+              | Runtime_claude_code.Unsupported_control_request _
+              | Runtime_claude_code.Turn_transport_interrupted _
+              | Runtime_claude_code.Context_window_exceeded _
+              | Runtime_claude_code.Turn_failed _
+              | Runtime_claude_code.Turn_failed_with_observation _
+              | Runtime_claude_code.Stopped_by_host _
+              | Runtime_claude_code.Quota_blocked _
+              | Runtime_claude_code.Process_exited _
+              | Runtime_claude_code.Unhandled_exception _
+              | Runtime_claude_code.Timeout _ )
+          | Fusion_official_client.Claude_admission_failure _
+          | Fusion_official_client.Antigravity_failure _
+          | Fusion_official_client.Muse_failure _ )
+      ; _
+      } -> Option.is_some (Keeper_lane_cli_oneshot.input_capacity failure)
   | Unknown_runtime _ | Not_an_official_client _ | Invalid_json_output _
   | Invalid_domain_output _ -> false
 
@@ -913,7 +968,21 @@ let cli_prompt_of_messages ~keeper_id (messages : Agent_core.Types.message list)
   match messages with
   | [ { Agent_core.Types.content = [ Agent_core.Types.Text prompt ]; _ } ] ->
     Some prompt
-  | messages ->
+  | ( []
+    | _ :: _ :: _
+    | [ { Agent_core.Types.content = []; _ } ]
+    | [ { Agent_core.Types.content = _ :: _ :: _; _ } ]
+    | [ { Agent_core.Types.content =
+            [ ( Agent_core.Types.Thinking _
+              | Agent_core.Types.ReasoningDetails _
+              | Agent_core.Types.RedactedThinking _
+              | Agent_core.Types.ToolUse _
+              | Agent_core.Types.ToolResult _
+              | Agent_core.Types.Image _
+              | Agent_core.Types.Document _
+              | Agent_core.Types.Audio _ ) ]
+      ; _
+      } ] ) as messages ->
     Log.Keeper.warn
       ~keeper_name:keeper_id
       "librarian cli fallback skipped: fitted prompt is not one text message \
@@ -1443,6 +1512,23 @@ let commit_continuity ~commit ~observe =
   observed
 ;;
 
+(* The judgment run_best_effort applies to its optional admission arguments.
+   The wildcard-expansion codemod folded the accepting arm
+   [Some _, Memory_maintenance, None, None, None -> true] into the rejecting
+   one, so a standalone Memory maintenance pass carrying an explicit admission
+   batch was refused. Restored here as a named function so tests can pin the
+   accepted and rejected shapes. *)
+let admission_mode_valid ~has_admission ~write_scope ~has_continuity
+      ~has_durable_range_id ~has_official_range_id
+  =
+  (not has_admission)
+  ||
+  match write_scope with
+  | Memory_maintenance ->
+    not (has_continuity || has_durable_range_id || has_official_range_id)
+  | Context_only | Context_and_memory -> false
+;;
+
 let run_best_effort
       ?(write_scope = Context_and_memory)
       ?admission
@@ -1463,9 +1549,13 @@ let run_best_effort
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
-  let admission_mode_valid = match admission, write_scope, continuity, durable_range_id, official_range_id with
-    | None, _, _, _, _ | Some _, Memory_maintenance, None, None, None -> true
-    | Some _, _, _, _, _ -> false in
+  let admission_mode_valid =
+    admission_mode_valid
+      ~has_admission:(Option.is_some admission)
+      ~write_scope
+      ~has_continuity:(Option.is_some continuity)
+      ~has_durable_range_id:(Option.is_some durable_range_id)
+      ~has_official_range_id:(Option.is_some official_range_id) in
   if not admission_mode_valid then
     on_not_committed {detail = "explicit admission requires a standalone Memory maintenance pass";
                       walk_shows_size = false; input_capacity_evidence = No_input_capacity_refusal; smaller_range_meets_same_failure = false}
@@ -1483,7 +1573,20 @@ let run_best_effort
            let detail = "Librarian is off; pending input remains unconsumed" in
            on_not_committed {detail; walk_shows_size=false; input_capacity_evidence=No_input_capacity_refusal; smaller_range_meets_same_failure = false};
            Log.Keeper.info ~keeper_name:keeper_id "%s" detail
-         | Ok _ | Error _ ->
+         | Ok _ | Error (Prompt_render_failed _)
+         | Error
+             (Exact_setup_failed
+               ( Exact_registry_unavailable _
+               | Exact_lane_unavailable (Exact_lane_unconfigured _ | No_admitted_lane_slots _)
+               | Exact_lane_preference_unavailable _
+               | Exact_candidate_invalid _
+               | Exact_flow_snapshot_failed _
+               | Exact_flow_start_failed _
+               | Exact_request_projection_failed _ ))
+         | Error (Exact_execution_failed _) | Error (Cli_slots_exhausted _)
+         | Error (Cli_prompt_unavailable _) | Error (No_transport_declared)
+         | Error (Domain_output_invalid _) | Error (Absorb_judgment_failed _)
+         | Error (Memory_snapshot_write_failed _) ->
         let registry = Exact_lane_run_registry.global () in
         let run_id = Random_id.prefixed ~prefix:"librarian-exact-" ~bytes:16 in
         let started_at = Time_compat.now () in

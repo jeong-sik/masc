@@ -13,6 +13,16 @@ let tmpdir prefix =
   Fs_compat.mkdir_p dir;
   dir
 
+(* Every store here is a listed store under a fresh temporary root. The
+   store's directory is [Dated_jsonl.Store.dir location]; it exists, as the
+   temporary directory did before. *)
+let store_under root = Dated_jsonl.Store.(at (root_of_masc_dir root) Root.Audit)
+
+let temp_store prefix =
+  let location = store_under (tmpdir prefix) in
+  Fs_compat.mkdir_p (Dated_jsonl.Store.dir location);
+  location
+
 let make_json i =
   `Assoc [("i", `Int i); ("ts", `Float (Unix.gettimeofday ()))]
 
@@ -23,8 +33,9 @@ let json_i json = Yojson.Safe.Util.(json |> member "i" |> to_int)
 let test_append_creates_dated_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_append" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_append" in
+  let dir = Dated_jsonl.Store.dir location in
+  let store = Dated_jsonl.open_store location in
   Dated_jsonl.append store (make_json 1);
   Dated_jsonl.append store (make_json 2);
   (* Verify directory structure exists *)
@@ -49,8 +60,8 @@ exception After_commit
 let test_notifying_commit_reports_durable_row () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_commit" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_commit" in
+  let store = Dated_jsonl.open_store location in
   let committed = ref false in
   (match
      Dated_jsonl.append_notifying_commit store (make_json 1)
@@ -67,8 +78,8 @@ let test_notifying_commit_reports_durable_row () =
 let test_read_recent () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_recent" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_recent" in
+  let store = Dated_jsonl.open_store location in
   for i = 1 to 5 do
     Dated_jsonl.append store (make_json i)
   done;
@@ -83,8 +94,8 @@ let test_read_recent () =
 let test_read_recent_zero () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_zero" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_zero" in
+  let store = Dated_jsonl.open_store location in
   Dated_jsonl.append store (make_json 1);
   let result = Dated_jsonl.read_recent store 0 in
   check int "returns 0" 0 (List.length result)
@@ -92,8 +103,8 @@ let test_read_recent_zero () =
 let test_read_recent_more_than_exists () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_overflow" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_overflow" in
+  let store = Dated_jsonl.open_store location in
   Dated_jsonl.append store (make_json 1);
   Dated_jsonl.append store (make_json 2);
   let result = Dated_jsonl.read_recent store 100 in
@@ -113,10 +124,11 @@ let require_recent_result label = function
 ;;
 
 let test_read_recent_skips_malformed_lines () =
-  let dir = tmpdir "dated_jsonl_recent_malformed" in
+  let location = temp_store "dated_jsonl_recent_malformed" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01"
     [ {|{"i":1}|}; "not-json"; {|{"i":2}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let values = Dated_jsonl.read_recent store 10 |> List.map json_i in
   check (list int) "read_recent skips malformed rows" [ 1; 2 ] values
 
@@ -125,19 +137,21 @@ let test_read_recent_skips_malformed_lines () =
    comparing the two proves nothing. Every expectation below is absolute. *)
 
 let test_filter_map_recent_is_chronological_across_day_files () =
-  let dir = tmpdir "dated_jsonl_filter_map_order" in
+  let location = temp_store "dated_jsonl_filter_map_order" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "31" [ {|{"i":1}|}; {|{"i":2}|} ];
   write_dated_file dir "2026-02" "01" [ {|{"i":3}|}; {|{"i":4}|} ];
   write_dated_file dir "2026-02" "02" [ {|{"i":5}|}; {|{"i":6}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let values = Dated_jsonl.filter_map_recent store 6 ~f:(fun j -> Some (json_i j)) in
   check (list int) "oldest first across months" [ 1; 2; 3; 4; 5; 6 ] values
 
 let test_filter_map_recent_limit_counts_rows_read_not_rows_kept () =
-  let dir = tmpdir "dated_jsonl_filter_map_limit" in
+  let location = temp_store "dated_jsonl_filter_map_limit" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01"
     [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|}; {|{"i":4}|}; {|{"i":5}|}; {|{"i":6}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   (* The newest 4 rows are 3..6; the evens among *those* are 4 and 6. A reader
      that kept scanning until it had 4 selected rows would return [2;4;6]. *)
   let values =
@@ -148,20 +162,22 @@ let test_filter_map_recent_limit_counts_rows_read_not_rows_kept () =
   check (list int) "n bounds rows read" [ 4; 6 ] values
 
 let test_filter_map_recent_offset_skips_newest_rows () =
-  let dir = tmpdir "dated_jsonl_filter_map_offset" in
+  let location = temp_store "dated_jsonl_filter_map_offset" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01"
     [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|}; {|{"i":4}|}; {|{"i":5}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let values =
     Dated_jsonl.filter_map_recent ~offset:2 store 2 ~f:(fun j -> Some (json_i j))
   in
   check (list int) "offset drops the two newest" [ 2; 3 ] values
 
 let test_filter_map_recent_skips_malformed_rows () =
-  let dir = tmpdir "dated_jsonl_filter_map_malformed" in
+  let location = temp_store "dated_jsonl_filter_map_malformed" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01"
     [ {|{"i":1}|}; "not-json"; {|{"i":2}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let values = Dated_jsonl.filter_map_recent store 10 ~f:(fun j -> Some (json_i j)) in
   check (list int) "malformed row skipped" [ 1; 2 ] values
 
@@ -171,10 +187,11 @@ let test_filter_map_recent_calls_the_projection_newest_first () =
      interchangeable with [read_recent |> List.filter_map f]. Pinned because
      the remaining migration targets (rate-limited decode-error logging, drop
      reporting) are exactly that kind of projection. *)
-  let dir = tmpdir "dated_jsonl_filter_map_visit_order" in
+  let location = temp_store "dated_jsonl_filter_map_visit_order" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; {|{"i":2}|} ];
   write_dated_file dir "2026-01" "02" [ {|{"i":3}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let visited = ref [] in
   let values =
     Dated_jsonl.filter_map_recent store 3 ~f:(fun j ->
@@ -190,9 +207,10 @@ let test_filter_map_recent_does_not_swallow_callback_failure () =
   (* The reader swallows [Yojson.Json_error] to skip malformed rows. A decoder
      that raises the same exception must still reach the caller, or a broken
      decoder reads as an empty store. Guards the [try] scope in the reader. *)
-  let dir = tmpdir "dated_jsonl_filter_map_callback_raise" in
+  let location = temp_store "dated_jsonl_filter_map_callback_raise" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   check_raises "decoder failure reaches the caller"
     (Yojson.Json_error "decoder rejected the row")
     (fun () ->
@@ -201,13 +219,14 @@ let test_filter_map_recent_does_not_swallow_callback_failure () =
            raise (Yojson.Json_error "decoder rejected the row"))))
 
 let test_collect_matching_counts_selected_rows () =
-  let dir = tmpdir "dated_jsonl_collect_matching" in
+  let location = temp_store "dated_jsonl_collect_matching" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file
     dir
     "2026-01"
     "01"
     [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|}; {|{"i":4}|}; {|{"i":5}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let values =
     Dated_jsonl.collect_matching store 2 ~f:(fun json ->
       let value = json_i json in
@@ -217,11 +236,12 @@ let test_collect_matching_counts_selected_rows () =
 ;;
 
 let test_collect_matching_range_skips_out_of_range_files () =
-  let dir = tmpdir "dated_jsonl_collect_matching_range" in
+  let location = temp_store "dated_jsonl_collect_matching_range" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "31" [ {|{"i":1}|} ];
   write_dated_file dir "2026-02" "01" [ {|{"i":2}|} ];
   write_dated_file dir "2026-02" "02" [ {|{"i":3}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let visited = ref [] in
   let values =
     Dated_jsonl.collect_matching_range
@@ -239,7 +259,8 @@ let test_collect_matching_range_skips_out_of_range_files () =
 ;;
 
 let test_collect_matching_stops_without_loading_the_day () =
-  let dir = tmpdir "dated_jsonl_collect_matching_bounded" in
+  let location = temp_store "dated_jsonl_collect_matching_bounded" in
+  let dir = Dated_jsonl.Store.dir location in
   let month_dir = Filename.concat dir "2026-01" in
   Fs_compat.mkdir_p month_dir;
   let path = Filename.concat month_dir "01.jsonl" in
@@ -254,7 +275,7 @@ let test_collect_matching_stops_without_loading_the_day () =
       ignore (Unix.lseek descriptor sparse_prefix_bytes Unix.SEEK_SET);
       let suffix = "\n{\"i\":2}\n" in
       ignore (Unix.write_substring descriptor suffix 0 (String.length suffix)));
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let allocated_before = Gc.allocated_bytes () in
   let values =
     Dated_jsonl.collect_matching store 1 ~f:(fun json -> Some (json_i json))
@@ -266,11 +287,12 @@ let test_collect_matching_stops_without_loading_the_day () =
 ;;
 
 let test_collect_matching_skips_a_retained_file_pruned_mid_scan () =
-  let dir = tmpdir "dated_jsonl_collect_matching_pruned" in
+  let location = temp_store "dated_jsonl_collect_matching_pruned" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
   write_dated_file dir "2026-01" "02" [ {|{"i":2}|} ];
   let older = Filename.concat (Filename.concat dir "2026-01") "01.jsonl" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let values =
     Dated_jsonl.collect_matching store 2 ~f:(fun json ->
       let value = json_i json in
@@ -281,14 +303,15 @@ let test_collect_matching_skips_a_retained_file_pruned_mid_scan () =
 ;;
 
 let test_read_recent_result_counts_malformed_physical_row () =
-  let dir = tmpdir "dated_jsonl_recent_result_malformed" in
+  let location = temp_store "dated_jsonl_recent_result_malformed" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file
     dir
     "2026-01"
     "01"
     [ {|{"i":1}|}; {|{"i":2}|}; "not-json"; {|{"i":3}|} ];
   let path = Filename.concat (Filename.concat dir "2026-01") "01.jsonl" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   match
     Dated_jsonl.read_recent_result store 2
     |> require_recent_result "strict malformed recent read"
@@ -303,13 +326,14 @@ let test_read_recent_result_counts_malformed_physical_row () =
 ;;
 
 let test_read_recent_result_offset_counts_malformed_physical_row () =
-  let dir = tmpdir "dated_jsonl_recent_result_offset" in
+  let location = temp_store "dated_jsonl_recent_result_offset" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file
     dir
     "2026-01"
     "01"
     [ {|{"i":1}|}; {|{"i":2}|}; "not-json"; {|{"i":3}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   match
     Dated_jsonl.read_recent_result ~offset:1 store 2
     |> require_recent_result "strict offset recent read"
@@ -321,7 +345,7 @@ let test_read_recent_result_offset_counts_malformed_physical_row () =
 ;;
 
 let test_read_recent_result_rejects_negative_offset () =
-  let store = Dated_jsonl.create ~base_dir:(tmpdir "dated_jsonl_negative_offset") () in
+  let store = Dated_jsonl.open_store (temp_store "dated_jsonl_negative_offset") in
   match Dated_jsonl.read_recent_result ~offset:(-1) store 1 with
   | Error (Dated_jsonl.Invalid_offset { offset = -1 }) -> ()
   | Error error ->
@@ -330,8 +354,8 @@ let test_read_recent_result_rejects_negative_offset () =
 ;;
 
 let test_read_recent_result_missing_store_is_empty () =
-  let base_dir = Filename.concat (tmpdir "dated_jsonl_missing_store") "absent" in
-  let store = Dated_jsonl.create ~base_dir () in
+  let location = store_under (Filename.concat (tmpdir "dated_jsonl_missing_store") "absent") in
+  let store = Dated_jsonl.open_store location in
   let entries =
     Dated_jsonl.read_recent_result store 4
     |> require_recent_result "missing strict store"
@@ -341,9 +365,10 @@ let test_read_recent_result_missing_store_is_empty () =
 
 let test_read_recent_result_rejects_base_file () =
   let dir = tmpdir "dated_jsonl_base_file" in
-  let base_dir = Filename.concat dir "ledger" in
+  let location = store_under dir in
+  let base_dir = Dated_jsonl.Store.dir location in
   Fs_compat.append_file base_dir "not-a-directory";
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match Dated_jsonl.read_recent_result store 1 with
   | Error (Dated_jsonl.Not_a_directory { path }) ->
     check string "base file path" base_dir path
@@ -353,10 +378,11 @@ let test_read_recent_result_rejects_base_file () =
 ;;
 
 let test_read_recent_result_rejects_month_file () =
-  let base_dir = tmpdir "dated_jsonl_month_file" in
+  let location = temp_store "dated_jsonl_month_file" in
+  let base_dir = Dated_jsonl.Store.dir location in
   let month_path = Filename.concat base_dir "2026-01" in
   Fs_compat.append_file month_path "not-a-directory";
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match Dated_jsonl.read_recent_result store 1 with
   | Error (Dated_jsonl.Not_a_directory { path }) ->
     check string "month file path" month_path path
@@ -367,13 +393,14 @@ let test_read_recent_result_rejects_month_file () =
 
 let test_read_recent_result_rejects_month_symlink () =
   let dir = tmpdir "dated_jsonl_month_symlink" in
-  let base_dir = Filename.concat dir "ledger" in
+  let location = store_under dir in
+  let base_dir = Dated_jsonl.Store.dir location in
   let external_dir = Filename.concat dir "external" in
   Fs_compat.mkdir_p base_dir;
   write_dated_file external_dir "2026-01" "01" [ {|{"outside":true}|} ];
   let month_path = Filename.concat base_dir "2026-01" in
   Unix.symlink (Filename.concat external_dir "2026-01") month_path;
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match Dated_jsonl.read_recent_result store 1 with
   | Error
       (Dated_jsonl.Non_regular_file
@@ -387,12 +414,13 @@ let test_read_recent_result_rejects_month_symlink () =
 ;;
 
 let test_read_recent_result_rejects_day_symlink () =
-  let base_dir = tmpdir "dated_jsonl_day_symlink" in
+  let location = temp_store "dated_jsonl_day_symlink" in
+  let base_dir = Dated_jsonl.Store.dir location in
   let month_path = Filename.concat base_dir "2026-01" in
   Fs_compat.mkdir_p month_path;
   let path = Filename.concat month_path "01.jsonl" in
   Unix.symlink (Filename.concat base_dir "missing-target") path;
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match Dated_jsonl.read_recent_result store 1 with
   | Error
       (Dated_jsonl.Non_regular_file
@@ -405,9 +433,10 @@ let test_read_recent_result_rejects_day_symlink () =
 
 let test_read_recent_result_rejects_base_symlink () =
   let dir = tmpdir "dated_jsonl_dangling_base" in
-  let base_dir = Filename.concat dir "ledger" in
+  let location = store_under dir in
+  let base_dir = Dated_jsonl.Store.dir location in
   Unix.symlink (Filename.concat dir "missing-target") base_dir;
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match Dated_jsonl.read_recent_result store 1 with
   | Error
       (Dated_jsonl.Non_regular_file
@@ -425,13 +454,14 @@ let test_read_recent_result_rejects_base_symlink () =
    would hide every row in the store, so they are skipped. A real layout
    violation still fails: that means a writer is wrong (see the test below). *)
 let test_read_recent_result_skips_dot_entries () =
-  let base_dir = tmpdir "dated_jsonl_dot_entries" in
+  let location = temp_store "dated_jsonl_dot_entries" in
+  let base_dir = Dated_jsonl.Store.dir location in
   write_dated_file base_dir "2026-02" "01" [ {|{"i":1}|} ];
   Fs_compat.append_file (Filename.concat base_dir ".DS_Store") "not dated";
   Fs_compat.append_file
     (Filename.concat (Filename.concat base_dir "2026-02") ".DS_Store")
     "not dated";
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match Dated_jsonl.read_recent_result store 10 with
   | Ok rows -> check int "the row is still readable" 1 (List.length rows)
   | Error error ->
@@ -441,10 +471,11 @@ let test_read_recent_result_skips_dot_entries () =
 ;;
 
 let test_read_recent_result_rejects_invalid_layout () =
-  let base_dir = tmpdir "dated_jsonl_invalid_layout" in
+  let location = temp_store "dated_jsonl_invalid_layout" in
+  let base_dir = Dated_jsonl.Store.dir location in
   let invalid_month = "2026-aa" in
   Fs_compat.mkdir_p (Filename.concat base_dir invalid_month);
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   (match Dated_jsonl.read_recent_result store 1 with
    | Error
        (Dated_jsonl.Invalid_layout_entry
@@ -454,12 +485,13 @@ let test_read_recent_result_rejects_invalid_layout () =
    | Error error ->
      failf "unexpected layout error: %s" (Dated_jsonl.read_error_to_string error)
   | Ok _ -> fail "invalid month layout was silently ignored");
-  let day_base_dir = tmpdir "dated_jsonl_invalid_day_layout" in
+  let day_location = temp_store "dated_jsonl_invalid_day_layout" in
+  let day_base_dir = Dated_jsonl.Store.dir day_location in
   let month_path = Filename.concat day_base_dir "2026-02" in
   Fs_compat.mkdir_p month_path;
   let invalid_day = "29.jsonl" in
   Fs_compat.append_file (Filename.concat month_path invalid_day) "{}\n";
-  let day_store = Dated_jsonl.create ~base_dir:day_base_dir () in
+  let day_store = Dated_jsonl.open_store day_location in
   match Dated_jsonl.read_recent_result day_store 1 with
   | Error
       (Dated_jsonl.Invalid_layout_entry
@@ -472,9 +504,10 @@ let test_read_recent_result_rejects_invalid_layout () =
 ;;
 
 let test_read_recent_result_accepts_leap_day () =
-  let base_dir = tmpdir "dated_jsonl_leap_day" in
+  let location = temp_store "dated_jsonl_leap_day" in
+  let base_dir = Dated_jsonl.Store.dir location in
   write_dated_file base_dir "2024-02" "29" [ {|{"i":29}|} ];
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match
     Dated_jsonl.read_recent_result store 1
     |> require_recent_result "leap-day strict read"
@@ -484,12 +517,13 @@ let test_read_recent_result_accepts_leap_day () =
 ;;
 
 let test_read_recent_result_rejects_fifo_without_blocking () =
-  let base_dir = tmpdir "dated_jsonl_fifo" in
+  let location = temp_store "dated_jsonl_fifo" in
+  let base_dir = Dated_jsonl.Store.dir location in
   let month_path = Filename.concat base_dir "2026-01" in
   Fs_compat.mkdir_p month_path;
   let path = Filename.concat month_path "01.jsonl" in
   Unix.mkfifo path 0o600;
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match Dated_jsonl.read_recent_result store 1 with
   | Error
       (Dated_jsonl.Non_regular_file
@@ -501,11 +535,12 @@ let test_read_recent_result_rejects_fifo_without_blocking () =
 ;;
 
 let test_read_recent_result_spans_months_and_physical_offset () =
-  let dir = tmpdir "dated_jsonl_recent_result_cross_month" in
+  let location = temp_store "dated_jsonl_recent_result_cross_month" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "31" [ {|{"i":1}|}; {|{"i":2}|} ];
   write_dated_file dir "2026-02" "01" [ "not-json"; {|{"i":3}|} ];
   write_dated_file dir "2026-02" "02" [ {|{"i":4}|}; {|{"i":5}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   match
     Dated_jsonl.read_recent_result ~offset:1 store 4
     |> require_recent_result "cross-month strict recent read"
@@ -523,14 +558,15 @@ let test_read_recent_result_spans_months_and_physical_offset () =
 ;;
 
 let test_read_recent_result_keeps_unterminated_tail_row () =
-  let base_dir = tmpdir "dated_jsonl_unterminated_tail" in
+  let location = temp_store "dated_jsonl_unterminated_tail" in
+  let base_dir = Dated_jsonl.Store.dir location in
   let month_path = Filename.concat base_dir "2026-01" in
   Fs_compat.mkdir_p month_path;
   Fs_compat.append_file
     (Filename.concat month_path "01.jsonl")
     {|{"i":1}
 {"i":2}|};
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match
     Dated_jsonl.read_recent_result store 1
     |> require_recent_result "unterminated strict tail"
@@ -540,7 +576,8 @@ let test_read_recent_result_keeps_unterminated_tail_row () =
 ;;
 
 let test_find_latest_entry_result_scans_backwards_across_chunks () =
-  let dir = tmpdir "dated_jsonl_find_latest" in
+  let location = temp_store "dated_jsonl_find_latest" in
+  let dir = Dated_jsonl.Store.dir location in
   let padding = String.make 9000 'x' in
   write_dated_file
     dir
@@ -550,7 +587,7 @@ let test_find_latest_entry_result_scans_backwards_across_chunks () =
     ; Printf.sprintf {|{"kind":"heartbeat","padding":"%s"}|} padding
     ; {|{"kind":"heartbeat","value":2}|}
     ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   match
     Dated_jsonl.find_latest_entry_result store (function
       | Dated_jsonl.Parsed json
@@ -573,7 +610,8 @@ let test_find_latest_entry_result_scans_backwards_across_chunks () =
    from the end of the file, so these lengths do not put a newline on a read
    edge. *)
 let test_a_backwards_scan_visits_every_line_once_newest_first () =
-  let dir = tmpdir "dated_jsonl_scan_shapes" in
+  let location = temp_store "dated_jsonl_scan_shapes" in
+  let dir = Dated_jsonl.Store.dir location in
   let chunk = 8192 in
   let row index length =
     let prefix = Printf.sprintf {|{"i":%d,"p":"|} index in
@@ -599,7 +637,7 @@ let test_a_backwards_scan_visits_every_line_once_newest_first () =
   Fs_compat.append_file
     (Filename.concat month_dir "01.jsonl")
     (String.concat "\n" (lines @ [ row 7 (3 * chunk) ]));
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let seen = ref [] in
   (match
      Dated_jsonl.find_latest_entry_result store (fun entry ->
@@ -628,7 +666,8 @@ let test_a_backwards_scan_visits_every_line_once_newest_first () =
 let allocation_budget_per_row_byte = 16
 
 let test_a_long_row_is_copied_once_not_once_per_read () =
-  let dir = tmpdir "dated_jsonl_scan_long_row" in
+  let location = temp_store "dated_jsonl_scan_long_row" in
+  let dir = Dated_jsonl.Store.dir location in
   let long_row =
     Printf.sprintf {|{"kind":"padding","padding":"%s"}|} (String.make (1 lsl 20) 'x')
   in
@@ -637,7 +676,7 @@ let test_a_long_row_is_copied_once_not_once_per_read () =
     "2026-01"
     "01"
     [ {|{"kind":"turn","value":1}|}; long_row; {|{"kind":"heartbeat","value":2}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let before = Gc.allocated_bytes () in
   let found =
     Dated_jsonl.find_latest_entry_result store (function
@@ -804,8 +843,8 @@ let test_load_tail_lines_keeps_first_when_full_file_spans_chunks () =
 let test_read_recent_lines () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_lines" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_lines" in
+  let store = Dated_jsonl.open_store location in
   for i = 1 to 4 do
     Dated_jsonl.append store (make_json i)
   done;
@@ -821,8 +860,9 @@ let test_read_recent_lines () =
 let test_count_entries () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_count" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_count" in
+  let dir = Dated_jsonl.Store.dir location in
+  let store = Dated_jsonl.open_store location in
   for i = 1 to 3 do
     Dated_jsonl.append store (make_json i)
   done;
@@ -848,8 +888,8 @@ let today_utc () =
 let test_fold_range_appended_sees_only_new_rows () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_fold_appended" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_fold_appended" in
+  let store = Dated_jsonl.open_store location in
   let today = today_utc () in
   List.iter (fun i -> Dated_jsonl.append store (make_json i)) [ 1; 2; 3 ];
   let seen, cursors =
@@ -883,8 +923,8 @@ let test_fold_range_appended_sees_only_new_rows () =
 let test_range_day_file_paths_matches_iter_range () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_range_paths" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_range_paths" in
+  let store = Dated_jsonl.open_store location in
   let today = today_utc () in
   Dated_jsonl.append store (make_json 1);
   let paths = Dated_jsonl.range_day_file_paths store ~since:today ~until:today in
@@ -904,8 +944,8 @@ let test_range_day_file_paths_matches_iter_range () =
 let test_read_range () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_range" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_range" in
+  let store = Dated_jsonl.open_store location in
   Dated_jsonl.append store (make_json 1);
   (* Read today's range *)
   let open Unix in
@@ -921,17 +961,18 @@ let test_read_range () =
 let test_read_range_malformed () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_badrange" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_badrange" in
+  let store = Dated_jsonl.open_store location in
   let result = Dated_jsonl.read_range store ~since:"bad" ~until:"dates" in
   check int "malformed dates return empty" 0 (List.length result)
 
 let test_read_range_recent () =
-  let dir = tmpdir "dated_jsonl_range_recent" in
+  let location = temp_store "dated_jsonl_range_recent" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|} ];
   write_dated_file dir "2026-01" "02" [ {|{"i":4}|}; {|{"i":5}|}; {|{"i":6}|} ];
   write_dated_file dir "2026-02" "01" [ {|{"i":7}|}; {|{"i":8}|}; {|{"i":9}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let ints r = List.map json_i r in
   (* newest 2 in window come from the tail of the newest in-range day-file *)
   check
@@ -960,17 +1001,19 @@ let test_read_range_recent () =
 ;;
 
 let test_iter_all_chronological_skips_malformed () =
-  let dir = tmpdir "dated_jsonl_iter_all" in
+  let location = temp_store "dated_jsonl_iter_all" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; "not-json" ];
   write_dated_file dir "2026-01" "02" [ {|{"i":2}|} ];
   write_dated_file dir "2026-02" "01" [ {|{"i":3}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let seen = ref [] in
   Dated_jsonl.iter_all store (fun json -> seen := json_i json :: !seen);
   check (list int) "iter_all chronological" [ 1; 2; 3 ] (List.rev !seen)
 
 let test_iter_all_entries_result_continues_after_malformed () =
-  let dir = tmpdir "dated_jsonl_iter_all_entries_result" in
+  let location = temp_store "dated_jsonl_iter_all_entries_result" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "31" [ {|{"i":1}|} ];
   write_dated_file
     dir
@@ -983,7 +1026,7 @@ let test_iter_all_entries_result_continues_after_malformed () =
     (Filename.concat (Filename.concat dir "2026-02") ".DS_Store")
     "not dated";
   let path = Filename.concat (Filename.concat dir "2026-02") "01.jsonl" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let seen = ref [] in
   (match
      Dated_jsonl.iter_all_entries_result store (fun entry -> seen := entry :: !seen)
@@ -1008,9 +1051,10 @@ let test_iter_all_entries_result_continues_after_malformed () =
 
 let test_iter_all_entries_result_surfaces_typed_io_error () =
   let dir = tmpdir "dated_jsonl_iter_entries_io" in
-  let base_dir = Filename.concat dir "ledger" in
+  let location = store_under dir in
+  let base_dir = Dated_jsonl.Store.dir location in
   Fs_compat.append_file base_dir "not-a-directory";
-  let store = Dated_jsonl.create ~base_dir () in
+  let store = Dated_jsonl.open_store location in
   match Dated_jsonl.iter_all_entries_result store ignore with
   | Error (Dated_jsonl.Not_a_directory { path }) ->
     check string "stream base file path" base_dir path
@@ -1020,7 +1064,8 @@ let test_iter_all_entries_result_surfaces_typed_io_error () =
 ;;
 
 let test_iter_range_entries_result_reads_only_requested_days () =
-  let dir = tmpdir "dated_jsonl_iter_range_entries_result" in
+  let location = temp_store "dated_jsonl_iter_range_entries_result" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "31" [ {|{"i":1}|} ];
   write_dated_file
     dir
@@ -1029,7 +1074,7 @@ let test_iter_range_entries_result_reads_only_requested_days () =
     [ "not-json"; {|{"i":2}|} ];
   write_dated_file dir "2026-02" "02" [ {|{"i":3}|} ];
   let path = Filename.concat (Filename.concat dir "2026-02") "01.jsonl" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let seen = ref [] in
   (match
      Dated_jsonl.iter_range_entries_result
@@ -1058,9 +1103,7 @@ let test_iter_range_entries_result_reads_only_requested_days () =
 
 let test_iter_range_entries_result_rejects_invalid_range () =
   let store =
-    Dated_jsonl.create
-      ~base_dir:(tmpdir "dated_jsonl_iter_range_invalid")
-      ()
+    Dated_jsonl.open_store (temp_store "dated_jsonl_iter_range_invalid")
   in
   let rejects ~name ~since ~until =
     match Dated_jsonl.iter_range_entries_result store ~since ~until ignore with
@@ -1083,11 +1126,12 @@ let test_iter_range_entries_result_rejects_invalid_range () =
 ;;
 
 let test_iter_range_chronological () =
-  let dir = tmpdir "dated_jsonl_iter_range" in
+  let location = temp_store "dated_jsonl_iter_range" in
+  let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
   write_dated_file dir "2026-01" "02" [ {|{"i":2}|} ];
   write_dated_file dir "2026-02" "01" [ {|{"i":3}|} ];
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   let seen = ref [] in
   Dated_jsonl.iter_range store ~since:"2026-01-02" ~until:"2026-02-01"
     (fun json -> seen := json_i json :: !seen);
@@ -1098,14 +1142,15 @@ let test_iter_range_chronological () =
 let test_prune () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_prune" in
+  let location = temp_store "dated_jsonl_prune" in
+  let dir = Dated_jsonl.Store.dir location in
   (* Create a fake old month dir with a day file *)
   let old_month = Filename.concat dir "2020-01" in
   Fs_compat.mkdir_p old_month;
   Fs_compat.append_file (Filename.concat old_month "15.jsonl")
     "{\"old\":true}\n";
   (* Also add today's data *)
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   Dated_jsonl.append store (make_json 1);
   (* Prune data older than 30 days *)
   let deleted = Dated_jsonl.prune store ~days:30 in
@@ -1119,24 +1164,25 @@ let test_prune () =
 (* The cutoff month and day used to be formatted here rather than asked of
    the writer, and the existing case only separates 2020 from today -- six
    years of slack hides any disagreement. These put a file on each side of
-   the boundary and name the boundary through Jsonl_writer, the module that
-   decides where rows land (#27143). *)
+   the boundary and name the boundary through Dated_jsonl.Store.dated_path,
+   which decides where rows land (#27143). *)
 let test_prune_boundary_follows_the_writer_layout () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_prune_boundary" in
+  let location = temp_store "dated_jsonl_prune_boundary" in
+  let dir = Dated_jsonl.Store.dir location in
   let day = 86_400.0 in
   let now = Unix.gettimeofday () in
   let write_day ~ts =
-    let dated = Jsonl_writer.dated_path ~base_dir:dir ~ts in
-    Fs_compat.mkdir_p (Filename.concat dir dated.Jsonl_writer.month_dir);
-    Fs_compat.append_file dated.Jsonl_writer.path "{\"probe\":true}\n";
-    dated.Jsonl_writer.path
+    let dated = Dated_jsonl.Store.dated_path location ~ts in
+    Fs_compat.mkdir_p (Filename.concat dir dated.Dated_jsonl.Store.month_dir);
+    Fs_compat.append_file dated.Dated_jsonl.Store.path "{\"probe\":true}\n";
+    dated.Dated_jsonl.Store.path
   in
   (* One day past the cutoff and one day inside it. *)
   let outside = write_day ~ts:(now -. (31.0 *. day)) in
   let inside = write_day ~ts:(now -. (29.0 *. day)) in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let store = Dated_jsonl.open_store location in
   ignore (Dated_jsonl.prune store ~days:30);
   check bool "the day past the cutoff is gone" false (Sys.file_exists outside);
   check bool "the day inside the cutoff is kept" true (Sys.file_exists inside)
@@ -1145,40 +1191,84 @@ let test_prune_boundary_follows_the_writer_layout () =
 let test_prune_keeps_the_cutoff_day_itself () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_prune_cutoff_day" in
+  let location = temp_store "dated_jsonl_prune_cutoff_day" in
+  let dir = Dated_jsonl.Store.dir location in
   let day = 86_400.0 in
   let now = Unix.gettimeofday () in
-  let dated = Jsonl_writer.dated_path ~base_dir:dir ~ts:(now -. (30.0 *. day)) in
-  Fs_compat.mkdir_p (Filename.concat dir dated.Jsonl_writer.month_dir);
-  Fs_compat.append_file dated.Jsonl_writer.path "{\"probe\":true}\n";
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let dated = Dated_jsonl.Store.dated_path location ~ts:(now -. (30.0 *. day)) in
+  Fs_compat.mkdir_p (Filename.concat dir dated.Dated_jsonl.Store.month_dir);
+  Fs_compat.append_file dated.Dated_jsonl.Store.path "{\"probe\":true}\n";
+  let store = Dated_jsonl.open_store location in
   ignore (Dated_jsonl.prune store ~days:30);
   check
     bool
     "the cutoff day is retained, not deleted"
     true
-    (Sys.file_exists dated.Jsonl_writer.path)
+    (Sys.file_exists dated.Dated_jsonl.Store.path)
 ;;
+
+(* Only removals that happened are counted. A folder named like a day file
+   cannot be unlinked, as root too, so it is attempted and not counted; the
+   two real day files go and are the two counted (#42891). *)
+let test_prune_counts_only_removed_files () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let location = temp_store "dated_jsonl_prune_counts" in
+  let dir = Dated_jsonl.Store.dir location in
+  let january = Filename.concat dir "2020-01" in
+  let february = Filename.concat dir "2020-02" in
+  List.iter Fs_compat.mkdir_p [ january; february ];
+  let unremovable = Filename.concat january "14.jsonl" in
+  Unix.mkdir unremovable 0o755;
+  let removable = [ Filename.concat january "15.jsonl"; Filename.concat february "15.jsonl" ] in
+  List.iter (fun path -> Fs_compat.append_file path "{\"old\":true}\n") removable;
+  let store = Dated_jsonl.open_store location in
+  let deleted = Dated_jsonl.prune store ~days:30 in
+  check int "only the removed files count" 2 deleted;
+  check bool "the folder stays" true (Sys.file_exists unremovable);
+  List.iter (fun path -> check bool path false (Sys.file_exists path)) removable
+
+(* The pass reads and unlinks on a system thread, so another fiber runs while
+   it is in flight. On the fiber, prune would finish before the second
+   fiber of [Fiber.both] started (#42935). *)
+let test_prune_leaves_the_fiber_free () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let location = temp_store "dated_jsonl_prune_off_fiber" in
+  let old_month = Filename.concat (Dated_jsonl.Store.dir location) "2020-01" in
+  Fs_compat.mkdir_p old_month;
+  Fs_compat.append_file (Filename.concat old_month "15.jsonl") "{\"old\":true}\n";
+  let store = Dated_jsonl.open_store location in
+  let finished = ref false in
+  let ran_during_prune = ref false in
+  Eio.Fiber.both
+    (fun () ->
+       ignore (Dated_jsonl.prune store ~days:30 : int);
+       finished := true)
+    (fun () -> ran_during_prune := not !finished);
+  check bool "another fiber ran during the prune" true !ran_during_prune;
+  check bool "old file removed" false (Sys.file_exists (Filename.concat old_month "15.jsonl"))
 
 let test_prune_zero_days () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_prune0" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_prune0" in
+  let store = Dated_jsonl.open_store location in
   let deleted = Dated_jsonl.prune store ~days:0 in
   check int "zero days prunes nothing" 0 deleted
 
 let test_max_bytes_prunes_oldest_completed_day_files () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_max_bytes" in
+  let location = temp_store "dated_jsonl_max_bytes" in
+  let dir = Dated_jsonl.Store.dir location in
   let old_file_1 = Filename.concat (Filename.concat dir "2020-01") "01.jsonl" in
   let old_file_2 = Filename.concat (Filename.concat dir "2020-01") "02.jsonl" in
   write_dated_file dir "2020-01" "01"
     [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'a') ];
   write_dated_file dir "2020-01" "02"
     [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'b') ];
-  let store = Dated_jsonl.create ~base_dir:dir ~max_bytes:120 () in
+  let store = Dated_jsonl.open_store ~max_bytes:120 location in
   Dated_jsonl.append store (make_json 1);
   check bool "oldest file removed" false (Sys.file_exists old_file_1);
   check bool "second old file removed" false (Sys.file_exists old_file_2);
@@ -1188,8 +1278,8 @@ let test_max_bytes_prunes_oldest_completed_day_files () =
 let test_max_bytes_preserves_current_day_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_max_bytes_current" in
-  let store = Dated_jsonl.create ~base_dir:dir ~max_bytes:1 () in
+  let location = temp_store "dated_jsonl_max_bytes_current" in
+  let store = Dated_jsonl.open_store ~max_bytes:1 location in
   Dated_jsonl.append store
     (`Assoc [ ("payload", `String (String.make 128 'x')) ]);
   check int "current file row survives tiny cap" 1
@@ -1200,8 +1290,8 @@ let test_max_bytes_preserves_current_day_file () =
 let test_concurrent_append () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_concurrent" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_concurrent" in
+  let store = Dated_jsonl.open_store location in
   let n = 50 in
   Eio.Fiber.all (
     List.init n (fun i ->
@@ -1217,8 +1307,8 @@ let test_concurrent_append () =
 let test_empty_store () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_empty" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_empty" in
+  let store = Dated_jsonl.open_store location in
   let result = Dated_jsonl.read_recent store 10 in
   check int "empty read" 0 (List.length result);
   let lines = Dated_jsonl.read_recent_lines store 10 in
@@ -1261,8 +1351,9 @@ let non_empty_lines file =
 let test_append_rotating_rotates_at_cap () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_rotate" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_rotate" in
+  let dir = Dated_jsonl.Store.dir location in
+  let store = Dated_jsonl.open_store location in
   (match
      Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
        (tiny_json 1)
@@ -1287,8 +1378,8 @@ let test_append_rotating_rotates_at_cap () =
 let test_append_rotating_range_reads_cross_segments () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_rotate_range" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_rotate_range" in
+  let store = Dated_jsonl.open_store location in
   for i = 1 to 3 do
     ignore
       (Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
@@ -1305,9 +1396,10 @@ let test_append_rotating_range_reads_cross_segments () =
 let test_append_rotating_ring_prunes_oldest_segment () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_rotate_ring" in
+  let location = temp_store "dated_jsonl_rotate_ring" in
+  let dir = Dated_jsonl.Store.dir location in
   let store =
-    Dated_jsonl.create ~base_dir:dir ~max_bytes:(2 * tiny_row_bytes) ()
+    Dated_jsonl.open_store ~max_bytes:(2 * tiny_row_bytes) location
   in
   for i = 1 to 3 do
     ignore
@@ -1327,8 +1419,8 @@ let test_append_rotating_ring_prunes_oldest_segment () =
 let test_append_rotating_oversized_row_lands_in_empty_current () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_rotate_oversized" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_rotate_oversized" in
+  let store = Dated_jsonl.open_store location in
   let oversized = `Assoc [ ("i", `Int 1); ("pad", `String (String.make 64 'x')) ] in
   (match
      Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
@@ -1348,8 +1440,9 @@ let test_append_rotating_oversized_row_lands_in_empty_current () =
 let test_append_rotating_sequence_survives_restart () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_jsonl_rotate_restart" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_jsonl_rotate_restart" in
+  let dir = Dated_jsonl.Store.dir location in
+  let store = Dated_jsonl.open_store location in
   ignore
     (Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
        (tiny_json 1)
@@ -1360,7 +1453,7 @@ let test_append_rotating_sequence_survives_restart () =
       : Dated_jsonl.append_outcome);
   (* A fresh handle over the same directory derives the next sequence
      from the names on disk, not from in-process state. *)
-  let reopened = Dated_jsonl.create ~base_dir:dir () in
+  let reopened = Dated_jsonl.open_store location in
   (match
      Dated_jsonl.append_rotating reopened ~max_current_file_bytes:tiny_row_bytes
        (tiny_json 3)
@@ -1376,8 +1469,9 @@ let test_append_rotating_sequence_survives_restart () =
 let test_strict_incremental_read_keeps_complete_line_boundaries () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_strict_incremental" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_strict_incremental" in
+  let dir = Dated_jsonl.Store.dir location in
+  let store = Dated_jsonl.open_store location in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
   let path = Filename.concat dir "2026-01/01.jsonl" in
   let folded = ref 0 in
@@ -1415,8 +1509,9 @@ let test_strict_incremental_read_keeps_complete_line_boundaries () =
 let test_strict_incremental_rejects_replacement_during_read () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "dated_strict_replacement" in
-  let store = Dated_jsonl.create ~base_dir:dir () in
+  let location = temp_store "dated_strict_replacement" in
+  let dir = Dated_jsonl.Store.dir location in
+  let store = Dated_jsonl.open_store location in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
   let path = Filename.concat dir "2026-01/01.jsonl" in
   let replacement = path ^ ".replacement" in
@@ -1597,6 +1692,10 @@ let () =
         [
           test_case "removes old files" `Quick test_prune;
           test_case "zero days safe" `Quick test_prune_zero_days;
+          test_case "counts only removed files" `Quick
+            test_prune_counts_only_removed_files;
+          test_case "leaves the fiber free" `Quick
+            test_prune_leaves_the_fiber_free;
           test_case "boundary follows the writer layout" `Quick
             test_prune_boundary_follows_the_writer_layout;
           test_case "cutoff day itself is kept" `Quick

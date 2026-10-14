@@ -311,7 +311,7 @@ let test_malformed_outbox_is_quarantined_before_successor_delivery () =
       ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention previous_wake)
       (fun () ->
     let outbox_dir =
-      Filename.concat (Workspace_utils.masc_root_dir config) "message-mention-outbox"
+      Filename.concat (Workspace_utils.masc_dir config) "message-mention-outbox"
     in
     let malformed_path = Filename.concat outbox_dir "malformed.json" in
     let successor =
@@ -348,7 +348,7 @@ let test_malformed_outbox_is_quarantined_before_successor_delivery () =
     let quarantine_path =
       Filename.concat
         (Filename.concat
-           (Workspace_utils.masc_root_dir config)
+           (Workspace_utils.masc_dir config)
            "message-mention-outbox-quarantine")
         receipt.quarantine_name
     in

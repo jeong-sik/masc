@@ -53,6 +53,22 @@ let test_read_state_repairs_empty_object () =
       check int "repaired message_seq" 0
         (Safe_ops.json_int ~default:(-1) "message_seq" repaired_json))
 
+(* [is_initialized] reads [state.json], so reading the state of a workspace
+   that was never initialized must leave it uninitialized. *)
+let test_read_state_does_not_create_state_json () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      let state = Workspace.read_state config in
+      check string "declared default" "0.1.0" state.protocol_version;
+      check bool "no state.json written" false
+        (Sys.file_exists (state_path base_dir));
+      check bool "still not initialized" false (Workspace.is_initialized config))
+
 let test_read_state_drops_legacy_active_agent_objects () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -258,6 +274,8 @@ let () =
         [
           test_case "repairs empty object" `Quick
             test_read_state_repairs_empty_object;
+          test_case "reading an uninitialized workspace writes nothing" `Quick
+            test_read_state_does_not_create_state_json;
           test_case "drops legacy active_agents objects" `Quick
             test_read_state_drops_legacy_active_agent_objects;
           test_case "filters invalid active_agents entries" `Quick

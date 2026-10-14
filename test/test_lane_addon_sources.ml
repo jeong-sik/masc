@@ -27,10 +27,10 @@ let with_store f =
 let package dir max_bytes : Types.package = {
   id="source-test";revision="1";title="Source capture fixture";
   contributions=[Types.Observe];image="unused";command=["unused"];
-  directory=dir;skills_directory=None;action_tool=None;state_storage=Types.Ephemeral;tool_invocation=Types.Direct;exported_tools=[];outputs=[];refresh_policy=Types.Every_hint;
+  directory=dir;skills_directory=None;action_tool=None;runtime=Types.Docker;state_storage=Types.Ephemeral;tool_invocation=Types.Direct;exported_tools=[];outputs=[];refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
-  resources={cpus=0.5;memory_bytes=134217728L;pids=16;max_reply_bytes=max_bytes}}
+  resources={cpus=0.5;memory_bytes=134217728L;pids=Some 16;max_reply_bytes=max_bytes}}
 let file_source id path = `Assoc ["kind", `String "snapshot_file";
   "source_id", `String id; "path", `String path]
 let binding sources = `Assoc ["sources", `List sources]
@@ -419,9 +419,9 @@ let test_misc_tools_name_the_source_they_move () =
     | Sources.Tool_completed -> "tool" in
   let activity operation = label (Sources.activity_of_misc_operation operation) in
   check string "stepping the MSX moves its capture" "msx"
-    (activity Tool_schemas_misc.Misc_msx_step);
+    (activity (Tool_schemas_misc.Misc_msx Msx_tool.Step));
   check string "reading the MSX screen moves nothing" "tool"
-    (activity Tool_schemas_misc.Misc_msx_screen);
+    (activity (Tool_schemas_misc.Misc_msx Msx_tool.Screen));
   check string "pressing on the DOS machine moves its capture" "dos"
     (activity Tool_schemas_misc.Misc_dos_press);
   check string "reading the DOS screen moves nothing" "tool"

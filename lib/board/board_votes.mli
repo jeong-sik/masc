@@ -53,12 +53,10 @@ val vote_direction_of_string_opt : string -> vote_direction option
 (** {1 Vote log path} *)
 
 val vote_log_path : unit -> string
-(** Path to the append-only vote log JSONL under the cluster-aware board
-    directory resolved by {!Board_paths.board_masc_dir} — the same
-    resolver used by [persist_path] / [comments_path] / [reactions_path] /
-    [sub_boards_path], so on the default cluster this is
-    [<base>/.masc/board_votes.jsonl] and on a named cluster it is
-    [<base>/.masc/clusters/<cluster>/board_votes.jsonl].  Each accepted row
+(** Path to the append-only vote log JSONL under the board directory
+    resolved by {!Board_paths.board_masc_dir} — the same resolver used by
+    [persist_path] / [comments_path] / [reactions_path] / [sub_boards_path],
+    so this is [<base>/.masc/board_votes.jsonl].  Each accepted row
     has exactly [target], [voter], [direction], and positive finite [ts]
     fields; [target] carries canonical typed target/voter identities and the
     derived [voter] field must match it. *)
@@ -236,6 +234,26 @@ val flush_dirty : store -> unit
     Stamps [last_flush] with the wall clock. *)
 
 (** {1 Karma} *)
+
+(** A single attributed karma event.  One event is generated per upvote
+    received by an agent.  Downvotes do not generate karma events
+    (scoring rule: [Up] = +1, [Down] = 0). *)
+type karma_event = {
+  recipient : string;
+  (** Agent who earned the karma — author of the upvoted post or comment. *)
+  voter : string;
+  (** Agent who cast the upvote. *)
+  target_kind : Board_vote_key.target_kind;
+  (** The upvoted content's kind, read off the vote key. *)
+  target_id : string;
+  (** Identifier of the upvoted post or comment. *)
+  delta : int;
+  (** Karma delta.  Always [+1] per upvote under the current scoring
+      contract.  Stored explicitly so future rule changes are backward
+      compatible — older events keep their original delta value. *)
+  ts : float;
+  (** Unix timestamp at which the upvote was cast (seconds since epoch). *)
+}
 
 val karma_score_for_direction : vote_direction -> int
 (** Scoring contract: [Up] → [+1], [Down] → [0].

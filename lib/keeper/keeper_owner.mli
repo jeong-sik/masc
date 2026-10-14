@@ -54,6 +54,7 @@ type operation_interrupt_result =
       { running_operation_id : Chat_operation.Operation_id.t option }
   | Operation_settling
   | Operation_maintenance_running
+  | Operation_slot_held_by_autonomous_turn
   | Operation_interrupt_failed of string
 (** Result of a mailbox-linearized compare-and-interrupt. A stale caller can
     never signal a newer operation: the expected name is compared against the
@@ -63,7 +64,12 @@ type operation_interrupt_result =
     is released when that settle completes (a settle hook that blocks keeps it
     held with no cancel handle). [Operation_maintenance_running] means the slot
     is held by a maintenance run, an internal transaction whose caller expects
-    a value or a typed error; a chat stop names it and cancels nothing. *)
+    a value or a typed error; a chat stop names it and cancels nothing.
+    [Operation_slot_held_by_autonomous_turn] means the named operation id still
+    reads as running but the slot is held by an autonomous cycle, which that id
+    does not name: nothing is cancelled and the row is not settled, so a
+    Running row whose child already ended stays Running until its settle
+    succeeds. This result only protects the autonomous cycle. *)
 
 type pause_result = Interrupt_result of operation_interrupt_result | Pending_admission_paused
 
@@ -165,6 +171,7 @@ type operation_error_kind =
   | Unknown_operation
   | Operation_not_queued
   | Operation_idempotency_conflict
+  | Operation_native_call_unsettled
   | Operation_store_unavailable
 
 type error =
@@ -409,7 +416,9 @@ val interrupt_running_operation
   :  t
   -> Chat_operation.Operation_id.t
   -> (operation_interrupt_result, error) result
-(** Signal only when this exact operation still owns the running child. *)
+(** Signal only when this exact operation still owns the running child: the
+    slot holder must be on the chat-operation lane and the durable running id
+    must equal the requested one. *)
 
 val submit_operation
   :  t

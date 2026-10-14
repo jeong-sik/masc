@@ -83,7 +83,7 @@ let with_temp_dir f =
 let test_chat_trace_block_by_turn_ref_reads_allowed_trace_ids () =
   with_temp_dir (fun dir ->
     let config = Workspace.default_config dir in
-    let masc_root = Workspace.masc_root_dir config in
+    let masc_root = Workspace.masc_dir config in
     let keeper_name = "keeper-chat-trace" in
     T.append_withheld_thinking
       ~masc_root

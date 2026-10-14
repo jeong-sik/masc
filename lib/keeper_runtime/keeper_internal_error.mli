@@ -229,16 +229,6 @@ and masc_internal_error =
 
 val runtime_runner_execute_site : string
 
-val blocker_detail_structured_max_chars : int
-(** Upper bound (~2000) preserved for a [masc_agent_core_error] structured payload
-    by {!cap_blocker_detail}. *)
-
-val cap_blocker_detail : string -> string
-(** [cap_blocker_detail s] bounds a keeper [blocker_info] detail string: a
-    structured payload beginning with [masc_internal_error_prefix] (#9933) is
-    preserved up to {!blocker_detail_structured_max_chars}; plain narrative
-    text is truncated to the narrative budget (~200). Idempotent. *)
-
 val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 (** A JSON object tagged by ["kind"]. A fence writes its [cause] as a nested
     object, and a terminal effect failure its [detail], so no arm of this

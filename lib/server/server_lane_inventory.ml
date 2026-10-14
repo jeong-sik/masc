@@ -109,7 +109,9 @@ let snapshot ~config =
   {observed_at=Time_compat.now (); rows=builtin @ package_rows ~declarations ~instances:packages.instances;
    exact;directory;complete=declarations.complete && packages.complete;
    owner_present=packages.owner_present;
-   issues=List.map (fun (issue : Config.issue) -> issue.source_path,issue.message) declarations.issues @ packages.issues}
+   issues=List.map (fun (issue : Config.issue) -> issue.source_path,issue.message) declarations.issues
+          @ List.map (fun (issue : Addon.inventory_issue) ->
+              issue.issue_path,Addon.retained_fault_message issue.issue_reason) packages.issues}
 
 let str s = `String s
 let strings values = `List (List.map str values)

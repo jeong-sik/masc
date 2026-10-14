@@ -97,11 +97,38 @@ let cause_of_core_error (error : Agent_core.Error.t) =
   | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit; _ }) ->
     Context_overflow { limit }
   | Agent_core.Error.Api (Agent_core.Retry.InputCapacity _) -> Input_capacity
-  | Agent_core.Error.Api _ -> unnamed_core_cause error
+  | Agent_core.Error.Api (Agent_core.Retry.RateLimited _)
+  | Agent_core.Error.Api (Agent_core.Retry.Overloaded _)
+  | Agent_core.Error.Api (Agent_core.Retry.ServerError _)
+  | Agent_core.Error.Api (Agent_core.Retry.AuthError _)
+  | Agent_core.Error.Api (Agent_core.Retry.AuthorizationError _)
+  | Agent_core.Error.Api (Agent_core.Retry.PaymentRequired _)
+  | Agent_core.Error.Api (Agent_core.Retry.InvalidRequest _)
+  | Agent_core.Error.Api (Agent_core.Retry.NotFound _)
+  | Agent_core.Error.Api (Agent_core.Retry.Timeout _) -> unnamed_core_cause error
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     Provider_network { provider = Some provider; kind; detail }
-  | Agent_core.Error.Provider _ -> unnamed_core_cause error
+  | Agent_core.Error.Provider
+      ( Llm_provider.Error.MissingApiKey _
+      | Llm_provider.Error.InvalidConfig _
+      | Llm_provider.Error.ParseError _
+      | Llm_provider.Error.ProviderWireError _
+      | Llm_provider.Error.ProviderReportedError _
+      | Llm_provider.Error.UnknownVariant _
+      | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.EmptyCompletion _
+      | Llm_provider.Error.RepeatingGeneration _
+      | Llm_provider.Error.RateLimit _
+      | Llm_provider.Error.HardQuota _
+      | Llm_provider.Error.CapacityExhausted _
+      | Llm_provider.Error.AuthError _
+      | Llm_provider.Error.AuthorizationError _
+      | Llm_provider.Error.ServerError _
+      | Llm_provider.Error.Timeout _
+      | Llm_provider.Error.InvalidRequest _
+      | Llm_provider.Error.NotFound _
+      | Llm_provider.Error.ProviderTerminal _ ) -> unnamed_core_cause error
   | Agent_core.Error.Agent _
   | Agent_core.Error.Mcp _
   | Agent_core.Error.Config _

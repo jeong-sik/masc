@@ -110,7 +110,9 @@ let test_stale_checkpoint_digest_and_commit_readback () = with_store @@ fun _pat
   rejected "wrong operation digest accepted"
     (Store.update_direct_native_call store ~now:4. ~operation_id ~execution_digest:(String.make 64 'a')
        (Native.Terminal {call_id; disposition=disposition Agent.Retire}));
-  rejected "active scope completed without terminal receipt" (Store.succeed_running store ~now:4. ~operation_id ~outcome_ref:"missing-core-receipt");
+  (match Store.succeed_running store ~now:4. ~operation_id ~outcome_ref:"missing-core-receipt" with
+   | Error Store.Native_call_unsettled -> ()
+   | Ok _ | Error _ -> fail "active scope completed without terminal receipt");
   match read store with
   | Native.Active current -> check bool "failed writes preserve latest checkpoint" true (Keeper_checkpoint_ref.equal current.checkpoint (checkpoint 2))
   | _ -> fail "failed writes changed native call state"
@@ -130,10 +132,61 @@ let test_checkpoint_deferral_acknowledges_only_committed_retirement () = with_st
   check bool "same operation is queued" true
     (match Store.get store operation_id |> ok with Some {Operation.state=Operation.Queued; _} -> true | _ -> false)
 
+let still_running store =
+  match Store.get store operation_id |> ok with
+  | Some {Operation.state=Operation.Running _; _} -> true
+  | Some _ | None -> false
+
+let settle_failed store ~now =
+  Store.fail_running store ~now ~operation_id ~kind:Operation.Turn_cancelled
+    ~detail:"operator interrupted the turn" ~outcome_ref:None
+
+let test_settling_an_active_call_is_a_precondition_not_corruption () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  let before = read store in
+  (match settle_failed store ~now:4. with
+   | Error Store.Native_call_unsettled -> ()
+   | Ok _ | Error _ -> fail "failing an active call was not refused as unsettled");
+  (match Store.succeed_running store ~now:4. ~operation_id ~outcome_ref:"x" with
+   | Error Store.Native_call_unsettled -> ()
+   | Ok _ | Error _ -> fail "completing an active call was not refused as unsettled");
+  (match Store.defer_direct_checkpoint store ~now:4. ~operation_id
+           ~execution_digest:operation.Operation.execution_digest
+           ~checkpoint:(Keeper_semantic_execution.Agent_core (checkpoint 1)) with
+   | Error Store.Native_call_unsettled -> ()
+   | Ok _ | Error _ -> fail "suspending an active call was not refused as unsettled");
+  check bool "refusals keep the operation running" true (still_running store);
+  check bool "refusals keep the active call" true (Native.equal_state before (read store));
+  terminal store operation Agent.Retire;
+  (match settle_failed store ~now:5. with
+   | Ok {Operation.state=Operation.Failed _; _} -> ()
+   | Ok _ | Error _ -> fail "the recorded disposition did not release settlement")
+
+let test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  terminal store operation (Agent.Operator_repair_required Agent.Effect_outcome_unknown);
+  (match Store.succeed_running store ~now:4. ~operation_id ~outcome_ref:"x" with
+   | Error Store.Native_call_unsettled -> ()
+   | Ok _ | Error _ -> fail "an unknown effect completed, or its refusal was not a precondition");
+  (match Store.defer_direct_checkpoint store ~now:4. ~operation_id
+           ~execution_digest:operation.Operation.execution_digest
+           ~checkpoint:(Keeper_semantic_execution.Agent_core (checkpoint 1)) with
+   | Error Store.Native_call_unsettled -> ()
+   | Ok _ | Error _ -> fail "an unknown effect resumed through another continuation");
+  (match settle_failed store ~now:5. with
+   | Ok {Operation.state=Operation.Failed _; _} -> ()
+   | Ok _ | Error _ -> fail "an unknown effect could not fail the operation");
+  (match read store with
+   | Native.Terminal_unacknowledged (_, {Agent.recovery=Agent.Operator_repair_required Agent.Effect_outcome_unknown; _}) -> ()
+   | Native.No_native_call | Native.Active _ | Native.Terminal_unacknowledged _ ->
+     fail "the unknown-effect receipt was not preserved")
+
 let () = run "native-call-owner-store" ["recovery", [
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;
   test_case "terminal restart retains incomplete receipt without dispatch" `Quick test_terminal_restart_never_dispatches;
   test_case "unknown effect survives settlement and rejects retry" `Quick test_unknown_effect_survives_failure_and_rejects_retry;
+  test_case "settling an active call is a precondition, not corruption" `Quick test_settling_an_active_call_is_a_precondition_not_corruption;
+  test_case "unknown-effect receipt lets the operation fail but not complete" `Quick test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete;
   test_case "retired call replacement and Owner acknowledgement" `Quick test_retired_replacement_is_atomic_and_normal_receipt_acknowledges;
   test_case "checkpoint deferral acknowledges only committed retirement" `Quick test_checkpoint_deferral_acknowledges_only_committed_retirement;
   test_case "checkpoint CAS, digest and commit readback" `Quick test_stale_checkpoint_digest_and_commit_readback]]

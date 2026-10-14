@@ -1,18 +1,11 @@
 (** Reading a connector REST response under one duplicate-key policy.
 
-    The two connectors used to disagree. [discord_rest_client] rejected a
-    repeated object key on every field read; [slack_rest_client] took the first
-    value through [List.assoc_opt]. JSON does not forbid a repeated key and
-    Yojson does not reject one, so the same body could produce two different
-    answers depending on which connector read it.
-
-    A repeated key is a property of the document, not of one field read, so
-    {!parse} settles it once. Every reader below is total on the result, and no
-    call site is left holding an error it has to decide about. That last part
-    is what actually leaked before: the rejecting reader returned
-    [(_, string) result] per field, and two of its four call sites wrote
-    [Ok _ | Error _ -> status], folding the rejection back into the default it
-    was meant to prevent. *)
+    JSON does not forbid a repeated object key and Yojson does not reject one,
+    so without a policy the same body could give two answers depending on
+    which field reader saw it. A repeated key is a property of the document,
+    not of one field read, so {!parse} rejects such a body once, at any depth,
+    for every connector. Every reader below is total on the result, so no call
+    site holds a per-field error it has to decide about. *)
 
 type t
 (** A parsed connector response. No object in it repeats a key. *)

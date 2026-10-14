@@ -90,7 +90,7 @@ let%test "observer rejection remains typed" =
   match observe (fun _ -> Error { reason = "queue full" }) observed with
   | Error { observation = actual; cause = Observer_rejected { reason = "queue full" } } ->
     actual = observed
-  | Ok () | Error _ -> false
+  | Error { cause = Observer_rejected _ | Observer_raised _; _ } | Ok () -> false
 ;;
 
 let%test "ordinary observer exception becomes typed evidence" =
@@ -106,7 +106,7 @@ let%test "ordinary observer exception becomes typed evidence" =
   match observe (fun _ -> failwith "observer unavailable") observed with
   | Error { cause = Observer_raised { message; _ }; _ } ->
     String.equal message "Failure(\"observer unavailable\")"
-  | Ok () | Error _ -> false
+  | Error { cause = Observer_rejected _; _ } | Ok () -> false
 ;;
 
 let%test "reserved observer exception propagates" =

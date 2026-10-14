@@ -21,8 +21,11 @@ let with_workspace f =
       Unix.mkdir base 0o700;
       let state = Mcp_server.For_testing.create_state ~base_path:base in
       let config = Mcp_server.workspace_config state in
-      let ledger = Filename.concat (Workspace.masc_root_dir config) "tool_calls" in
-      let store = Dated_jsonl.create ~base_dir:ledger () in
+      let location =
+        Dated_jsonl.Store.(at (Workspace.dated_store_root config) Root.Tool_calls)
+      in
+      let ledger = Dated_jsonl.Store.dir location in
+      let store = Dated_jsonl.open_store location in
       Eio.Switch.on_release sw (fun () ->
         Dated_jsonl.prepare_for_directory_removal store;
         Keeper_tool_call_index.forget_for_ledger ~ledger_dir:ledger;

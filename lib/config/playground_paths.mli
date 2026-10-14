@@ -55,8 +55,9 @@ val parse_bundle_relative_repo_path : string -> (string * string) option
     This is the anchor {!parse_playground_repo_path} looks for once it has
     stripped the playground prefix, exposed for callers that already hold the
     bundle-relative form and know whose bundle it is — a tool call's
-    [action_radius.target_path] is written that way. Local and Docker keepers
-    differ in where the bundle sits, not in the path inside it, so a caller
+    [action_radius.target_path] is written that way. Docker keepers and the
+    endpoint-owned ones (microvm, remote_ssh) differ in where the bundle sits,
+    not in the path inside it, so a caller
     reaching this needs no sandbox knowledge and should not manufacture an
     absolute path to get here.
 
@@ -88,7 +89,7 @@ val parse_playground_repo_path
     into [(repo_id, rel_path)].
 
     Layouts accepted (relative to [base_path]):
-    - [.masc/playground/<keeper>/repos/<repo_id>/<rel>]          (Local)
+    - [.masc/playground/<keeper>/repos/<repo_id>/<rel>]          (microvm, remote_ssh)
     - [.masc/playground/docker/<keeper>/repos/<repo_id>/<rel>]   (Docker)
 
     Used by the keeper write path so files keepers edit inside their

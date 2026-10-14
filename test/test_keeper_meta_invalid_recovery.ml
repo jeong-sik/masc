@@ -278,26 +278,25 @@ let test_non_enumerated_corruption_reads_as_absent () =
   check string "corrupt file is not rewritten" before (Masc_test_deps.read_file path)
 ;;
 
-let test_recognized_misspelling_repairs_to_canonical_spelling () =
+(* The repair trims and lowercases before it looks for a label, so [raw] is a
+   recognized value with a spelling defect — the operator intent is
+   unambiguous and repair must keep it, not reset to the field default. *)
+let check_misspelling_repairs_to ~name ~raw ~expected =
   with_temp_workspace @@ fun config ->
-  let name = "meta-spelling-canary" in
   write_keeper_toml config name;
-  (* The of_string parser trims and lowercases, so this is a recognized value
-     with a spelling defect — the operator intent is unambiguous and repair must
-     keep it, not reset to the field default. *)
   let path =
     write_corrupted_meta
       config
       name
       ~field:"last_proactive_outcome"
-      ~value:(`String "SILENT")
+      ~value:(`String raw)
   in
   (match Keeper_meta_store.read_meta config name with
    | Ok (Some meta) ->
      check
        string
        "last_proactive_outcome keeps recognized intent"
-       "silent"
+       expected
        (Keeper_meta_contract.proactive_cycle_outcome_to_string
           meta.runtime.proactive_rt.last_outcome)
    | Ok None -> fail "read_meta lost the keeper"
@@ -307,11 +306,23 @@ let test_recognized_misspelling_repairs_to_canonical_spelling () =
      check
        string
        "persisted outcome is the canonical spelling"
-       "silent"
+       expected
        (match List.assoc "last_proactive_outcome" fields with
         | `String value -> value
         | other -> Yojson.Safe.to_string other)
    | _ -> fail "repaired meta file is not a JSON object")
+;;
+
+let test_recognized_misspelling_repairs_to_canonical_spelling () =
+  check_misspelling_repairs_to ~name:"meta-spelling-canary" ~raw:"SILENT"
+    ~expected:"silent"
+;;
+
+(* ["unknown"] is a label like the others, so its misspelling is kept too
+   rather than reset to the field default. *)
+let test_misspelled_unknown_repairs_to_unknown () =
+  check_misspelling_repairs_to ~name:"meta-spelling-unknown" ~raw:" UNKNOWN"
+    ~expected:"unknown"
 ;;
 
 (* The deployment gate and the runtime read share one decode decision
@@ -399,88 +410,31 @@ let test_gate_verdict_matches_runtime_read () =
   | Ok (Some _) -> fail "runtime served truncated JSON"
 ;;
 
-module Problem = Keeper_meta_store.Problem_report_state
-
-let retired_field_rows path =
-  List.filter
-    (fun (entry : Problem.entry) ->
-       entry.site = Problem.Meta_retired_fields && String.equal entry.path path)
-    (Problem.snapshot ())
-;;
-
-(* #39200: for one release a meta written before #39025 still carries
-   [trace_history] and [last_handoff_ts]. The runtime read and the deploy gate
-   both keep it, with its counters; the file is reported once under its own
-   store-problem site; the read leaves the bytes alone; and the Owner's next
-   save writes the file without either key, which clears the report. *)
-let test_retired_fields_dropped_reported_once_and_not_saved () =
-  with_temp_workspace @@ fun config ->
-  let name = "meta-retired-fields-canary" in
-  write_keeper_toml config name;
-  let path = keeper_meta_path config name in
-  let retired_names =
-    List.map
-      Keeper_meta_json_current_schema.retired_field_name
-      Keeper_meta_json_current_schema.all_retired_fields
-  in
-  Masc_test_deps.current_meta_json_fixture ~name ()
-  |> replace_field "total_turns" (`Int 41)
-  |> replace_field "trace_history" (`List [])
-  |> replace_field "last_handoff_ts" (`Float 0.0)
-  |> Yojson.Safe.pretty_to_string
-  |> write_file path;
-  let written = Masc_test_deps.read_file path in
-  (match Keeper_meta_store.validate_current_meta_file_result path with
-   | Ok () -> ()
-   | Error (Keeper_meta_store.Unreadable detail)
-   | Error (Keeper_meta_store.Not_current detail) ->
-     failf "deploy gate rejected a meta the runtime keeps: %s" detail);
-  let read () =
-    match Keeper_meta_store.read_meta config name with
-    | Ok (Some meta) -> meta
-    | Ok None -> fail "meta with retired fields read as absent"
-    | Error detail -> failf "meta with retired fields was refused: %s" detail
-  in
-  let base_seq = latest_seq () in
-  let meta = read () in
-  ignore (read ());
-  ignore (Keeper_meta_store.keepalive_keeper_names config);
-  check
-    int
-    "counters survive the dropped keys"
-    41
-    meta.Keeper_meta_contract.runtime.usage.total_turns;
-  (match retired_field_rows path with
-   | [ row ] ->
-     check string "the report names the dropped keys"
-       (String.concat ", " retired_names) row.detail
-   | rows -> failf "expected one retired-fields report, got %d" (List.length rows));
-  check
-    int
-    "one WARN for the file across repeated reads"
-    1
-    (List.length (warns (entries_about name (keeper_entries_since base_seq))));
-  check string "the read does not rewrite the file" written
-    (Masc_test_deps.read_file path);
-  (match Keeper_meta_store.replace_snapshot config meta with
-   | Ok () -> ()
-   | Error detail -> failf "saving the read meta failed: %s" detail);
-  (match Yojson.Safe.from_string (Masc_test_deps.read_file path) with
-   | `Assoc fields ->
-     List.iter
-       (fun key ->
-          check bool (key ^ " is not saved") false (List.mem_assoc key fields))
-       retired_names
-   | _ -> fail "saved meta is not a JSON object");
-  ignore (read ());
-  check int "the report clears once the saved file drops the keys" 0
-    (List.length (retired_field_rows path))
+(* The parser reads a label back as its outcome only while every outcome has
+   its own label: with two outcomes on one label, the second would read back
+   as the first. *)
+let test_every_outcome_label_reads_back_as_its_outcome () =
+  List.iter
+    (fun outcome ->
+       let label = Keeper_meta_contract.proactive_cycle_outcome_to_string outcome in
+       check
+         bool
+         (Printf.sprintf "%S reads back as its own outcome" label)
+         true
+         (Keeper_meta_contract.proactive_cycle_outcome_of_string label = Some outcome))
+    Keeper_meta_contract.all_proactive_cycle_outcomes
 ;;
 
 let () =
   run
     "keeper_meta_invalid_recovery"
-    [ ( "issue-28844"
+    [ ( "outcome-labels"
+      , [ test_case
+            "every outcome label reads back as its outcome"
+            `Quick
+            test_every_outcome_label_reads_back_as_its_outcome
+        ] )
+    ; ( "issue-28844"
       , [ test_case
             "non-canonical enumerated field is auto-repaired and keeper rejoins keepalive"
             `Quick
@@ -489,6 +443,10 @@ let () =
             "recognized misspelling repairs to its canonical spelling"
             `Quick
             test_recognized_misspelling_repairs_to_canonical_spelling
+        ; test_case
+            "misspelled unknown repairs to unknown"
+            `Quick
+            test_misspelled_unknown_repairs_to_unknown
         ; test_case
             "scan WARN is emitted on state transitions only"
             `Quick
@@ -503,12 +461,6 @@ let () =
             "gate verdict matches the runtime read on the current-schema corpus"
             `Quick
             test_gate_verdict_matches_runtime_read
-        ] )
-    ; ( "retired-fields-39200"
-      , [ test_case
-            "retired fields are dropped, reported once, and not saved"
-            `Quick
-            test_retired_fields_dropped_reported_once_and_not_saved
         ] )
     ]
 ;;

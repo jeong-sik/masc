@@ -292,6 +292,82 @@ let test_window_reproduces_per_keeper_coverage () =
     Server_dashboard_http_composite_claims.claim_window_rows
 ;;
 
+(* What a keeper needing attention is recommended.
+
+   The dashboard reads these as strings and keeps a fleet row's attention items
+   by [target_type = "keeper"] (dashboard/src/components/agent-roster.ts). The
+   record behind them holds a catalog action and no target type, so the names
+   that reach the wire are checked here. *)
+let attention ~needs_attention ~idle_attention =
+  { Server_dashboard_http_composite_claims.cra_is_live = true
+  ; cra_fiber_stop_requested = false
+  ; cra_idle_attention = idle_attention
+  ; cra_blocked = false
+  ; cra_execution_current = false
+  ; cra_stale_execution_receipt = false
+  ; cra_live_turn_started_at = None
+  ; cra_live_turn_last_progress_at = None
+  ; cra_needs_attention = needs_attention
+  ; cra_reason = Some "stale"
+  ; cra_state = Server_dashboard_http_composite_claims.Attention_stale
+  }
+;;
+
+let recommended ~needs_attention ~idle_attention =
+  Server_dashboard_http_composite_recommendations.composite_recommended_actions_json
+    ~keeper_name:"worker-a"
+    ~snapshot:(`Assoc [])
+    ~execution:(`Assoc [])
+    ~attention:(attention ~needs_attention ~idle_attention)
+  |> Yojson.Safe.Util.to_list
+;;
+
+let test_recommendations_address_the_keeper () =
+  let open Yojson.Safe.Util in
+  let action_types items =
+    List.map (fun item -> item |> member "action_type" |> to_string) items
+  in
+  Alcotest.(check (list string))
+    "nothing is recommended for a keeper that needs no attention"
+    []
+    (action_types (recommended ~needs_attention:false ~idle_attention:false));
+  let stalled = recommended ~needs_attention:true ~idle_attention:false in
+  Alcotest.(check (list string))
+    "a stalled keeper: recovery first, it is the more severe"
+    [ "keeper_recover"; "keeper_probe" ]
+    (action_types stalled);
+  let idle = recommended ~needs_attention:true ~idle_attention:true in
+  Alcotest.(check (list string))
+    "an idle keeper: equal severity, so ordered by action name"
+    [ "keeper_message"; "keeper_probe" ]
+    (action_types idle);
+  List.iter
+    (fun item ->
+       let action_type = item |> member "action_type" |> to_string in
+       let preview = item |> member "preview" in
+       Alcotest.(check string)
+         (action_type ^ " addresses a keeper")
+         "keeper"
+         (item |> member "target_type" |> to_string);
+       Alcotest.(check string)
+         (action_type ^ " names the keeper")
+         "worker-a"
+         (item |> member "target_id" |> to_string);
+       Alcotest.(check bool)
+         (action_type ^ " asks for confirmation")
+         true
+         (item |> member "confirm_required" |> to_bool);
+       Alcotest.(check string)
+         (action_type ^ " previews the same action")
+         action_type
+         (preview |> member "action_type" |> to_string);
+       Alcotest.(check string)
+         (action_type ^ " previews the same target type")
+         "keeper"
+         (preview |> member "target_type" |> to_string))
+    (stalled @ idle)
+;;
+
 let () =
   Alcotest.run
     "composite claim window"
@@ -313,6 +389,12 @@ let () =
             "reproduces the per-keeper read's coverage"
             `Quick
             test_window_reproduces_per_keeper_coverage
+        ] )
+    ; ( "recommended actions"
+      , [ Alcotest.test_case
+            "address the keeper by catalog action"
+            `Quick
+            test_recommendations_address_the_keeper
         ] )
     ]
 ;;

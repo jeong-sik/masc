@@ -6,6 +6,12 @@ module History = Server_provider_usage_history
 let decode decoder json = match decoder (Yojson.Safe.from_string json) with
   | Ok report -> report | Error error -> fail (Usage.decode_error_to_string error)
 
+let usage_journal config =
+  Dated_jsonl.open_store
+    (Dated_jsonl.Store.at
+       (Workspace_utils.dated_store_root config)
+       Provider_usage_history)
+
 let fixture test = Eio_main.run (fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base = Filename.temp_dir "provider-usage-history-" "" in
@@ -57,8 +63,7 @@ let removed_cap_and_empty_snapshot () = fixture (fun config scope day ->
   check (float 0.) "yesterday retains its observed cap" (day -. 1.) (observed (List.hd rows));
   (* A delayed old-format journal append must not revive a window removed by
      the later snapshot. This also covers reading the pre-marker store format. *)
-  let journal = Dated_jsonl.create
-    ~base_dir:(Filename.concat (Workspace_utils.masc_dir config) "provider_usage_history") () in
+  let journal = usage_journal config in
   Dated_jsonl.append journal (`List [`Assoc [
     "scope_id", `String (History.scope_id scope); "source", `String (Usage.source_to_string Openrouter_key_read);
     "kind", `String "provider:credit limit"; "limit_id", `Null;
@@ -120,8 +125,7 @@ let overlapping_sources () = fixture (fun config scope day ->
     (List.length (empty_reports config (day +. 31.))))
 
 let legacy_openrouter_label ~old_kind ~current_kind ~report ~unit ~value ~extra () = fixture (fun config scope day ->
-  let journal = Dated_jsonl.create
-    ~base_dir:(Filename.concat (Workspace_utils.masc_dir config) "provider_usage_history") () in
+  let journal = usage_journal config in
   let legacy ~source ~observed_at = `Assoc ([
     "scope_id", `String (History.scope_id scope); "source", `String source;
     "kind", `String old_kind; "limit_id", `Null;

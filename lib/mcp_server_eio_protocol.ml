@@ -71,7 +71,14 @@ let require_auth ~base_path ~requirement ~id ?auth_token () =
            Error (make_auth_error ~id (Token_expired agent))
          | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
            Error (make_auth_error ~id Invalid_token)
-         | Error err ->
+         | Error
+             (( Masc_domain.Task _
+              | Masc_domain.Agent _
+              | Masc_domain.System _
+              | Masc_domain.Auth
+                  ( Masc_domain.Auth_error.Unauthorized _
+                  | Masc_domain.Auth_error.Forbidden _
+                  | Masc_domain.Auth_error.SameOriginBlocked ) ) as err) ->
            let cause = Masc_domain.masc_error_to_string err in
            Log.Auth.error
              "MCP credential-store lookup failed for request %s: %s"
@@ -242,12 +249,9 @@ let capabilities_for_profile = function
 ;;
 
 let handle_initialize_eio ?(profile = Full) id params =
-  match Mcp_transport_protocol.validate_initialize_params params with
+  match Mcp_transport_protocol.initialize_protocol_version params with
   | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-  | Ok () ->
-    let protocol_version =
-      params |> Mcp_transport_protocol.protocol_version_from_params
-    in
+  | Ok protocol_version ->
     (match Mcp_transport_protocol.validate_protocol_version protocol_version with
      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
      | Ok protocol_version ->
@@ -460,7 +464,7 @@ let handle_list_tools_eio
     make_response ~id (`Assoc result_fields)
 ;;
 
-let handle_list_resources_eio id cursor =
+let handle_list_resources_eio ~base_path id cursor =
   let tool_help_resources =
     public_tool_help_schemas ()
     |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
@@ -475,7 +479,9 @@ let handle_list_resources_eio id cursor =
         ())
   in
   let resources =
-    Mcp_server.resources @ tool_help_resources
+    Mcp_server.resources
+    @ tool_help_resources
+    @ Mcp_server_eio_resource.wiki_resources ~base_path
     |> List.sort (fun (a : Mcp_server.mcp_resource) b -> String.compare a.uri b.uri)
   in
   match TP.page_items_with_cursor ~kind:"resources" resources cursor with
@@ -937,7 +943,8 @@ let handle_request
                   (fun _auth_token ->
                      match TP.parse_cursor_only_params req.params with
                      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
-                     | Ok { cursor } -> handle_list_resources_eio id cursor)
+                     | Ok { cursor } ->
+                       handle_list_resources_eio ~base_path id cursor)
               | "resources/read" ->
                 with_required_auth
                   ~base_path

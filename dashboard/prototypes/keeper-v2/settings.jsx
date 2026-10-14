@@ -94,7 +94,7 @@ const TOOL_GROUPS = [
   { id: 'filesystem', kind: 'local', tools: ['tool_read_file'] },
   { id: 'workspace_write', kind: 'local', tools: ['tool_edit_file', 'tool_write_file'] },
   { id: 'execute', kind: 'local', guard: true, tools: ['tool_execute'] },
-  { id: 'library', kind: 'local', tools: ['keeper_library_search', 'keeper_library_read'] },
+  { id: 'wiki', kind: 'local', tools: ['keeper_wiki_search', 'keeper_wiki_read'] },
   { id: 'voice', kind: 'local', optin: true, tools: ['keeper_voice_speak', 'keeper_voice_listen', 'keeper_voice_agent', 'keeper_voice_sessions'] },
   { id: 'masc.essential', kind: 'masc', tools: ['masc_status', 'masc_web_search', 'masc_web_fetch'] },
   { id: 'masc.workspace', kind: 'masc', tools: ['masc_tasks', 'masc_claim_next', 'masc_transition', 'masc_add_task', 'masc_agents', 'masc_broadcast', 'masc_messages', 'masc_heartbeat'] },
@@ -559,7 +559,7 @@ function SettingsSurface({ onNav }) {
                 <div className="set-sub-h">상태 스토어 레이아웃 (읽기 전용 · --base-path 기준)</div>
                 <div className="set-storemap">
                   {[
-                    ['.masc/root-state.json', 'workspace 루트 마커 — 구 .masc/state.json fallback 제거됨'],
+                    ['.masc/state.json', 'workspace 상태 — 이 파일이 있으면 초기화된 workspace'],
                     ['.masc/costs/YYYY-MM/DD.jsonl', '비용 원장 — 날짜 분할 · (trace_id, keeper_turn_id, oas_turn_ordinal) 정확 일치로만 병합'],
                     ['.masc/telemetry/YYYY-MM/DD.jsonl', '텔레메트리 — 단일 .masc/telemetry.jsonl 리더 제거됨'],
                     ['.masc/gate/', 'Gate 상태 · Always Allowed 규칙 저장소 · Auto Judge 판단'],

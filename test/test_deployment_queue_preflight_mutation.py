@@ -50,11 +50,7 @@ def generate(source_path, output_path, evidence_path):
 
 
 def invoke(executable, *arguments):
-    # Queue paths in these fixtures use the default cluster. Do not inherit a
-    # developer's named-cluster setting into a fixture-only subprocess.
-    environment = dict(os.environ)
-    environment.pop("MASC_CLUSTER_NAME", None)
-    result = subprocess.run([str(executable), *arguments], env=environment,
+    result = subprocess.run([str(executable), *arguments],
                             text=True, capture_output=True, check=False)
     print(json.dumps({"executable": str(executable), "arguments": arguments,
                       "returncode": result.returncode,

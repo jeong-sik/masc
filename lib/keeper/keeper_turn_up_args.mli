@@ -22,7 +22,7 @@ type parsed_args =
   ; board_interests_opt : string list option
   ; max_context_override_opt : int option
   ; max_context_override_present : bool
-  ; sandbox_profile_opt : string option
+  ; sandbox_profile_opt : sandbox_profile option
   ; sandbox_image_patch : string option option
         (** None retains the setting; Some None clears the override; Some (Some image) sets it. *)
   ; microvm_backend_patch : Keeper_microvm_backend.t option option
@@ -30,7 +30,7 @@ type parsed_args =
             selects the parsed backend, only for a microvm profile. *)
   ; remote_endpoint_opt : string option
   ; remote_endpoint_present : bool
-  ; network_mode_opt : string option
+  ; network_mode_opt : network_mode option
   ; egress_allow_opt : string list option
         (** What this keeper may reach in the policy lane (RFC-0415), or
             [None] when the call did not say. Refused at parse time unless
@@ -115,33 +115,25 @@ val resolve_board_interests :
   string list
 
 val resolve_sandbox_profile :
-  ?requested:string ->
+  ?requested:sandbox_profile ->
   fallback:sandbox_profile option ->
   unit ->
   sandbox_profile option
 (** An explicit [requested] profile wins over the TOML [fallback]; [None] means
     neither source named one.
 
-    Omission is not a profile, so it does not collapse into [Local].  It used
-    to: keeper-up then refused the substituted value with "local is disabled",
-    naming a profile the caller never chose, and the message sent operators
-    looking for a playground switch instead of the missing field.  Callers
-    turn [None] into
+    Omission is not a profile. Callers turn [None] into
     [Keeper_meta_contract.missing_required_sandbox_profile_error], which names
-    the field and the allowed values.
-
-    [requested] is the caller's raw string; an unparseable one is treated as absent,
-    since the gate rejects those first. *)
+    the field and the allowed values. *)
 
 val resolve_requested_network_mode :
-  requested:string option ->
+  requested:network_mode option ->
   sandbox_profile:sandbox_profile ->
   fallback:network_mode option ->
   (network_mode, string) result
-(** The network mode a keeper lands on. [requested] is the caller's raw
-    [network_mode] argument; an unparseable one is an [Error] naming every
-    accepted spelling, and [None] takes the keeper TOML's [fallback] first,
-    then the profile's own default.
+(** The network mode a keeper lands on. [requested] is the caller's
+    [network_mode] argument, already read by {!parse}; [None] takes the keeper
+    TOML's [fallback] first, then the profile's own default.
 
     A mode the profile cannot hold is an [Error] as well, from
     {!Keeper_types_profile_sandbox.network_mode_rejection}. Without it,

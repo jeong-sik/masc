@@ -131,27 +131,27 @@ let test_boot_lifts_a_counter_that_fell_behind () =
   with_workspace (fun config messages ->
     List.iter (file_a_message messages) [ 1; 84; 2604 ];
     let path = write_state_with config 84 in
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check int "raised to the store" 2604 (recorded_seq config path))
 
 let test_boot_leaves_a_counter_that_is_ahead () =
   with_workspace (fun config messages ->
     List.iter (file_a_message messages) [ 12 ];
     let path = write_state_with config 900 in
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check int "untouched" 900 (recorded_seq config path))
 
 let test_boot_leaves_a_counter_that_matches () =
   with_workspace (fun config messages ->
     List.iter (file_a_message messages) [ 2604 ];
     let path = write_state_with config 2604 in
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check int "untouched" 2604 (recorded_seq config path))
 
 let test_boot_leaves_the_counter_when_nothing_is_filed () =
   with_workspace (fun config _messages ->
     let path = write_state_with config 7 in
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check int "an empty store says nothing about the counter" 7
       (recorded_seq config path))
 
@@ -163,9 +163,34 @@ let test_boot_does_not_touch_unreadable_state () =
     List.iter (file_a_message messages) [ 2604 ];
     let path = state_path config in
     Workspace_utils_ops.write_json config path (`String "not a state object");
-    Bootstrap.ensure_workspace_bootstrap config;
+    ignore (Workspace_init.init config ~agent_name:None : string);
     check string "left for the typed recovery" {|"not a state object"|}
       (Yojson.Safe.to_string (Workspace_utils_ops.read_json config path)))
+
+(* The repair reads the counter and writes it back. A message numbered by
+   [next_seq] in between would be written over by the older read and the
+   counter would step back, so the repair waits for the state lock. Here the
+   lock is held by another fiber: the counter must not move until it is
+   released. *)
+let test_boot_waits_for_the_state_lock () =
+  with_workspace (fun config messages ->
+    List.iter (file_a_message messages) [ 2604 ];
+    let path = write_state_with config 84 in
+    Eio_main.run @@ fun _env ->
+    let release, released = Eio.Promise.create () in
+    Eio.Fiber.both
+      (fun () ->
+        Workspace_utils_ops.with_file_lock config path (fun () ->
+          Eio.Promise.await release))
+      (fun () ->
+        Eio.Fiber.both
+          (fun () -> Bootstrap.reconcile_message_seq config path)
+          (fun () ->
+            Eio.Fiber.yield ();
+            check int "held while another fiber has the lock" 84
+              (recorded_seq config path);
+            Eio.Promise.resolve released ()));
+    check int "raised once the lock is free" 2604 (recorded_seq config path))
 
 let () =
   run "workspace message seq resume"
@@ -198,5 +223,7 @@ let () =
             test_boot_leaves_the_counter_when_nothing_is_filed
         ; test_case "boot does not touch unreadable state" `Quick
             test_boot_does_not_touch_unreadable_state
+        ; test_case "boot waits for the state lock" `Quick
+            test_boot_waits_for_the_state_lock
         ] )
     ]

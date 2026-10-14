@@ -61,7 +61,7 @@ let timestamps_of entries =
     entries
 
 let read_top root ~n =
-  Telemetry_unified.read_unified ~base_path:root ~masc_root:root
+  Telemetry_unified.read_unified ~masc_root:root
     ~sources:[ Telemetry_unified.Keeper_metric ]
     ~limit:(Telemetry_unified.read_limit_of_int n)
     ()

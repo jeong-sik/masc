@@ -65,11 +65,14 @@ let retain ~config ~keeper_id ~kind ~now (artifact : Tool_output.artifact_ref) =
      records and provider inputs. The latest pin also protects paused keepers
      after dated history expires, until a new snapshot is published or an
      authoritative recall mode supersedes it. *)
-  let keeper_dir = Filename.concat (Workspace.keepers_runtime_dir config) keeper_id in
   let json = Tool_output.normalized_artifact_ref_to_json artifact in
-  let base_dir = Filename.concat keeper_dir
-      (Common.keeper_runtime_store_dirname Common.Keeper_memory_recall_artifacts) in
-  let path = (Jsonl_writer.dated_path ~base_dir ~ts:now).path in
+  let location =
+    Dated_jsonl.Store.keeper
+      (Workspace.dated_store_root config)
+      ~keeper:keeper_id
+      Dated_jsonl.Store.Keeper.Memory_recall_artifacts
+  in
+  let path = (Dated_jsonl.Store.dated_path location ~ts:now).path in
   let payload = Yojson.Safe.to_string json in
   let retained =
     match Fs_compat.append_private_jsonl_durable_locked_result path (payload ^ "\n") with

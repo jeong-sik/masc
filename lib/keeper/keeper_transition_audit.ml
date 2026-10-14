@@ -69,7 +69,7 @@ let sink_path () =
 
 (* The directory this store occupies under [.masc]. Exposed so readers of the
    same store name it from here instead of spelling the literal. *)
-let store_dirname = "transition-audit"
+let store_dirname = Dated_jsonl.Store.Root.(relative_path Transition_audit)
 
 let default_store = Atomic.make None
 
@@ -78,12 +78,12 @@ let get_default_store () =
   | Some store -> Some store
   | None ->
     (try
-       let dir =
-         Filename.concat
-           (Common.masc_dir_from_base_path ~base_path:(Env_config_core.base_path ()))
-           store_dirname
+       let store =
+         Dated_jsonl.open_store
+           (Dated_jsonl.Store.at
+              (Dated_jsonl.Store.root_of_base_path ~base_path:(Env_config_core.base_path ()))
+              Dated_jsonl.Store.Root.Transition_audit)
        in
-       let store = Dated_jsonl.create ~base_dir:dir () in
        if Atomic.compare_and_set default_store None (Some store)
        then Some store
        else Atomic.get default_store

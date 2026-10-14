@@ -26,9 +26,9 @@ let elapsed_duration_ms ~start_time ~end_time =
   let elapsed_ms = (end_time -. start_time) *. 1000. in
   match classify_float elapsed_ms with
   | FP_nan | FP_infinite -> 0
-  | _ when elapsed_ms <= 0. -> 0
-  | _ when elapsed_ms < 1. -> 1
-  | _ -> int_of_float elapsed_ms
+  | FP_normal | FP_subnormal | FP_zero when elapsed_ms <= 0. -> 0
+  | FP_normal | FP_subnormal | FP_zero when elapsed_ms < 1. -> 1
+  | FP_normal | FP_subnormal | FP_zero -> int_of_float elapsed_ms
 
 let model_execute_location_fields ~config ~meta ~args ~cwd =
   let execution_location =
@@ -108,7 +108,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
     match meta.sandbox_profile with
     | Docker ->
       Keeper_tool_execute_path.execute_cwd_resolution_error_public_message error
-    | _ -> private_message
+    | Micro_vm | Remote_ssh -> private_message
   in
   Keeper_tool_execution.failure
     ~class_:Tool_result.Policy_rejection
@@ -482,8 +482,7 @@ let handle_tool_execute_typed
         let base_host_env = dispatch_bundle.base_host_env in
         let dispatched_location_fields () =
           (* [Host] is unreachable on this lane: every profile a keeper may
-             declare builds a guest or SSH target, and the builder that made
-             a host one went with the [Local] profile. The arm stays because
+             declare builds a guest or SSH target. The arm stays because
              [Sandbox_target.t] is the general execution type and other
              callers do run on this host; it answers with the same fields the
              other targets do rather than describing a keeper that cannot

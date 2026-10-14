@@ -349,7 +349,8 @@ let refresh_discord_directory_once ~clock ~base_dir ~token =
             Log.Server.warn
               "Discord directory bound channel %s is deleted (10003); skipping                it until restart — unbind it to stop this warning"
               channel_id
-          | _ -> record_rest_error ~scope:"bound_channel" ~target:channel_id error)
+          | Directory_authentication_failed | Directory_permission_denied
+          | Directory_operation_failed -> record_rest_error ~scope:"bound_channel" ~target:channel_id error)
        | Ok json ->
          (match discord_channel_directory_entry json with
           | Error detail ->

@@ -32,7 +32,7 @@ let build
       (entries : Log.Ring.entry list)
   : Yojson.Safe.t
   =
-  let masc_root = Workspace.masc_root_dir config in
+  let masc_root = Workspace.masc_dir config in
   let newest =
     match entries with
     | [] -> None

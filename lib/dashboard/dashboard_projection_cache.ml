@@ -7,7 +7,7 @@
 (* Same partition the server-side dashboard cache uses: the directory the
    cached state lives in, not a constant (#24504). *)
 let cache_partition_segment (config : Workspace_utils.config) =
-  Workspace_utils.masc_root_dir config
+  Workspace_utils.masc_dir config
 
 let actor_cache_key (config : Workspace_utils.config) prefix actor_name =
   Printf.sprintf "%s:%s:%s" prefix (cache_partition_segment config) actor_name

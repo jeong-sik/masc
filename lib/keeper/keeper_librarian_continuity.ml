@@ -89,7 +89,9 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
   match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
   | Error C.Ref_not_found -> Ok (No_source Source_unreadable)
-  | Error error -> Error (match error with
+  | Error
+      ((C.Ref_read_failed _ | C.Ref_identity_invalid _ | C.Ref_session_mismatch _
+       | C.Ref_lock_failed _) as error) -> Error (match error with
       | C.Ref_not_found -> "continuity checkpoint absent"
       | C.Ref_read_failed error -> C.checkpoint_load_error_to_string error
       | C.Ref_identity_invalid _ -> "continuity checkpoint identity invalid"
@@ -258,7 +260,9 @@ let memory_range_id ~config ~keeper_name prepared =
       start_atom = prepared.start_atom; end_atom = prepared.end_atom; last_atom_digest;
       end_boundary_line = cut.cut_line;
       boundary_lines_seen = List.fold_left (fun count (_, read) ->
-        match read with Error B.Incomplete_line -> count | _ -> count + 1) 0 prepared.lines }
+        match read with
+          | Error B.Incomplete_line -> count
+          | Ok _ | Error (B.Not_json _ | B.Malformed _) -> count + 1) 0 prepared.lines }
   | None -> Error "continuity source has no covering completed boundary"
 let memory_committed ~config ~keeper_name prepared =
   let* expected = memory_range_id ~config ~keeper_name prepared in

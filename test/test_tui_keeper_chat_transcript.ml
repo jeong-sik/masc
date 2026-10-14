@@ -2240,6 +2240,28 @@ let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
         (String.length (String.trim meaning) > 0))
     Transcript.legend
 
+(* An observed-action row names a tool the server attributed to the skill.
+   That name reaches the reader like every other tool name: through the
+   shared display rule, so "masc_fusion" reads as MascFusion and a skill
+   slug such as "browser-lanes" keeps its readable name. The label happens
+   when drawing -- the stored record keeps the wire name, so dedupe and
+   the ledger keep working on the same bytes the server sent. *)
+let test_an_observed_action_draws_the_shared_display_label () =
+  let activity =
+    Transcript.make_skill_activity ~skill_name:"evidence"
+      ~state:Transcript.Skill_used
+      ~actions:[ "masc_fusion"; "browser-lanes" ] ()
+  in
+  let full = String.concat "\n" (Transcript.skill_rows ~full:true [activity]) in
+  check bool "the observed action draws the label form" true
+    (contains ~needle:"**MascFusion**" full);
+  check bool "a skill slug keeps its readable name" true
+    (contains ~needle:"**browser-lanes**" full);
+  check bool "the wire name does not leak into the row" false
+    (contains ~needle:"**masc_fusion**" full);
+  check (list string) "the stored action keeps the wire name"
+    [ "masc_fusion"; "browser-lanes" ] activity.actions
+
 let test_event_times_survive_log_replay_and_continuation () =
   let log = Log.create ~keeper_name:"keeper.one" ~request_id:"timed" ~started_at:100. in
   let put at delta = ignore (Log.add ~at log ~seq:None delta) in
@@ -2734,6 +2756,8 @@ let () =
     ; ( "content"
       , [ test_case "the legend names every mark and phrase the rows draw" `Quick
             test_the_legend_names_every_mark_and_phrase_the_rows_draw
+        ; test_case "an observed action draws the shared display label" `Quick
+            test_an_observed_action_draws_the_shared_display_label
         ; test_case "checkpoint keeps original request live" `Quick test_checkpoint_wait_keeps_the_request_live
         ; test_case "started_at keeps the dispatch instant" `Quick
             test_started_at_keeps_the_dispatch_instant

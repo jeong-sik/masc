@@ -58,7 +58,7 @@ status: reference
   없다는 것은 성공을 뜻하지 않는다. 실패 관찰값은 `runtime_id`를 보존하고,
   지연 시간은 `prompt_sent_at`부터 잰다. 시도의 `model_id`에는 실제 모델 id 대신
   `Boundary_redaction.runtime_model_label`(`runtime`)을 기록하며,
-  `selected_model`과 `selected_model_raw`는 모두 `None`이다. 따라서 이 실패
+  `selected_model`은 `None`이다. 따라서 이 실패
   관찰값만으로 실제 모델을 식별할 수는 없다.
   → [Keeper_turn_driver.official_client_observation](../../lib/keeper/keeper_turn_driver.mli) ·
   [Runtime_observation](../../lib/runtime/runtime_observation.ml)
@@ -341,18 +341,6 @@ status: reference
 
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
-
-**Cluster**
-: `.masc/` 상태 디렉터리 레이아웃을 가르는 이름 범위(`MASC_CLUSTER_NAME`). 기본값은
-  `default`이며 그때 경로는 `<base>/.masc/`다. 다른 이름은
-  `<base>/.masc/clusters/<sanitized>/`를 쓴다. TUI 개요의 `Cluster:` 행이 이 값을
-  보여준다. Turn Boundary와 Read Position 같은 runtime 좌표는 선택한 cluster의
-  디렉터리에만 의미가 있고, 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
-  Memory OS와 Working Context는 cluster가 아니라 Keeper 이름에 귀속되므로 cluster
-  간에 공유된다.
-  → [masc_root_dir_from](../../lib/workspace/workspace_utils_paths_backend.mli),
-  [backend_config_for](../../lib/workspace/workspace_utils_backend_setup.mli),
-  [cluster_name](../../lib/config/env_config_core.mli)
 
 **Workspace Heartbeat**
 : `Workspace.heartbeat`가 Agent 파일의 `last_seen`을 갱신하는 Workspace 저장 작업.
@@ -887,8 +875,12 @@ status: reference
     `rechecking delivery` 건수를 분리하고 로컬 NEXT 프리뷰를
     별도 행으로 표시한다. 각 모드는 같은 표시 행 계산으로 뷰포트 예산을 예약하며,
     큐 입력 단축키(`Ctrl-T:queue`)와 현재 작업 중단 안내를 보존한다.
-  - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume` 및 `Ctrl-T`)을 제공하며,
-    작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력 드래프트는 파기되지 않고 유지된다.
+  - 큐 제어와 입력 보존: 대화 대기열 제어 명령(`/queue`·`/queue resume`·`/queue clear` 및
+    `Ctrl-T`)을 제공하며, 작성 도중 `Esc`로 다른 화면을 탐색하더라도 대기열 상태와 입력
+    드래프트는 파기되지 않고 유지된다. `/queue clear`는 이 TUI가 화면의 Keeper에 대해 추적하는
+    대기 메시지를 한 번에 취소한다. 아직 보내지 않은 것은 버리고, 전송 작업에 넘겼으나 첫
+    POST가 나가기 전인 것은 거둬들이고, 서버 큐에 들어 있는 것은 서버에 취소를 요청한다
+    (사용법: `docs/guides/tui-chat-queue.md`).
   - 검증과 증거: OCaml 생애주기 테스트(`test/test_tui_chat_queue_wiring.ml`,
     `test/test_tui_chat_activity.ml`)가 재연결 불확실성·Keeper 이동 후 복귀 계약을
     다룬다. 실행 증거와 한계는
@@ -2075,11 +2067,15 @@ status: reference
   를 적는다(#38835). Keeper 도구 경로와 HTTP 경로가 같은 입력을 쓰고, 게시 처리기가
   유일한 작성자다. 저장 wire 형식은 `_blob` 래퍼로 기록해 durable 정리가 자식 참조를
   따라가게 한다.
-  - `kind`는 읽는 쪽이 어떻게 보여 줄지 정한다: `image`·`video`·`youtube`·`external_link`.
+  - `kind`는 읽는 쪽이 어떻게 보여 줄지 정한다: `image`·`video`·`youtube`·`external_link`·
+    `file`·`audio`·`score`·`midi`.
     아티팩트를 가리키는 참조는 대시보드가 바이트를 불러온 뒤 `image`는 이미지,
     `video`는 영상으로 보여 주고, 그 외는 다운로드를 둔다(미디어 종류는 해시마다
     저장되지 않아 요소가 직접 감지한다). `youtube`는 `url`만 허용한다 — 저장된
-    아티팩트는 유튜브 영상이 아니다.
+    아티팩트는 유튜브 영상이 아니다. `file`·`audio`·`score`·`midi`는 파일이 무엇인지만
+    말한다. TUI는 이름과 크기를 한 줄로 보여 주고, 재생하거나 악보로 그리지는 않는다.
+  - `name`은 선택이다. 보통 원래 파일 이름이고, 읽는 쪽이 첨부 옆에 보여 준다.
+    비어 있지 않은 한 줄이고 255바이트를 넘지 않는다.
   - 출처 둘은 동시에 쓰지 않고, 둘 다 없으면 거절한다. `http:`·`javascript:`·
     `data:` URL과 형식이 맞지 않는 항목은 받지 않는다. 아티팩트 참조는
     쓰기 전에 기존 Tool_blob_store에서 바이트를 확인하고, 지정된 상한
@@ -2091,6 +2087,18 @@ status: reference
   → [Board_tool_attachment](../../lib/board_tool_adapter/board_tool_attachment.mli),
   [Board_tool_format](../../lib/board_tool_adapter/board_tool_format.mli),
   [Tool_blob_store](../../lib/tool_blob_store/tool_blob_store.mli)
+
+**alphaTex 펜스 (alphaTex Fence)**
+: Board 글이나 chat 본문에 ` ```alphatex ` 로 여는 코드 펜스 하나. 안에 기타 악보를
+  글자(alphaTex 문법)로 적으면 TUI가 탭 악보로 그린다. 읽는 범위는 `\title`·`\tempo`·
+  `\ts`·`\tuning` 지시어, 길이 `:1`~`:16`, 음·화음·쉼표, 마디선, 반복 기호(`\ro`·`\rc N`·
+  `\ae`)다. 범위 밖이거나 마디보다 넓으면 그리지 않고 이유 한 줄과 원문을 보여 준다.
+  - 이름 경계: Board Attachment의 `score` 종류와 다르다. `score` 첨부는 파일이 악보라는
+    표시일 뿐이고 TUI는 이름과 크기만 보여 준다. 탭으로 그려지는 것은 본문의 이 펜스뿐이다.
+  - 길이를 바꾸지 않는 주법 표기는 그리지 않고 그 음 뒤에 `*`만 붙인다.
+  - 아직 없는 것: 대시보드의 악보 렌더러(후속, #42782).
+  → [Masc_tui_alphatex](../../bin/masc_tui_alphatex.mli),
+  [Masc_tui_alphatex_score](../../bin/masc_tui_alphatex_score.mli)
 
 **Karma**
 : 다른 에이전트가 내 글이나 댓글에 준 upvote 한 번마다 생기는 `karma_event`의 합.
@@ -2606,7 +2614,7 @@ status: reference
   보낸다.
   **다른 뜻과 구별한다**: Memory 쪽의 `claim`은 전이가 아니라 Fact의 문장 필드다(→ Fact).
   "새 claim"은 Librarian이 새로 적자고 낸 Fact를 말한다. Task 소유 기록을 가리킬 때는
-  이 전이 상태(`Claimed`/`InProgress`)로 읽고, 소스 결속 기록의 `claim_id`(→ Shared Fact)
+  이 전이 상태(`Claimed`/`InProgress`)로 읽고, 소스 결속 기록의 `claim_id`(→ Shared Claim)
   와는 다른 것이다.
 
 **Release**
@@ -3125,8 +3133,7 @@ status: reference
 : Librarian이 Keeper가 아직 처리하지 않은 event·chat 요청을 묶어, 원본 요청에 맥락과
   다음 행동 제안을 붙여 둔 것. 실행 권한도 checkpoint 이력도 아니다. 정리 하나가
   pocket(`Keeper_librarian_context.pocket`)이고, 지금 저장된 pocket 묶음이
-  `Keeper_librarian_context.snapshot`의 `pockets`다. Keeper 이름에 묶인다. cluster 사이에서
-  무엇을 같이 쓰는지는 **Cluster** 항목에 적었다.
+  `Keeper_librarian_context.snapshot`의 `pockets`다. Keeper 이름에 묶인다.
   **다른 뜻 두 개와 구별한다.** ① 코드의 `Keeper_types.working_context`는 이 묶음이 아니라
   실행 중인 Keeper가 쥔 Checkpoint 하나를 감싼 값이다(**Checkpoint** 항목) — 이름만 같다.
   ② 라우트·설정 쪽의 `working-context`/`working_contexts`는 이 묶음을 가리키는
@@ -3292,7 +3299,7 @@ status: reference
 
 **Turn Boundary**
 : 끝난 Keeper turn이 남기는 한 줄(`keepers/<keeper>/turn-boundaries.jsonl`).
-  선택한 cluster의 runtime root 아래에 저장한다. 그 turn이
+  `<base>/.masc` 아래에 저장한다. 그 turn이
   끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.
   History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
@@ -3311,8 +3318,7 @@ status: reference
   줄과 `history_restarted` 줄은 읽는 쪽에 같은 말을 한다. 가장 최근의 이 두 종류
   중 하나부터 현재 History의 끝 경계를 고른다. 그 앞의 줄은 같은 메시지가 반복되어
   digest가 맞더라도 쓰지 않으며, `fresh` turn의 자기 끝 경계는 포함한다.
-  이 파일의 Atom 위치는 선택한 cluster의 History만 가리키는
-  cluster-scoped 좌표다. 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
+  이 파일의 Atom 위치는 이 workspace의 History만 가리키는 좌표다.
 
 **Turn Boundary Position (턴 경계 위치)**
 : `turn-boundaries.jsonl`의 `turn_ended` 줄이 적는, 그 turn이 끝났을 때 History의
@@ -3361,7 +3367,7 @@ status: reference
 
 **Read Position**
 : Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
-  Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.
+  Turn Boundary와 같은 Keeper runtime 디렉터리에 저장한다.
   Turn Boundary 파일의 줄 번호가 아니라 값이다: trace, 읽은 Atom 수, 마지막으로
   읽은 Atom을 여는 Message의 digest. 그 파일에는 지난 History의 줄도 남아 있어서
   줄 번호로는 지금 History 안의 자리를 말할 수 없다. 공식 클라이언트 턴은 Atom을 남기지
@@ -3372,8 +3378,7 @@ status: reference
   위치 파일은 둘 다, 없으면 아직 읽은 적이 없다는 뜻이다. 못
   읽는 파일은 "읽은 적 없음"으로 치지 않고 오류로 다룬다. 그렇게 치면 History
   전체가 안 읽은 것으로 보인다.
-  이 값도 선택한 cluster의 Turn Boundary와 History에만 의미가 있으며, 다른
-  cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
+  이 값도 이 workspace의 Turn Boundary와 History에만 의미가 있다.
   Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
 **Librarian Range Receipt (완료 범위 영수증)**
@@ -3451,18 +3456,19 @@ status: reference
     2. **대조 (`Ledger.reconcile`)**: 기존 원장의 사실 배치 표(`dispositions`)와 대조하여, 아직 원장에 없는 새로 추가된 사실(`new_facts`)과 스냅샷에서 사라진 사실(`vanished`)을 가려낸다. 읽기에 성공한 스토어에서 사라짐이 확인된 사실만 원장에서 제거하며, 읽지 못한 스토어의 기존 배치는 유지한다.
     3. **모델 분류 (`Request.prepare`)**: 새로운 사실(`new_facts`)이 존재할 때만 모델 프롬프트(`workspace_memory_curator`)를 호출하여 다음 세 요소로 분류한다:
        - **사실 배치 (`facts` / `dispositions`)**: 각 키퍼 사실(`fact_ref`: 일반 사실 `Ordinary` 또는 소스 결속 사실 `Source_bound`)을 기존 공유 주장 합류(`Claim_member`), 충돌 합류(`Conflict_member`), 또는 제외 사유(`Excluded`) 중 하나로 1:1 배정한다.
-       - **공유 주장 (`claims`)**: 둘 이상의 키퍼 사실이 일치하거나 작업공간 차원에서 의미를 공유하는 항목 목록(`(claim_id, claim)`).
+       - **공유 주장 (`claims`)**: 하나 이상의 키퍼 사실이 일치하거나 작업공간 차원에서 의미를 공유하는 항목 목록(`(claim_id, claim)`). 모든 항목은 구성원을 최소 하나 가진다(→ Shared Claim).
        - **충돌 (`conflicts`)**: 서로 상충하거나 불일치하는 사실들의 설명 목록(`(conflict_id, description)`).
     4. **원자적 저장 (`Ledger.save`)**: 모델의 분류 결과를 엄격히 검증(`Ledger.apply`)한 뒤 원장에 원자적으로 교체 저장한다.
   - **불변식**: 원장은 모델이 분류한 장부일 뿐 Keeper의 자기 기억을 수정하지 않으며, 의미 검증이나 권위 있는 사실 승격을 뜻하지 않는다. Keeper는 `keeper_workspace_memory_read` 도구로 원장의 주장·충돌 ID와 소속 사실 원문을 직접 조회할 수 있다.
+  - **이름 주의**: 턴 문맥의 `## Shared workspace memory ledger` 구획(→ Shared Briefing)과 도구 이름의 `workspace_memory`는 모두 이 원장을 가리킨다. 이 원장은 Keeper 한 명의 Memory OS(개인 기억)가 아니다. 구성원은 개인 기억의 Fact이지만 원장은 그것을 바꾸지 않는다. Board의 `[원장]` 글(릴리스 사이클 기록)은 이 원장과 다른 것이다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_context](../../lib/workspace_memory/workspace_memory_context.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [server_workspace_memory_curator](../../lib/server/server_workspace_memory_curator.ml)
 
-**Shared Fact (작업공간 기억 원장 행)**
-: Workspace Curator가 변경된 Keeper 사실을 기존 주장·충돌에 합류시키거나 새 항목을 만들고, 제외 이유를 기록한 원장의 행 하나(`workspace_memory_ledger`의 `claim_id`가 가리키는 것). 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. 행의 `claim_id`는 Fact의 문장 필드 `claim`(→ Fact)과 다른 것이다 — 원장 행의 식별자다.
+**Shared Claim (공유 주장)**
+: 작업공간 기억 원장 `claims`의 항목 하나(`(claim_id, claim)`). Keeper 사실 하나 이상이 같은 말이거나 작업공간 차원에서 의미를 공유한다고 Workspace Curator가 묶은 문장이고(구성원은 최소 하나다. 구성원이 하나여도 주장이다), 턴 문맥의 `Shared claims` 건수가 이것을 센다. 어떤 Keeper 사실이 이 항목에 속하는지는 사실마다 하나씩 기록하는 배치(`Claim_member`)가 정한다. 같은 원장에는 충돌 항목(`conflict_id`, `Conflict_member`)과 제외 배치(`Excluded`)가 따로 있으니 주장·충돌·제외를 한 낱말로 부르지 않는다. 다른 Keeper의 가까운 사실은 판정 맥락이고 선택된 변경 사실만 분류한다. 원장은 Keeper Memory OS를 바꾸지 않으며, 모델 분류가 의미 검증이나 사실 승격을 뜻하지 않는다. Keeper는 주장·충돌 목록을 본 뒤 ID별로 현재 원문 상태를 읽는다. 스토어를 읽지 못한 사실은 사라진 사실로 단정하지 않는다. `claim_id`는 이 항목의 식별자이고, 항목의 `claim` 문장은 Fact의 문장 필드 `claim`(→ Fact)과 이름만 같다. 공유 주장은 Keeper 한 명이 쓴 Fact가 아니다. 이 표제어의 이전 이름은 Shared Fact였으나 코드와 프롬프트에는 그 이름이 없다.
   → [workspace_memory_ledger](../../lib/workspace_memory/workspace_memory_ledger.mli) · [workspace_memory_request](../../lib/workspace_memory/workspace_memory_request.mli) · [workspace_memory_ledger_view](../../lib/workspace_memory/workspace_memory_ledger_view.mli)
 
 **Workspace Curator (공유 맥락 합성)**
-: 여러 Keeper가 같은 원문을 반복해서 읽지 않도록 공유 맥락을 합성하는 단독 모델 레인. 코드의 `Workspace_curator`는 Keeper Memory의 변경 사실을 공유 주장·충돌로 분류한 뒤, 그 본문을 의미를 보존한 공유 요약으로 합성한다. 새 사실은 이전 요약에 합치고, 삭제·수정된 사실이나 합성 프롬프트 변경이 있으면 현재 자료로 다시 만든다. 동일한 자료의 완성본은 Keeper들이 재사용한다. 요약은 현재 작업공간의 모든 운영 상태나 검증된 사실을 뜻하지 않으며, 원본 Memory를 덮어쓰지 않는다.
+: 여러 Keeper가 같은 원문을 반복해서 읽지 않도록 공유 맥락을 합성하는 단독 모델 레인. 턴 문맥과 `config/prompts/keeper.md`는 이 레인을 `World Curator`라고도 적는다(같은 레인이다. 코드 식별자는 `Workspace_curator`). 코드의 `Workspace_curator`는 Keeper Memory의 변경 사실을 공유 주장·충돌로 분류한 뒤, 그 본문을 의미를 보존한 공유 요약으로 합성한다. 새 사실은 이전 요약에 합치고, 삭제·수정된 사실이나 합성 프롬프트 변경이 있으면 현재 자료로 다시 만든다. 동일한 자료의 완성본은 Keeper들이 재사용한다. 요약은 현재 작업공간의 모든 운영 상태나 검증된 사실을 뜻하지 않으며, 원본 Memory를 덮어쓰지 않는다.
 
 **Shared Briefing (공유 요약 / 브리핑 글)**
 : Workspace_curator가 작업공간 기억 원장(`ledger.json`)에 기록된 모든 주장과 충돌 텍스트(`Ledger.briefing_sources`)를 모델로 종합 요약한 자연어 글.
@@ -3780,25 +3786,61 @@ status: reference
   → [Keeper_shutdown_types](../../lib/keeper/keeper_shutdown_types.mli),
   [Server_dashboard_http_delete_actions](../../lib/server/server_dashboard_http_delete_actions.ml)
 
-**Library**
-: `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.
-  자동 수집 경로는 없고 Keeper에게는 검색·읽기 샤드만 있으므로, 설치에 문서가
-  하나도 없는 상태도 정상이다. 알려진 문서가 있을 때만 검색한다.
-  문서는 호출자가 해석한 workspace(`Workspace.config.base_path`) 아래
-  `<base_path>/docs/library`에 저장되고, 도구는 환경 변수를 읽지 않는다.
-  각 문서는 YAML frontmatter
-  (`title`·`source`·`author`·`created`·`updated`·`tags`)를 갖는다. 한 층의 평평한
-  디렉터리라 문서는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌 합타입
-  (`Direct_experience`·`Research`·`Experiment`·`Observation`)이고, 생성자를 더하면
-  `source_to_string`이 컴파일 오류로 강제된다. 쓰기에서 `source`가 없으면 `title`
-  없을 때처럼 거부하고, 읽기에서 알 수 없는 `source`는 파일명과 이유로 표시한다.
-  네 도구가 이걸 쓴다 —
-  `masc_library_list`·`masc_library_read`·`masc_library_add`·`masc_library_search`.
-  Keeper 쪽에는 read-only인 `keeper_library_search`·`keeper_library_read` 샤드
-  투영만 있다.
-  Librarian(기억 정리자)과 이름이 비슷하지만 다른 것이다 — Librarian은 Keeper의
-  Memory OS를 정리하고, Library는 명시적으로 추가된 문서만 담는다.
-  → [Tool_library](../../lib/tool_library.mli)
+**Wiki**
+: 이름 붙은 공유 Markdown 페이지 모음. 사람과 Keeper가 같이 읽고 쓴다. Keeper 한 명의 기억
+  (Memory OS, Librarian이 정리한다)과는 다른 것이다.
+  자동 수집 경로는 없다. 누가 만든 페이지만 있으므로 설치에 페이지가 하나도 없는 상태도
+  정상이다.
+  페이지는 호출자가 해석한 workspace(`Workspace.config.base_path`) 아래
+  `<base_path>/.masc/wiki/<page>.md`에 저장되고, 도구는 환경 변수를 읽지 않는다.
+  `page`는 쓰는 쪽이 정하는 이름이다. 소문자 `a-z`, 숫자, `-`만 쓰고 `index`와 `log`는
+  쓸 수 없다. 규칙에 안 맞는 이름은 고쳐 주지 않고 거절한다. 제목(`title`)·요약
+  (`summary`)·고친 이유(`note`)·쓰는 쪽 이름·태그는 한 줄이어야 하고, 비어 있거나 앞뒤에
+  공백이 있으면 거절한다. 태그에는 쉼표도 쓸 수 없다. 쓴 대로 다시 읽히지 않는 값을
+  받지 않으려는 규칙이다.
+  같은 디렉터리에 페이지가 아닌 파일 둘이 있다. `index.md`는 페이지마다 제목·파일·한 줄
+  요약을 적은 목록으로, 쓸 때마다 서버가 페이지에서 다시 만들므로 손으로 고치지 않는다.
+  `log.md`는 만들기·고치기마다 한 줄(시각·create 또는 update·revision·page·author·note)을
+  끝에 덧붙이는 기록이고, 줄은 지우거나 고치지 않는다.
+  각 페이지는 YAML frontmatter
+  (`title`·`summary`·`source`·`author`·`created`·`updated`·`revision`·`tags`)를 갖는다.
+  한 층의 평평한 디렉터리라 페이지는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌
+  합타입(`Direct_experience`·`Research`·`Experiment`·`Observation`)이고, 생성자를 더하면
+  `source_to_string`이 컴파일 오류로 강제된다. 만들 때 `source`가 없으면 거부하고,
+  고칠 때는 바꿀 수 없다. 읽기에서 알 수 없는 `source`는 파일명과 이유로 표시한다.
+  다섯 도구가 이걸 쓴다 —
+  `masc_wiki_list`·`masc_wiki_read`·`masc_wiki_create`·`masc_wiki_update`·`masc_wiki_search`.
+  Keeper는 `masc_wiki_list`·`masc_wiki_create`·`masc_wiki_update`를 그 이름 그대로 부르고,
+  읽기와 검색은 `keeper_wiki_read`·`keeper_wiki_search`라는 이름으로 부른다.
+  페이지를 읽기만 하는 점검 도구 `masc_wiki_lint`는 이 다섯과 따로 적는다(→ Wiki lint).
+  → [Tool_wiki](../../lib/tool_wiki.mli)
+
+**Wiki lint (`masc_wiki_lint`)**
+: Wiki의 모든 페이지를 읽어 무엇이 어긋났는지 보고하는 읽기 전용 점검 도구. 페이지·`index.md`·
+  `log.md`를 쓰지 않고, 잠금을 잡지 않고, 모델을 부르지 않으며, 같은 페이지 묶음에는 같은
+  순서로 같은 결과를 낸다. 설정 스위치가 없고, 부르지 않으면 아무 일도 일어나지 않는다. 일곱
+  `kind`와 응답 필드는 안정이며, 새 종류(`revision_log_gap` 등)는 둘째 단계에서 더해질 수 있다.
+  결과 한 건을 `finding`이라 부르고 일곱 가지 `kind`가 있다 — `broken_link`(없는 페이지로 가는
+  `[글자](page.md)` 링크)·`unsupported_link`(앵커·상대 경로·`[[위키링크]]`처럼 따라가지 않는
+  모양. 보고만 하고 판정하지 않는다)·`orphan`(다른 페이지가 링크하지 않음. 자기 링크와
+  `index.md`의 줄은 세지 않는다)·`orphan_unconfirmed`(읽히는 페이지는 링크하지 않지만 머리말이
+  안 읽히는 페이지가 링크할 수도 있다)·`missing_sources`(`## Sources` 절에 `repo:`·`board:`·
+  `artifact:`·`url:` 줄이 없다)·`hearsay_only`(출처가 `said:` 줄뿐이다)·`unreadable_page`
+  (머리말이 안 읽히거나 파일을 열 수 없다). 코드 펜스·코드 스팬·이미지 안의 링크는 세지 않는다.
+  **다른 뜻과 구별한다**: 이 점검의 `missing_sources`가 보는 `## Sources` 참조 줄은 frontmatter의
+  `source`(획득 방식, → Wiki)와 다른 것이고, Board 글의 `sources`(url·인용)와도 다르다.
+  `finding`은 모델이 낸 판단이 아니라 글자만 읽어 센 결과다. 모순 후보·로그와 revision 어긋남은
+  아직 없다. 점검 도중 위키가 쓰이면 응답은 스냅샷이 아니므로 `broken_link`는 한 번 더 돌려 확인한다.
+  → [Wiki_lint](../../lib/wiki_lint.mli) · [Wiki_lint_report](../../lib/wiki_lint_report.mli) ·
+  [wiki-lint 가이드](../guides/wiki-lint.md)
+
+**Page revision**
+: Wiki 페이지가 몇 번째 판인지 적은 수(frontmatter의 `revision`). 만들 때 1이고 고칠 때마다
+  1씩 는다. `masc_wiki_update`는 쓰는 쪽이 읽었던 값을 `base_revision`으로 받는다. 그 사이
+  페이지가 바뀌었으면 고치기를 거절하고, 거절 응답에 지금 revision과 본문을 싣는다. 쓰는
+  쪽은 그 본문에 자기 변경을 합쳐서 받은 revision으로 다시 보낸다. 서버는 본문을 합치지
+  않는다. `Backlog revision`·`content_revision`과는 다른 값이다.
+  → [Tool_wiki](../../lib/tool_wiki.mli)
 
 **Librarian**
 : Keeper마다 따로 도는 기억 정리자. Keeper의 History와 현재 facts를 읽고 LLM을

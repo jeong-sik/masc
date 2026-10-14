@@ -2,11 +2,6 @@
 type deps = {
   query_param : Httpun.Request.t -> string -> string option;
   int_query_param : Httpun.Request.t -> string -> default:int -> int;
-  get_origin : Httpun.Request.t -> string;
-  cors_headers : string -> (string * string) list;
-  get_switch : unit -> Eio.Switch.t option;
-  get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t option;
-  get_session_id_any : Httpun.Request.t -> string option;
 }
 
 let split_csv raw =

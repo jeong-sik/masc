@@ -521,8 +521,8 @@ PR-2b 는 둘을 따로 둔다. RFC-0454 P2 가 먼저 열리면 그 표를 이 
   이 중 timeout 접두어로 시작하는 것은 없다. 접두어 갈래가 답을 바꾸는 입력은 없다.
   이 갈래만 고정하던 `test_keeper_provider_timeout_labels` 의 문자열 파싱 케이스도 같이 지운다.
 - trust snapshot 의 "최신 종료 사유" 는 두 출처가 있다. runtime blocker 와 턴이다.
-  지금은 blocker class 문자열을 `Agent_core_error { wire }` 에 넣어 섞는다(`keeper_runtime_trust_snapshot.ml:103-134`).
-  `Blocker of Keeper_meta_contract.blocker_class | Turn_end of Keeper_turn_end.t` 로 나눈다.
+  지금은 브리지 분류를 `Keeper_turn_disposition` 에 섞는다(`keeper_runtime_trust_snapshot.ml` 의 `disposition_of_runtime_blocker_class`).
+  `Blocker of Keeper_status_bridge_blocker.runtime_blocker_class | Turn_end of Keeper_turn_end.t` 로 나눈다.
 - 이 단계가 끝나면 `Keeper_turn_terminal_code`, `Keeper_turn_disposition`, `Keeper_turn_terminal` 이 쓰이지 않는다. 지운다.
   `registry_failure_reason_of_raw_error` 로 가는 `core_error = None` 갈래도 호출자가 없다(유일한 호출자가 `~core_error:err` 를 넘긴다). 같이 지운다.
 
@@ -652,6 +652,6 @@ PR-4 뒤 `terminal_reason_code` 0건. PR-5 뒤 `Keeper_turn_disposition`, `Keepe
   파생 라벨 `operator_disposition`·`operator_disposition_reason` 은 그대로 둔다.
   `outcome` 은 `Keeper_turn_end.t` 에서 계산할 수 있다. 없앨지는 후속으로 따로 본다.
 - **제3자 provider 어휘.** agent_core 의 `ProviderReportedError.error_type`, OpenAI·OpenRouter·Ollama 봉투 파서는 그대로다.
-- **runtime blocker.** `Keeper_meta_contract.blocker_class` 와 그 직렬화 문자열은 그대로다. trust snapshot 이 그것을 disposition 에 섞는 부분만 PR-5 에서 나눈다.
+- **runtime blocker.** `Keeper_status_bridge_blocker.runtime_blocker_class` 와 그 라벨은 그대로다. trust snapshot 이 그것을 disposition 에 섞는 부분만 PR-5 에서 나눈다.
 - **RFC-0454 의 채팅 row 작업.** 공유하는 agent-core 투영(PR-2)만 겹친다.
 - **manifest·activity event 의 나머지 필드와 event kind.**

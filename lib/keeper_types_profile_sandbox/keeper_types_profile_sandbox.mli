@@ -1,8 +1,10 @@
-type sandbox_profile =
+type sandbox_profile = Keeper_sandbox_config.sandbox_profile =
   | Docker
   | Micro_vm
   | Remote_ssh
-(** The profiles a keeper may run under.  There is no host arm. *)
+(** The profiles a keeper may run under.  There is no host arm. The config
+    layer's type, so a profile places the keeper's playground bundle
+    ({!Keeper_sandbox_config.host_root_rel_of_profile}) as it is. *)
 
 module Sandbox_profile_tla : sig
   type t = sandbox_profile =

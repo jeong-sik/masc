@@ -54,7 +54,8 @@ let step_context t delta =
   let content = match choice with Preset tokens -> string_of_int tokens | Custom -> t.custom_context in
   let name_choice = match t.mode, t.name_choice with
     | Copy, (Suggested_name | Context_name) -> Context_name
-    | _, choice -> choice in
+    | (Edit, ((Suggested_name | Context_name | Operator_name) as choice))
+    | (Copy, (Operator_name as choice)) -> choice in
   let suggested = if t.mode=Copy && name_choice=Context_name then context_name t.source content else None in
   {t with context_choice=choice; name_choice; error=None;
     values=List.map (fun (field, old) -> field,
@@ -133,7 +134,9 @@ let copy_tables lines ~from ~into =
     match if structural then Edit_text.header_of_line line else None with
     | Some (Edit_text.Table parts) | Some (Edit_text.Table_array parts) as header ->
       if prefix parts then
-        let array = match header with Some (Edit_text.Table_array _) -> true | _ -> false in
+        let array = match header with
+          | Some (Edit_text.Table_array _) -> true
+          | Some (Edit_text.Table _) | None -> false in
         let new_parts = into @ List.drop (List.length from) parts in
         let line = (if array then "[[" else "[") ^ path new_parts ^ (if array then "]]" else "]")
           ^ Option.value ~default:"" (Edit_text.header_trailing_comment line) in
@@ -207,7 +210,8 @@ let apply t current =
         | Some value, _ | None, Some value -> Some value
         | None, None -> source.max_context in
       set_int draft "num-ctx" requested
-    | _ -> draft in
+    | Some { api_format = (Runtime_schema.Messages_api | (Runtime_schema.Chat_completions_api | (Runtime_schema.Gemini_api | (Runtime_schema.Vertex_gemini_api | (Runtime_schema.Codex_app_server_runtime | (Runtime_schema.Antigravity_cli_runtime | (Runtime_schema.Claude_code_runtime | Runtime_schema.Muse_serve_runtime)))))));_}
+    | None | Some {api_format=Ollama_api; _ } -> draft in
   let draft = if effort = Option.value ~default:"" t.source.reasoning_effort then draft else
     let draft = if effort = "" then draft else
       Edit_text.edit_table_scalar draft ~path:model_path ~key:"reasoning-uncontrolled" ~value:None in

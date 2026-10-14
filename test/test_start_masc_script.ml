@@ -568,8 +568,8 @@ let test_default_base_path_requires_explicit_base_path () =
       ignore (make_config_root dir);
       make_fake_eio_exe dir;
       let home_dir = Filename.concat dir "home" in
-      let me_root = Filename.concat home_dir "me" in
-      mkdir_p me_root;
+      let home_workspace = Filename.concat home_dir "workspace" in
+      mkdir_p home_workspace;
       let capture = Filename.concat dir "captured-no-home-default.txt" in
       let code, stdout, stderr =
         run_script ~cwd:dir script

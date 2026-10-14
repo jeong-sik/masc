@@ -265,7 +265,29 @@ let custom_deltas_unvalidated fields =
       | Some value -> (
           match Projection.decode_acceptance value with
           | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
-          | Error error ->
+          | Error
+              (( Projection.Request_id_mismatch _
+               | Projection.Duplicate_acceptance
+               | Projection.Duplicate_reply_details
+               | Projection.Duplicate_terminal
+               | Projection.Event_before_acceptance _
+               | Projection.Event_identity_mismatch _
+               | Projection.Unknown_event_type _
+               | Projection.Unknown_custom_event _
+               | Projection.Tool_event_without_start _
+               | Projection.Tool_result_without_start _
+               | Projection.Quarantined_tool_result _
+               | Projection.Conflicting_tool_result _
+               | Projection.Reused_tool_execution_id _
+               | Projection.Duplicate_run_start
+               | Projection.Missing_run_start _
+               | Projection.Missing_acceptance
+               | Projection.Stream_interrupted _
+               | Projection.Missing_reply_details
+               | Projection.Missing_text_end
+               | Projection.Run_failed _
+               | Projection.Replayed_failed
+               | Projection.Replayed_cancelled ) as error) ->
               [ Undecodable (Projection.stream_error_to_string error) ]
           | Ok acceptance ->
               let admission =
@@ -410,15 +432,23 @@ let custom_deltas_unvalidated fields =
                    { quarantined_occurrence = None; detail }
                ]
              | Some (`Assoc occurrence_fields) ->
-               (match
-                  tool_occurrence ~event:"KEEPER_STREAM_PROTOCOL_ERROR"
-                    occurrence_fields
-                with
-                | Ok occurrence ->
-                  [ Stream_protocol_error
-                      { quarantined_occurrence = Some occurrence; detail }
-                  ]
-                | Error detail -> [ Undecodable detail ])
+               (* The strict decoder rejects a repeated identity field here;
+                  the live view must refuse it too before the occurrence can
+                  mark a tool failed and ended. *)
+               (match Projection.unique_object_fields
+                        ~surface:"Keeper live CUSTOM KEEPER_STREAM_PROTOCOL_ERROR.value.quarantined_occurrence"
+                        (`Assoc occurrence_fields) with
+                | Error detail -> [ Undecodable detail ]
+                | Ok unique_fields ->
+                  (match
+                     tool_occurrence ~event:"KEEPER_STREAM_PROTOCOL_ERROR"
+                       unique_fields
+                   with
+                   | Ok occurrence ->
+                     [ Stream_protocol_error
+                         { quarantined_occurrence = Some occurrence; detail }
+                     ]
+                   | Error detail -> [ Undecodable detail ]))
              | Some _ ->
                [ Undecodable
                    "KEEPER_STREAM_PROTOCOL_ERROR quarantined_occurrence is not an object"
@@ -488,8 +518,7 @@ let custom_deltas_unvalidated fields =
                   { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref; terminal_stream_scope }
               ]
           | _, _, _, Error detail -> [Undecodable detail]
-          | _ ->
-              [ Undecodable
+          | (Some _, Some _, None, Ok _) | (Some _, None, _, Ok _) | (None, _, _, Ok _) -> [ Undecodable
                   "KEEPER_REPLY_DETAILS needs reply, a known turn_outcome and \
                    a well-formed turn_ref"
               ]))
@@ -499,11 +528,46 @@ let custom_deltas_unvalidated fields =
 let custom_deltas fields =
   match string_field fields "name", List.assoc_opt "value" fields with
   | Some name, Some value ->
-    (match Projection.validate_custom_value ~name value with
-     | Ok () -> custom_deltas_unvalidated fields
-     | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
-     | Error error ->
-       [ Undecodable (Projection.stream_error_to_string error) ])
+    let unique_value =
+      match value with
+      | `Assoc _ ->
+        Projection.unique_object_fields
+          ~surface:("Keeper live CUSTOM " ^ name ^ ".value") value
+        |> Result.map (fun _ -> ())
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        Ok ()
+    in
+    (match unique_value with
+     | Error detail -> [ Undecodable detail ]
+     | Ok () ->
+       (match Projection.validate_custom_value ~name value with
+        | Ok () -> custom_deltas_unvalidated fields
+        | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
+        | Error
+            (( Projection.Request_id_mismatch _
+             | Projection.Duplicate_acceptance
+             | Projection.Duplicate_reply_details
+             | Projection.Duplicate_terminal
+             | Projection.Event_before_acceptance _
+             | Projection.Event_identity_mismatch _
+             | Projection.Unknown_event_type _
+             | Projection.Unknown_custom_event _
+             | Projection.Tool_event_without_start _
+             | Projection.Tool_result_without_start _
+             | Projection.Quarantined_tool_result _
+             | Projection.Conflicting_tool_result _
+             | Projection.Reused_tool_execution_id _
+             | Projection.Duplicate_run_start
+             | Projection.Missing_run_start _
+             | Projection.Missing_acceptance
+             | Projection.Stream_interrupted _
+             | Projection.Missing_reply_details
+             | Projection.Missing_text_end
+             | Projection.Run_failed _
+             | Projection.Replayed_failed
+             | Projection.Replayed_cancelled
+             ) as error) ->
+          [ Undecodable (Projection.stream_error_to_string error) ]))
   | None, _ | Some _, None -> custom_deltas_unvalidated fields
 
 (* Annotated rather than inferred. Without it the parameter widens to an open
@@ -514,7 +578,10 @@ let custom_deltas fields =
    unreachable. *)
 let event_deltas (event : Yojson.Safe.t) =
   match event with
-  | `Assoc fields -> (
+  | `Assoc _ -> (
+      match Projection.unique_object_fields ~surface:"Keeper live event" event with
+      | Error detail -> [Undecodable detail]
+      | Ok fields -> (
       match string_field fields "type" with
       | None -> [ Undecodable "event has no type" ]
       | Some "RUN_STARTED" -> [ Run_started ]
@@ -543,7 +610,7 @@ let event_deltas (event : Yojson.Safe.t) =
       (* Accepted by the strict decode, nothing for this view to draw. *)
       | Some ("TEXT_MESSAGE_START" | "TEXT_MESSAGE_END") -> []
       | Some unknown ->
-          [ Undecodable (Printf.sprintf "unknown event type %s" unknown) ])
+          [ Undecodable (Printf.sprintf "unknown event type %s" unknown) ]))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       (* Spelled out rather than left to a catch-all so a new Yojson variant
          stops the build instead of landing here. *)

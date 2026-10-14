@@ -368,6 +368,115 @@ let test_image_pointer_geometry () =
     check bool "captions and unused margins never target page" true
       (point ~row ~column = None)) [(3,1);(24,1);(4,81);(4,0)]
 
+(* An evidence picture arrives as a PNG file. It travels as it is, under the
+   image id of its own slot, so replacing one slot's picture never touches
+   another's. *)
+let test_a_png_file_replaces_under_its_slots_identity () =
+  let slot = Masc_tui_graphics.Evidence_image_2 in
+  let id = Masc_tui_graphics.image_id slot in
+  let data = String.init 9000 (fun index -> Char.chr ((index * 7) mod 256)) in
+  let escapes =
+    Masc_tui_graphics.replace_png ~image_id:id ~placement_id:1 ~data ~rows:9 ~cols:30
+      ~crop:None
+  in
+  let all = bodies escapes in
+  check bool "chunked like every other placement" true (List.length all > 1);
+  let keys, _ = keys_and_payload (List.hd all) in
+  let says key = List.exists (String.equal key) keys in
+  check bool "a PNG file" true (says "f=100");
+  check bool "transmitted and displayed" true (says "a=T");
+  check bool "under the slot's image id" true (says (Printf.sprintf "i=%d" id));
+  check bool "and one placement" true (says "p=1");
+  check bool "as many rows as asked" true (says "r=9");
+  check bool "and as many columns" true (says "c=30");
+  check bool "the whole picture, no source rectangle" false
+    (List.exists (fun key -> String.starts_with ~prefix:"y=" key || String.starts_with ~prefix:"h=" key) keys);
+  check bool "the terminal is asked not to answer" true (says "q=2");
+  check string "the file's bytes arrive whole" data
+    (all
+     |> List.map (fun body -> snd (keys_and_payload body))
+     |> String.concat ""
+     |> Base64.decode_exn);
+  check string "no bytes, no escape" ""
+    (Masc_tui_graphics.replace_png ~image_id:id ~placement_id:1 ~data:"" ~rows:9 ~cols:30
+       ~crop:None)
+;;
+
+(* A picture the window cuts is drawn from a source rectangle, over the cells
+   its shown rows cover. Both c and r travel, because the terminal derives the
+   one that is missing from the whole picture's shape. *)
+let test_a_cropped_png_names_its_source_rows_and_its_cells () =
+  let crop = Some { Masc_tui_graphics.top_px = 160; height_px = 240 } in
+  let keys_of body = fst (keys_and_payload body) in
+  let says keys key = List.exists (String.equal key) keys in
+  let placed =
+    Masc_tui_graphics.replace_png ~image_id:51 ~placement_id:1 ~data:"png" ~rows:6 ~cols:30 ~crop
+  in
+  (match bodies placed with
+   | body :: _ ->
+       let keys = keys_of body in
+       check bool "from this row of the source" true (says keys "y=160");
+       check bool "this many source rows" true (says keys "h=240");
+       check bool "over these rows" true (says keys "r=6");
+       check bool "and these columns" true (says keys "c=30");
+       check bool "across the picture's whole width" false
+         (List.exists (String.starts_with ~prefix:"w=") keys)
+   | [] -> fail "a placement is at least one escape");
+  match bodies (Masc_tui_graphics.put_png ~image_id:51 ~placement_id:1 ~rows:6 ~cols:30 ~crop) with
+  | [ body ] ->
+      let keys = String.split_on_char ',' body in
+      check bool "a put" true (says keys "a=p");
+      check bool "of the same rectangle" true (says keys "y=160" && says keys "h=240");
+      check bool "over the same cells" true (says keys "r=6" && says keys "c=30");
+      check bool "with no payload" false (String.contains body ';')
+  | escapes -> failf "a put is one escape, got %d" (List.length escapes)
+;;
+
+let test_a_source_rectangle_is_never_empty () =
+  let crop = Some { Masc_tui_graphics.top_px = -3; height_px = 0 } in
+  match bodies (Masc_tui_graphics.put_png ~image_id:51 ~placement_id:1 ~rows:0 ~cols:0 ~crop) with
+  | [ body ] ->
+      let keys = String.split_on_char ',' body in
+      let says key = List.exists (String.equal key) keys in
+      check bool "starts at the top at the least" true (says "y=0");
+      check bool "one source row at the least" true (says "h=1");
+      check bool "one row at the least" true (says "r=1");
+      check bool "one column at the least" true (says "c=1")
+  | escapes -> failf "a put is one escape, got %d" (List.length escapes)
+;;
+
+(* Lowercase d=i takes the placement and leaves the pixels, which is what lets
+   a picture scrolled out of view come back as a put. *)
+let test_a_placement_can_go_without_the_pixels () =
+  match bodies (Masc_tui_graphics.delete_placement ~image_id:51 ~placement_id:1) with
+  | [ body ] ->
+      let keys = String.split_on_char ',' body in
+      let says key = List.exists (String.equal key) keys in
+      check bool "a delete" true (says "a=d");
+      check bool "by image id, lowercase: pixels stay" true (says "d=i");
+      check bool "of this image" true (says "i=51");
+      check bool "and only this placement" true (says "p=1");
+      check bool "uppercase would free the pixels" false (says "d=I")
+  | escapes -> failf "a delete is one escape, got %d" (List.length escapes)
+;;
+
+let test_the_evidence_slots_are_four_distinct_ids () =
+  let ids = List.map Masc_tui_graphics.image_id Masc_tui_graphics.evidence_images in
+  check int "four slots" 4 (List.length ids);
+  check int "each its own id" 4 (List.length (List.sort_uniq Int.compare ids));
+  List.iter
+    (fun id ->
+      check bool "and not one a candle or the probe uses" false
+        (List.exists
+           (fun other -> other = id)
+           (List.filter_map
+              (fun image ->
+                if List.mem image Masc_tui_graphics.evidence_images then None
+                else Some (Masc_tui_graphics.image_id image))
+              Masc_tui_graphics.all_of_image)))
+    ids
+;;
+
 let () =
   run
     "tui_graphics"
@@ -403,6 +512,16 @@ let () =
             test_rgba_png_replaces_under_its_identity
         ; test_case "a put places held pixels without sending them" `Quick
             test_a_put_places_held_pixels_without_sending_them
+        ; test_case "a PNG file replaces under its slot's identity" `Quick
+            test_a_png_file_replaces_under_its_slots_identity
+        ; test_case "a cropped PNG names its source rows and its cells" `Quick
+            test_a_cropped_png_names_its_source_rows_and_its_cells
+        ; test_case "a source rectangle is never empty" `Quick
+            test_a_source_rectangle_is_never_empty
+        ; test_case "a placement can go without the pixels" `Quick
+            test_a_placement_can_go_without_the_pixels
+        ; test_case "the evidence slots are four distinct ids" `Quick
+            test_the_evidence_slots_are_four_distinct_ids
         ] )
     ; ( "tmux"
       , [ test_case "passthrough doubles every escape" `Quick

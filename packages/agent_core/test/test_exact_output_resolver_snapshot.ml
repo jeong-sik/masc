@@ -65,10 +65,8 @@ let target_catalog
       ?(aliases = [])
       ?(kind = "openai_compat")
       ?(base_url = "https://snapshot.example")
-      ?base_url_env
-      ?(request_path = "/v1/chat/completions")
-      ?(api_key_env = "")
-      ?default_model
+            ?(request_path = "/v1/chat/completions")
+            ?default_model
       ?(model = "snapshot-model")
       ?(target = "snapshot-target")
       ?enable_thinking
@@ -85,8 +83,8 @@ let target_catalog
      id = %S\n\
      %skind = %S\n\
      base_url = %S\n\
-     %srequest_path = %S\n\
-     api_key_env = %S\n\
+     request_path = %S\n\
+     auth = \"none\"\n\
      %s\n\
      [[models]]\n\
      id_prefix = %S\n\
@@ -106,9 +104,7 @@ let target_catalog
     (aliases_line aliases)
     kind
     base_url
-    (option_line "base_url_env" (Printf.sprintf "%S") base_url_env)
     request_path
-    api_key_env
     (option_line "default_model" (Printf.sprintf "%S") default_model)
     model
     provider
@@ -365,218 +361,7 @@ let test_exact_target_id_has_no_alias_or_default () =
     [ "snapshot-alias"; "snapshot-fixture"; "different-default" ]
 ;;
 
-let test_environment_is_consumed_once_and_snapshot_is_immutable () =
-  let values =
-    ref
-      [ "SNAPSHOT_BASE", "https://first.example"
-      ; "SNAPSHOT_KEY", "first-secret"
-      ; "OLLAMA_CLOUD_API_KEY", "embedded-fixture"
-      ]
-  in
-  let reads = Hashtbl.create 4 in
-  let getenv name =
-    Hashtbl.replace reads name (1 + Option.value (Hashtbl.find_opt reads name) ~default:0);
-    Ok (List.assoc_opt name !values)
-  in
-  let snapshot =
-    snapshot
-      ~getenv
-      (target_catalog ~base_url_env:"SNAPSHOT_BASE" ~api_key_env:"SNAPSHOT_KEY" ())
-  in
-  let before = resolve snapshot "snapshot-target" in
-  let before_plan_fingerprint = ready before |> EO.plan_fingerprint in
-  check int "base URL read once" 1 (Hashtbl.find reads "SNAPSHOT_BASE");
-  check int "credential read once" 1 (Hashtbl.find reads "SNAPSHOT_KEY");
-  values
-  := [ "SNAPSHOT_BASE", "https://rotated.example"
-     ; "SNAPSHOT_KEY", "rotated-secret"
-     ; "OLLAMA_CLOUD_API_KEY", "rotated-embedded"
-     ];
-  Fun.protect
-    ~finally:(fun () ->
-      Model_catalog.clear_global ();
-      Provider_catalog.clear_global ())
-    (fun () ->
-       Model_catalog.set_global Model_catalog.empty;
-       Provider_catalog.clear_global ();
-       let after = resolve snapshot "snapshot-target" in
-       let after_plan_fingerprint = ready after |> EO.plan_fingerprint in
-       check
-         string
-         "frozen request remains unchanged"
-         before_plan_fingerprint
-         after_plan_fingerprint;
-       check string "identity remains frozen" (identity before) (identity after);
-       check
-         int
-         "resolve/admit do not reread URL env"
-         1
-         (Hashtbl.find reads "SNAPSHOT_BASE");
-       check
-         int
-         "resolve/admit do not reread credential env"
-         1
-         (Hashtbl.find reads "SNAPSHOT_KEY"))
-;;
 
-let test_credential_outcomes_are_frozen_per_target () =
-  let contents =
-    String.concat
-      "\n"
-      [ target_catalog
-          ~provider:"credential-no-auth-provider"
-          ~model:"credential-no-auth-model"
-          ~target:"credential-no-auth"
-          ()
-      ; target_catalog
-          ~provider:"credential-available-provider"
-          ~api_key_env:"AVAILABLE_FIXTURE_KEY"
-          ~model:"credential-available-model"
-          ~target:"credential-available"
-          ()
-      ; target_catalog
-          ~provider:"credential-shared-provider"
-          ~api_key_env:"AVAILABLE_FIXTURE_KEY"
-          ~model:"credential-shared-model"
-          ~target:"credential-shared"
-          ()
-      ; target_catalog
-          ~provider:"credential-missing-provider"
-          ~api_key_env:"MISSING_FIXTURE_KEY"
-          ~model:"credential-missing-model"
-          ~target:"credential-missing"
-          ()
-      ; target_catalog
-          ~provider:"credential-invalid-provider"
-          ~api_key_env:"INVALID_FIXTURE_KEY"
-          ~model:"credential-invalid-model"
-          ~target:"credential-invalid"
-          ()
-      ; target_catalog
-          ~provider:"credential-read-failed-provider"
-          ~api_key_env:"READ_FAILED_FIXTURE_KEY"
-          ~model:"credential-read-failed-model"
-          ~target:"credential-read-failed"
-          ()
-      ]
-  in
-  let values =
-    ref
-      [ "AVAILABLE_FIXTURE_KEY", Ok (Some "first-secret")
-      ; "MISSING_FIXTURE_KEY", Ok None
-      ; "INVALID_FIXTURE_KEY", Ok (Some "secret\r\nX-Leak: yes")
-      ; "READ_FAILED_FIXTURE_KEY", Error ()
-      ]
-  in
-  let reads = Hashtbl.create 8 in
-  let getenv name =
-    Hashtbl.replace reads name (1 + Option.value (Hashtbl.find_opt reads name) ~default:0);
-    Option.value (List.assoc_opt name !values) ~default:(Ok None)
-  in
-  let frozen = snapshot ~getenv contents in
-  let no_auth = admit frozen "credential-no-auth" in
-  let available = admit frozen "credential-available" in
-  let shared_available = admit frozen "credential-shared" in
-  let missing = admit frozen "credential-missing" in
-  let invalid = admit frozen "credential-invalid" in
-  let read_failed = admit frozen "credential-read-failed" in
-  ignore (resolve_admitted no_auth : EO.selected_target);
-  let available_target = resolve_admitted available in
-  ignore (resolve_admitted shared_available : EO.selected_target);
-  let expect_missing admitted =
-    match EO.resolve_target admitted with
-    | Error error ->
-      (match EO.target_selection_error_disposition error with
-       | EO.Runtime_slot_unavailable -> ()
-       | _ -> fail "missing credential must remain a runtime-slot outcome")
-    | Ok _ -> fail "missing credential unexpectedly resolved"
-  in
-  let expect_invalid admitted =
-    match EO.resolve_target admitted with
-    | Error error ->
-      (match EO.target_selection_error_disposition error with
-       | EO.Runtime_slot_unavailable -> ()
-       | _ -> fail "invalid credential must remain a runtime-slot outcome")
-    | Ok _ -> fail "invalid credential unexpectedly resolved"
-  in
-  let expect_read_failed admitted =
-    match EO.resolve_target admitted with
-    | Error error ->
-      (match EO.target_selection_error_disposition error with
-       | EO.Runtime_slot_unavailable -> ()
-       | _ -> fail "credential read failure must remain a runtime-slot outcome")
-    | Ok _ -> fail "read-failed credential unexpectedly resolved"
-  in
-  expect_missing missing;
-  expect_invalid invalid;
-  expect_read_failed read_failed;
-  List.iter
-    (fun name ->
-       check
-         int
-         (name ^ " observed once while freezing")
-         1
-         (Option.value (Hashtbl.find_opt reads name) ~default:0))
-    [ "AVAILABLE_FIXTURE_KEY"
-    ; "MISSING_FIXTURE_KEY"
-    ; "INVALID_FIXTURE_KEY"
-    ; "READ_FAILED_FIXTURE_KEY"
-    ];
-  values
-  := [ "AVAILABLE_FIXTURE_KEY", Ok (Some "rotated-secret")
-     ; "MISSING_FIXTURE_KEY", Ok (Some "now-present")
-     ; "INVALID_FIXTURE_KEY", Ok (Some "now-valid")
-     ; "READ_FAILED_FIXTURE_KEY", Ok (Some "read-now-works")
-     ];
-  ignore (resolve_admitted available : EO.selected_target);
-  ignore (resolve_admitted shared_available : EO.selected_target);
-  expect_missing missing;
-  expect_invalid invalid;
-  expect_read_failed read_failed;
-  List.iter
-    (fun name ->
-       check
-         int
-         (name ^ " is not reread while resolving")
-         1
-         (Option.value (Hashtbl.find_opt reads name) ~default:0))
-    [ "AVAILABLE_FIXTURE_KEY"
-    ; "MISSING_FIXTURE_KEY"
-    ; "INVALID_FIXTURE_KEY"
-    ; "READ_FAILED_FIXTURE_KEY"
-    ];
-  let rotated = snapshot ~getenv contents in
-  List.iter
-    (fun id -> ignore (resolve rotated id : EO.selected_target))
-    [ "credential-no-auth"
-    ; "credential-available"
-    ; "credential-shared"
-    ; "credential-missing"
-    ; "credential-invalid"
-    ; "credential-read-failed"
-    ];
-  check
-    string
-    "credential rotation does not change catalog generation"
-    (generation frozen)
-    (generation rotated);
-  check
-    string
-    "credential rotation does not change catalog evidence"
-    (evidence frozen)
-    (evidence rotated);
-  check
-    string
-    "credential rotation does not change target identity"
-    (identity available_target)
-    (identity (resolve rotated "credential-available"));
-  (match EO.admit_target_ref frozen "missing-target" with
-   | Error (EO.Target_not_in_catalog "missing-target") -> ()
-   | Ok _ | Error _ -> fail "unknown catalog membership must remain typed");
-  match EO.admit_target_ref frozen "../invalid-target" with
-  | Error (EO.Target_ref_rejected EO.Invalid_target_ref) -> ()
-  | Ok _ | Error _ -> fail "target syntax rejection must remain typed"
-;;
 
 let with_temp_catalog contents f =
   let path = Filename.temp_file "exact-output-full-replacement-" ".toml" in
@@ -729,39 +514,6 @@ let test_unbound_target_policy_is_explicit_and_observable () =
   | _ -> fail "degraded snapshot must retain one typed binding rejection"
 ;;
 
-let test_credential_rotation_is_not_functional_identity () =
-  let contents = target_catalog ~api_key_env:"ROTATING_FIXTURE_KEY" () in
-  let load credential =
-    snapshot
-      ~getenv:(fun name ->
-        Ok
-          (if String.equal name "ROTATING_FIXTURE_KEY"
-           then Some credential
-           else if String.equal name "OLLAMA_CLOUD_API_KEY"
-           then Some "embedded-fixture"
-           else None))
-      contents
-  in
-  let first = load "first-secret" in
-  let second = load "second-secret" in
-  let first_target = resolve first "snapshot-target" in
-  let second_target = resolve second "snapshot-target" in
-  check
-    string
-    "secret rotation leaves generation stable"
-    (generation first)
-    (generation second);
-  check
-    string
-    "secret rotation leaves target identity stable"
-    (identity first_target)
-    (identity second_target);
-  check
-    string
-    "secret rotation leaves public plan fingerprint stable"
-    (ready first_target |> EO.plan_fingerprint)
-    (ready second_target |> EO.plan_fingerprint)
-;;
 
 let test_pricing_and_formatting_are_nonfunctional () =
   let first_contents = target_catalog ~price:1.0 () in
@@ -1102,14 +854,6 @@ let () =
     [ ( "resolver"
       , [ test_case "exact id only" `Quick test_exact_target_id_has_no_alias_or_default
         ; test_case
-            "environment consumed once"
-            `Quick
-            test_environment_is_consumed_once_and_snapshot_is_immutable
-        ; test_case
-            "credential outcomes frozen per target"
-            `Quick
-            test_credential_outcomes_are_frozen_per_target
-        ; test_case
             "full replacement path suppresses embedded"
             `Quick
             test_full_replacement_path_is_frozen_and_suppresses_embedded
@@ -1121,10 +865,6 @@ let () =
             "unbound target policy is explicit and observable"
             `Quick
             test_unbound_target_policy_is_explicit_and_observable
-        ; test_case
-            "credential rotation is nonfunctional"
-            `Quick
-            test_credential_rotation_is_not_functional_identity
         ; test_case
             "pricing and formatting nonfunctional"
             `Quick

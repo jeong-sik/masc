@@ -92,12 +92,12 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
        let primary_coverage_stage = most_common_stage_of_entries success_entries in
        let coverage_status =
          if success_count = 0 && error_count > 0
-         then "error_only"
+         then Coverage_error_only
          else if usage_missing_count = 0 && telemetry_missing_count = 0
-         then "full"
+         then Coverage_full
          else if usage_sample_count = 0 && telemetry_sample_count = 0
-         then "none"
-         else "partial"
+         then Coverage_none
+         else Coverage_partial
        in
        (* thinking_fraction: count of entries with thinking_enabled=true over
        entries that reported the field. Entries without the field (older jsonl

@@ -165,11 +165,24 @@ let speaker_header_field (m : Agent_core.Types.message) =
 ;;
 
 let message_to_text ~position_label ~position (m : Agent_core.Types.message) : string =
-  let parts = List.filter_map text_of_content m.content in
-  let body = String.concat "\n" parts |> String.trim in
+  (* Context retained for provider replay is already-selected runtime input,
+     not a new observation. Keep its position for range accounting without
+     feeding recalled memories or instructions back into memory selection. *)
+  let attribution, body =
+    match Agent_core.Types.Extra_system_context_provenance.classify m.metadata with
+    | Present | Historical ->
+      " source=runtime_context", "[runtime context omitted]"
+    | Invalid ->
+      " source=runtime_context provenance=invalid", "[runtime context omitted]"
+    | Duplicate ->
+      " source=runtime_context provenance=duplicate", "[runtime context omitted]"
+    | Absent ->
+      let parts = List.filter_map text_of_content m.content in
+      speaker_header_field m, String.concat "\n" parts |> String.trim
+  in
   let header =
     Printf.sprintf "%s=%d role=%s%s" position_label position
-      (role_to_string m.role) (speaker_header_field m)
+      (role_to_string m.role) attribution
   in
   if String.equal body ""
   then Printf.sprintf "[%s] (empty)" header

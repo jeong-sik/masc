@@ -147,7 +147,15 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
       match Retry.server_status_class_of_code http_status, failure with
       | Some Retry.Overloaded_status, Overloaded _
       | Some Retry.Server_error_status, Server_error _ -> true
-      | (Some Retry.Overloaded_status | Some Retry.Server_error_status | None), _ -> false
+      | ((Some (Retry.Overloaded_status) | Some (Retry.Server_error_status) | None), Candidate_rejected)
+      | ((Some (Retry.Overloaded_status) | Some (Retry.Server_error_status) | None), Completion_failed_before_dispatch)
+      | ((Some (Retry.Overloaded_status) | Some (Retry.Server_error_status) | None), Response_body_deadline_exceeded)
+      | ((Some (Retry.Overloaded_status) | Some (Retry.Server_error_status) | None), Serialized_request_refused _)
+      | ((Some (Retry.Overloaded_status) | Some (Retry.Server_error_status) | None), Rate_limited _)
+      | ((Some (Retry.Server_error_status) | None), Overloaded _)
+      | ((Some (Retry.Overloaded_status) | None), Server_error _)
+      | ((Some (Retry.Overloaded_status) | Some (Retry.Server_error_status) | None), Output_limit_reached)
+      | ((Some (Retry.Overloaded_status) | Some (Retry.Server_error_status) | None), Invalid_json_output) -> false
     in
     status_matches_failure
     && attempt.dispatch_count = 1

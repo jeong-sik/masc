@@ -8,7 +8,7 @@ val latest_metrics_json :
 
 val model_observability_json :
   current_runtime_id:string ->
-  runtime_blocker_fields:(string * Yojson.Safe.t) list ->
+  runtime_blocker_class:Keeper_status_bridge.runtime_blocker_class option ->
   runtime_trust:Yojson.Safe.t ->
   Yojson.Safe.t option ->
   Yojson.Safe.t

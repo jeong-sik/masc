@@ -49,12 +49,10 @@ let non_empty_trimmed_string_opt value =
   if trimmed = "" then None else Some trimmed
 
 let degraded_keeper_dashboard_row
-      ?error
-      ~(site : string)
+      ~(error : string)
       (m : Keeper_meta_contract.keeper_meta)
   =
-  let attention_reason = Option.value ~default:site error in
-  let runtime_trust = Trust.degraded_keeper_trust_json ~site ~attention_reason in
+  let runtime_trust = Trust.degraded_keeper_trust_json ~error in
   let fd_observation = `Assoc (Keeper_fd_pressure.projection_fields ()) in
   let runtime_id =
     Keeper_meta_contract.runtime_id_of_meta m |> non_empty_trimmed_string_opt
@@ -63,8 +61,11 @@ let degraded_keeper_dashboard_row
   let diagnostic =
     `Assoc
       ([ ("status", `String "degraded")
-       ; ("reason", `String site)
-       ; ("error", Json_util.string_opt_to_json error)
+       ; ( "reason"
+         , `String
+             Keeper_runtime_trust_snapshot_core.(
+               disposition_reason_to_wire Keeper_dashboard_worker_exception) )
+       ; ("error", `String error)
        ; ("fd_observation", fd_observation)
        ])
   in
@@ -314,7 +315,7 @@ let running_keeper_count (config : Workspace.config) : int =
        (fun count name ->
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) when runtime_keepalive_running config meta -> count + 1
-         | _ -> count)
+         | Ok (None) | Error _ | Ok (Some _) -> count)
        0
 
 (* #10710: bounded fiber pool for per-keeper dashboard enrichment. Each
@@ -323,6 +324,19 @@ let running_keeper_count (config : Workspace.config) : int =
    descriptors / scheduler slots than the render needs. Mirrors
    [Dashboard_execution.dashboard_enrich_max_fibers]. *)
 let dashboard_keeper_max_fibers = 8
+
+(* Both registry branches of [keepers_dashboard_json] build their
+   [supervisor_diagnostics] here, so they can differ only in values, never in
+   which keys they emit. *)
+let supervisor_diagnostics_json ~restart_count ~crash_log ~last_failure_reason =
+  `Assoc
+    [ ("restart_count", `Int restart_count)
+    ; ("crash_log", `List crash_log)
+    ; ( "last_failure_reason"
+      , match last_failure_reason with
+        | Some r -> `String (Keeper_registry.failure_reason_to_string r)
+        | None -> `Null )
+    ]
 
 let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojson.Safe.t =
   let include_goals = true in
@@ -577,7 +591,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 let disk_crashes =
                   (try
                      Keeper_crash_persistence.recent_crashes
-                       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+                       ~store_root:(Workspace.dated_store_root config)
                        ~name:m.name ~max_entries:20
                    with
                    | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -589,21 +603,17 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 let combined_log = match disk_crashes with
                   | [] -> crash_log
                   | _ -> disk_crashes in
-                (`Assoc [
-                  ("restart_count", `Int entry.restart_count);
-                  ("crash_log", `List combined_log);
-                  ("last_failure_reason",
-                    match entry.last_failure_reason with
-                    | Some r -> `String (Keeper_registry.failure_reason_to_string r)
-                    | None -> `Null);
-                ], List.length combined_log)
+                ( supervisor_diagnostics_json
+                    ~restart_count:entry.restart_count
+                    ~crash_log:combined_log
+                    ~last_failure_reason:entry.last_failure_reason
+                , List.length combined_log )
             | None ->
-                (`Assoc [
-                  ("restart_count", `Int 0);
-                  ("crash_log", `List []);
-                  ("last_failure_reason", `Null);
-                  ("dead_since", `Null);
-                ], 0)
+                ( supervisor_diagnostics_json
+                    ~restart_count:0
+                    ~crash_log:[]
+                    ~last_failure_reason:None
+                , 0 )
           in
           let outcomes_json =
             compute_outcomes_rollup
@@ -897,9 +907,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
              match Keeper_meta_store.read_meta config name with
              | Ok (Some meta) ->
                  Some
-                   (degraded_keeper_dashboard_row
-                      ~site:"keeper_dashboard_worker_exception"
-                      ~error
+                   (degraded_keeper_dashboard_row ~error
                       meta)
              | Error _ | Ok None -> None
            with
@@ -1054,9 +1062,7 @@ let execution_trust_keeper_rows (config : Workspace.config) =
                 match Keeper_meta_store.read_meta config name with
                 | Ok (Some meta) ->
                   Some
-                    (degraded_keeper_dashboard_row
-                       ~site:"keeper_dashboard_worker_exception"
-                       ~error
+                    (degraded_keeper_dashboard_row ~error
                        meta
                      |> execution_trust_row_of_dashboard_row)
                 | Error _ | Ok None -> None

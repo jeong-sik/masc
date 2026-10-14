@@ -20,6 +20,7 @@ let provider_turn_ordinal (state : agent_state) : int = state.turn_count
 type turn_preparation =
   { tools_json : Yojson.Safe.t list option
   ; effective_messages : message list
+  ; context_message : (message option, Error.t) result
   ; visible_tool_names : string list
   }
 
@@ -31,16 +32,19 @@ let prepare_tools ~(tools : Tool_set.t) () =
   tools_json, visible_tool_names
 ;;
 
-let prepare_messages ~messages ~turn_params () =
+(* Cadence premise: at most one fresh carrier per prepare call. The hook may
+   attach on every agent-core turn (tool rounds are turns here), so each
+   signed Anthropic turn that carries context retains one [Historical]
+   carrier in history; the context window trims them as ordinary history.
+   A caller that attaches per round must accept per-round history growth. *)
+let context_message turn_params =
   match turn_params.Hooks.extra_system_context with
-  | None -> messages
+  | None -> None
   | Some ctx ->
-    (* Append (not prepend) so that the conversation prefix remains
-       byte-identical across turns — critical for local LLM KV-cache
-       reuse.  The dynamic context (timestamps, tool counts) changes
-       every turn; placing it at the tail keeps the stable history
-       prefix cacheable.  Anthropic API handles caching server-side
-       regardless of position, but Ollama/llama.cpp prefix-match. *)
+    (* The request puts fresh context at the tail. Anthropic collection retains
+       this exact carrier before its response so the next tool round keeps
+       the signed thinking prefix; other providers retain their existing
+       request-only context behavior. *)
     let system_msg =
       { role = User
       ; content = [ Text ("[system context] " ^ ctx) ]
@@ -49,12 +53,23 @@ let prepare_messages ~messages ~turn_params () =
       ; metadata = Extra_system_context_provenance.metadata
       }
     in
-    messages @ [ system_msg ]
+    Some system_msg
+;;
+
+let append_context_message ~messages ~context_message =
+  match context_message with
+  | None -> messages
+  | Some message -> Util.snoc messages message
+;;
+
+let prepare_messages ~messages ~turn_params () =
+  append_context_message ~messages ~context_message:(context_message turn_params)
 ;;
 
 let prepare_turn ~tools ~messages ~turn_params ?model_input_projection () =
   let tools_json, visible_tool_names = prepare_tools ~tools () in
-  let prepared = prepare_messages ~messages ~turn_params () in
+  let context_message = context_message turn_params in
+  let prepared = append_context_message ~messages ~context_message in
   let effective_messages =
     match model_input_projection with
     | None -> Ok prepared
@@ -64,8 +79,19 @@ let prepare_turn ~tools ~messages ~turn_params ?model_input_projection () =
          Llm_provider.Reserved_exn.reraise_if_reserved exn;
          Error (Error.Internal (Printexc.to_string exn)))
   in
-  Result.map
-    (fun effective_messages -> { tools_json; effective_messages; visible_tool_names })
+  Result.map (fun effective_messages ->
+    let context_message =
+      match context_message with
+      | None -> Ok None
+      | Some _ ->
+        (match List.filter (fun (message : Types.message) ->
+           Extra_system_context_provenance.classify message.metadata = Present)
+           effective_messages with
+         | [] -> Ok None
+         | [message] -> Ok (Some message)
+         | _ -> Error (Error.Internal "model input projection returned multiple current context carriers"))
+    in
+    { tools_json; effective_messages; context_message; visible_tool_names })
     effective_messages
 ;;
 
@@ -194,7 +220,8 @@ let last_tool_results_from messages =
       when List.for_all
              (function
                | ToolResult _ -> true
-               | _ -> false)
+               | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _
+               | Document _ | Audio _ -> false)
              content ->
       List.filter_map
         (fun (block : content_block) ->

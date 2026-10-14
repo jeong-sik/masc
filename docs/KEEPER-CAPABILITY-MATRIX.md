@@ -18,7 +18,7 @@ Keeper가 실제로 호출할 수 있는 이름과 인자는 매 turn에 제공�
 | Conversation 읽기/게시 | `keeper_surface_read`, `keeper_surface_post` | `lib/keeper/keeper_tool_descriptor.ml` |
 | Repository/file 탐색 및 실행 | 현재 schema가 제공하는 search, read, write, edit, execute capability | `lib/keeper/keeper_tool_descriptor.ml`, `lib/tool_surface/` |
 | Memory | `keeper_memory_search`, `keeper_memory_write` | `lib/tool_surface/tool_shard_types_schemas_base.ml` |
-| Shared references | `keeper_library_search`, `keeper_library_read` | `lib/tool_surface/tool_shard_types_schemas_library.ml` |
+| Shared references | `keeper_wiki_search`, `keeper_wiki_read` | `lib/tool_surface/tool_shard_types_schemas_wiki.ml` |
 | 다중 판단 합성 | `masc_fusion`, `masc_fusion_status` | `lib/keeper/keeper_tool_descriptor.ml` |
 | 사용 가능한 capability 검색 | `keeper_tools_list`, `keeper_tool_search` | `lib/tool_surface/tool_shard_types_schemas_base.ml`, `lib/keeper/keeper_tool_descriptor.ml` |
 

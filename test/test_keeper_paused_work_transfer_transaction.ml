@@ -68,7 +68,7 @@ let receipt_path config ~keeper_name ~operator_operation_id =
   Filename.concat
     (Filename.concat
        (Filename.concat
-          (Workspace.masc_root_dir config)
+          (Workspace.masc_dir config)
           ("paused-work-dispositions-"
            ^ Masc.Keeper_paused_work_disposition_receipt.store_version))
        ("keeper-" ^ sha256 keeper_name))
@@ -311,7 +311,7 @@ let test_retired_receipt_directory_is_not_read () =
     Filename.concat
       (Filename.concat
          (Filename.concat
-            (Workspace.masc_root_dir config)
+            (Workspace.masc_dir config)
             "paused-work-dispositions")
          ("keeper-" ^ sha256 from_keeper))
       ("operation-" ^ sha256 request.operator_operation_id ^ ".json")

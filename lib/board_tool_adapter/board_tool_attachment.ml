@@ -1,14 +1,20 @@
-type kind = Image | Video | Youtube | External_link
+type kind = Image | Video | Youtube | External_link | File | Audio | Score | Midi
 
 type source =
   | Https_url of string
   | Artifact_sha256 of string
 
-type unresolved = { kind : kind; source : source }
+type unresolved = { kind : kind; source : source; name : string option }
 
 type t =
-  | Url of { kind : kind; url : string }
-  | Artifact of { kind : kind; reference : Tool_output.artifact_ref }
+  | Url of { kind : kind; url : string; name : string option }
+  | Artifact of
+      { kind : kind
+      ; reference : Tool_output.artifact_ref
+      ; name : string option
+      }
+
+let max_name_bytes = 255
 
 type error =
   | Raw_meta_attachments
@@ -17,6 +23,7 @@ type error =
   | Entry_not_object of int
   | Invalid_entry_fields of int
   | Invalid_kind of int
+  | Invalid_name of int
   | Invalid_url of int
   | Invalid_sha256 of int * Tool_output.invalid_sha256
   | Missing_artifact of int * string
@@ -34,12 +41,17 @@ let error_to_string = function
     Printf.sprintf "attachments[%d] must be an object" index
   | Invalid_entry_fields index ->
     Printf.sprintf
-      "attachments[%d] must contain exactly kind and one of url or sha256"
+      "attachments[%d] must contain exactly kind, one of url or sha256, and an optional string name"
       index
   | Invalid_kind index ->
     Printf.sprintf
-      "attachments[%d].kind must be image, video, youtube, or external_link"
+      "attachments[%d].kind must be image, video, youtube, external_link, file, audio, score, or midi"
       index
+  | Invalid_name index ->
+    Printf.sprintf
+      "attachments[%d].name must be a non-empty string on one line, at most %d bytes"
+      index
+      max_name_bytes
   | Invalid_url index ->
     Printf.sprintf
       "attachments[%d].url must be an absolute https URL without credentials or controls"
@@ -60,7 +72,7 @@ let error_to_string = function
       (Tool_output.make_error_to_string invalid)
   | Youtube_requires_url index ->
     Printf.sprintf
-      "attachments[%d]: kind youtube needs url; attach an artifact as image, video, or external_link"
+      "attachments[%d]: kind youtube needs url; attach an artifact as image, video, external_link, file, audio, score, or midi"
       index
   | Artifact_too_large { index; bytes; maximum } ->
     Printf.sprintf
@@ -75,6 +87,10 @@ let kind_of_json index = function
   | Some (`String "video") -> Ok Video
   | Some (`String "youtube") -> Ok Youtube
   | Some (`String "external_link") -> Ok External_link
+  | Some (`String "file") -> Ok File
+  | Some (`String "audio") -> Ok Audio
+  | Some (`String "score") -> Ok Score
+  | Some (`String "midi") -> Ok Midi
   | Some _ | None -> Error (Invalid_kind index)
 ;;
 
@@ -99,26 +115,59 @@ let valid_https_url url =
     | exception Invalid_argument _ -> false
 ;;
 
+(* A name is the file's name: a reader prints it beside the attachment and
+   the dashboard saves the download under it. So it is text (the entry is
+   stored as JSON, and a JSON string is not arbitrary bytes), one line, no
+   longer than a file name, and names no directory. *)
+let valid_name name =
+  let length = String.length name in
+  length > 0
+  && length <= max_name_bytes
+  && String.is_valid_utf_8 name
+  && (not (String.equal name "."))
+  && (not (String.equal name ".."))
+  && String.for_all
+       (fun char ->
+         let code = Char.code char in
+         code >= 0x20 && code <> 0x7f && char <> '/' && char <> '\\')
+       name
+;;
+
+let parse_source index fields name =
+  if List.length fields <> 2
+  then Error (Invalid_entry_fields index)
+  else
+    let ( let* ) = Result.bind in
+    let* kind = kind_of_json index (List.assoc_opt "kind" fields) in
+    match List.assoc_opt "url" fields, List.assoc_opt "sha256" fields with
+    | Some (`String url), None when valid_https_url url ->
+      Ok { kind; source = Https_url url; name }
+    | Some _, None -> Error (Invalid_url index)
+    | None, Some (`String sha256) ->
+      (match kind with
+       | Youtube -> Error (Youtube_requires_url index)
+       | Image | Video | External_link | File | Audio | Score | Midi ->
+         (match Tool_blob_store.validate_sha256 sha256 with
+          | Ok () -> Ok { kind; source = Artifact_sha256 sha256; name }
+          | Error invalid -> Error (Invalid_sha256 (index, invalid))))
+    | None, Some _ | None, None | Some _, Some _ ->
+      Error (Invalid_entry_fields index)
+;;
+
 let parse_entry index = function
-  | `Assoc fields ->
-    if List.length fields <> 2
-    then Error (Invalid_entry_fields index)
-    else
-      let ( let* ) = Result.bind in
-      let* kind = kind_of_json index (List.assoc_opt "kind" fields) in
-      (match List.assoc_opt "url" fields, List.assoc_opt "sha256" fields with
-       | Some (`String url), None when valid_https_url url ->
-         Ok { kind; source = Https_url url }
-       | Some _, None -> Error (Invalid_url index)
-       | None, Some (`String sha256) ->
-         (match kind with
-          | Youtube -> Error (Youtube_requires_url index)
-          | Image | Video | External_link ->
-            (match Tool_blob_store.validate_sha256 sha256 with
-             | Ok () -> Ok { kind; source = Artifact_sha256 sha256 }
-             | Error invalid -> Error (Invalid_sha256 (index, invalid))))
-       | None, Some _ | None, None | Some _, Some _ ->
-         Error (Invalid_entry_fields index))
+  | `Assoc entry_fields ->
+    (* [name] is the only optional field; every other key must be exactly
+       [kind] plus one of [url] or [sha256]. A duplicate [name] is a shape
+       error, not a string to carry. *)
+    let name_fields, fields =
+      List.partition (fun (key, _) -> String.equal key "name") entry_fields
+    in
+    (match name_fields with
+     | [ _, `String name ] when valid_name name ->
+       parse_source index fields (Some name)
+     | [] -> parse_source index fields None
+     | [ _ ] -> Error (Invalid_name index)
+     | _ -> Error (Invalid_entry_fields index))
   | _ -> Error (Entry_not_object index)
 ;;
 
@@ -166,9 +215,9 @@ let resolve ~base_path ~max_artifact_bytes entries =
   let store = Tool_blob_store.create ~base_path in
   let rec loop index acc = function
     | [] -> Ok (List.rev acc)
-    | { kind; source = Https_url url } :: rest ->
-      loop (index + 1) (Url { kind; url } :: acc) rest
-    | { kind; source = Artifact_sha256 sha256 } :: rest ->
+    | { kind; source = Https_url url; name } :: rest ->
+      loop (index + 1) (Url { kind; url; name } :: acc) rest
+    | { kind; source = Artifact_sha256 sha256; name } :: rest ->
       let fetched =
         Eio_unix.run_in_systhread (fun () ->
           Tool_blob_store.fetch_bounded store ~sha256 ~max_bytes:max_artifact_bytes)
@@ -195,7 +244,7 @@ let resolve ~base_path ~max_artifact_bytes entries =
           with
           | Error error -> Error (Invalid_artifact_reference (index, error))
           | Ok reference ->
-            loop (index + 1) (Artifact { kind; reference } :: acc) rest))
+            loop (index + 1) (Artifact { kind; reference; name } :: acc) rest))
   in
   loop 0 [] entries
 ;;
@@ -205,14 +254,27 @@ let kind_to_string = function
   | Video -> "video"
   | Youtube -> "youtube"
   | External_link -> "external_link"
+  | File -> "file"
+  | Audio -> "audio"
+  | Score -> "score"
+  | Midi -> "midi"
+;;
+
+let name_field name =
+  match name with
+  | Some name -> [ "name", `String name ]
+  | None -> []
 ;;
 
 let to_json = function
-  | Url { kind; url } ->
-    `Assoc [ "kind", `String (kind_to_string kind); "url", `String url ]
-  | Artifact { kind; reference } ->
+  | Url { kind; url; name } ->
     `Assoc
-      [ "kind", `String (kind_to_string kind)
-      ; "artifact", Tool_output.normalized_artifact_ref_to_json reference
-      ]
+      ([ "kind", `String (kind_to_string kind); "url", `String url ]
+       @ name_field name)
+  | Artifact { kind; reference; name } ->
+    `Assoc
+      ([ "kind", `String (kind_to_string kind)
+       ; "artifact", Tool_output.normalized_artifact_ref_to_json reference
+       ]
+       @ name_field name)
 ;;

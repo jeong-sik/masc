@@ -87,7 +87,8 @@ let observe_terminal_replay t replay =
     when Option.exists Keeper_chat_operation.is_terminal t.operation_state ->
       t.terminal_replay <- Replayed_after_terminal;
       bump t
-  | _ -> ()
+  | (Replayed_after_terminal, Replayed_after_terminal) | (Replay_pending, _)
+  | (Replayed_after_terminal, Replay_pending) -> ()
 
 
 let observe_operation_state t state =
@@ -160,8 +161,14 @@ let add ?at t ~seq (delta : Live.delta) =
       t.latest_acceptance <- Some entry;
       bump t;
       true
-  | _ ->
-  let duplicate =
+  | Live.Run_started | Live.Checkpoint | Live.External_effect_completed | Live.Run_finished
+  | Live.Batch_bound _ | Live.Runtime_attempt_started _ | Live.Provider_retry_observed _
+  | Live.Stream_model_started _ | Live.Model_content_activity _ | Live.Stream_model_stopped _
+  | Live.Stream_details _ | Live.Text _ | Live.Thinking _ | Live.Native_tool_started _
+  | Live.Native_tool_progress _ | Live.Native_tool_ended _ | Live.Tool_started _ | Live.Tool_args _
+  | Live.Tool_ended _ | Live.Tool_result _ | Live.Stream_protocol_error _
+  | Live.Approval_requested _ | Live.Approval_settled _ | Live.Reply_details _ | Live.Run_failed _
+  | Live.Undecodable _ -> let duplicate =
     match seq with
     | Some seq -> Hashtbl.mem t.held_seqs seq
     | None -> false
@@ -186,7 +193,15 @@ let add ?at t ~seq (delta : Live.delta) =
        t.resume_position <- Journal.replay_position_advance t.resume_position seq
      | None -> ());
     t.reversed_entries <- { seq; at; attempt = t.attempt; delta } :: t.reversed_entries;
-    (match delta with Live.Run_started -> t.run_started <- true | _ -> ());
+    (match delta with
+      | Live.Run_started -> t.run_started <- true
+      | Live.Batch_bound _ | Runtime_attempt_started _ | Provider_retry_observed _
+      | Stream_model_started _ | Model_content_activity _ | Stream_model_stopped _
+      | Stream_details _ | Text _ | Thinking _ | Native_tool_started _ | Native_tool_progress _
+      | Native_tool_ended _ | Tool_started _ | Tool_args _ | Tool_ended _ | Tool_result _
+      | Stream_protocol_error _ | Approval_requested _ | Approval_settled _ | Accepted _
+      | Checkpoint | External_effect_completed | Reply_details _ | Run_failed _ | Run_finished
+      | Undecodable _ -> ());
     bump t;
     true
   end
@@ -630,7 +645,7 @@ let read_with_operation_state ~read_operation ~read_journal =
     match operation, journal with
     | Ok (Some state), Ok _ when Keeper_chat_operation.is_terminal state ->
         Replayed_after_terminal
-    | _ -> Replay_pending in
+    | (Ok (Some _) | Ok None | Error _), (Ok _ | Error _) -> Replay_pending in
   let operation = read_operation () in
   let journal = read_journal () in
   let reread refreshed =

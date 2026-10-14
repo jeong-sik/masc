@@ -198,10 +198,10 @@ let resolve_server_default_base_path path = resolve_masc_base_path path
 (* task-351: quarantine escape guard.
    2026-08-25 04:38:30Z incident: a test-harness Workspace.init with a
    temp-dir base request (test_warn_root_causes.ml, agent
-   "test-stale-task-hint") resolved its base to the production root
-   (/Users/dancer/me) and rewrote production state: messages seq 2604→1,
-   backlog replaced. Filesystem proof: /Users/dancer/me/.masc/agents/
-   test-stale-task-hint.json (session_bound_at 04:38:30Z).
+   "test-stale-task-hint") resolved its base to the live base path and
+   rewrote production state: messages seq 2604→1, backlog replaced.
+   Filesystem proof: <live base>/.masc/agents/test-stale-task-hint.json
+   (session_bound_at 04:38:30Z).
 
    The primary cause — the MASC_TEST_ALLOW_BASE_PATH_OVERRIDE switch that
    let a test executable resolve to a live base — was removed in #30487.
@@ -332,21 +332,8 @@ let sanitize_namespace_segment name =
     if head = "" then "x-" ^ digest else head ^ "-" ^ digest)
 
 let backend_config_for base_path =
-  let cluster_name = Env_config_core.cluster_name () in
-  let masc_root = Common.masc_dir_from_base_path ~base_path in
-  let cluster_segment =
-    match cluster_name with
-    | "" | "default" -> None
-    | other -> Some (sanitize_namespace_segment other)
-  in
-  let backend_base_path =
-    match cluster_segment with
-    | None -> masc_root
-    | Some seg -> Filename.concat (Common.clusters_dir_from_base_path ~base_path) seg
-  in
   {
-    Backend_types.base_path = backend_base_path;
-    Backend_types.cluster_name;
+    Backend_types.base_path = Common.masc_dir_from_base_path ~base_path;
     Backend_types.node_id = Backend_types.generate_node_id ();
     Backend_types.pubsub_max_messages = Backend_types.pubsub_max_messages;
   }

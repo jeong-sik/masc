@@ -359,7 +359,8 @@ let observe ~base_path =
                      conflict_count = List.length (conflicts ledger);
                      classified_count = List.length (dispositions ledger);
                      briefing })
-    | _ -> Unavailable (ledger_path ^ ": not a regular file")
+    | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+      Unavailable (ledger_path ^ ": not a regular file")
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Missing
   | Unix.Unix_error (error, fn, arg) ->

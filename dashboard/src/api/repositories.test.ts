@@ -28,7 +28,7 @@ describe('repositories API', () => {
         {
           id: 'masc',
           name: 'masc',
-          local_path: '/Users/dancer/me/workspace/yousleepwhen/masc',
+          local_path: '/Users/worker/ws/workspace/yousleepwhen/masc',
           status: 'active',
           git_status: {
             state: 'available',
@@ -75,9 +75,9 @@ describe('repositories API', () => {
     stubFetch({
       repositories: [
         {
-          id: 'me',
-          name: 'me',
-          local_path: '/Users/dancer/me',
+          id: 'ws',
+          name: 'ws',
+          local_path: '/Users/worker/ws',
           status: 'active',
         },
       ],
@@ -93,8 +93,8 @@ describe('repositories API', () => {
     expect(init.method).toBe('POST')
     expect(init.body).toBe(JSON.stringify({}))
     expect(repos).toHaveLength(1)
-    expect(repos[0]!.id).toBe('me')
-    expect(repos[0]!.local_path).toBe('/Users/dancer/me')
+    expect(repos[0]!.id).toBe('ws')
+    expect(repos[0]!.local_path).toBe('/Users/worker/ws')
   })
 
   it('addRepository posts the registration payload as-is', async () => {

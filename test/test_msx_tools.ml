@@ -4,15 +4,17 @@
    image. What they pin: the no-machine refusal, that every refusal declares
    it took no effect, the frame clock, the ledger
    edges with the caller's name, the key vocabulary, the per-call frame cap,
-   the read-only classification, and that the descriptors and schemas exist. *)
+   and that the descriptors and schemas exist. *)
 
 open Alcotest
 open Masc
 
 let dispatch ~base_path ?(agent = "msx-test") name assoc =
-  match Msx_machine_tools.dispatch ~relay:Machine_msx_host_events.relay ~base_path ~agent ~name ~arguments:(`Assoc assoc) with
-  | Some result -> result
-  | None -> fail (name ^ " is not dispatched by the machine worker")
+  match Msx_tool.of_name name with
+  | Some tool ->
+    Msx_machine_tools.dispatch ~relay:Machine_msx_host_events.relay ~base_path ~agent ~tool
+      ~arguments:(`Assoc assoc)
+  | None -> fail (name ^ " is not an MSX tool")
 ;;
 
 let with_workspace f =
@@ -1080,27 +1082,15 @@ let test_key_vocabulary () =
 
 let test_registration () =
   List.iter
-    (fun (operation, name, _readonly) ->
+    (fun tool ->
+      let name = Msx_tool.name tool in
       check bool (name ^ " is not statically registered") true
-        (Tool_schemas_misc.misc_registered_schema operation = None);
+        (Tool_schemas_misc.misc_registered_schema (Tool_schemas_misc.Misc_msx tool) = None);
       check bool (name ^ " has no static Keeper descriptor") true
         (Keeper_tool_descriptor.descriptors_for_internal name = []);
       check bool (name ^ " remains a packaged worker schema") true
         (Option.is_some (Embedded_config.read ("tools/" ^ name ^ ".toml"))))
-    [ (Tool_schemas_misc.Misc_msx_load, "masc_msx_load", false)
-    ; (Tool_schemas_misc.Misc_msx_change_disk, "masc_msx_change_disk", false)
-    ; (Tool_schemas_misc.Misc_msx_export_disk, "masc_msx_export_disk", false)
-    ; (Tool_schemas_misc.Misc_msx_save, "masc_msx_save", false)
-    ; (Tool_schemas_misc.Misc_msx_restore, "masc_msx_restore", false)
-    ; (Tool_schemas_misc.Misc_msx_eject, "masc_msx_eject", false)
-    ; (Tool_schemas_misc.Misc_msx_screen, "masc_msx_screen", true)
-    ; (Tool_schemas_misc.Misc_msx_meta, "masc_msx_meta", true)
-    ; (Tool_schemas_misc.Misc_msx_checkpoint_info, "masc_msx_checkpoint_info", true)
-    ; (Tool_schemas_misc.Misc_msx_press, "masc_msx_press", false)
-    ; (Tool_schemas_misc.Misc_msx_step, "masc_msx_step", false)
-    ; (Tool_schemas_misc.Misc_msx_peek, "masc_msx_peek", true)
-    ; (Tool_schemas_misc.Misc_msx_ram_diff, "masc_msx_ram_diff", true)
-    ]
+    Msx_tool.all
 ;;
 
 (* The lane reports which core it linked, the way Dos_lane.core does for DOS.

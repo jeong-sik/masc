@@ -1653,6 +1653,36 @@ let remove_tree (path : string) : unit =
     (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-remove-tree" path) (fun () -> remove_tree_unix path))
 ;;
 
+let subdirectory_names_unix dir =
+  let is_directory path =
+    match Unix.stat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } -> true
+    | { Unix.st_kind =
+          Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+      ; _
+      } -> false
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
+  in
+  let names =
+    match Sys.readdir dir with
+    | names -> Array.to_list names
+    | exception Sys_error _ when not (is_directory dir) -> []
+  in
+  names
+  |> List.filter (fun name -> is_directory (Filename.concat dir name))
+  |> List.sort String.compare
+;;
+
+let subdirectory_names (dir : string) : string list =
+  with_fs_or_fallback
+    ~path:dir
+    ~fallback:(fun () -> subdirectory_names_unix dir)
+    (fun _fs ->
+       Eio_unix.run_in_systhread
+         ~label:(labelled "fs-compat-subdirectory-names" dir)
+         (fun () -> subdirectory_names_unix dir))
+;;
+
 let realpath (path : string) : string =
   with_fs_or_fallback
     ~path
@@ -2834,6 +2864,32 @@ let rec private_jsonl_transaction_error_to_string = function
       (private_jsonl_cleanup_failures_to_string cleanup_failures)
   | Transaction_append_failed append_error ->
     durable_append_error_to_string append_error
+;;
+
+(* [wrapped] is true once one [Transaction_settlement_failed] has been
+   entered. A settlement failure nested inside another one is not followed. *)
+let rec private_jsonl_transaction_error_is_incomplete_tail_at ~wrapped = function
+  | Incomplete_transaction_tail _ -> true
+  | Transaction_settlement_failed { primary = Transaction_failed inner; _ } ->
+    (not wrapped)
+    && private_jsonl_transaction_error_is_incomplete_tail_at ~wrapped:true inner
+  | Transaction_settlement_failed { primary = Transaction_succeeded _; _ } -> false
+  | Stable_lock_contended _
+  | Unexpected_stable_lock_permissions _
+  | Invalid_stable_lock_state _
+  | Cursor_mismatch _
+  | Unexpected_transaction_file_kind _
+  | Ambiguous_transaction_file_identity _
+  | Transaction_path_binding_changed _
+  | Invalid_transaction_suffix
+  | Private_jsonl_operation_failed _
+  | Rewrite_stage_failed _
+  | Rewrite_published_durability_unknown _
+  | Transaction_append_failed _ -> false
+;;
+
+let private_jsonl_transaction_error_is_incomplete_tail =
+  private_jsonl_transaction_error_is_incomplete_tail_at ~wrapped:false
 ;;
 
 let private_jsonl_failure operation exception_ =

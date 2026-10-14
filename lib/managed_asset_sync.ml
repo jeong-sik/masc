@@ -279,7 +279,9 @@ let writable_leaf_state ~domain dest =
   | Fs_compat.Exact_missing -> Ok `Missing
   | Fs_compat.Exact_kind Unix.S_REG -> Ok `Regular
   | Fs_compat.Exact_kind Unix.S_LNK -> Ok `Symlink
-  | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+  | Fs_compat.Exact_unknown | Fs_compat.Exact_kind (Unix.S_DIR) | Fs_compat.Exact_kind (Unix.S_CHR)
+  | Fs_compat.Exact_kind (Unix.S_BLK) | Fs_compat.Exact_kind (Unix.S_FIFO)
+  | Fs_compat.Exact_kind (Unix.S_SOCK) ->
     Error
       (Printf.sprintf "managed %s asset leaf is not a regular file" (noun domain))
 ;;
@@ -528,7 +530,9 @@ let retire_runtime_asset ~domain ~recorded ~dest_dir runtime_rel (acc, kept) =
              | Ok preserved_at -> remove ~kept_edit:(Some preserved_at) acc)
           | Some _ -> remove ~kept_edit:None acc
           | None -> acc, kept)
-       | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+       | Fs_compat.Exact_unknown | Fs_compat.Exact_kind (Unix.S_DIR)
+       | Fs_compat.Exact_kind (Unix.S_CHR) | Fs_compat.Exact_kind (Unix.S_BLK)
+       | Fs_compat.Exact_kind (Unix.S_FIFO) | Fs_compat.Exact_kind (Unix.S_SOCK) ->
          keep
            acc
            (Printf.sprintf

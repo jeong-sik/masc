@@ -315,7 +315,9 @@ let replace_heartbeat_failure_reason expected replacement =
       | Some (Heartbeat_consecutive_failures _) ->
         replaced := true;
         { latest with last_failure_reason = replacement }
-      | Some _ | None ->
+      | None | Some (Turn_consecutive_failures _) | Some (Provider_runtime_error _)
+      | Some (Turn_configuration_error _) | Some (Official_client_recovery_required _)
+      | Some (Fiber_unresolved _) | Some (Exception _) | Some (Operator_interrupt) ->
         replaced := false;
         latest)
   in
@@ -514,7 +516,7 @@ let wakeup_cadence_sleeper_exact (expected : registry_entry) =
                   if Atomic.compare_and_set current.cadence_sleeping true false
                   then Cadence_sleeper_signaled
                   else Cadence_sleeper_awake)
-             | phase -> Cadence_sleeper_inactive phase))))
+             | (Keeper_state_machine.Offline | Keeper_state_machine.Draining | Keeper_state_machine.Paused | Keeper_state_machine.Stopped | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting) as phase -> Cadence_sleeper_inactive phase))))
 ;;
 
 let fiber_health_of ~base_path name =
@@ -541,12 +543,11 @@ let crash_log_of ~base_path name =
   | None -> []
 ;;
 
-let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts ~crash_log =
+let restore_supervisor_state ~base_path name ~restart_count ~crash_log =
   Error_tracking.restore_supervisor_state
     ~base_path
     name
     ~restart_count
-    ~last_restart_ts
     ~crash_log
     ~update_entry:update_entry_unit
 ;;
@@ -847,7 +848,7 @@ let rec dispatch_event_with_audit_internal
             ; wall_clock_at_decision = now
             };
           Keeper_lifecycle_hooks.run
-            ~base_dir:base_path
+            ~masc_root:(Common.masc_dir_from_base_path ~base_path)
             ~meta:entry.meta
             ~keeper_id:name
             (Keeper_lifecycle_hooks.Phase_transition
@@ -869,9 +870,15 @@ let rec dispatch_event_with_audit_internal
            | exn -> record_phase_broadcast_failure ~name exn);
           (* Update running count based on phase transition *)
           (match tr.prev_phase, tr.new_phase with
-           | Running, phase when phase <> Running -> decr_running_count_clamped ()
-           | phase, Running when phase <> Running -> Atomic.incr running_count_atomic
-           | _ -> ());
+           | ( Running
+             , (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting) ) ->
+             decr_running_count_clamped ()
+           | ( (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting)
+             , Running ) -> Atomic.incr running_count_atomic
+           | Running, Running -> ()
+           | ( (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting)
+             , (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting) )
+             -> ());
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string LifecycleTransitions)
             ~labels:

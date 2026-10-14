@@ -140,14 +140,11 @@ val masc_http_port_opt : unit -> string option
 val default_host : string
 val masc_host : unit -> string
 
-(** {1 Assets / cluster name} *)
+(** {1 Assets} *)
 
 (* RFC-0085 PR-10 — [assets_dir_opt] removed completely.  Caller 0
    after PR-10 migration; readers use
    [(Host_config.from_env ()).assets_dir]. *)
-
-val cluster_name_opt : unit -> string option
-val cluster_name : unit -> string
 
 (** {1 HTTP base URL} *)
 
@@ -271,11 +268,10 @@ val resolve_against_base_path : string -> string
 
 val orchestrator_enabled_env_key : string
 
-(** {1 Config / data dir} *)
+(** {1 Config dir} *)
 
 val config_dir_env_key : string
 
-val data_dir_env_key : string
 (** {1 Auth} *)
 
 val jsonl_retention_days_env_key : string

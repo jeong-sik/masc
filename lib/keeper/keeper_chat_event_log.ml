@@ -380,6 +380,15 @@ let keeper_chat_event_to_json event =
 let keeper_chat_event_of_json json =
   let open Yojson.Safe.Util in
   let ( let* ) = Result.bind in
+  (* The members every native tool row carries, plus the one its kind adds. *)
+  let native_tool ~extra =
+    let* fields = object_fields ~label:"native_tool"
+        ~allowed:(["type"; "occurrence"; "tool_call_id"; "tool_call_name"] @ extra) json in
+    let* occurrence = occurrence_of_json (json |> member "occurrence") in
+    let* tool_call_id = optional_identity ~label:"native_tool" "tool_call_id" fields in
+    let* tool_call_name = optional_identity ~label:"native_tool" "tool_call_name" fields in
+    Ok ({ occurrence; tool_call_id; tool_call_name }, fields)
+  in
   try
     let* _ = object_fields ~label:"keeper_chat_event" json in
     let tag = json |> member "type" |> to_string in
@@ -588,32 +597,24 @@ let keeper_chat_event_of_json json =
            { occurrence
            ; tool_call_id = json |> member "tool_call_id" |> to_string_option
            })
-    | ("native_tool_start" | "native_tool_end" | "native_tool_progress") as tag ->
-      let extra = match tag with
-        | "native_tool_start" -> []
-        | "native_tool_progress" -> ["progress"]
-        | _ -> ["completion"] in
-      let* fields = object_fields ~label:"native_tool"
-          ~allowed:(["type"; "occurrence"; "tool_call_id"; "tool_call_name"] @ extra) json in
-      let* occurrence = occurrence_of_json (json |> member "occurrence") in
-      let* tool_call_id = optional_identity ~label:"native_tool" "tool_call_id" fields in
-      let* tool_call_name = optional_identity ~label:"native_tool" "tool_call_name" fields in
-      let tool = { occurrence; tool_call_id; tool_call_name } in
-      (match tag with
-      | "native_tool_start" -> Ok (Native_tool_start tool)
-      | "native_tool_progress" ->
-          let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
-          Ok (Native_tool_progress (tool, progress))
-      | _ ->
-          (* Rows written before the writer kept a completion have none.
-             Whether the provider reported a status for them is not known, so
-             they read as completion_unrecorded, not as an end seen with no
-             status. object_fields above already rejects a duplicate member;
-             a malformed present completion is unreadable. *)
-          let* completion = match List.assoc_opt "completion" fields with
-            | None -> Ok Runtime_native_tools.completion_unrecorded
-            | Some value -> Runtime_native_tools.completion_of_json value in
-          Ok (Native_tool_end (tool, completion)))
+    | "native_tool_start" ->
+      let* tool, _ = native_tool ~extra:[] in
+      Ok (Native_tool_start tool)
+    | "native_tool_progress" ->
+      let* tool, _ = native_tool ~extra:["progress"] in
+      let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
+      Ok (Native_tool_progress (tool, progress))
+    | "native_tool_end" ->
+      let* tool, fields = native_tool ~extra:["completion"] in
+      (* Rows written before the writer kept a completion have none.
+         Whether the provider reported a status for them is not known, so
+         they read as completion_unrecorded, not as an end seen with no
+         status. object_fields in native_tool already rejects a duplicate
+         member; a malformed present completion is unreadable. *)
+      let* completion = match List.assoc_opt "completion" fields with
+        | None -> Ok Runtime_native_tools.completion_unrecorded
+        | Some value -> Runtime_native_tools.completion_of_json value in
+      Ok (Native_tool_end (tool, completion))
     | "tool_approval_requested" ->
       Ok
         (Tool_approval_requested
@@ -774,7 +775,46 @@ let journaled_envelope_of_json json =
     | _ -> Error "journaled event is not an object" in
   match settlement, entry.event with
   | Some _, Event_error _ | None, _ -> Ok (entry, settlement)
-  | Some _, _ -> Error "restart settlement must identify an error terminal"
+  | Some _,
+    ( Run_started _
+    | Batch_bound _
+    | Text_message_start _
+    | Text_delta _
+    | Text_message_end
+    | External_effect_completed _
+    | Run_finished _
+    | Reply_details _
+    | Continuation_checkpoint _
+    | Agent_core_stream_connected
+    | Provider_retry_observed _
+    | Agent_core_runtime_attempt_started _
+    | Agent_core_stream_message_start _
+    | Agent_core_stream_message_delta _
+    | Agent_core_stream_message_stop _
+    | Agent_core_stream_ping
+    | Agent_core_content_block_start _
+    | Agent_core_content_block_stop _
+    | Model_content_activity _
+    | Agent_core_thinking_delta _
+    | Agent_core_thinking_signature_delta _
+    | Agent_core_media_delta _
+    | Agent_core_stream_protocol_error _
+    | Tool_call_start _
+    | Tool_call_args _
+    | Tool_call_args_snapshot _
+    | Tool_call_end _
+    | Native_tool_start _
+    | Native_tool_end _
+    | Native_tool_progress _
+    | Tool_approval_requested _
+    | Tool_approval_settled _
+    | Tool_result_ready _
+    | Tool_transcript_committed _
+    | Link_block _
+    | Image_block _
+    | Status_block _
+    | Audio_block _
+    | Tool_context_block _ ) -> Error "restart settlement must identify an error terminal"
 ;;
 
 let journaled_event_of_json json = Result.map fst (journaled_envelope_of_json json)
@@ -860,7 +900,46 @@ let event_floats_are_finite = function
     float_is_finite cost_usd
   | Audio_block { duration_sec = Some duration_sec; _ } ->
     float_is_finite duration_sec
-  | _ -> true
+  | Run_started _
+  | Batch_bound _
+  | Text_message_start _
+  | Text_delta _
+  | Text_message_end
+  | External_effect_completed _
+  | Run_finished _
+  | Event_error _
+  | Reply_details _
+  | Continuation_checkpoint _
+  | Agent_core_stream_connected
+  | Provider_retry_observed _
+  | Agent_core_runtime_attempt_started _
+  | Agent_core_stream_message_start _
+  | Agent_core_stream_message_delta _
+  | Agent_core_stream_message_stop _
+  | Agent_core_stream_ping
+  | Agent_core_content_block_start _
+  | Agent_core_content_block_stop _
+  | Model_content_activity _
+  | Agent_core_thinking_delta _
+  | Agent_core_thinking_signature_delta _
+  | Agent_core_media_delta _
+  | Agent_core_stream_protocol_error _
+  | Tool_call_start _
+  | Tool_call_args _
+  | Tool_call_args_snapshot _
+  | Tool_call_end _
+  | Native_tool_start _
+  | Native_tool_end _
+  | Native_tool_progress _
+  | Tool_approval_requested _
+  | Tool_approval_settled _
+  | Tool_result_ready _
+  | Tool_transcript_committed _
+  | Link_block _
+  | Image_block _
+  | Status_block _
+  | Audio_block _
+  | Tool_context_block _ -> true
 ;;
 
 (* The result covers raw filesystem exceptions too: mkdir/open/lock failures
@@ -1030,7 +1109,49 @@ let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
      | Ok latest ->
        let complete = match latest with
          | Some { event = (Keeper_chat_events.Run_finished _ | Event_error _); _ } -> true
-         | Some _ | None -> false in
+         | Some
+             { event =
+                 ( Run_started _
+                 | Batch_bound _
+                 | Text_message_start _
+                 | Text_delta _
+                 | Text_message_end
+                 | External_effect_completed _
+                 | Reply_details _
+                 | Continuation_checkpoint _
+                 | Agent_core_stream_connected
+                 | Provider_retry_observed _
+                 | Agent_core_runtime_attempt_started _
+                 | Agent_core_stream_message_start _
+                 | Agent_core_stream_message_delta _
+                 | Agent_core_stream_message_stop _
+                 | Agent_core_stream_ping
+                 | Agent_core_content_block_start _
+                 | Agent_core_content_block_stop _
+                 | Model_content_activity _
+                 | Agent_core_thinking_delta _
+                 | Agent_core_thinking_signature_delta _
+                 | Agent_core_media_delta _
+                 | Agent_core_stream_protocol_error _
+                 | Tool_call_start _
+                 | Tool_call_args _
+                 | Tool_call_args_snapshot _
+                 | Tool_call_end _
+                 | Native_tool_start _
+                 | Native_tool_end _
+                 | Native_tool_progress _
+                 | Tool_approval_requested _
+                 | Tool_approval_settled _
+                 | Tool_result_ready _
+                 | Tool_transcript_committed _
+                 | Link_block _
+                 | Image_block _
+                 | Status_block _
+                 | Audio_block _
+                 | Tool_context_block _ )
+             ; _
+             }
+         | None -> false in
        if require_existing && not complete then
          Error (Journal_corrupt "continuation journal has no durable terminal segment boundary")
        else
@@ -1057,7 +1178,52 @@ let same_restart_settlement left right =
 let existing_restart_terminal settlement = function
   | ({event=Event_error {message};seq;ts}, Some recorded) :: _
     when same_restart_settlement settlement recorded -> Some (Existing_terminal_error {seq;ts;message})
-  | _ -> None
+  | []
+  | ( { event =
+          ( Run_started _
+            | Batch_bound _
+            | Text_message_start _
+            | Text_delta _
+            | Text_message_end
+            | External_effect_completed _
+            | Run_finished _
+            | Event_error _
+            | Reply_details _
+            | Continuation_checkpoint _
+            | Agent_core_stream_connected
+            | Provider_retry_observed _
+            | Agent_core_runtime_attempt_started _
+            | Agent_core_stream_message_start _
+            | Agent_core_stream_message_delta _
+            | Agent_core_stream_message_stop _
+            | Agent_core_stream_ping
+            | Agent_core_content_block_start _
+            | Agent_core_content_block_stop _
+            | Model_content_activity _
+            | Agent_core_thinking_delta _
+            | Agent_core_thinking_signature_delta _
+            | Agent_core_media_delta _
+            | Agent_core_stream_protocol_error _
+            | Tool_call_start _
+            | Tool_call_args _
+            | Tool_call_args_snapshot _
+            | Tool_call_end _
+            | Native_tool_start _
+            | Native_tool_end _
+            | Native_tool_progress _
+            | Tool_approval_requested _
+            | Tool_approval_settled _
+            | Tool_result_ready _
+            | Tool_transcript_committed _
+            | Link_block _
+            | Image_block _
+            | Status_block _
+            | Audio_block _
+            | Tool_context_block _ )
+      ; _
+      }
+    , _ )
+    :: _ -> None
 ;;
 
 let find_restart_terminal journal ~settlement =
@@ -1078,7 +1244,7 @@ let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
   let* entries = match read_journal_envelopes journal with
     | Ok entries -> Ok entries
     | Error Journal_missing -> Ok []
-    | Error error -> Error (read_error error) in
+    | Error (Journal_unreadable _ | Journal_corrupt _ as error) -> Error (read_error error) in
   match segment, List.rev entries with
   | Existing_segment, ({ event = Keeper_chat_events.Event_error { message }; seq; ts }, _) :: _ ->
     Ok (Existing_terminal_error { seq; ts; message })
@@ -1088,7 +1254,52 @@ let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
      | None ->
          let* () = append_journaled_result ~restart_settlement:settlement journal ~seq ~ts (Event_error {message}) in
          Ok (Recorded_terminal_error {seq;ts}))
-  | Existing_segment, _ ->
+  | Existing_segment, []
+  | ( Existing_segment
+    , ( { event =
+            ( Run_started _
+            | Batch_bound _
+            | Text_message_start _
+            | Text_delta _
+            | Text_message_end
+            | External_effect_completed _
+            | Run_finished _
+            | Reply_details _
+            | Continuation_checkpoint _
+            | Agent_core_stream_connected
+            | Provider_retry_observed _
+            | Agent_core_runtime_attempt_started _
+            | Agent_core_stream_message_start _
+            | Agent_core_stream_message_delta _
+            | Agent_core_stream_message_stop _
+            | Agent_core_stream_ping
+            | Agent_core_content_block_start _
+            | Agent_core_content_block_stop _
+            | Model_content_activity _
+            | Agent_core_thinking_delta _
+            | Agent_core_thinking_signature_delta _
+            | Agent_core_media_delta _
+            | Agent_core_stream_protocol_error _
+            | Tool_call_start _
+            | Tool_call_args _
+            | Tool_call_args_snapshot _
+            | Tool_call_end _
+            | Native_tool_start _
+            | Native_tool_end _
+            | Native_tool_progress _
+            | Tool_approval_requested _
+            | Tool_approval_settled _
+            | Tool_result_ready _
+            | Tool_transcript_committed _
+            | Link_block _
+            | Image_block _
+            | Status_block _
+            | Audio_block _
+            | Tool_context_block _ )
+        ; _
+        }
+      , _ )
+      :: _ ) ->
     let* () = append_result journal ~seq ~ts (Event_error {message}) in
     Ok (Recorded_terminal_error {seq;ts})
 ;;

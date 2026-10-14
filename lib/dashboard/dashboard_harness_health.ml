@@ -77,11 +77,11 @@ let trim_recent (type a) max_items (values : a list) : a list =
 ;;
 
 
-let wake_payload_store_base_dir () =
-  Filename.concat (Env_config.base_path ()) "data/keeper-wake-payload"
+let wake_payload_location ~base_path =
+  Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Keeper_wake_payload)
 ;;
 
-let get_or_create_store ~store_ref ~store_mu base_dir_fn =
+let get_or_create_store ~store_ref ~store_mu location_fn =
   match Atomic.get store_ref with
   | Some store -> store
   | None ->
@@ -89,7 +89,7 @@ let get_or_create_store ~store_ref ~store_mu base_dir_fn =
     (match Atomic.get store_ref with
      | Some store -> store
      | None ->
-       let store = Dated_jsonl.create ~base_dir:(base_dir_fn ()) () in
+       let store = Dated_jsonl.open_store (location_fn ()) in
        Atomic.set store_ref (Some store);
        store)
 ;;
@@ -110,13 +110,15 @@ let get_wake_payload_store () =
   get_or_create_store
     ~store_ref:wake_payload_store_ref
     ~store_mu:wake_payload_store_mu
-    wake_payload_store_base_dir
+    (fun () -> wake_payload_location ~base_path:(Env_config.base_path ()))
 ;;
 
 
 
-let set_wake_payload_store_for_testing ~base_dir =
-  Atomic.set wake_payload_store_ref (Some (Dated_jsonl.create ~base_dir ()))
+let set_wake_payload_store_for_testing ~base_path =
+  Atomic.set
+    wake_payload_store_ref
+    (Some (Dated_jsonl.open_store (wake_payload_location ~base_path)))
 ;;
 
 let string_field json key = Safe_ops.json_string ~default:"" key json

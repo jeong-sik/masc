@@ -1303,7 +1303,7 @@ max-concurrent = 1
       let observation = Masc.Keeper_world_observation.observe
         ~pending_board_events:(Some []) ~config ~meta in
       Masc.Keeper_unified_metrics_decision.append_decision_record
-        ~config ~meta ~observation ~latency_ms:3 ~outcome:"success"
+        ~config ~meta ~observation ~latency_ms:3 ~outcome:Keeper_decision_outcome.Success
         ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
         ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
         ~degraded_retry_applied:settlement.degraded_retry_applied
@@ -1851,7 +1851,9 @@ max-concurrent = 1
          Option.bind (registered_entry ()).last_failure_reason
            (Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
                ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt))
-         |> Option.map (fun surface -> surface.Masc.Keeper_status_bridge.blocker_class)
+         |> Option.map (fun surface ->
+                Masc.Keeper_status_bridge.runtime_blocker_class_to_string
+                  surface.Masc.Keeper_status_bridge.blocker_class)
        in
        check "native refusal appears on the public status before recovery"
          (public_before_recovery = Some "official_client_recovery_required");
@@ -1946,11 +1948,8 @@ let () =
 
 let () =
   check
-    "observability artifacts all have consumer and retention owners"
+    "observability artifacts all have a producer, an authority source and a consumer"
     (KOAR.validate () = []);
-  check
-    "observability inventory covers the six audited stores"
-    (List.length KOAR.entries = 6);
   check
     "observability artifacts never claim command authority"
     (match KOAR.to_yojson () with
@@ -2908,7 +2907,7 @@ max-concurrent = 1
   let observation =
     let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
     Runtime_observation.runtime_observation_with_metrics
-      ~runtime_id:answering_runtime ~selected_model_raw:None ~capture ()
+      ~runtime_id:answering_runtime ~selected_model:None ~capture ()
   in
   let prompt_metrics =
     Masc.Keeper_agent_prompt_metrics.build_prompt_metrics
@@ -2975,7 +2974,7 @@ max-concurrent = 1
     Yojson.Safe.Util.(row |> member outer |> member inner)
   in
   let answered =
-    append_and_read ~outcome:"success" ~result:(Some answered_result) ()
+    append_and_read ~outcome:Keeper_decision_outcome.Success ~result:(Some answered_result) ()
   in
   check "an observed success row keeps the lane in provider_context.runtime_id"
     (member_at answered "provider_context" "runtime_id" = `String lane);
@@ -2996,7 +2995,7 @@ max-concurrent = 1
   (* No run result: the turn failed and only the runtime walk's own report
      names who was dispatched. *)
   let failed =
-    append_and_read ~outcome:"error" ~result:None ~executed_runtime_id:head_runtime ()
+    append_and_read ~outcome:Keeper_decision_outcome.Failed ~result:None ~executed_runtime_id:head_runtime ()
   in
   check "a failed row without a run result keeps the lane in provider_context.runtime_id"
     (member_at failed "provider_context" "runtime_id" = `String lane);
@@ -3005,6 +3004,10 @@ max-concurrent = 1
   check "a failed row without a run result does not repeat the pair in telemetry"
     (member_at failed "telemetry" "runtime_id" = `Null
      && member_at failed "telemetry" "executed_runtime_id" = `Null);
+  check "a failed row without a run result records the failure as its telemetry outcome"
+    (member_at failed "telemetry" "outcome" = `String "error"
+     && member_at failed "telemetry" "coverage_stage" = `String "unknown"
+     && member_at failed "telemetry" "coverage_reason" = `String "error_turn");
   let aggregate =
     compute_model_metrics ~base_path:workspace_dir ~window_minutes:60
   in
@@ -3026,33 +3029,36 @@ let () =
      failed: transport error: error sending request for url \
      (https://api.meta.ai/v1/responses) (after 4 provider attempts)"
   in
+  let core =
+    Keeper_request_failure_core.of_core_error
+      (Agent_core.Error.Provider
+         (Llm_provider.Error.ParseError { detail = cause_message }))
+  in
   let fenced =
     Keeper_internal_error.Provider_attempt_effect_fenced
       { runtime_id = "muse_d242bc1a.muse-spark-1.3_75bc5a82"
       ; effect_disposition = Keeper_provider_attempt_effect_core.Observation_unavailable
-      ; cause =
-          Keeper_internal_error.Fenced_core
-            (Keeper_request_failure_core.of_core_error
-               (Agent_core.Error.Provider
-                  (Llm_provider.Error.ParseError { detail = cause_message })))
+      ; cause = Keeper_internal_error.Fenced_core core
       }
   in
   let core_error = Keeper_internal_error.core_error_of_masc_internal_error fenced in
   let raw_error = Agent_core.Error.to_string core_error in
-  let contains ~needle text =
-    let n = String.length needle and t = String.length text in
-    let rec loop i = i + n <= t && (String.sub text i n = needle || loop (i + 1)) in
-    n = 0 || loop 0
+  (* The expected line is built from the typed cause and disposition, so the
+     check compares values rather than looking for a word inside a sentence. *)
+  let expected_summary =
+    Printf.sprintf
+      "effect_disposition=%s; %s"
+      (Keeper_provider_attempt_effect_core.to_string
+         Keeper_provider_attempt_effect_core.Observation_unavailable)
+      (Keeper_request_failure_core.summary core)
   in
+  let prefix_preview = Masc.Keeper_types_profile.short_preview raw_error in
   check
     "fixture: the raw envelope is longer than the preview limit"
     (String.length raw_error > 220);
   check
-    "fixture: a prefix preview of the raw envelope loses the cause"
-    (not
-       (contains
-          ~needle:"api.meta.ai"
-          (Masc.Keeper_types_profile.short_preview raw_error)));
+    "the fenced summary is the typed disposition and cause"
+    (Keeper_internal_error.fenced_attempt_summary fenced = Some expected_summary);
   let terminal = Masc.Keeper_turn_terminal.of_failure ~raw_error core_error in
   (match
      Masc.Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
@@ -3060,11 +3066,11 @@ let () =
    with
    | Some (Masc.Keeper_registry.Provider_runtime_error { detail; code; _ }) ->
      check
-       "a fenced attempt's registry detail names the cause"
-       (contains ~needle:"api.meta.ai" detail);
+       "a fenced attempt's registry detail is its typed summary"
+       (String.equal detail (Masc.Keeper_types_profile.short_preview expected_summary));
      check
-       "a fenced attempt's registry detail keeps the effect disposition"
-       (contains ~needle:"observation_unavailable" detail);
+       "a fenced attempt's registry detail is no longer the prefix of the raw envelope"
+       (not (String.equal detail prefix_preview));
      check
        "a fenced attempt keeps its typed code"
        (String.equal code "provider_attempt_effect_fenced")

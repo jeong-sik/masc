@@ -101,7 +101,8 @@ let identity_summary ~providers ~query =
       (List.filter
          (function
            | Identity_attached _ -> true
-           | _ -> false)
+           | Identity_not_attached | Identity_attached_without_tools | Identity_switch_unreadable
+           | Identity_switched_off -> false)
          states)
   in
   let parts =

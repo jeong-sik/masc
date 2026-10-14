@@ -10,9 +10,8 @@
     env-configurable interval
     ([MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC], default 0.25s),
     broadcasts each as an SSE event, and appends each observed serializable
-    event to the cluster-aware [.masc/agent-core-events/] store for offline/debugging.
-    The durable store prunes old date-split files on append using
-    [MASC_AGENT_CORE_EVENTS_RETENTION_DAYS] (default 30; non-positive disables).
+    event to the [.masc/agent-core-events/] store for offline/debugging.
+    The server's prune pass removes the store's day files by age.
     Runs as a background Eio fiber under [sw].
 
     Contract: the bridge fiber is a never-ending loop forked on [sw].

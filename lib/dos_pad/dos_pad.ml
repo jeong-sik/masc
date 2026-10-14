@@ -19,7 +19,7 @@ let parse_key ~button value =
     Result.map_error
       (fun message -> Printf.sprintf "%s: key %S: %s" button name message)
       (Result.map (fun () -> name) (Dos_lane.check_key_name name))
-  | other -> Error (Printf.sprintf "%s: keys holds %s, not a key name" button (kind_name other))
+  | (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) as other -> Error (Printf.sprintf "%s: keys holds %s, not a key name" button (kind_name other))
 
 let parse_binding ~button fields =
   let ( let* ) = Result.bind in
@@ -39,14 +39,14 @@ let parse_binding ~button fields =
           let* key = parse_key ~button item in
           Ok (key :: rest))
         items (Ok [])
-    | Some other -> Error (Printf.sprintf "%s: keys must be an array, got %s" button (kind_name other))
+    | Some ((Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) as other) -> Error (Printf.sprintf "%s: keys must be an array, got %s" button (kind_name other))
   in
   let* label =
     match List.assoc_opt "label" fields with
     | Some (Otoml.TomlString label) when String.trim label <> "" -> Ok label
     | Some (Otoml.TomlString _) -> Error (Printf.sprintf "%s: label is empty" button)
     | None -> Error (Printf.sprintf "%s: label is required" button)
-    | Some other -> Error (Printf.sprintf "%s: label must be a string, got %s" button (kind_name other))
+    | Some ((Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) as other) -> Error (Printf.sprintf "%s: label must be a string, got %s" button (kind_name other))
   in
   Ok { keys; label }
 
@@ -66,9 +66,9 @@ let parse contents =
         | Otoml.TomlTable fields | Otoml.TomlInlineTable fields ->
           let* binding = parse_binding ~button:name fields in
           Ok ((button, binding) :: layout)
-        | other -> Error (Printf.sprintf "%s must be a table, got %s" name (kind_name other)))
+        | (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) as other -> Error (Printf.sprintf "%s must be a table, got %s" name (kind_name other)))
       (Ok []) tables
-  | Ok other -> Error (Printf.sprintf "a layout is a table of buttons, got %s" (kind_name other))
+  | Ok ((Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) as other) -> Error (Printf.sprintf "a layout is a table of buttons, got %s" (kind_name other))
 
 let pads_dir ~base_path =
   Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "pads"

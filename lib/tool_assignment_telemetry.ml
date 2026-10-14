@@ -220,14 +220,11 @@ let get_or_create_runtime () : active_runtime =
       match store_bound_to ~base_path current with
       | Some store -> activate current store
       | None ->
-        (* RFC-0121: layout SSOT via [Config_dir_resolver.data_dir]. *)
-        let dir =
-          Filename.concat
-            (Config_dir_resolver.data_dir ~base_path)
-            "tool-events"
+        let location =
+          Dated_jsonl.Store.(at (root_of_base_path ~base_path) Root.Tool_events)
         in
-        Fs_compat.mkdir_p dir;
-        let store = Dated_jsonl.create ~base_dir:dir () in
+        Fs_compat.mkdir_p (Dated_jsonl.Store.dir location);
+        let store = Dated_jsonl.open_store location in
         let rebound = Option.is_some current.store in
         let next =
           {
@@ -375,7 +372,7 @@ let rebuild_assignment_index store =
       rebuilt := Assignment_by_agent.add agent_id assignment_id !rebuilt
     | Error error ->
       decode_failures := add_decode_failure !decode_failures error
-    | _ -> ());
+    | Ok (Called _ | Completed _) -> ());
   !rebuilt, !decode_failures
 
 let rec publish_rebuilt_assignment_index () =

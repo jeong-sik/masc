@@ -161,7 +161,8 @@ let find_completed_activity journal key =
        match event with
        | Tool_completed { idempotency_key; output_json; _ } when idempotency_key = key ->
          Some output_json
-       | _ -> None)
+       | Turn_started _ | Llm_request _ | Llm_response _ | Tool_called _ | State_transition _
+       | Checkpoint_saved _ | Error_occurred _ | Tool_completed _ -> None)
     entries (* entries is reversed, so finds most recent first *)
 ;;
 
@@ -258,7 +259,8 @@ let tool_completions journal =
        match event with
        | Tool_completed { idempotency_key; output_json; is_error; _ } ->
          Some (idempotency_key, output_json, is_error)
-       | _ -> None)
+       | Turn_started _ | Llm_request _ | Llm_response _ | Tool_called _ | State_transition _
+       | Checkpoint_saved _ | Error_occurred _ -> None)
     (events journal)
 ;;
 

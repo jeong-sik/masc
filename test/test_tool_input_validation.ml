@@ -993,8 +993,8 @@ let test_keeper_up_rejects_undeclared_field () =
 let test_keeper_down_rejects_undeclared_field () =
   assert_rejects_undeclared_field ~tool:"masc_keeper_down" ~field:"remove_metaa"
 
-(* Regression guard for the closure itself: every field observed in live
-   ~/me/.masc tool-call logs must still be accepted. Closing a schema turns
+(* Regression guard for the closure itself: every field observed in a live
+   workspace's tool-call logs must still be accepted. Closing a schema turns
    a silent drop into a hard rejection, so an under-declared property breaks
    a working call — the same failure the missing [compact] declaration
    produced above. *)
@@ -1051,8 +1051,8 @@ let test_keeper_clear_accepts_live_traffic_fields () =
 
    This door checks declared-ness, type and enum membership. The advertised
    spellings are held to their typed owner by [test_enum_mirror_sync], and
-   [Keeper_turn_up_args.resolve_requested_network_mode] parses the member it
-   receives, with its own case. *)
+   [Keeper_turn_up_args.parse] reads the member it receives into the typed
+   mode, with its own case. *)
 let test_keeper_up_accepts_network_mode () =
   match
     Tool_input_validation.validate_args

@@ -129,6 +129,8 @@ let script t context body args = evaluate t context ("arguments[0]=JSON.parse(ar
 let scene t context args = script t context "return browserScene(arguments[0]);" args
 let page t context = script t context
   "return {url:location.href,title:document.title,text:document.body?.innerText ?? '',active:document.visibilityState==='visible',scrollX,scrollY};" (obj [])
+let tab_metadata t context = script t context
+  "return {url:location.href,title:document.title,active:document.visibilityState==='visible'};" (obj [])
 (* A read that answers for the whole document. The extension runs its reads
    once the parser is done; nothing waits for the parser here, so a document
    still being parsed is refused instead of answered with the part that
@@ -222,12 +224,27 @@ let dispatch t ~verb args =
      | None->Error (Before_effect "BiDi session metadata is unavailable"))
   | Tabs_list ->
     let* current = pre (tree t) in
-    let rec rows index acc = function
-      | [] -> Ok (`List (List.rev acc))
-      | (context,id)::rest -> let* p=pre (page t context) in
-        let* url=pre (string "url" p) in let* title=pre (required "title" p) in let* active=pre (required "active" p) in
-        rows (index+1) (obj ["id",`Int id;"index",`Int index;"url",str url;"title",title;"active",active]::acc) rest in
-    rows 0 [] current
+    let rec rows index acc unavailable = function
+      | [] ->
+        let tabs = `List (List.rev acc) in
+        Ok (match unavailable with
+          | [] -> tabs
+          | _ :: _ -> obj ["tabs",tabs;"complete",`Bool false;
+              "unavailableTabs",`List (List.rev unavailable)])
+      | (context,id)::rest ->
+        (match tab_metadata t context with
+         | Error detail ->
+           rows (index+1) acc
+             (obj ["id",`Int id;"index",`Int index;"error",str detail]::unavailable) rest
+         | Ok p ->
+           let* url=pre (string "url" p) in
+           let* title=pre (required "title" p) in
+           let* active=pre (required "active" p) in
+           rows (index+1)
+             (obj ["id",`Int id;"index",`Int index;"url",str url;"title",title;"active",active]::acc)
+             unavailable rest)
+    in
+    rows 0 [] [] current
   | Page_elements -> on_tab (fun context id -> pre (
         (* The inventory the automation lane reads, so its selectors mean the
            same thing to the DOM interactions below. *)

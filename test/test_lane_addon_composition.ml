@@ -82,7 +82,7 @@ let with_fixture ?(acquire=Lane_addon_sources.acquire) ?produce_package ?(produc
                   on_created connection; Ok connection);
                 image_ready=(fun ~package:_ -> Ok ());
                 acquire;
-                recover_stop=(fun ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ())} in
+                recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ())} in
               Runtime.For_testing.with_backend backend (fun () ->
                 (* Exceptional exits cancel the Eio switch before the outer
                    cleanup removes this fresh directory. Normal exits retire

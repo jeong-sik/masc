@@ -4,8 +4,11 @@
     another.  Unified telemetry can then surface the gap even when the primary
     lane itself has no fresh rows to read. *)
 
-let store_dir masc_root =
-  Filename.concat masc_root "telemetry-coverage-gaps"
+(* [masc_root] is [<base>/.masc]. *)
+let location masc_root =
+  Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Telemetry_coverage_gaps)
+
+let store_dir masc_root = Dated_jsonl.Store.dir (location masc_root)
 
 let string_opt_json = function
   | Some value when String.trim value <> "" -> `String value
@@ -50,7 +53,7 @@ let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
         ("stale_reason", stale_reason);
       ]
     ();
-  let store = Dated_jsonl.create ~base_dir:(store_dir masc_root) () in
+  let store = Dated_jsonl.open_store (location masc_root) in
   let now = Time_compat.now () in
   let json =
     `Assoc
@@ -76,4 +79,4 @@ let read_recent ~masc_root ~n =
   else
     let dir = store_dir masc_root in
     if not (Sys.file_exists dir) then []
-    else Dated_jsonl.read_recent (Dated_jsonl.create ~base_dir:dir ()) n
+    else Dated_jsonl.read_recent (Dated_jsonl.open_store (location masc_root)) n

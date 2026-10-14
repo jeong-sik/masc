@@ -37,7 +37,9 @@ let screen_response ~config =
   | Ok result ->
       match List.find_map (function
         | Mcp_protocol.Mcp_types.ImageContent {mime_type="image/png"; data; _} -> Some data
-        | _ -> None) result.content with
+        | Mcp_protocol.Mcp_types.(
+            ImageContent _ | TextContent _ | AudioContent _ | ResourceContent _
+            | ResourceLinkContent _) -> None) result.content with
       | None -> Error (`Internal_server_error,
           Server_refusal.json ~code:"capture_failed" "DOS worker returned no PNG frame")
       | Some encoded ->

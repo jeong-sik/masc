@@ -26,6 +26,15 @@ module KeeperReactive : sig
   (** [MASC_KEEPER_REACTIVE_ENABLED], default [true]. *)
 end
 
+module KeeperWikiContents : sig
+  val enabled_env_key : string
+  (** [MASC_KEEPER_WIKI_CONTENTS_ENABLED]. *)
+
+  val enabled : unit -> bool
+  (** Whether a Keeper turn carries the wiki table of contents; default
+      [true]. *)
+end
+
 (** {1 Keeper turn} *)
 
 (** The env/TOML/default layer under [Keeper_config]'s [keeper.turn.*]

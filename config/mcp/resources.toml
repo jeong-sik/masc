@@ -81,19 +81,19 @@ title = "Event Log (JSON)"
 description = "Recent valid JSON workspace event log entries"
 mime_type = "application/json"
 
-# Library - documents in <base_path>/docs/library
+# Wiki - pages in <base_path>/.masc/wiki
 [[resources]]
-uri = "masc://library"
-name = "Library Index"
-title = "Knowledge Library"
-description = "Library documents with title, source, and tags. A document whose frontmatter does not read is listed by filename with the reason."
+uri = "masc://wiki"
+name = "Wiki Index"
+title = "Wiki"
+description = "Wiki pages with title, source, and tags. A page whose frontmatter does not read is listed by filename with the reason."
 mime_type = "text/markdown"
 
 [[resources]]
-uri = "masc://library.json"
-name = "Library Index (JSON)"
-title = "Knowledge Library (JSON)"
-description = "Library documents as JSON with title, source, author, created, and tags. A document whose frontmatter does not read carries the reason in unreadable instead."
+uri = "masc://wiki.json"
+name = "Wiki Index (JSON)"
+title = "Wiki (JSON)"
+description = "Wiki pages as JSON with title, summary, source, author, created, revision, and tags. A page whose frontmatter does not read carries the reason in unreadable instead."
 mime_type = "application/json"
 
 [[resources]]
@@ -132,17 +132,17 @@ description = "Read recent event log entries as JSON with optional limit"
 mime_type = "application/json"
 
 [[resource_templates]]
-uri_template = "masc://library/{topic}"
-name = "Library Document"
-title = "Library Document"
-description = "Read a specific library document by topic name"
+uri_template = "masc://wiki/{topic}"
+name = "Wiki Page"
+title = "Wiki Page"
+description = "Read one wiki page by topic name. The topic log reads the wiki's append-only log of page creations and updates. Each page and the log are also listed as resources."
 mime_type = "text/markdown"
 
 [[resource_templates]]
-uri_template = "masc://library/{topic}.json"
-name = "Library Document (JSON)"
-title = "Library Document (JSON)"
-description = "Read a specific library document as JSON: its content with title, source, author, created, and tags, or with the reason in unreadable when its frontmatter does not read"
+uri_template = "masc://wiki/{topic}.json"
+name = "Wiki Page (JSON)"
+title = "Wiki Page (JSON)"
+description = "Read one wiki page as JSON: its content with title, summary, source, author, created, revision, and tags, or with the reason in unreadable when its frontmatter does not read"
 mime_type = "application/json"
 
 [[resource_templates]]

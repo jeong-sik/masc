@@ -2,7 +2,9 @@ let installed checkpoint = function
   | Keeper_checkpoint_store.Installed installed ->
     if List.exists (function
          | Keeper_checkpoint_store.Commit_durability_unknown _ -> true
-         | _ -> false) installed.auxiliary
+         | Keeper_checkpoint_store.Commit_observer_failed _
+         | Keeper_checkpoint_store.Release_process_lock_failed _
+         | Keeper_checkpoint_store.Post_commit_unwind_interrupted _ -> false) installed.auxiliary
     then Error "approval input checkpoint durability could not be confirmed"
     else Ok checkpoint
   | Keeper_checkpoint_store.Not_installed _ ->
@@ -40,4 +42,7 @@ let admit ?(co_inputs = []) ~session_dir ~identity ~message (fallback : Agent_co
      | Ok checkpoint ->
        Keeper_checkpoint_store.save_agent_core_if_absent ~session_dir checkpoint
        |> installed checkpoint)
-  | Error _ -> Error "approval input could not read authoritative checkpoint identity"
+  | Error (Keeper_checkpoint_store.Ref_read_failed _)
+  | Error (Keeper_checkpoint_store.Ref_identity_invalid _)
+  | Error (Keeper_checkpoint_store.Ref_session_mismatch _)
+  | Error (Keeper_checkpoint_store.Ref_lock_failed _) -> Error "approval input could not read authoritative checkpoint identity"

@@ -2074,22 +2074,20 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
     bool
     "an explicit request creates without a TOML default"
     true
-    (A.resolve_sandbox_profile ~requested:"docker" ~fallback:None ()
+    (A.resolve_sandbox_profile
+       ~requested:Keeper_types_profile_toml_io.Docker
+       ~fallback:None
+       ()
      = Some Keeper_types_profile_toml_io.Docker);
   check
     bool
     "an explicit request overrides the TOML default"
     true
     (A.resolve_sandbox_profile
-       ~requested:"microvm"
+       ~requested:Keeper_types_profile_toml_io.Micro_vm
        ~fallback:(Some Keeper_types_profile_toml_io.Docker)
        ()
      = Some Keeper_types_profile_toml_io.Micro_vm);
-  check
-    bool
-    "\"local\" no longer names a profile"
-    true
-    (A.resolve_sandbox_profile ~requested:"local" ~fallback:None () = None);
   check
     bool
     "no request keeps the TOML default"
@@ -2098,21 +2096,7 @@ let test_requested_sandbox_profile_wins_over_the_toml_fallback () =
        ~fallback:(Some Keeper_types_profile_toml_io.Docker)
        ()
      = Some Keeper_types_profile_toml_io.Docker);
-  (* Unparseable is treated as absent rather than mapped to a profile: the tool gate
-     rejects it before this point, and inventing an isolation boundary here would hide
-     that rejection if the gate were ever bypassed. *)
-  check
-    bool
-    "an unparseable request falls back rather than choosing a boundary"
-    true
-    (A.resolve_sandbox_profile
-       ~requested:"chroot"
-       ~fallback:(Some Keeper_types_profile_toml_io.Docker)
-       ()
-     = Some Keeper_types_profile_toml_io.Docker);
-  (* Nothing stated is not a profile. It used to resolve to [Local], so every
-     omission came back as "local is disabled" -- a refusal naming a value the
-     caller never wrote. The caller now reports the missing field. *)
+  (* Nothing stated is not a profile: the caller reports the missing field. *)
   check
     bool
     "neither stated resolves to no profile at all"
@@ -2128,30 +2112,50 @@ let contains needle haystack =
 (* The form an operator edits and the parse that answers it drifted: the stem
    named two fields while [parse] required a third, so every keeper created
    through the TUI came back rejected and nothing failed until a human tried
-   it. Running the stem through [parse] moves that cost here. *)
-let test_the_creation_stem_is_a_declaration_parse_accepts () =
+   it. Running the stem through [parse] moves that cost here.
+
+   The stem leaves [network_mode] blank on purpose and [parse] refuses the
+   blank by name. So the check is that the blank is the only refusal: with a
+   mode filled in, [parse] accepts the rest of the stem. *)
+let test_the_creation_stem_is_refused_only_for_its_blank_network_mode () =
   with_test_context
   @@ fun ctx ->
-  let json =
+  let fields =
     match Yojson.Safe.from_string Keeper_turn_up_args.creation_stem with
-    | json -> json
+    | `Assoc fields -> fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      failf "the stem must be a JSON object"
     | exception Yojson.Json_error message ->
       failf "the stem must be JSON: %s" message
   in
-  match
-    Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx json
-  with
+  let parse fields =
+    Keeper_turn_up_args.parse ~docker_preflight:no_daemon_in_this_suite ctx
+      (`Assoc fields)
+  in
+  (match parse fields with
+   | Ok _ -> failf "the stem's blank network_mode must be refused"
+   | Error result ->
+     check bool "the stem is refused for its network_mode" true
+       (contains "invalid network_mode"
+          (Keeper_types_profile.tool_result_body result)));
+  let filled =
+    List.map
+      (fun (key, value) ->
+         if String.equal key "network_mode" then key, `String "none" else key, value)
+      fields
+  in
+  match parse filled with
   | Ok _ -> ()
   | Error result ->
     failf
-      "the stem the form offers must be a declaration parse accepts: %s"
+      "the stem with a network_mode filled in must be a declaration parse accepts: %s"
       (Keeper_types_profile.tool_result_body result)
 ;;
 
 (* [network_mode] was resolved twice, and the two answers disagreed: update
    read the caller's argument, create computed one from [profile_defaults] and
    dropped the caller's. A keeper created for web search landed on "none" and
-   its operator edited the TOML by hand. The four cases below hold the shared
+   its operator edited the TOML by hand. The cases below hold the shared
    resolver to what both branches now need. *)
 let test_a_requested_network_mode_survives_the_fallback () =
   let module A = Keeper_turn_up_args in
@@ -2160,7 +2164,7 @@ let test_a_requested_network_mode_survives_the_fallback () =
     "the caller's inherit wins over a declared none"
     true
     (A.resolve_requested_network_mode
-       ~requested:(Some "inherit")
+       ~requested:(Some Keeper_types_profile_sandbox.Network_inherit)
        ~sandbox_profile:Keeper_types_profile_sandbox.Docker
        ~fallback:(Some Keeper_types_profile_sandbox.Network_none)
      = Ok Keeper_types_profile_sandbox.Network_inherit)
@@ -2188,24 +2192,38 @@ let test_an_absent_network_mode_takes_the_declared_fallback () =
      = Ok Keeper_types_profile_sandbox.Network_none)
 ;;
 
+(* [parse] reads the mode once and hands the typed value on, so create and
+   update never see a value it could not read. *)
 let test_a_network_mode_rejection_names_every_accepted_spelling () =
-  let module A = Keeper_turn_up_args in
-  match
-    A.resolve_requested_network_mode
-      ~requested:(Some "lan")
-      ~sandbox_profile:Keeper_types_profile_sandbox.Docker
-      ~fallback:None
-  with
-  | Ok _ -> failf "an unparseable network_mode must not resolve"
-  | Error message ->
-    List.iter
-      (fun spelling ->
-         check
-           bool
-           (Printf.sprintf "the rejection names %s" spelling)
-           true
-           (contains spelling message))
-      Keeper_types_profile_sandbox.valid_network_mode_strings
+  with_test_context
+  @@ fun ctx ->
+  let parse value =
+    parse_stating_a_profile ctx
+      (`Assoc [ "name", `String "network-mode-parse"; "network_mode", value ])
+  in
+  (match parse (`String "lan") with
+   | Ok _ -> failf "an unparseable network_mode must not resolve"
+   | Error result ->
+     let message = Keeper_types_profile.tool_result_body result in
+     check bool "the rejection says which field" true
+       (contains "invalid network_mode" message);
+     List.iter
+       (fun spelling ->
+          check
+            bool
+            (Printf.sprintf "the rejection names %s" spelling)
+            true
+            (contains spelling message))
+       Keeper_types_profile_sandbox.valid_network_mode_strings);
+  List.iter
+    (fun value ->
+       match parse value with
+       | Ok _ -> failf "a non-string network_mode must not be read as absent"
+       | Error result ->
+         check bool "the refusal says network_mode must be a string" true
+           (contains "network_mode must be a string"
+              (Keeper_types_profile.tool_result_body result)))
+    [ `Null; `Int 1 ]
 ;;
 
 (* The pair that a create wrote and the next config load refused. [remote_ssh]
@@ -2291,7 +2309,7 @@ let test_remote_ssh_refuses_a_network_mode_it_cannot_hold () =
   let module A = Keeper_turn_up_args in
   (match
      A.resolve_requested_network_mode
-       ~requested:(Some "none")
+       ~requested:(Some Keeper_types_profile_sandbox.Network_none)
        ~sandbox_profile:Keeper_types_profile_sandbox.Remote_ssh
        ~fallback:None
    with
@@ -2310,7 +2328,7 @@ let test_remote_ssh_refuses_a_network_mode_it_cannot_hold () =
     "remote_ssh with inherit resolves"
     true
     (A.resolve_requested_network_mode
-       ~requested:(Some "inherit")
+       ~requested:(Some Keeper_types_profile_sandbox.Network_inherit)
        ~sandbox_profile:Keeper_types_profile_sandbox.Remote_ssh
        ~fallback:None
      = Ok Keeper_types_profile_sandbox.Network_inherit);
@@ -2319,7 +2337,7 @@ let test_remote_ssh_refuses_a_network_mode_it_cannot_hold () =
     "docker with none resolves"
     true
     (A.resolve_requested_network_mode
-       ~requested:(Some "none")
+       ~requested:(Some Keeper_types_profile_sandbox.Network_none)
        ~sandbox_profile:Keeper_types_profile_sandbox.Docker
        ~fallback:None
      = Ok Keeper_types_profile_sandbox.Network_none)
@@ -2789,6 +2807,63 @@ let test_input_policy () =
     [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
 ;;
 
+(* [parse] reads the profile once and hands the typed value on, so a value it
+   cannot read is refused here; create and update never see one. *)
+let test_parse_types_the_sandbox_profile () =
+  with_test_context @@ fun ctx ->
+  let parse profile =
+    parse_stating_a_profile ctx
+      (`Assoc
+         [ "name", `String "profile-parse"
+         ; "sandbox_profile", profile
+         ; "sandbox_image", `String "base"
+         ])
+  in
+  (match parse (`String "docker") with
+   | Ok parsed ->
+     check bool "typed sandbox profile" true
+       (parsed.sandbox_profile_opt = Some Keeper_types_profile_toml_io.Docker)
+   | Error result -> fail (Keeper_types_profile.tool_result_body result));
+  List.iter
+    (fun (value, refusal) ->
+       match parse value with
+       | Error result ->
+         check bool
+           (Printf.sprintf "the refusal says %S" refusal)
+           true
+           (contains refusal (Keeper_types_profile.tool_result_body result))
+       | Ok _ -> fail "an unreadable sandbox_profile was admitted")
+    [ `String "chroot", "invalid sandbox_profile"
+    ; `String "local", "invalid sandbox_profile"
+    ; `Null, "sandbox_profile must be a string"
+    ; `Int 1, "sandbox_profile must be a string"
+    ]
+;;
+
+(* [instructions] is free text, so [parse] checks only its shape. A non-string
+   used to read as absent and leave the TOML's instructions in place; it is
+   refused now. The empty string still reads as absent. *)
+let test_parse_refuses_non_string_instructions () =
+  with_test_context @@ fun ctx ->
+  let parse value =
+    parse_stating_a_profile ctx
+      (`Assoc [ "name", `String "instructions-shape"; "instructions", value ])
+  in
+  List.iter
+    (fun value ->
+       match parse value with
+       | Ok _ -> fail "a non-string instructions must not be read as absent"
+       | Error result ->
+         check bool "the refusal says instructions must be a string" true
+           (contains "instructions must be a string"
+              (Keeper_types_profile.tool_result_body result)))
+    [ `Null; `Int 1; `List [] ];
+  match parse (`String "") with
+  | Ok parsed ->
+    check (option string) "the empty string reads as absent" None parsed.instructions_arg
+  | Error result -> fail (Keeper_types_profile.tool_result_body result)
+;;
+
 let test_parse_rejects_unknown_keys () =
   with_test_context @@ fun ctx ->
   List.iter
@@ -2945,6 +3020,8 @@ let () =
             `Quick
             test_parse_rejects_unknown_keys
         ; test_case "typed input policy" `Quick test_input_policy
+        ; test_case "non-string instructions are refused" `Quick
+            test_parse_refuses_non_string_instructions
         ] )
     ; ( "sandbox_profile"
       , [ test_case
@@ -2952,13 +3029,17 @@ let () =
             `Quick
             test_requested_sandbox_profile_wins_over_the_toml_fallback
         ; test_case
+            "parse types the sandbox_profile once"
+            `Quick
+            test_parse_types_the_sandbox_profile
+        ; test_case
             "a call that states no sandbox_profile is rejected"
             `Quick
             test_parse_requires_a_sandbox_profile
         ; test_case
-            "the creation stem is a declaration parse accepts"
+            "the creation stem is refused only for its blank network_mode"
             `Quick
-            test_the_creation_stem_is_a_declaration_parse_accepts
+            test_the_creation_stem_is_refused_only_for_its_blank_network_mode
         ; test_case
             "the schema does not promise a default parse refuses"
             `Quick

@@ -98,7 +98,7 @@ module Model_id : sig
 
   val equality_key : t -> Equality_key.t
   (** The key {!equal} compares.  The provider-scoped catalog lookup
-      ([Model_catalog.lookup_for_provider_result]) answers with the row whose
+      ([Model_catalog.lookup_for_provider]) answers with the row whose
       {!Id_prefix.equality_key} equals it. *)
 
   val starts_with : prefix:Id_prefix.t -> t -> bool

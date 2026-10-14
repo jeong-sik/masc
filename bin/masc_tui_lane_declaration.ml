@@ -133,7 +133,10 @@ let replace_with_current session = match session.current with
 let parse_source text =
   try match Otoml.Parser.from_string_result text with
     | Ok (Otoml.TomlTable fields) -> Ok fields
-    | Ok _ -> Error "Declaration requires a TOML table"
+    | Ok (Otoml.TomlString _) | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+    | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
+    | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+    | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> Error "Declaration requires a TOML table"
     | Error detail -> Error detail
   with Otoml.Duplicate_key detail -> Error detail
 let application_target (session : session) =
@@ -147,10 +150,14 @@ let application_target (session : session) =
       let* fields = parse_source document.source_text in
       let* installation_id = match List.assoc_opt "id" fields with
         | Some (Otoml.TomlString id) when String.trim id <> "" -> Ok id
-        | _ -> Error "Accepted file has no valid installation ID" in
+        | Some (Otoml.TomlInteger _ | (Otoml.TomlFloat _ | (Otoml.TomlBoolean _ | (Otoml.TomlOffsetDateTime _ | (Otoml.TomlLocalDateTime _ | (Otoml.TomlLocalDate _ | (Otoml.TomlLocalTime _ | (Otoml.TomlArray _ | (Otoml.TomlTable _ | (Otoml.TomlInlineTable _ | Otoml.TomlTableArray _))))))))))
+        | None | Some (TomlString _) -> Error "Accepted file has no valid installation ID" in
       let* enabled = match List.assoc_opt "enabled" fields with
         | None -> Ok true | Some (Otoml.TomlBoolean enabled) -> Ok enabled
-        | Some _ -> Error "Accepted file has no valid activity setting" in
+        | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+        | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+        | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+        | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "Accepted file has no valid activity setting" in
       let* desired_revision = match document.desired_revision with
         | Some revision -> Ok revision | None -> Error "Accepted file has no worker input revision" in
       Ok {Masc_tui_lane_application.source_path=document.source_path;installation_id;
@@ -160,7 +167,10 @@ let draft_enabled (session : session) =
   match List.assoc_opt "enabled" fields with
   | None -> Ok true
   | Some (Otoml.TomlBoolean enabled) -> Ok enabled
-  | Some _ -> Error "enabled requires a boolean; repair the draft with E"
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "enabled requires a boolean; repair the draft with E"
 let toggle_enabled (session : session) =
   let* enabled = draft_enabled session in
   let text = Toml_line_editor.edit_root_bool session.text ~key:"enabled" ~value:(not enabled) in

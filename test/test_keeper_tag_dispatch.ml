@@ -116,12 +116,12 @@ let rec remove_tree path =
       Unix.rmdir path
     end else Sys.remove path
 
-(* The library follows the keeper's workspace config, not MASC_BASE_PATH.
+(* The wiki follows the keeper's workspace config, not MASC_BASE_PATH.
    [Workspace.default_config] points the variable at [config.base_path] in a
    test executable, so the decoy is set after [with_workspace] built the
    config: from here on the two disagree, as they do in a process whose
    environment names a different workspace than the request. *)
-let test_library_follows_config_not_env () =
+let test_wiki_follows_config_not_env () =
   with_workspace (fun config ->
     let decoy =
       Filename.concat (Filename.get_temp_dir_name ())
@@ -135,40 +135,42 @@ let test_library_follows_config_not_env () =
         Unix.putenv "MASC_BASE_PATH" (Option.value original ~default:"");
         remove_tree decoy)
       (fun () ->
-        let dispatch_library name args =
+        let dispatch_wiki name args =
           Keeper_tag_dispatch.dispatch
             ~config ~keeper_name:"test-keeper" ~agent_name:"test-keeper"
-            ~tag:Tool_dispatch.Mod_library ~name ~args
+            ~tag:Tool_dispatch.Mod_wiki ~name ~args
         in
         (match
-           dispatch_library "masc_library_add"
+           dispatch_wiki "masc_wiki_create"
              (`Assoc
-               [ "title", `String "Keeper Workspace Doc"
-               ; "content", `String "written through the keeper path"
+               [ "page", `String "keeper-workspace-doc"
+               ; "title", `String "Keeper Workspace Doc"
+               ; "summary", `String "Written through the keeper path"
+               ; "body", `String "written through the keeper path"
                ; "source", `String "observation"
                ])
          with
          | Some tr when Tool_result.is_success tr -> ()
-         | Some tr -> failf "masc_library_add should succeed: %s" (Tool_result.message tr)
-         | None -> fail "masc_library_add returned None");
-        let config_library = Tool_library.library_root ~base_path:config.base_path in
+         | Some tr -> failf "masc_wiki_create should succeed: %s" (Tool_result.message tr)
+         | None -> fail "masc_wiki_create returned None");
+        let config_wiki = Tool_wiki.wiki_root ~base_path:config.base_path in
         check bool "document written under the config workspace" true
-          (Sys.file_exists config_library
+          (Sys.file_exists config_wiki
            && Array.exists
                 (fun f -> Filename.check_suffix f ".md")
-                (Sys.readdir config_library));
+                (Sys.readdir config_wiki));
         check bool "nothing written under MASC_BASE_PATH" false
-          (Sys.file_exists (Tool_library.library_root ~base_path:decoy));
+          (Sys.file_exists (Tool_wiki.wiki_root ~base_path:decoy));
         match
-          dispatch_library "masc_library_read"
+          dispatch_wiki "masc_wiki_read"
             (`Assoc [ "topic", `String "Keeper Workspace Doc" ])
         with
         | Some tr when Tool_result.is_success tr ->
           check bool "read finds it in the config workspace" true
             (String_util.contains_substring (Tool_result.message tr)
                "written through the keeper path")
-        | Some tr -> failf "masc_library_read should succeed: %s" (Tool_result.message tr)
-        | None -> fail "masc_library_read returned None"))
+        | Some tr -> failf "masc_wiki_read should succeed: %s" (Tool_result.message tr)
+        | None -> fail "masc_wiki_read returned None"))
 ;;
 
 let () =
@@ -187,10 +189,10 @@ let () =
         `Quick
         test_task_author_uses_keeper_name;
     ];
-    "Mod_library workspace", [
+    "Mod_wiki workspace", [
       test_case
-        "library follows the config, not MASC_BASE_PATH"
+        "wiki follows the config, not MASC_BASE_PATH"
         `Quick
-        test_library_follows_config_not_env;
+        test_wiki_follows_config_not_env;
     ];
   ]

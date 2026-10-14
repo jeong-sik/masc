@@ -61,7 +61,7 @@ let handle_completion config operation = function
          ();
        let meta = completion_meta_for_coverage config operation in
        Keeper_lifecycle_hooks.run
-         ~base_dir:(Workspace.masc_root_dir config)
+         ~masc_root:(Workspace.masc_dir config)
          ?meta
          ~keeper_id:operation.keeper_name
          Keeper_lifecycle_hooks.Supervisor_cleaned;

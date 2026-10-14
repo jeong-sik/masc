@@ -176,7 +176,7 @@ data: [DONE]
        | Error detail -> `Assoc ["ok", `Bool false; "error", `String detail]);
     ignore (cleanup |> get Fun.id));
   Masc_test_deps.with_publication_recovery_registry ~sw ~fs:env#fs
-    ~registry_root:(Workspace.masc_root_dir config) @@ fun publication_registry ->
+    ~registry_root:(Workspace.masc_dir config) @@ fun publication_registry ->
   let ctx : _ Keeper_types_profile.context =
     { config; agent_name = "board-probe-operator"; sw; clock = env#clock
     ; proc_mgr = Some env#process_mgr; net = Some env#net

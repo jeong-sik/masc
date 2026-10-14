@@ -393,7 +393,14 @@ let replay_journal_status ~base_path ~approval_id replay_outcome =
     Ok Replay_journal_already_recorded
   | Error (Keeper_approval_queue_result.Grant_replay_not_consumed _) ->
     Ok Replay_grant_not_consumed
-  | Error error ->
+  | Error
+      (( Keeper_approval_queue_result.Grant_store_unavailable _
+       | Keeper_approval_queue_result.Grant_replay_projection_unavailable _
+       | Keeper_approval_queue_result.Grant_workspace_mismatch _
+       | Keeper_approval_queue_result.Grant_still_pending _
+       | Keeper_approval_queue_result.Grant_resolution_not_approved _
+       | Keeper_approval_queue_result.Grant_resolution_missing _
+       | Keeper_approval_queue_result.Grant_replay_outcome_conflict _ ) as error) ->
     Error (Keeper_approval_queue_result.grant_error_to_string error)
 ;;
 
@@ -1256,7 +1263,13 @@ module For_testing = struct
            ~request
            ~operation
            (Effect_failed detail))
-    | Ok _ -> Error "invalid_state"
+    | Ok
+        { state = Keeper_approval_queue_result.Resolution_unconsumed
+        ; replay_outcome = Some _
+        ; _
+        }
+    | Ok { state = Keeper_approval_queue_result.Resolution_consumed; _ } ->
+      Error "invalid_state"
     | Error error -> Error (Keeper_approval_queue_result.grant_error_to_string error)
   ;;
 

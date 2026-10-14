@@ -31,7 +31,11 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
         when String.equal text (Keeper_context_layers.text rendered) ->
         Issued (Keeper_context_layers.receipt_to_json rendered)
       | Block Prompt_block_id.Dynamic_context, _ -> Unavailable
-      | (Block _ | Unattributed _), _ -> Not_applicable in
+      | ((Block (Prompt_block_id.Keeper_instructions) | Unattributed _), _)
+      | (Block (Prompt_block_id.Temporal_summary), _)
+      | (Block (Prompt_block_id.Memory_os_recall), _)
+      | (Block (Prompt_block_id.Librarian_working_context), _)
+      | (Block (Prompt_block_id.Operator_note), _) | (Block (Prompt_block_id.Skill_compositions), _) -> Not_applicable in
     spans :=
       { kind
       ; offset = Buffer.length buffer

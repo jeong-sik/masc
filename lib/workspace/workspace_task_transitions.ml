@@ -190,8 +190,13 @@ let transition_task_outcome_r
             | Masc_domain.Done_action
             | Masc_domain.Cancel
             | Masc_domain.Release
-            | Masc_domain.Submit_for_verification ), _ -> Ok ())
-          [@warning "-4"]
+            | Masc_domain.Submit_for_verification ),
+            ( Masc_domain.Todo
+            | Masc_domain.Claimed _
+            | Masc_domain.InProgress _
+            | Masc_domain.AwaitingVerification _
+            | Masc_domain.Done _
+            | Masc_domain.Cancelled _ ) -> Ok ())
         in
         let now = now_iso () in
         let now_ts = Time_compat.now () in

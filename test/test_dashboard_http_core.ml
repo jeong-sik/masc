@@ -252,9 +252,9 @@ let test_keeper_up_workspace_precondition () =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let config = Workspace.default_config dir in
-    mkdir_p (Workspace.masc_root_dir config);
+    mkdir_p (Workspace.masc_dir config);
     let base = Unix.realpath config.base_path in
-    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let root = Unix.realpath (Workspace.masc_dir config) in
     let expected base root = `Assoc ["base_path", `String base; "masc_root", `String root] in
     let declaration = ["name", `String "new-keeper"; "create_only", `Bool true] in
     let args workspace = `Assoc (("expected_workspace", workspace) :: declaration) in
@@ -281,7 +281,7 @@ let test_keeper_up_workspace_precondition () =
         (`Assoc (("expected_workspace", expected base root)
           :: ("expected_workspace", expected base root) :: declaration))
        = Error Lifecycle.Invalid_workspace_precondition);
-    Unix.rmdir (Workspace.masc_root_dir config);
+    Unix.rmdir (Workspace.masc_dir config);
     check bool "unreadable receiving root fails closed" true
       (Lifecycle.validate_up_workspace ~config (args (expected base root))
        = Error Lifecycle.Workspace_precondition_failed))
@@ -290,9 +290,9 @@ let test_gate_resolve_workspace_precondition () =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let config = Workspace.default_config dir in
-    mkdir_p (Workspace.masc_root_dir config);
+    mkdir_p (Workspace.masc_dir config);
     let base = Unix.realpath config.base_path in
-    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let root = Unix.realpath (Workspace.masc_dir config) in
     let request base_path masc_root =
       `Assoc
         [ "id", `String "absent-approval"
@@ -459,9 +459,9 @@ let test_hitl_recover_route_and_preconditions () =
 let test_gate_retry_workspace_precondition () =  let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let config = Workspace.default_config dir in
-    mkdir_p (Workspace.masc_root_dir config);
+    mkdir_p (Workspace.masc_dir config);
     let base = Unix.realpath config.base_path in
-    let root = Unix.realpath (Workspace.masc_root_dir config) in
+    let root = Unix.realpath (Workspace.masc_dir config) in
     let expected base_path masc_root =
       `Assoc [ "base_path", `String base_path; "masc_root", `String masc_root ]
     in
@@ -1803,37 +1803,27 @@ let test_dashboard_query_cache_key_partitions_route_params () =
       check string "deterministic key shape"
         (Printf.sprintf
            "session:%s:[[\"actor\",\"default\"],[\"session\",\"session-a\"]]"
-           (Workspace_utils.masc_root_dir config))
+           (Workspace_utils.masc_dir config))
         session_a)
 
-(* Two clusters can share a base path — the store separates them under
-   .masc/clusters/<name>. The cache partition was the constant "default", so
-   the keys did not, and a scope switch could serve the previous workspace's
-   projection (#24504). *)
-let test_dashboard_cache_key_partitions_by_cluster () =
+(* The cache partition is the workspace's root. It was once the constant
+   "default", so two workspaces shared keys and a scope switch could serve the
+   previous workspace's projection (#24504). *)
+let test_dashboard_cache_key_partitions_by_workspace_root () =
   let dir = test_dir () in
+  let other_dir = test_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () -> cleanup_dir dir; cleanup_dir other_dir)
     (fun () ->
       let config = Workspace_utils.default_config dir in
-      let other_cluster =
-        { config with
-          backend_config =
-            { config.Workspace_utils.backend_config with
-              Backend_types.cluster_name = "cluster-b"
-            }
-        }
-      in
-      check bool "the two configs share a base path" true
-        (String.equal config.Workspace_utils.base_path
-           other_cluster.Workspace_utils.base_path);
-      check bool "but their cache keys differ" true
+      let other = Workspace_utils.default_config other_dir in
+      check bool "two workspaces get different cache keys" true
         (not
            (String.equal
               (Server_dashboard_http_core_cache.dashboard_cache_key config
                  "session" "s")
               (Server_dashboard_http_core_cache.dashboard_cache_key
-                 other_cluster "session" "s"))))
+                 other "session" "s"))))
 
 let test_dashboard_query_cache_key_encodes_delimiter_values () =
   let dir = test_dir () in
@@ -3961,7 +3951,8 @@ let test_execution_parameterized_timeout_keeps_request_metadata () =
   for _attempt = 1 to 3 do
     let timeout = Dashboard_cache.get_or_compute_with_timeout key
         ~ttl:120.0 ~clock ~timeout_sec:0.01
-        (fun () -> raise (Dashboard_cache.Compute_timeout (key, false))) in
+        (fun () ->
+          raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner })) in
     check bool "timeout does not publish a successful payload" true
       (Dashboard_cache.is_timeout_envelope timeout)
   done;
@@ -4654,10 +4645,6 @@ let test_tools_prepared_selector_scope_and_keeper_contract () =
       (String_util.contains_substring (Server_timing.to_header_value second_timing) "request_one");
     let other_base = { config with Workspace.base_path = config.base_path ^ "-other" } in
     let other_workspace = { config with Workspace.workspace_path = config.workspace_path ^ "-other" } in
-    let other_root = { config with Workspace.backend_config =
-      { config.backend_config with Backend_types.cluster_name = "other-tools-cluster" } } in
-    check bool "cluster fixture resolves a distinct MASC root" true
-      (Workspace.masc_root_dir config <> Workspace.masc_root_dir other_root);
     let expect_json query_config keeper =
       let seen = ref None in
       let fallback ~keeper ~timing:_ actual_config =
@@ -4677,7 +4664,7 @@ let test_tools_prepared_selector_scope_and_keeper_contract () =
     in
     List.iter (fun (scope, keeper) -> expect_json scope keeper)
       [ config, Some ""; config, Some "exact-keeper";
-        other_base, None; other_workspace, None; other_root, None ];
+        other_base, None; other_workspace, None ];
     Dashboard_snapshot.reset_for_test ();
     expect_json config None)
 
@@ -6107,7 +6094,11 @@ let shrink_result = Alcotest.(option (pair string int))
 
 let test_context_shrink_detection () =
   let base = shrink_base_meta () in
-  let shrink meta fields = Keeper_config_post.context_shrink_of_patch ~meta fields in
+  let shrink meta fields =
+    match Keeper_config_post.validate_dashboard_config_patch fields with
+    | Ok patch -> Keeper_config_post.context_shrink_of_patch ~meta patch
+    | Error error -> Alcotest.fail error
+  in
   check shrink_result "cap introduced where there was none is a shrink"
     (Some ("unset (full model window)", 1000))
     (shrink (with_max_override base None) [ ("max_context_override", `Int 1000) ]);
@@ -6125,31 +6116,41 @@ let test_context_shrink_detection () =
     (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
 ;;
 
-let test_config_patch_input_policy () =
-  let meta = shrink_base_meta () in
-  List.iter (fun wire ->
-    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", `String wire] with
-    | Ok () -> () | Error error -> Alcotest.fail error) ["small"; "wide"];
-  List.iter (fun value ->
-    match Keeper_config_post.validate_dashboard_config_patch ~meta ["input_policy", value] with
-    | Error _ -> () | Ok () -> Alcotest.fail "invalid config policy accepted")
-    [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
+(* The two control fields come back typed and leave the persisted fields; the
+   handler no longer reads them from the JSON again. *)
+let test_config_patch_separates_control_fields () =
+  match
+    Keeper_config_post.validate_dashboard_config_patch
+      [ ("name", `String "shrink-fixture");
+        ("confirm_context_shrink", `Bool true);
+        ("expected_config_revision", `String "revision");
+        ("max_context_override", `Int 1000) ]
+  with
+  | Error error -> Alcotest.fail error
+  | Ok patch ->
+    Alcotest.(check bool) "confirmation is read" true
+      patch.Keeper_config_post.confirm_context_shrink;
+    Alcotest.(check (list string)) "only persisted fields remain, in order"
+      [ "name"; "max_context_override" ]
+      (List.map fst patch.Keeper_config_post.config_fields);
+    Alcotest.(check bool) "the checked cap is what gets persisted" true
+      (Yojson.Safe.equal (`Int 1000)
+         (List.assoc "max_context_override" patch.Keeper_config_post.config_fields))
 ;;
 
 let test_config_patch_accepts_typed_skills () =
-  let meta = shrink_base_meta () in
   let validate fields =
-    Keeper_config_post.validate_dashboard_config_patch ~meta fields
+    Keeper_config_post.validate_dashboard_config_patch fields
   in
   let check_ok label fields =
     match validate fields with
-    | Ok () -> ()
+    | Ok _ -> ()
     | Error error -> Alcotest.failf "%s: %s" label error
   in
   let check_error label fields =
     match validate fields with
     | Error _ -> ()
-    | Ok () -> Alcotest.failf "%s unexpectedly accepted" label
+    | Ok _ -> Alcotest.failf "%s unexpectedly accepted" label
   in
   check_ok "empty object selects all" [ "skills", `Assoc [] ];
   check_ok "empty names select none"
@@ -6163,25 +6164,24 @@ let test_config_patch_accepts_typed_skills () =
   check_error "skills must be an object" [ "skills", `List [] ]
 ;;
 
-(* [remote_endpoint] takes a string or an explicit null, so it cannot sit in
-   [dashboard_config_string_fields]: that list demands a string and would
-   refuse the null an operator sends to detach the endpoint. Whether the name
+(* [remote_endpoint] takes a string or an explicit null, unlike the plain
+   string fields, which refuse the null an operator sends to detach the
+   endpoint. Whether the name
    is declared under [exec.ssh.endpoints], and whether the profile admits an
    endpoint at all, are decided later by [Keeper_turn_up_args.parse]. *)
 let test_config_patch_remote_endpoint_shape () =
-  let meta = shrink_base_meta () in
   let validate fields =
-    Keeper_config_post.validate_dashboard_config_patch ~meta fields
+    Keeper_config_post.validate_dashboard_config_patch fields
   in
   let check_ok label fields =
     match validate fields with
-    | Ok () -> ()
+    | Ok _ -> ()
     | Error error -> Alcotest.failf "%s: %s" label error
   in
   let check_error label fields =
     match validate fields with
     | Error _ -> ()
-    | Ok () -> Alcotest.failf "%s unexpectedly accepted" label
+    | Ok _ -> Alcotest.failf "%s unexpectedly accepted" label
   in
   check_ok "an endpoint name is accepted"
     [ "remote_endpoint", `String "builder" ];
@@ -6264,10 +6264,11 @@ let write_config_sync_toml config name =
 
 let post_config ?(inject_revision = true) ~sw ~clock ~state ~name body =
   let body =
+    if not inject_revision then body
+    else
     match Yojson.Safe.from_string body with
     | `Assoc fields
-      when inject_revision
-           && not (List.mem_assoc "expected_config_revision" fields) ->
+      when not (List.mem_assoc "expected_config_revision" fields) ->
       let config = Lib.Mcp_server.workspace_config state in
       let revision =
         match
@@ -6541,12 +6542,76 @@ let test_config_post_requires_expected_revision () =
   let name = "config-sync-revision-required" in
   prepare_config_sync_keeper ~sw config name;
   ignore (write_config_sync_toml config name);
-  let raw, _ =
+  let raw, json =
     post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
       ~name {|{"activation_mode":"autonomous"}|}
   in
   expect_http_status "missing revision HTTP 400" 400 raw;
+  let open Yojson.Safe.Util in
+  check bool "a refusal before the update says nothing was written" false
+    (json |> member "config_applied" |> to_bool);
+  check string "and that the lane was not touched" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+let test_config_post_refuses_invalid_json_without_a_write () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-invalid-json-refused" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let before = In_channel.with_open_bin toml_path In_channel.input_all in
+  let raw, json =
+    post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name "{"
+  in
+  expect_http_status "invalid json HTTP 400" 400 raw;
+  let open Yojson.Safe.Util in
+  check bool "the refusal names the body parse" true
+    (String.starts_with ~prefix:"invalid json: "
+       (json |> member "error" |> to_string));
+  check bool "an unparsable body says nothing was written" false
+    (json |> member "config_applied" |> to_bool);
+  check string "and that the lane was not touched" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
+  check string "the keeper TOML is unchanged" before
+    (In_channel.with_open_bin toml_path In_channel.input_all);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+(* The dashboard checks only that [input_policy] is a string; the value is
+   read by [Keeper_turn_up_args.parse], which runs before anything is
+   written. A value parse cannot read is answered 400 and the keeper TOML
+   stays as it was. *)
+let test_config_post_refuses_an_unreadable_input_policy_without_a_write () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-input-policy-refused" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let before = read_file toml_path in
+  let raw, json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"input_policy":"automatic"}|}
+  in
+  expect_http_status "unreadable input_policy HTTP 400" 400 raw;
+  let body = Yojson.Safe.to_string json in
+  check bool "the refusal names the accepted policies" true
+    (String_util.contains_substring body "input_policy must be small or wide");
+  (* The removed dashboard check said the same words and added
+     "(received string)"; its absence is what shows parse refused. *)
+  check bool "the refusal is parse's, not the dashboard's" false
+    (String_util.contains_substring body "(received");
+  (let open Yojson.Safe.Util in
+   check bool "a parse refusal says nothing was written" false
+     (json |> member "config_applied" |> to_bool);
+   check string "and that the lane was not touched" "not_attempted"
+     (json |> member "runtime_sync" |> to_string));
+  check string "keeper TOML unchanged" before (read_file toml_path);
   ignore
     (Masc.Keeper_keepalive.stop_keepalive_and_await
        ~base_path:config.base_path name)
@@ -7250,9 +7315,11 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   check (option string) "TOML is rolled back" (Some "manual")
     (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode")
 
-(* The route's own validation lets an unknown network_mode through, and the
-   update refuses it before writing anything. Nothing changed and no lane was
-   touched, so the refusal must say so. *)
+(* A network_mode the keeper's profile cannot hold passes the route and
+   [parse] (both read the value, neither knows the profile) and the update
+   refuses the pair before writing anything: this docker keeper cannot take
+   "policy". Nothing changed and no lane was touched, so the refusal must say
+   so. An unparseable spelling never gets this far; [parse] refuses it. *)
 let test_config_post_refused_before_write_says_not_applied () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-refused-before-write" in
@@ -7268,7 +7335,7 @@ let test_config_post_refused_before_write_says_not_applied () =
   let raw, json =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-      ~name {|{"activation_mode":"autonomous","network_mode":"not-a-mode"}|}
+      ~name {|{"activation_mode":"autonomous","network_mode":"policy"}|}
   in
   expect_http_status "a profile the update cannot resolve is HTTP 400" 400 raw;
   let open Yojson.Safe.Util in
@@ -7279,10 +7346,10 @@ let test_config_post_refused_before_write_says_not_applied () =
   check string "refusal names the profile, not a runtime sync failure"
     "keeper_config_profile_refused"
     (json |> member "error" |> member "code" |> to_string);
-  check bool "refusal names the rejected value" true
+  check bool "refusal names the rejected pair" true
     (String_util.contains_substring
        (json |> member "error" |> member "detail" |> to_string)
-       "not-a-mode");
+       "docker_no_network_policy");
   check string "keeper TOML is untouched" toml_before (read toml_path);
   check string "runtime.toml is untouched" runtime_before (read runtime_path)
 
@@ -7923,8 +7990,8 @@ let () =
             test_dashboard_query_cache_key_partitions_route_params;
           test_case "dashboard query cache key encodes delimiter values" `Quick
             test_dashboard_query_cache_key_encodes_delimiter_values;
-          test_case "cache key partitions by cluster" `Quick
-            test_dashboard_cache_key_partitions_by_cluster;
+          test_case "cache key partitions by workspace root" `Quick
+            test_dashboard_cache_key_partitions_by_workspace_root;
           test_case "operator snapshot default route exposes provenance" `Quick
             test_operator_snapshot_default_route_exposes_provenance;
           test_case "operator digest default route exposes provenance" `Quick
@@ -8159,7 +8226,8 @@ let () =
             test_context_shrink_detection;
           test_case "config patch accepts typed Skills" `Quick
             test_config_patch_accepts_typed_skills;
-          test_case "config patch input policy" `Quick test_config_patch_input_policy;
+          test_case "config patch separates control fields" `Quick
+            test_config_patch_separates_control_fields;
           test_case "config patch shape-checks remote_endpoint" `Quick
             test_config_patch_remote_endpoint_shape;
           test_case "config POST atomically restarts runtime" `Quick
@@ -8172,6 +8240,10 @@ let () =
             test_config_post_mid_turn_policy_needs_the_lanes_proxy;
           test_case "config POST requires expected revision" `Quick
             test_config_post_requires_expected_revision;
+          test_case "config POST refuses invalid json without a write" `Quick
+            test_config_post_refuses_invalid_json_without_a_write;
+          test_case "config POST refuses an unreadable input_policy without a write" `Quick
+            test_config_post_refuses_an_unreadable_input_policy_without_a_write;
           test_case "stale config POST loses with typed 409" `Quick
             test_config_post_rejects_second_writer_with_same_revision;
           test_case "direct assignment stale writer loses without a write" `Quick

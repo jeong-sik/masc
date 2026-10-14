@@ -11,12 +11,17 @@
 #   scripts/analyze-keeper-execute-failures.sh [base_path] [window_hours]
 #
 # Examples:
-#   scripts/analyze-keeper-execute-failures.sh /Users/dancer/me 240
-#   MASC_BASE_PATH=/Users/dancer/me scripts/analyze-keeper-execute-failures.sh
+#   scripts/analyze-keeper-execute-failures.sh /srv/masc 240
+#   MASC_BASE_PATH=/srv/masc scripts/analyze-keeper-execute-failures.sh
 
 set -euo pipefail
 
-BASE_PATH="${1:-${MASC_BASE_PATH:-$(pwd)}}"
+BASE_PATH="${1:-${MASC_BASE_PATH:-}}"
+# A value of only spaces names nothing, and nothing is read from the cwd.
+if [ -z "${BASE_PATH//[[:space:]]/}" ]; then
+  echo "error: a base_path argument or MASC_BASE_PATH is required" >&2
+  exit 2
+fi
 WINDOW_HOURS="${2:-240}"
 TOOL_CALLS_DIR="${BASE_PATH}/.masc/tool_calls"
 EXECUTE_COUNTERS_URL="${MASC_EXECUTE_COUNTERS_URL:-}"

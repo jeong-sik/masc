@@ -281,33 +281,6 @@ let queued_count_for_testing () =
   with_append_queue_lock (fun () -> Stdlib.Queue.length append_queue)
 
 
-(* RFC-0162 §3.3: default retention. The earlier opt-in policy
-   (None unless env explicitly set positive) let `.masc/tool_calls/`
-   grow unbounded; RFC-0162 §1.2 observed 30 day-files / 465 MB on a
-   developer workstation. The dashboard count_entries scan
-   (Phase 0b) and the host kern.maxfiles budget both degrade
-   monotonically with directory size.
-
-   The mli already documents "default is 30 days, and values <= 0
-   disable pruning" (lib/keeper_tool_call_log.mli:99-103), so this
-   change is a contract recovery — the ml implementation was
-   drifted from its own stated contract. Operators that want the
-   prior unbounded behavior must now opt out explicitly with
-   MASC_TOOL_CALL_LOG_RETENTION_DAYS=0. *)
-let retention_days_default = 30
-
-(* Opt-out: unset prunes after [retention_days_default]. A malformed value
-   lands on that same default and warns, rather than being the one store that
-   treated garbage differently from the two that cite this one (#27110). *)
-let retention_days () =
-  match
-    Env_config_core.get_retention_days
-      ~default:(Env_config_core.Prune_after_days retention_days_default)
-      "MASC_TOOL_CALL_LOG_RETENTION_DAYS"
-  with
-  | Env_config_core.Retain_forever -> None
-  | Env_config_core.Prune_after_days days -> Some days
-
 let iso_date_of_unix ts = Jsonl_writer.day_key ~ts
 
 (* A trailing-window file-change answer, kept between calls.
@@ -379,18 +352,20 @@ let reset_file_change_cache () =
   Stdlib.Mutex.protect file_change_cache_mu (fun () -> Hashtbl.reset file_change_cache)
 ;;
 
-let init ?cluster_name ~base_path () =
-  let cluster_name =
-    Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
-  in
-  let masc_root = Workspace_utils.masc_root_dir_from ~base_path ~cluster_name in
-  let dir = Filename.concat masc_root "tool_calls" in
+(* [masc_root] is [<base>/.masc]. *)
+let location masc_root =
+  Dated_jsonl.Store.(at (root_of_masc_dir masc_root) Root.Tool_calls)
+;;
+
+let init ~base_path () =
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  let location = location masc_root in
+  let dir = Dated_jsonl.Store.dir location in
   Atomic.set store_state { store = None; configured = Some (masc_root, dir) };
   (* A carried tally names rows in the store being replaced. *)
   reset_file_change_cache ();
   try
-    let retention_days = retention_days () in
-    let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
+    let store = Dated_jsonl.open_store location in
     Atomic.set store_state
       { store = Some store; configured = Some (masc_root, dir) }
   with
@@ -441,19 +416,18 @@ let pending_file_change_evidence_count_for_testing () =
     Invocation_table.length pending_file_change_evidence)
 ;;
 
-let store_dir () =
-  match (Atomic.get store_state).store with
-  | Some store -> Some (Dated_jsonl.base_dir store)
-  | None -> None
-;;
+let store () = (Atomic.get store_state).store
+
+let store_dir () = Option.map Dated_jsonl.base_dir (store ())
 
 let current_log_path () =
-  match store_dir () with
-  | None -> None
-  | Some dir ->
+  let state = Atomic.get store_state in
+  match state.store, state.configured with
+  | Some _, Some (masc_root, _) ->
     (* Same layout this file already reads through Jsonl_writer.day_key below;
        it was spelled out again here (#27143). *)
-    Some (Jsonl_writer.dated_path_now ~base_dir:dir).Jsonl_writer.path
+    Some (Dated_jsonl.Store.dated_path_now (location masc_root)).Dated_jsonl.Store.path
+  | Some _, None | None, (Some _ | None) -> None
 ;;
 
 let configured_masc_root () =

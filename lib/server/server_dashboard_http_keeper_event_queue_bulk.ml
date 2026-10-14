@@ -221,8 +221,21 @@ let fresh_operation_id () = Random_id.uuid_v7 ()
 
 let backup_path ~base_path operation_id =
   Filename.concat
-    (Filename.concat base_path "event-queue-bulk-backups")
+    (Config_dir_resolver.event_queue_bulk_backups_dir ~base_path)
     (operation_id ^ ".json")
+;;
+
+(* The backup folder does not exist until the first bulk operation, and the
+   atomic write stages its file inside the folder it is given, so the folder
+   is made here. Without it every confirmed bulk cancel on a workspace that
+   had never run one ended in "backup write failed" and cancelled nothing. *)
+let write_backup ~base_path ~operation_id backup =
+  let path = backup_path ~base_path operation_id in
+  match Fs_compat.mkdir_p (Filename.dirname path) with
+  | exception Sys_error detail -> Error detail
+  | () ->
+    Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string backup)
+    |> Result.map (fun () -> path)
 ;;
 
 let cancel_row ~config ~operation_id ~reason row =
@@ -316,9 +329,8 @@ let handle_post state ~actor:_ req reqd body =
                ; "rows", `List (List.map row_json rows)
                ]
            in
-           let path = backup_path ~base_path:config.Workspace.base_path operation_id in
            (match
-              Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string backup)
+              write_backup ~base_path:config.Workspace.base_path ~operation_id backup
             with
             | Error detail ->
               respond
@@ -328,7 +340,7 @@ let handle_post state ~actor:_ req reqd body =
                   ; "ok", `Bool false
                   ; "error", `String ("backup write failed: " ^ detail)
                   ])
-            | Ok () ->
+            | Ok path ->
               let results =
                 execute_rows
                   ~cancel:(cancel_row ~config)

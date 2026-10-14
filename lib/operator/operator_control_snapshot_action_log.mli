@@ -9,7 +9,6 @@ val action_result_status_to_string : action_result_status -> string
 
 type confirmation_state =
   | Preview
-  | Immediate
   | Expired
   | Denied
   | Confirmed

@@ -129,12 +129,15 @@ type BoardPostMeta = Record<string, unknown> & {
 }
 
 /** Decoded Board attachment written through the typed post argument. */
-export type BoardAttachmentKind = 'image' | 'video' | 'youtube' | 'external_link'
+export type BoardAttachmentKind =
+  | 'image' | 'video' | 'youtube' | 'external_link'
+  | 'file' | 'audio' | 'score' | 'midi'
 
 export type BoardAttachmentSource =
   | { kind: 'url'; url: string; name?: string; sizeBytes?: number; width?: number | null; height?: number | null }
-  | { kind: 'artifact'; sha256: string; bytes: number; mime: string }
+  | { kind: 'artifact'; sha256: string; bytes: number; mime: string; name?: string }
 
+/** `source.name` is the entry's optional display label (the original file name). */
 export interface BoardAttachment {
   kind: BoardAttachmentKind
   source: BoardAttachmentSource
@@ -415,27 +418,15 @@ export interface ProviderHealth {
 }
 
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
+  'heartbeat_failures',
+  'turn_failures',
   'runtime_exhausted',
   'provider_runtime_error',
   'official_client_recovery_required',
+  'turn_configuration_error',
   'fiber_unresolved',
-  'heartbeat_failures',
-  'turn_failures',
   'exception',
-  'agent_core_context_window_exceeded',
-  'agent_core_unrecognized_stop_reason',
-  'agent_core_guardrail_violation',
-  'agent_core_tripwire_violation',
-  'agent_core_input_required',
-  'gate_replay_repair_required',
-  'incomplete_tool_transcript',
-  'internal_bridge_exception',
-  'internal_contract_rejected',
-  'internal_unhandled_exception',
-  'provider_attempt_effect_fenced',
-  'receipt_persistence_failed',
-  'terminal_effect_failed',
-  'tool_correction_lost',
+  'operator_interrupt',
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
@@ -541,8 +532,15 @@ export interface KeeperTrustTerminalReason {
   next_action?: string | null
 }
 
+// The values Keeper_trust_disposition.to_wire sends, in its declaration
+// order. trust-disposition.test.ts and test_keeper_trust_disposition
+// each check this against api/fixtures/trust-dispositions.json.
+export const TRUST_DISPOSITIONS = ['Pass', 'Alert', 'Blocked', 'Degraded'] as const
+
+export type TrustDisposition = (typeof TRUST_DISPOSITIONS)[number]
+
 export interface KeeperTrustSummary {
-  disposition?: string | null
+  disposition?: TrustDisposition | null
   disposition_reason?: string | null
   operator_disposition?: string | null
   operator_disposition_reason?: string | null

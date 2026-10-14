@@ -1264,7 +1264,7 @@ let prompt_only_snapshot base_url =
        kind = \"openai_compat\"\n\
        base_url = %S\n\
        request_path = \"/v1/chat/completions\"\n\
-       api_key_env = \"\"\n\n\
+       auth = \"none\"\n\n\
        [[models]]\n\
        id_prefix = \"hitl-incapable-model\"\n\
        provider_name = \"hitl-incapable-provider\"\n\

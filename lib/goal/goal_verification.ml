@@ -526,4 +526,13 @@ let bind_review config ~goal_id =
           | Some { completion = Proof_pending pending; submitted_evidence; _ }
             when Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
             Ok (goal, (pending.request_id, pending.criterion, submitted_evidence))
-          | Some _ | None -> Error "goal has no pending proof for its current criterion"))
+          | Some
+              { completion =
+                  ( Completion_idle
+                  | Proof_pending _
+                  | Proof_proven _
+                  | Proof_refuted _
+                  | Human_confirmed _ )
+              ; _
+              }
+          | None -> Error "goal has no pending proof for its current criterion"))

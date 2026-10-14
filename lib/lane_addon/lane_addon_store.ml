@@ -523,7 +523,8 @@ let read_bindings t =
   let* names = protect (fun () ->
     match Fs_compat.exact_path_kind directory with
     | Fs_compat.Exact_missing -> Ok []
-    | _ -> Ok (Fs_compat.read_dir directory |> List.sort String.compare)) in
+    | Fs_compat.Exact_kind _ | Fs_compat.Exact_unknown ->
+        Ok (Fs_compat.read_dir directory |> List.sort String.compare)) in
   let read name =
     let path = Filename.concat directory name in
     let unreadable ?contents detail = Some (Error { path; detail; contents }) in

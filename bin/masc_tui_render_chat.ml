@@ -3458,6 +3458,33 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
      in every search and scroll-pin measurement. *)
   let polled = polled_turn_output_with_anchors state ~keeper_name ~role_label_column in
   let held = held_polled_for_keeper state keeper_name in
+  (* A held excerpt freezes its scroll anchor, not the pane width it was held
+     at. A resize re-wraps every committed row at the new width, and the
+     excerpt must follow: its inline margin is the clock plus the badge, and
+     a badge kept at the old badge column leaves the body a few cells wide on
+     a narrowed pane -- the fold task-2292 reports. The excerpt's entry is
+     derived from the preview's own speaker, so re-laying the badge out at the
+     pane's current column fixes the margin without touching the frozen text
+     or the anchor. The identity check keeps the entry physically equal while
+     the width stands, so the frame's reuse paths do not notice. *)
+  let refit_held_entry (excerpt : Masc_tui_types.held_polled_excerpt) =
+    let entry = excerpt.Masc_tui_types.held_entry in
+    let style = entry.Message_layout.style in
+    let column = Message_layout.chat_role_label_width ~pane_cells:chat_cols in
+    if entry.Message_layout.role_label
+       = Message_layout.align_role_label ~column ~style
+           entry.Message_layout.speaker
+    then entry
+    else
+      { entry with
+        Message_layout.role_label =
+          Message_layout.align_role_label ~column ~style
+            entry.Message_layout.speaker;
+        Message_layout.role_label_mark_cells =
+          Message_layout.role_label_mark_cells ~column ~style () } in
+  let held = List.map (fun excerpt ->
+      { excerpt with Masc_tui_types.held_entry = refit_held_entry excerpt })
+      held in
   (* A held excerpt keeps its place among the live rows: one the producer
      still shows replaces that row where it stands, and one the producer has
      already replaced is older than every live row, so it goes first.

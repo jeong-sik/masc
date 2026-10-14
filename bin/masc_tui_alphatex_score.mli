@@ -5,7 +5,9 @@
     notes [fret.string] with an optional [.dur], the fret one or two digits or
     [x]; chords [(…).dur]; rests [r] and [r.dur]; and bars [|]. A beat that
     says its own duration sets it for the beats after it. [\title], [\tempo]
-    and [\ts] are read and checked and carry nothing into the score.
+    and [\ts] are kept on the score: the pane draws them on the header line
+    ahead of the tab. A tempo or signature whose digits do not fit an int is
+    kept as [None] and the header omits it, the way an absent one is.
 
     Repeat signs stand in the bar they mark: [\ro] opens the repeat, [\rc N]
     closes it with the count of total plays, and [\ae n …] names the ending
@@ -93,6 +95,9 @@ type measure = {
 type t = {
   tuning : string list;  (** line names, highest string first; 1 to 12 *)
   measures : measure list;  (** never empty *)
+  title : string option;  (** [\title]; [None] when none was said *)
+  tempo : int option;  (** [\tempo] in BPM; [None] when none fit an int *)
+  time_signature : (int * int) option;  (** [\ts] numerator and denominator *)
 }
 
 val read : string -> (t, failure) result

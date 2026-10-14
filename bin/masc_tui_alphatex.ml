@@ -86,6 +86,11 @@ let right_marks (measure : Score.measure) =
   | None -> "|"
   | Some count -> ":|x" ^ string_of_int count ^ "|"
 
+let measure_width (measure : Score.measure) =
+  String.length (left_marks measure)
+  + (cells_per_unit measure * measure.units)
+  + String.length (right_marks measure)
+
 let systems ~max_width (score : Score.t) =
   let lead = name_width score + 1 in
   let rec fill systems current used = function
@@ -96,11 +101,7 @@ let systems ~max_width (score : Score.t) =
               | [] -> systems
               | _ :: _ -> List.rev current :: systems))
     | (measure : Score.measure) :: rest ->
-        let width =
-          String.length (left_marks measure)
-          + (cells_per_unit measure * measure.units)
-          + String.length (right_marks measure)
-        in
+        let width = measure_width measure in
         if lead + width > max_width then
           Error (Too_wide { needed = lead + width; available = max_width })
         else (
@@ -132,16 +133,59 @@ let draw_measure ~strings (measure : Score.measure) =
     measure.beats;
   rows
 
+(* The header ahead of the tab: what the directives said, and nothing when
+   none of them did. The title is the author's text, shown the way failure
+   sentences show words, quotes included. *)
+let header_line (score : Score.t) =
+  let pieces =
+    (match score.tempo with
+     | Some tempo -> [ Printf.sprintf "♩=%d" tempo ]
+     | None -> [])
+    @ (match score.time_signature with
+       | Some (top, bottom) -> [ Printf.sprintf "%d/%d" top bottom ]
+       | None -> [])
+    @ (match score.title with
+       | Some title -> [ Printf.sprintf "%S" title ]
+       | None -> [])
+  in
+  match pieces with
+  | [] -> None
+  | _ :: _ -> Some (String.concat " · " pieces)
+
 let draw ?(rhythm = false) (score : Score.t) systems =
   let strings = List.length score.tuning in
   let name_width = name_width score in
+  (* The numbers are physical measures, counted across the systems, so the
+     second system opens where the first one left off. *)
+  let next_number = ref 1 in
+  let number_row system =
+    let lead = name_width + 1 in
+    let width = lead + List.fold_left (fun sum m -> sum + measure_width m) 0 system in
+    let row = Bytes.make width ' ' in
+    let written_end = ref lead in
+    let place at (measure : Score.measure) =
+      let text = string_of_int !next_number in
+      next_number := !next_number + 1;
+      (* The number rides at the measure's first cell, past its left marks,
+         the way fret cells do below. *)
+      let start = at + String.length (left_marks measure) in
+      Bytes.blit_string text 0 row start (String.length text);
+      written_end := max !written_end (start + String.length text)
+    in
+    let (_ : int) =
+      List.fold_left (fun at m -> place at m; at + measure_width m) lead system
+    in
+    Bytes.sub_string row 0 !written_end
+  in
   let system_lines system =
     (* The drawn rows keep the measures' order, one block of rows per
        measure, so the barlines below join the measure they belong to. The
        rhythm row rides last, under the lowest string, and shares the
-       measures' barlines. *)
+       measures' barlines. The number row rides first, above the highest
+       string, at the measures' first cells. *)
     let drawn = List.map (draw_measure ~strings) system in
-    List.mapi
+    number_row system
+    :: List.mapi
       (fun line name ->
         let text = Buffer.create 32 in
         Buffer.add_string text name;
@@ -166,4 +210,11 @@ let draw ?(rhythm = false) (score : Score.t) systems =
 let render_tab ?(rhythm = false) ~max_width source =
   match Score.read source with
   | Error failure -> Error (Unreadable failure)
-  | Ok score -> Result.map (draw ~rhythm score) (systems ~max_width score)
+  | Ok score ->
+      Result.map
+        (fun systems ->
+           (match header_line score with
+            | Some line -> [ line ]
+            | None -> [])
+           @ draw ~rhythm score systems)
+        (systems ~max_width score)

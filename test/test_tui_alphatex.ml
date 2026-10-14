@@ -205,9 +205,11 @@ let test_the_rhythm_line_names_each_beat () =
   match Alphatex.render_tab ~rhythm:true ~max_width:60 ":4 0.6 3.6 :8 5.6 3.6" with
   | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
   | Ok lines ->
-      Alcotest.(check int) "the rhythm line is one more than the strings" 7
+      (* The measure numbers ride ahead of the strings, so the block is the
+         numbers, the six strings and the rhythm line. *)
+      Alcotest.(check int) "the rhythm line is one more than the strings" 8
         (List.length lines);
-      let rhythm = List.nth lines 6 in
+      let rhythm = List.nth lines 7 in
       (* One-letter tuning names give a lead of [name + bar] = two cells. *)
       Alcotest.(check bool) "the rhythm lead is blank, one wide as a line name" true
         (String.length rhythm >= 2 && rhythm.[0] = ' ' && rhythm.[1] = '|');
@@ -220,7 +222,7 @@ let test_the_rhythm_line_names_each_beat () =
            (fun line ->
              let cells = String.sub line 2 (String.length line - 2) in
              not (List.exists (fun letter -> String.contains cells letter) [ 'w'; 'h'; 'q'; 'e'; 's' ]))
-           (List.filteri (fun i _ -> i < 6) lines))
+           (List.filteri (fun i _ -> i > 0 && i < 7) lines))
 
 let test_the_rhythm_line_without_the_word_is_not_there () =
   let score = ":4 0.6 3.6 :8 5.6 3.6" in
@@ -230,7 +232,7 @@ let test_the_rhythm_line_without_the_word_is_not_there () =
   with
   | Error failure, _ | _, Error failure -> Alcotest.fail (Alphatex.failure_text failure)
   | Ok without, Ok with_rhythm ->
-      Alcotest.(check int) "the default keeps six lines" 6 (List.length without);
+      Alcotest.(check int) "the default keeps the numbers and six lines" 7 (List.length without);
       Alcotest.(check bool) "the default line count is one less" true
         (List.length with_rhythm = List.length without + 1);
       List.iter2
@@ -244,7 +246,7 @@ let test_the_rhythm_line_fills_between_beats () =
   match Alphatex.render_tab ~rhythm:true ~max_width:80 ":1 0.6 3.6 5.6 3.6" with
   | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
   | Ok lines ->
-      let rhythm = List.nth lines 6 in
+      let rhythm = List.nth lines 7 in
       Alcotest.(check char) "every whole beat says w at its first cell" 'w' rhythm.[2];
       Alcotest.(check char) "the second whole beat too" 'w' rhythm.[18];
       Alcotest.(check bool) "the letters are one per beat" true
@@ -269,6 +271,79 @@ let test_a_repeated_measure_the_pane_cannot_hold () =
   | Error (Too_wide _) -> ()
   | Error other -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
   | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
+
+(* {1 The header}
+
+   [\title] [\tempo] and [\ts] are kept on the score now: the pane draws
+   them on one line ahead of the tab and numbers each measure above its
+   system. *)
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack and needle_len = String.length needle in
+  let rec go index =
+    index + needle_len <= haystack_len
+    && (String.sub haystack index needle_len = needle || go (index + 1))
+  in
+  needle_len = 0 || go 0
+
+let read_score source =
+  match Score.read source with
+  | Ok score -> score
+  | Error failure -> Alcotest.fail (Score.failure_text failure)
+
+let test_directives_are_kept () =
+  let score = read_score "\\title \"Riff\" \\tempo 92 \\ts 6 8 :4 0.6" in
+  Alcotest.(check (option string)) "the title" (Some "Riff") score.title;
+  Alcotest.(check (option int)) "the tempo" (Some 92) score.tempo;
+  Alcotest.(check (option (pair int int))) "the time signature" (Some (6, 8))
+    score.time_signature
+
+let test_directives_absent_are_none () =
+  let score = read_score ":4 0.6" in
+  Alcotest.(check (option string)) "no title" None score.title;
+  Alcotest.(check (option int)) "no tempo" None score.tempo;
+  Alcotest.(check (option (pair int int))) "no time signature" None
+    score.time_signature
+
+let test_header_line_drawn () =
+  match
+    Alphatex.render_tab ~max_width:80 "\\title \"Riff\" \\tempo 92 \\ts 4 4 :4 0.6 3.6"
+  with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+      let headers =
+        List.filter (fun line -> contains_substring line "♩=") lines
+      in
+      Alcotest.(check int) "exactly one header line" 1 (List.length headers);
+      let header = List.hd headers in
+      List.iter
+        (fun piece ->
+           Alcotest.(check bool)
+             (Printf.sprintf "%S is in the header" piece)
+             true (contains_substring header piece))
+        [ "♩=92"; "4/4"; "\"Riff\"" ]
+
+let test_header_line_absent_when_no_directives () =
+  match Alphatex.render_tab ~max_width:80 ":4 0.6" with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+      Alcotest.(check bool) "no header line without directives" false
+        (List.exists (fun line -> contains_substring line "♩=") lines)
+
+let test_measure_numbers_climb_with_the_measures () =
+  match
+    Alphatex.render_tab ~max_width:80 ":4 0.6 3.6 | :4 5.6 7.6 | :4 0.6 3.6 | :4 5.6 7.6"
+  with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+      (* Without directives the first drawn row is the measure numbers. *)
+      let numbers = List.hd lines in
+      let index_of digit = String.index_opt numbers (Char.chr (Char.code '0' + digit)) in
+      (match index_of 1, index_of 2, index_of 3, index_of 4 with
+       | Some at1, Some at2, Some at3, Some at4 ->
+           Alcotest.(check bool) "the numbers climb with the measures" true
+             (at1 < at2 && at2 < at3 && at3 < at4)
+       | _ -> Alcotest.fail "not every measure number was drawn")
 
 (* {1 Failures -- each is the fence arm's reason to show the source} *)
 
@@ -447,6 +522,16 @@ let () =
             test_the_rhythm_line_without_the_word_is_not_there
         ; Alcotest.test_case "the rhythm line fills between beats" `Quick
             test_the_rhythm_line_fills_between_beats
+        ; Alcotest.test_case "directives are kept on the score" `Quick
+            test_directives_are_kept
+        ; Alcotest.test_case "directives absent are none" `Quick
+            test_directives_absent_are_none
+        ; Alcotest.test_case "the header line is drawn" `Quick
+            test_header_line_drawn
+        ; Alcotest.test_case "no header line without directives" `Quick
+            test_header_line_absent_when_no_directives
+        ; Alcotest.test_case "measure numbers climb with the measures" `Quick
+            test_measure_numbers_climb_with_the_measures
         ] )
     ; ( "failures"
       , [ Alcotest.test_case "what never closes" `Quick test_what_never_closes

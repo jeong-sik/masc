@@ -63,6 +63,9 @@ type measure = {
 type t = {
   tuning : string list;
   measures : measure list;
+  title : string option;
+  tempo : int option;
+  time_signature : (int * int) option;
 }
 
 (* A failure quotes the text that caused it, and that text is as long as its
@@ -164,7 +167,7 @@ type directive =
 type token =
   | Tk_directive of directive
   | Tk_unknown_directive of string
-  | Tk_quoted
+  | Tk_quoted of string  (* the title text, escapes resolved *)
   | Tk_effect of string  (* a [{…}] group, its text between the braces *)
   | Tk_chord of string * int option  (* the bracketed members, [.dur] in units *)
   | Tk_bar
@@ -216,7 +219,7 @@ let tokenize source =
         else Error Backslash_without_name
       else if char = '"' then begin
         (* A backslash keeps the character after it, so an escaped quote does
-           not end the string. The text itself is not drawn. *)
+           not end the string. The text is the title's, kept on the score. *)
         let rec quoted i =
           if i >= limit then None
           else if source.[i] = '\\' then quoted (i + 2)
@@ -224,7 +227,21 @@ let tokenize source =
           else quoted (i + 1)
         in
         match quoted (index + 1) with
-        | Some close -> scan (Tk_quoted :: tokens) (close + 1)
+        | Some close ->
+            let inner = String.sub source (index + 1) (close - index - 1) in
+            let text = Buffer.create (String.length inner) in
+            let rec unescape i =
+              if i < String.length inner then
+                if inner.[i] = '\\' && i + 1 < String.length inner then begin
+                  Buffer.add_char text inner.[i + 1];
+                  unescape (i + 2)
+                end else begin
+                  Buffer.add_char text inner.[i];
+                  unescape (i + 1)
+                end
+            in
+            unescape 0;
+            scan (Tk_quoted (Buffer.contents text) :: tokens) (close + 1)
         | None -> Error (Unclosed Quoted_string)
       end
       else if char = '{' then begin
@@ -440,6 +457,9 @@ type builder = {
   b_measures : (marks * sounding list) list;  (* newest measure first, each newest beat first *)
   b_beats : sounding list;  (* the open measure, newest beat first *)
   b_marks : marks;  (* the signs of the open measure *)
+  b_title : string option;  (* the last [\title] said *)
+  b_tempo : int option;  (* the last [\tempo] that fit an int *)
+  b_ts : (int * int) option;  (* the last [\ts] whose numbers fit *)
 }
 
 (* A beat that says its own length sets the length for the beats after it,
@@ -456,16 +476,17 @@ let mark_latest_beat state =
       Ok { state with b_measures = (marks, mark beat :: earlier) :: measures }
   | [], ((_, []) :: _ | []) -> Error Effect_without_note
 
-(* Digits, and nothing is done with their value: a tempo is read and not
-   drawn, so its size is not this module's to refuse. *)
+(* Digits: all of them, and the value fits an int or it does not -- a tempo
+   too large to draw reads fine and the header omits it, the way an absent
+   one is. The caller decides what the value means. *)
 let number_argument missing tokens =
   match tokens with
   | Tk_word word :: rest ->
     (if String.length word > 0 && String.for_all is_digit word
-     then Ok rest
+     then Ok (int_of_string_opt word, rest)
      else Error (Missing_argument missing))
   | [] -> Error (Missing_argument missing)
-  | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
+  | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
     Error (Missing_argument missing)
 
 (* A tuning's note names, highest string first, as written: [E4] names its
@@ -500,7 +521,7 @@ let collect_tuning tokens =
          | Some name -> collect (name :: names) rest
          | None -> List.rev names, tokens)
     | [] -> List.rev names, tokens
-    | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
+    | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
       List.rev names, tokens
   in
   collect [] tokens
@@ -559,7 +580,7 @@ let collect_endings tokens =
       | Tk_chord (_, (None | Some _))
       | Tk_directive _
       | Tk_unknown_directive _
-      | Tk_quoted
+      | Tk_quoted _
       | Tk_effect _
       | Tk_bar )
       :: _ -> Ok (List.rev found, tokens)
@@ -641,20 +662,34 @@ let read source =
           let tuning = Option.value state.b_tuning ~default:default_tuning in
           (match measures with
            | [] -> Error No_music
-           | _ :: _ -> Ok { tuning; measures })
+           | _ :: _ ->
+               Ok
+                 { tuning
+                 ; measures
+                 ; title = state.b_title
+                 ; tempo = state.b_tempo
+                 ; time_signature = state.b_ts
+                 })
     | Tk_directive Title :: rest ->
         (match rest with
-         | Tk_quoted :: after -> step state after
+         | Tk_quoted text :: after ->
+             (* The latest title wins, the way the latest tempo does. *)
+             step { state with b_title = Some text } after
          | [] -> Error (Missing_argument Title_text)
          | (Tk_directive _ | Tk_unknown_directive _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
            Error (Missing_argument Title_text))
     | Tk_directive Tempo :: rest ->
-        let* after = number_argument Tempo_number rest in
-        step state after
+        let* value, after = number_argument Tempo_number rest in
+        step { state with b_tempo = value } after
     | Tk_directive Time_signature :: rest ->
-        let* after = number_argument Time_signature_numbers rest in
-        let* after = number_argument Time_signature_numbers after in
-        step state after
+        let* top, after = number_argument Time_signature_numbers rest in
+        let* bottom, after = number_argument Time_signature_numbers after in
+        let ts =
+          match top, bottom with
+          | Some top, Some bottom -> Some (top, bottom)
+          | _ -> None
+        in
+        step { state with b_ts = ts } after
     | Tk_directive Tuning :: rest ->
         (match state.b_tuning with
          | Some _ -> Error Second_tuning
@@ -679,7 +714,7 @@ let read source =
         | []
         | ( Tk_directive _
           | Tk_unknown_directive _
-          | Tk_quoted
+          | Tk_quoted _
           | Tk_effect _
           | Tk_chord _
           | Tk_bar )
@@ -695,7 +730,7 @@ let read source =
               }
               after)
     | Tk_unknown_directive name :: _ -> Error (Unknown_directive name)
-    | Tk_quoted :: _ -> Error Quoted_without_title
+    | Tk_quoted _ :: _ -> Error Quoted_without_title
     | Tk_effect text :: rest ->
         if effect_changes_length text then Error (Unsupported_rhythm text)
         else
@@ -724,5 +759,13 @@ let read source =
         step state rest
   in
   step
-    { b_tuning = None; b_default = quarter; b_measures = []; b_beats = []; b_marks = no_marks }
+    { b_tuning = None
+    ; b_default = quarter
+    ; b_measures = []
+    ; b_beats = []
+    ; b_marks = no_marks
+    ; b_title = None
+    ; b_tempo = None
+    ; b_ts = None
+    }
     tokens

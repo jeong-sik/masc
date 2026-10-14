@@ -2504,6 +2504,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () = with
   let module Ledger = Masc.Keeper_skill_activation_ledger in
   let module Recorder = Masc.Keeper_skill_activation_recorder in
   let module Surface = Masc.Keeper_capability_surface in
+  let module Delivery = Masc.Keeper_composition_result_delivery in
   let config = Workspace.default_config fixture.base_path in
   set_source fixture ~task_id:"task-A" ~turn:41;
   Call_log.init ~base_path:fixture.base_path ();
@@ -2584,8 +2585,12 @@ pointer = "/content"
     |> require "original nested job activation recorder" in
   let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
     {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+  let physical_turn_ref = Ids.Turn_ref.make
+    ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ~absolute_turn:73 in
+  let delivery = Delivery.create ~base_path:fixture.base_path ~physical_turn_ref in
   let make_bundle () = Bundle.make_tool_bundle_for_capability_surface ~config ~meta:fixture.meta
       ~publication_recovery ~capability_surface:surface ~skill_activation_context:recorder
+      ~composition_result_delivery:delivery
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"nested owned-job fixture")
       ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
   let fixture = {fixture with make_bundle} in
@@ -2761,6 +2766,100 @@ pointer = "/content"
   check int "later runtime callback is never selected for original work" 1 !runtime_reads;
   check int "nested program creates once" 1 (effect_count fixture "create");
   check int "nested program starts once" 1 (effect_count fixture "start");
+  let transport_started = Mtime_clock.counter () in
+  let lookup tool_use_id = with_bundle fixture (fun bundle ->
+    match invoke_raw bundle ~tool_use_id ~turn:1 "keeper_composition_status"
+        (`Assoc ["request_id",`String entry.request_id]) with
+    | Ok output -> output.Agent_core.Types.content
+    | Error error -> failf "actual async status transport failed: %s" error.Agent_core.Types.message) in
+  let status_id = "status-original-result-in-new-turn" in
+  let wire = lookup status_id in
+  let observed = ref [] and errors = ref [] in
+  let observe observation = observed := observation :: !observed
+  and on_error error = errors := error :: !errors in
+  let stage_response ?(id=status_id) ?(content=wire) () =
+    let messages = [{Agent_core.Types.role=Tool;
+      content=[Agent_core.Types.ToolResult {tool_use_id=id;content;
+        outcome=Agent_core.Llm_provider.Types.Tool_succeeded;json=None;content_blocks=None}];
+      name=None;tool_call_id=None;metadata=[]}] in
+    Delivery.stage_provider delivery ~runtime_id:"later.provider.runtime" ~agent_core_turn:2
+      ~tool_results:(Masc.Keeper_run_tools_hooks.trailing_tool_result_contents messages) in
+  let commit turn = Delivery.commit_provider_response delivery ~agent_core_turn:turn ~observe ~on_error in
+  stage_response (); Delivery.clear_pending delivery; commit 2;
+  check int "failed provider request proves no child result receipt" 0 (List.length !observed);
+  stage_response (); commit 3;
+  check int "unrelated response cannot consume pending result" 0 (List.length !observed);
+  commit 2;
+  check int "matching actual provider response correlates one result" 1 (List.length !observed);
+  let observation = List.hd !observed in
+  check bool "physical result turn stays separate from original activation" true
+    (Ids.Turn_ref.equal physical_turn_ref observation.Delivery.physical_turn_ref
+     && not (Ids.Turn_ref.equal original_activation.turn_ref observation.physical_turn_ref));
+  check string "transport retains actual status call ID" status_id observation.transport_receipt.tool_use_id;
+  check string "result retains original canonical request ID" entry.request_id
+    (Delivery.request_id observation.binding);
+  check_json "transport retains original Task" (`String "task-A")
+    (Delivery.observation_to_json observation |> member "original_source_task_id");
+  check_json "transport restores original recorder Turn_ref"
+    (Ids.Turn_ref.to_yojson original_activation.turn_ref)
+    (Delivery.observation_to_json observation |> member "original_recorder" |> member "turn_ref");
+  check bool "small actual status payload delivers inline data" true
+    (observation.presentation = Delivery.Inline_result);
+  let transport_ms = Mtime.Span.to_float_ns (Mtime_clock.count transport_started) /. 1_000_000. in
+  stage_response ~id:"unbound-status-result" (); commit 2;
+  stage_response ~content:(wire ^ " ") (); commit 2;
+  check int "unbound and changed wire payloads grant no receipt" 1 (List.length !observed);
+  let invocation tool_use_id = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:1
+    ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Concurrent}
+    ~completion:Agent_core.Tool_contract.Continue_after_success in
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation status_id) ~content:wire ~observe ~on_error;
+  check int "actual official result callback keeps its own handoff" 2 (List.length !observed);
+  let manifest = wire |> Yojson.Safe.from_string |> member "artifact_manifest"
+    |> composition_reference "actual status result manifest" in
+  let marker = Tool_output.encode_for_agent_core (Tool_output.Stored manifest) in
+  Delivery.observe_official_result delivery ~runtime_id:"later.reference.runtime"
+    ~invocation:(invocation status_id) ~content:marker ~observe ~on_error;
+  check int "exact transmitted reference is correlated" 3 (List.length !observed);
+  check bool "reference handoff does not claim inline child body" true
+    ((List.hd !observed).presentation = Delivery.Manifest_reference);
+  check int "transport receipt counts actual marker bytes" (String.length marker)
+    (List.hd !observed).transport_receipt.content_bytes;
+  let repeated_id = "status-original-result-again" in
+  let repeated_wire = lookup repeated_id in
+  Delivery.observe_official_result delivery ~runtime_id:"later.official.runtime"
+    ~invocation:(invocation repeated_id) ~content:repeated_wire ~observe ~on_error;
+  check int "repeated lookup keeps a distinct actual handoff" 4 (List.length !observed);
+  check string "repeated lookup never rewrites transport identity" repeated_id
+    (List.hd !observed).transport_receipt.tool_use_id;
+  let original_run = Journal.source journal |> fun source -> source.run_reference in
+  let blob_store = Tool_blob_store.create ~base_path:fixture.base_path in
+  let original_bytes = Tool_blob_store.fetch blob_store ~sha256:original_run.sha256
+    |> require "read original authority for transport fault"
+    |> function Some bytes -> bytes | None -> fail "original transport run authority missing" in
+  check bool "remove original authority in isolated fixture" true
+    (Tool_blob_store.delete blob_store ~sha256:original_run.sha256 |> require "remove original transport authority");
+  Fun.protect ~finally:(fun () -> ignore (Tool_blob_store.put_durable blob_store
+    ~bytes:original_bytes ~mime:original_run.mime)) (fun () ->
+    stage_response (); commit 2;
+    check int "missing original authority cannot publish retained result binding" 4 (List.length !observed);
+    check int "missing original authority stays an explicit observation failure" 1 (List.length !errors));
+  stage_response (); commit 2;
+  check int "restored original authority correlates without new work" 5 (List.length !observed);
+  check int "all result correlation performs zero backend operations" ready_backend (List.length (calls fixture));
+  check int "result correlation creates no program" 1 (effect_count fixture "create");
+  check int "result correlation starts no program" 1 (effect_count fixture "start");
+  let retained = Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
+    |> require "original activation after transport correlation" in
+  check bool "transport correlation preserves original child activation" true
+    (Option.exists (fun ledger -> Ledger.activations ledger = [original_activation]) retained);
+  Printf.printf "OWNED_ASYNC_RESULT_TRANSPORT_BINDING %s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["scope",`String "synthetic CLI public prepare/run/fresh continuation/status and actual wire correlation boundary";
+     "status_lookup_and_provider_receipt_ms",`Float transport_ms;
+     "observed_transport_handoffs",`Int (List.length !observed);
+     "backend_calls_after_result_ready",`Int (List.length (calls fixture)-ready_backend);
+     "original_activation_count",`Int 1;
+     "durable_child_delivery_ledger_updated",`Bool false]));
   Printf.printf "OWNED_NESTED_SKILL_CONTINUATION %s\n%!" (Yojson.Safe.to_string (`Assoc
     ["scope",`String "synthetic CLI public nested async parent and fresh original child authority recovery";
      "prepare_to_saved_wait_ms",`Float prepare_to_wait_ms;"fresh_pulse_to_original_dag_ms",`Float recovery_ms;

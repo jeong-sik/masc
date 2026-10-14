@@ -150,10 +150,36 @@ the pre-dispatch run artifact retains the original public invocation and all
 prepared mappings. Original Task attribution comes from the canonical turn
 recorder and survives the parent's result delivery.
 
-Async child result receipts use a stable `composition-result:<original run ID>`
-parent identity across request successors. The original submission receipt only
-acknowledges acceptance and cannot mark these child results delivered. The public
-fixture separately exercises the completed result receipt and original ledger
-facts. Wiring that receipt into actual provider requests and official-client
-handoffs, and the full nested owned-job wait/fresh-supervisor scenario, remain
-separate execution evidence to obtain; source binding alone does not prove them.
+Async child activation scopes retain the logical parent
+`composition-result:<original run ID>` across request successors. The initial
+submission receipt acknowledges acceptance. A later status lookup has its own
+actual ToolResult ID; that transport ID is never rewritten into the logical
+parent ID.
+
+The status producer now binds a completed prepared result to its original
+canonical request, read-only execution journal and sealed run recorder. It
+compares every original source coordinate, both artifacts and the actual status
+manifest before retaining the current invocation ID. The provider observer
+stages the actual trailing ToolResults and emits correlation only after the
+matching successful response. A new turn or runtime attempt clears pending
+delivery. The official-client observer consumes its actual result-content
+callback. Both retain the physical turn/runtime separately from the original
+recorder. They re-read original authority before emitting correlation; unavailable
+authority, unbound IDs or different payloads do not acquire a result receipt.
+
+An inline result and a transmitted manifest reference are distinct observations.
+The reference receipt hashes the actual marker bytes, and does not claim that a
+locally fetched body reached the provider. Repeated status lookups keep distinct
+transport IDs. Correlation currently reaches the structured Keeper log; durable
+async Skill-delivery and later action attribution in the activation ledger remain
+the next integration step. The same-turn inline ledger policy is unchanged.
+
+The owned-job feature scenario now continues its public prepare/run and fresh
+supervisor recovery through a real status tool invocation, raw provider-wire
+staging and the official-result observer. It covers failed requests, unrelated
+responses, unbound/changed content, exact references, repeated lookup IDs and
+missing original run authority. It checks that no backend operation or child
+activation is recreated and emits a separate status-to-correlated-response
+measurement. A run of that fixture proves its synthetic transport scope, not an
+external provider response, real Docker or installed-runtime behavior. Record the
+actual head and run before claiming the new scenarios pass.

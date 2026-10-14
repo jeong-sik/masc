@@ -115,6 +115,7 @@ type ctx =
   ; on_tool_stream_observation :
       (Keeper_hooks_agent_core.tool_stream_observation -> unit) option
   ; skill_activation_context : Keeper_skill_activation_recorder.t
+  ; composition_result_delivery : Keeper_composition_result_delivery.t
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; identity_tool_index : Keeper_identity_tool_index.t
@@ -154,22 +155,6 @@ let receipt_of_tool_result ~tool_use_id ~content =
   Keeper_skill_activation_ledger.{ tool_use_id; content_bytes; content_sha256 }
 ;;
 
-let receipts_of_tool_message content =
-  List.filter_map
-    (function
-      | Agent_core.Types.ToolResult { tool_use_id; content; _ } ->
-        Some (receipt_of_tool_result ~tool_use_id ~content)
-      | Text _
-      | Thinking _
-      | ReasoningDetails _
-      | RedactedThinking _
-      | ToolUse _
-      | Image _
-      | Document _
-      | Audio _ -> None)
-    content
-;;
-
 (* The tool results the model response boundary answers. A turn's tool results
    are the last messages before the model's reply, but not always the single
    final one: a keeper that runs several tools in a batch, or appends a
@@ -179,13 +164,21 @@ let receipts_of_tool_message content =
    dropped the receipt whenever anything followed the results, and the skill
    ledger then never matched. Non-trailing history is not scanned: a result
    older than this turn was already offered at its own boundary. *)
-let trailing_tool_result_receipts messages =
+let trailing_tool_result_contents messages =
   let rec take acc = function
-    | { Agent_core.Types.role = Tool; content; _ } :: rest ->
-      take (List.rev_append (receipts_of_tool_message content) acc) rest
-    | ({ role = (User | System | Assistant); _ } :: _) | [] -> List.rev acc
-  in
-  take [] (List.rev messages)
+    | {Agent_core.Types.role=Tool;content;_}::rest ->
+      let results = List.filter_map (function
+        | Agent_core.Types.ToolResult {tool_use_id;content;_} -> Some (tool_use_id,content)
+        | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | Image _ | Document _ | Audio _ -> None) content in
+      take (results @ acc) rest
+    | {role=(User | System | Assistant);_}::_ | [] -> acc
+  in take [] (List.rev messages)
+;;
+
+let trailing_tool_result_receipts messages =
+  trailing_tool_result_contents messages
+  |> List.map (fun (tool_use_id,content) -> receipt_of_tool_result ~tool_use_id ~content)
 ;;
 
 module Skill_delivery_state = struct
@@ -521,6 +514,16 @@ let assemble_hooks
        gate or serializing tool execution itself. *)
     let serialize_tool_observer = create_tool_observer_serialization () in
     let skill_delivery_state = Skill_delivery_state.create () in
+    let observe_composition_result observation =
+      Log.Keeper.info
+        "Prepared composition result handoff keeper=%s evidence=%s"
+        meta.name
+        (Keeper_composition_result_delivery.observation_to_json observation |> Yojson.Safe.to_string)
+    in
+    let composition_delivery_error error =
+      Log.Keeper.warn "Prepared composition result handoff refused keeper=%s detail=%s"
+        meta.name (Keeper_composition_result_delivery.error_to_string error)
+    in
     let observe_skill_delivery ~runtime_id ~boundary tool_results =
       (* Every handoff is a new causal boundary. A failed ledger observation
          cannot leave ids from an older successful handoff active. *)
@@ -551,6 +554,8 @@ let assemble_hooks
           (Keeper_skill_activation_recorder.error_to_string error)
     in
     let stage_skill_delivery_on_wire ~runtime_id ~agent_core_turn messages =
+      Keeper_composition_result_delivery.stage_provider ctx.composition_result_delivery
+        ~runtime_id ~agent_core_turn ~tool_results:(trailing_tool_result_contents messages);
       Skill_delivery_state.stage
         skill_delivery_state
         ~runtime_id
@@ -558,6 +563,9 @@ let assemble_hooks
         (trailing_tool_result_receipts messages)
     in
     let observe_official_client_result_handoff ~runtime_id ~invocation ~content =
+      Keeper_composition_result_delivery.observe_official_result ctx.composition_result_delivery
+        ~runtime_id ~invocation ~content ~observe:observe_composition_result
+        ~on_error:composition_delivery_error;
       let tool_use_id =
         Agent_core.Tool_contract.Invocation.tool_use_id invocation
       in
@@ -636,6 +644,7 @@ let assemble_hooks
          it. A failover candidate must receive the Skill result itself before
          one of its actions can complete that activation's evidence. *)
       Skill_delivery_state.begin_runtime_attempt skill_delivery_state;
+      Keeper_composition_result_delivery.clear_pending ctx.composition_result_delivery;
       ctx.on_runtime_attempt attempt
     in
     (* [client_reported_in_attempt] says the attempt's client reported on its
@@ -814,6 +823,9 @@ let assemble_hooks
             (fun event ->
               match event with
               | Agent_core.Hooks.AfterTurn { turn; _ } ->
+                Keeper_composition_result_delivery.commit_provider_response ctx.composition_result_delivery
+                  ~agent_core_turn:turn ~observe:observe_composition_result
+                  ~on_error:composition_delivery_error;
                 Skill_delivery_state.commit_model_response
                   skill_delivery_state
                   ~agent_core_turn:turn
@@ -887,6 +899,7 @@ let assemble_hooks
                    exact provider request. Do not carry causal candidates into a
                    later Agent Core turn. *)
                 Skill_delivery_state.begin_turn skill_delivery_state;
+                Keeper_composition_result_delivery.clear_pending ctx.composition_result_delivery;
                 (* Reset the in-turn FSM before this hook writes the next agent-core
                    turn's runtime, policy, and prompt phases. *)
                 Keeper_registry.mark_agent_core_turn_started

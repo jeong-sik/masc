@@ -88,6 +88,11 @@ val load
 
 val source : t -> source
 
+val validate_request : t -> Keeper_msg_async.entry -> (unit, error) result
+(** Read-only comparison of the canonical request with every immutable source
+    coordinate, including the original Task, invocation and both artifacts.
+    This does not bind a worker or grant continuation. *)
+
 val waiting_continuation : t -> (continuation option, error) result
 (** Read only canonical current-owner terminal proof and exact journal state.
     [None] means no bound request, an active worker, or a settled worker that

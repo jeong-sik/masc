@@ -127,6 +127,8 @@ val make_tools
           result)
   -> ?record_nested_composition_activation:Keeper_composition_nested_run.record_activation
   -> ?nested_activation_context:Keeper_skill_activation_recorder.t
+  -> ?result_delivery:Keeper_composition_result_delivery.t
+       (** The owning turn's typed status-result correlation registry. *)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
@@ -183,6 +185,7 @@ module Compatibility : sig
             result)
     -> ?record_nested_composition_activation:Keeper_composition_nested_run.record_activation
     -> ?nested_activation_context:Keeper_skill_activation_recorder.t
+    -> ?result_delivery:Keeper_composition_result_delivery.t
     -> config:Workspace.config
     -> meta:Keeper_meta_contract.keeper_meta
     -> publication_recovery:

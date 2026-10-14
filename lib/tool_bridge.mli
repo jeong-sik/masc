@@ -56,6 +56,18 @@ val attach_artifact_manifest :
     envelopes carry canonical class/next move without repeating that data as
     message text. Opaque failure messages use [Inline_with_reference]. *)
 
+val artifact_manifest_reference :
+  Tool_result.result ->
+  (Tool_output.artifact_ref * Tool_output.artifact_projection, string) result
+(** Read the producer's typed manifest and presentation from result metadata.
+    This performs no storage, projection or artifact fetch. *)
+
+val artifact_result_envelope :
+  reference:Tool_output.artifact_ref -> structured_content:Yojson.Safe.t ->
+  ?content:string -> unit -> string
+(** Canonical inline wire envelope shared by the result projection and its
+    delivery observer. Does not project or fetch a referenced body. *)
+
 val maybe_externalize :
   ?base_path:string ->
   ?stored_preview:string ->

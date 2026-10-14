@@ -1508,11 +1508,20 @@ let rec async_worker_result
     | Some _,Error failure ->
       (match failure.Executor.cause with
        | Executor.Tool_did_not_complete node ->
-         (match Plan.contract plan node.node_id,node.result with
-          | Some {target=Plan.Child_submission _;_},Tool_result.Failed _
-          | Some {target=Plan.Child_result _;_},Tool_result.Failed {class_=Workflow_rejection;_} ->
-            Some (Tool_result.message node.result)
-          | (None | Some {target=(Descriptor_target _ | Child_submission _ | Child_result _);_}),_ -> None)
+         (match Plan.contract plan node.node_id with
+          | None -> None
+          | Some {target=Plan.Descriptor_target _;_} -> None
+          | Some {target=Plan.Child_submission _;_} ->
+            (match node.result with
+             | Tool_result.Failed _ -> Some (Tool_result.message node.result)
+             | Tool_result.Completed _ | Tool_result.Deferred _ -> None)
+          | Some {target=Plan.Child_result _;_} ->
+            (match node.result with
+             | Tool_result.Failed {class_=Workflow_rejection;_} ->
+               Some (Tool_result.message node.result)
+             | Tool_result.Failed {class_=(Dependency_unavailable | Policy_rejection
+                 | Runtime_failure | Operator_cancelled);_}
+             | Tool_result.Completed _ | Tool_result.Deferred _ -> None))
        | Run_journal_rejected _ | Node_observation_failed _ | Plan_execution_failed _
        | Outer_completion_mismatch _ -> None)
     | (None | Some _),(Ok _ | Error _) -> None in

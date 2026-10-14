@@ -10,18 +10,22 @@ TUI 어디에서든 ```alphatex 코드 펜스가 들어간 텍스트(Board 글·
 
 ## 무엇을 그리는가
 
-```alphatex 펜스 안에서 지원하는 문법은 다음 일곱 지시자와 노트 토큰뿐입니다
-(masc_tui_alphatex_score.ml `directive_of_word` 직독):
+```alphatex 펜스 안에서 인정하는 문법은 다음 일곱 지시자와 노트 토큰뿐입니다
+(masc_tui_alphatex_score.ml `directive_of_word` 직독). 화면에 그려지는 것은
+줄 레이블과 마디 기호뿐이고, 세 지시자는 파싱만 하고 그리지 않습니다:
 
-| 지시자 | 인자 | 화면 효과 |
+| 지시자 | 인자 | 렌더러가 하는 일 |
 |---|---|---|
-| `\title "…"` | 따옴표 문자열 | 악보 상단에 제목(공백 뒤) |
-| `\tempo 96` | 숫자 | 제목 뒤 `96 BPM` |
-| `\ts 4 4` | 숫자 둘 | 박자 표기 |
-| `\tuning E A D G B e` | 여섯 음이름 | 줄 튜닝 표기 |
+| `\tuning E A D G B e` | 여섯 음이름 | 줄 레이블로 그립니다(기본 e B G D A E) |
 | `\ro` | 없음 | 도돌이표 시작 `|:` |
 | `\rc 2` | 반복 횟수 | 도돌이표 끝 `:|x2|` |
 | `\ae (1 2)` | 괄호 숫자 목록 | 대체 엔딩 브래킷 `1,2|` |
+| `\title "…"` | 따옴표 문자열 | 파싱만 하고 그리지 않습니다 |
+| `\tempo 96` | 숫자 | 파싱만 하고 그리지 않습니다 |
+| `\ts 4 4` | 숫자 둘 | 파싱만 하고 그리지 않습니다 |
+
+아래 예시 화면에도 제목과 BPM이 보이지 않는 것이 정상입니다. 표의 화면
+효과는 2026-10-14 개발판 실측 캡처와 score.ml 직독으로 대조했습니다.
 
 노트는 `프렛.줄` 한 쌍입니다. 줄 번호는 **1 = 고음 e 줄, 6 = 저음 E 줄**이고
 표준 alphaTex와 같습니다. `:4 0.1 3.2 5.3 0.4`는 "4분음표 4개: e줄 0프렛,
@@ -60,7 +64,8 @@ B줄 3프렛, G줄 5프렛, e줄 0프렛"입니다. 띄어쓰기로 여러 노�
 ```
 ```
 
-Board 본문과 채팅 양쪽에서 실제로 그려진 화면:
+Board 본문과 채팅 양쪽에서 실제로 그려진 화면(소스의 `\tempo 96`는
+파싱만 되고 화면에는 나오지 않습니다):
 
 ```
 ┌─ alphaTex 악보 ──────────────────────────────────────────
@@ -127,7 +132,8 @@ Board 본문과 채팅 양쪽에서 실제로 그려진 화면:
 
 - 근거: task-2335 실측 `evidence/task-2335-alphatex-guide/`(PTY 캡처 스크립트
   `capture.py`, 렌더 화면 `board-post.txt`·`chat-alphatex.txt`, 판정
-  `report.json` — 12/12 단언 통과)
+  `report.json` — 11 PASS(보드 7 + 채팅 4), report의 `binary_commit`이 캡처
+  빌드의 head 40자)
 - 용어: `docs/spec/00-glossary.md` "alphatex" 항목(#43108)
 - 렌더러: `bin/masc_tui_alphatex.ml`, `bin/masc_tui_alphatex_score.ml`,
   `bin/masc_tui_markdown.ml`(fence 분류)

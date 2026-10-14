@@ -15,8 +15,7 @@ type shell_projection_trace_status =
   | Shell_trace_failed
 
 type shell_projection_trace =
-  { trace_light : bool
-  ; trace_started_at : float
+  { trace_started_at : float
   ; mutable trace_status : shell_projection_trace_status
   ; mutable trace_active : string list
   ; mutable trace_completed : shell_projection_timing list
@@ -25,7 +24,6 @@ type shell_projection_trace =
 
 type shell_projection_trace_snapshot =
   { snapshot_status : shell_projection_trace_status
-  ; snapshot_light : bool
   ; snapshot_elapsed_ms : int
   ; snapshot_active : string list
   ; snapshot_completed : shell_projection_timing list
@@ -61,10 +59,9 @@ let timing_log timings =
     |> String.concat ","
 ;;
 
-let start ~cache_key ~light =
+let start ~cache_key =
   let trace =
-    { trace_light = light
-    ; trace_started_at = Unix.gettimeofday ()
+    { trace_started_at = Unix.gettimeofday ()
     ; trace_status = Shell_trace_running
     ; trace_active = []
     ; trace_completed = []
@@ -109,7 +106,6 @@ let snapshot cache_key =
       let elapsed_until = Option.value finished_at ~default:now_ts in
       Some
         { snapshot_status = trace.trace_status
-        ; snapshot_light = trace.trace_light
         ; snapshot_elapsed_ms =
             int_of_float ((elapsed_until -. trace.trace_started_at) *. 1000.0)
         ; snapshot_active = trace.trace_active

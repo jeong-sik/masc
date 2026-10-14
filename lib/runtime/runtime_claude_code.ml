@@ -604,27 +604,103 @@ let parse_subscription json =
     Ok { authentication; subscription_type; api_provider }
 ;;
 
-let read_subscription ~mgr ~cwd config =
-  try
-    Eio.Process.parse_out
-      mgr
-      Eio.Buf_read.take_all
-      ~is_success:(fun code -> code = 0 || code = 1)
-      ~cwd
-      ~env:(client_environment config.account_home)
-      [ config.cli_path
-      ; Runtime_native_tools.claude_setting_sources_arg
-      ; "auth"; "status"; "--json" ]
+(* The CLI's stderr is the only witness when its stdout stops mid-document:
+   keep an excerpt with the probe's failures so the next truncated probe
+   names the crash instead of only the cut. The excerpt is flattened to one
+   line, capped at 300 bytes on a UTF-8 boundary, with control bytes
+   neutralised: the detail is shown in the UI. *)
+let subscription_stderr_limit = 300
+
+(* Back a byte cut up to a UTF-8 character boundary, so the excerpt never
+   ends mid-codepoint on valid input. *)
+let utf8_cut text limit =
+  let limit = min limit (String.length text) in
+  if limit = String.length text then limit
+  else begin
+    let pos = ref limit in
+    while !pos > 0 && Char.code text.[!pos] land 0xC0 = 0x80 do
+      decr pos
+    done;
+    let lead = Char.code text.[!pos] in
+    let width =
+      if lead land 0x80 = 0 then 1
+      else if lead land 0xE0 = 0xC0 then 2
+      else if lead land 0xF0 = 0xE0 then 3
+      else 4
+    in
+    if !pos + width > limit then !pos else limit
+  end
+
+let subscription_stderr_excerpt stderr_buf =
+  let mapped =
+    Buffer.contents stderr_buf
     |> String.trim
-    |> parse_json ~stage:"auth status"
-    |> fun result -> Result.bind result parse_subscription
+    |> String.map (fun char ->
+      if char = '\n' || char = '\r' || char = '\t' then ' '
+      else if Char.code char < 0x20 || char = '\x7f' then '?'
+      else char)
+  in
+  if mapped = "" then None
+  else if String.length mapped <= subscription_stderr_limit then Some mapped
+  else Some (String.sub mapped 0 (utf8_cut mapped subscription_stderr_limit) ^ "…")
+
+let read_subscription ~mgr ~cwd config =
+  let stderr_buf = Buffer.create 256 in
+  let enrich ~excerpt result =
+    match result, excerpt with
+    | Error (Protocol_error { stage; detail }), Some text ->
+        true, Error (Protocol_error { stage; detail = detail ^ "; stderr: " ^ text })
+    | Error (Protocol_error _), None -> false, result
+    | ( Ok _
+      | Error
+          ( Invalid_config _ | Spawn_failed _ | Subscription_required _
+          | Unsupported_control_request _ | Turn_transport_interrupted _
+          | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Unhandled_exception _ | Timeout _ ) ),
+      (None | Some _) -> false, result
+  in
+  try
+    let stdout =
+      Eio.Process.parse_out
+        mgr
+        Eio.Buf_read.take_all
+        ~is_success:(fun code -> code = 0 || code = 1)
+        ~cwd
+        ~stderr:(Eio.Flow.buffer_sink stderr_buf)
+        ~env:(client_environment config.account_home)
+        [ config.cli_path
+        ; Runtime_native_tools.claude_setting_sources_arg
+        ; "auth"; "status"; "--json" ]
+    in
+    (* parse_out joins its stderr copier before it returns, so the buffer is
+       drained here. *)
+    let excerpt = subscription_stderr_excerpt stderr_buf in
+    let attached, result =
+      stdout
+      |> String.trim
+      |> parse_json ~stage:"auth status"
+      |> fun result -> Result.bind result parse_subscription
+      |> enrich ~excerpt
+    in
+    (* Stderr that the detail does not carry still reaches the debug log:
+       success-path warnings were inherited by the server log before this
+       probe captured its stderr. *)
+    if not attached then Option.iter (Log.Runtime_agent.debug "auth probe stderr: %s") excerpt;
+    result
   with
   | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Exn.Io
       (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
     Error (Invalid_config (Printf.sprintf "executable %S was not found" executable))
-  | exn -> Error (Spawn_failed (Printexc.to_string exn))
+  | exn ->
+      (* A crashed probe may still have told its stderr why: keep what the
+         copier had drained, best-effort past this point. *)
+      let detail = Printexc.to_string exn in
+      (match subscription_stderr_excerpt stderr_buf with
+       | None -> Error (Spawn_failed detail)
+       | Some text -> Error (Spawn_failed (detail ^ "; stderr: " ^ text)))
 ;;
 
 (* Claude Code reads two keys from a tools/list entry's [_meta]

@@ -1344,6 +1344,42 @@ let test_unparsable_file_holds_every_declaration_but_not_inspect () =
     await_ready clock config id;
     detach clock config id)
 
+(* Binding inventory issues name their failure kind so publication contention
+   (identity-changed, confirmed-absent) reads apart from real damage (parse,
+   non-regular) without opening the store (task-2382). The production path is
+   exercised: a corrupt record and a replaced file land in one issues list and
+   the two details differ by their bracketed tag. *)
+let test_binding_inventory_issues_carry_failure_kind_tags () =
+  with_fixture (fun _ _ config _directory _packages _state ->
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    Fs_compat.mkdir_p (Filename.concat root "bindings");
+    write (Filename.concat (bindings_directory config) "corrupt.json") "{not json";
+    let replaced = Filename.concat (bindings_directory config) "replaced.json" in
+    write replaced "{}";
+    Unix.unlink replaced;
+    Fs_compat.mkdir_p replaced;
+    let inventory = Store.For_testing.binding_inventory ~root in
+    check bool "tagged issues still make the inventory incomplete" false inventory.complete;
+    check int "both damaged records are reported" 2 (List.length inventory.issues);
+    let detail_of name =
+      List.find (fun (path, _) -> Filename.basename path = name) inventory.issues |> snd in
+    let parse = detail_of "corrupt.json" in
+    let non_regular = detail_of "replaced.json" in
+    check bool "a stable corrupt record is tagged parse"
+      true (String.length parse >= 8 && String.sub parse 0 8 = "[parse] ");
+    check bool "a replaced file is tagged non-regular"
+      true (String.length non_regular >= 24
+            && String.sub non_regular 0 24 = "[non-regular directory] ");
+    check bool "parse damage and non-regular damage read apart"
+      true (parse <> non_regular);
+    let identity = Store.For_testing.issue_detail
+        { Fs_compat.failure =
+            Fs_compat.Filesystem_identity_changed { path = "unused" }
+        ; close_failure = None } in
+    check bool "identity-changed carries its own tag"
+      true (String.length identity >= 19
+            && String.sub identity 0 19 = "[identity-changed] "))
+
 let test_unlistable_binding_store_stops_reconciliation () =
   with_fixture (fun _ _ config directory packages state ->
     let manifest = package packages "ready" in
@@ -1423,4 +1459,6 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_unparsable_file_holds_every_declaration_but_not_inspect;
   test_case "a binding store that cannot be listed stops reconciliation" `Quick
     test_unlistable_binding_store_stops_reconciliation;
+  test_case "binding inventory issues carry failure-kind tags" `Quick
+    test_binding_inventory_issues_carry_failure_kind_tags;
 ]]

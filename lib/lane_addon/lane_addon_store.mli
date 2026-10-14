@@ -96,7 +96,10 @@ val binding_inventory : root:string -> binding_inventory
     containing directory (or its first existing ancestor) to reestablish
     publication durability after an uncertain rename or unlink by a previous
     process. Read/sync failures preserve readable siblings but make [complete]
-    false. Offload filesystem I/O. These observed bytes do not authorize
+    false. Issue details carry a bracketed failure-kind tag
+    ([identity-changed] / [absent-unconfirmed] / [parse] / [non-regular …] /
+    [unreadable]) so publication contention reads apart from real damage.
+    Offload filesystem I/O. These observed bytes do not authorize
     mutations. *)
 type observation_write_error =
   | Observation_rejected of string
@@ -146,6 +149,7 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
 module For_testing : sig
   val remove_binding : sync_parent:(string -> unit) -> t -> instance_id:string -> (unit, string) result
   val binding_inventory : sync_parent:(string -> unit) -> root:string -> binding_inventory
+  val issue_detail : Fs_compat.owned_regular_file_read_error -> string
   val write : sync_parent:(string -> unit) -> t -> string -> string -> (unit, string) result
   val load_sampling_request_bounded :
     sync_file:(Unix.file_descr -> unit) -> sync_parent:(Unix.file_descr -> unit) ->

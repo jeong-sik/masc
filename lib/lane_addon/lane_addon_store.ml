@@ -293,6 +293,27 @@ type binding_inventory = {
   issues : (string * string) list;
   complete : bool;
 }
+
+(* Binding inventory issue details carry a bracketed failure-kind tag so a
+   recurring application.kind=unknown signal can be attributed to publication
+   contention ([identity-changed], [absent-unconfirmed]) versus real damage
+   ([parse], [non-regular …], [unreadable]) without opening the store. Pure
+   over the fs_compat failure variants: no paths and no message strings are
+   sniffed. *)
+let issue_detail (error : Fs_compat.owned_regular_file_read_error) =
+  let failure = error.Fs_compat.failure in
+  let tag =
+    match failure with
+    | Fs_compat.Filesystem_identity_changed _ -> "identity-changed"
+    | Fs_compat.Path_is_not_regular_file { kind; _ } ->
+        if kind = Unix.S_DIR then "non-regular directory"
+        else "non-regular " ^ Fs_compat.file_kind_to_string kind
+    | Fs_compat.Ownership_boundary_rejected _
+    | Fs_compat.Owned_path_owner_mismatch _
+    | Fs_compat.Owned_path_writable_by_others _
+    | Fs_compat.Owned_file_operation_failed _ -> "unreadable" in
+  "[" ^ tag ^ "] " ^ Fs_compat.owned_regular_file_read_error_to_string error
+
 let binding_inventory_with ~sync_parent ~root =
   let directory = Filename.concat root "bindings" in
   let listed = protect (fun () ->
@@ -312,9 +333,11 @@ let binding_inventory_with ~sync_parent ~root =
          an issue that makes the reading incomplete. *)
       let read_record path =
         let attempt () =
-          Fs_compat.load_owned_regular_file_range
-            ~ownership_root:root ~offset:0 ~max_bytes:max_int path
-          |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+          match Fs_compat.load_owned_regular_file_range
+                  ~ownership_root:root ~offset:0 ~max_bytes:max_int path with
+          | Error error -> Error (issue_detail error)
+          | Ok (Some { Fs_compat.content; _ }) -> Ok (Some content)
+          | Ok None -> Ok None in
         let rec retry = function
           | 0 -> attempt ()
           | remaining ->
@@ -323,7 +346,10 @@ let binding_inventory_with ~sync_parent ~root =
              | Error _ when remaining > 0 -> retry (remaining - 1)
              | Error _ as failure -> failure) in
         match retry 1 with
-        | Ok (Some contents) -> Ok (Some (Yojson.Safe.from_string contents.content))
+        | Ok (Some contents) ->
+            (try Ok (Some (Yojson.Safe.from_string contents))
+             with Yojson.Json_error detail ->
+               Error ("[parse] " ^ detail))
         | Ok None ->
             (* The listing saw the name and the record is gone: a rename
                source or an unlink. Report absence only when a fresh look
@@ -332,7 +358,7 @@ let binding_inventory_with ~sync_parent ~root =
             (match Fs_compat.exact_path_kind path with
              | Fs_compat.Exact_missing -> Ok None
              | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ ->
-               Error "binding disappeared during inventory read")
+               Error "binding disappeared during inventory read [absent-unconfirmed]")
         | Error _ as failure -> failure in
       let records,issues = List.fold_left (fun (records,issues) name ->
         if not (Filename.check_suffix name ".json") then records,issues
@@ -848,6 +874,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
 module For_testing = struct
   let remove_binding = remove_binding_with
   let binding_inventory = binding_inventory_with
+  let issue_detail = issue_detail
   let write = write_with
   let load_sampling_request_bounded = load_sampling_request_bounded_with
   let save_action = save_action_with

@@ -473,24 +473,35 @@ that shows numbers, type `0`).
   <url>` is a different run: it writes `[web_search]` into `runtime.toml`.
   The next two rows are those writes, offered as choices.
 - **z.ai web search (not marked).** Shown only when `ZAI_API_KEY` is set where the
-  setup runs, the variable the GLM models already read. Confirming it runs
-  `masc web-search-setup --provider zai`, which writes `web_search.provider = "zai"`,
-  so z.ai is tried first and the other providers follow in their usual order.
-  Each search spends the search allowance of that GLM Coding Plan. The key is
-  never stored: the server reads it from its environment.
-- **SearXNG in Docker (not marked).** Shown when Docker answers and no SearXNG
-  does yet. Confirming it pulls a pinned image and starts a container named
-  `masc-searxng` on `127.0.0.1:8888` with settings written under
-  `<workspace>/.masc/searxng/`, waits until a JSON search is answered, and then
-  writes `web_search.searxng_url`. It needs no key. SearXNG asks other search
-  engines for its results and they can refuse a server's requests, so it can
-  answer with few or no results: on the computer this was measured on, one
-  engine answered and two refused. SearXNG is then tried before the providers
-  that need a key, and behind a provider named in `web_search.provider`. A
-  SearXNG that already answers there is offered as a row that only writes the
-  address. With Docker not running, the row is not shown. A `masc-searxng`
-  container that is paused, restarting or in a state Docker will not start from
-  is not offered either: the setup says which Docker command looks at it.
+  setup runs. The GLM models read the same variable. Confirming it runs
+  `masc web-search-setup --provider zai`, which sets `web_search.provider = "zai"`
+  and replaces a provider set there. z.ai is then tried first and the other
+  providers follow in their usual order. If `web_search.provider_order` is set,
+  it decides the order and the choice changes nothing. Each search spends the
+  search allowance of that GLM Coding Plan. The key is not stored: the server
+  reads it from its environment.
+- **SearXNG (not marked).** It needs no key. SearXNG asks other search engines
+  for its results, and they can refuse a server's requests, so it can answer
+  with few or no results. On the arm64 Mac it was measured on (2026-10-14), one
+  engine answered and two refused. What the row does depends on what is there:
+  - *No container, Docker answers:* it pulls a pinned image (about 380 MB on
+    disk), starts a container named `masc-searxng` on `127.0.0.1:8888` with
+    `--restart unless-stopped`, writes its settings under
+    `<workspace>/.masc/searxng/`, waits until a JSON search is answered, and
+    then writes `web_search.searxng_url`.
+  - *A stopped `masc-searxng` container:* it runs `docker start` and nothing
+    else, with no pull and nothing written, and then writes `web_search.searxng_url`.
+  - *A SearXNG that already answers at `http://127.0.0.1:8888`:* the row only
+    writes the address. It is shown whether or not Docker runs.
+
+  The address replaces a `web_search.searxng_url` set there. SearXNG is then
+  tried before the providers that need a key, and behind a provider named in
+  `web_search.provider`. An explicit `web_search.provider_order` outranks both.
+  In every other case the row is not shown: with Docker not running and nothing
+  answering, or with a `masc-searxng` container that is running without
+  answering JSON, paused, restarting, or in a state Docker will not start from.
+  For the container cases the setup prints the Docker command to run next
+  (`docker logs`, `docker unpause` or `docker inspect`).
 - **Firefox routes (not marked).** When Firefox is found, two more rows connect
   a Firefox that `imp` can log in with, the same two routes
   [`masc browser-lane-setup`](../connectors/browser/host/README.md) offers:

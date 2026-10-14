@@ -1187,6 +1187,11 @@ SEARXNG_CONTAINER_STATES = ('absent', 'stopped', 'running', 'paused', 'restartin
 # `Sandbox_prerequisites.searxng_container_name`; what `docker logs` is asked for.
 SEARXNG_CONTAINER_NAME = 'masc-searxng'
 SEARXNG_ENDPOINT_STATES = ('answers', 'refuses_json', 'unreachable')
+# A link a person could type: no whitespace and no control characters, so
+# nothing the binary sent can move the cursor or end the printed command.
+SEARXNG_URL_SHAPE = re.compile(r'https?://[^\s\x00-\x1f\x7f]+')
+# Ids the catalog uses: lowercase words joined by underscores.
+CATALOG_ACTION_ID = re.compile(r'[a-z0-9_]+')
 
 
 @dataclass(frozen=True)
@@ -1211,13 +1216,17 @@ def decode_searxng_readiness(value):
             or value.get('docker') not in ('ready', 'unavailable')
             or value.get('container') not in SEARXNG_CONTAINER_STATES
             or value.get('endpoint') not in SEARXNG_ENDPOINT_STATES
-            or not isinstance(value.get('url'), str) or not value['url'].startswith('http')):
+            or not isinstance(value.get('url'), str) or not SEARXNG_URL_SHAPE.fullmatch(value['url'])):
         raise SetupError('MASC returned unreadable SearXNG readiness')
     if (value['status'] == 'ready') != (value['endpoint'] == 'answers'):
         raise SetupError('MASC returned inconsistent SearXNG readiness')
+    # The binary only asks Docker about a container when Docker answers, and
+    # only an unusable container carries Docker's own word for it.
     docker_status = value.get('docker_status')
-    if docker_status is not None and not isinstance(docker_status, str):
-        raise SetupError('MASC returned unreadable SearXNG readiness')
+    if (value['docker'] == 'unavailable' and value['container'] != 'absent') or (
+            (value['container'] == 'unusable') != (isinstance(docker_status, str) and docker_status != '')
+            or (docker_status is not None and not isinstance(docker_status, str))):
+        raise SetupError('MASC returned inconsistent SearXNG readiness')
     return SearxngReadiness(docker=value['docker'] == 'ready', container=value['container'],
                             endpoint=value['endpoint'], url=value['url'], docker_status=docker_status or '')
 
@@ -1227,7 +1236,9 @@ def prerequisite_catalog(binary, dependency, workspace_args=()):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         catalog = json.loads(result.stdout)
-        if result.returncode or catalog.get('schema') != 'masc.prerequisite_actions.v1' or not isinstance(catalog.get('actions'), list):
+        if (result.returncode or not isinstance(catalog, dict)
+                or catalog.get('schema') != 'masc.prerequisite_actions.v1'
+                or not isinstance(catalog.get('actions'), list)):
             raise ValueError('invalid actions')
     except (TypeError, ValueError):
         raise SetupError('MASC could not inspect installation actions for this computer')
@@ -1291,7 +1302,7 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
                             stdout=subprocess.PIPE, text=True)
     try:
         receipt = json.loads(result.stdout)
-        if receipt.get('schema') != 'masc.prerequisite_action_result.v1':
+        if not isinstance(receipt, dict) or receipt.get('schema') != 'masc.prerequisite_action_result.v1':
             raise ValueError('invalid result')
         state = receipt['status']
         readiness = receipt.get('readiness')
@@ -2566,6 +2577,8 @@ EXTENSION_TOOL = 'extension'
 BROWSER_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL)
 WEB_SEARCH_TOOL = 'web-search'
 ZAI_TOOL = 'zai'
+# The value `web_search.provider` takes for z.ai, and what `--provider` is given.
+ZAI_PROVIDER = 'zai'
 SEARXNG_TOOL = 'searxng'
 # The variable the glm-coding model provider reads, and the one the zai search
 # provider reads. Only whether it is set is looked at here, never its value.
@@ -2645,7 +2658,7 @@ def web_search_command(base):
 def zai_command(base):
     """Names z.ai as the provider tried first; `masc web-search-setup` then
     prints the state and says whether a running server must restart."""
-    return 'masc web-search-setup --provider zai --base-path ' + shlex.quote(str(base))
+    return 'masc web-search-setup --provider ' + ZAI_PROVIDER + ' --base-path ' + shlex.quote(str(base))
 
 
 def searxng_url_command(base, url):
@@ -2825,6 +2838,27 @@ def web_search_row(base):
                    web_search_command(base), checked=True)
 
 
+# Both choices write a key under [web_search] that may already hold something
+# the operator wrote, and an explicit order outranks both. The wizard cannot
+# read runtime.toml (no TOML parser in the Python it targets), so the screen
+# says it instead of leaving the reader to find out from the table after.
+PROVIDER_ORDER_SENTENCE = ('If web_search.provider_order is set it decides the order and this choice changes '
+                           'nothing.')
+# Where SearXNG stands once its address is saved: first among the providers
+# MASC tries without being told, and behind one named in web_search.provider.
+SEARXNG_ORDER_SENTENCE = ('Choosing it sets web_search.searxng_url, replacing an address set there. SearXNG is '
+                          'then tried before the providers that need a key, and behind a provider named in '
+                          'web_search.provider (z.ai, if you choose it too). ' + PROVIDER_ORDER_SENTENCE)
+# What SearXNG's answer to a JSON search can and cannot promise: it asks other
+# search engines, and they may refuse a server's requests. Measured on one
+# computer on 2026-10-14: every answer came through one engine while two
+# others refused. The image size is `docker images` on an arm64 Mac.
+SEARXNG_NOTICE = ('\nSearXNG runs in Docker on this computer and needs no key. It asks other search engines for '
+                  'results, and they can refuse a server\'s requests, so it can answer with few or no results. '
+                  'The first start downloads an image of about 380 MB on disk, and Docker then restarts the '
+                  'container whenever it starts, until you stop it. ' + SEARXNG_ORDER_SENTENCE)
+
+
 def zai_row(base):
     """Offered only when ZAI_API_KEY is set where the wizard runs: the key the
     GLM models use, so the reader's own plan is what a search would spend."""
@@ -2832,23 +2866,10 @@ def zai_row(base):
         return None
     notice = ('\nz.ai web search uses the GLM Coding Plan key in ' + ZAI_KEY_VARIABLE
               + ', the same key the GLM models use. A search spends that plan\'s search allowance. '
-              'Choosing it names z.ai as the provider tried first; the others follow it in their usual order.')
+              'Choosing it sets web_search.provider to z.ai, replacing a provider set there: z.ai is tried '
+              'first and the others follow it in their usual order. ' + PROVIDER_ORDER_SENTENCE)
     return ToolRow(ZAI_TOOL, 'z.ai web search through your GLM Coding Plan key · tried first',
                    zai_command(base), checked=False, notice=notice)
-
-
-# What SearXNG's answer to a JSON search can and cannot promise: it asks other
-# search engines, and they may refuse a server's requests. Measured on one
-# computer on 2026-10-14: every answer came through one engine while two
-# others refused.
-# Where SearXNG stands once its address is saved: first among the providers
-# MASC tries without being told, and behind one named in web_search.provider.
-SEARXNG_ORDER_SENTENCE = ('Choosing it writes its address as web_search.searxng_url. SearXNG is then tried before '
-                          'the providers that need a key. A provider named in web_search.provider, such as z.ai '
-                          'when you choose it too, still goes first.')
-SEARXNG_NOTICE = ('\nSearXNG runs in Docker on this computer and needs no key. It asks other search engines for '
-                  'results, and they can refuse a server\'s requests, so it can answer with few or no results. '
-                  + SEARXNG_ORDER_SENTENCE)
 
 
 def searxng_plan(binary, base):
@@ -2857,27 +2878,31 @@ def searxng_plan(binary, base):
     catalog = prerequisite_catalog(binary, SEARXNG_DEPENDENCY, ['--base-path', str(base)])
     readiness = decode_searxng_readiness(catalog.get('dependency_readiness'))
     actions = [row for row in catalog['actions'] if isinstance(row, dict) and isinstance(row.get('id'), str)]
-    return readiness, (actions[0]['id'] if actions else None)
+    action_id = actions[0]['id'] if actions else None
+    if action_id is not None and not CATALOG_ACTION_ID.fullmatch(action_id):
+        raise SetupError('MASC returned an unreadable SearXNG action id')
+    return readiness, action_id
 
 
 def say_container_state(readiness):
-    """Why a container that exists is not offered: what is wrong with it, and
-    the one Docker command that looks at or undoes that. The wizard starts and
-    stops nothing of it itself."""
+    """Why a container that exists is not offered: what is wrong with it and the
+    Docker command to run. The wizard starts, stops and removes nothing of it."""
     name = SEARXNG_CONTAINER_NAME
     where = terminal_text(readiness.url)
     if readiness.container == 'running':
         print('A SearXNG container is running but does not answer JSON searches at ' + where
               + '. Look at its logs (docker logs ' + name + ').', file=sys.stderr)
     elif readiness.container == 'paused':
-        print('The SearXNG container is paused. Run docker unpause ' + name + ' to use it.', file=sys.stderr)
+        print('The SearXNG container is paused. Run docker unpause ' + name + ', then set this up again.',
+              file=sys.stderr)
     elif readiness.container == 'restarting':
         print('The SearXNG container keeps restarting. Look at its logs (docker logs ' + name + ').',
               file=sys.stderr)
     elif readiness.container == 'unusable':
         print('The SearXNG container is in a state Docker will not start from'
               + (' (' + terminal_text(readiness.docker_status) + ')' if readiness.docker_status else '')
-              + '. Look at it with docker inspect ' + name + '.', file=sys.stderr)
+              + '. Look at it with docker inspect ' + name + '. If you do not need it, docker rm -f '
+              + name + ' removes it, and this row then offers a fresh one.', file=sys.stderr)
 
 
 def searxng_row(binary, base):
@@ -2895,8 +2920,8 @@ def searxng_row(binary, base):
     # Only a container that is not there needs the image pulled.
     effort = ('pulls an image' if readiness.container == 'absent'
               else 'starts the stopped ' + SEARXNG_CONTAINER_NAME + ' container')
-    return ToolRow(SEARXNG_TOOL, 'SearXNG in Docker · key-free search on ' + terminal_text(readiness.url)
-                   + ' · ' + effort,
+    return ToolRow(SEARXNG_TOOL, 'SearXNG in Docker · ' + effort + ' · key-free search on '
+                   + terminal_text(readiness.url),
                    searxng_start_command(base, action_id) + ' && ' + searxng_url_command(base, readiness.url),
                    checked=False, notice=SEARXNG_NOTICE)
 
@@ -3056,8 +3081,14 @@ def run_web_search_setup(binary, base, options):
 
 
 def choose_zai(binary, base):
-    if not run_web_search_setup(binary, base, ['--provider', ZAI_TOOL]):
-        print('z.ai was not chosen. Run ' + zai_command(base) + ' to try again.', file=sys.stderr)
+    if not run_web_search_setup(binary, base, ['--provider', ZAI_PROVIDER]):
+        print('z.ai was not chosen. Run ' + terminal_text(zai_command(base)) + ' to try again.', file=sys.stderr)
+
+
+def searxng_look_command(base):
+    """What the binary offers now. Its action id changes with the container, so
+    a retry names this and not the id the row was built with."""
+    return 'masc prerequisite-actions ' + SEARXNG_DEPENDENCY + ' --base-path ' + shlex.quote(str(base))
 
 
 def start_searxng(binary, base):
@@ -3075,22 +3106,25 @@ def start_searxng(binary, base):
             if not readiness.docker or action_id is None:
                 print('There is nothing to start for SearXNG on this computer now' +
                       ('' if readiness.docker else ' because Docker is not running') +
-                      '. Run masc prerequisite-actions ' + SEARXNG_DEPENDENCY + ' to see why.', file=sys.stderr)
+                      '. Run ' + terminal_text(searxng_look_command(base)) + ' to see why.', file=sys.stderr)
                 print('SearXNG was not started.', file=sys.stderr)
                 return
             state = execute_prerequisite(binary, SEARXNG_DEPENDENCY, action_id, ['--base-path', str(base)], base)
             if state != 'commands_completed':
-                print('SearXNG was not started. Run ' + searxng_start_command(base, action_id) + ' to try again.',
-                      file=sys.stderr)
+                # The container may exist now, and then the action that built
+                # the row is no longer offered: say where to look, not an id.
+                print('SearXNG did not come up. Run ' + terminal_text(searxng_look_command(base))
+                      + ' to see what is offered now, and docker logs ' + SEARXNG_CONTAINER_NAME
+                      + ' to see why.', file=sys.stderr)
                 return
     except (SetupError, OSError, subprocess.SubprocessError) as error:
-        print(terminal_text(str(error)) + '\nSearXNG was not started. Run masc prerequisite-actions '
-              + SEARXNG_DEPENDENCY + ' to see what it would take.', file=sys.stderr)
+        print(terminal_text(str(error)) + '\nCould not tell whether SearXNG started. Run '
+              + terminal_text(searxng_look_command(base)) + ' to see where it stands.', file=sys.stderr)
         return
     url = readiness.url
     if not run_web_search_setup(binary, base, ['--searxng-url', url]):
         print('SearXNG answers, but its address was not saved for web search. Run '
-              + searxng_url_command(base, url) + ' to save it.', file=sys.stderr)
+              + terminal_text(searxng_url_command(base, url)) + ' to save it.', file=sys.stderr)
 
 
 def choose_imp_tools(binary, base):

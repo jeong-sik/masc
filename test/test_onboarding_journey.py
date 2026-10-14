@@ -1632,7 +1632,8 @@ class SearxngReadinessDecoding(unittest.TestCase):
     def test_every_container_word_the_binary_can_say_is_read(self):
         for container in ('absent', 'stopped', 'running', 'paused', 'restarting', 'unusable'):
             with self.subTest(container=container):
-                value = SETUP.decode_searxng_readiness(searxng_readiness(container=container))
+                extra = dict(docker_status='dead') if container == 'unusable' else {}
+                value = SETUP.decode_searxng_readiness(searxng_readiness(container=container, **extra))
                 self.assertEqual(value.container, container)
 
     def test_dockers_own_word_for_an_unusable_container_is_kept(self):
@@ -1663,6 +1664,24 @@ class SearxngReadinessDecoding(unittest.TestCase):
         for value in (None, [], 'ready'):
             with self.subTest(value=value), self.assertRaises(SETUP.SetupError):
                 SETUP.decode_searxng_readiness(value)
+
+    def test_a_readiness_the_binary_never_prints_is_refused(self):
+        # Fields that each read fine and cannot be true together. The binary
+        # asks Docker about the container only when Docker answers, and keeps
+        # Docker's own word only for an unusable container.
+        for what, value in (
+                ('a container beside a Docker that is down', searxng_readiness(docker=False, container='running')),
+                ('an unusable container without Docker\'s word', searxng_readiness(container='unusable')),
+                ('Docker\'s word on a running container', searxng_readiness(container='running', docker_status='dead')),
+                ('an empty word for an unusable container', searxng_readiness(container='unusable', docker_status=''))):
+            with self.subTest(what=what), self.assertRaises(SETUP.SetupError):
+                SETUP.decode_searxng_readiness(value)
+
+    def test_an_address_that_could_move_the_cursor_or_split_a_command_is_refused(self):
+        for url in ('http://127.0.0.1:8888/\x1b[31m', 'http://127.0.0.1:8888 && rm', 'http://', 'ftp://127.0.0.1',
+                    'http://127.0.0.1:8888\n'):
+            with self.subTest(url=url), self.assertRaises(SETUP.SetupError):
+                SETUP.decode_searxng_readiness(searxng_readiness(url=url))
 
     def test_a_status_that_disagrees_with_the_endpoint_is_refused(self):
         # `ready` is the one word a caller may act on, so it is not taken
@@ -1886,8 +1905,12 @@ class SearchChoices(unittest.TestCase):
         _, argvs, printed = self.run_marked(replies, 'SearXNG in Docker')
         self.assertEqual(argvs, [self.ARGV_LOOK, self.ARGV_LOOK, self.ARGV_START])
         self.assertIn('docker exited 125', printed)
-        self.assertIn('SearXNG was not started', printed)
-        self.assertIn('masc prerequisite-actions searxng --execute searxng_docker_run', printed)
+        # The container may exist now, so the action it was built with may not
+        # be offered any more: the retry names where to look, not that id.
+        self.assertIn('SearXNG did not come up', printed)
+        self.assertIn('masc prerequisite-actions searxng --base-path /workspace', printed)
+        self.assertIn('docker logs masc-searxng', printed)
+        self.assertNotIn('--execute', printed)
 
     def test_a_start_that_says_completed_but_does_not_answer_is_not_written(self):
         # A receipt that claims a finished start while the endpoint is silent
@@ -1896,7 +1919,7 @@ class SearchChoices(unittest.TestCase):
         lying = completed(searxng_receipt('commands_completed', container='running', endpoint='unreachable'))
         _, argvs, printed = self.run_marked([absent, absent, lying], 'SearXNG in Docker')
         self.assertNotIn(self.ARGV_URL, argvs)
-        self.assertIn('SearXNG was not started', printed)
+        self.assertIn('Could not tell whether SearXNG started', printed)
 
     def test_an_instance_that_started_while_the_reader_chose_is_not_started_again(self):
         absent = completed(searxng_catalog(docker=True, container='absent'))
@@ -1929,6 +1952,109 @@ class SearchChoices(unittest.TestCase):
         self.assertEqual(written, [['--provider', 'zai', '--base-path', '/workspace'],
                                    ['--searxng-url', 'http://127.0.0.1:8888', '--base-path', '/workspace'],
                                    ['--base-path', '/workspace']])
+
+    # What a binary that answers in a shape nobody wrote must not do.
+
+    def test_a_catalog_or_receipt_that_is_not_an_object_does_not_end_setup(self):
+        for shape in ('[]', 'null', '"text"', '3'):
+            with self.subTest(shape=shape):
+                with patch.object(SETUP.subprocess, 'run', side_effect=[completed(shape)]), \
+                        contextlib.redirect_stderr(io.StringIO()) as printed:
+                    rows = {row.key for row in SETUP.imp_tool_rows('/bin/masc', '/workspace')}
+                self.assertEqual(rows, {'github', 'web-search'})
+                absent = completed(searxng_catalog(docker=True, container='absent'))
+                with patch.object(SETUP.subprocess, 'run', side_effect=[absent, completed(shape)]), \
+                        contextlib.redirect_stderr(io.StringIO()) as printed:
+                    SETUP.start_searxng('/bin/masc', '/workspace')
+                self.assertIn('Could not tell whether SearXNG started', printed.getvalue())
+
+    def test_an_action_id_with_a_control_character_is_not_offered_or_printed(self):
+        broken = json.loads(searxng_catalog(docker=True, container='absent'))
+        broken['actions'][0]['id'] = 'searxng_docker_run\x1b[31m'
+        rows, printed = self.rows(completed(json.dumps(broken)))
+        self.assertNotIn('searxng', rows)
+        self.assertNotIn('\x1b', printed)
+
+    # Commands the reader copies: a workspace path with spaces and quotes.
+
+    AWKWARD = "/work space/it's $HOME"
+
+    def test_every_printed_command_survives_a_path_with_spaces_and_quotes(self):
+        import shlex
+        os.environ[SETUP.ZAI_KEY_VARIABLE] = self.KEY
+        with patch.object(SETUP.subprocess, 'run',
+                          side_effect=[completed(searxng_catalog(docker=True, container='absent'))]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            rows = {row.key: row for row in SETUP.imp_tool_rows('/bin/masc', self.AWKWARD)}
+        self.assertEqual(shlex.split(rows['zai'].command),
+                         ['masc', 'web-search-setup', '--provider', 'zai', '--base-path', self.AWKWARD])
+        tokens = shlex.split(rows['searxng'].command)
+        self.assertEqual(tokens.count(self.AWKWARD), 2)
+        divider = tokens.index('&&')
+        self.assertEqual(tokens[divider - 4:divider],
+                         ['--execute', 'searxng_docker_run', '--base-path', self.AWKWARD])
+        self.assertEqual(tokens[-4:], ['--searxng-url', 'http://127.0.0.1:8888', '--base-path', self.AWKWARD][:2]
+                         + ['--base-path', self.AWKWARD])
+        self.assertEqual(shlex.split(SETUP.searxng_look_command(self.AWKWARD)),
+                         ['masc', 'prerequisite-actions', 'searxng', '--base-path', self.AWKWARD])
+
+    def test_a_workspace_path_with_an_escape_never_reaches_the_screen_raw(self):
+        # The path is the reader's own, but it is printed inside commands that
+        # shlex.quote makes safe for a shell and not for a terminal.
+        base = '/work/\x1b[31mred'
+        os.environ[SETUP.ZAI_KEY_VARIABLE] = self.KEY
+        absent = completed(searxng_catalog(docker=True, container='absent'))
+        failed = dict(schema='masc.prerequisite_action_result.v1', status='failed', readiness='unavailable',
+                      reason='docker exited 125', dependency_readiness=searxng_readiness())
+        with patch.object(SETUP.subprocess, 'run', side_effect=[absent, completed(json.dumps(failed), 1)]), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.start_searxng('/bin/masc', base)
+        with patch.object(SETUP.subprocess, 'run', return_value=completed('', 1)), \
+                contextlib.redirect_stderr(io.StringIO()) as chosen:
+            SETUP.choose_zai('/bin/masc', base)
+        with patch.object(SETUP.subprocess, 'run', side_effect=[absent, completed(searxng_receipt(
+                'commands_completed', container='running', endpoint='answers')), completed('', 1)]), \
+                contextlib.redirect_stderr(io.StringIO()) as unsaved:
+            SETUP.start_searxng('/bin/masc', base)
+        for what, text in (('the retry after a start', printed.getvalue()), ('the z.ai retry', chosen.getvalue()),
+                           ('the unsaved address', unsaved.getvalue())):
+            with self.subTest(what=what):
+                self.assertNotIn('\x1b', text)
+                self.assertIn('red', text)
+
+    # What the consent text has to say, and where.
+
+    def test_the_cost_of_the_searxng_row_comes_before_the_part_a_narrow_screen_cuts(self):
+        rows, _ = self.rows(completed(searxng_catalog(docker=True, container='absent')))
+        label = rows['searxng'].label
+        self.assertLess(label.index('pulls an image'), 50)
+        self.assertLess(label.index('pulls an image'), label.index('key-free'))
+        stopped, _ = self.rows(completed(searxng_catalog(docker=True, container='stopped')))
+        self.assertLess(stopped['searxng'].label.index('starts the stopped'), 50)
+
+    def test_both_notices_say_what_they_replace_and_that_an_explicit_order_outranks_them(self):
+        os.environ[SETUP.ZAI_KEY_VARIABLE] = self.KEY
+        rows, _ = self.rows(completed(searxng_catalog(docker=True, container='absent')))
+        for key, replaced in (('zai', 'replacing a provider set there'),
+                              ('searxng', 'replacing an address set there')):
+            with self.subTest(row=key):
+                self.assertIn(replaced, rows[key].notice)
+                self.assertIn('web_search.provider_order is set it decides the order', rows[key].notice)
+        # The cost the reader takes on with the mark, said before the mark.
+        self.assertIn('about 380 MB', rows['searxng'].notice)
+        self.assertIn('restarts the container whenever it starts', rows['searxng'].notice)
+
+    def test_a_container_that_cannot_be_started_is_told_how_it_can_be_removed(self):
+        _, printed = self.rows(completed(searxng_catalog(docker=True, container='unusable', docker_status='dead')))
+        self.assertIn('docker rm -f masc-searxng', printed)
+
+    def test_an_unmarked_searxng_row_starts_nothing_and_writes_nothing(self):
+        absent = completed(searxng_catalog(docker=True, container='absent'))
+        with patch.object(SETUP.subprocess, 'run', side_effect=[absent]) as run, \
+                patch.object(SETUP, 'pick', return_value=[]), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_imp_tools('/bin/masc', '/workspace'), ())
+        # Only the look that built the row. A `--execute` or a write would be a second call.
+        self.assertEqual([call.args[0] for call in run.call_args_list], [self.ARGV_LOOK])
 
     # What the receipt of the start has to say before the wizard believes it.
 
@@ -2903,10 +3029,15 @@ class SearchChoicesAgainstTheBinary(unittest.TestCase):
         return patch.dict(os.environ, dict(isolated_environment(self.root, self.tools), **extra), clear=True)
 
     def something_answers_at_the_probe_address(self):
-        import socket
-        with socket.socket() as probe:
-            probe.settimeout(1)
-            return probe.connect_ex(self.ADDRESS) == 0
+        """A listener that is not SearXNG does not change these cases: the
+        binary reads only a JSON object with `results` as an answer."""
+        import urllib.request
+        url = 'http://%s:%d/search?q=masc&format=json' % self.ADDRESS
+        try:
+            with urllib.request.urlopen(url, timeout=3) as answer:
+                return answer.status == 200 and 'results' in json.loads(answer.read().decode('utf-8', 'replace'))
+        except (OSError, ValueError):
+            return False
 
     def plan(self):
         with self.environment():
@@ -2961,7 +3092,7 @@ class SearchChoicesAgainstTheBinary(unittest.TestCase):
         with open(self.root / 'stderr.txt', 'w') as sink, self.environment(), contextlib.redirect_stderr(sink):
             SETUP.start_searxng(BINARY, str(self.base))
         printed = (self.root / 'stderr.txt').read_text()
-        self.assertIn('SearXNG was not started', printed)
+        self.assertIn('SearXNG did not come up', printed)
         self.assertNotIn('searxng_url', (self.base / '.masc/config/runtime.toml').read_text())
         # The pull was tried, so the receipt that came back is one the wizard read.
         self.assertIn('pull', self.record.read_text())

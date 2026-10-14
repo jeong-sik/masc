@@ -429,22 +429,32 @@ SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에는 아무�
   시작하는 서버는 이 터미널의 환경에서 `MASC_BASE_PATH`, `MASC_CONFIG_DIR` 만 워크스페이스 값으로
   바꾼 환경을 받고, 이미 실행 중인 서버는 가진 환경을 그대로 씁니다. 서버를 시작하는 곳에 키를
   export 한 뒤에 다시 실행하세요. `masc web-search-setup --searxng-url <주소>` 는 다른 실행입니다.
-  `runtime.toml` 의 `[web_search]` 에 씁니다. 바로 아래 두 줄이 이 쓰기를 고르는 줄입니다.
+  `runtime.toml` 의 `[web_search]` 에 씁니다. 바로 아래 두 줄에서 이 설정을 직접 고를 수 있습니다.
 - **z.ai 웹 검색(체크 안 됨).** 설치를 실행하는 곳에 `ZAI_API_KEY` 가 있을 때만 나옵니다. GLM
-  모델이 이미 읽는 변수입니다. 확정하면 `masc web-search-setup --provider zai` 가
-  `web_search.provider = "zai"` 를 쓰고, z.ai 를 먼저 시도한 뒤 나머지 공급자를 평소 순서로
-  시도합니다. 검색할 때마다 그 GLM Coding Plan 의 검색 한도가 줄어듭니다. 키는 저장하지 않고
-  서버가 자기 환경에서 읽습니다.
-- **Docker 의 SearXNG(체크 안 됨).** Docker 가 응답하고 SearXNG 가 아직 없을 때 나옵니다. 확정하면
-  버전을 고정한 이미지를 받아 `127.0.0.1:8888` 에 `masc-searxng` 컨테이너를 띄우고, 설정은
-  `<워크스페이스>/.masc/searxng/` 아래에 쓰고, JSON 검색이 응답할 때까지 기다린 뒤
-  `web_search.searxng_url` 을 씁니다. 키가 필요 없습니다. SearXNG 는 다른 검색 엔진에서 결과를
-  가져오는데 그 엔진들이 서버의 요청을 거절할 수 있어서 결과가 적거나 없을 수 있습니다. 측정한
-  컴퓨터에서는 엔진 하나가 답했고 둘은 거절했습니다. 저장한 뒤에는 키가 필요한 공급자보다 먼저
-  시도하고, `web_search.provider` 로 이름 붙인 공급자 뒤에 둡니다. 그 주소에서 이미 SearXNG 가
-  응답하면 주소만 쓰는 줄로 나옵니다. Docker 가 꺼져 있으면 이 줄은 나오지 않습니다.
-  `masc-searxng` 컨테이너가 일시정지, 재시작 중이거나 Docker 가 시작할 수 없는 상태여도 나오지
-  않고, 어느 Docker 명령으로 살펴볼지 안내합니다.
+  모델도 같은 변수를 읽습니다. 확정하면 `masc web-search-setup --provider zai` 가
+  `web_search.provider = "zai"` 를 씁니다. 거기에 다른 공급자가 적혀 있었다면 바뀝니다. 그러면 z.ai 를
+  먼저 시도하고 나머지 공급자는 평소 순서로 시도합니다. `web_search.provider_order` 가 있으면 그
+  순서가 우선이라 이 선택은 아무것도 바꾸지 않습니다. 검색할 때마다 그 GLM Coding Plan 의 검색
+  한도가 줄어듭니다. 키는 저장하지 않고 서버가 자기 환경에서 읽습니다.
+- **SearXNG(체크 안 됨).** 키가 필요 없습니다. SearXNG 는 다른 검색 엔진에서 결과를 가져오고, 그
+  엔진들이 서버의 요청을 거절할 수 있어서 결과가 적거나 없을 수 있습니다. 측정한 arm64 Mac
+  (2026-10-14)에서는 엔진 하나가 답했고 둘은 거절했습니다. 줄이 하는 일은 현재 상태에 따라 다릅니다.
+  - *컨테이너가 없고 Docker 가 응답할 때:* 버전을 고정한 이미지(디스크에서 약 380 MB)를 받고,
+    `masc-searxng` 컨테이너를 `--restart unless-stopped` 로 `127.0.0.1:8888` 에 띄웁니다. 설정은
+    `<워크스페이스>/.masc/searxng/` 아래에 쓰고, JSON 검색이 응답할 때까지 기다린 뒤
+    `web_search.searxng_url` 을 씁니다.
+  - *멈춘 `masc-searxng` 컨테이너가 있을 때:* `docker start` 만 합니다. 이미지를 받지 않고 아무것도
+    쓰지 않습니다. 그 뒤에 `web_search.searxng_url` 을 씁니다.
+  - *`http://127.0.0.1:8888` 에서 SearXNG 가 이미 응답할 때:* 주소만 씁니다. Docker 가 꺼져 있어도
+    나옵니다.
+
+  이 주소는 이미 적혀 있던 `web_search.searxng_url` 을 바꿉니다. 저장하면 SearXNG 는 키가 필요한
+  공급자보다 먼저 시도하고, `web_search.provider` 로 이름 붙인 공급자 뒤에 둡니다.
+  `web_search.provider_order` 가 있으면 둘 다 그 순서가 우선입니다. 그 밖의 경우에는 줄이 나오지
+  않습니다. Docker 가 꺼져 있고 응답하는 곳도 없을 때, 또는 `masc-searxng` 컨테이너가 실행 중인데
+  JSON 에 답하지 않거나, 일시정지, 재시작 중이거나, Docker 가 시작할 수 없는 상태일 때입니다.
+  컨테이너가 이런 상태면 다음에 실행할 Docker 명령(`docker logs`, `docker unpause`,
+  `docker inspect`)을 화면에 알려 줍니다.
 - **Firefox 연결 두 줄(체크 안 됨).** Firefox 를 찾았을 때만 `imp`가 로그인해서 쓸 Firefox 를
   연결하는 줄이 둘 더 나옵니다. `masc browser-lane-setup` 이 여는 두 길입니다.
   - *BiDi*: MASC 가 전용 Firefox 를 로컬 포트의 원격 디버깅으로 직접 띄웁니다. 다시 불러올 것이
@@ -460,8 +470,8 @@ SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에는 아무�
   실행하세요. 그 폴더 위치는 이 문서가 확인하지 않았습니다.
 
 빠른 설치는 모든 줄과 줄마다 명령, 체크됐을 줄인지를 보여 주기만 합니다. 프로그램의 `--version`과
-`gh auth status`를 실행하고 Docker 에 `masc-searxng` 컨테이너를, 로컬 주소에 응답을 물어보지만
-설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과 같이 합니다.
+`gh auth status`를 실행하고, Docker 에 `masc-searxng` 컨테이너를 묻고, 로컬 주소가 응답하는지
+확인합니다. 설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과 같이 합니다.
 
 ```bash
 # 브라우저 줄: imp 전용 Firefox 의 geckodriver

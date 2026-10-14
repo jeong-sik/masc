@@ -2780,6 +2780,8 @@
 
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
+(include stanzas/test_keeper_phase_gate_plan.inc)
+
 (include stanzas/test_keeper_tool_name.inc)
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)

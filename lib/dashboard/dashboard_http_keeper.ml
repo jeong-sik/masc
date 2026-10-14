@@ -602,7 +602,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   ("restart_count", `Int 0);
                   ("crash_log", `List []);
                   ("last_failure_reason", `Null);
-                  ("dead_since", `Null);
                 ], 0)
           in
           let outcomes_json =

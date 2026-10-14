@@ -82,7 +82,21 @@ let prepare ~base_path ~keeper_name ~request_id ~composition_tool:tool =
         ~temp_dir:(Filename.concat (directory ~base_path) ".atomic-staging") ~pretty:false
         (path ~base_path request_id) (to_json { request_id; keeper_name })
       |> Result.map_error (fun error -> Storage_failed (Keeper_fs.durable_write_error_to_string error))
-  | result -> Error (Request_unavailable result)
+  (* Only a queued request owned by this Keeper can become an obligation.
+     Every other (status, keeper) pair is listed by constructor so that a new
+     [Async.request_status] constructor or a new [load_result] constructor is
+     reported here at compile time instead of silently inheriting this
+     outcome. *)
+  | Async.Found
+      ({ status =
+           ( Async.Queued | Async.Running | Async.Cancelling _ | Async.Lost _
+           | Async.Cancelled _ | Async.Persistence_failed _ | Async.Done _ )
+       ; _
+       } as entry) ->
+    Error (Request_unavailable (Async.Found entry))
+  | Async.Absent -> Error (Request_unavailable Async.Absent)
+  | Async.Unreadable reason -> Error (Request_unavailable (Async.Unreadable reason))
+  | Async.Rejected rejection -> Error (Request_unavailable (Async.Rejected rejection))
 ;;
 
 let read ~base_path name =
@@ -132,7 +146,16 @@ let flush ~base_path ~deliver =
       | Some obligation ->
         match Async.load_canonical_durable_terminal ~base_path ~caller:obligation.keeper_name obligation.request_id with
         | Error (Async.Canonical_terminal_runtime_active _ | Async.Canonical_terminal_nonterminal _) -> Ok Waiting
-        | Error error -> Error (Canonical_result_unavailable error)
+        (* The remaining terminal-load errors are listed by constructor: a new
+           [Async.canonical_terminal_error] constructor must be classified here
+           deliberately rather than caught by a catch-all. *)
+        | Error
+            (( Async.Canonical_terminal_absent
+             | Async.Canonical_terminal_unreadable _
+             | Async.Canonical_terminal_access_rejected _
+             | Async.Canonical_terminal_publication_ambiguous _
+             | Async.Canonical_terminal_noncanonical_location _ ) as error) ->
+          Error (Canonical_result_unavailable error)
         | Ok proof ->
           let entry = Async.durable_terminal_entry proof in
           if not (String.equal entry.keeper_name obligation.keeper_name)

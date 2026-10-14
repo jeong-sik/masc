@@ -144,7 +144,10 @@ val waiting_continuation : t -> (continuation option, error) result
     that stops before dispatch may retain its predecessor's exact wait only
     when every journal node is unchanged at the binding and the canonical
     waiting dependencies match. Original occurrence identities and owners remain
-    intact. *)
+    intact. Other unfinished effectful attempts and unproven settled outcomes
+    of a [Lost] owner without a prior result wait remain [Replay_not_proven].
+    Such a run cannot become fresh work through the [None] fallback, and
+    discovery retains its pending marker without a replacement. *)
 
 val continuation_base_path : continuation -> string
 (** Canonical workspace where the sealed owner and node snapshot were read.

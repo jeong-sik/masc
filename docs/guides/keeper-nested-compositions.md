@@ -70,6 +70,18 @@ was absent. If a waiting successor stops before dispatch, the original wait
 remains recoverable only through unchanged journal nodes, matching canonical
 job IDs and exact predecessor terminal evidence.
 
+Losing the first worker before it records any result wait does not prove that
+its effects were absent. An unfinished effectful attempt, an unknown or
+post-effect failure, or a defer without a valid producer-owned result wait
+retains its pending marker and reports `replay_not_proven`. Maintenance does
+not schedule a replacement, and public manual resume refuses before accepting
+another request. The original Task, occurrences and retained results stay in
+the same journal. Declared read-only unfinished work still permits the existing
+manual resume; this refusal does not add a retry budget or a new runtime setting.
+This retention is not accepted-child acknowledgement recovery: that still needs
+the exact child admission proof and a parent owner transition before async
+children can be compiled.
+
 A child output is its declared named export. `/profile` selects export `profile`;
 `/document/items/0` selects within export `document`. RFC 6901 escaping applies to
 export names too. The compiler maps the export to its exact leaf producer and

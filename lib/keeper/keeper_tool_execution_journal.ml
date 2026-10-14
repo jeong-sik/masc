@@ -983,6 +983,16 @@ let recoverable_lost_nodes nodes dependencies =
   if List.for_all (fun job_id -> List.mem job_id recorded_jobs) dependencies then Ok ()
   else Error (Invalid_result "original waiting dependencies are absent from the lost journal")
 
+let validate_lost_without_wait expected_owner nodes =
+  Nodes.fold (fun _ record prior ->
+    let* () = prior in
+    let occurrence = occurrence_of_record record in
+    match record with
+    | Attempting occurrence when occurrence.readonly -> Ok ()
+    | Attempting _ -> Error (Replay_not_proven occurrence.node_id)
+    | Settled _ -> replay_for expected_owner occurrence.node_id (Some record)
+        |> Result.map (fun _ -> ())) nodes (Ok ())
+
 let waiting_continuation journal = filesystem (fun () ->
   let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
   let* state = strict_read ~root:journal.root journal.path in
@@ -1023,7 +1033,12 @@ let waiting_continuation journal = filesystem (fun () ->
       | Lost _ ->
         let* original_wait = prior_result_wait journal state.prior_owners in
         (match original_wait with
-         | None -> Ok None
+         | None ->
+           (* No recorded wait is not proof of absent effects. Preserve the
+              unresolved first owner before discovery considers retirement or
+              a public resume falls back to ordinary request admission. *)
+           let* () = validate_lost_without_wait expected_owner state.nodes in
+           Ok None
          | Some (dependencies,predecessor_terminals) ->
            let* () = recoverable_lost_nodes state.nodes dependencies in
            Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals;

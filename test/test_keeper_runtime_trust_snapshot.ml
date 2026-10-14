@@ -11,7 +11,10 @@ let receipt_disposition =
             (fun ppf kind ->
                Format.pp_print_string ppf (Receipt.operator_disposition_kind_to_string kind))
             ( = ))
-         string))
+         (testable
+            (fun ppf reason ->
+               Format.pp_print_string ppf (Receipt.operator_disposition_reason_to_string reason))
+            ( = ))))
 ;;
 
 let rec remove_tree path =
@@ -140,19 +143,19 @@ let test_trust_blocker_uses_structured_state () =
   in
   let healthy = decide None in
   Alcotest.(check string) "no blocker is healthy" "healthy"
-    healthy.disposition_reason;
+    (Core.disposition_reason_to_wire healthy.disposition_reason);
   let exhausted =
     decide (Some Masc.Keeper_status_bridge.Blocked_by_runtime_exhaustion)
   in
   Alcotest.(check string) "runtime exhaustion is named" "runtime_exhausted"
-    exhausted.disposition_reason;
+    (Core.disposition_reason_to_wire exhausted.disposition_reason);
   let blocked = decide (Some Masc.Keeper_status_bridge.Blocked_by_unresolved_fiber) in
   Alcotest.(check string) "an unresolved fiber is a critical block"
-    "critical_block" blocked.disposition_reason;
+    "critical_block" (Core.disposition_reason_to_wire blocked.disposition_reason);
   Alcotest.(check bool) "blocker requires attention" true blocked.needs_attention;
   let unnamed = decide (Some Masc.Keeper_status_bridge.Blocked_by_turn_failures) in
   Alcotest.(check string) "a class with no reason of its own still shows as a blocker"
-    "unknown_runtime_blocker" unnamed.disposition_reason;
+    "unknown_runtime_blocker" (Core.disposition_reason_to_wire unnamed.disposition_reason);
   Alcotest.(check bool) "that blocker requires attention" true unnamed.needs_attention;
   (* No receipt is shown in any of these, so there is no operator
      disposition to relay. A kind derived from the blocker would be a guess. *)
@@ -172,7 +175,7 @@ let test_trust_blocker_uses_structured_state () =
 let test_trust_relays_only_a_shown_receipt_operator_disposition () =
   let module Core = Masc.Keeper_runtime_trust_snapshot_core in
   let fenced_receipt =
-    Receipt.Disp_effect_review_required, "provider_attempt_effect_fenced"
+    Receipt.Disp_effect_review_required, Receipt.Reason_provider_attempt_effect_fenced
   in
   let decide approval_queue =
     Core.decide
@@ -192,7 +195,7 @@ let test_trust_relays_only_a_shown_receipt_operator_disposition () =
   Alcotest.(check bool) "an effect review needs attention" true shown.needs_attention;
   let pending = decide (Core.Approval_queue_available 2) in
   Alcotest.(check string) "a pending approval takes the display"
-    "pending_operator_decision" pending.disposition_reason;
+    "pending_operator_decision" (Core.disposition_reason_to_wire pending.disposition_reason);
   Alcotest.check receipt_disposition
     "a receipt the snapshot does not show is not relayed"
     None pending.receipt_operator_disposition
@@ -767,31 +770,6 @@ let test_unknown_completion_observation_is_explicit () =
           |> to_string))
 ;;
 
-let test_operator_disposition_display_reads_the_kind () =
-  let check_case kind ~operator_disposition_reason ~expected_disposition ~expected_reason =
-    let label = Receipt.operator_disposition_kind_to_string kind in
-    let disposition, reason =
-      Masc.Keeper_operator_disposition_display.of_kind ~operator_disposition_reason kind
-    in
-    Alcotest.(check string) (label ^ " disposition") expected_disposition
-      (Masc.Keeper_trust_disposition.to_wire disposition);
-    Alcotest.(check string) (label ^ " reason") expected_reason reason
-  in
-  check_case Receipt.Disp_pass_next_model ~operator_disposition_reason:""
-    ~expected_disposition:"Pass" ~expected_reason:"runtime_fallback";
-  check_case Receipt.Disp_fail_open_next_runtime ~operator_disposition_reason:"manual_review"
-    ~expected_disposition:"Pass" ~expected_reason:"manual_review";
-  check_case Receipt.Disp_retry_later ~operator_disposition_reason:"transient_runtime_retry"
-    ~expected_disposition:"Pass" ~expected_reason:"transient_runtime_retry";
-  check_case Receipt.Disp_operator_action_required ~operator_disposition_reason:"config_invalid"
-    ~expected_disposition:"Blocked" ~expected_reason:"config_invalid";
-  check_case Receipt.Disp_operator_action_required
-    ~operator_disposition_reason:"authorization_refused" ~expected_disposition:"Blocked"
-    ~expected_reason:"authorization_refused";
-  check_case Receipt.Disp_effect_review_required ~operator_disposition_reason:""
-    ~expected_disposition:"Alert" ~expected_reason:"effect_review_required"
-;;
-
 (* The receipt writer puts a kind and its reason on every row together, so a
    row whose kind the parser does not know, or a kind with no reason, is
    damaged. The snapshot relays neither and shows its own verdict. A row
@@ -848,6 +826,16 @@ let test_a_damaged_receipt_disposition_relays_nothing () =
          (disposition = `Null);
        append
          ~ended_at:"2026-06-01T00:02:00Z"
+         [ "operator_disposition", `String "effect_review_required"
+         ; "operator_disposition_reason", `String "manual_review"
+         ];
+       let disposition, _ = relayed () in
+       Alcotest.(check bool)
+         "a reason the writer never writes is not relayed"
+         true
+         (disposition = `Null);
+       append
+         ~ended_at:"2026-06-01T00:03:00Z"
          [ "operator_disposition", `String "effect_review_required"
          ; "operator_disposition_reason", `String "provider_attempt_effect_fenced"
          ];
@@ -952,9 +940,7 @@ let test_dashboard_trust_relays_the_snapshot_operator_disposition () =
    receipt, so it reports no operator disposition. *)
 let test_degraded_dashboard_trust_reports_no_operator_disposition () =
   let trust =
-    Dashboard_http_keeper_trust.degraded_keeper_trust_json
-      ~site:"keeper_dashboard_worker_exception"
-      ~attention_reason:"worker raised"
+    Dashboard_http_keeper_trust.degraded_keeper_trust_json ~error:"worker raised"
   in
   let open Yojson.Safe.Util in
   Alcotest.(check bool)
@@ -966,7 +952,7 @@ let test_degraded_dashboard_trust_reports_no_operator_disposition () =
     true
     (member "operator_disposition_reason" trust = `Null);
   Alcotest.(check string)
-    "the failed site is the reason"
+    "a worker exception is the reason"
     "keeper_dashboard_worker_exception"
     (member "disposition_reason" trust |> to_string);
   Alcotest.(check string)
@@ -1337,10 +1323,6 @@ let () =
             "unknown completion-contract label uses explicit sentinel"
             `Quick
             test_unknown_completion_observation_is_explicit
-        ; Alcotest.test_case
-            "operator disposition display reads the typed kind"
-            `Quick
-            test_operator_disposition_display_reads_the_kind
         ; Alcotest.test_case
             "status model observability reuses runtime-trust execution selected model"
             `Quick

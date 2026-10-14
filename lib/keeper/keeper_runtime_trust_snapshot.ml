@@ -239,15 +239,17 @@ let approval_queue_attention_of_projection
 
 (* A receipt writes both fields from one typed pair
    ([Keeper_execution_receipt.to_json_with_operator_disposition]), so the pair
-   is parsed here once. A kind the parser does not know, or a kind without its
-   reason, is a damaged record: it relays nothing rather than a guessed kind or
-   an invented reason. *)
+   is parsed here once. A kind or a reason the writer does not write, or a
+   kind without its reason, is a damaged record: it relays nothing rather than
+   a guessed kind or an invented reason. *)
 let receipt_operator_disposition receipt =
   match
     ( Option.bind
         (json_string_opt_member "operator_disposition" receipt)
         Keeper_execution_receipt.operator_disposition_kind_of_string,
-      json_string_opt_member "operator_disposition_reason" receipt )
+      Option.bind
+        (json_string_opt_member "operator_disposition_reason" receipt)
+        Keeper_execution_receipt.operator_disposition_reason_of_string )
   with
   | Some kind, Some reason -> Some (kind, reason)
   | Some _, None | None, Some _ | None, None -> None
@@ -283,15 +285,17 @@ let trust_model_json_fields (model : Trust_core.t) =
     match model.receipt_operator_disposition with
     | Some (kind, reason) ->
       ( `String (Keeper_execution_receipt.operator_disposition_kind_to_string kind),
-        `String reason )
+        `String (Keeper_execution_receipt.operator_disposition_reason_to_string reason) )
     | None -> `Null, `Null
   in
   [ "disposition", `String (Keeper_trust_disposition.to_wire model.disposition)
-  ; "disposition_reason", `String model.disposition_reason
+  ; "disposition_reason", `String (Trust_core.disposition_reason_to_wire model.disposition_reason)
   ; "operator_disposition", operator_disposition
   ; "operator_disposition_reason", operator_disposition_reason
   ; "needs_attention", `Bool model.needs_attention
-  ; "attention_reason", Json_util.string_opt_to_json model.attention_reason
+  ; ( "attention_reason"
+    , Json_util.string_opt_to_json
+        (Option.map Trust_core.attention_reason_to_wire model.attention_reason) )
   ; "next_human_action", Json_util.string_opt_to_json model.next_human_action
   ]
 ;;

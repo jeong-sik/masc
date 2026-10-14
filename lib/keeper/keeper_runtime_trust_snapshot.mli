@@ -11,8 +11,8 @@ val summary_json :
     trust projection writes, from the same serializer. *)
 val unread_keeper_json :
   disposition:Keeper_trust_disposition.t ->
-  disposition_reason:string ->
-  attention_reason:string ->
+  disposition_reason:Keeper_runtime_trust_snapshot_core.disposition_reason ->
+  attention_reason:Keeper_runtime_trust_snapshot_core.attention_reason ->
   next_human_action:string ->
   Yojson.Safe.t
 

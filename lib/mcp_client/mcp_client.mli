@@ -66,12 +66,14 @@ val http_post
   :  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> deadline_s:float
   -> post
-(** The production transport: each request of a session runs under
-    [deadline_s] on [clock], one window per request. It is the only way to
-    reach a server outside a test, and it cannot be built without a clock
-    and a deadline: a tools/call is work a keeper turn is waiting on with
-    the attempt watchdog off, so a server that accepts the connection and
-    never answers is ended by this deadline or not at all. *)
+(** The production transport for a caller that has a clock: each request of
+    a session runs under [deadline_s] on [clock], one window per request. It
+    cannot be built without a clock and a deadline: a tools/call is work a
+    keeper turn is waiting on with the attempt watchdog off, so a server
+    that accepts the connection and never answers is ended by this deadline
+    or not at all. A caller with no clock (the web search tool, which runs
+    curl as its other providers do) supplies a {!post} of its own, under the
+    same rule: it must bound each request. *)
 
 type t
 

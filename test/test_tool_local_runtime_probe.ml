@@ -300,6 +300,86 @@ let test_transport_failure_names_its_cause () =
   check string "operator text keeps the url" "curl exit code 6 for https://example.invalid/"
     (H.transport_failure_to_string ~url:"https://example.invalid/" (H.Curl_exited 6))
 
+let test_response_with_headers_splits_status_headers_and_body () =
+  let split = Masc.Tool_local_runtime_http.split_http_response_with_headers in
+  (match
+     split
+       "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nMcp-Session-Id: sess-1\r\n\r\nevent: message\ndata: {}\n\n"
+   with
+   | Some r ->
+       check int "status" 200 r.status;
+       check (option string) "header keeps the name as written" (Some "sess-1")
+         (List.assoc_opt "Mcp-Session-Id" r.headers);
+       check (option string) "content type" (Some "text/event-stream")
+         (List.assoc_opt "Content-Type" r.headers);
+       (* The blank line inside an event stream belongs to the body. *)
+       check string "body is everything after the first blank line"
+         "event: message\ndata: {}\n\n" r.body
+   | None -> fail "expected a response");
+  (match split "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n" with
+   | Some r ->
+       check int "no-body status" 202 r.status;
+       check string "no body" "" r.body
+   | None -> fail "expected a response for an empty body");
+  (* Bare LF, as a proxy or a fixture may write. *)
+  (match split "HTTP/1.1 200 OK\nX-A: b\n\n{\"ok\":true}" with
+   | Some r -> check string "bare lf body" "{\"ok\":true}" r.body
+   | None -> fail "expected a response for bare lf")
+
+let test_response_with_headers_tolerates_odd_framing () =
+  let split = Masc.Tool_local_runtime_http.split_http_response_with_headers in
+  (match split "HTTP/1.1  200  OK\r\nX-A: b\r\n\r\nbody" with
+   | Some r -> check int "two spaces" 200 r.status
+   | None -> fail "expected a response with two spaces in the status line");
+  (match split "\r\nHTTP/1.1 200 OK\r\n\r\nbody" with
+   | Some r -> check string "leading blank line" "body" r.body
+   | None -> fail "expected a response after a leading blank line");
+  (* Read in one pass: 40k interim blocks and then a response. *)
+  let interim = Buffer.create (40_000 * 27) in
+  for _ = 1 to 40_000 do
+    Buffer.add_string interim "HTTP/1.1 100 Continue\r\n\r\n"
+  done;
+  Buffer.add_string interim "HTTP/1.1 200 OK\r\n\r\nx";
+  (match split (Buffer.contents interim) with
+   | Some r ->
+       check int "final status" 200 r.status;
+       check string "body" "x" r.body
+   | None -> fail "expected a response after many interim blocks")
+
+let test_response_with_headers_skips_an_interim_block () =
+  let split = Masc.Tool_local_runtime_http.split_http_response_with_headers in
+  (match split "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nX-A: b\r\n\r\nbody" with
+   | Some r ->
+       check int "the final status, not the interim one" 200 r.status;
+       check string "body" "body" r.body
+   | None -> fail "expected a response after the interim block")
+
+let test_response_with_headers_refuses_what_is_not_a_response () =
+  let split = Masc.Tool_local_runtime_http.split_http_response_with_headers in
+  check bool "plain text" true (split "not http\r\n\r\nbody" = None);
+  check bool "no end of header block" true (split "HTTP/1.1 200 OK\r\nX-A: b" = None);
+  check bool "empty" true (split "" = None)
+
+let test_curl_post_response_argv_includes_headers_and_one_content_type () =
+  let argv =
+    Masc.Tool_local_runtime_http.curl_post_json_response_argv_for_test ~timeout_sec:7
+      ~headers:[ ("Authorization", "Bearer k"); ("Accept", "application/json, text/event-stream") ]
+      ~url:"https://example.invalid/mcp" ~body_json:"{\"a\":1}" ()
+  in
+  check string "argv0" "curl" (List.hd argv);
+  check string "-q first so ~/.curlrc is not read" "-q" (List.nth argv 1);
+  check bool "response headers are asked for" true (List.mem "-i" argv);
+  (* Through an HTTPS proxy curl would print the CONNECT block first. *)
+  check bool "no proxy CONNECT block in the output" true
+    (List.mem "--suppress-connect-headers" argv);
+  check bool "no write-out: the status line carries the status" false (List.mem "-w" argv);
+  check int "one content type" 1
+    (List.length (List.filter (fun a -> String.equal a "Content-Type: application/json") argv));
+  check bool "body passed with -d" true
+    (List.exists2 (fun a b -> String.equal a "-d" && String.equal b "{\"a\":1}")
+       (List.filteri (fun i _ -> i < List.length argv - 1) argv) (List.tl argv));
+  check string "url last" "https://example.invalid/mcp" (List.nth argv (List.length argv - 1))
+
 let test_curl_get_argv_keeps_curl_as_executable_with_headers () =
   let argv =
     Masc.Tool_local_runtime_http.curl_get_argv_for_test
@@ -504,6 +584,16 @@ let () =
             test_normalize_server_url_strips_trailing_slashes;
           test_case "builds normalized endpoint urls" `Quick
             test_endpoint_urls_use_normalized_base;
+          test_case "response with headers splits status, headers and body" `Quick
+            test_response_with_headers_splits_status_headers_and_body;
+          test_case "response with headers skips an interim block" `Quick
+            test_response_with_headers_skips_an_interim_block;
+          test_case "response with headers tolerates odd framing" `Quick
+            test_response_with_headers_tolerates_odd_framing;
+          test_case "response with headers refuses what is not a response" `Quick
+            test_response_with_headers_refuses_what_is_not_a_response;
+          test_case "curl post response argv asks for headers, one content type" `Quick
+            test_curl_post_response_argv_includes_headers_and_one_content_type;
           test_case "curl argv keeps executable before headers" `Quick
             test_curl_get_argv_keeps_curl_as_executable_with_headers;
           test_case "transport failure names its cause" `Quick

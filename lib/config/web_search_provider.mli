@@ -21,6 +21,8 @@ type t =
   | Exa
   | Bing_api
   | Ollama
+  | Zai
+      (** z.ai's Web Search MCP server (GLM Coding Plan). *)
 [@@deriving enumerate]
 (* [all] is generated, so a provider added to [t] is in it. *)
 
@@ -62,7 +64,12 @@ val in_default_order : t -> bool
 (** Whether the provider joins the chain when nothing configures one.
     {!Brave_llm_context} does not: it answers with a grounded context envelope
     instead of result rows, which is a caller's choice made through provider
-    config and not a fallback. *)
+    config and not a fallback. {!Zai} does not either, for another reason: its
+    key is the one the [glm-coding] model provider already reads, so the key is
+    present on every install that talks to GLM, and a search spends the plan's
+    MCP allowance and not a model call. A search joins that allowance only when
+    the operator names the provider in [provider], [provider_order] or
+    [fallbacks]. *)
 
 val default_order : t list
 (** The providers {!in_default_order} holds, in the order the chain tries them,

@@ -191,6 +191,7 @@ Precedence:
 | `BING_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `bing_api` provider. |
 | `AZURE_BING_SEARCH_API_KEY` | `(none)` | Azure-issued alias with the same admission as `BING_SEARCH_API_KEY`. |
 | `OLLAMA_API_KEY` | `(none)` | Env-only credential; presence admits the `ollama` provider. |
+| `ZAI_API_KEY` | `(none)` | Env-only credential; the `zai` provider (z.ai Web Search MCP, GLM Coding Plan) reads it when named in `provider`, `provider_order` or `fallbacks`. It is not in the default order. A `zai` search is three requests, each under `MASC_WEB_SEARCH_TIMEOUT_SEC`. The `glm-coding` model provider reads the same variable. |
 
 Web artifact corpus (RFC-0383): every truncation offload stores the full
 extraction as a content-addressed blob in the `Tool_blob_store`

@@ -6,6 +6,7 @@ type t =
   | Exa
   | Bing_api
   | Ollama
+  | Zai
 [@@deriving enumerate]
 
 let label = function
@@ -16,6 +17,7 @@ let label = function
   | Exa -> "exa"
   | Bing_api -> "bing_api"
   | Ollama -> "ollama"
+  | Zai -> "zai"
 ;;
 
 let of_label raw =
@@ -27,6 +29,7 @@ let of_label raw =
   | "exa" -> Some Exa
   | "bing" | "bing_api" -> Some Bing_api
   | "ollama" -> Some Ollama
+  | "zai" | "z.ai" -> Some Zai
   | "auto" | "" -> None
   | _ -> None
 ;;
@@ -38,6 +41,7 @@ let credential_env_names = function
   | Exa -> [ "EXA_API_KEY" ]
   | Bing_api -> [ "BING_SEARCH_API_KEY"; "AZURE_BING_SEARCH_API_KEY" ]
   | Ollama -> [ "OLLAMA_API_KEY" ]
+  | Zai -> [ "ZAI_API_KEY" ]
 ;;
 
 let env_value name =
@@ -52,11 +56,11 @@ let has_credentials provider = Option.is_some (credential provider)
 
 let needs_credential_to_call = function
   | Searxng -> false
-  | Brave | Brave_llm_context | Tavily | Exa | Bing_api | Ollama -> true
+  | Brave | Brave_llm_context | Tavily | Exa | Bing_api | Ollama | Zai -> true
 ;;
 
 let in_default_order = function
-  | Brave_llm_context -> false
+  | Brave_llm_context | Zai -> false
   | Searxng | Brave | Tavily | Exa | Bing_api | Ollama -> true
 ;;
 

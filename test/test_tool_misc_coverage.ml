@@ -453,6 +453,308 @@ let () = test "parse_ollama_search_json" (fun () ->
   assert (Result.is_error (Tool_misc.parse_ollama_search_json "not json"))
 )
 
+(* z.ai's web_search_prime answers with one text block that holds the result
+   array serialised twice. The first row is verbatim from a real answer
+   (2026-10-14); the second is abbreviated. *)
+let zai_nested_text =
+  {|"[{\"title\":\"Module Eio.Switch\",\"link\":\"https://ocaml-multicore.github.io/eio/eio/Eio/Switch/index.html\",\"content\":\"on_release t fn registers fn to be called once t 's main function has returned and all fibers have finished. If fn raises an exception, it is passed to fail . Read more\",\"refer\":\"ref_1\"},{\"title\":\"eio 1.6 (latest) · OCaml Package\",\"link\":\"https://ocaml.org/p/eio/latest/doc/index.html\",\"content\":\"Eio 1.6\",\"refer\":\"ref_2\"}]"|}
+
+let zai_first_row =
+  ( "Module Eio.Switch"
+  , "https://ocaml-multicore.github.io/eio/eio/Eio/Switch/index.html"
+  , "on_release t fn registers fn to be called once t 's main function has returned and all fibers have finished. If fn raises an exception, it is passed to fail . Read more" )
+
+let () = test "parse_zai_search_text reads the nested array and keeps link as url" (fun () ->
+  (match Tool_misc_web_search.parse_zai_search_text zai_nested_text with
+   | Ok [ first; (title2, url2, snippet2) ] ->
+     assert (first = zai_first_row);
+     assert (url2 = "https://ocaml.org/p/eio/latest/doc/index.html");
+     assert (snippet2 = "Eio 1.6");
+     assert (String.length title2 > 0)
+   | _ -> failwith "expected two rows");
+  (* The same array, not nested, is the same data. *)
+  assert
+    (Tool_misc_web_search.parse_zai_search_text
+       {|[{"title":"T","link":"https://example.com/a","content":"C","refer":"ref_1"}]|}
+     = Ok [ ("T", "https://example.com/a", "C") ])
+)
+
+let () = test "parse_zai_search_text refuses what is not a usable array" (fun () ->
+  let parse = Tool_misc_web_search.parse_zai_search_text in
+  assert (Result.is_error (parse "not json"));
+  assert (Result.is_error (parse {|{"results":[]}|}));
+  assert (Result.is_error (parse {|"not an array"|}));
+  (* A row under "url" is not a z.ai row: the field there is "link". *)
+  assert
+    (Result.is_error
+       (parse {|[{"title":"T","url":"https://example.com/a","content":"C"}]|}));
+  assert (Result.is_error (parse {|[{"title":"T","link":"ftp://example.com/a"}]|}));
+  (* A real empty answer is data. *)
+  assert (parse {|"[]"|} = Ok [])
+)
+
+let json_rpc_result id result =
+  Yojson.Safe.to_string
+    (`Assoc [ ("jsonrpc", `String "2.0"); ("id", `Int id); ("result", result) ])
+
+(* A scripted z.ai: [initialize] answers with a session id, the notification
+   with 202, and the call with [call_response]. Every request is recorded. *)
+let zai_fake_post ~call_response requests =
+  fun ~url ~headers ~body ->
+    let json = Yojson.Safe.from_string body in
+    let meth =
+      match json with
+      | `Assoc fields -> (match List.assoc_opt "method" fields with Some (`String m) -> m | _ -> "")
+      | _ -> ""
+    in
+    requests := (meth, url, headers, json) :: !requests;
+    match meth with
+    | "initialize" ->
+      Ok
+        { Masc_http_client.status = 200
+        ; headers = [ ("content-type", "text/event-stream"); ("Mcp-Session-Id", "sess-1") ]
+        ; body =
+            "event: message\ndata: "
+            ^ json_rpc_result 1
+                (`Assoc
+                  [ ("protocolVersion", `String "2024-11-05")
+                  ; ("capabilities", `Assoc [])
+                  ; ("serverInfo", `Assoc [ ("name", `String "mcp-web-search-prime") ])
+                  ])
+            ^ "\n\n"
+        }
+    | "notifications/initialized" ->
+      Ok { Masc_http_client.status = 202; headers = []; body = "" }
+    | _ -> call_response ()
+
+let zai_call_ok text () =
+  Ok
+    { Masc_http_client.status = 200
+    ; headers = [ ("content-type", "text/event-stream") ]
+    ; body =
+        "event: message\ndata: "
+        ^ json_rpc_result 3
+            (`Assoc
+              [ ( "content"
+                , `List [ `Assoc [ ("type", `String "text"); ("text", `String text) ] ] )
+              ; ("isError", `Bool false)
+              ])
+        ^ "\n\n"
+    }
+
+let () = test "search_via_zai opens a session, calls the tool, and limits the rows" (fun () ->
+  let requests = ref [] in
+  let post = zai_fake_post ~call_response:(zai_call_ok zai_nested_text) requests in
+  assert
+    (Tool_misc_web_search.search_via_zai_for_test ~post ~api_key:"zai-test-key"
+       ~query:"eio switch" ~limit:1
+     = Ok [ zai_first_row ]);
+  let seen = List.rev !requests in
+  assert (List.map (fun (m, _, _, _) -> m) seen = [ "initialize"; "notifications/initialized"; "tools/call" ]);
+  List.iter
+    (fun (_, url, headers, _) ->
+      assert (url = "https://api.z.ai/api/mcp/web_search_prime/mcp");
+      assert (List.assoc_opt "Authorization" headers = Some "Bearer zai-test-key"))
+    seen;
+  (* The session the server minted rides on the call. *)
+  (match List.rev seen with
+   | (_, _, headers, json) :: _ ->
+     assert (List.assoc_opt "Mcp-Session-Id" headers = Some "sess-1");
+     (match json with
+      | `Assoc fields ->
+        (match List.assoc_opt "params" fields with
+         | Some (`Assoc params) ->
+           assert (List.assoc_opt "name" params = Some (`String "web_search_prime"));
+           (match List.assoc_opt "arguments" params with
+            | Some (`Assoc args) ->
+              assert (List.assoc_opt "search_query" args = Some (`String "eio switch"));
+              assert (List.assoc_opt "location" args = Some (`String "us"))
+            | _ -> failwith "arguments missing")
+         | _ -> failwith "params missing")
+      | _ -> failwith "call is not an object")
+   | [] -> failwith "no requests")
+)
+
+let () = test "search_via_zai names each failure without echoing the answer" (fun () ->
+  let run call_response =
+    let requests = ref [] in
+    Tool_misc_web_search.search_via_zai_for_test
+      ~post:(zai_fake_post ~call_response requests)
+      ~api_key:"zai-test-key" ~query:"q" ~limit:5
+  in
+  let is_server detail = function
+    | Error (Tool_misc_web_search.Server message) -> String.equal message detail
+    | _ -> false
+  in
+  assert
+    (is_server "provider refused the key"
+       (run (fun () -> Ok { Masc_http_client.status = 401; headers = []; body = "bad key" })));
+  (* What z.ai answers an invalid key: HTTP 200 and an error body that is not
+     JSON-RPC. Measured 2026-10-14. *)
+  assert
+    (is_server "provider refused the key"
+       (run (fun () ->
+          Ok
+            { Masc_http_client.status = 200
+            ; headers = [ ("content-type", "application/json") ]
+            ; body = {|{"code":401,"msg":"token expired or incorrect","success":false}|}
+            })));
+  assert
+    (is_server "provider returned HTTP 429"
+       (run (fun () ->
+          Ok
+            { Masc_http_client.status = 200
+            ; headers = [ ("content-type", "application/json") ]
+            ; body = {|{"code":429,"msg":"quota used up","success":false}|}
+            })));
+  assert
+    (is_server "provider returned HTTP 500"
+       (run (fun () -> Ok { Masc_http_client.status = 500; headers = []; body = "secret detail" })));
+  assert
+    (is_server "provider refused the call (-32000)"
+       (run (fun () ->
+          Ok
+            { Masc_http_client.status = 200
+            ; headers = [ ("content-type", "application/json") ]
+            ; body =
+                {|{"jsonrpc":"2.0","id":3,"error":{"code":-32000,"message":"quota for q is used up"}}|}
+            })));
+  assert
+    (is_server "provider reported a failed search"
+       (run (fun () ->
+          Ok
+            { Masc_http_client.status = 200
+            ; headers = [ ("content-type", "application/json") ]
+            ; body =
+                json_rpc_result 3
+                  (`Assoc
+                    [ ( "content"
+                      , `List [ `Assoc [ ("type", `String "text"); ("text", `String "nope") ] ] )
+                    ; ("isError", `Bool true)
+                    ])
+            })));
+  (match run (fun () -> Error "curl exit code 6 for https://api.z.ai/api/mcp") with
+   | Error (Tool_misc_web_search.Transport message) ->
+     assert (not (str_contains message "https://api.z.ai"))
+   | _ -> failwith "expected a transport error");
+  (match run (zai_call_ok "not an array") with
+   | Error (Tool_misc_web_search.Parse _) -> ()
+   | _ -> failwith "expected a parse error")
+)
+
+(* A bad key is refused on the first request, not on the call: the failure has
+   to read as a refused key at initialize too. *)
+let () = test "search_via_zai reads a refusal at every stage" (fun () ->
+  let refusal ~code_json =
+    fun ~url:_ ~headers:_ ~body:_ ->
+      Ok
+        { Masc_http_client.status = 200
+        ; headers = [ ("content-type", "application/json") ]
+        ; body = Printf.sprintf {|{"code":%s,"msg":"nope","success":false}|} code_json
+        }
+  in
+  let run post =
+    Tool_misc_web_search.search_via_zai_for_test ~post ~api_key:"zai-test-key" ~query:"q"
+      ~limit:5
+  in
+  let is_server detail = function
+    | Error (Tool_misc_web_search.Server message) -> String.equal message detail
+    | _ -> false
+  in
+  (* At initialize, as the real server answers an invalid key. *)
+  assert (is_server "provider refused the key" (run (refusal ~code_json:"401")));
+  (* The code as a string. *)
+  assert (is_server "provider refused the key" (run (refusal ~code_json:{|"401"|})));
+  (* A business code is not an HTTP status: it is still a refusal, not an
+     answer nobody could read. *)
+  assert (is_server "provider refused the call (1113)" (run (refusal ~code_json:"1113")));
+  (* No success flag: nothing says this is z.ai's failure shape. *)
+  (match
+     run (fun ~url:_ ~headers:_ ~body:_ ->
+       Ok
+         { Masc_http_client.status = 200
+         ; headers = [ ("content-type", "application/json") ]
+         ; body = {|{"code":401}|}
+         })
+   with
+   | Error (Tool_misc_web_search.Parse _) -> ()
+   | _ -> failwith "expected a parse error without the success flag")
+)
+
+let () = test "the zai transport drops the content type and carries the answer" (fun () ->
+  let seen = ref [] in
+  let run ~timeout_sec ~headers ~url ~body_json () =
+    seen := (timeout_sec, headers, url, body_json) :: !seen;
+    Ok
+      { Tool_local_runtime_http.status = 202
+      ; headers = [ ("Mcp-Session-Id", "sess-1") ]
+      ; body = "ok"
+      }
+  in
+  let post = Tool_misc_web_search.curl_mcp_post_with_for_test ~run ~timeout_sec:9 in
+  (match
+     post ~url:"https://example.invalid/mcp"
+       ~headers:
+         [ ("Content-Type", "application/json")
+         ; ("content-type", "application/json")
+         ; ("Authorization", "Bearer k")
+         ]
+       ~body:"{}"
+   with
+   | Ok response ->
+     assert (response.Masc_http_client.status = 202);
+     assert (response.Masc_http_client.body = "ok");
+     assert (List.assoc_opt "Mcp-Session-Id" response.Masc_http_client.headers = Some "sess-1")
+   | Error detail -> failwith detail);
+  (match !seen with
+   | [ (9, headers, "https://example.invalid/mcp", "{}") ] ->
+     assert (headers = [ ("Authorization", "Bearer k") ])
+   | _ -> failwith "run was not given the request");
+  let failing ~timeout_sec:_ ~headers:_ ~url:_ ~body_json:_ () = Error "curl exit code 28" in
+  assert
+    (Tool_misc_web_search.curl_mcp_post_with_for_test ~run:failing ~timeout_sec:1
+       ~url:"https://example.invalid/mcp" ~headers:[] ~body:"{}"
+     = Error "curl exit code 28")
+)
+
+let () = test "dispatch names zai without a key and reaches no network" (fun () ->
+  with_env "ZAI_API_KEY" None (fun () ->
+    with_env "MASC_WEB_SEARCH_PROVIDER" (Some "zai") (fun () ->
+      with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+        with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+          with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" (Some "0") (fun () ->
+            let ctx = make_test_ctx () in
+            let args = `Assoc [ ("query", `String "zai without a key") ] in
+            match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+            | Some result ->
+              assert (not (Tool_result.is_success result));
+              assert (str_contains (Tool_result.message result) "zai");
+              assert (str_contains (Tool_result.message result) "missing ZAI_API_KEY")
+            | None -> failwith "masc_web_search was not dispatched")))))
+)
+
+let () = test "zai is a provider only when it is named" (fun () ->
+  assert (Web_search_provider.of_label "ZAI" = Some Web_search_provider.Zai);
+  assert (Web_search_provider.of_label " z.ai " = Some Web_search_provider.Zai);
+  assert (not (List.mem Web_search_provider.Zai Web_search_provider.default_order));
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "OLLAMA_API_KEY" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                    with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                      with_env "ZAI_API_KEY" (Some "zai-key") (fun () ->
+                        (* The key is on every install that talks to GLM, so
+                           it must not make a search start spending the plan. *)
+                        assert (Tool_misc.web_search_provider_plan () = []);
+                        with_env "MASC_WEB_SEARCH_PROVIDER" (Some "zai") (fun () ->
+                          assert (Tool_misc.web_search_provider_plan () = [ "zai" ])))))))))))))
+)
+
 let () = test "web_search_provider_plan_admits_ollama_with_key" (fun () ->
   with_env "MASC_SEARXNG_URL" None (fun () ->
     with_env "BRAVE_SEARCH_API_KEY" None (fun () ->

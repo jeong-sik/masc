@@ -18,21 +18,6 @@ type command =
       ; failure : Operation.failure
       }
 
-type persistence_intent =
-  | Persist_running
-  | Persist_continuation
-  | Persist_queued_edit
-  | Persist_queued_move
-  | Persist_terminal
-
-type post_commit_effect = Publish_operation
-
-type transition =
-  { operation : Operation.t
-  ; persistence : persistence_intent
-  ; post_commit : post_commit_effect
-  }
-
 type error =
   | Not_queued
   | Not_running
@@ -42,10 +27,6 @@ let error_to_string = function
   | Not_queued -> "operation is not queued"
   | Not_running -> "operation is not running"
   | Invalid_input detail -> detail
-;;
-
-let transition operation persistence =
-  { operation; persistence; post_commit = Publish_operation }
 ;;
 
 let validate_sequence sequence =
@@ -74,36 +55,24 @@ let apply (operation : Operation.t) command =
     (match Operation.validate_timestamp ~field:"started_at" started_at with
      | Error detail -> Error (Invalid_input detail)
      | Ok () ->
-       Ok
-         (transition
-            { operation with state = Running { started_at } }
-            Persist_running))
+       Ok { operation with state = Running { started_at } })
   | Requeue_continuation, Running _ ->
-    Ok (transition { operation with state = Queued } Persist_continuation)
+    Ok { operation with state = Queued }
   | Edit_queued { input; execution_digest }, Queued ->
     if String.length execution_digest <> 64
     then Error (Invalid_input "execution_digest must be lowercase SHA-256 hex")
     else
-      Ok
-        (transition
-           { operation with input = Some input; execution_digest }
-           Persist_queued_edit)
+      Ok { operation with input = Some input; execution_digest }
   | Move_queued { sequence }, Queued ->
     (match validate_sequence sequence with
      | Error _ as error -> error
      | Ok () ->
-       Ok (transition { operation with sequence } Persist_queued_move))
+       Ok { operation with sequence })
   | Cancel_queued { completed_at }, Queued ->
     (match validate_terminal_time completed_at with
      | Error _ as error -> error
      | Ok () ->
-       Ok
-         (transition
-            { operation with
-              input = None
-            ; state = Cancelled { completed_at }
-            }
-            Persist_terminal))
+       Ok { operation with input = None; state = Cancelled { completed_at } })
   | Succeed_running { completed_at; outcome_ref }, Running _ ->
     (match
        validate_terminal_time completed_at,
@@ -112,13 +81,7 @@ let apply (operation : Operation.t) command =
      | Error error, _ -> Error error
      | _, Error detail -> Error (Invalid_input detail)
      | Ok (), Ok outcome_ref ->
-       Ok
-         (transition
-            { operation with
-              input = None
-            ; state = Succeeded { completed_at; outcome_ref }
-            }
-            Persist_terminal))
+       Ok { operation with input = None; state = Succeeded { completed_at; outcome_ref } })
   | Fail_running { completed_at; failure }, Running _ ->
     (match
        validate_terminal_time completed_at,
@@ -128,13 +91,7 @@ let apply (operation : Operation.t) command =
      | _, Error detail -> Error (Invalid_input detail)
      | Ok (), Ok detail ->
        let failure = { failure with detail } in
-       Ok
-         (transition
-            { operation with
-              input = None
-            ; state = Failed { completed_at; failure }
-            }
-            Persist_terminal))
+       Ok { operation with input = None; state = Failed { completed_at; failure } })
   | (Start _ | Edit_queued _ | Move_queued _ | Cancel_queued _),
     (Running _ | Succeeded _ | Failed _ | Cancelled _) ->
     Error Not_queued

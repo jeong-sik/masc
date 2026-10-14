@@ -8369,15 +8369,16 @@ let test_async_composition_binds_params_into_durable_status () =
        (match Agent_core.Tool.execution_mode status_tool ~input:`Null with
         | Agent_core.Tool_contract.Concurrent -> ()
         | Agent_core.Tool_contract.Serial -> fail "status tool lost read-only concurrency");
-       let request_id, composition_run_id, result_wait =
-         match
-           Agent_core.Tool.execute
+       let submission_started = Mtime_clock.counter () in
+       let submission = Agent_core.Tool.execute
              ~invocation:
                (composition_invocation
                   ~completion:Agent_core.Tool_contract.Continue_after_success)
              async_tool
-             (`Assoc [ "query", `String query ])
-         with
+             (`Assoc [ "query", `String query ]) in
+       let submission_ms = Mtime.Span.to_float_ns (Mtime_clock.count submission_started) /. 1_000_000. in
+       let request_id, composition_run_id, result_wait =
+         match submission with
          | Error error -> fail error.Agent_core.Types.message
          | Ok output ->
            let payload = structured_tool_output_exn ~base_path:config.base_path output.content in
@@ -8444,6 +8445,76 @@ let test_async_composition_binds_params_into_durable_status () =
           check string "public reader consumes the original named Tool result"
             "keeper_compose_memory-background"
             Yojson.Safe.Util.(member "result" read |> member "composition_tool" |> to_string));
+       (match Masc.Keeper_msg_async.load_canonical_durable_terminal
+           ~base_path:config.base_path ~caller:meta.name request_id with
+        | Ok _ -> ()
+        | Error error -> fail (Masc.Keeper_msg_async.canonical_terminal_error_to_string error));
+       let request_files () =
+         [ Masc.Keeper_msg_async.For_testing.active_record_path ~base_path:config.base_path ~request_id
+         ; Masc.Keeper_msg_async.For_testing.terminal_record_path ~base_path:config.base_path ~request_id ]
+         |> List.map (function Some path -> Filename.dirname path | None -> fail "canonical request path missing")
+         |> List.sort_uniq String.compare
+         |> List.map (fun directory ->
+           directory, (Array.to_list (Sys.readdir directory) |> List.sort String.compare))
+       in
+       let original_request_files = request_files () in
+       let replay_samples = ref [] in
+       let replay () =
+         let started = Mtime_clock.counter () in
+         let result = Agent_core.Tool.execute
+             ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+             async_tool (`Assoc ["query",`String query]) in
+         let elapsed_ms = Mtime.Span.to_float_ns (Mtime_clock.count started) /. 1_000_000. in
+         match result with
+         | Error error -> fail error.Agent_core.Types.message
+         | Ok output ->
+           let replay = structured_tool_output_exn ~base_path:config.base_path output.content in
+           check string "lost acknowledgement replay retains original request" request_id
+             Yojson.Safe.Util.(member "request_id" replay |> to_string);
+           check string "lost acknowledgement replay retains original run" composition_run_id
+             Yojson.Safe.Util.(member "composition_run_id" replay |> to_string);
+           check bool "lost acknowledgement replay retains original result binding" true
+             (Yojson.Safe.equal result_wait (Yojson.Safe.Util.member "result_wait" replay));
+           check bool "replay creates no active or terminal broker request" true
+             (original_request_files = request_files ());
+           replay_samples := elapsed_ms :: !replay_samples
+       in
+       replay ();
+       let intent_directory = Filename.concat
+           (Filename.concat (Masc.Common.masc_dir_from_base_path ~base_path:config.base_path) "keeper_msg_requests")
+           "named_submissions" in
+       let intent_path =
+         Array.to_list (Sys.readdir intent_directory)
+         |> List.find_map (fun name ->
+           if Filename.extension name <> ".json" then None else
+           let path = Filename.concat intent_directory name in
+           let header = In_channel.with_open_text path In_channel.input_line
+             |> function Some line -> parse_json line | None -> fail "named submission header absent" in
+           if Yojson.Safe.Util.(member "source" header |> member "composition_run_id") = `String composition_run_id
+           then Some path else None)
+         |> function Some path -> path | None -> fail "original named intent was not persisted"
+       in
+       let tail = open_out_gen [Open_wronly;Open_append;Open_binary] 0o600 intent_path in
+       Fun.protect ~finally:(fun () -> close_out tail) (fun () -> output_string tail "{");
+       replay ();
+       (match Agent_core.Tool.execute
+           ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+           async_tool (`Assoc ["query",`String "changed-original-arguments"]) with
+        | Error _ -> ()
+        | Ok _ -> fail "same SDK invocation accepted different original arguments");
+       Unix.rename intent_path (intent_path ^ ".retained-original");
+       (match Agent_core.Tool.execute
+           ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+           async_tool (`Assoc ["query",`String query]) with
+        | Error _ -> ()
+        | Ok _ -> fail "missing original intent silently created a replacement named run");
+       check bool "missing original intent creates no replacement broker request" true
+         (original_request_files = request_files ());
+       Printf.printf "named_submission_recovery_measurement=%s\n%!" (Yojson.Safe.to_string
+         (`Assoc ["scope",`String "synthetic public SDK named acceptance and acknowledgement replay; counters end before decoding/assertions";
+           "initial_sdk_ms",`Float submission_ms;
+           "successful_replay_sdk_ms",`List (List.map (fun value -> `Float value) (List.rev !replay_samples));
+           "additional_canonical_requests",`Int 0]));
        match
          Agent_core.Tool.execute
            ~invocation:

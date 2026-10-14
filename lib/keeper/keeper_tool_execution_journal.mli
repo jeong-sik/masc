@@ -99,6 +99,20 @@ val source : t -> source
 val same_source : source -> source -> bool
 (** Compare serialized immutable coordinates, including sealed recorder facts. *)
 
+val source_to_yojson : source -> Yojson.Safe.t
+val source_of_yojson : Yojson.Safe.t -> (source, error) result
+(** The strict immutable source codec, shared by producer-owned submission
+    intents. Decoding grants neither admission nor execution authority. *)
+
+val validate_source_plan : t -> plan:Keeper_tool_plan.t -> (unit, error) result
+(** Read the original owned draft and compare its exact bound plan. No worker
+    is required or reserved; unavailable artifacts remain an error. *)
+
+val named_admission : t ->
+  (Keeper_composition_dependency.composition option, error) result
+(** [None] proves only that this exact journal has no admitted request yet.
+    It does not prove absence of an attempted broker submission. *)
+
 val named_binding : t -> (Keeper_composition_dependency.composition, error) result
 (** Read the first admitted canonical named request. Successor workers retain
     this original public result binding. No request or membership is created. *)

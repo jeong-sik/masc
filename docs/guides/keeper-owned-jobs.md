@@ -247,6 +247,23 @@ recorder facts, never from the current Task. The internal descriptor-only
 compatibility adapter cannot execute a named async run without a frozen turn
 surface; production Keeper bundles supply that surface.
 
+Named submission also retains one source for the SDK's original trace, turn and
+Tool invocation ID. Replaying an acknowledgement lost by the caller returns the
+same first request, run and `result_wait`; it never invokes a second worker.
+Exact Skill, bound arguments and original Task must still match. A fresh named
+submission uses its frozen activation recorder, and a recorded invocation whose
+original intent is missing cannot create a replacement. This does not recover an
+old invocation by assigning it a new Tool ID.
+
+The intent is durable before broker entry. A typed pre-acceptance rejection may
+release that same source for another attempt. Partial acceptance, reconciliation
+or fork uncertainty retains the reservation and the actual request ID when
+known. Canonical named membership and journal ownership decide acceptance;
+an incomplete phase-log tail cannot conceal an intact, accepted original source.
+Missing or corrupt source authority stays unresolved. These producer receipts
+precede compiler support for async child Skill nodes; they do not enable that
+syntax or change named Skills' static read-only admission.
+
 Pending reads return a typed dependency. An enclosing prepared async DAG releases
 its worker, retains completed independent nodes, and rechecks the same occurrences
 after canonical completion. The result includes the full original structured
@@ -279,3 +296,10 @@ instead of publishing stale Lost failure. An actual broker cancellation retains 
 no child continuation. Authored scenarios are not execution evidence until
 the selected head's run completes, and their component intervals do not measure
 whole-task preparation improvement or installed runtime/UI behavior.
+
+`test_keeper_tool_dispatch_runtime` exercises the actual public SDK bundle and
+canonical broker records: acknowledgement replay preserves original IDs without
+new requests; an interrupted phase append still recovers accepted work; changed
+arguments and a missing original intent refuse replacement. Its one-shot SDK
+intervals end before response decoding and verification. Authored assertions and
+interval capture are not execution evidence until the selected run completes.

@@ -125,8 +125,13 @@ val make_tools
         ( Keeper_skill_activation_ledger.record_outcome
         , Keeper_skill_activation_recorder.error )
           result)
+       (** Inline composition recording. Named async submissions record the
+           original sealed [nested_activation_context] within their producer
+           intent transaction, before broker entry. *)
   -> ?record_nested_composition_activation:Keeper_composition_nested_run.record_activation
   -> ?nested_activation_context:Keeper_skill_activation_recorder.t
+       (** Required for a fresh named async invocation; existing original
+           submissions retain their recorded context on replay. *)
   -> ?result_delivery:Keeper_composition_result_delivery.t
        (** The owning turn's typed status-result correlation registry. *)
   -> config:Workspace.config

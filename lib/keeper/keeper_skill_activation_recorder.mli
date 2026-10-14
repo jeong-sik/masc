@@ -83,6 +83,14 @@ val record_composition :
   Skill_reference.t ->
   (Keeper_skill_activation_ledger.record_outcome, error) result
 
+val record_bound_composition :
+  config:Workspace.config -> bound_context ->
+  invocation:Agent_core.Tool_contract.Invocation.t -> tool_name:string ->
+  Skill_reference.t ->
+  (Keeper_skill_activation_ledger.record_outcome, error) result
+(** Record with the exact already-sealed runtime, Task and turn facts. The
+    runtime provider is not evaluated again during named source preparation. *)
+
 val record_nested_composition :
   config:Workspace.config -> t ->
   invocation:Agent_core.Tool_contract.Invocation.t ->

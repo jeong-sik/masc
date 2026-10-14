@@ -126,54 +126,111 @@ let probe_chat_completion_compatible
       | Ok (Error http_error) ->
           (Some false, Some (error_message_of_http_error http_error))
 
-let classify_runtime_blocker ~provider_reachable ~slot_reachable
-    ~chat_contract_status ~expected_model ~actual_model_id ~expected_slots
-    ~actual_slots_total ~expected_ctx ~actual_ctx ~chat_completion_compatible
-    =
-  if not provider_reachable || not slot_reachable then
-    (Some "provider_unreachable", Some "llama runtime health or slots endpoint failed")
-  else if not chat_completion_compatible then
-    ( Some "provider_protocol_incompatible",
-      Some "one or more endpoints failed the AGENT_CORE chat-completions probe" )
-  else if
-    match expected_model, actual_model_id with
-    | Some expected, Some actual -> not (String.equal expected actual)
-    | Some _, None -> true
-    | _ -> false
-  then
-    ( Some "provider_model_mismatch",
-      Some
-        (Printf.sprintf "expected model %s, got %s"
-           (Option.value ~default:"<missing>" expected_model)
-           (Option.value ~default:"<mixed-or-missing>" actual_model_id)) )
-  else if
-    match expected_slots with
-    | Some expected -> actual_slots_total < expected
-    | None -> false
-  then
-    ( Some "slot_count_insufficient",
-      Some
-        (Printf.sprintf "expected at least %d slots, got %d"
-           (Option.value ~default:0 expected_slots) actual_slots_total) )
-  else if
-    match expected_ctx, actual_ctx with
-    | Some expected, Some actual -> expected <> actual
-    | Some _, None -> true
-    | _ -> false
-  then
-    ( Some "ctx_mismatch",
-      Some
-        (Printf.sprintf "expected ctx %s, got %s"
-           (match expected_ctx with Some value -> Int.to_string value | None -> "<none>")
-           (match actual_ctx with Some value -> Int.to_string value | None -> "<mixed-or-missing>")) )
-  else if String.equal chat_contract_status "rejected" then
-    ( Some "chat_contract_incompatible",
-      Some "runtime passed health/slots but failed /v1/chat/completions contract probe" )
-  else
-    (None, None)
+(* Why the local pool fails verification. A case carries the values its
+   detail names, so the label and the sentence come from one value. *)
+type runtime_blocker =
+  | Agent_core_discovery_unavailable
+  | Provider_unreachable
+  | Provider_protocol_incompatible
+  | Provider_model_mismatch of { expected : string; actual : string option }
+  | Slot_count_insufficient of { expected : int; actual : int }
+  | Ctx_mismatch of { expected : int; actual : int option }
 
-let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_ctx
-    ?expected_model endpoints () =
+let runtime_blocker_label = function
+  | Agent_core_discovery_unavailable -> "agent_core_discovery_unavailable"
+  | Provider_unreachable -> "provider_unreachable"
+  | Provider_protocol_incompatible -> "provider_protocol_incompatible"
+  | Provider_model_mismatch _ -> "provider_model_mismatch"
+  | Slot_count_insufficient _ -> "slot_count_insufficient"
+  | Ctx_mismatch _ -> "ctx_mismatch"
+
+let runtime_blocker_detail = function
+  | Agent_core_discovery_unavailable ->
+      "No typed local OpenAI-compatible discovery endpoint is registered. This diagnostic does not assess or block official-client, CLI, or remote Keeper provider lanes."
+  | Provider_unreachable -> "llama runtime health or slots endpoint failed"
+  | Provider_protocol_incompatible ->
+      "one or more endpoints failed the AGENT_CORE chat-completions probe"
+  | Provider_model_mismatch { expected; actual } ->
+      Printf.sprintf "expected model %s, got %s" expected
+        (Option.value ~default:"<mixed-or-missing>" actual)
+  | Slot_count_insufficient { expected; actual } ->
+      Printf.sprintf "expected at least %d slots, got %d" expected actual
+  | Ctx_mismatch { expected; actual } ->
+      Printf.sprintf "expected ctx %d, got %s" expected
+        (match actual with Some value -> Int.to_string value | None -> "<mixed-or-missing>")
+
+let classify_runtime_blocker ~provider_reachable ~slot_reachable
+    ~chat_completion_compatible ~expected_model ~actual_model_id ~expected_slots
+    ~actual_slots_total ~expected_ctx ~actual_ctx =
+  if not provider_reachable || not slot_reachable then Some Provider_unreachable
+  else if not chat_completion_compatible then Some Provider_protocol_incompatible
+  else
+    match expected_model, actual_model_id with
+    | Some expected, Some actual when not (String.equal expected actual) ->
+        Some (Provider_model_mismatch { expected; actual = Some actual })
+    | Some expected, None -> Some (Provider_model_mismatch { expected; actual = None })
+    | Some _, Some _ | None, _ -> (
+        match expected_slots with
+        | Some expected when actual_slots_total < expected ->
+            Some (Slot_count_insufficient { expected; actual = actual_slots_total })
+        | Some _ | None -> (
+            match expected_ctx, actual_ctx with
+            | Some expected, Some actual when expected <> actual ->
+                Some (Ctx_mismatch { expected; actual = Some actual })
+            | Some expected, None -> Some (Ctx_mismatch { expected; actual = None })
+            | Some _, Some _ | None, _ -> None))
+
+(* What one verification observed. The discovered and the undiscovered case
+   both fill it and [verify_result_json] writes the keys once, so the two
+   cases can differ only in values. *)
+type verify_result = {
+  provider_reachable : bool;
+  slot_reachable : bool;
+  chat_completion_compatible : bool option;
+  actual_model_id : string option;
+  actual_slots : int;
+  actual_ctx : int option;
+  active_slots_now : int;
+  configured_capacity : int;
+  runtime_blocker : runtime_blocker option;
+  runtimes : Yojson.Safe.t list;
+}
+
+let verify_result_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model
+    (result : verify_result) =
+  `Assoc
+    [
+      ("checked_at", `String (Masc_domain.now_iso ()));
+      ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
+      ("source", `String "agent_core_discovery");
+      ("verification_scope", `String "local_openai_compatible_runtime_pool");
+      ("blocks_keeper_turns", `Bool false);
+      ("fleet_provider_health", `String "not_assessed");
+      ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
+      ("provider_reachable", `Bool result.provider_reachable);
+      ("slot_reachable", `Bool result.slot_reachable);
+      ( "chat_completion_compatible",
+        Json_util.bool_opt_to_json result.chat_completion_compatible );
+      ("expected_model", Json_util.string_opt_to_json expected_model);
+      ("actual_model_id", Json_util.string_opt_to_json result.actual_model_id);
+      ("expected_slots", Json_util.int_opt_to_json expected_slots);
+      ("actual_slots", `Int result.actual_slots);
+      ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
+      ("actual_ctx", Json_util.int_opt_to_json result.actual_ctx);
+      ("active_slots_now", `Int result.active_slots_now);
+      ("configured_capacity", `Int result.configured_capacity);
+      ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
+      ( "runtime_blocker",
+        Json_util.string_opt_to_json
+          (Option.map runtime_blocker_label result.runtime_blocker) );
+      ( "detail",
+        Json_util.string_opt_to_json
+          (Option.map runtime_blocker_detail result.runtime_blocker) );
+      ("pass", `Bool (Option.is_none result.runtime_blocker));
+      ("runtimes", `List result.runtimes);
+    ]
+
+let verify_discovered ?expected_slots ?expected_ctx ?expected_model endpoints =
   let configured_capacity =
     endpoints
     |> List.fold_left
@@ -181,7 +238,6 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
            acc + Option.value ~default:0 (endpoint_total_slots endpoint))
          0
   in
-  let configured_max_concurrent_models = Inference_utils.max_concurrent_models in
   let runtime_rows, provider_reachable, slot_reachable, actual_slots_total,
       active_slots_now, actual_ctxs, actual_models, chat_completion_compatible =
     List.fold_left
@@ -222,15 +278,12 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
                    else Some "agent_core discovery marked endpoint unhealthy") );
               ("slot_reachable", `Bool slot_ok_row);
               ("slot_status_code", Json_util.int_opt_to_json (if slot_ok_row then Some 200 else None));
-              ("slot_error", `Null);
               ( "props_status_code",
                 Json_util.int_opt_to_json
                   (if Option.is_some endpoint.props then Some 200 else None) );
-              ("props_error", `Null);
               ( "models_status_code",
                 Json_util.int_opt_to_json
                   (if Stdlib.List.length endpoint.models > 0 then Some 200 else None) );
-              ("models_error", `Null);
               ("expected_model", Json_util.string_opt_to_json expected_model);
               ("actual_model_id", Json_util.string_opt_to_json actual_model);
               ("expected_slots", Json_util.int_opt_to_json expected_slots);
@@ -263,76 +316,41 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
     | [ value ] -> Some value
     | _ -> None
   in
-  let runtime_blocker, detail =
-    classify_runtime_blocker ~provider_reachable ~slot_reachable
-      ~chat_contract_status:(if chat_completion_compatible then "confirmed" else "rejected")
-      ~expected_model
-      ~actual_model_id ~expected_slots ~actual_slots_total ~expected_ctx
-      ~actual_ctx ~chat_completion_compatible
-  in
-  `Assoc
-    [
-      ("checked_at", `String (Masc_domain.now_iso ()));
-      ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
-      ("source", `String "agent_core_discovery");
-      ("verification_scope", `String "local_openai_compatible_runtime_pool");
-      ("blocks_keeper_turns", `Bool false);
-      ("fleet_provider_health", `String "not_assessed");
-      ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
-      ("provider_reachable", `Bool provider_reachable);
-      ("slot_reachable", `Bool slot_reachable);
-      ("chat_completion_compatible", `Bool chat_completion_compatible);
-      ("expected_model", Json_util.string_opt_to_json expected_model);
-      ("actual_model_id", Json_util.string_opt_to_json actual_model_id);
-      ("expected_slots", Json_util.int_opt_to_json expected_slots);
-      ("actual_slots", `Int actual_slots_total);
-      ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
-      ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
-      ("active_slots_now", `Int active_slots_now);
-      ("configured_capacity", `Int configured_capacity);
-      ("configured_max_concurrent_models", `Int configured_max_concurrent_models);
-      ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker);
-      ("detail", Json_util.string_opt_to_json detail);
-      ("pass", `Bool (Option.is_none runtime_blocker));
-      ("runtimes", `List (List.rev runtime_rows));
-    ]
+  {
+    provider_reachable;
+    slot_reachable;
+    chat_completion_compatible = Some chat_completion_compatible;
+    actual_model_id;
+    actual_slots = actual_slots_total;
+    actual_ctx;
+    active_slots_now;
+    configured_capacity;
+    runtime_blocker =
+      classify_runtime_blocker ~provider_reachable ~slot_reachable
+        ~chat_completion_compatible ~expected_model ~actual_model_id ~expected_slots
+        ~actual_slots_total ~expected_ctx ~actual_ctx;
+    runtimes = List.rev runtime_rows;
+  }
 
-let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
-    ?expected_ctx ?expected_model () =
-  `Assoc
-    [
-      ("checked_at", `String (Masc_domain.now_iso ()));
-      ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
-      ("source", `String "agent_core_discovery");
-      ("verification_scope", `String "local_openai_compatible_runtime_pool");
-      ("blocks_keeper_turns", `Bool false);
-      ("fleet_provider_health", `String "not_assessed");
-      ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
-      ("provider_reachable", `Bool false);
-      ("slot_reachable", `Bool false);
-      ("chat_completion_compatible", `Null);
-      ("expected_model", Json_util.string_opt_to_json expected_model);
-      ("actual_model_id", `Null);
-      ("expected_slots", Json_util.int_opt_to_json expected_slots);
-      ("actual_slots", `Int 0);
-      ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
-      ("actual_ctx", `Null);
-      ("active_slots_now", `Int 0);
-      ("configured_capacity", `Int 0);
-      ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
-      ("runtime_blocker", `String "agent_core_discovery_unavailable");
-      ( "detail",
-        `String
-          "No typed local OpenAI-compatible discovery endpoint is registered. This diagnostic does not assess or block official-client, CLI, or remote Keeper provider lanes." );
-      ("pass", `Bool false);
-      ("runtimes", `List []);
-    ]
+let undiscovered_result =
+  {
+    provider_reachable = false;
+    slot_reachable = false;
+    chat_completion_compatible = None;
+    actual_model_id = None;
+    actual_slots = 0;
+    actual_ctx = None;
+    active_slots_now = 0;
+    configured_capacity = 0;
+    runtime_blocker = Some Agent_core_discovery_unavailable;
+    runtimes = [];
+  }
 
 let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () =
-  match discovery_endpoints_for_pool runtime_pool with
-  | Some endpoints ->
-      runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_ctx
-        ?expected_model endpoints ()
-  | None ->
-      runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots ?expected_ctx
-        ?expected_model ()
+  let result =
+    match discovery_endpoints_for_pool runtime_pool with
+    | Some endpoints ->
+        verify_discovered ?expected_slots ?expected_ctx ?expected_model endpoints
+    | None -> undiscovered_result
+  in
+  verify_result_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model result

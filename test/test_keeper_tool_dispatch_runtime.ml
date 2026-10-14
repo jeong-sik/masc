@@ -339,7 +339,17 @@ let parse_json raw =
 
 let structured_tool_output_exn ~base_path content =
   match Tool_output.decode_from_agent_core content with
-  | Tool_output.Not_marker -> parse_json content
+  | Tool_output.Not_marker ->
+    (* An [Inline_with_reference] presentation (#43137) is plain JSON, not a
+       stored marker: the typed result envelope carries the structured
+       content beside the manifest reference. Unwrap it; any other JSON is
+       taken as the structured content itself. *)
+    (match parse_json content with
+     | `Assoc fields ->
+       (match List.assoc_opt "structured_content" fields with
+        | Some structured_content -> structured_content
+        | None -> `Assoc fields)
+     | structured_content -> structured_content)
   | Tool_output.Invalid_marker { detail } -> fail detail
   | Tool_output.Decoded reference ->
     if not (String.equal reference.mime Tool_output.artifact_manifest_mime)

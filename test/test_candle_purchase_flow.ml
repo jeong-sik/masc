@@ -766,8 +766,8 @@ rounding = "down"
       ];
     (* Refused when expected_price_milli is lower than the actual scaled price (1600) *)
     (match
-       Candle_shop.purchase
-         ~expected_price_milli:800
+       Candle_shop.purchase_with_expected_price
+         ~expected_price_milli:(Some 800)
          ~now
          ~base_path
          ~keeper:keeper_a
@@ -775,17 +775,10 @@ rounding = "down"
      with
      | Error (Candle_shop.Price_changed { expected_milli = 800; actual_milli = 1600; _ }) -> ()
      | Ok _ | Error _ -> fail "expected Price_changed when effective price exceeds expected_price_milli");
-    rejected
-      "price_changed"
-      (call
-         config
-         "keeper-a"
-         "keeper_candle_purchase"
-         (`Assoc [ "item", `String "crown"; "expected_price_milli", `Int 800 ]));
     let receipt_inflation =
       match
-        Candle_shop.purchase
-          ~expected_price_milli:1600
+        Candle_shop.purchase_with_expected_price
+          ~expected_price_milli:(Some 1600)
           ~now
           ~base_path
           ~keeper:keeper_a
@@ -798,7 +791,18 @@ rounding = "down"
     check int "remaining balance after 1 gift and 1600 debit from 5000 is 3399" 3399 receipt_inflation.account.balance_milli;
     check (list (triple string string int)) "ledger Recorded exact debited amounts"
       [ "keeper-a", "glasses", 100; "keeper-a", "crown", 1600 ]
-      (purchases config))
+      (purchases config);
+    (* Close the decaying interval at t = start + 3600 so the wall-clock tool call
+       sees the 3399 balance (2.0x cap) without decaying across real calendar days. *)
+    write_config config shop;
+    ignore (Candle_shop.account ~now ~base_path ~keeper:keeper_a);
+    rejected
+      "price_changed"
+      (call
+         config
+         "keeper-a"
+         "keeper_candle_purchase"
+         (`Assoc [ "item", `String "crown"; "expected_price_milli", `Int 800 ])))
 ;;
 
 let () =

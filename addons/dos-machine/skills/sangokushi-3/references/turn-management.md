@@ -91,21 +91,25 @@ the msx-retro-mania Keeper (board post `p-ffdbabf575e181c9c8cd02d7366f92ed`).
 3.치수 4.상업투자. A number and Enter there opened `누구에게 명령하겠습니까(1-3)?`,
 a list of the city's officers.
 
-In the officer list a number and Enter redrew `(1-3)?` and moved the highlight
-to that officer; Esc changed nothing. An empty Enter then opened
+In the officer list a number and Enter redrew `(1-3)?` and moved the mark
+(`2*`) to that officer; Esc changed nothing. An empty Enter then opened
 `금을 얼마나 투자하겠습니까(1-100)?`. For 상업투자 (`4`), `5`, `0`, Enter echoed
 `50_` and opened `상업투자하겠습니까(Y/N)?`; `y` confirmed. The chosen officer's
 reply (관우: `다음달에 보고할 수 있으리라 생각합니다`) stayed up with
 `waiting_for_key: true` until one Space returned to
 `유비님, 6.평원에 명령을(0-9)?`. The same steps for 경작 (`2`, officer `1`,
-empty Enter, `50`, `y`) also returned to the command prompt.
+empty Enter, `50`, `y`) also returned to the command prompt. A way out of the
+amount prompt without ordering, and `n` at `상업투자하겠습니까(Y/N)?`, were
+not tried.
 
 A 경작 order had already been sent at this city that month when `5`, `2`,
 Enter was sent again. The prompt redrew `무엇을 하겠습니까(1-4)?` with no
-officer list. The June report listed both `경작 : 경작물 상승` and
-`상업투자 : 상업치 상승`, so the first 경작 order had been carried out. The
-option's color was not read; in the training note above, the ordered option
-was red for the rest of that month.
+officer list. A 상업투자 order (`4`, Enter) at the same city later that month
+did open its officer list and went through. The June report listed both
+`경작 : 경작물 상승` and `상업투자 : 상업치 상승`, so the first 경작 order had
+been carried out. This was seen only in that one game state, and the option's
+color was not read; in the training note above, the ordered option was red for
+the rest of that month.
 
 After `0`, Enter, `y` the month report
 (`유비님, 6.평원에 관한 보고서가 도착했습니다` / `아무 키나 누르세요`) came up.

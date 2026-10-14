@@ -42,12 +42,13 @@ screen after a digit or time advance can also mean that the selection needs a
 different input. Screen identity or elapsed execution steps alone do not prove
 that the game accepted a command.
 
-A small `steps` allowance ends the call before a slow transition does. At a
+A small `steps` allowance can end the call before a slow transition does. At a
 month report (`아무 키나 누르세요`), `enter` with `steps: 300` ran 300 steps and
 left the text unchanged; `masc_dos_step` with 4,000,000 steps and no key then
-reached the command prompt. Leave `steps` at its default unless a short run is
-the point, and follow a short `press` with `masc_dos_step` before reading an
-unchanged picture as a refused key.
+reached the command prompt. Whether the two Enters were dropped or the other
+cities' turns took more than 300 steps was not told apart. Leave `steps` at its
+default unless a short run is the point, and follow a short `press` with
+`masc_dos_step` before reading an unchanged picture as a refused key.
 
 ## Boot
 
@@ -86,11 +87,14 @@ whether a digit needs `enter` or what an empty `enter` will do.
   At `어떻게 하겠습니까(1-3)` in the save menu, it returns to the command
   prompt.
 - In the 개발 officer list (`누구에게 명령하겠습니까`) a number and `enter`
-  redrew the same prompt and moved the highlight to that officer; one empty
+  redrew the same prompt and moved the mark (`2*`) to that officer; one empty
   `enter` then opened the amount prompt. Send the empty `enter` once before
-  concluding that `enter` does nothing in a list. An order already sent this
-  month for a city may not open its officer list again. Details:
-  `references/turn-management.md`.
+  concluding that `enter` does nothing in a list. Choosing 경작 again after a
+  경작 order had been sent that month returned to the submenu without an
+  officer list (one game state only; the option's color was not read), while 상업투자
+  the same month opened its list. `esc` in the officer list changed nothing;
+  a way out of the amount prompt and `n` at the confirmation were not tried.
+  Details: `references/turn-management.md`.
 - Battle-menu digits act immediately; a following `enter` backs out of the
   menu just opened. During officer placement, `enter` does nothing and `0`
   places the officer. Read those sections before sending another key.

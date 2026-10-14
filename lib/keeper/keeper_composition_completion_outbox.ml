@@ -141,6 +141,32 @@ let acknowledge_waiting ~base_path ~keeper_name ~request_id ~composition_tool:to
     | Queued | Running | Cancelling _ | Lost _ | Cancelled _
     | Persistence_failed _ | Done _ ->
       Error (Invalid_obligation "canonical request is not an owned-job waiting attempt")
+
+let prepare_terminal ~base_path ~keeper_name ~request_id =
+  protect_io @@ fun () ->
+  match Async.load_canonical_durable_terminal ~base_path ~caller:keeper_name request_id with
+  | Error error -> Error (Canonical_result_unavailable error)
+  | Ok proof ->
+    let entry = Async.durable_terminal_entry proof in
+    (match entry.status with
+     | Async.Waiting_for_owned_jobs _ ->
+       let base_path = entry.base_path in
+       (match read ~base_path (filename request_id) with
+        | Ok (Some obligation)
+          when String.equal obligation.request_id request_id
+            && String.equal obligation.keeper_name keeper_name -> Ok ()
+        | Ok (Some _) ->
+          Error (Invalid_obligation "completion obligation changed request/recipient identity")
+        | Ok None ->
+          Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
+            ~temp_dir:(Filename.concat (directory ~base_path) ".atomic-staging") ~pretty:false
+            (path ~base_path request_id) (to_json { request_id; keeper_name })
+          |> Result.map_error (fun error ->
+               Storage_failed (Keeper_fs.durable_write_error_to_string error))
+        | Error error -> Error error)
+     | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+     | Persistence_failed _ | Done _ ->
+       Error (Request_unavailable (Async.Found entry)))
 ;;
 
 let flush ~base_path ~deliver =

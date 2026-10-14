@@ -97,6 +97,78 @@ type 'a t =
   ; on_result : Journal.continuation -> (Tool_result.result,error) result -> unit
   ; mutable active : Run_set.t }
 
+(** A refusal that cannot heal by retrying: the sealed run's tool contract was
+    rejected by current authority ([Policy_rejection], e.g. the capability
+    surface changed) or the run's durable ownership no longer admits it
+    ([Workflow_rejection], e.g. source conflict or ownership change), or the
+    original Keeper's metadata is gone or belongs to another Keeper.
+    Transient outcomes — paused Keeper, missing snapshot, unavailable
+    profile/metadata, runtime faults — stay retryable and are never listed
+    here. *)
+type permanent_refusal =
+  | Owner_metadata_missing
+  | Owner_metadata_mismatch
+  | Sealed_run_refused of Tool_result.failure_payload
+
+let permanent_refusal_of_outcome (outcome : (Tool_result.result, error) result) =
+  match outcome with
+  | Error error ->
+    (match error with
+     | Metadata_missing -> Some Owner_metadata_missing
+     | Metadata_owner_mismatch -> Some Owner_metadata_mismatch
+     | Profile_unavailable _ | Metadata_unavailable _ | Profile_rejected _
+     | Keeper_paused | Snapshot_lookup_failed _ | Snapshot_missing
+     | Snapshot_rejected _ | Runtime_failed _ -> None)
+  | Ok result ->
+    match result with
+    | Tool_result.Failed failure ->
+      (match failure.class_ with
+       | Tool_result.Policy_rejection | Tool_result.Workflow_rejection ->
+         Some (Sealed_run_refused failure)
+       | Tool_result.Dependency_unavailable | Tool_result.Runtime_failure
+       | Tool_result.Operator_cancelled -> None)
+    | Tool_result.Completed _ | Tool_result.Deferred _ -> None
+
+let refusal_message = function
+  | Owner_metadata_missing -> error_to_string Metadata_missing
+  | Owner_metadata_mismatch -> error_to_string Metadata_owner_mismatch
+  | Sealed_run_refused failure -> failure.message
+
+let refusal_data = function
+  | Owner_metadata_missing -> `Assoc ["kind", `String "owner_metadata_missing"]
+  | Owner_metadata_mismatch -> `Assoc ["kind", `String "owner_metadata_mismatch"]
+  | Sealed_run_refused failure -> Tool_result.data (Tool_result.Failed failure)
+
+let settle_permanent_refusal supervisor candidate refusal =
+  let source = Journal.continuation_source candidate in
+  let base_path = supervisor.context.config.base_path in
+  let request_id = Journal.continuation_request_id candidate in
+  let run_id = Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id in
+  match
+    Keeper_composition_completion_outbox.prepare_terminal
+      ~base_path ~keeper_name:source.keeper_name ~request_id
+  with
+  | Error error ->
+    Log.Keeper.warn ~keeper_name:source.keeper_name
+      "prepared continuation refusal delivery retained run=%s request=%s error=%s"
+      run_id request_id (Keeper_composition_completion_outbox.error_to_string error)
+  | Ok () ->
+    (match
+       Keeper_msg_async.settle_waiting_request_as_failed ~base_path ~caller:source.keeper_name
+         ~request_id ~body:(refusal_message refusal) ~data:(refusal_data refusal) ()
+     with
+     | Error error ->
+       (* The delivery obligation stays pending; while the canonical record
+          remains waiting, the outbox retires it without delivering, and the
+          next pulse retries this refusal end to end. *)
+       Log.Keeper.warn ~keeper_name:source.keeper_name
+         "prepared continuation refusal settlement retained run=%s request=%s error=%s"
+         run_id request_id (Keeper_msg_async.waiting_settlement_rejection_to_string error)
+     | Ok () ->
+       Log.Keeper.info ~keeper_name:source.keeper_name
+         "prepared continuation refused permanently run=%s request=%s; failure terminal settled and delivery obligated"
+         run_id request_id)
+
 let log_result candidate outcome =
   let source = Journal.continuation_source candidate in
   let run_id = Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id in
@@ -129,6 +201,12 @@ let pulse ~sw supervisor =
               try resume ~context:supervisor.context candidate with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error (Runtime_failed (Printexc.to_string exn))) in
+        (match permanent_refusal_of_outcome outcome with
+         | Some refusal ->
+           (try settle_permanent_refusal supervisor candidate refusal with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Log.Server.warn "prepared continuation refusal settle failed: %s" (Printexc.to_string exn))
+         | None -> ());
         (try supervisor.on_result candidate outcome with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> Log.Server.warn "prepared continuation observer failed: %s" (Printexc.to_string exn)))

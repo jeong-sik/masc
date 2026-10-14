@@ -1271,16 +1271,6 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   Fun.protect ~finally:(fun () -> Unix.unlink duplicate_declaration) (fun () ->
     write_profile ~path:duplicate_declaration ~declared_name:keeper false;
     assert_profile_owner_refused "maintenance rejects duplicate declaration owner claims");
-  write_profile true;
-  let refused,notify_refused = Eio.Promise.create () in
-  let denied_wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
-  Wake.pulse ~sw:context.sw denied_wake |> require "actual maintenance pulse under current denial";
-  (match Eio.Promise.await refused with
-   | Ok result -> check bool "maintenance honors current TOML tool denial" true (Tool_result.is_failed result)
-   | Error error -> fail (Wake.error_to_string error));
-  check string "maintenance refusal keeps the exact original owner" (Journal.continuation_request_id after_second_loss)
-    (Journal.continuation_request_id (continuation ()));
-  check int "maintenance refusal has no backend operation" before_completed_resume (List.length (calls fixture));
   write_profile false;
   let accepted,notify_accepted = Eio.Promise.create () in
   let accepted_callbacks = ref 0 and other_intakes = ref [] in
@@ -1375,7 +1365,94 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let stable = pending () in
   check int "retirement leaves no pending marker work" 0 stable.inspected;
   check int "composition never recreates original program" 1 (effect_count fixture "create");
-  check int "composition never restarts original program" 1 (effect_count fixture "start")
+  check int "composition never restarts original program" 1 (effect_count fixture "start");
+  (* A second prepared run proves a permanent intake refusal ends the run
+     instead of re-forking it on every pulse: once the node contract changes,
+     the sealed continuation is refused exactly once, the failure terminal is
+     settled on the run's last async request and delivered through the
+     composition completion outbox, and discovery drops the marker. *)
+  let second_daemon_state = daemon fixture |> to_assoc in
+  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
+    (List.map (fun (name,value) -> name,(if name="container" then `Null else value))
+       second_daemon_state)));
+  control fixture (`Assoc ["state", `String "running"]);
+  set_source fixture ~task_id:"task-C" ~turn:61;
+  let second_id = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"start-second" ~turn:61 "keeper_job_start"
+      (`Assoc ["argv", `List [`String "fixture-program-second"]; "inputs", `List []])) |> job_id in
+  let second_literal value = `Assoc ["kind", `String "literal"; "value", value] in
+  let second_node name tool input after = `Assoc ["id", `String name; "tool", `String tool;
+      "input", input; "after", `List (List.map (fun name -> `String name) after)] in
+  let second_recipe = `Assoc ["execution", `String "async";
+      "nodes", `List [second_node "await-second" "keeper_job_result"
+        (second_literal (argument second_id)) []]] in
+  let second_prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-wait-second" ~turn:61 "keeper_composition_prepare" second_recipe) in
+  let second_draft = second_prepared |> member "draft" |> composition_reference "second prepared draft" in
+  let second_accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"run-wait-second" ~turn:61 "keeper_composition_run"
+      (`Assoc ["sha256", `String second_draft.sha256])) in
+  let second_ok, _, second_entry = await_composition env fixture second_accepted in
+  check bool "second run suspends on its original job wait" false second_ok;
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"collect-second" ~turn:61 "keeper_job_status" (argument second_id)));
+  let second_ready = pending () in
+  check int "completed second job is discovered without another event" 1 (List.length second_ready.ready);
+  check int "second ready wait has readable original authority" 0 (List.length second_ready.failures);
+  (* The node contract changes after admission: the sealed tool contract can
+     never be re-admitted, so the next pulse must refuse permanently. *)
+  write_profile true;
+  let before_refusal_calls = List.length (calls fixture) in
+  let refused,notify_refused = Eio.Promise.create () in
+  let denied_wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
+  Wake.pulse ~sw:context.sw denied_wake |> require "actual maintenance pulse under changed node contract";
+  (match Eio.Promise.await refused with
+   | Ok result -> check bool "maintenance honors current TOML tool denial" true (Tool_result.is_failed result)
+   | Error error -> fail (Wake.error_to_string error));
+  check int "permanent refusal performs no backend operation" before_refusal_calls (List.length (calls fixture));
+  let settled = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+      ~caller:keeper second_entry.request_id |> require "permanent refusal settles the run terminal" in
+  (match (Async.durable_terminal_entry settled).status with
+   | Async.Done {ok=false; data=Some data; _} ->
+     check_json "refusal settles the changed node contract"
+       (`String "plan_rejected") (data |> member "kind");
+     check_json "refusal names the node whose contract changed"
+       (`String "unknown_tool") (data |> member "error" |> member "kind");
+     check_json "refusal preserves the changed node identity"
+       (`String "await-second") (data |> member "error" |> member "node_id")
+   | status -> failf "permanent refusal did not settle a failure terminal: %s"
+       (Async.status_to_string status));
+  let reconcile = Masc.Keeper_composition_completion_wake.reconcile
+      ~base_path:fixture.base_path |> require "permanent refusal completion outbox reconcile" in
+  check int "exactly one refusal completion is delivered" 1 reconcile.delivered;
+  let sources = Queue.pending_selections_result ~base_path:fixture.base_path keeper
+    |> require "permanent refusal completion queue" in
+  let failure_completions = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      match selection.source.payload with
+      | Keeper_event_queue.Composition_completed completion
+        when String.equal completion.cc_request_id second_entry.request_id ->
+        (match completion.cc_terminal with
+         | Keeper_event_queue.Composition_failed _ -> true
+         | Keeper_event_queue.Composition_succeeded
+         | Keeper_event_queue.Composition_cancelled _ -> false)
+      | _ -> false) sources in
+  check int "exactly one failure completion reaches the original Keeper" 1 (List.length failure_completions);
+  let again = Masc.Keeper_composition_completion_wake.reconcile
+      ~base_path:fixture.base_path |> require "permanent refusal completion outbox re-reconcile" in
+  check int "a settled refusal delivers exactly once" 0 again.delivered;
+  (* Discovery retires the marker, so the next pulse has 0 ready candidates. *)
+  let after_refusal = pending () in
+  check int "next discovery has no ready continuation" 0 (List.length after_refusal.ready);
+  check int "permanently refused marker is retired" 1 after_refusal.retired;
+  let quiet_wake = Wake.create ~context () in
+  Wake.pulse ~sw:context.sw quiet_wake |> require "pulse after permanent refusal";
+  check int "next pulse has 0 ready candidates" 0 (List.length (pending ()).ready);
+  write_profile false;
+  let restored_wake = Wake.create ~context () in
+  Wake.pulse ~sw:context.sw restored_wake |> require "pulse after restoring the profile";
+  check int "restored contract cannot resurrect a settled run" 0 (List.length (pending ()).ready);
+  check (list string) "permanent refusal never starts an async worker" [] (active_requests ())
 
 let test_historical_output_contract_refuses_current_resume () = with_fixture @@ fun env _initialize fixture ->
   let module Draft = Masc.Keeper_composition_draft in

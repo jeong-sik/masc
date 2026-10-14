@@ -384,6 +384,21 @@ let dot_effect word = word = "d" || word = "dd"
 let tuplet_effect word = word = "tu"
 let grace_effect word = word = "gr"
 
+(* A rhythm effect reads a beat's length. Inside a chord there is no single
+   beat for it to change, so [chord_notes] rejects it rather than draw the
+   note at a length the effect did not take. *)
+let chord_rhythm_effect text =
+  let words =
+    text
+    |> String.map (fun char -> if is_whitespace char then ' ' else char)
+    |> String.split_on_char ' '
+    |> List.filter (fun word -> not (String.equal word ""))
+  in
+  if List.exists dot_effect words || List.exists tuplet_effect words
+     || List.exists grace_effect words
+  then Some (String.concat " " words)
+  else None
+
 (* The ticks a whole note takes: every other length is a fraction of it, so
    one unit serves them all and a tuplet divides cleanly. *)
 let whole_note_ticks = 384
@@ -429,14 +444,19 @@ let chord_notes ~strings inner =
       match String.index_from_opt inner index '}' with
       | None -> Error (Unclosed Effect_group)
       | Some close ->
-          let _markup = String.sub inner (index + 1) (close - index - 1) in
-          (* A chord sounds as one beat: a rhythm effect inside it cannot
-             change the beat's length the way one on a lone note does, and no
-             member is the "latest beat" for the caller to read it from. It
-             only marks the member it rides, the way technique markup does,
-             and the chord keeps the count its [:n] or default gave it. *)
+          let markup = String.sub inner (index + 1) (close - index - 1) in
+          (* A chord sounds as one beat: a rhythm effect inside it (a dot, a
+             tuplet, a grace) cannot change the beat's length the way one on a
+             lone note does -- there is no "latest beat" inside the chord for
+             it to apply to. Reading it as a no-op would draw the dotted note
+             at its plain length and pull every beat after it one count early,
+             so the chord is rejected instead of silently misread. Technique
+             markup ({v}, {f}, ...) still marks the member it rides. *)
           (match found with
-           | (word, _) :: earlier -> members ((word, true) :: earlier) (close + 1)
+           | (word, _) :: earlier ->
+               (match chord_rhythm_effect markup with
+                | Some rhythm -> Error (Unsupported_rhythm rhythm)
+                | None -> members ((word, true) :: earlier) (close + 1))
            | [] -> Error Effect_without_note)
     else begin
       let rec word_stop i =

@@ -67,15 +67,16 @@ let ticks_per_cell = 24
    needs, and a column a grace note takes back gives the next beat one cell
    so the grace does not erase it. *)
 let beat_width (beat : Score.beat) =
+  let text_len =
+    List.fold_left (fun len note -> len + String.length (note_text note) + 1) 0 beat.notes
+  in
   if beat.span = 0 then
-    (* A grace note takes no time, but its text still draws, one cell wide;
-       it does not crowd the beat before it, only the one it leads into. *)
-    1
+    (* A grace note takes no time, but its text still draws: as wide as the
+       fret number, so a two-digit fret (12{gr}) is not erased by the note
+       it leads into. It does not crowd the beat before it. *)
+    max 1 text_len
   else
     let span_cells = (beat.span + ticks_per_cell - 1) / ticks_per_cell in
-    let text_len =
-      List.fold_left (fun len note -> len + String.length (note_text note) + 1) 0 beat.notes
-    in
     max span_cells text_len
 
 let beat_cells = beat_width

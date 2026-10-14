@@ -223,7 +223,22 @@ let test_wide_note_text_does_not_overwrite_the_next_beat () =
               && content.[i + 3] = '1' && content.[i + 4] = '0')
              || has_both (i + 1))
        in
-       has_both 0)
+       has_both 0);
+    (* A grace note with a two-letter fret must hold both cells, or the note
+       it leads into draws over its second digit. *)
+    (match Alphatex.render_tab ~max_width:40 ":4 12.1{gr} 5.1" with
+     | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+     | Ok lines ->
+       let row = string_row lines in
+       let content = String.sub row 2 (String.length row - 2) in
+       Alcotest.(check bool) "a two-letter grace note is not overwritten" true
+         (let rec has_grace i =
+            i + 4 <= String.length content
+            && ((content.[i] = '1' && content.[i + 1] = '2' && content.[i + 2] = '-'
+                 && content.[i + 3] = '5')
+                || has_grace (i + 1))
+          in
+          has_grace 0))
 
 (* The rhythm line rides under the lowest string: it is the beat letters
    [w h q e s] at their beats' first cells, with the same left lead and
@@ -444,8 +459,8 @@ let test_markup_that_changes_length () =
     [ 256, [ 0, 64, ( true, [ "0@6" ] ); 64, 96, ( false, [ "3@6" ] ); 160, 96, ( false, [ "5@6" ] ) ] ];
   check_music "a grace note takes no time" ":4 3.1{gr} 5.1"
     [ 96, [ 0, 0, ( true, [ "3@1" ] ); 0, 96, ( false, [ "5@1" ] ) ] ];
-  check_music "a rhythm effect on a chord member marks the note" ":4 (3.1{d} 2.2)"
-    [ 96, [ 0, 96, ( false, [ "3@1*"; "2@2" ] ) ] ];
+  check_failure "a rhythm effect on a chord member cannot change its length"
+    ":4 (3.1{d} 2.2)" (Unsupported_rhythm "d");
   check_failure "a tuplet the ticks cannot divide" ":4 0.6{tu 5} 3.6"
     (Unsupported_rhythm "tu 5");
   check_failure "a tuplet with no number" ":4 0.6{tu} 3.6" (Unsupported_rhythm "tu");

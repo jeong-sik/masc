@@ -54,8 +54,23 @@ canonical owner journal.
 
 These direct tools use serial admission and return while the isolated program
 runs. This producer is the first owned-job backend: shared mutable workspace
-claims, remote Docker bind authority, automatic job-completion wakes and
-composition suspension/resume need their own execution contracts. Prepared
-read-only draft continuation does not reinterpret these jobs as retryable
-ordinary leaves. Those remaining contracts are tracked in
+claims, remote Docker bind authority, automatic job-completion wakes,
+composition suspension/resume and terminal container/workspace cleanup need
+their own execution contracts. Prepared read-only draft continuation does not
+reinterpret these jobs as retryable ordinary leaves. Those remaining contracts
+are tracked in
+[issue #42799](https://github.com/jeong-sik/masc/issues/42799).
+
+Terminal jobs do not clean up automatically yet. A finished or cancelled job
+keeps its stopped Docker container, its captured log evidence, its private
+workspace and CLI directory under `<base-path>/.masc/owned_job_data`, and its
+owner journal under `<base-path>/.masc/keeper_msg_requests/owned_jobs`.
+Durable output artifacts stay in the blob store while the owner journal
+references them. To reclaim disk once a job is terminal (`exited` or
+`cancelled`) and its outputs are collected, an operator removes the exact
+saved container (`docker container rm` on the result's `container_id`, or
+`docker container ls --all --filter label=masc.mcp.owned_job=<job_id>` when
+the id is unknown) and then deletes that job's directories under
+`owned_job_data`. Keep the owner journal while its artifact references must
+stay discoverable. Automated cleanup and retention are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

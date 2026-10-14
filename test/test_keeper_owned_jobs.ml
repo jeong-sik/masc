@@ -332,6 +332,59 @@ let check_original_source fixture json =
              "trace_id", `String (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id)])
     (json |> member "source")
 
+let first_create_argv fixture =
+  calls fixture |> List.find_map (fun json ->
+      let argv = json |> to_list |> List.map to_string in
+      let rec command = function
+        | ("--config" | "--host") :: _ :: rest -> command rest
+        | "container" :: "create" :: _ -> Some argv
+        | _ -> None in
+      command argv)
+  |> function Some argv -> argv | None -> fail "missing fixture create call"
+
+let argv_option name argv =
+  let rec find = function
+    | key :: value :: _ when key = name -> value
+    | _ :: rest -> find rest
+    | [] -> failf "missing %s in create argv" name in
+  find argv
+
+(* Retarget one verified donor container at a cancelled job: a new identity,
+   the cancelled job's name and ownership label, and its private workspace
+   bind. Every other field already passes the backend contract. *)
+let orphan_container ~job_id ~name ~workspace (container : Yojson.Safe.t) =
+  let patch_labels = function
+    | `Assoc fields -> `Assoc (List.map (function
+        | ("masc.mcp.owned_job", _) -> ("masc.mcp.owned_job", `String job_id)
+        | label -> label) fields)
+    | json -> json in
+  let patch_config = function
+    | `Assoc fields -> `Assoc (List.map (function
+        | "Labels", labels -> "Labels", patch_labels labels
+        | field -> field) fields)
+    | json -> json in
+  let patch_mounts = function
+    | `List mounts -> `List (List.map (function
+        | `Assoc fields -> `Assoc (List.map (function
+            | ("Source", `String _) -> ("Source", `String workspace)
+            | field -> field) fields)
+        | mount -> mount) mounts)
+    | json -> json in
+  let patch_state = function
+    | `Assoc _ -> `Assoc ["Status", `String "created"; "Running", `Bool false;
+                          "Paused", `Bool false; "Restarting", `Bool false;
+                          "Dead", `Bool false; "ExitCode", `Int 0]
+    | json -> json in
+  match container with
+  | `Assoc fields -> `Assoc (List.map (function
+      | "Id", _ -> "Id", `String (String.make 64 'c')
+      | "Name", _ -> "Name", `String ("/" ^ name)
+      | "Config", config -> "Config", patch_config config
+      | "Mounts", mounts -> "Mounts", patch_mounts mounts
+      | "State", state -> "State", patch_state state
+      | field -> field) fields)
+  | _ -> fail "fixture container shape changed"
+
 let test_running_restart_exit_and_artifacts () = with_fixture @@ fun _env initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let store = Tool_blob_store.create ~base_path:fixture.base_path in
@@ -449,6 +502,69 @@ let test_unknown_start_absence_never_replays () = with_fixture @@ fun _env _init
   check int "unknown start never recreates" 1 (effect_count fixture "create");
   check int "unknown start never restarts" 1 (effect_count fixture "start");
   (match (load fixture id).phase with Store.Start_requested _ -> () | _ -> fail "original start intent replaced")
+
+let test_cancelled_unconfirmed_launch_closes_absent_create () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  control fixture (`Assoc ["mode", `String "create_unknown_absent"]);
+  let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  let id = job_id started in
+  check string "unknown create preserves intent" "create_requested" (started |> member "phase" |> to_string);
+  let cancelled = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-absent-create" ~turn:42
+      "keeper_job_cancel" (argument id)) in
+  check string "cancelled absent create closes terminally" "cancelled_unconfirmed_launch"
+      (cancelled |> member "phase" |> to_string);
+  check bool "terminal retains cancellation request" true (cancelled |> member "cancel_requested" |> to_bool);
+  check bool "unconfirmed launch has no container" true
+      ((cancelled |> member "container_id") = `Null);
+  check int "cancelled absent create never recreates" 1 (effect_count fixture "create");
+  check int "cancelled absent create never starts" 0 (effect_count fixture "start");
+  check int "cancelled absent create has no kill" 0 (effect_count fixture "kill");
+  (match (load fixture id).phase with
+   | Store.Cancelled_unconfirmed_launch -> ()
+   | _ -> fail "cancelled launch is not durable");
+  let again = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-after-close" ~turn:43
+      "keeper_job_status" (argument id)) in
+  check string "terminal survives later status" "cancelled_unconfirmed_launch" (again |> member "phase" |> to_string);
+  check int "terminal status never recreates" 1 (effect_count fixture "create");
+  check_original_source fixture again
+
+let test_cancelled_unconfirmed_launch_treats_late_container_as_orphan () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  control fixture (`Assoc ["mode", `String "start_unknown_absent"]);
+  let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  let id = job_id started in
+  check string "unknown start preserves intent" "start_requested" (started |> member "phase" |> to_string);
+  let cancelled = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-absent-start" ~turn:42
+      "keeper_job_cancel" (argument id)) in
+  check string "cancelled absent start closes terminally" "cancelled_unconfirmed_launch"
+      (cancelled |> member "phase" |> to_string);
+  check int "cancelled absent start has no kill" 0 (effect_count fixture "kill");
+  (match (load fixture id).phase with
+   | Store.Cancelled_unconfirmed_launch -> ()
+   | _ -> fail "cancelled start launch is not durable");
+  control fixture (`Assoc []);
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  ignore (with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]));
+  let container = daemon fixture |> member "container" in
+  let create_argv = first_create_argv fixture in
+  let name = argv_option "--name" create_argv in
+  let a_job_id = Store.Job_id.of_string id |> require "typed cancelled job id" in
+  let workspace = (Store.paths ~base_path:fixture.base_path a_job_id).workspace in
+  let orphan = orphan_container ~job_id:id ~name ~workspace container in
+  let calls_json = daemon fixture |> member "calls" in
+  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc ["calls", calls_json; "container", orphan]));
+  let orphan_seen = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"status-orphan" ~turn:53
+      "keeper_job_status" (argument id)) in
+  check string "late same-label container stays orphan" "cancelled_unconfirmed_launch"
+      (orphan_seen |> member "phase" |> to_string);
+  check bool "orphan observation leaves cancellation evidence" true
+      ((orphan_seen |> member "detail")
+       = `String "same-label container after a cancelled launch is an orphan; cancellation evidence is retained");
+  check int "orphan never recreates a job" 2 (effect_count fixture "create");
+  check int "orphan never kills" 0 (effect_count fixture "kill");
+  (match (load fixture id).phase with
+   | Store.Cancelled_unconfirmed_launch -> ()
+   | _ -> fail "orphan replaced the cancelled launch phase")
 
 let test_cancel_in_flight_retains_exact_intent () = with_fixture @@ fun env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
@@ -572,6 +688,8 @@ let () =
       [ test_case "structured launch, original source, restart and artifact ownership" `Quick test_running_restart_exit_and_artifacts
       ; test_case "unknown create absence cannot relaunch" `Quick test_unknown_create_absence_never_replays
       ; test_case "unknown start absence cannot restart" `Quick test_unknown_start_absence_never_replays
+      ; test_case "cancelled absent create closes terminally" `Quick test_cancelled_unconfirmed_launch_closes_absent_create
+      ; test_case "late same-label container stays an orphan" `Quick test_cancelled_unconfirmed_launch_treats_late_container_as_orphan
       ; test_case "interrupted cancellation retains exact intent" `Quick test_cancel_in_flight_retains_exact_intent
       ; test_case "changed mount or cloned identity cannot authorize a kill" `Quick test_changed_mount_cannot_authorize_cancel
       ; test_case "large stdout and stderr preserve complete original artifacts" `Quick test_large_streams_publish_complete_original_artifacts ]]

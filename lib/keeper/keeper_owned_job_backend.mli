@@ -72,8 +72,13 @@ val cancel : container_id:string -> preparation -> (observation, error) result
     One effectful CLI call, followed by canonical observation. No retry.
     Nonzero CLI exits are unconfirmed effects. Cancellation propagates; the
     caller's persisted intent remains authoritative when no receipt returns.
-    Cancel kills only an exactly verified owned running container; stopped
-    containers and their evidence remain available until explicit cleanup. *)
+    Cancel kills only an exactly verified owned running container. A cancelled
+    job whose exact label inventory confirms no owned container closes into a
+    terminal cancelled phase instead of waiting forever. Terminal jobs keep
+    their stopped container, captured logs, private workspace, CLI directory
+    and owner journal until an operator removes them by the procedure in
+    docs/guides/keeper-owned-jobs.md; automated cleanup and retention are
+    tracked in issue #42799. *)
 
 type logs = { stdout : Tool_output.artifact_ref; stderr : Tool_output.artifact_ref }
 val logs : container_id:string -> preparation -> (logs, error) result

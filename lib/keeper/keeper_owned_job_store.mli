@@ -23,6 +23,7 @@ type phase =
   | Running of string
   | Exited of { container_id : string; exit_code : int }
   | Cancelled_before_start of string option
+  | Cancelled_unconfirmed_launch
 
 type input = { path : string; artifact : Tool_output.artifact_ref }
 type paths = { job_dir : string; workspace : string; cli_config_dir : string }

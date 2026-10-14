@@ -29,6 +29,12 @@ let observe (record : Store.record) observation =
   | Store.Running expected, Backend.Running id when id = expected -> settle record.phase
   | Store.Exited {container_id;exit_code}, Backend.Stopped (id,code)
       when id = container_id && code = exit_code -> settle record.phase
+  | (Store.Create_requested | Store.Created _ | Store.Start_requested _ | Store.Running _),
+    Backend.Absent when record.cancel_requested ->
+      settle Store.Cancelled_unconfirmed_launch
+  | Store.Cancelled_unconfirmed_launch, Backend.Absent -> Ok (Confirmed record)
+  | Store.Cancelled_unconfirmed_launch, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
+      preserve "same-label container after a cancelled launch is an orphan; cancellation evidence is retained"
   | _, Backend.Unconfirmed detail -> preserve detail
   | _, Backend.Absent -> preserve "saved backend job is absent; launch intent is retained, no relaunch"
   | _, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
@@ -48,7 +54,7 @@ let collect (record : Store.record) =
            save record ~phase:record.phase ~cancel_requested:record.cancel_requested
              ~outputs:(Some (logs.stdout,logs.stderr)) ~detail:None)
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
-    | Store.Running _ | Store.Cancelled_before_start _), _
+    | Store.Running _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), _
   | Store.Exited _, Some _ -> Ok record
 
 let launch_created (record : Store.record) =
@@ -64,7 +70,8 @@ let launch_created (record : Store.record) =
         (match settled with Confirmed observed -> collect observed
          | Unconfirmed observed -> Ok observed)
   | Store.Prepared | Store.Create_requested | Store.Start_requested _ | Store.Running _
-  | Store.Exited _ | Store.Cancelled_before_start _ -> Ok record
+  | Store.Exited _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch ->
+      Ok record
 
 let reconcile (record : Store.record) =
   match record.phase with
@@ -74,6 +81,10 @@ let reconcile (record : Store.record) =
           ~outputs:None ~detail:None
       else Ok record
   | Store.Cancelled_before_start _ -> Ok record
+  | Store.Cancelled_unconfirmed_launch ->
+      (match observe record (Backend.inspect record.preparation) with
+       | Ok observed -> Ok (record_of_settlement observed)
+       | Error error -> Error error)
   | Store.Create_requested | Store.Created _ | Store.Start_requested _
   | Store.Running _ | Store.Exited _ ->
       let* observed =
@@ -82,7 +93,8 @@ let reconcile (record : Store.record) =
               backend_result record (Backend.cancel ~container_id record.preparation)
           | Store.Create_requested | Store.Created _ | Store.Exited _ ->
               observe record (Backend.inspect record.preparation)
-          | Store.Prepared | Store.Cancelled_before_start _ -> Ok (Confirmed record)
+          | Store.Prepared | Store.Cancelled_before_start _
+          | Store.Cancelled_unconfirmed_launch -> Ok (Confirmed record)
         else observe record (Backend.inspect record.preparation) in
       (match observed with
        | Unconfirmed record -> Ok record

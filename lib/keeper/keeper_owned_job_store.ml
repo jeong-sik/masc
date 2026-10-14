@@ -23,6 +23,7 @@ type phase =
   | Running of string
   | Exited of { container_id : string; exit_code : int }
   | Cancelled_before_start of string option
+  | Cancelled_unconfirmed_launch
 type input = { path : string; artifact : Tool_output.artifact_ref }
 type paths = { job_dir : string; workspace : string; cli_config_dir : string }
 type record =
@@ -76,18 +77,20 @@ let phase_to_string = function
   | Created _ -> "created" | Start_requested _ -> "start_requested"
   | Running _ -> "running" | Exited _ -> "exited"
   | Cancelled_before_start _ -> "cancelled_before_start"
+  | Cancelled_unconfirmed_launch -> "cancelled_unconfirmed_launch"
 
 let container_id = function
   | Prepared | Create_requested -> None
   | Created id | Start_requested id | Running id -> Some id
   | Exited { container_id; _ } -> Some container_id
   | Cancelled_before_start id -> id
+  | Cancelled_unconfirmed_launch -> None
 
 let phase_to_json phase =
   let exit_code = match phase with
     | Exited { exit_code; _ } -> Some exit_code
     | Prepared | Create_requested | Created _ | Start_requested _ | Running _
-    | Cancelled_before_start _ -> None in
+    | Cancelled_before_start _ | Cancelled_unconfirmed_launch -> None in
   `Assoc ["kind", `String (phase_to_string phase);
           "container_id", string_option (container_id phase);
           "exit_code", int_option exit_code]
@@ -163,6 +166,7 @@ let phase_of_json value =
   | "running", Some id, None -> Ok (Running id)
   | "exited", Some container_id, Some exit_code -> Ok (Exited {container_id;exit_code})
   | "cancelled_before_start", id, None -> Ok (Cancelled_before_start id)
+  | "cancelled_unconfirmed_launch", None, None -> Ok Cancelled_unconfirmed_launch
   | _ -> Error (Corrupt "invalid phase/handle/exit-code combination")
 
 let valid_input_path path =
@@ -194,9 +198,10 @@ let validate_record (record : record) =
     match record.phase, record.outputs with
     | Exited _, _ -> Ok ()
     | (Prepared | Create_requested | Created _ | Start_requested _ | Running _
-      | Cancelled_before_start _), None -> Ok ()
+      | Cancelled_before_start _ | Cancelled_unconfirmed_launch), None -> Ok ()
     | (Prepared | Create_requested | Created _ | Start_requested _ | Running _
-      | Cancelled_before_start _), Some _ -> Error (Corrupt "outputs precede confirmed exit")
+      | Cancelled_before_start _ | Cancelled_unconfirmed_launch), Some _ ->
+        Error (Corrupt "outputs precede confirmed exit")
 
 let record_of_json value =
   let* fields = exact_object
@@ -242,8 +247,10 @@ let phase_transition before after =
   | Start_requested id, Running next -> id = next
   | Start_requested id, Exited {container_id;_} -> id = container_id
   | Running id, Exited {container_id;_} -> id = container_id
+  | (Create_requested | Created _ | Start_requested _ | Running _),
+    Cancelled_unconfirmed_launch -> true
   | (Prepared | Create_requested | Created _ | Start_requested _ | Running _
-    | Exited _ | Cancelled_before_start _), _ -> false
+    | Exited _ | Cancelled_before_start _ | Cancelled_unconfirmed_launch), _ -> false
 
 let follows previous next =
   previous.sequence < max_int && next.sequence = previous.sequence + 1
@@ -406,7 +413,7 @@ let result_json record =
     | Created _ -> "ready", None
     | Running _ -> "running", None
     | Exited {exit_code;_} -> "exited", Some exit_code
-    | Cancelled_before_start _ -> "cancelled", None in
+    | Cancelled_before_start _ | Cancelled_unconfirmed_launch -> "cancelled", None in
   let artifacts = match record.outputs with None -> [] | Some (stdout,stderr) -> [stdout;stderr] in
   `Assoc ["job_id", `String (Job_id.to_string record.job_id); "status", `String status;
       "source", source_to_json record.source; "phase", `String (phase_to_string record.phase);

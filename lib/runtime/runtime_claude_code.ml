@@ -723,11 +723,19 @@ let probe_auth_status ~mgr ~cwd config =
    process dying mid-write), so one more probe is cheaper than failing the
    Keeper request. A second cut document is reported as the failure it is. *)
 let read_subscription ~mgr ~cwd config =
-  match probe_auth_status ~mgr ~cwd config with
-  | Error (Protocol_error { detail; _ }), true ->
-      Log.Runtime_agent.warn "auth probe returned a cut document, retrying once: %s" detail;
-      fst (probe_auth_status ~mgr ~cwd config)
-  | result, (true | false) -> result
+  let first, cut_document = probe_auth_status ~mgr ~cwd config in
+  if cut_document
+  then (
+    (* [cut_document] is only true for a [Protocol_error], so the first result
+       carries the reason. *)
+    (match first with
+     | Ok _ -> ()
+     | Error error ->
+       Log.Runtime_agent.warn
+         "auth probe returned a cut document, retrying once: %s"
+         (error_to_string error));
+    fst (probe_auth_status ~mgr ~cwd config))
+  else first
 ;;
 
 (* Claude Code reads two keys from a tools/list entry's [_meta]

@@ -16,10 +16,13 @@ let mode_of_string = function
    sizing argument as the approval registry's waiter list. *)
 type t =
   { mutable overrides : (string * mode) list
+  ; mutable restore_error : string option
   ; mutex : Stdlib.Mutex.t
   }
 
-let create () = { overrides = []; mutex = Stdlib.Mutex.create () }
+let create () =
+  { overrides = []; restore_error = None; mutex = Stdlib.Mutex.create () }
+;;
 
 (* Created at load, so a stance set over HTTP and a gate consulting it cannot
    see two different registries. *)
@@ -32,14 +35,174 @@ let resolve t ~keeper_name =
       | Some mode -> mode
       | None -> Auto)
 
-let set t ~keeper_name mode =
-  Stdlib.Mutex.protect t.mutex (fun () ->
-      let without =
-        List.filter (fun (name, _) -> not (String.equal name keeper_name)) t.overrides
-      in
-      t.overrides <-
-        (match mode with
-         | Auto -> without
-         | Yolo -> without @ [ (keeper_name, mode) ]))
-
 let overrides t = Stdlib.Mutex.protect t.mutex (fun () -> t.overrides)
+
+let last_restore_error t =
+  Stdlib.Mutex.protect t.mutex (fun () -> t.restore_error)
+
+(* One row per keeper an operator has moved off [Auto]. [actor] and
+   [changed_at] follow the Keeper_gate_mode override convention: the file
+   is small, so it doubles as the change record. *)
+type override_row =
+  { keeper_name : string
+  ; mode : mode
+  ; actor : string
+  ; changed_at : string
+  }
+
+let override_row_json o =
+  `Assoc
+    [ "keeper_name", `String o.keeper_name
+    ; "mode", `String (mode_to_string o.mode)
+    ; "updated_by", `String o.actor
+    ; "updated_at", `String o.changed_at
+    ]
+;;
+
+let override_row_of_json = function
+  | `Assoc fields ->
+    let string_field key =
+      match List.assoc_opt key fields with
+      | Some (`String value) when String.trim value <> "" -> Ok value
+      | Some _ | None ->
+        Error (Printf.sprintf "tool approval mode override is missing %s" key)
+    in
+    (match string_field "keeper_name" with
+     | Error detail -> Error detail
+     | Ok keeper_name ->
+       (match List.assoc_opt "mode" fields with
+        | None -> Error "tool approval mode override is missing mode"
+        | Some (`String raw) ->
+          (match mode_of_string raw with
+           | None ->
+             Error
+               (Printf.sprintf
+                  "tool approval mode override mode must be auto or yolo, got %S"
+                  raw)
+           | Some mode ->
+             let or_unknown = function Ok value -> value | Error _ -> "" in
+             Ok
+               { keeper_name
+               ; mode
+               ; actor = or_unknown (string_field "updated_by")
+               ; changed_at = or_unknown (string_field "updated_at")
+               })
+        | Some _ -> Error "tool approval mode override mode must be a string"))
+  | _ -> Error "tool approval mode override must be an object"
+;;
+
+let file_schema = "masc.tool_approval_modes.v1"
+
+let file_json rows =
+  `Assoc
+    [ "schema", `String file_schema
+    ; "overrides", `List (List.map override_row_json rows)
+    ]
+;;
+
+let rows_of_file_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "schema" fields with
+     | Some (`String tag) when String.equal tag file_schema ->
+       (match List.assoc_opt "overrides" fields with
+        | None -> Error "tool approval mode store is missing overrides"
+        | Some (`List rows) ->
+          List.fold_left
+            (fun acc row ->
+               match acc, override_row_of_json row with
+               | Error detail, _ -> Error detail
+               | Ok _, Error detail -> Error detail
+               | Ok kept, Ok parsed -> Ok (parsed :: kept))
+            (Ok []) rows
+          |> Result.map List.rev
+        | Some _ -> Error "tool approval mode overrides must be a list")
+     | Some (`String tag) ->
+       Error
+         (Printf.sprintf
+            "tool approval mode store has unexpected schema %S (want %S)"
+            tag
+            file_schema)
+     | Some _ | None -> Error "tool approval mode store is missing schema")
+  | _ -> Error "tool approval mode store must be an object"
+;;
+
+(* An unreadable store is an error rather than an empty list. Reading it as
+   "nobody was singled out" would resolve every keeper to [Auto], which is
+   the looser answer — a file that cannot be read must not be the quiet way
+   back to it (same rule as [Keeper_gate_mode.keeper_overrides]). *)
+let keeper_overrides ~base_path =
+  let file = Keeper_gate_path.tool_approval_modes ~base_path in
+  if not (Sys.file_exists file)
+  then Ok []
+  else
+    match Safe_ops.read_json_file_safe file with
+    | Error detail ->
+      Error (Printf.sprintf "tool approval mode store read failed: %s" detail)
+    | Ok json -> rows_of_file_json json
+;;
+
+let set t ~base_path ~actor ~keeper_name mode =
+  match keeper_overrides ~base_path with
+  | Error detail ->
+    Stdlib.Mutex.protect t.mutex (fun () -> t.restore_error <- Some detail);
+    Error detail
+  | Ok rows ->
+    let changed_at = Masc_domain.now_iso () in
+    let without =
+      List.filter
+        (fun row -> not (String.equal row.keeper_name keeper_name))
+        rows
+    in
+    (* Removing rather than storing a synonym for "no opinion": the file is
+       then also the list of keepers an operator has actually singled out,
+       and a screen showing it does not have to filter. *)
+    let rows =
+      match mode with
+      | Auto -> without
+      | Yolo -> without @ [ { keeper_name; mode; actor; changed_at } ]
+    in
+    Fs_compat.mkdir_p (Keeper_gate_path.dir ~base_path);
+    (match
+       Fs_compat.save_file_atomic
+         (Keeper_gate_path.tool_approval_modes ~base_path)
+         (Yojson.Safe.pretty_to_string (file_json rows))
+     with
+     | Error detail ->
+       Error (Printf.sprintf "tool approval mode store write failed: %s" detail)
+     | Ok () ->
+       (* The durable write lands before memory: a [set] that fails on disk
+          must not hold in the registry, or a restart would silently drop
+          what the operator was told stood. *)
+       Stdlib.Mutex.protect t.mutex (fun () ->
+           t.overrides <- List.map (fun row -> row.keeper_name, row.mode) rows;
+           t.restore_error <- None);
+       Audit_log.log_action
+         (Workspace.default_config base_path)
+         ~agent_id:actor
+         ~action:(Audit_log.Custom "keeper_tool_approval_mode_set")
+         ~details:
+           (`Assoc
+              [ "keeper_name", `String keeper_name
+              ; ( "mode"
+                , match mode with
+                  | Auto -> `Null
+                  | Yolo -> `String "yolo" )
+              ; "changed_at", `String changed_at
+              ; "actor", `String actor
+              ])
+         ~outcome:Audit_log.Success
+         ();
+       Ok ())
+;;
+
+let bind ~base_path t =
+  match keeper_overrides ~base_path with
+  | Ok rows ->
+    Stdlib.Mutex.protect t.mutex (fun () ->
+        t.overrides <- List.map (fun row -> row.keeper_name, row.mode) rows;
+        t.restore_error <- None);
+    Ok ()
+  | Error detail ->
+    Stdlib.Mutex.protect t.mutex (fun () -> t.restore_error <- Some detail);
+    Error detail
+;;

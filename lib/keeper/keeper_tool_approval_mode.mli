@@ -15,10 +15,16 @@
     happened to be the same sentence, because writing to somebody else's Jira
     did not reach the Gate at all.
 
-    Deliberately in-memory, like {!Keeper_tool_approval_registry}: a stance
-    this permissive must not outlive the process that was told to take it. A
-    restart returns every keeper to [Auto], and that is the point, not a
-    gap. *)
+    Durable, reversing an earlier safety stance: overrides persist under the
+    workspace gate root and replay into the shared registry at boot, because
+    the operator's other authorization choices (runtime.toml, keeper config)
+    already survive restarts and this one's silent evaporation caused a real
+    incident — after a restart one keeper's [Yolo] was gone and every tool
+    call hit its 180s approval timeout until diagnosed. The trade-off is now
+    the opposite of what it was: a stance this permissive outlives the
+    process that was told to take it, so an operator who wants it gone must
+    set [Auto] rather than wait for a restart. An unreadable store is an
+    error surfaced via {!last_restore_error}, never a quiet return to [Auto]. *)
 
 type mode =
   | Auto  (** The approval policy decides, call by call. *)
@@ -41,10 +47,41 @@ val shared : unit -> t
 val resolve : t -> keeper_name:string -> mode
 (** A keeper nobody has spoken about is [Auto]. *)
 
-val set : t -> keeper_name:string -> mode -> unit
-(** Setting [Auto] removes the override rather than storing a synonym for
-    the default, so {!overrides} lists exactly the keepers an operator has
-    moved off it. *)
-
 val overrides : t -> (string * mode) list
 (** Every keeper currently moved off [Auto], in the order they were set. *)
+
+type override_row =
+  { keeper_name : string
+  ; mode : mode
+  ; actor : string
+  ; changed_at : string
+  }
+
+val keeper_overrides : base_path:string -> (override_row list, string) result
+(** The persisted overrides. A missing file is an empty list; a file that
+    cannot be read or decoded is an error, because answering "nobody was
+    singled out" would be the quiet way back to the looser [Auto] default. *)
+
+val set :
+  t ->
+  base_path:string ->
+  actor:string ->
+  keeper_name:string ->
+  mode ->
+  (unit, string) result
+(** Persists the change beside the other gate state, then updates the
+    in-memory registry, so a failed write holds neither. Setting [Auto]
+    removes the keeper's row rather than storing a synonym for the default,
+    so the file lists exactly the keepers an operator has moved off [Auto].
+    The change is also written to the audit log as actor [actor]. *)
+
+val bind : base_path:string -> t -> (unit, string) result
+(** Replay the persisted overrides into the registry; the server calls this
+    once, synchronously, at boot. A missing file leaves an empty registry;
+    an unreadable one keeps whatever the registry held and reports via
+    {!last_restore_error}. *)
+
+val last_restore_error : t -> string option
+(** The store error the most recent failed {!set} or {!bind} hit, if any.
+    Kept (not just logged) so a screen can show that the durable answer is
+    unavailable instead of appearing to confirm "no overrides". *)

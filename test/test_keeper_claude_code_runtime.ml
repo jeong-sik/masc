@@ -1798,9 +1798,14 @@ let test_root_heartbeat_reaches_scoped_journal_and_tui ?(retry = false) () =
              let keeper_name = "claude-fixture" in
              let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
              Fun.protect
-               ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
+               ~finally:(fun () ->
+                 ignore
+                   (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+                      ~keeper_name previous))
                (fun () ->
-                 Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo;
+                 ignore
+                   (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+                      ~keeper_name Keeper_tool_approval_mode.Yolo);
                  run ()) in
          match result with
          | Error error -> fail (Agent_core.Error.to_string error)
@@ -3161,9 +3166,14 @@ let test_task_callback_keeps_closed_native_owner_and_model_content () =
           let modes = Keeper_tool_approval_mode.shared () in
           let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
           let attempt = Fun.protect
-            ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
+            ~finally:(fun () ->
+              ignore
+                (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+                   ~keeper_name previous))
             (fun () ->
-              Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo;
+              ignore
+                (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+                   ~keeper_name Keeper_tool_approval_mode.Yolo);
               run_direct_attempt ~base_path ~cli_path ~goal:"TASK_METADATA" ~tools:[]
                 ~required_native_posture:Runtime_native_tools.Native_full
                 ~on_event ~on_native_task_observation ()) in
@@ -3221,11 +3231,19 @@ let task_binding_native_result ~uuid ~call_id =
         "tool_use_id",`String call_id;"content",`String "background launch"]]]])
 ;;
 
-let with_fixture_yolo ~keeper_name f =
+let with_fixture_yolo ~base_path ~keeper_name f =
   let modes = Keeper_tool_approval_mode.shared () in
   let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
-  Fun.protect ~finally:(fun () -> Keeper_tool_approval_mode.set modes ~keeper_name previous)
-    (fun () -> Keeper_tool_approval_mode.set modes ~keeper_name Keeper_tool_approval_mode.Yolo; f ())
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test" ~keeper_name
+           previous))
+    (fun () ->
+      ignore
+        (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test" ~keeper_name
+           Keeper_tool_approval_mode.Yolo);
+      f ())
 ;;
 
 let child_content_frame ?(diagnostic=false) ~uuid ~parent ~text () =
@@ -3283,7 +3301,7 @@ let test_child_callback_binds_original_input_without_root_events () =
          Emit (response_text ~turn_id:"body-complete" ~message_id:"body" secret);
          Emit later;child "after-later-input" "parent-agent";
          Emit (result_text ~turn_id:"final" "Answer")]) (fun cli_path ->
-          let attempt=with_fixture_yolo ~keeper_name (fun () ->
+          let attempt=with_fixture_yolo ~base_path ~keeper_name (fun () ->
             run_direct_attempt ~base_path ~cli_path ~goal:"CHILD_INPUT" ~tools:[]
               ~required_native_posture:Runtime_native_tools.Native_full
               ?on_native_task_observation ~on_child_content_observation
@@ -3365,7 +3383,7 @@ let test_child_and_task_callbacks_share_failed_original_evidence () =
          Emit (task_binding_start ~uuid:"new-task" ~task_id:"new" ~call_id:"new-call");
          Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
          Emit_with_input (result_text ~turn_id:"final" "Answer")]) (fun cli_path ->
-          let attempt=with_fixture_yolo ~keeper_name:"claude-pre-dispatch" (fun () ->
+          let attempt=with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" (fun () ->
             run_direct_attempt ~base_path ~cli_path ~goal:"CHILD_FAILURE" ~tools:[]
               ~required_native_posture:Runtime_native_tools.Native_full
               ~on_child_content_observation:(fun observation -> children:=observation :: !children)
@@ -3419,7 +3437,7 @@ let test_task_binding_freezes_exact_envelope_and_dispatch () =
         Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
         Emit (result_text ~turn_id:"final" "Answer")])
         (fun cli_path ->
-          let result = with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+          let result = with_fixture_yolo ~base_path ~keeper_name:"claude-fixture" (fun () ->
             run_keeper_turn ~base_path ~cli_path ~goal:"TASK_BINDING" ~tools:[]
               ~required_native_posture:Runtime_native_tools.Native_full
               ~on_runtime_attempt:(fun attempt -> admitted := Some attempt)
@@ -3512,7 +3530,7 @@ let with_task_journal_bindings ?on_bound f =
       Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Unchanged answer");
       Emit (result_text ~turn_id:"final" "Unchanged answer")]
       (fun cli_path ->
-        let result = with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+        let result = with_fixture_yolo ~base_path ~keeper_name:"claude-fixture" (fun () ->
           run_keeper_turn ~base_path ~cli_path ~goal:"TASK_JOURNAL"
             ~required_native_posture:Runtime_native_tools.Native_full
             ~on_native_task_observation:(fun ~attempt bound ->
@@ -3552,7 +3570,7 @@ let with_child_journal_observations ?on_observed f =
         ~parent:"child-parent" ~text:"NOT_A_BODY" ());
       Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Unchanged child sink answer");
       Emit (result_text ~turn_id:"final" "Unchanged child sink answer")] (fun cli_path ->
-      let result=with_fixture_yolo ~keeper_name:"claude-fixture" (fun () ->
+      let result=with_fixture_yolo ~base_path ~keeper_name:"claude-fixture" (fun () ->
         run_keeper_turn ~base_path ~cli_path ~goal:"CHILD_JOURNAL" ~tools:[]
           ~required_native_posture:Runtime_native_tools.Native_full
           ~on_runtime_attempt:(fun attempt -> admitted:=Some attempt)
@@ -4765,7 +4783,7 @@ let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
       Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
       Emit_with_input (result_text ~turn_id:"final" "Answer")]
       (fun cli_path ->
-        let result = with_fixture_yolo ~keeper_name:"claude-pre-dispatch" (fun () ->
+        let result = with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" (fun () ->
           run_direct_attempt ~base_path ~cli_path ~goal:"COMMAND_BINDING" ~tools:[]
             ~required_native_posture:Runtime_native_tools.Native_full
             ~on_native_task_observation:(fun bound -> seen := bound :: !seen) ()) in

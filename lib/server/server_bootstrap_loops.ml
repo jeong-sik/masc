@@ -901,6 +901,24 @@ let prepare_keeper_persistence_owned
        (delivery and external outcome unknown; no closing deliver row; \
        operator confirmation required, never reapplied)"
       late_uncertain;
+  (* Tool-approval-mode overrides persist like the operator's other
+     authorization choices (runtime.toml, keeper config); replay them before
+     any keeper loop can consult the registry. An unreadable store is an
+     error, not a quiet return to Auto: the registry keeps whatever it held,
+     the error stays visible via last_restore_error, and the boot log names
+     it — a file that cannot be read must not be the way back to the looser
+     default. *)
+  (match
+     Keeper_tool_approval_mode.bind
+       ~base_path
+       (Keeper_tool_approval_mode.shared ())
+   with
+   | Ok () -> ()
+   | Error detail ->
+     Log.Keeper.error
+       "tool_approval_mode_store: restore failed, overrides left as last \
+        known: %s"
+       detail);
   let prepared =
     { base_path = base_path_identity
     ; report =

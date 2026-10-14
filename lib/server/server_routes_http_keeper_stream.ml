@@ -582,21 +582,27 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
       else (
-        Keeper_tool_approval_mode.set
-          (Keeper_tool_approval_mode.shared ())
-          ~keeper_name
-          mode;
-        Log.Keeper.info
-          "keeper_tool_approval_mode: keeper=%s mode=%s actor=%s"
-          keeper_name
-          (Keeper_tool_approval_mode.mode_to_string mode)
-          actor;
-        respond_json_value_with_cors ~status:`OK request reqd
-          (`Assoc
-             [ ("keeper", `String keeper_name)
-             ; ( "mode"
-               , `String (Keeper_tool_approval_mode.mode_to_string mode) )
-             ])))
+        match
+          Keeper_tool_approval_mode.set
+            (Keeper_tool_approval_mode.shared ())
+            ~base_path ~actor ~keeper_name mode
+        with
+        | Error detail ->
+          respond_json_value_with_cors ~status:`Internal_server_error request
+            reqd
+            (keeper_chat_stream_error_json detail)
+        | Ok () ->
+          Log.Keeper.info
+            "keeper_tool_approval_mode: keeper=%s mode=%s actor=%s"
+            keeper_name
+            (Keeper_tool_approval_mode.mode_to_string mode)
+            actor;
+          respond_json_value_with_cors ~status:`OK request reqd
+            (`Assoc
+               [ ("keeper", `String keeper_name)
+               ; ( "mode"
+                 , `String (Keeper_tool_approval_mode.mode_to_string mode) )
+               ])))
 ;;
 
 let handle_keeper_run_next state ~actor request reqd =

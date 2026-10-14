@@ -209,9 +209,11 @@ let named_programs ~request ~set =
    since it was written: a brew upgrade or a removed install. The server then
    fails on it, while this command (and the install wizard, which found a
    geckodriver on PATH) reports success. Keeping the value is the promise, so
-   it is not changed; this only says it is not there. Only a program that is
-   not there is said. One that exists and does not answer --version may need
-   variables the probe runs without, and saying so every run would be noise. *)
+   it is not changed; this only says it is not there. The program is located,
+   not started: it is the operator's, a launcher may open a window, and the
+   question is only whether the file is there. One that exists and does not
+   answer --version is therefore not said either, and it may need variables
+   the probe runs without. *)
 let kept_programs ~set = function
   | None -> []
   | Some (current : Browser_configuration.automation) ->
@@ -223,13 +225,21 @@ let kept_programs ~set = function
       if List.mem key set
       then []
       else (
-        match Browser_runtime_dependencies.probe path with
-        | Browser_runtime_dependencies.Missing _ ->
+        (* The lookup trims what it is given, so a value with a space around
+           it would be found as a file the server cannot start. *)
+        let located =
+          if String.equal (String.trim path) path
+          then Browser_runtime_dependencies.locate path
+          else None
+        in
+        match located with
+        | Some _ -> []
+        | None ->
           [ Printf.sprintf
-              "%s = %s is not there now. It is left as it is; name %s to change it."
+              "%s = %s is not an executable file now. It is left as it is; name %s to \
+               change it."
               (key_name key) path (flag key)
-          ]
-        | Browser_runtime_dependencies.Started _ | Browser_runtime_dependencies.Failed _ -> [])
+          ])
     in
     check Geckodriver current.driver
     @ (match current.binary with

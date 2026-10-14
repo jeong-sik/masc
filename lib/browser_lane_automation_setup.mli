@@ -73,9 +73,9 @@ val lane_enabled : plan -> bool
 val notes : plan -> string list
 (** Said when a program the operator named is there and did not answer
     [--version]: it is written as named and not verified. Also said for a value
-    the configuration already holds, and keeps, that names a program that is not
-    there now: the value is left as it is and the note names the flag that
-    changes it. *)
+    the configuration already holds, and keeps, that names a file that is not an
+    executable one now: the value is left as it is and the note names the flag
+    that changes it. The program is located and never started. *)
 
 val installed_geckodriver : unit -> Browser_runtime_dependencies.check
 (** The [geckodriver] [PATH] finds first, with whether it answers

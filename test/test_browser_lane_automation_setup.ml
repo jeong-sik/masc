@@ -544,6 +544,46 @@ let test_a_kept_program_that_exists_and_does_not_answer_is_not_said () =
       (runtime_base ^ Printf.sprintf "\n[browser.automation]\ngeckodriver = \"%s\"\n" broken);
     check (list string) "no note" [] (A.notes (plan_ok (request fixture))))
 
+(* The kept program is the operator's. It is looked for, not started: a
+   launcher may open a window, and the question is only whether the file is
+   there. A program that writes a marker when it runs shows a start. *)
+let test_a_kept_program_is_looked_for_and_never_started () =
+  with_fixture (fun fixture ->
+    let marker = Filename.concat fixture.root "was-run" in
+    let driver = Filename.concat fixture.root "kept driver" in
+    program ~mode:0o755 driver (Printf.sprintf "geckodriver 0.0'; touch '%s" marker);
+    let browser = Filename.concat fixture.root "kept browser" in
+    program ~mode:0o755 browser (Printf.sprintf "Zen 0.0'; touch '%s" marker);
+    write fixture.runtime
+      (runtime_base
+       ^ Printf.sprintf "\n[browser.automation]\ngeckodriver = \"%s\"\nbinary = \"%s\"\n"
+           driver browser);
+    let plan = plan_ok (request fixture) in
+    check (list string) "both are there, so nothing is said" [] (A.notes plan);
+    check bool "neither was started" false (Sys.file_exists marker))
+
+let test_a_kept_file_that_cannot_run_is_said () =
+  with_fixture (fun fixture ->
+    let plain = Filename.concat fixture.root "not executable" in
+    write ~mode:0o644 plain "#!/bin/sh\necho x\n";
+    write fixture.runtime
+      (runtime_base
+       ^ Printf.sprintf "\n[browser.automation]\ngeckodriver = \"%s\"\n" plain);
+    kept_note "no execute bit" ~flag:"--geckodriver" ~path:plain
+      (A.notes (plan_ok (request fixture))))
+
+(* The loader takes a value with a space after it, and the file lookup trims
+   what it is given: the program that exists is not the one the server would
+   be told to start. *)
+let test_a_kept_value_with_a_space_after_it_is_not_the_file_that_is_there () =
+  with_fixture (fun fixture ->
+    write fixture.runtime
+      (runtime_base
+       ^ Printf.sprintf "\n[browser.automation]\ngeckodriver = \"%s \"\n" fixture.driver);
+    check bool "the trimmed file is there" true (Sys.file_exists fixture.driver);
+    kept_note "a space after it" ~flag:"--geckodriver" ~path:(fixture.driver ^ " ")
+      (A.notes (plan_ok (request fixture))))
+
 let test_a_lane_that_is_off_is_reported_and_still_written () =
   with_fixture ~config:(runtime_base ^ "\n[browser.automation]\nenabled = false\n")
     (fun fixture ->
@@ -614,5 +654,11 @@ let () =
             test_a_named_value_replaces_a_gone_one_and_is_not_noted
         ; test_case "one that exists and does not answer is not said" `Quick
             test_a_kept_program_that_exists_and_does_not_answer_is_not_said
+        ; test_case "a kept program is looked for and never started" `Quick
+            test_a_kept_program_is_looked_for_and_never_started
+        ; test_case "a kept file that cannot run is said" `Quick
+            test_a_kept_file_that_cannot_run_is_said
+        ; test_case "a kept value with a space after it" `Quick
+            test_a_kept_value_with_a_space_after_it_is_not_the_file_that_is_there
         ] )
     ]

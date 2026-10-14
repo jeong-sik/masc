@@ -27,6 +27,14 @@ type check =
   | Failed of { command : string; path : string; status : Unix.process_status; detail : string }
       (** An executable exists at [path] and did not answer. *)
 
+val locate : string -> string option
+(** The absolute path of the executable file [command] names, without starting
+    it: a name is looked up on [PATH] and a path is used as written. [None] when
+    nothing there can be executed (no file, a file without the execute bit, a
+    directory). {!probe} runs what this finds. Ask this, not {!probe}, when the
+    question is only whether a program is there: starting a program costs up to
+    the probe's time budget and a launcher may open a window. *)
+
 val probe : string -> check
 (** Resolve one executable (a name on [PATH], or a path) and run its version
     entry point, bounded in time. No installation, no browser window, no

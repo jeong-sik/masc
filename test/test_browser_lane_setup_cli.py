@@ -266,13 +266,13 @@ class BrowserLaneSetupCommand(unittest.TestCase):
                       path=f"{root / 'new'}:/usr/bin:/bin")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("was already there and is left as it is", result.stdout)
-        self.assertIn(f"geckodriver = {gone} is not there now", result.stdout)
+        self.assertIn(f"geckodriver = {gone} is not an executable file now", result.stdout)
         self.assertIn("name --geckodriver to change it", result.stdout)
         self.assertEqual(runtime_toml(base).read_text(), text, "the value is not changed")
         named = masc(root, "--mode", "automation", "--base-path", str(base),
                      "--geckodriver", str(root / "new" / "geckodriver"))
         self.assertEqual(named.returncode, 0, named.stderr)
-        self.assertNotIn("is not there now", named.stdout)
+        self.assertNotIn("is not an executable file now", named.stdout)
 
     def test_automation_beside_bidi_writes_both_tables_and_one_host(self):
         root = self.scratch()

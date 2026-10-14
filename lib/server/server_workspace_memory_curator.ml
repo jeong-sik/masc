@@ -192,21 +192,133 @@ let execute_http ~(resolved : Runtime_exact_output_registry.resolved_lane) ~requ
 
 (* Exact owns provider admission and size evidence. Curator does not convert
    a token window into a byte budget. *)
-let execute_output ~(resolved : Runtime_exact_output_registry.resolved_lane)
-    ~schema ~rendered_prompt ~validate_output =
+let system_prompt =
+  "Return one JSON object matching the exact output schema."
+
+let execute_cli
+    ~cli_runner
+    ~base_path
+    ~cli_slots
+    ~requirement
+    ~rendered_prompt
+    ~validate_output
+    ~prior_size_refused
+    ~prior_output_refused
+    ~prior_details
+  =
+  let size_refused = ref prior_size_refused in
+  let on_failure failure =
+    if Keeper_lane_cli_oneshot.refused_for_input_size failure
+    then size_refused := true
+  in
+  match
+    Keeper_lane_cli_oneshot.walk
+      ?runner:cli_runner
+      ~base_dir:base_path
+      ~cli_slots
+      ~system_prompt
+      ~requirement
+      ~prompt:rendered_prompt
+      ~validate:validate_output
+      ~on_failure
+      ()
+  with
+  | Ok (runtime_id, accepted) -> Ok (accepted, runtime_id, None)
+  | Error cli_failures ->
+    let detail =
+      String.concat
+        "; "
+        (prior_details
+         @ List.map Keeper_lane_cli_oneshot.failure_to_string cli_failures)
+    in
+    if !size_refused
+    then Error (Input_too_large detail)
+    else if prior_output_refused
+    then Error (Output_too_large detail)
+    else Error (Execution_failed detail)
+
+let execute_output
+    ~cli_runner
+    ~base_path
+    ~(resolved : Runtime_exact_output_registry.resolved_lane)
+    ~schema
+    ~rendered_prompt
+    ~validate_output
+  =
   let requirement = Exact.make_output_requirement ~schema
       ~minimum_guarantee:Exact.Json_syntax in
+  let cli_admission =
+    Keeper_lane_cli_oneshot.partition_cli_slots
+      ~lane:(Runtime.requirement_of_exact_lane ~schema Runtime.Workspace_curator)
+      resolved.cli_slots
+  in
+  let refused_cli_details =
+    List.map
+      (fun ({ slot; refusal } : Keeper_lane_cli_oneshot.refused_slot) ->
+         Printf.sprintf
+           "cli lane slot %s refused admission: %s"
+           slot
+           (Runtime.refusal_to_string refusal))
+      cli_admission.refused_cli_slots
+  in
   match execute_http ~resolved ~requirement ~rendered_prompt ~validate_output with
   | Ok answer -> Ok answer
-  | Error No_http_slot -> Error (Execution_failed "workspace curator has no admitted exact-output HTTP slot")
-  | Error (Http_failed detail) -> Error detail
+  | Error No_http_slot ->
+    if resolved.cli_slots = []
+    then Error (Execution_failed "workspace curator has no admitted exact-output HTTP slot")
+    else if cli_admission.cli_slots = []
+    then Error (Execution_failed (String.concat "; " refused_cli_details))
+    else
+      execute_cli
+        ~cli_runner
+        ~base_path
+        ~cli_slots:cli_admission.cli_slots
+        ~requirement
+        ~rendered_prompt
+        ~validate_output
+        ~prior_size_refused:false
+        ~prior_output_refused:false
+        ~prior_details:refused_cli_details
+  | Error (Http_failed http_err) ->
+    if resolved.cli_slots = []
+    then Error http_err
+    else (
+      let prior_size_refused, prior_output_refused =
+        match http_err with
+        | Input_too_large _ -> true, false
+        | Output_too_large _ -> false, true
+        | Execution_failed _ -> false, false
+      in
+      let prior_details = execution_failure_detail http_err :: refused_cli_details in
+      if cli_admission.cli_slots = []
+      then (
+        let detail = String.concat "; " prior_details in
+        if prior_size_refused
+        then Error (Input_too_large detail)
+        else if prior_output_refused
+        then Error (Output_too_large detail)
+        else Error (Execution_failed detail))
+      else
+        execute_cli
+          ~cli_runner
+          ~base_path
+          ~cli_slots:cli_admission.cli_slots
+          ~requirement
+          ~rendered_prompt
+          ~validate_output
+          ~prior_size_refused
+          ~prior_output_refused
+          ~prior_details)
 
-let execute ~resolved ~rendered_prompt ~selected ~ledger =
-  execute_output ~resolved ~schema:output_schema ~rendered_prompt
+let execute_with_options ~cli_runner ~base_path ~resolved ~rendered_prompt ~selected ~ledger =
+  execute_output ~cli_runner ~base_path ~resolved ~schema:output_schema ~rendered_prompt
     ~validate_output:(validate ~selected ~ledger)
 
-let summarize ~resolved ~batch =
-  execute_output ~resolved ~schema:Briefing.output_schema
+let execute ~resolved ~rendered_prompt ~selected ~ledger =
+  execute_with_options ~cli_runner:None ~base_path:"." ~resolved ~rendered_prompt ~selected ~ledger
+
+let summarize ~base_path ~resolved ~batch =
+  execute_output ~cli_runner:None ~base_path ~resolved ~schema:Briefing.output_schema
     ~rendered_prompt:(Briefing.rendered_prompt batch)
     ~validate_output:(fun raw ->
       let* text = Briefing.decode_output raw in
@@ -219,6 +331,8 @@ type owner =
   ; mutable in_flight : bool
   ; mutable stopped : bool
   ; mutable wake : unit Eio.Promise.u option
+  ; in_flight_revisions :
+      (string * Keeper_memory_commit_notifications.store, int) Hashtbl.t
   }
 
 let owners_mutex = Stdlib.Mutex.create ()
@@ -233,6 +347,29 @@ let wake owner =
       let resolver = owner.wake in owner.wake <- None; true, resolver)) in
   Option.iter (fun resolver -> Eio.Promise.resolve resolver ()) resolver;
   if queued then Queued else No_owner
+
+(* Keeper_memory_commit_notifications.Current.replace increments snapshot.revision
+   monotonically per (keepers_dir, keeper_id, store), while recovery may
+   re-dispatch the same revision. Suppress only duplicate wakes for a revision
+   that is already in-flight; once in_flight clears at the end of a drain pass,
+   in_flight_revisions is cleared so any subsequent commit wakes a fresh pass. *)
+let wake_for_commit owner (event : Keeper_memory_commit_notifications.event) =
+  let key = event.keeper_id, event.store in
+  let should_wake, resolver =
+    Stdlib.Mutex.protect owner.mutex (fun () ->
+      if owner.stopped then false, None
+      else if owner.in_flight
+              && Hashtbl.find_opt owner.in_flight_revisions key = Some event.revision
+      then false, None
+      else (
+        Hashtbl.replace owner.in_flight_revisions key event.revision;
+        owner.pending <- true;
+        let resolver = owner.wake in
+        owner.wake <- None;
+        true, resolver))
+  in
+  Option.iter (fun resolver -> Eio.Promise.resolve resolver ()) resolver;
+  if should_wake then Queued else No_owner
 
 let request ~base_path =
   match Unix.realpath base_path with
@@ -254,14 +391,29 @@ let prepare_execution ~base_path =
     |> Result.map_error Runtime_exact_output_registry.publication_error_to_string in
   let* resolved = Runtime_exact_output_registry.resolve_lane registry ~lane_id
     |> Result.map_error Runtime_exact_output_registry.lane_resolution_error_to_string in
-  let* () = if resolved.cli_slots = [] then Ok ()
-    else Error "workspace curator requires exact-output HTTP slots" in
+  let cli_admission =
+    Keeper_lane_cli_oneshot.partition_cli_slots
+      ~lane:(Runtime.requirement_of_exact_lane ~schema:output_schema Runtime.Workspace_curator)
+      resolved.cli_slots
+  in
+  let resolved = { resolved with cli_slots = cli_admission.cli_slots } in
+  let refused_cli_json =
+    List.map
+      (fun ({ slot; refusal } : Keeper_lane_cli_oneshot.refused_slot) ->
+         `Assoc
+           [ "slot", `String slot
+           ; "refusal", `String (Runtime.refusal_to_string refusal)
+           ])
+      cli_admission.refused_cli_slots
+  in
   let configuration = `Assoc
     [ "catalog_generation", `String (Runtime_exact_output_registry.catalog_generation_fingerprint registry)
     ; "slots", `List (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> `String slot.slot_id) resolved.selected_slots)
-    ; "cli_slots", `List (List.map (fun id -> `String id) resolved.cli_slots) ] in
+    ; "cli_slots", `List (List.map (fun id -> `String id) resolved.cli_slots)
+    ; "refused_cli_slots", `List refused_cli_json ] in
   Ok { configuration;
-       execute = execute ~resolved; summarize = summarize ~resolved }
+       execute = execute_with_options ~cli_runner:None ~base_path ~resolved;
+       summarize = summarize ~base_path ~resolved }
 
 type classification_error = Inventory_failed of string | Curation_failed of string
 
@@ -488,7 +640,15 @@ let start_with ~sw ~base_path ~enabled ~prepare =
      Creating it here could reconcile every durable ledger member away. *)
   let keepers_dir = try Unix.realpath keepers_dir with
     | Unix.Unix_error (Unix.ENOENT, _, _) -> keepers_dir in
-  let owner = { mutex = Stdlib.Mutex.create (); pending = true; in_flight = false; stopped = false; wake = None } in
+  let owner =
+    { mutex = Stdlib.Mutex.create ()
+    ; pending = true
+    ; in_flight = false
+    ; stopped = false
+    ; wake = None
+    ; in_flight_revisions = Hashtbl.create 8
+    }
+  in
   let admitted = Stdlib.Mutex.protect owners_mutex (fun () ->
     if Hashtbl.mem owners base_path then false
     else (Hashtbl.add owners base_path owner; true)) in
@@ -499,7 +659,7 @@ let start_with ~sw ~base_path ~enabled ~prepare =
         ignore (wake owner)) in
     let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun event ->
       (* fire-and-forget: wake reports admission only; notifications have no response consumer. *)
-      if String.equal event.keepers_dir keepers_dir then ignore (wake owner)) in
+      if String.equal event.keepers_dir keepers_dir then ignore (wake_for_commit owner event)) in
     Eio.Switch.on_release sw (fun () ->
       Stdlib.Mutex.protect owner.mutex (fun () -> owner.stopped <- true; owner.wake <- None);
       unsubscribe_configuration ();
@@ -528,23 +688,36 @@ let start_with ~sw ~base_path ~enabled ~prepare =
           (try if enabled () && run ~base_path ~enabled ~prepare then ignore (wake owner) with
            | Eio.Cancel.Cancelled _ as error -> raise error
            | exn -> Log.Server.error "workspace curator owner %s: %s" base_path (Printexc.to_string exn));
-          Stdlib.Mutex.protect owner.mutex (fun () -> owner.in_flight <- false);
+          Stdlib.Mutex.protect owner.mutex (fun () ->
+            owner.in_flight <- false;
+            Hashtbl.clear owner.in_flight_revisions);
           drain () in
       drain ();
       `Stop_daemon))
 
+(* Runtime.report_exact_output_registry logs a publication warning once when
+   workspace_curator_exact has no admitted slots, and TUI lane inventory
+   surfaces "no admitted slots" with dropped/refused slot details. Returning
+   false here parks the background drain loop instead of emitting a repeated
+   error log on every Keeper memory commit. *)
 let configured () = match Runtime_exact_output_registry.current () with
     | Error _ -> false
     | Ok registry ->
       (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
        | Error (Runtime_exact_output_registry.Exact_lane_off _)
-       | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> false
-       | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true)
+       | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _)
+       | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> false
+       | Ok _ -> true)
 
 let start ~sw ~base_path =
   start_with ~sw ~base_path ~enabled:configured ~prepare:(fun () -> prepare_execution ~base_path)
 
 module For_testing = struct
+  let configured = configured
+
+  let execute_with_cli ?cli_runner ?(base_path = ".") ~resolved ~rendered_prompt ~selected ~ledger () =
+    execute_with_options ~cli_runner ~base_path ~resolved ~rendered_prompt ~selected ~ledger
+
   let execute ~resolved ~rendered_prompt ~selected ~ledger =
     execute ~resolved ~rendered_prompt ~selected ~ledger
     |> Result.map_error execution_failure_detail

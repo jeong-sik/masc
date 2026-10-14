@@ -146,6 +146,165 @@ let refused_for_binding_rest = function
   | Invalid_domain_output _ -> false
 ;;
 
+let claude_error_is_input_size : Runtime_claude_code.error -> bool = function
+  | Runtime_claude_code.Context_window_exceeded _ -> true
+  | Runtime_claude_code.Quota_blocked _
+  | Runtime_claude_code.Invalid_config _
+  | Runtime_claude_code.Spawn_failed _
+  | Runtime_claude_code.Protocol_error _
+  | Runtime_claude_code.Subscription_required _
+  | Runtime_claude_code.Unsupported_control_request _
+  | Runtime_claude_code.Turn_transport_interrupted _
+  | Runtime_claude_code.Turn_failed _
+  | Runtime_claude_code.Turn_failed_with_observation _
+  | Runtime_claude_code.Stopped_by_host _
+  | Runtime_claude_code.Process_exited _
+  | Runtime_claude_code.Unhandled_exception _
+  | Runtime_claude_code.Timeout _ -> false
+;;
+
+let codex_error_is_input_size : Runtime_codex_app_server.error -> bool = function
+  | Runtime_codex_app_server.Context_window_exceeded _ -> true
+  | Runtime_codex_app_server.Turn_failed _
+  | Runtime_codex_app_server.Invalid_config _
+  | Runtime_codex_app_server.Spawn_failed _
+  | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+  | Runtime_codex_app_server.Turn_input_write_failed _
+  | Runtime_codex_app_server.Protocol_error _
+  | Runtime_codex_app_server.Rpc_error _
+  | Runtime_codex_app_server.Subscription_required _
+  | Runtime_codex_app_server.Unsupported_server_request _
+  | Runtime_codex_app_server.Stopped_by_host _
+  | Runtime_codex_app_server.Turn_interrupted
+  | Runtime_codex_app_server.Runtime_shutting_down
+  | Runtime_codex_app_server.Process_exited _
+  | Runtime_codex_app_server.Timeout _ -> false
+;;
+
+let antigravity_error_is_input_size : Runtime_antigravity.error -> bool = function
+  | Runtime_antigravity.Invalid_config _
+  | Runtime_antigravity.Spawn_failed _
+  | Runtime_antigravity.Protocol_error _
+  | Runtime_antigravity.State_callback_failed _
+  | Runtime_antigravity.Turn_failed _
+  | Runtime_antigravity.Process_exited _
+  | Runtime_antigravity.Unhandled_exception _
+  | Runtime_antigravity.Timeout _ -> false
+;;
+
+let muse_error_is_input_size : Runtime_muse_serve.error -> bool = function
+  | Runtime_muse_serve.Invalid_config _
+  | Runtime_muse_serve.Spawn_failed _
+  | Runtime_muse_serve.Turn_input_write_failed _
+  | Runtime_muse_serve.Protocol_error _
+  | Runtime_muse_serve.Rpc_error _
+  | Runtime_muse_serve.Capability_not_granted _
+  | Runtime_muse_serve.Session_not_durable
+  | Runtime_muse_serve.Session_model_mismatch _
+  | Runtime_muse_serve.Session_workspace_mismatch _
+  | Runtime_muse_serve.Session_approval_mode_mismatch _
+  | Runtime_muse_serve.Auth_required _
+  | Runtime_muse_serve.Turn_failed _
+  | Runtime_muse_serve.Turn_cancelled
+  | Runtime_muse_serve.Unsupported_server_request _
+  | Runtime_muse_serve.Runtime_shutting_down
+  | Runtime_muse_serve.Process_exited _
+  | Runtime_muse_serve.Timeout _ -> false
+;;
+
+let refused_for_input_size = function
+  | Execution_failed { cause = Fusion_official_client.Claude_failure error; runtime_id = _ }
+  | Execution_failed
+      { cause = Fusion_official_client.Claude_admission_failure error; runtime_id = _ } ->
+    claude_error_is_input_size error
+  | Execution_failed { cause = Fusion_official_client.Codex_failure error; runtime_id = _ } ->
+    codex_error_is_input_size error
+  | Execution_failed
+      { cause = Fusion_official_client.Antigravity_failure error; runtime_id = _ } ->
+    antigravity_error_is_input_size error
+  | Execution_failed { cause = Fusion_official_client.Muse_failure error; runtime_id = _ } ->
+    muse_error_is_input_size error
+  | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
+  | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
+  | Unknown_runtime _
+  | Not_an_official_client _
+  | Invalid_json_output _
+  | Invalid_domain_output _ -> false
+;;
+
+type input_size_refusal =
+  | Input_over_limit of
+      { estimated_tokens : int
+      ; limit_tokens : int
+      }
+
+let check_input_size ~estimated_tokens ~(overflow : Runtime.overflow_behavior) =
+  match overflow with
+  | Runtime.Caller_bounded { max_input_tokens } ->
+    if estimated_tokens > max_input_tokens
+    then
+      Error
+        (Input_over_limit
+           { estimated_tokens; limit_tokens = max_input_tokens })
+    else Ok ()
+  | Runtime.Rejects_oversize_input
+  | Runtime.Truncates_silently -> Ok ()
+;;
+
+type refused_slot =
+  { slot : string
+  ; refusal : Runtime.refusal
+  }
+
+type admitted_cli_slots =
+  { cli_slots : string list
+  ; refused_cli_slots : refused_slot list
+  }
+
+let partition_cli_slots
+    ~(lane : Runtime.lane_requirement)
+    ?(capability_of = Runtime.capability_of_runtime_id)
+    (slots : string list)
+  : admitted_cli_slots
+  =
+  let cli_slots_rev, refused_rev =
+    List.fold_left
+      (fun (admitted, refused) slot ->
+         match capability_of slot with
+         | None ->
+           admitted, { slot; refusal = Runtime.Runtime_unknown } :: refused
+         | Some runtime ->
+           (match Runtime.admits ~lane ~runtime with
+            | Ok () -> slot :: admitted, refused
+            | Error refusal -> admitted, { slot; refusal } :: refused))
+      ([], [])
+      slots
+  in
+  { cli_slots = List.rev cli_slots_rev
+  ; refused_cli_slots = List.rev refused_rev
+  }
+;;
+
+let output_schema_for_api_format
+    (api_format : Runtime_schema.api_format)
+    (output_schema : Yojson.Safe.t)
+  : Yojson.Safe.t option
+  =
+  match Runtime_schema.api_format_output_schema_channel api_format with
+  | Runtime_schema.Holds_output_schema -> Some output_schema
+  | Runtime_schema.No_output_schema_channel -> None
+;;
+
+let output_schema_for_runtime
+    (runtime : Runtime_instance.t)
+    (output_schema : Yojson.Safe.t)
+  : Yojson.Safe.t option
+  =
+  output_schema_for_api_format
+    runtime.Runtime_instance.provider.Runtime_schema.api_format
+    output_schema
+;;
+
 type attempt_observation =
   | Dispatching of { runtime_id : string }
   | Raw_response of { runtime_id : string; text : string }
@@ -162,8 +321,9 @@ let default_runner ~base_dir : runner =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> Error (Fusion_official_client.Setup_failure "runtime is not configured")
   | Some runtime ->
+    let output_schema = output_schema_for_runtime runtime output_schema in
     Fusion_official_client.run_with_images ~images:[]
-      ~base_dir ~runtime ~system_prompt ~output_schema ~prompt ()
+      ~base_dir ~runtime ~system_prompt ?output_schema ~prompt ()
     |> Result.map (fun (response : Fusion_official_client.response) -> response.text)
 ;;
 

@@ -38,6 +38,18 @@ module For_testing : sig
     -> ledger:Workspace_memory_ledger.t
     -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, string) result
 
+  val execute_with_cli
+    : ?cli_runner:Keeper_lane_cli_oneshot.runner
+    -> ?base_path:string
+    -> resolved:Runtime_exact_output_registry.resolved_lane
+    -> rendered_prompt:string
+    -> selected:Workspace_memory_ledger.pending_fact list
+    -> ledger:Workspace_memory_ledger.t
+    -> unit
+    -> (Yojson.Safe.t * string * Exact_lane_run_registry.usage option, execution_failure) result
+
+  val configured : unit -> bool
+
   val start
     : sw:Eio.Switch.t
     -> base_path:string

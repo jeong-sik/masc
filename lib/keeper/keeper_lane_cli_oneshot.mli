@@ -61,6 +61,58 @@ val refused_for_binding_rest : failure -> bool
     once the account frees. Every other failure, including an Antigravity
     refusal (its quota arrives only as turn text), is [false]. *)
 
+val refused_for_input_size : failure -> bool
+(** [true] only when the client refused because the prompt exceeded the model's
+    context window, read from its typed failure: Claude
+    [Context_window_exceeded] or Codex [Context_window_exceeded]. *)
+
+type input_size_refusal =
+  | Input_over_limit of
+      { estimated_tokens : int
+      ; limit_tokens : int
+      }
+
+val check_input_size
+  :  estimated_tokens:int
+  -> overflow:Runtime.overflow_behavior
+  -> (unit, input_size_refusal) result
+(** Guard caller-bounded runtimes before calling a provider that truncates
+    silently on overflow. Returns [Error (Input_over_limit _)] when
+    [overflow] is [Runtime.Caller_bounded { max_input_tokens }] and
+    [estimated_tokens > max_input_tokens]. *)
+
+type refused_slot =
+  { slot : string
+  ; refusal : Runtime.refusal
+  }
+
+type admitted_cli_slots =
+  { cli_slots : string list
+  ; refused_cli_slots : refused_slot list
+  }
+
+val partition_cli_slots
+  :  lane:Runtime.lane_requirement
+  -> ?capability_of:(string -> Runtime.runtime_capability option)
+  -> string list
+  -> admitted_cli_slots
+(** Partition declared [cli_slots] through {!Runtime.admits}, preserving both
+    admitted [cli_slots] and [refused_cli_slots] with their typed
+    {!Runtime.refusal} reason in declaration order. *)
+
+val output_schema_for_api_format
+  :  Runtime_schema.api_format
+  -> Yojson.Safe.t
+  -> Yojson.Safe.t option
+(** Return [Some output_schema] when the transport has an output-schema channel
+    ([Holds_output_schema]) and [None] when it carries structured output via
+    prompt instructions alone ([No_output_schema_channel], e.g. [Muse_serve]). *)
+
+val output_schema_for_runtime
+  :  Runtime_instance.t
+  -> Yojson.Safe.t
+  -> Yojson.Safe.t option
+
 (** Emitted only after runtime admission, just before the runner and just after
     its raw response. Observers retain failed syntax/semantic evidence without
     changing slot progression or output validation. *)
@@ -82,8 +134,9 @@ type runner =
     instead of only being asked for it in prose. Claude, Antigravity and
     Codex have one, by three different routes: [--json-schema] on Claude and
     Antigravity, [outputSchema] on the Codex v2 [turn/start] request. Muse
-    Code has none, so the default runner fails a Muse Code slot with
-    {!Fusion_official_client.Setup_failure} before any process starts. *)
+    Code has none ([No_output_schema_channel]), so the default runner omits
+    [?output_schema] on Muse Code and relies on the prompt schema instruction
+    plus strict JSON parsing when admitted for a [Json_syntax] lane. *)
 
 val run
   :  ?runner:runner

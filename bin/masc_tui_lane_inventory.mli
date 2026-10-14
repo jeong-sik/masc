@@ -3,6 +3,8 @@
 val row_summary : Masc.Tui_decode_lane_inventory.row -> string
 (** Machine activity is displayed independently of its retained publication. *)
 val detail_lines : Masc.Tui_decode_lane_inventory.row -> string list
+val refused_cli_slot_lines :
+  Masc.Keeper_lane_cli_oneshot.refused_slot list -> string list
 val overview_notices : Masc.Tui_decode_lane_inventory.snapshot -> string list
 (** Owner/completeness notices and an issue count; full diagnostics stay in
     [snapshot_notices] so they do not displace the selectable overview. *)

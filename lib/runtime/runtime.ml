@@ -3728,3 +3728,333 @@ let replace_exact_output_lane_slot ?runtime_config_path ~lane ~slot ~replacement
       | _, None -> Error (no_output_schema_channel_refusal ~slot:replacement ~lane_id:(Standalone_lane.to_id lane))
       | _ -> Error "Replace a candidate within its HTTP or CLI group; add a candidate to change groups")
 ;;
+
+type window_requirement =
+  | Unbounded_or_unknown
+  | Known_at_least of { min_tokens : int }
+
+type overflow_requirement =
+  | Truncation_acceptable
+  | Reject_before_truncation
+
+type verdict_requirement =
+  | Free_text
+  | Json_syntax of { schema : Yojson.Safe.t }
+  | Provider_enforced_json_schema of
+      { name : string
+      ; schema : Yojson.Safe.t
+      }
+
+type lane_requirement =
+  { window : window_requirement
+  ; overflow : overflow_requirement
+  ; verdict : verdict_requirement
+  ; tool_free : bool
+  ; fresh_invocation : bool
+  }
+
+type context_window_capability =
+  | Window_unknown
+  | Window_known of { max_input_tokens : int }
+
+type overflow_behavior =
+  | Truncates_silently
+  | Rejects_oversize_input
+  | Caller_bounded of { max_input_tokens : int }
+
+type structured_output_capability =
+  | Text_only
+  | Prompted_json
+  | Flag_json_schema
+  | Http_response_format_json_schema
+[@@deriving eq]
+
+type runtime_capability =
+  { context_window : context_window_capability
+  ; overflow : overflow_behavior
+  ; structured_output : structured_output_capability
+  ; supports_tool_free : bool
+  ; supports_fresh_invocation : bool
+  }
+
+type refusal =
+  | Runtime_unknown
+  | Window_unknown_for_bounded_lane
+  | Window_too_small of
+      { required : int
+      ; actual : int
+      }
+  | Caller_bound_too_small of
+      { required : int
+      ; actual : int
+      }
+  | Silent_truncation_on_overflow
+  | Structured_output_unsupported of
+      { required : [ `Json_syntax | `Provider_enforced_json_schema ]
+      ; actual : structured_output_capability
+      }
+  | Tool_free_unsupported
+  | Fresh_invocation_unsupported
+[@@deriving eq]
+
+let structured_output_capability_to_string = function
+  | Text_only -> "text_only"
+  | Prompted_json -> "prompted_json"
+  | Flag_json_schema -> "flag_json_schema"
+  | Http_response_format_json_schema -> "http_response_format_json_schema"
+;;
+
+let refusal_to_string = function
+  | Runtime_unknown ->
+    "runtime is not configured or has no capability profile"
+  | Window_unknown_for_bounded_lane ->
+    "context window is unknown for a bounded-input lane"
+  | Window_too_small { required; actual } ->
+    Printf.sprintf
+      "context window %d tokens is smaller than required minimum %d tokens"
+      actual
+      required
+  | Caller_bound_too_small { required; actual } ->
+    Printf.sprintf
+      "caller-bounded input limit %d tokens is smaller than required minimum %d tokens"
+      actual
+      required
+  | Silent_truncation_on_overflow ->
+    "runtime truncates oversize input without a typed overflow rejection"
+  | Structured_output_unsupported { required; actual } ->
+    let req_label =
+      match required with
+      | `Json_syntax -> "json_syntax"
+      | `Provider_enforced_json_schema -> "provider_enforced_json_schema"
+    in
+    Printf.sprintf
+      "structured output capability %s cannot satisfy required %s"
+      (structured_output_capability_to_string actual)
+      req_label
+  | Tool_free_unsupported ->
+    "runtime does not support tool-free execution (native tool suppression)"
+  | Fresh_invocation_unsupported ->
+    "runtime does not support fresh stateless one-shot invocation"
+;;
+
+let pp_refusal fmt refusal = Format.pp_print_string fmt (refusal_to_string refusal)
+
+let check_window_admission
+    (lane_window : window_requirement)
+    (runtime_window : context_window_capability)
+  : (unit, refusal) result
+  =
+  match lane_window, runtime_window with
+  | Unbounded_or_unknown, Window_unknown -> Ok ()
+  | Unbounded_or_unknown, Window_known { max_input_tokens = _ } -> Ok ()
+  | Known_at_least { min_tokens = _ }, Window_unknown ->
+    Error Window_unknown_for_bounded_lane
+  | Known_at_least { min_tokens }, Window_known { max_input_tokens } ->
+    if max_input_tokens >= min_tokens
+    then Ok ()
+    else Error (Window_too_small { required = min_tokens; actual = max_input_tokens })
+;;
+
+let check_overflow_admission
+    ~(lane_window : window_requirement)
+    (lane_overflow : overflow_requirement)
+    (runtime_overflow : overflow_behavior)
+  : (unit, refusal) result
+  =
+  match lane_overflow, runtime_overflow with
+  | Truncation_acceptable, Truncates_silently -> Ok ()
+  | Truncation_acceptable, Rejects_oversize_input -> Ok ()
+  | Truncation_acceptable, Caller_bounded { max_input_tokens = _ } -> Ok ()
+  | Reject_before_truncation, Rejects_oversize_input -> Ok ()
+  | Reject_before_truncation, Caller_bounded { max_input_tokens } ->
+    (match lane_window with
+     | Unbounded_or_unknown -> Ok ()
+     | Known_at_least { min_tokens } ->
+       if max_input_tokens >= min_tokens
+       then Ok ()
+       else
+         Error
+           (Caller_bound_too_small
+              { required = min_tokens; actual = max_input_tokens }))
+  | Reject_before_truncation, Truncates_silently ->
+    Error Silent_truncation_on_overflow
+;;
+
+let check_verdict_admission
+    (lane_verdict : verdict_requirement)
+    (runtime_output : structured_output_capability)
+  : (unit, refusal) result
+  =
+  match lane_verdict, runtime_output with
+  | Free_text, Text_only -> Ok ()
+  | Free_text, Prompted_json -> Ok ()
+  | Free_text, Flag_json_schema -> Ok ()
+  | Free_text, Http_response_format_json_schema -> Ok ()
+  | Json_syntax { schema = _ }, Prompted_json -> Ok ()
+  | Json_syntax { schema = _ }, Flag_json_schema -> Ok ()
+  | Json_syntax { schema = _ }, Http_response_format_json_schema -> Ok ()
+  | Json_syntax { schema = _ }, Text_only ->
+    Error
+      (Structured_output_unsupported
+         { required = `Json_syntax; actual = Text_only })
+  | Provider_enforced_json_schema { name = _; schema = _ }, Flag_json_schema -> Ok ()
+  | Provider_enforced_json_schema { name = _; schema = _ }, Http_response_format_json_schema
+    -> Ok ()
+  | Provider_enforced_json_schema { name = _; schema = _ }, Text_only ->
+    Error
+      (Structured_output_unsupported
+         { required = `Provider_enforced_json_schema; actual = Text_only })
+  | Provider_enforced_json_schema { name = _; schema = _ }, Prompted_json ->
+    Error
+      (Structured_output_unsupported
+         { required = `Provider_enforced_json_schema; actual = Prompted_json })
+;;
+
+let check_tool_free_admission ~lane_tool_free ~supports_tool_free =
+  match lane_tool_free, supports_tool_free with
+  | false, (true | false) -> Ok ()
+  | true, true -> Ok ()
+  | true, false -> Error Tool_free_unsupported
+;;
+
+let check_fresh_invocation_admission ~lane_fresh ~supports_fresh =
+  match lane_fresh, supports_fresh with
+  | false, (true | false) -> Ok ()
+  | true, true -> Ok ()
+  | true, false -> Error Fresh_invocation_unsupported
+;;
+
+let admits ~(lane : lane_requirement) ~(runtime : runtime_capability)
+  : (unit, refusal) result
+  =
+  let* () = check_window_admission lane.window runtime.context_window in
+  let* () =
+    check_overflow_admission
+      ~lane_window:lane.window
+      lane.overflow
+      runtime.overflow
+  in
+  let* () = check_verdict_admission lane.verdict runtime.structured_output in
+  let* () =
+    check_tool_free_admission
+      ~lane_tool_free:lane.tool_free
+      ~supports_tool_free:runtime.supports_tool_free
+  in
+  check_fresh_invocation_admission
+    ~lane_fresh:lane.fresh_invocation
+    ~supports_fresh:runtime.supports_fresh_invocation
+;;
+
+let capability_of_runtime (rt : t) : runtime_capability =
+  let context_window =
+    match resolve_max_context_of_runtime rt with
+    | Some (max_input_tokens, _source) when max_input_tokens > 0 ->
+      Window_known { max_input_tokens }
+    | Some _ | None -> Window_unknown
+  in
+  let overflow =
+    match rt.execution with
+    (* Both adapters report a typed Context_window_exceeded error variant
+       (Runtime_claude_code.Context_window_exceeded / Runtime_codex_app_server.Context_window_exceeded). *)
+    | Runtime_execution.Claude_code _
+    | Runtime_execution.Codex_app_server _ ->
+      Rejects_oversize_input
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Muse_serve _ ->
+      Truncates_silently
+    | Runtime_execution.Agent_core _ ->
+      (match context_window with
+       | Window_known { max_input_tokens } -> Caller_bounded { max_input_tokens }
+       | Window_unknown -> Rejects_oversize_input)
+  in
+  let structured_output =
+    match rt.execution with
+    | Runtime_execution.Claude_code _
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Antigravity_cli _ ->
+      Flag_json_schema
+    | Runtime_execution.Muse_serve _ ->
+      Prompted_json
+    | Runtime_execution.Agent_core provider_config ->
+      (match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
+       | Some caps
+         when caps.Llm_provider.Capabilities.supports_response_format_json
+              || caps.Llm_provider.Capabilities.supports_structured_output ->
+         Http_response_format_json_schema
+       | Some _ | None -> Prompted_json)
+  in
+  let supports_tool_free =
+    match rt.execution with
+    | Runtime_execution.Claude_code _ -> rt.model.tools_support
+    | Runtime_execution.Agent_core provider ->
+      Provider_tool_support.provider_supports_inline_tools provider
+      && (Provider_tool_support.agent_core_capabilities_of_config provider)
+           .Llm_provider.Capabilities.supports_system_prompt
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Antigravity_cli _ ->
+      false
+    | Runtime_execution.Muse_serve _ ->
+      Runtime_native_tools.muse_none_supported
+  in
+  let supports_fresh_invocation =
+    match rt.execution with
+    | Runtime_execution.Claude_code _
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Muse_serve _
+    | Runtime_execution.Agent_core _ ->
+      true
+  in
+  { context_window
+  ; overflow
+  ; structured_output
+  ; supports_tool_free
+  ; supports_fresh_invocation
+  }
+;;
+
+let capability_of_runtime_id (runtime_id : string) : runtime_capability option =
+  Option.map capability_of_runtime (get_runtime_by_id runtime_id)
+;;
+
+let default_exact_schema : Yojson.Safe.t = `Assoc [ "type", `String "object" ]
+
+(* Minimum context window budget for Workspace_curator: covers the curator
+   system prompt, output schema instruction, and at least one singleton fact +
+   ledger neighbor snapshot before batch narrowing. *)
+let curator_min_window_tokens = 4096
+
+let requirement_of_exact_lane
+    ?(schema = default_exact_schema)
+    ?(min_window_tokens = curator_min_window_tokens)
+    (lane : exact_lane)
+  : lane_requirement
+  =
+  match lane with
+  | Workspace_curator ->
+    { window = Known_at_least { min_tokens = min_window_tokens }
+    ; overflow = Reject_before_truncation
+    ; verdict = Json_syntax { schema }
+    ; tool_free = false
+    ; fresh_invocation = true
+    }
+  | Verifier ->
+    { window = Unbounded_or_unknown
+    ; overflow = Truncation_acceptable
+    ; verdict = Json_syntax { schema }
+    ; tool_free = true
+    ; fresh_invocation = true
+    }
+  | Librarian
+  | Hitl_auto_judge
+  | Board_attention
+  | Browser_stagehand
+  | Candle_appraiser ->
+    { window = Unbounded_or_unknown
+    ; overflow = Truncation_acceptable
+    ; verdict = Json_syntax { schema }
+    ; tool_free = false
+    ; fresh_invocation = true
+    }
+;;
+

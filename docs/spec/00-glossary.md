@@ -2097,7 +2097,7 @@ status: reference
     표시일 뿐이고 TUI는 이름과 크기만 보여 준다. 탭으로 그려지는 것은 본문의 이 펜스뿐이다.
   - 길이를 바꾸지 않는 주법 표기는 그리지 않고 그 음 뒤에 `*`만 붙인다.
   - 아직 없는 것: 대시보드의 악보 렌더러(후속, #42782).
-  → [Masc_tui_alphatex](../../bin/masc_tui_alphatex.mli),
+  → [사용 가이드](../guides/alphatex-tab.md), [Masc_tui_alphatex](../../bin/masc_tui_alphatex.mli),
   [Masc_tui_alphatex_score](../../bin/masc_tui_alphatex_score.mli)
 
 **Karma**

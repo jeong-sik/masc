@@ -1601,6 +1601,11 @@ comment body is a complete JSON object or array, Board pretty-prints it and
 uses the same JSON syntax colours as fenced code. Ordinary Markdown remains
 authored Markdown.
 
+A ` ```alphatex ` fenced block in a post or comment body is drawn as a guitar
+tablature box instead of plain code - what renders, what the fallback box
+means, and how to turn it off are in the
+[alphaTex tab guide](guides/alphatex-tab.md).
+
 ### Work / Goals
 
 Planning is one workspace holding two different subjects, which is why its

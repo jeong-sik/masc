@@ -37,6 +37,8 @@ let describe findings =
            page
            log_revision
            page_revision
+       | Lint.Revision_log_hole { page; missing } ->
+         Printf.sprintf "revision_log_hole %s r%d" page missing
        | Lint.Unreadable_page { file; reason } -> Printf.sprintf "unreadable_page %s (%s)" file reason)
     findings
 ;;
@@ -102,6 +104,7 @@ let test_orphan_is_confirmed_without_unreadable_pages () =
     ; "hearsay_only", 0
     ; "unreadable_page", 0
     ; "revision_log_gap", 0
+    ; "revision_log_hole", 0
     ]
     (Lint.counts findings)
 ;;
@@ -278,27 +281,34 @@ let test_revision_log_gap_is_one_finding_per_page () =
     ; readable ~page:"beta" ~revision:5 ("[alpha](alpha.md)\n" ^ sourced)
     ]
   in
+  (* A page's lines run r1, r2, ... with no skips, so a realistic log is
+     contiguous. alpha is four lines deep against a page at r3; that is one
+     gap, not four. beta is at the revision its log records. *)
   let log =
     Log.parse
       ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n"
-       ^ "## [2026-10-13 20:01] update r5 | alpha | someone | b\n"
-       ^ "## [2026-10-13 20:02] update r7 | alpha | someone | c\n"
-       ^ "## [2026-10-13 20:03] update r5 | beta | someone | d\n")
+       ^ "## [2026-10-13 20:01] update r2 | alpha | someone | b\n"
+       ^ "## [2026-10-13 20:02] update r3 | alpha | someone | c\n"
+       ^ "## [2026-10-13 20:03] update r4 | alpha | someone | d\n"
+       ^ "## [2026-10-13 20:04] create r1 | beta | someone | e\n"
+       ^ "## [2026-10-13 20:05] update r2 | beta | someone | f\n"
+       ^ "## [2026-10-13 20:06] update r3 | beta | someone | g\n"
+       ^ "## [2026-10-13 20:07] update r4 | beta | someone | h\n"
+       ^ "## [2026-10-13 20:08] update r5 | beta | someone | i\n")
   in
-  (* alpha is three revisions behind the highest line; that is one finding,
-     not three. beta is at the revision the log records, and the reverse
-     direction (a page ahead of the log) is not a finding. *)
   check (list string) "one finding for the page the log ran ahead of"
-    [ "revision_log_gap alpha log r7 page r3" ]
+    [ "revision_log_gap alpha log r4 page r3" ]
     (describe (Lint.run (G.of_nodes nodes) ~log));
   check (list (pair string int)) "counts" [ "revision_log_gap", 1 ]
     (List.filter (fun (kind, _) -> kind = "revision_log_gap") (Lint.counts (Lint.run (G.of_nodes nodes) ~log)))
 ;;
 
 let test_revision_log_gap_is_silent_when_the_log_matches () =
-  let nodes = [ readable ~page:"alpha" ~revision:2 ("[beta](beta.md)\n" ^ sourced)
-              ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
-              ] in
+  let nodes =
+    [ readable ~page:"alpha" ~revision:2 ("[beta](beta.md)\n" ^ sourced)
+    ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+    ]
+  in
   let matching =
     Log.parse
       ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n"
@@ -311,18 +321,134 @@ let test_revision_log_gap_is_silent_when_the_log_matches () =
 ;;
 
 let test_revision_log_gap_ignores_a_page_that_is_not_there () =
-  let nodes = [ readable ~page:"alpha" ("[beta](beta.md)\n" ^ sourced)
-              ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
-              ] in
+  let nodes =
+    [ readable ~page:"alpha" ("[beta](beta.md)\n" ^ sourced)
+    ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+    ]
+  in
   let log = Log.parse (journal_line ^ "## [2026-10-13 20:01] update r9 | gone | someone | c\n") in
   check (list string) "a log line for an absent page is not a gap"
     []
     (describe (Lint.run (G.of_nodes nodes) ~log))
 ;;
 
+(* --- a line that reached the page and never reached the log (§4.5) ------ *)
+
+let test_revision_log_hole_finds_the_skipped_line () =
+  let nodes =
+    [ readable ~page:"alpha" ~revision:4 ("[beta](beta.md)\n" ^ sourced)
+    ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+    ]
+  in
+  (* alpha's lines are r1, r2, r4: r3 was written to the page and lost from the
+     log. This is what an append_log that failed leaves. The page reached r4,
+     so there is no gap: only the hole. *)
+  let log =
+    Log.parse
+      ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n"
+       ^ "## [2026-10-13 20:01] update r2 | alpha | someone | b\n"
+       ^ "## [2026-10-13 20:02] update r4 | alpha | someone | d\n")
+  in
+  check (list string) "the skipped revision is named"
+    [ "revision_log_hole alpha r3" ]
+    (describe (Lint.run (G.of_nodes nodes) ~log))
+;;
+
+let test_revision_log_hole_is_silent_on_a_contiguous_column () =
+  let nodes = [ readable ~page:"alpha" ~revision:3 ("[beta](beta.md)\n" ^ sourced)
+              ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+              ] in
+  let contiguous =
+    Log.parse
+      ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n"
+       ^ "## [2026-10-13 20:01] update r2 | alpha | someone | b\n"
+       ^ "## [2026-10-13 20:02] update r3 | alpha | someone | c\n")
+  in
+  (* A page ahead of its log leaves the top of the column empty, not a hole. *)
+  let page_ahead = Log.parse (journal_line) in
+  check (list string) "no hole in a contiguous column"
+    []
+    (describe (Lint.run (G.of_nodes nodes) ~log:contiguous));
+  check (list string) "a page ahead of the log is not a hole"
+    []
+    (describe (Lint.run (G.of_nodes nodes) ~log:page_ahead))
+;;
+
+let test_revision_log_hole_ignores_a_page_that_is_not_there () =
+  let nodes = [ readable ~page:"alpha" ("[beta](beta.md)\n" ^ sourced)
+              ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+              ] in
+  let log = Log.parse (journal_line ^ "## [2026-10-13 20:01] update r5 | gone | someone | c\n") in
+  check (list string) "a hole in an absent page's column is not a finding"
+    []
+    (describe (Lint.run (G.of_nodes nodes) ~log))
+;;
+
+(* A line the parser could not read might have carried an r<N> for this page,
+   in a place we cannot read, so the column is not one we can call complete. *)
+let test_revision_log_hole_is_silent_when_a_line_was_dropped () =
+  let nodes =
+    [ readable ~page:"alpha" ~revision:4 ("[beta](beta.md)\n" ^ sourced)
+    ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+    ]
+  in
+  let with_unreadable =
+    Log.parse
+      ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n\
+       ## [2026-10-13 20:01] update r2 | alpha | someone | b\n\
+       ## [2026-10-13 20:02] upd\n\
+       ## [2026-10-13 20:03] update r4 | alpha | someone | d\n")
+  in
+  let with_unknown_action =
+    Log.parse
+      ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n\
+       ## [2026-10-13 20:01] update r2 | alpha | someone | b\n\
+       ## [2026-10-13 20:02] publish r3 | alpha | someone | c\n\
+       ## [2026-10-13 20:03] update r4 | alpha | someone | d\n")
+  in
+  check (list string) "a torn line hides the column"
+    []
+    (describe (Lint.run (G.of_nodes nodes) ~log:with_unreadable));
+  check (list string) "an unknown action word hides the column"
+    []
+    (describe (Lint.run (G.of_nodes nodes) ~log:with_unknown_action))
+;;
+
+(* A page whose log starts at r3 (no create line) must not be reported as
+   hole r1 forever. The column starts where the log's own lowest line starts. *)
+let test_revision_log_hole_does_not_start_at_r1 () =
+  let nodes =
+    [ readable ~page:"alpha" ~revision:4 ("[beta](beta.md)\n" ^ sourced)
+    ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+    ]
+  in
+  let starts_at_three =
+    Log.parse
+      ("## [2026-10-13 20:00] update r3 | alpha | someone | c\n\
+       ## [2026-10-13 20:01] update r4 | alpha | someone | d\n")
+  in
+  check (list string) "no hole when the column starts above r1"
+    []
+    (describe (Lint.run (G.of_nodes nodes) ~log:starts_at_three))
+;;
+
 (* --- the report as the tool hands it back (RFC §4.2) -------------------- *)
 
 let member key json = Yojson.Safe.Util.member key json
+
+let render_with nodes log =
+  let request : Report.request = { page = None; kind = None; limit = None; cursor = None } in
+  match
+    Report.render
+      ~pages_total:(List.length nodes)
+      ~pages_unreadable:0
+      ~log
+      ~findings:(Lint.run (G.of_nodes nodes) ~log)
+      request
+  with
+  | Ok json -> json
+  | Error problem -> fail ("render refused: " ^ Report.problem_to_string problem)
+;;
 
 let test_report_carries_the_log_counts_and_the_gap () =
   let nodes =
@@ -333,26 +459,17 @@ let test_report_carries_the_log_counts_and_the_gap () =
   let log =
     Log.parse
       ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n"
-       ^ "## [2026-10-13 20:01] update r3 | alpha | someone | b\n"
-       ^ "## [2026-10-13 20:02] publish r3 | beta | someone | c\n")
+       ^ "## [2026-10-13 20:01] update r2 | alpha | someone | b\n"
+       ^ "## [2026-10-13 20:02] update r3 | alpha | someone | c\n"
+       ^ "## [2026-10-13 20:03] publish r3 | beta | someone | d\n")
   in
-  let request : Report.request = { page = None; kind = None; limit = None; cursor = None } in
-  let json =
-    match
-      Report.render
-        ~pages_total:2
-        ~pages_unreadable:0
-        ~log
-        ~findings:(Lint.run (G.of_nodes nodes) ~log)
-        request
-    with
-    | Ok json -> json
-    | Error problem -> fail ("render refused: " ^ Report.problem_to_string problem)
-  in
+  let json = render_with nodes log in
   check int "log_unknown_action" 1 Yojson.Safe.Util.(to_int (member "log_unknown_action" json));
   check int "log_unreadable_line" 0 Yojson.Safe.Util.(to_int (member "log_unreadable_line" json));
   check int "counts.revision_log_gap" 1
     Yojson.Safe.Util.(to_int (member "revision_log_gap" (member "counts" json)));
+  check int "counts.revision_log_hole" 0
+    Yojson.Safe.Util.(to_int (member "revision_log_hole" (member "counts" json)));
   let gap =
     Yojson.Safe.Util.(
       to_list (member "findings" json)
@@ -361,6 +478,30 @@ let test_report_carries_the_log_counts_and_the_gap () =
   check int "the gap carries log_revision" 3 Yojson.Safe.Util.(to_int (member "log_revision" gap));
   check int "the gap carries page_revision" 1 Yojson.Safe.Util.(to_int (member "page_revision" gap));
   check string "the gap names the page" "alpha" Yojson.Safe.Util.(to_string (member "page" gap))
+;;
+
+let test_report_carries_the_hole () =
+  let nodes =
+    [ readable ~page:"alpha" ~revision:4 ("[beta](beta.md)\n" ^ sourced)
+    ; readable ~page:"beta" ("[alpha](alpha.md)\n" ^ sourced)
+    ]
+  in
+  let log =
+    Log.parse
+      ("## [2026-10-13 20:00] create r1 | alpha | someone | a\n"
+       ^ "## [2026-10-13 20:01] update r2 | alpha | someone | b\n"
+       ^ "## [2026-10-13 20:02] update r4 | alpha | someone | d\n")
+  in
+  let json = render_with nodes log in
+  check int "counts.revision_log_hole" 1
+    Yojson.Safe.Util.(to_int (member "revision_log_hole" (member "counts" json)));
+  let hole =
+    Yojson.Safe.Util.(
+      to_list (member "findings" json)
+      |> List.find (fun f -> to_string (member "kind" f) = "revision_log_hole"))
+  in
+  check int "the hole carries missing" 3 Yojson.Safe.Util.(to_int (member "missing" hole));
+  check string "the hole names the page" "alpha" Yojson.Safe.Util.(to_string (member "page" hole))
 ;;
 
 let () =
@@ -396,10 +537,21 @@ let () =
         ; test_case "no gap when the log matches" `Quick test_revision_log_gap_is_silent_when_the_log_matches
         ; test_case "no gap for a page that is not there" `Quick
             test_revision_log_gap_ignores_a_page_that_is_not_there
+        ; test_case "a hole names the skipped line" `Quick
+            test_revision_log_hole_finds_the_skipped_line
+        ; test_case "no hole on a contiguous column" `Quick
+            test_revision_log_hole_is_silent_on_a_contiguous_column
+        ; test_case "no hole for a page that is not there" `Quick
+            test_revision_log_hole_ignores_a_page_that_is_not_there
+        ; test_case "a dropped line hides the column" `Quick
+            test_revision_log_hole_is_silent_when_a_line_was_dropped
+        ; test_case "the column does not start at r1" `Quick
+            test_revision_log_hole_does_not_start_at_r1
         ] )
     ; ( "report"
       , [ test_case "the report carries the log counts and the gap" `Quick
             test_report_carries_the_log_counts_and_the_gap
+        ; test_case "the report carries the hole" `Quick test_report_carries_the_hole
         ] )
     ]
 ;;

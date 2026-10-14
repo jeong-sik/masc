@@ -2092,7 +2092,7 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
   (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
       ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
    | Published _ | Unchanged _ -> () | Workspace_retired -> fail "completion hint publication retired early");
-  let context : float Masc.Keeper_types_profile.context =
+  let context : _ Masc.Keeper_types_profile.context =
     {config;agent_name="completion-hint-fixture";
      sw=Async.server_background_switch () |> require "completion hint background switch";
      clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;

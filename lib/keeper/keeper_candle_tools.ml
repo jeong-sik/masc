@@ -160,6 +160,9 @@ let run ~operation ~base_path ~keeper_name ~keeper_names ~args =
     let* id, fields =
       input (Candle_json.field ~context "item" Candle_json.as_string fields)
     in
+    let* expected_price_milli, fields =
+      input (optional_int ~context "expected_price_milli" fields)
+    in
     let* () = input (Candle_json.finish ~context fields) in
     let* item =
       match Item.of_id id with
@@ -167,7 +170,13 @@ let run ~operation ~base_path ~keeper_name ~keeper_names ~args =
       | None -> Error (Bad_arguments (Printf.sprintf "Unknown portrait item %S" id))
     in
     let* receipt =
-      shop (Candle_shop.purchase ~now:Time_compat.now ~base_path ~keeper ~item)
+      shop
+        (Candle_shop.purchase
+           ?expected_price_milli
+           ~now:Time_compat.now
+           ~base_path
+           ~keeper
+           ~item)
     in
     Ok
       (`Assoc
@@ -264,6 +273,7 @@ let error_info = function
       | Candle_shop.Off -> "candle_off", Tool_result.Dependency_unavailable
       | Candle_shop.Disabled _ -> "candle_disabled", Tool_result.Dependency_unavailable
       | Candle_shop.Unpriced _ -> "unpriced_item", Tool_result.Workflow_rejection
+      | Candle_shop.Price_changed _ -> "price_changed", Tool_result.Workflow_rejection
       | Candle_shop.Account_invalid _ -> "account_invalid", Tool_result.Runtime_failure
       | Candle_shop.Ledger_unavailable _ ->
         "ledger_unavailable", Tool_result.Dependency_unavailable

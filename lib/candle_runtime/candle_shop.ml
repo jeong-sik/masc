@@ -26,7 +26,12 @@ let catalog_entry_to_yojson (entry : catalog_entry) =
        [ "price_status", `String "priced"; "price_milli", `String (string_of_int amount) ])
 
 let effective_price_for_balance (policy : Candle_config.policy) balance item =
-  let summary = Candle_balance.supply_summary balance in
+  let min_active_balance_milli =
+    Candle_config.min_active_balance_milli policy.pricing
+  in
+  let summary =
+    Candle_balance.supply_summary ~min_active_balance_milli balance
+  in
   Candle_config.effective_price
     policy
     ~total_supply_milli:summary.total_supply_milli
@@ -51,6 +56,11 @@ type error =
   | Off
   | Disabled of string
   | Unpriced of Keeper_portrait_item.t
+  | Price_changed of
+      { item : Keeper_portrait_item.t
+      ; expected_milli : int
+      ; actual_milli : int
+      }
   | Account_invalid of Candle_balance.error
   | Purchase_refused of Candle_balance.error
   | Ledger_unavailable of string
@@ -60,6 +70,12 @@ let error_to_string = function
   | Off -> "Candle is off"
   | Disabled detail -> "Candle is disabled: " ^ detail
   | Unpriced item -> "No price is configured for " ^ Keeper_portrait_item.id item
+  | Price_changed { item; expected_milli; actual_milli } ->
+    Printf.sprintf
+      "Price of %s is %d milli-Candle, which exceeds expected %d"
+      (Keeper_portrait_item.id item)
+      actual_milli
+      expected_milli
   | Account_invalid error ->
     "Candle ledger account is invalid: " ^ Candle_balance.error_to_string error
   | Purchase_refused error -> Candle_balance.error_to_string error
@@ -123,7 +139,7 @@ let catalog ~now ~base_path =
     Ok (catalog_for_balance view.policy view.balance)
 ;;
 
-let purchase ~now ~base_path ~keeper ~item =
+let purchase ?expected_price_milli ~now ~base_path ~keeper ~item =
   let* (_ : Candle_config.policy) = policy ~base_path in
   let keeper = Keeper_id.Keeper_name.to_string keeper in
   Candle_ledger.update ~base_path (fun view ->
@@ -139,6 +155,14 @@ let purchase ~now ~base_path ~keeper ~item =
       match effective_price_for_balance current_policy balance item with
       | Candle_config.Unpriced -> Error (Unpriced item)
       | Candle_config.Priced amount -> Ok amount
+    in
+    let* () =
+      match expected_price_milli with
+      | Some expected when amount_milli > expected ->
+        Error
+          (Price_changed
+             { item; expected_milli = expected; actual_milli = amount_milli })
+      | Some _ | None -> Ok ()
     in
     let* balance =
       Candle_balance.purchase balance ~at:purchased_at ~keeper ~item ~amount_milli

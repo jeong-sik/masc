@@ -232,7 +232,16 @@ let test_wallet_decay_and_policy_observation () =
   (* At t3 (1h after t2): keeper-a 150 -> 75, keeper-b 400 -> 200. Total = 275, active = 2. *)
   check string "supply_summary_at t3 decays both active keepers" "275"
     (Z.to_string summary_t3.total_supply_milli);
-  check int "active_keepers at t3 remains 2" 2 summary_t3.active_keepers
+  check int "active_keepers at t3 remains 2" 2 summary_t3.active_keepers;
+  let summary_t3_filtered =
+    match Candle_balance.supply_summary_at ~min_active_balance_milli:100 at_t2 ~now:t3 with
+    | Ok s -> s
+    | Error error -> fail (Candle_balance.error_to_string error)
+  in
+  check string "total_supply_milli still sums all positive wallets" "275"
+    (Z.to_string summary_t3_filtered.total_supply_milli);
+  check int "only keepers >= min_active_balance_milli count as active" 1
+    summary_t3_filtered.active_keepers
 
 let () = run "candle_balance"
   ["ledger credits", [test_case "serialized payments cannot overflow a balance" `Quick test_cumulative_credit_boundary;

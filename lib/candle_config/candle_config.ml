@@ -28,6 +28,14 @@ type policy = {
 
 let pricing policy = policy.pricing
 
+let max_permille_limit = 10_000
+
+let min_active_balance_milli = function
+  | Fixed -> 1
+  | Supply_scaled { target_per_keeper_milli; _ } ->
+    Int.max 1 (target_per_keeper_milli / 10)
+;;
+
 type price = Unpriced | Priced of int
 let price policy item =
   match List.assoc_opt item policy.prices with None -> Unpriced | Some amount -> Priced amount
@@ -35,27 +43,29 @@ let price policy item =
 let scale_price ~pricing ~total_supply_milli ~active_keepers ~base_price_milli =
   match pricing with
   | Fixed -> base_price_milli
-  | Supply_scaled _ when active_keepers <= 0 || base_price_milli <= 0 -> base_price_milli
   | Supply_scaled { target_per_keeper_milli; min_permille; max_permille; rounding } ->
-    let denom = Z.mul (Z.of_int active_keepers) (Z.of_int target_per_keeper_milli) in
-    let raw_permille =
-      Candle_math.round_div
-        ~rounding
-        (Z.mul total_supply_milli (Z.of_int 1000))
-        denom
-    in
-    let eff_permille =
-      Z.max (Z.of_int min_permille) (Z.min (Z.of_int max_permille) raw_permille)
-    in
-    let scaled =
-      Z.max
-        Z.one
-        (Candle_math.round_div
-           ~rounding
-           (Z.mul (Z.of_int base_price_milli) eff_permille)
-           (Z.of_int 1000))
-    in
-    if Z.fits_int scaled then Z.to_int scaled else max_int
+    if active_keepers <= 0 || base_price_milli <= 0
+    then base_price_milli
+    else (
+      let denom = Z.mul (Z.of_int active_keepers) (Z.of_int target_per_keeper_milli) in
+      let raw_permille =
+        Candle_math.round_div
+          ~rounding
+          (Z.mul total_supply_milli (Z.of_int 1000))
+          denom
+      in
+      let eff_permille =
+        Z.max (Z.of_int min_permille) (Z.min (Z.of_int max_permille) raw_permille)
+      in
+      let scaled =
+        Z.max
+          Z.one
+          (Candle_math.round_div
+             ~rounding
+             (Z.mul (Z.of_int base_price_milli) eff_permille)
+             (Z.of_int 1000))
+      in
+      if Z.fits_int scaled then Z.to_int scaled else max_int)
 ;;
 
 let effective_price policy ~total_supply_milli ~active_keepers item =
@@ -107,9 +117,7 @@ let integer context fields key low high =
   | Otoml.TomlTableArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
     Error (Printf.sprintf "%s.%s must be an integer in %d..%d" context key low high)
 
-let string_choice context fields key choices =
-  let* value = required context fields key in
-  match value with
+let decode_string_choice context key choices = function
   | Otoml.TomlString value ->
     (match List.assoc_opt value choices with
      | Some policy -> Ok policy
@@ -119,6 +127,15 @@ let string_choice context fields key choices =
   | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _
   | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
     Error (context ^ "." ^ key ^ " must be a string")
+
+let string_choice context fields key choices =
+  let* value = required context fields key in
+  decode_string_choice context key choices value
+
+let string_choice_opt ~default context fields key choices =
+  match List.assoc_opt key fields with
+  | None -> Ok default
+  | Some value -> decode_string_choice context key choices value
 
 let payout_of_toml payout =
   let* fields = exact_table "payout"
@@ -184,23 +201,23 @@ let pricing_of_toml pricing_table =
     let* target_per_keeper_milli =
       integer "shop.pricing" fields "target_per_keeper_milli" 1 max_int
     in
-    let* min_permille = integer "shop.pricing" fields "min_permille" 1 max_int in
+    let* min_permille =
+      integer "shop.pricing" fields "min_permille" 1 max_permille_limit
+    in
     let* max_permille =
-      integer "shop.pricing" fields "max_permille" min_permille max_int
+      integer "shop.pricing" fields "max_permille" min_permille max_permille_limit
     in
     let* rounding =
-      match List.assoc_opt "rounding" fields with
-      | None -> Ok Candle_math.Floor
-      | Some _ ->
-        string_choice
-          "shop.pricing"
-          fields
-          "rounding"
-          [ "down", Candle_math.Floor
-          ; "floor", Candle_math.Floor
-          ; "up", Candle_math.Ceil
-          ; "ceil", Candle_math.Ceil
-          ]
+      string_choice_opt
+        ~default:Candle_math.Floor
+        "shop.pricing"
+        fields
+        "rounding"
+        [ "down", Candle_math.Floor
+        ; "floor", Candle_math.Floor
+        ; "up", Candle_math.Ceil
+        ; "ceil", Candle_math.Ceil
+        ]
     in
     Ok (Supply_scaled { target_per_keeper_milli; min_permille; max_permille; rounding })
 

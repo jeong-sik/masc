@@ -139,13 +139,15 @@ type supply_summary =
   ; active_keepers : int
   }
 
-let supply_summary state =
+let supply_summary ?(min_active_balance_milli = 1) state =
+  let threshold = Int.max 1 min_active_balance_milli in
   Names.fold
     (fun _ amount acc ->
        if amount > 0
        then
          { total_supply_milli = Z.add acc.total_supply_milli (Z.of_int amount)
-         ; active_keepers = acc.active_keepers + 1
+         ; active_keepers =
+             (if amount >= threshold then acc.active_keepers + 1 else acc.active_keepers)
          }
        else acc)
     state.balances
@@ -198,10 +200,10 @@ let advance_all state ~at =
     advance_keeper state ~at ~keeper) state.balances (Ok state)
 ;;
 
-let supply_summary_at state ~now =
+let supply_summary_at ?min_active_balance_milli state ~now =
   let* state = stamp state ~at:now in
   let* state = advance_all state ~at:now in
-  Ok (supply_summary state)
+  Ok (supply_summary ?min_active_balance_milli state)
 ;;
 
 let set_half_life state ~at half_life =

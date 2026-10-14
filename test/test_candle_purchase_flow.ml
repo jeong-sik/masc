@@ -747,13 +747,55 @@ rounding = "down"
       (Option.map Candle_time.to_rfc3339 receipt_deflation.account.last_event_at);
     (* Now test inflation: grant keeper-a 4900 milli-Candles at t = start + 3600 so balance is 5000.
        Active keepers = 1, total_supply = 5000 -> raw_permille = 5000 -> clamped to max_permille = 2000 (2.0x).
-       Effective price of crown (base 800) = 800 * 2000 / 1000 = 1600. *)
+       Effective price of crown (base 800) = 800 * 2000 / 1000 = 1600.
+       Gifting 1 milli-Candle to dust-keeper (balance 1 < min_active_balance_milli 100) must NOT inflate active_keepers! *)
     let grant_at = receipt_deflation.purchased_at in
-    append config [ { E.at = grant_at; body = E.Granted { keeper = "keeper-a"; amount_milli = 4900; reason = "inflation-test" } } ];
-    let receipt_inflation = match Candle_shop.purchase ~now ~base_path ~keeper:keeper_a ~item:crown with
-      | Ok r -> r | Error e -> fail (Candle_shop.error_to_string e) in
+    append config
+      [ { E.at = grant_at
+        ; body = E.Granted { keeper = "keeper-a"; amount_milli = 4900; reason = "inflation-test" }
+        }
+      ; { E.at = grant_at
+        ; body =
+            E.Gifted
+              { from_keeper = "keeper-a"
+              ; to_keeper = "dust-keeper"
+              ; amount_milli = 1
+              ; reason = "dust-sybil-probe"
+              }
+        }
+      ];
+    (* Refused when expected_price_milli is lower than the actual scaled price (1600) *)
+    (match
+       Candle_shop.purchase
+         ~expected_price_milli:800
+         ~now
+         ~base_path
+         ~keeper:keeper_a
+         ~item:crown
+     with
+     | Error (Candle_shop.Price_changed { expected_milli = 800; actual_milli = 1600; _ }) -> ()
+     | Ok _ | Error _ -> fail "expected Price_changed when effective price exceeds expected_price_milli");
+    rejected
+      "price_changed"
+      (call
+         config
+         "keeper-a"
+         "keeper_candle_purchase"
+         (`Assoc [ "item", `String "crown"; "expected_price_milli", `Int 800 ]));
+    let receipt_inflation =
+      match
+        Candle_shop.purchase
+          ~expected_price_milli:1600
+          ~now
+          ~base_path
+          ~keeper:keeper_a
+          ~item:crown
+      with
+      | Ok r -> r
+      | Error e -> fail (Candle_shop.error_to_string e)
+    in
     check int "inflationary purchase debited capped effective price 1600" 1600 receipt_inflation.amount_milli;
-    check int "remaining balance after 1600 debit from 5000 is 3400" 3400 receipt_inflation.account.balance_milli;
+    check int "remaining balance after 1 gift and 1600 debit from 5000 is 3399" 3399 receipt_inflation.account.balance_milli;
     check (list (triple string string int)) "ledger Recorded exact debited amounts"
       [ "keeper-a", "glasses", 100; "keeper-a", "crown", 1600 ]
       (purchases config))

@@ -50,13 +50,18 @@ type supply_summary =
   ; active_keepers : int
   }
 
-val supply_summary : t -> supply_summary
-(** Exact sum of positive wallet balances and count of keepers with positive
-    balance in this projection. *)
+val supply_summary : ?min_active_balance_milli:int -> t -> supply_summary
+(** Exact sum of positive wallet balances and count of keepers whose balance is
+    at least [max 1 min_active_balance_milli] (default [1]) in this
+    projection. *)
 
-val supply_summary_at : t -> now:Candle_time.t -> (supply_summary, error) result
+val supply_summary_at
+  :  ?min_active_balance_milli:int
+  -> t
+  -> now:Candle_time.t
+  -> (supply_summary, error) result
 (** Advance all wallets to [now] and return their aggregate supply and active
-    keeper count. *)
+    keeper count under [min_active_balance_milli]. *)
 
 (** Exact nonnegative decimal milli-Candle amounts. Aggregate issuance can
     exceed a machine integer even when every individual wallet is valid. *)

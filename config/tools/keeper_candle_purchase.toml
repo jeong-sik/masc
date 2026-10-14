@@ -8,3 +8,9 @@ name = "item"
 type = "string"
 required = true
 description = "A canonical item id returned by keeper_candle_catalog."
+
+[[params]]
+name = "expected_price_milli"
+type = "integer"
+required = false
+description = "Optional maximum milli-Candle price you expect to pay. If the effective price at the purchase instant exceeds this bound, the purchase is refused with price_changed."

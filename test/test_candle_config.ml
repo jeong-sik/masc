@@ -290,6 +290,7 @@ rounding = "down"
     ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 0\nmin_permille = 250\nmax_permille = 2000\n"
     ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 1000\nmin_permille = 0\nmax_permille = 2000\n"
     ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 1000\nmin_permille = 1500\nmax_permille = 1000\n"
+    ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 1000\nmin_permille = 250\nmax_permille = 10001\n"
     ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 1000\nmin_permille = 250\nmax_permille = 2000\nrounding = \"nearest\"\n"
     ; "[shop.pricing]\nmode = \"supply_scaled\"\ntarget_per_keeper_milli = 1000\nmin_permille = 250\nmax_permille = 2000\nunknown_key = 1\n"
     ]

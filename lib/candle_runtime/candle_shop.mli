@@ -41,6 +41,11 @@ type error =
   | Off
   | Disabled of string
   | Unpriced of Keeper_portrait_item.t
+  | Price_changed of
+      { item : Keeper_portrait_item.t
+      ; expected_milli : int
+      ; actual_milli : int
+      }
   | Account_invalid of Candle_balance.error
   | Purchase_refused of Candle_balance.error
   | Ledger_unavailable of string
@@ -63,9 +68,12 @@ val catalog : now:(unit -> float) -> base_path:string -> (catalog_entry list, er
     ledger update recomputes funds and ownership before appending one purchase.
     A competing append reruns that decision with the new ledger. The price
     recorded is the explicit policy re-read within each cursor attempt; an
-    item that becomes unpriced is refused before any debit. *)
+    item that becomes unpriced is refused before any debit. When
+    [expected_price_milli] is given and the effective price at the purchase
+    instant exceeds it, the purchase is refused with [Price_changed]. *)
 val purchase
-  :  now:(unit -> float)
+  :  ?expected_price_milli:int
+  -> now:(unit -> float)
   -> base_path:string
   -> keeper:Keeper_id.Keeper_name.t
   -> item:Keeper_portrait_item.t

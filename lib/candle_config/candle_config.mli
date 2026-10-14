@@ -33,6 +33,15 @@ type policy = private
 
 val pricing : policy -> pricing_policy
 
+val max_permille_limit : int
+(** Upper bound ([10_000], i.e. 10x base price) accepted for [max_permille] in
+    [shop.pricing]. *)
+
+val min_active_balance_milli : pricing_policy -> int
+(** Minimum positive wallet balance (in milli-Candles) for a keeper to count
+    toward [active_keepers] under [pricing_policy]: [1] under [Fixed], and
+    [max 1 (target_per_keeper_milli / 10)] under [Supply_scaled]. *)
+
 type price = Unpriced | Priced of int
 val price : policy -> Keeper_portrait_item.t -> price
 (** The explicit configured base milli-Candle price. A missing entry is

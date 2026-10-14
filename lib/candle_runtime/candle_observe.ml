@@ -63,10 +63,24 @@ let ready_account_revision ~events ~policy ~balance ~keeper =
         ] in
   let owned = Candle_balance.owned balance ~keeper
     |> List.map (fun item -> `String (Keeper_portrait_item.id item)) in
+  let min_active_balance_milli =
+    Candle_config.min_active_balance_milli policy.Candle_config.pricing
+  in
+  let summary =
+    Candle_balance.supply_summary ~min_active_balance_milli balance
+  in
   let catalog = Keeper_portrait_item.all |> List.map (fun item ->
-    let price = match Candle_config.price policy item with
+    let price =
+      match
+        Candle_config.effective_price
+          policy
+          ~total_supply_milli:summary.total_supply_milli
+          ~active_keepers:summary.active_keepers
+          item
+      with
       | Candle_config.Unpriced -> `Null
-      | Candle_config.Priced amount -> `String (string_of_int amount) in
+      | Candle_config.Priced amount -> `String (string_of_int amount)
+    in
     `List [`String (Keeper_portrait_item.id item); price]) in
   let account = `List ([
     half_life;

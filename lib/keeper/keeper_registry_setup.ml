@@ -477,7 +477,6 @@ let register_with_state_result
     ; done_p
     ; done_r
     ; restart_count = 0
-    ; last_restart_ts = 0.0
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = initial_failure_reason
@@ -780,7 +779,6 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; done_p
     ; done_r
     ; restart_count = 0
-    ; last_restart_ts = 0.0
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = initial_failure_reason

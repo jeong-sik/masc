@@ -14,7 +14,7 @@ let record_crash_entry entry ts msg =
 let record_restart ~base_path name ~update_entry =
   Log.Keeper.warn "registry: recording restart name=%s" name;
   update_entry ~base_path name (fun e ->
-    { e with restart_count = e.restart_count + 1; last_restart_ts = Time_compat.now () })
+    { e with restart_count = e.restart_count + 1 })
 ;;
 
 let set_last_error_entry ~base_path ~name err ~update_entry =
@@ -42,14 +42,12 @@ let restore_supervisor_state
       ~base_path
       name
       ~restart_count
-      ~last_restart_ts
       ~crash_log
       ~update_entry
   =
   update_entry ~base_path name (fun e ->
     { e with
       restart_count
-    ; last_restart_ts
     ; crash_log
     ; last_failure_reason = None
     })

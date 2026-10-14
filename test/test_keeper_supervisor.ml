@@ -1668,7 +1668,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
-        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+        ~restart_count:0 ~crash_log:[];
       let attempt_labels = [ ("keeper", name) ] in
       let outcome_labels = [ ("keeper", name); ("outcome", "started") ] in
       let attempts_before =
@@ -1779,7 +1779,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
-        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+        ~restart_count:0 ~crash_log:[];
       let attempt_labels = [ ("keeper", name) ] in
       let outcome_labels =
         [ ("keeper", name); ("outcome", "meta_unavailable") ]
@@ -2325,7 +2325,7 @@ let test_idle_duration_never_stops_keeper () =
         name
         (Unix.time () -. 3600.0);
       Reg.restore_supervisor_state ~base_path:config.base_path name
-        ~restart_count:50 ~last_restart_ts:0.0 ~crash_log:[];
+        ~restart_count:50 ~crash_log:[];
       check bool "precondition: fiber_stop clear"
         false (Atomic.get reg.fiber_stop);
       check bool "precondition: fiber_wakeup clear"
@@ -2386,7 +2386,7 @@ let test_non_storm_crashed_restarts_normally () =
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
-        ~restart_count:50 ~last_restart_ts:0.0 ~crash_log:[];
+        ~restart_count:50 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Heartbeat_consecutive_failures 3));
       let baseline_pause =

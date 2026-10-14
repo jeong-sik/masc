@@ -751,10 +751,22 @@ let styled_span (opening, closing) text = opening ^ text ^ closing
 
 (* What a fence's header names. Most tags name themselves; one names what the
    reader is looking at -- an alphatex fence holds a score, and the header is
-   the place that says so while the fence still shows its source. *)
-let is_alphatex_tag tag = String.equal (String.lowercase_ascii (String.trim tag)) "alphatex"
+   the place that says so while the fence still shows its source. An
+   alphatex tag may carry the [rhythm] word to draw the rhythm line, too;
+   the word can sit anywhere after the tag, and nothing else after the tag
+   is read. *)
+let alphatex_rhythm_word tag =
+  let words = String.split_on_char ' ' (String.lowercase_ascii (String.trim tag)) in
+  List.exists (String.equal "rhythm") words
 
-let fence_header_label tag = if is_alphatex_tag tag then "alphaTex 악보" else tag
+let is_alphatex_tag tag =
+  let words = String.split_on_char ' ' (String.lowercase_ascii (String.trim tag)) in
+  match words with first :: _ -> String.equal first "alphatex" | [] -> false
+
+let fence_header_label tag =
+  if is_alphatex_tag tag then
+    if alphatex_rhythm_word tag then "alphaTex 악보 (리듬)" else "alphaTex 악보"
+  else tag
 
 (* The tag was previously consumed only to choose a lexer, so [```bash] and an
    untagged fence looked identical. Fill the row so reverse video can provide a
@@ -1337,8 +1349,11 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
             measure is wider than the pane. The tablature rows are generated
             text with no source-byte mapping, so a drawn tab has no semantic
             run: the block is reported unmapped rather than passed off as a
-            document whose every visible row has a source. *)
-         (match Masc_tui_alphatex.render_tab ~max_width:body_width source with
+            document whose every visible row has a source. The rhythm word in
+            the header asks for the rhythm line; the plain tag draws exactly
+            the tab it always drew. *)
+         (match Masc_tui_alphatex.render_tab ~rhythm:(alphatex_rhythm_word tag)
+                  ~max_width:body_width source with
           | Ok tab_lines ->
               Option.iter (fun emit -> emit (block_start, [])) on_unmapped;
               List.iter (fun line -> emit_all (code_rows palette ~width line)) tab_lines
@@ -1374,8 +1389,13 @@ let render_streaming_internal ?on_semantic ?on_unmapped ~palette ~width text =
                 previous_inline:=false;
                 begin_block ~can_absorb_terminal:true line;
                 let language = fence_language line.source_text in
+                (* An alphatex tag may carry the rhythm word after the tag;
+                   the lexer picks by the tag's first word, the way the fence
+                   arm reads the whole header. *)
                 let lexer =
-                  Option.bind language lexer_of_language
+                  match language with
+                  | Some tag when is_alphatex_tag tag -> lexer_of_language "alphatex"
+                  | _ -> Option.bind language lexer_of_language
                 in
                 walk (Some (marker, language, lexer, line.source_start)) [] rest
             | None -> (

@@ -198,6 +198,60 @@ let test_a_measure_the_pane_cannot_hold () =
   | Error other -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
   | Ok _ -> Alcotest.fail "a measure wider than the pane was drawn"
 
+(* The rhythm line rides under the lowest string: it is the beat letters
+   [w h q e s] at their beats' first cells, with the same left lead and
+   barlines as the string lines. *)
+let test_the_rhythm_line_names_each_beat () =
+  match Alphatex.render_tab ~rhythm:true ~max_width:60 ":4 0.6 3.6 :8 5.6 3.6" with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+      Alcotest.(check int) "the rhythm line is one more than the strings" 7
+        (List.length lines);
+      let rhythm = List.nth lines 6 in
+      (* One-letter tuning names give a lead of [name + bar] = two cells. *)
+      Alcotest.(check bool) "the rhythm lead is blank, one wide as a line name" true
+        (String.length rhythm >= 2 && rhythm.[0] = ' ' && rhythm.[1] = '|');
+      Alcotest.(check char) "the first beat is a quarter" 'q' rhythm.[2];
+      Alcotest.(check char) "the second beat is a quarter" 'q' rhythm.[6];
+      Alcotest.(check char) "the third beat is an eighth" 'e' rhythm.[10];
+      Alcotest.(check char) "the fourth beat is an eighth" 'e' rhythm.[12];
+      Alcotest.(check bool) "no letter rides the string lines' cells" true
+        (List.for_all
+           (fun line ->
+             let cells = String.sub line 2 (String.length line - 2) in
+             not (List.exists (fun letter -> String.contains cells letter) [ 'w'; 'h'; 'q'; 'e'; 's' ]))
+           (List.filteri (fun i _ -> i < 6) lines))
+
+let test_the_rhythm_line_without_the_word_is_not_there () =
+  let score = ":4 0.6 3.6 :8 5.6 3.6" in
+  match
+    ( Alphatex.render_tab ~max_width:60 score,
+      Alphatex.render_tab ~rhythm:true ~max_width:60 score )
+  with
+  | Error failure, _ | _, Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok without, Ok with_rhythm ->
+      Alcotest.(check int) "the default keeps six lines" 6 (List.length without);
+      Alcotest.(check bool) "the default line count is one less" true
+        (List.length with_rhythm = List.length without + 1);
+      List.iter2
+        (fun plain drawn ->
+          Alcotest.(check string) "the default draws the same line" plain drawn)
+        without (List.filteri (fun i _ -> i < List.length without) with_rhythm)
+
+let test_the_rhythm_line_fills_between_beats () =
+  (* [":1"] makes whole notes the default, so four beats fill 64 cells; the
+     pane is the full 80 so the measure fits and the letters can be read. *)
+  match Alphatex.render_tab ~rhythm:true ~max_width:80 ":1 0.6 3.6 5.6 3.6" with
+  | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
+  | Ok lines ->
+      let rhythm = List.nth lines 6 in
+      Alcotest.(check char) "every whole beat says w at its first cell" 'w' rhythm.[2];
+      Alcotest.(check char) "the second whole beat too" 'w' rhythm.[18];
+      Alcotest.(check bool) "the letters are one per beat" true
+        (String.for_all
+           (fun c -> c = '-' || c = 'w' || c = '|' || c = ' ')
+           (String.sub rhythm 2 (String.length rhythm - 2)))
+
 let repeated_riff =
   "\\ro :4 0.6 3.6 5.6 3.6 | :8 5.6 3.6 :4 0.5 \\rc 2 | \\ae 1 :4 5.5 3.5 | \\ae 2 :4 5.5 \
    \\rc 2"
@@ -387,6 +441,12 @@ let () =
             test_a_repeated_tab_stays_inside_the_pane
         ; Alcotest.test_case "a repeated measure the pane cannot hold" `Quick
             test_a_repeated_measure_the_pane_cannot_hold
+        ; Alcotest.test_case "the rhythm line names each beat" `Quick
+            test_the_rhythm_line_names_each_beat
+        ; Alcotest.test_case "the rhythm line without the word is not there" `Quick
+            test_the_rhythm_line_without_the_word_is_not_there
+        ; Alcotest.test_case "the rhythm line fills between beats" `Quick
+            test_the_rhythm_line_fills_between_beats
         ] )
     ; ( "failures"
       , [ Alcotest.test_case "what never closes" `Quick test_what_never_closes

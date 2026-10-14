@@ -37,6 +37,21 @@ let failure_text = function
    carried technique markup that is not drawn. *)
 let note_text (note : Score.note) = if note.marked then note.fret ^ "*" else note.fret
 
+(* The rhythm line names each beat's length with one letter at its first
+   cell, the way ASCII tab writes them: [w h q e s] for the whole, half,
+   quarter, eighth and sixteenth the reader's subset allows. The reader
+   refuses any other count, so a span without a letter here is a span the
+   subset gained without this line gaining its letter; it draws blank
+   rather than a wrong letter. *)
+let rhythm_letter (beat : Score.beat) =
+  match beat.span with
+  | 16 -> Some 'w'
+  | 8 -> Some 'h'
+  | 4 -> Some 'q'
+  | 2 -> Some 'e'
+  | 1 -> Some 's'
+  | _ -> None
+
 let cells_per_unit (measure : Score.measure) =
   List.fold_left
     (fun cells (beat : Score.beat) ->
@@ -100,9 +115,12 @@ let systems ~max_width (score : Score.t) =
 
 let draw_measure ~strings (measure : Score.measure) =
   let cells = cells_per_unit measure in
-  let rows = Array.init strings (fun _ -> Bytes.make (cells * measure.units) '-') in
+  let rows = Array.init (strings + 1) (fun _ -> Bytes.make (cells * measure.units) '-') in
   List.iter
     (fun (beat : Score.beat) ->
+      (match rhythm_letter beat with
+       | Some letter -> Bytes.set rows.(strings) (cells * beat.start) letter
+       | None -> ());
       List.iter
         (fun (note : Score.note) ->
           (* [Score.read] kept the string within the tuning and [cells_per_unit]
@@ -114,12 +132,14 @@ let draw_measure ~strings (measure : Score.measure) =
     measure.beats;
   rows
 
-let draw (score : Score.t) systems =
+let draw ?(rhythm = false) (score : Score.t) systems =
   let strings = List.length score.tuning in
   let name_width = name_width score in
   let system_lines system =
     (* The drawn rows keep the measures' order, one block of rows per
-       measure, so the barlines below join the measure they belong to. *)
+       measure, so the barlines below join the measure they belong to. The
+       rhythm row rides last, under the lowest string, and shares the
+       measures' barlines. *)
     let drawn = List.map (draw_measure ~strings) system in
     List.mapi
       (fun line name ->
@@ -134,7 +154,7 @@ let draw (score : Score.t) systems =
             Buffer.add_string text (right_marks measure))
           system drawn;
         Buffer.contents text)
-      score.tuning
+      (if rhythm then score.tuning @ [ "" ] else score.tuning)
   in
   (* A blank line between systems, none before the first. *)
   List.concat
@@ -143,7 +163,7 @@ let draw (score : Score.t) systems =
          if index = 0 then system_lines system else "" :: system_lines system)
        systems)
 
-let render_tab ~max_width source =
+let render_tab ?(rhythm = false) ~max_width source =
   match Score.read source with
   | Error failure -> Error (Unreadable failure)
-  | Ok score -> Result.map (draw score) (systems ~max_width score)
+  | Ok score -> Result.map (draw ~rhythm score) (systems ~max_width score)

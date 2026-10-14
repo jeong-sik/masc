@@ -43,6 +43,20 @@ no manifest, no `runtime.toml` (the workspace needs none yet). It connects no
 browser. It is for a browser you attach by hand, and for bringing an installed
 lane's host up to the build you are running; running it again keeps the token.
 
+`--mode automation` writes the automation lane's geckodriver into the
+`runtime.toml` the server reads and installs no host, extension or manifest:
+
+```sh
+masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
+```
+
+It names the first geckodriver on `PATH` that answers `--version` unless
+`--geckodriver` names one; `--browser` writes the `binary` key and is written only
+when named. Keys already in `runtime.toml` keep their values and are edited where
+they are, in `[browser.automation]` or directly in `[browser]`. A table written
+inline or with dotted keys is not edited. The server reads the table when it
+starts. Each session opens a fresh profile, so no login is kept.
+
 From a source checkout, `scripts/install-local-build.sh` builds `masc`,
 `masc-tui` and `masc-browser-host`, installs them into `~/.local/bin`, and
 reinstalls every host registered under a workspace's

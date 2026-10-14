@@ -97,49 +97,17 @@ let reads_back ~table text =
   | Ok { Browser_configuration.live_bidi = Some _ | None; _ } ->
     Error (Table_refused "the file loads with other values than the ones written")
 
-(* The loader reads what strict TOML forbids: a header for a table that dotted
-   keys or an inline table already declared loads as one table, and a TOML
-   reader that is strict (a script reading runtime.toml with Python's tomllib)
-   refuses the file. A line editor adds a header or edits the keys under one,
-   so it is only sound where the table has its own header or is absent and
-   nothing above it is inline. *)
-let standard_header_present text =
-  let lines, _ = Toml_line_editor.split_lines text in
-  List.exists2
-    (fun line structural -> structural && Toml_line_editor.is_table ~path:table_path line)
-    lines
-    (Toml_line_editor.structural_lines lines)
-
-let inline_ancestor text =
-  match Otoml.Parser.from_string_result text with
-  | Error _ -> false
-  | Ok toml ->
-    List.exists
-      (fun path ->
-         match Otoml.find_opt toml Fun.id path with
-         | Some (Otoml.TomlInlineTable _) -> true
-         | Some
-             Otoml.(
-               TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _
-               | TomlOffsetDateTime _ | TomlLocalDateTime _ | TomlLocalDate _
-               | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlTableArray _)
-         | None -> false)
-      [ [ "browser" ]; [ "browser"; "live" ] ]
+let table_path_list = [ "browser"; "live"; "bidi" ]
+let ancestors = [ [ "browser" ]; [ "browser"; "live" ] ]
 
 let editable ~existing text =
-  if inline_ancestor text
-  then
-    Error
-      (Table_refused
-         "[browser] or [browser.live] is written inline, which this command cannot add a \
-          table to. Add [browser.live.bidi] in runtime.toml")
-  else if Option.is_some existing && not (standard_header_present text)
-  then
-    Error
-      (Table_refused
-         "the table is written inline or with dotted keys, which this command does not edit. \
-          Change it in runtime.toml")
-  else Ok ()
+  Runtime_table_edit.check_editable
+    ~table_path:table_path_list
+    ~ancestors
+    ~declared:(Option.is_some existing)
+    text
+  |> Result.map_error (fun unreachable ->
+    Table_refused (Runtime_table_edit.unreachable_message ~table_path:table_path_list unreachable))
 
 let edited ~existing ~table ~set text =
   let* () = editable ~existing text in
@@ -302,8 +270,7 @@ let port_answers plan = plan.port_answers
 let lane_enabled plan = plan.lane_enabled
 let firefox_note plan = plan.firefox_note
 
-let revision_of (observation : Runtime.config_observation) =
-  Runtime.config_source_revision_to_string observation.source_revision
+let revision_of = Runtime_table_edit.revision_of_observation
 
 let plan ~find_firefox (request : request) =
   let path = request.runtime_config_path in
@@ -363,25 +330,20 @@ let ensure_profile profile =
        Error (Profile_not_created { path = profile; reason = Unix.error_message code })
      | exception Sys_error reason -> Error (Profile_not_created { path = profile; reason }))
 
-exception Refused of error
-
 (* Under the configuration lock the text is the one on disk now: the revision
    the plan was made from is compared again, and what the edit produces is read
    back before it is committed. *)
 let commit plan =
-  let edit text =
-    let current =
-      revision_of (Runtime.config_observation ~path:plan.runtime_config_path text)
-    in
-    if not (String.equal current plan.revision) then raise (Refused Configuration_changed);
-    match edited ~existing:plan.existing ~table:plan.table ~set:plan.set text with
-    | Ok text -> text
-    | Error error -> raise (Refused error)
-  in
-  match Runtime.edit_config_text ~runtime_config_path:plan.runtime_config_path edit with
-  | Ok _receipt -> Ok ()
-  | Error reason -> Error (Not_written reason)
-  | exception Refused error -> Error error
+  match
+    Runtime_table_edit.commit
+      ~runtime_config_path:plan.runtime_config_path
+      ~revision:plan.revision
+      ~edit:(edited ~existing:plan.existing ~table:plan.table ~set:plan.set)
+  with
+  | Ok () -> Ok ()
+  | Error Runtime_table_edit.Changed_meanwhile -> Error Configuration_changed
+  | Error (Runtime_table_edit.Edit_refused error) -> Error error
+  | Error (Runtime_table_edit.Not_written reason) -> Error (Not_written reason)
 
 let apply plan =
   let* profile_created = ensure_profile plan.table.profile in

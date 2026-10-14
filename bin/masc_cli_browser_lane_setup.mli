@@ -8,12 +8,19 @@
     launcher and writes the [\[browser.live.bidi\]] table of runtime.toml, so
     the MASC server starts a Firefox of its own. [--mode host] installs the host
     and its launcher and nothing else: no browser is connected, and no
-    runtime.toml is needed or written. It starts no browser and loads no
+    runtime.toml is needed or written. [--mode automation] writes the
+    geckodriver of the automation lane ([\[browser.automation\]]) and installs
+    no host: that lane needs none. It starts no browser and loads no
     extension.
 
     An option that the chosen modes do not use is refused, not ignored. *)
 
-type mode = Masc.Browser_lane_launcher.route
+type mode = Extension | Bidi | Host | Automation
+
+val all_modes : mode list
+
+(** The value [--mode] takes. *)
+val mode_name : mode -> string
 
 val run
   :  base_path:string
@@ -26,6 +33,8 @@ val run
   -> firefox:string option
   -> profile:string option
   -> port:int option
+  -> geckodriver:string option
+  -> browser:string option
   -> int
 (** The process exit code: [0] when it printed the state or finished the
     install, [1] when it refused and said why on stderr. *)

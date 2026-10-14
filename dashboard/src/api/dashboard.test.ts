@@ -1337,6 +1337,18 @@ describe('fetchDashboardTools', () => {
     repeated.observed_at = '2026-10-14T12:00:01Z'
     duplicate.ledger.async_result_deliveries.push(repeated)
     expect(() => normalizeSkillActivationProjection(duplicate)).toThrow('physical handoff')
+    for (const source of ['transport', 'original_frame'] as const) {
+      const malformed = structuredClone(projection)
+      const receipt = malformed.ledger.async_result_deliveries[0]
+      if (!receipt) throw new Error('shared async receipt missing')
+      if (source === 'transport') receipt.receipt.content_sha256 = receipt.receipt.content_sha256.toUpperCase()
+      else {
+        const child = receipt.child_activations[0]
+        if (!child) throw new Error('shared original frame missing')
+        child.activation_sha256 = child.activation_sha256.toUpperCase()
+      }
+      expect(() => normalizeSkillActivationProjection(malformed)).toThrow('canonical sha256')
+    }
     for (const [field, value] of [ ['physical_turn_ref', 'garbage'], ['composition_run_id', 'bad-run'],
       ['observed_at', '2026-02-30T12:00:00Z'] ] as const) {
       const malformed = structuredClone(projection)

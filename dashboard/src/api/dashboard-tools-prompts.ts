@@ -1611,6 +1611,16 @@ function decodeSkillTurnRef(value: unknown, label: string): string {
 }
 
 function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkillAsyncResultDelivery {
+  const nonblank = (value: unknown, field: string): string => {
+    const text = skillActivationString(value, field)
+    if (text.trim() === '') throw new Error(`skill_activations ${field} is blank`)
+    return text
+  }
+  const canonicalDigest = (value: unknown, field: string): string => {
+    const digest = skillActivationSha256(value, field)
+    if (digest !== digest.toLowerCase()) throw new Error(`skill_activations ${field} is not a canonical sha256`)
+    return digest
+  }
   const record = exactSkillActivationObject(value, label, [
     'original_turn_ref', 'composition_run_id', 'logical_parent_tool_use_id', 'request_id',
     'physical_turn_ref', 'runtime_id', 'status_invocation', 'boundary', 'receipt',
@@ -1647,7 +1657,7 @@ function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkil
     throw new Error(`skill_activations ${label}.boundary differs from status occurrence`)
   }
   const receipt = exactSkillActivationObject(record.receipt, `${label}.receipt`, ['tool_use_id', 'content_bytes', 'content_sha256'])
-  const toolUseId = skillActivationString(invocation.tool_use_id, `${label}.status_invocation.tool_use_id`)
+  const toolUseId = nonblank(invocation.tool_use_id, `${label}.status_invocation.tool_use_id`)
   if (receipt.tool_use_id !== toolUseId) throw new Error(`skill_activations ${label}.receipt differs from status occurrence`)
   if (record.presentation !== 'inline_result' && record.presentation !== 'manifest_reference') {
     throw new Error(`skill_activations ${label}.presentation is unsupported`)
@@ -1663,8 +1673,8 @@ function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkil
     const childLabel = `${label}.child_activations[${index}]`
     const child = exactSkillActivationObject(value, childLabel, ['skill_tool_use_id', 'activation_sha256'])
     return {
-      skill_tool_use_id: skillActivationString(child.skill_tool_use_id, `${childLabel}.skill_tool_use_id`),
-      activation_sha256: skillActivationSha256(child.activation_sha256, `${childLabel}.activation_sha256`),
+      skill_tool_use_id: nonblank(child.skill_tool_use_id, `${childLabel}.skill_tool_use_id`),
+      activation_sha256: canonicalDigest(child.activation_sha256, `${childLabel}.activation_sha256`),
     }
   }).sort((left, right) => {
     // OCaml String.compare orders the canonical UTF-8 bytes, including IDs
@@ -1684,10 +1694,10 @@ function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkil
   return {
     original_turn_ref: decodeSkillTurnRef(record.original_turn_ref, `${label}.original_turn_ref`),
     composition_run_id: runId.toLowerCase(),
-    logical_parent_tool_use_id: skillActivationString(record.logical_parent_tool_use_id, `${label}.logical_parent_tool_use_id`),
-    request_id: skillActivationString(record.request_id, `${label}.request_id`),
+    logical_parent_tool_use_id: nonblank(record.logical_parent_tool_use_id, `${label}.logical_parent_tool_use_id`),
+    request_id: nonblank(record.request_id, `${label}.request_id`),
     physical_turn_ref: decodeSkillTurnRef(record.physical_turn_ref, `${label}.physical_turn_ref`),
-    runtime_id: skillActivationString(record.runtime_id, `${label}.runtime_id`),
+    runtime_id: nonblank(record.runtime_id, `${label}.runtime_id`),
     status_invocation: {
       tool_use_id: toolUseId, turn,
       schedule: {
@@ -1701,7 +1711,7 @@ function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkil
     receipt: {
       tool_use_id: toolUseId,
       content_bytes: skillActivationNonnegativeInteger(receipt.content_bytes, `${label}.receipt.content_bytes`),
-      content_sha256: skillActivationSha256(receipt.content_sha256, `${label}.receipt.content_sha256`),
+      content_sha256: canonicalDigest(receipt.content_sha256, `${label}.receipt.content_sha256`),
     },
     presentation: record.presentation,
     child_activations: children,

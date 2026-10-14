@@ -2139,12 +2139,14 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
   check int "continuation does not query the backend after complete output" backend_at_ready (List.length (calls fixture));
   check string "completion keeps the original run" (accepted |> member "composition_run_id" |> to_string)
     (resumed |> member "composition_run_id" |> to_string);
-  let waiting_node = composition_node "await" (composition_nodes fixture waiting)
-  and completed_node = composition_node "await" (composition_nodes fixture completed) in
+  let waiting_nodes = waiting |> member "settled" |> to_list
+  and completed_nodes = completed |> member "actions" |> to_list in
+  let waiting_node = composition_node "await" waiting_nodes
+  and completed_node = composition_node "await" completed_nodes in
   List.iter (fun field -> check_json ("completion hint keeps original occurrence " ^ field)
       (waiting_node |> member field) (completed_node |> member field)) ["execution_id";"tool_use_id"];
   check_json "hint consumer receives complete original stdout" (`String stdout_bytes)
-    (composition_node "consume" (composition_nodes fixture completed) |> member "result"
+    (composition_node "consume" completed_nodes |> member "result"
      |> member "data" |> member "content");
   let request_context = match completed_entry.request_context with
     | Some fields -> `Assoc fields | None -> fail "original hint completion has no source context" in

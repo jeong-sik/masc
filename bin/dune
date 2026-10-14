@@ -1300,6 +1300,13 @@
  (modules masc_tui_alphatex)
  (libraries masc_tui_alphatex_score))
 
+;; SMF bytes -> what the pane shows: tracks, the tempo map, time signatures,
+;; duration. Pure; the fetch stays with the caller.
+(library
+ (name masc_tui_midi)
+ (wrapped false)
+ (modules masc_tui_midi))
+
 (library
  (name masc_tui_memo)
  (wrapped false)

@@ -1121,6 +1121,42 @@ let test_tool_row_missing_name_dropped () =
         1.0
         (drop_value invalid_payload -. before))
 
+let test_retired_kind_row_dropped () =
+  (* docs/audits/godfiles-20261008/kind-contract.md: the store has no row-level
+     `kind` or optional `assistant_kind`, and that contract has no
+     compatibility or migration path — a row that still carries the retired
+     label is refused rather than read as assistant speech.  [validate_row_fields]
+     therefore omits `kind` from its allowed list on purpose, so this test pins
+     the drop (and the strict reader's error) against a later re-add of the
+     label.  The retired `source` label sits on the allowed list for a
+     different reason: tolerating it never restored a typed surface, while
+     refusing it would delete the row. *)
+  let base_dir = temp_base_path "keeper-chat-store-kind" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-kind" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path
+        ({|{"id":"kind-user","role":"user","content":"hi","ts":1.0}|} ^ "\n"
+        ^ {|{"id":"kind-retired","role":"assistant","content":"old","ts":2.0,"kind":"reply"}|} ^ "\n"
+        ^ {|{"id":"kind-after","role":"assistant","content":"new","ts":3.0}|} ^ "\n");
+      Alcotest.(check (list string)) "retired kind row dropped"
+        [ "user"; "assistant" ]
+        (roles (K.load ~base_dir ~keeper_name));
+      Alcotest.(check (float 0.001)) "drop counted as invalid payload"
+        1.0
+        (drop_value invalid_payload -. before);
+      match K.load_all_result ~base_dir ~keeper_name with
+      | Ok _ -> Alcotest.fail "strict load accepted a retired kind row"
+      | Error detail ->
+        Alcotest.(check string)
+          "strict reader names the retired field"
+          (Printf.sprintf "%s:2 unknown chat row field \"kind\"" path)
+          detail)
+
 let test_window_keeps_tool_lines_of_retained_turns () =
   let base_dir = temp_base_path "keeper-chat-store-window" in
   Fun.protect
@@ -3728,6 +3764,8 @@ let () =
             test_load_all_result_rejects_invalid_surface;
           Alcotest.test_case "tool row without name dropped" `Quick
             test_tool_row_missing_name_dropped;
+          Alcotest.test_case "retired kind row dropped (kind-contract)" `Quick
+            test_retired_kind_row_dropped;
           Alcotest.test_case "unknown role row dropped (RFC-0232)" `Quick
             test_unknown_role_row_dropped;
         ] );

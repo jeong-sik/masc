@@ -129,6 +129,25 @@ let test_missing_topic_is_a_protocol_error () =
       [ "masc://wiki/missing"; "masc://wiki/missing.json" ])
 ;;
 
+(* A page can be listed and then fail to read: [list_pages] selects on the
+   ".md" suffix alone, so a directory named like a page reaches the read and
+   [load_file] raises [Sys_error] ("Is a directory"). The handler must answer
+   with an error envelope instead of letting it escape, as the index and log
+   branches already do — the [.mli] promises "Never raises". *)
+let test_unreadable_page_answers_an_error_envelope () =
+  with_wiki (fun state ->
+    let base_path = (Lib.Mcp_server.workspace_config state).Lib.Workspace.base_path in
+    let wiki_dir = Lib.Tool_wiki.wiki_root ~base_path in
+    Unix.mkdir (Filename.concat wiki_dir "ghost.md") 0o755;
+    List.iter
+      (fun uri ->
+        let response = read_resource state uri in
+        check (option string) (uri ^ " has no content") None (served_text response);
+        check int (uri ^ " error code") (-32602)
+          Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int))
+      [ "masc://wiki/ghost"; "masc://wiki/ghost.json" ])
+;;
+
 let test_missing_wiki_has_empty_json_index () =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
@@ -403,6 +422,10 @@ let () =
             test_prefix_without_separator_is_not_a_topic
         ; test_case "missing topic is a protocol error" `Quick test_missing_topic_is_a_protocol_error
         ; test_case "missing wiki has an empty JSON index" `Quick test_missing_wiki_has_empty_json_index
+        ; test_case
+            "an unreadable page answers an error envelope"
+            `Quick
+            test_unreadable_page_answers_an_error_envelope
         ] )
     ; ( "listing"
       , [ test_case

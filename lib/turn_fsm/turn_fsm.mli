@@ -90,11 +90,19 @@ type transition_context = {
 (** Orthogonal stop-signal state for a transition.  Mirrors the TLA+ variable
     [stop_signaled] in [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
 
+type any_state = Any : _ turn_state -> any_state
+val any_state_label : any_state -> string
+val any_state_tla_symbol : any_state -> string
+
 type transition_violation = {
-  from_state : string;
-  to_state : string;
-  reason : string;
+  from_state : any_state;
+  to_state : any_state;
 }
+(** An edge [classify_transition] finds no [Next] action for. *)
+
+val transition_violation_reason : string
+(** The reason logs give for every [transition_violation]: the edge is not
+    in [KeeperTurnFSM.tla] [Next]. *)
 
 val classify_transition :
   ?ctx:transition_context ->
@@ -115,8 +123,6 @@ val assert_transition_allowed :
 (* [require_active_state] lives in the keeper-side shim [Keeper_turn_fsm], not
    here: its [@@fsm_guard] ppx expansion references [Keeper_fsm_guard_runtime]. *)
 
-type any_state = Any : _ turn_state -> any_state
-val any_state_label : any_state -> string
 val all_symbols : string list
 val active_symbols : string list
 val terminal_symbols : string list

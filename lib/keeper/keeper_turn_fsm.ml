@@ -20,6 +20,8 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
   match assert_transition_allowed ?ctx ~from_state ~to_state () with
   | Ok _ -> ()
   | Error violation ->
+      let from_symbol = any_state_tla_symbol violation.from_state in
+      let to_symbol = any_state_tla_symbol violation.to_state in
       (* Log first: [wrap_unit] catches the raised exception only to
          bump the Otel_metric_store counter, then re-raises. Anything
          sequenced after [wrap_unit] would never run, so the
@@ -32,16 +34,16 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
         ~category:Log.Fsm
         ~details:
           (`Assoc
-            [ "from_state", `String violation.from_state
-            ; "to_state", `String violation.to_state
-            ; "reason", `String violation.reason
+            [ "from_state", `String from_symbol
+            ; "to_state", `String to_symbol
+            ; "reason", `String transition_violation_reason
             ])
         (Printf.sprintf
            "[fsm:transition:violation] %s -> %s (%s)"
-           violation.from_state
-           violation.to_state
-           violation.reason);
-      let stage = violation.from_state ^ "->" ^ violation.to_state in
+           from_symbol
+           to_symbol
+           transition_violation_reason);
+      let stage = from_symbol ^ "->" ^ to_symbol in
       (* [Invalid_argument] (not [assert false]) carries an explicit
          message into the re-raise backtrace.  Operators reading a
          crash dump or test failure see the violating transition +
@@ -56,8 +58,8 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
         Printf.sprintf
           "fsm:transition:violation keeper=%s turn=%d from=%s to=%s \
            reason=%s"
-          keeper_name turn_id violation.from_state violation.to_state
-          violation.reason
+          keeper_name turn_id from_symbol to_symbol
+          transition_violation_reason
       in
       Keeper_fsm_guard_runtime.wrap_unit
         ~action:"KeeperTurnFSM.Next"

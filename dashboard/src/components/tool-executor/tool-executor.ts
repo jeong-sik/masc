@@ -9,6 +9,7 @@ import {
   selectedTool, formValues, validationErrors, executing, lastResult,
   schemasLoading, schemasError, loadToolSchemas, updateFormValues, executeTool, clearSelection, selectedToolAccess,
 } from './tool-executor-state'
+import { toolDisplayLabel } from '../../lib/tool-display-label'
 
 function ToolDetail() {
   const tool = selectedTool.value
@@ -21,7 +22,7 @@ function ToolDetail() {
   return html`
     <div class="flex flex-col gap-3 h-full overflow-y-auto">
       <div>
-        <h3 class="text-base text-[var(--color-fg-secondary)] font-mono font-medium">${tool.name}</h3>
+        <h3 class="text-base text-[var(--color-fg-secondary)] font-mono font-medium">${toolDisplayLabel(tool.name)}</h3>
         <p class="text-xs text-[var(--color-fg-muted)] mt-1">${tool.description}</p>
         ${tool.annotations?.readOnlyHint === true ? html`<span class="text-3xs text-[var(--color-status-ok)] mt-1">읽기 전용</span>` : null}
       </div>

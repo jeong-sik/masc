@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import { useId, useState } from 'preact/hooks'
 import type { DashboardToolInventoryItem } from '../../api'
+import { toolDisplayLabel } from '../../lib/tool-display-label'
 import { toolBadge } from './tool-state'
 
 export function InventoryRow({ item }: { item: DashboardToolInventoryItem }) {
@@ -15,7 +16,7 @@ export function InventoryRow({ item }: { item: DashboardToolInventoryItem }) {
     <article class="v2-lab-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <div class="flex flex-col gap-2 sm:flex-row sm:justify-between sm:gap-3 sm:items-start">
         <div class="min-w-0 flex-1 break-words">
-          <div class="text-md font-bold text-[var(--color-fg-secondary)]">${item.name}</div>
+          <div class="text-md font-bold text-[var(--color-fg-secondary)]">${toolDisplayLabel(item.name)}</div>
         </div>
         <div class="flex flex-wrap gap-1.5 sm:justify-end">
           ${(item.surfaces ?? []).map(s => toolBadge(s, 'surface'))}

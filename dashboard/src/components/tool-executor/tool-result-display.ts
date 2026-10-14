@@ -7,6 +7,7 @@ import { copyToClipboard } from '../common/copyable-code'
 import { JsonViewer } from '../common/json-viewer'
 import { parseToolBlobMarker, type ToolBlobMarker } from '../../lib/tool-blob-marker'
 import { fetchToolBlob } from '../../api/tool-blob'
+import { toolDisplayLabel } from '../../lib/tool-display-label'
 
 interface ToolResultProps {
   success: boolean
@@ -71,7 +72,7 @@ function StoredBlobView({
       <div class="v2-lab-panel flex flex-col gap-2 mt-3">
         <div class="flex items-center gap-2">
           <${CountBadge} tone=${success ? 'ok' : 'bad'}>${success ? 'OK' : 'ERR'}<//>
-          <span class="text-2xs text-[var(--color-fg-muted)]">${toolName}</span>
+          <span class="text-2xs text-[var(--color-fg-muted)]">${toolDisplayLabel(toolName)}</span>
           <span class="text-3xs text-[var(--color-fg-muted)] ml-auto">${timeStr}</span>
         </div>
         <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
@@ -101,7 +102,7 @@ function StoredBlobView({
     <div class="v2-lab-panel flex flex-col gap-2 mt-3" data-testid="tool-blob-marker">
       <div class="flex items-center gap-2">
         <${CountBadge} tone=${success ? 'ok' : 'bad'}>${success ? 'OK' : 'ERR'}<//>
-        <span class="text-2xs text-[var(--color-fg-muted)]">${toolName}</span>
+        <span class="text-2xs text-[var(--color-fg-muted)]">${toolDisplayLabel(toolName)}</span>
         <span class="text-3xs text-[var(--color-fg-muted)] ml-auto">${timeStr}</span>
       </div>
       <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
@@ -150,7 +151,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
     <div class="v2-lab-panel flex flex-col gap-2 mt-3">
       <div class="flex items-center gap-2">
         <${CountBadge} tone=${success ? 'ok' : 'bad'}>${success ? 'OK' : 'ERR'}<//>
-        <span class="text-2xs text-[var(--color-fg-muted)]">${toolName}</span>
+        <span class="text-2xs text-[var(--color-fg-muted)]">${toolDisplayLabel(toolName)}</span>
         <span class="text-3xs text-[var(--color-fg-muted)] ml-auto">${timeStr}</span>
       </div>
       <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">

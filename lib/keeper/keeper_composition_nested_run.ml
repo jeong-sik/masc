@@ -33,51 +33,88 @@ type t =
   ; node_owners : child Node_map.t
   ; composition_run_id : Plan.Composition_run_id.t
   ; parent_invocation : Agent_core.Tool_contract.Invocation.t
+  ; delivery_parent_tool_use_id : string
   ; tool_name : string
   ; record_activation : record_activation option
   }
 
 type disposition = Not_started | Admission_rejected | Completed | Failed | Deferred | Partially_settled
 
-let create ~calls ~composition_run_id ~parent_invocation ~tool_name ~record_activation =
+let async_result_parent identity = "composition-result:" ^ Plan.Composition_run_id.to_string identity
+;;
+
+let create ?delivery_parent_tool_use_id ~calls ~composition_run_id ~parent_invocation ~tool_name ~record_activation () =
+  let delivery_parent_tool_use_id = match delivery_parent_tool_use_id with Some id -> id
+    | None -> Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation in
   let children = List.map (fun (call : Nested.call) ->
       let members = List.fold_left (fun members (_, id) -> Node_set.add id members) Node_set.empty call.node_mapping in
       { call; members; mutex = Eio.Mutex.create (); admission = Not_attempted }) calls in
   let node_owners = List.fold_left (fun index child -> Node_set.fold (fun id index ->
       if Node_map.mem id index then invalid_arg "compiled child leaf belongs to two scopes"
       else Node_map.add id child index) child.members index) Node_map.empty children in
-  { children; node_owners; composition_run_id; parent_invocation; tool_name; record_activation }
+  { children; node_owners; composition_run_id; parent_invocation; delivery_parent_tool_use_id; tool_name; record_activation }
 ;;
 
 let rejection ~kind ~detail data : Executor.admission_rejection =
   { detail; data = `Assoc [ "kind", `String kind; "error", data ] }
 ;;
 
-let record_child run child =
+let child_invocation run child =
   let parent = Agent_core.Tool_contract.Invocation.tool_use_id run.parent_invocation in
   let alias = Plan.Node_id.to_string child.call.alias in
   let run_id = Plan.Composition_run_id.to_string run.composition_run_id in
   let tool_use_id = "composition-skill:" ^ Yojson.Safe.to_string
       (`List [ `String run_id; `String parent; `String alias ]) in
-  let record record_activation =
-    let open Result in
-    let ( let* ) = bind in
-    let* scope = Ledger.nested_composition_scope ~parent_tool_use_id:parent ~composition_run_id:run_id ~alias
+  let open Result in
+  let ( let* ) = bind in
+  let* scope = Ledger.nested_composition_scope ~parent_tool_use_id:run.delivery_parent_tool_use_id ~composition_run_id:run_id ~alias
         |> map_error (fun error -> Recorder.Activation_rejected error) in
     let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id
         ~turn:(Agent_core.Tool_contract.Invocation.turn run.parent_invocation)
         ~schedule:(Agent_core.Tool_contract.Invocation.schedule run.parent_invocation)
         ~completion:Agent_core.Tool_contract.Continue_after_success in
-    record_activation ~invocation ~tool_name:run.tool_name ~scope ~reference:child.call.reference
-  in
+  Ok (tool_use_id, invocation, scope)
+;;
+
+let record_child run child =
+  let record record_activation = Result.bind (child_invocation run child) (fun (identity,invocation,scope) ->
+    Result.map (fun outcome -> identity,outcome)
+      (record_activation ~invocation ~tool_name:run.tool_name ~scope ~reference:child.call.reference)) in
   match run.record_activation with
   | None -> Rejected (rejection ~kind:"nested_activation_context_unavailable"
       ~detail:"Nested dispatch requires the active turn's canonical Skill activation recorder." `Null)
   | Some record_activation ->
     match record record_activation with
-    | Ok (Ledger.Recorded _ | Ledger.Already_recorded _) -> Admitted tool_use_id
+    | Ok (identity,(Ledger.Recorded _ | Ledger.Already_recorded _)) -> Admitted identity
     | Error error -> Rejected (rejection ~kind:"nested_activation_rejected"
         ~detail:(Recorder.error_to_string error) (Recorder.error_to_yojson error))
+;;
+
+let restore_admissions run ~find_activation =
+  List.iter (fun child ->
+    let found = Result.bind (child_invocation run child) (fun (identity,invocation,scope) ->
+      Result.map (fun activation -> identity,activation)
+        (find_activation ~invocation ~tool_name:run.tool_name ~scope ~reference:child.call.reference)) in
+    child.admission <- match found with
+      | Ok (_,None) -> Not_attempted
+      | Ok (identity,Some _) -> Admitted identity
+      | Error error -> Rejected (rejection ~kind:"nested_original_activation_unavailable"
+          ~detail:(Recorder.error_to_string error) (Recorder.error_to_yojson error))) run.children
+;;
+
+let check_continuation run continuation =
+  List.fold_left (fun result child -> Result.bind result (fun () ->
+    match child.admission with
+    | Admitted _ -> Ok ()
+    | Rejected error -> Error error
+    | Not_attempted ->
+      match Keeper_tool_execution_journal.continuation_child_admission continuation
+              ~node_ids:(Node_set.elements child.members) with
+      | Untouched_child -> Ok ()
+      | Admitted_child | Admission_unconfirmed -> Error (rejection
+          ~kind:"nested_original_activation_missing"
+          ~detail:"Original child evidence requires its exact retained activation before result reuse."
+          (Nested.call_to_json child.call)))) (Ok ()) run.children
 ;;
 
 let contains child node_id = Node_set.mem node_id child.members

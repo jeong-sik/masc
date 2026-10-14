@@ -1546,6 +1546,7 @@ let test_historical_output_contract_refuses_current_resume () = with_fixture @@ 
   let run_reference = persist (`Assoc
     ["draft",Tool_output.normalized_artifact_ref_to_json historical_reference;
      "nested_calls",document |> member "nested_calls";
+     "nested_activation",`Null;
      "composition_run_id",`String (Plan.Composition_run_id.to_string composition_run_id);
      "tool_use_id",`String (Agent_core.Tool_contract.Invocation.tool_use_id invocation);
      "source_turn",`Int (Agent_core.Tool_contract.Invocation.turn invocation)]) in

@@ -12,7 +12,8 @@ its sha256 to keeper_composition_run. No node executes or activates during prepa
 Static read-only leaves and keeper_job_start are admitted. A job launch retains \
 durable isolated ownership and Serial execution. Feed its /job_id output into \
 keeper_job_result, then use the complete original artifacts in dependent nodes. \
-Child recipes currently require inline mode without publication metadata. Choose async \
+Child definitions require inline mode; the enclosing draft may be inline or async. \
+Nested drafts omit publication metadata. Choose async \
 for independent work or an original job-result wait while the Keeper continues \
 other work. Optional skill metadata freezes the \
 reusable SKILL.md in this same draft. Validate and publish it by draft_sha256 \

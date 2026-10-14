@@ -107,6 +107,13 @@ val continuation_source : continuation -> source
 val continuation_request_id : continuation -> string
 val continuation_job_ids : continuation -> Keeper_owned_job_identity.Job_id.t list
 
+type child_admission_history = Untouched_child | Admitted_child | Admission_unconfirmed
+val continuation_child_admission : continuation ->
+  node_ids:Keeper_tool_plan.Node_id.t list -> child_admission_history
+(** Inspect the sealed original node evidence. Completion and producer-owned
+    wait prove prior admission; an unfinished attempt cannot prove absence.
+    Proven pre-effect refusals do not invent a child activation. *)
+
 type readiness = Waiting_for_results | Results_ready
 val continuation_readiness : continuation -> (readiness, error) result
 (** Strict owner reads only. No collection, backend call, launch or Task

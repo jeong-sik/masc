@@ -29,7 +29,6 @@ type error =
   | Skill_not_prepared
   | Different_package
   | Nested_rejected of Nested.error
-  | Nested_async_requires_worker_binding
   | Nested_publication_requires_catalog
 
 let prepare_tool_name = Catalog.prepare_tool_name
@@ -53,15 +52,12 @@ let failure_class = function
   | Plan_rejected _ | Inputs_rejected _ | Unsupported_node _ | Draft_not_found
   | Malformed_draft _ | Different_keeper | Capability_changed | Publication_rejected _
   | Skill_not_prepared | Different_package | Nested_rejected _
-  | Nested_async_requires_worker_binding | Nested_publication_requires_catalog -> Tool_result.Policy_rejection
+  | Nested_publication_requires_catalog -> Tool_result.Policy_rejection
 ;;
 
 let error_to_json = function
   | Plan_rejected error -> Keeper_tool_plan_request.error_to_json error
   | Nested_rejected error -> Nested.error_to_json error
-  | Nested_async_requires_worker_binding -> `Assoc
-      [ "kind", `String "nested_async_requires_worker_binding"
-      ; "detail", `String "Nested child activation currently binds to the active inline turn; async outer execution requires a durable worker binding." ]
   | Nested_publication_requires_catalog -> `Assoc
       [ "kind", `String "nested_publication_requires_catalog"
       ; "detail", `String "Publishable nested recipes require the named catalog grammar; omitting child identities from published flattened plans is refused." ]
@@ -259,9 +255,8 @@ let prepare ~base_path ~capability_surface ~keeper_name ~execution json =
   let* compiled = validate_plan ~capability_surface plan_json in
   let plan = Nested.plan compiled in
   let* () = match Nested.calls compiled, execution, metadata with
-    | [], _, _ | _ :: _, Catalog.Inline, None -> Ok ()
-    | _ :: _, Catalog.Async, _ -> Error Nested_async_requires_worker_binding
-    | _ :: _, Catalog.Inline, Some _ -> Error Nested_publication_requires_catalog in
+    | [], _, _ | _ :: _, (Catalog.Inline | Catalog.Async), None -> Ok ()
+    | _ :: _, (Catalog.Inline | Catalog.Async), Some _ -> Error Nested_publication_requires_catalog in
   let* canonical = encode_plan plan in
   let* authored_source = match metadata with
     | None -> Ok None
@@ -337,9 +332,8 @@ let load_with ~admission_check ~base_path ~capability_surface ~keeper_name ~sha2
         && same recorded_calls (Nested.calls_to_json compiled) -> Ok ()
     | _ -> Error (Malformed_draft "recipe differs from frozen plan or child mappings") in
   let* () = match Nested.calls compiled, execution, List.assoc_opt "skill" fields with
-    | [], _, _ | _ :: _, Catalog.Inline, Some `Null -> Ok ()
-    | _ :: _, Catalog.Async, _ -> Error Nested_async_requires_worker_binding
-    | _ :: _, Catalog.Inline, _ -> Error Nested_publication_requires_catalog in
+    | [], _, _ | _ :: _, (Catalog.Inline | Catalog.Async), Some `Null -> Ok ()
+    | _ :: _, (Catalog.Inline | Catalog.Async), _ -> Error Nested_publication_requires_catalog in
   let* () = match List.assoc_opt "tools" contract_fields with
     | Some recorded when same recorded (`List (node_contracts plan)) -> Ok ()
     | Some _ | None -> Error Capability_changed in
@@ -373,10 +367,9 @@ let load_continuation ~base_path ~capability_surface continuation =
   let source = Keeper_tool_execution_journal.continuation_source continuation in
   let* draft = load_with ~admission_check:Sealed_continuation ~base_path ~capability_surface
       ~keeper_name:source.keeper_name ~sha256:source.draft_reference.sha256 in
-  match draft.execution, Nested.calls draft.compiled with
-  | Catalog.Async, [] -> Ok draft
-  | Catalog.Inline, _ -> Error (Malformed_draft "owned continuation requires an original async draft")
-  | Catalog.Async, _ :: _ -> Error Nested_async_requires_worker_binding
+  match draft.execution with
+  | Catalog.Async -> Ok draft
+  | Catalog.Inline -> Error (Malformed_draft "owned continuation requires an original async draft")
 ;;
 
 let load_authored ~base_path ~capability_surface ~keeper_name ~package_id ~sha256 =
@@ -410,11 +403,39 @@ let preview draft =
                     ; "pointer", `String (Plan.Json_pointer.to_string export.pointer) ]) (Plan.exports draft.plan)) ]
 ;;
 
-let record_invocation ~base_path ~composition_run_id ~invocation draft =
+let record_invocation ~base_path ?nested_activation ~composition_run_id ~invocation draft =
   put_document ~base_path (`Assoc
     [ "draft", Tool_output.normalized_artifact_ref_to_json draft.reference
+    ; "nested_activation",(match nested_activation with None -> `Null | Some bound ->
+        Keeper_skill_activation_recorder.bound_context_to_yojson bound)
     ; "nested_calls", Nested.calls_to_json draft.compiled
     ; "composition_run_id", `String (Plan.Composition_run_id.to_string composition_run_id)
     ; "tool_use_id", `String (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
     ; "source_turn", `Int (Agent_core.Tool_contract.Invocation.turn invocation) ])
+;;
+
+let load_nested_activation ~base_path (source : Keeper_tool_execution_journal.source) =
+  let* bytes = Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:source.run_reference.sha256
+    |> Result.map_error (fun error -> Draft_read_failed error) in
+  let* bytes = match bytes with Some bytes -> Ok bytes | None -> Error Draft_not_found in
+  let* () = if source.run_reference.mime = Tool_output.artifact_manifest_mime
+      && source.run_reference.bytes = String.length bytes then Ok ()
+    else Error (Malformed_draft "original run artifact media or bytes mismatch") in
+  let* json = match Yojson.Safe.from_string bytes with
+    | json -> Ok json | exception Yojson.Json_error detail -> Error (Malformed_draft detail) in
+  let* json = match Tool_output.artifact_manifest_of_json json with
+    | Tool_output.Decoded_artifact_manifest {structured_content;_} -> Ok structured_content
+    | _ -> Error (Malformed_draft "original run is not a canonical manifest") in
+  let* fields = exact_fields ~names:["draft";"nested_calls";"nested_activation";"composition_run_id";"tool_use_id";"source_turn"] json in
+  let* () = if Yojson.Safe.equal (List.assoc "draft" fields) (Tool_output.normalized_artifact_ref_to_json source.draft_reference)
+      && List.assoc "composition_run_id" fields = `String (Plan.Composition_run_id.to_string source.composition_run_id)
+      && List.assoc "tool_use_id" fields = `String source.parent_tool_use_id
+      && List.assoc "source_turn" fields = `Int source.source_turn then Ok ()
+    else Error (Malformed_draft "original run invocation mismatch") in
+  match List.assoc "nested_calls" fields,List.assoc "nested_activation" fields with
+  | `List [],`Null -> Ok None
+  | `List (_::_),json -> Keeper_skill_activation_recorder.bound_context_of_yojson json
+      |> Result.map Option.some |> Result.map_error (fun error ->
+          Malformed_draft (Keeper_skill_activation_recorder.error_to_string error))
+  | _ -> Error (Malformed_draft "original child activation binding is incoherent")
 ;;

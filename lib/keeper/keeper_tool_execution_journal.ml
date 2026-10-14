@@ -537,11 +537,17 @@ let validate_artifacts ~base_path immutable_source =
   let* draft = frozen_draft ~base_path immutable_source in
   let* run = read_manifest ~base_path immutable_source.run_reference in
   Result.map_error (fun detail -> Draft_unavailable detail) (decode (fun () ->
-    let fields = object_fields ["draft"; "nested_calls"; "composition_run_id"; "tool_use_id"; "source_turn"] run in
+    let fields = object_fields ["draft"; "nested_calls"; "nested_activation"; "composition_run_id"; "tool_use_id"; "source_turn"] run in
     require (canonical_equal (field "draft" fields) (Tool_output.normalized_artifact_ref_to_json immutable_source.draft_reference))
       "run artifact draft identity mismatch";
     require (canonical_equal (field "nested_calls" fields) (field "nested_calls" draft))
       "run artifact frozen child mapping mismatch";
+    (match field "nested_calls" fields,field "nested_activation" fields with
+     | `List [],`Null -> ()
+     | `List (_::_),binding ->
+       (match Keeper_skill_activation_recorder.bound_context_of_yojson binding with
+        | Ok _ -> () | Error error -> refuse (Keeper_skill_activation_recorder.error_to_string error))
+     | _ -> refuse "run artifact original child activation binding mismatch");
     require (field "composition_run_id" fields = `String (Plan.Composition_run_id.to_string immutable_source.composition_run_id)
       && field "tool_use_id" fields = `String immutable_source.parent_tool_use_id
       && field "source_turn" fields = `Int immutable_source.source_turn) "run artifact original invocation mismatch"))
@@ -775,6 +781,24 @@ let continuation_base_path (continuation : continuation) = continuation.journal.
 let continuation_source (continuation : continuation) = source continuation.journal
 let continuation_request_id (continuation : continuation) = continuation.expected_owner.request_id
 let continuation_job_ids (continuation : continuation) = continuation.job_ids
+
+type child_admission_history = Untouched_child | Admitted_child | Admission_unconfirmed
+
+let continuation_child_admission continuation ~node_ids =
+  List.fold_left (fun history id ->
+    let current = match Nodes.find_opt (Plan.Node_id.to_string id) continuation.suspended_nodes with
+      | None -> Untouched_child
+      | Some (Attempting _) -> Admission_unconfirmed
+      | Some (Settled (_,completed,effect_disposition,wait)) ->
+        (match completed.result,effect_disposition,wait with
+         | Tool_result.Completed _,_,_ | Tool_result.Deferred _,_,Some _ -> Admitted_child
+         | Tool_result.Failed _,Some Tool_result.Proven_pre_effect,_ -> Untouched_child
+         | Tool_result.Failed _,(None | Some Tool_result.Effect_outcome_unknown),_
+         | Tool_result.Deferred _,_,None -> Admission_unconfirmed) in
+    match history,current with
+    | Admitted_child,_ | _,Admitted_child -> Admitted_child
+    | Admission_unconfirmed,_ | _,Admission_unconfirmed -> Admission_unconfirmed
+    | Untouched_child,Untouched_child -> Untouched_child) Untouched_child node_ids
 
 let normalize_job_ids = List.sort_uniq (fun left right ->
   String.compare (Keeper_owned_job_identity.Job_id.to_string left)

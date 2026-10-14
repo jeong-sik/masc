@@ -264,6 +264,8 @@ let with_fixture f =
       (`Assoc ["name", `String keeper; "activation_mode", `String "manual"])
       |> require "canonical Keeper metadata" in
   let meta = { meta with sandbox_profile = Masc.Keeper_types_profile.Docker; sandbox_image = Some "base" } in
+  ignore (Masc.Keeper_meta_store.replace_snapshot config meta |> require "fixture Keeper persistence");
+  ignore (Masc.Keeper_registry.register_offline ~base_path keeper meta);
   let surface = frozen_surface ~base_path ~sandbox_profile:meta.sandbox_profile in
   let cell = Call_log.create_turn_ctx_cell () in
   let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
@@ -313,10 +315,13 @@ let result_document ~base_path content =
 let invoke_raw bundle ~tool_use_id ~turn name input =
   let tool = List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) bundle.Masc.Keeper_tools_agent_core.tools
     |> function Some tool -> tool | None -> failf "public job tool unavailable: %s" name in
-  check bool "job tool remains ordinary Serial" true
-    (Agent_core.Tool.execution_mode tool ~input = Agent_core.Tool_contract.Serial);
+  let execution_mode = match Masc.Tool_schemas_owned_job.find_definition name with
+    | Some {read_only=true;_} -> Agent_core.Tool_contract.Concurrent
+    | Some {read_only=false;_} | None -> Agent_core.Tool_contract.Serial in
+  check bool "public tool uses its canonical execution mode" true
+    (Agent_core.Tool.execution_mode tool ~input = execution_mode);
   let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn
-      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
+      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode}
       ~completion:Agent_core.Tool_contract.Continue_after_success in
   Agent_core.Tool.execute ~invocation tool input
 
@@ -806,6 +811,137 @@ let test_malformed_source_cannot_publish_binding () = with_fixture @@ fun _env _
   (match Invocation.lookup ~base_path:fixture.base_path ~keeper_name:keeper (original_invocation fixture) with
    | Ok None -> () | Ok (Some _) | Error _ -> fail "malformed source published a binding")
 
+let await_composition env fixture accepted =
+  let module Async = Masc.Keeper_msg_async in
+  let request_id = accepted |> member "request_id" |> to_string in
+  (* A test deadlock guard, not a runtime completion or polling deadline. *)
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () ->
+    let rec read_terminal () =
+      match Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+          ~caller:keeper request_id with
+      | Ok proof ->
+          let entry = Async.durable_terminal_entry proof in
+          (match entry.status with
+           | Async.Done {ok;data=Some data;_} -> ok, data, entry
+           | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+           | Persistence_failed _ | Done {data=None;_} -> fail "composition did not settle a result")
+      | Error (Async.Canonical_terminal_absent | Canonical_terminal_runtime_active _) ->
+          Eio.Fiber.yield (); read_terminal ()
+      | Error error -> fail (Async.canonical_terminal_error_to_string error)
+    in read_terminal ())
+
+let composition_nodes fixture data =
+  let reference = data |> member "execution_artifact" in
+  let sha256 = reference |> member "sha256" |> to_string in
+  let bytes = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.base_path) ~sha256 with
+    | Ok (Some bytes) -> bytes | Ok None | Error _ -> fail "complete execution artifact unavailable" in
+  check int "execution artifact retains exact bytes" (reference |> member "bytes" |> to_int) (String.length bytes);
+  result_document ~base_path:fixture.base_path bytes |> member "nodes" |> to_list
+
+let composition_node name nodes = List.find (fun row -> row |> member "node_id" |> to_string = name) nodes
+
+let test_public_composition_wait_and_resume () = with_fixture @@ fun env initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"])
+    |> job_id in
+  let direct_before = List.length (calls fixture) in
+  with_bundle fixture (fun bundle ->
+    ignore (invoke fixture bundle ~tool_use_id:"direct-result-pending" ~turn:41 "keeper_job_result" (argument id));
+    check bool "direct result wait lets the Keeper continue other work" true
+      (bundle.terminal_effect_state () = Masc.Keeper_tools_agent_core.Terminal_effect_open));
+  check int "direct pending result has no backend operation" direct_before (List.length (calls fixture));
+  let sibling = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path)
+      ~bytes:"independent retained result\n" ~mime:"text/plain" in
+  let literal value = `Assoc ["kind", `String "literal"; "value", value] in
+  let node name tool input after = `Assoc ["id", `String name; "tool", `String tool;
+      "input", input; "after", `List (List.map (fun name -> `String name) after)] in
+  let output = `Assoc ["kind", `String "output"; "node", `String "await";
+      "pointer", `String "/artifacts/0/sha256"] in
+  let recipe = `Assoc ["execution", `String "async";
+      "branch_failure_policy", `String "continue_independent";
+      "nodes", `List
+        [node "await" "keeper_job_result" (literal (argument id)) [];
+         node "sibling" "keeper_artifact_read" (literal (`Assoc ["sha256", `String sibling.sha256])) [];
+         node "consumer" "keeper_artifact_read"
+           (`Assoc ["kind", `String "object"; "fields", `List
+             [`Assoc ["name", `String "sha256"; "value", output]]]) ["await"]];
+      "exports", `List [`Assoc ["name", `String "job"; "node", `String "await"; "pointer", `String "/job_id"]]] in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-wait" ~turn:41 "keeper_composition_prepare" recipe) in
+  let sha256 = prepared |> member "draft" |> member "sha256" |> to_string in
+  let calls_before = List.length (calls fixture) in
+  let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"run-wait" ~turn:41 "keeper_composition_run" (`Assoc ["sha256", `String sha256])) in
+  let ok, first, first_entry = await_composition env fixture accepted in
+  check bool "pending job suspends this worker attempt" false ok;
+  check int "waiting for result performs no backend operation" calls_before (List.length (calls fixture));
+  let first_nodes = composition_nodes fixture first in
+  let awaiting = composition_node "await" first_nodes in
+  check_json "producer owns the durable job wait" (`String "owned_job_result_wait") (awaiting |> member "deferred_kind");
+  check_json "job read is proven before any command effect" (`String "proven_pre_effect")
+    (awaiting |> member "failure_effect_disposition");
+  check bool "consumer waits for complete original output" false
+    (List.exists (fun row -> row |> member "node_id" |> to_string = "consumer") first_nodes);
+  let run_id = accepted |> member "composition_run_id" |> to_string in
+  let resume () = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"resume-wait" ~turn:52 "keeper_composition_run"
+      (`Assoc ["sha256", `String sha256; "resume_run_id", `String run_id])) in
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  Process_eio.reset_for_testing (); initialize ();
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7; "mode", `String "logs_unknown"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"collect-unavailable" ~turn:52 "keeper_job_status" (argument id)));
+  let before_resume = List.length (calls fixture) in
+  let still_pending = resume () in
+  let ok, second, _ = await_composition env fixture still_pending in
+  check bool "exit without complete outputs remains waiting" false ok;
+  check int "resuming a wait never collects or relaunches" before_resume (List.length (calls fixture));
+  let second_nodes = composition_nodes fixture second in
+  List.iter (fun field -> check_json ("same waiting occurrence " ^ field)
+      (awaiting |> member field) (composition_node "await" second_nodes |> member field)) ["execution_id";"tool_use_id"];
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 7]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"collect-complete" ~turn:52 "keeper_job_status" (argument id)));
+  let before_completed_resume = List.length (calls fixture) in
+  let resumed = resume () in
+  let ok, completed, completed_entry = await_composition env fixture resumed in
+  check bool "original complete job continues the remaining DAG" true ok;
+  check string "run identity survives resumption" run_id (resumed |> member "composition_run_id" |> to_string);
+  check int "completed result read has no backend operation" before_completed_resume (List.length (calls fixture));
+  let completed_nodes = composition_nodes fixture completed in
+  let final_wait = composition_node "await" completed_nodes in
+  List.iter (fun field -> check_json ("original wait identity " ^ field)
+      (awaiting |> member field) (final_wait |> member field)) ["execution_id";"tool_use_id"];
+  let original_sibling = composition_node "sibling" first_nodes
+  and final_sibling = composition_node "sibling" completed_nodes in
+  List.iter (fun field -> check_json ("completed sibling retains " ^ field)
+      (original_sibling |> member field) (final_sibling |> member field)) ["execution_id";"tool_use_id";"result"];
+  check_json "completed sibling never dispatches again" (`String "retained_completion")
+    (final_sibling |> member "execution_origin");
+  let consumer = composition_node "consumer" completed_nodes in
+  check_json "consumer reads exact original stdout" (`String stdout_bytes)
+    (consumer |> member "result" |> member "data" |> member "content");
+  check_json "nonzero program exit remains explicit" (`Int 7)
+    (final_wait |> member "result" |> member "data" |> member "exit_code");
+  List.iter (fun entry ->
+    let context = match entry.Masc.Keeper_msg_async.request_context with Some fields -> `Assoc fields | None -> fail "lost source context" in
+    check_json "completion belongs to original Task" (`String "task-A") (context |> member "source_task_id"))
+    [first_entry;completed_entry];
+  check int "composition never recreates original program" 1 (effect_count fixture "create");
+  check int "composition never restarts original program" 1 (effect_count fixture "start")
+
+let test_job_result_rejects_unavailable_authority () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  let record = load fixture id in
+  let owner = Filename.concat (Store.paths ~base_path:fixture.base_path record.job_id).job_dir "owner.jsonl" in
+  write owner "{invalid-owner\n";
+  let before = List.length (calls fixture) in
+  with_bundle fixture (fun bundle ->
+    match invoke_raw bundle ~tool_use_id:"result-corrupt" ~turn:41 "keeper_job_result" (argument id) with
+    | Error _ -> () | Ok _ -> fail "unavailable authority was treated as a pending or complete result");
+  check int "result authority failure performs no backend call" before (List.length (calls fixture))
+
 let () =
   Printf.printf "owned_job_feature_transport=synthetic_docker_cli actual_public_handler=true actual_docker_execution=false\n%!";
   run "Keeper owned jobs"
@@ -821,4 +957,6 @@ let () =
       ; test_case "lost start reply recovers the original job" `Quick test_lost_start_reply_recovers_original_job
       ; test_case "original invocation rejects request and source rebinding" `Quick test_original_invocation_rejects_rebinding
       ; test_case "corrupt invocation authority cannot launch" `Quick test_corrupt_invocation_binding_cannot_launch
-      ; test_case "malformed whole source cannot publish a binding" `Quick test_malformed_source_cannot_publish_binding ]]
+      ; test_case "malformed whole source cannot publish a binding" `Quick test_malformed_source_cannot_publish_binding
+      ; test_case "public Composition waits and resumes the original job result" `Quick test_public_composition_wait_and_resume
+      ; test_case "job result rejects unavailable owner authority" `Quick test_job_result_rejects_unavailable_authority ]]

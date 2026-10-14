@@ -25,7 +25,7 @@ type completed =
   ; truncated_to : int option
   }
 
-type replay = Dispatch | Reuse_completed of completed
+type replay = Dispatch | Reuse_completed of completed | Recheck_job_result of completed
 
 type error =
   | Invalid_source of string
@@ -256,6 +256,7 @@ type occurrence =
 type node_record =
   | Attempting of occurrence
   | Settled of occurrence * completed * Tool_result.failure_effect_disposition option
+      * Keeper_owned_job_store.Job_id.t option
 type state = {source : source; source_sha : string; owner : binding option; nodes : node_record Nodes.t}
 type t = {base_path : string; root : string; path : string; immutable_source : source; source_sha : string}
 type worker = {journal : t; binding : binding}
@@ -269,7 +270,7 @@ let binding_of_json json =
   {request_id; generation}
 let same_binding a b = String.equal a.request_id b.request_id && a.generation = b.generation
 let same_owner a b = match a, b with None, None -> true | Some a, Some b -> same_binding a b | _ -> false
-let occurrence_of_record = function Attempting occurrence | Settled (occurrence, _, _) -> occurrence
+let occurrence_of_record = function Attempting occurrence | Settled (occurrence, _, _, _) -> occurrence
 let occurrence_json occurrence =
   `Assoc ["node_id", `String (Plan.Node_id.to_string occurrence.node_id); "tool_name", `String occurrence.tool_name;
     "input", occurrence.input; "input_sha", `String occurrence.input_sha; "owner", binding_json occurrence.owner;
@@ -311,10 +312,26 @@ let row json = Yojson.Safe.to_string json ^ "\n"
 let source_event source = event "source" (json_sha (source_json source)) ["source", source_json source]
 let attempt_event source_sha occurrence = event "attempting" source_sha ["occurrence", occurrence_json occurrence]
 
+let job_wait_json = option_json (fun job_id -> `String (Keeper_owned_job_store.Job_id.to_string job_id))
+let job_wait_of_json = optional (fun json ->
+  match Keeper_owned_job_store.Job_id.of_string (string json) with
+  | Ok job_id -> job_id | Error detail -> refuse detail)
+
+let valid_job_wait (occurrence : occurrence) result phase job_id =
+  let read_only_action = match Tool_schemas_owned_job.find_definition occurrence.tool_name with
+    | Some { action = Tool_schemas_owned_job.Read_result; read_only = true; _ } -> true
+    | Some { action = (Start | Status | Cancel | Read_result); _ } | None -> false in
+  occurrence.readonly && read_only_action
+  && occurrence.input = `Assoc ["job_id", `String (Keeper_owned_job_store.Job_id.to_string job_id)]
+  && phase = Some Tool_result.Proven_pre_effect
+  && (match result with Tool_result.Deferred _ -> true | Completed _ | Failed _ -> false)
+
 let replay_for binding node_id = function
   | None -> Ok Dispatch
-  | Some (Settled (_, ({result = Tool_result.Completed _; _} as completed), _)) -> Ok (Reuse_completed completed)
-  | Some (Settled (_, {result = Tool_result.Failed _; _}, Some Tool_result.Proven_pre_effect)) -> Ok Dispatch
+  | Some (Settled (_, ({result = Tool_result.Completed _; _} as completed), _, _)) -> Ok (Reuse_completed completed)
+  | Some (Settled (occurrence, completed, phase, Some job_id))
+      when valid_job_wait occurrence completed.result phase job_id -> Ok (Recheck_job_result completed)
+  | Some (Settled (_, {result = Tool_result.Failed _; _}, Some Tool_result.Proven_pre_effect, _)) -> Ok Dispatch
   | Some (Attempting occurrence) when occurrence.readonly && not (same_binding occurrence.owner binding) -> Ok Dispatch
   | Some (Attempting _ | Settled _) -> Error (Replay_not_proven node_id)
 
@@ -336,7 +353,7 @@ let decode_state bytes = decode (fun () ->
     let extras = match kind with
       | "binding" -> ["expected_owner"; "owner"]
       | "attempting" -> ["occurrence"]
-      | "settled" -> ["occurrence"; "completed"; "failure_effect_disposition"]
+      | "settled" -> ["occurrence"; "completed"; "failure_effect_disposition"; "owned_job_wait"]
       | _ -> refuse "unknown journal event" in
     let fields = object_fields (["schema"; "kind"; "source_sha"] @ extras) json in
     require (field "schema" fields = `Int 1 && field "source_sha" fields = `String source_sha) "event source/schema mismatch";
@@ -357,7 +374,12 @@ let decode_state bytes = decode (fun () ->
         ~node_id:occurrence.node_id ~tool_name:occurrence.tool_name ~input:occurrence.input) "node identity changed") prior;
       let record = if kind = "attempting" then (
         require (occurrence.sequence = (match prior with None -> 1 | Some record -> (occurrence_of_record record).sequence + 1)) "attempt sequence mismatch";
-        require (match replay_for occurrence.owner occurrence.node_id prior with Ok Dispatch -> true | Ok (Reuse_completed _) | Error _ -> false) "unproven replay event";
+        require (match replay_for occurrence.owner occurrence.node_id prior with
+          | Ok Dispatch -> true
+          | Ok (Recheck_job_result stored) -> occurrence.readonly
+              && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
+              && occurrence.tool_use_id = stored.tool_use_id
+          | Ok (Reuse_completed _) | Error _ -> false) "unproven replay event";
         Attempting occurrence)
       else (
         require (match prior with Some (Attempting current) -> same_occurrence current occurrence | _ -> false) "settlement without exact attempt";
@@ -365,7 +387,10 @@ let decode_state bytes = decode (fun () ->
         require (Ids.Execution_id.equal completed.execution_id occurrence.execution_id && completed.tool_use_id = occurrence.tool_use_id
           && String.equal (Tool_result.tool_name completed.result) occurrence.tool_name) "settlement identity mismatch";
         let phase = optional effect_of_json (field "failure_effect_disposition" fields) in
-        Settled (occurrence, completed, phase)) in
+        let job_wait = job_wait_of_json (field "owned_job_wait" fields) in
+        Option.iter (fun job_id -> require (valid_job_wait occurrence completed.result phase job_id)
+          "owned job wait does not match the exact read-only result leaf") job_wait;
+        Settled (occurrence, completed, phase, job_wait)) in
       {state with nodes = Nodes.add key record state.nodes}
     | _ -> refuse "unknown journal event") {source; source_sha; owner = None; nodes = Nodes.empty} events)
 
@@ -590,7 +615,12 @@ let begin_attempt worker ~node_id ~tool_name ~input ~execution_id ~tool_use_id ~
       let* replay = replay_for worker.binding node_id record in
       match replay with
       | Reuse_completed _ -> Error (Attempt_conflict node_id)
-      | Dispatch ->
+      | Dispatch | Recheck_job_result _ ->
+        let* () = match replay with
+          | Recheck_job_result stored when not readonly
+              || not (Ids.Execution_id.equal execution_id stored.execution_id)
+              || tool_use_id <> stored.tool_use_id -> Error (Attempt_conflict node_id)
+          | Dispatch | Reuse_completed _ | Recheck_job_result _ -> Ok () in
         if not (exact_name tool_use_id && exact_name (Ids.Execution_id.to_string execution_id)) then Error (Invalid_result "invalid execution occurrence") else
         let sequence = match record with None -> 1 | Some record -> (occurrence_of_record record).sequence + 1 in
         Ok {node_id; tool_name; input; input_sha = json_sha input; owner = worker.binding; sequence; execution_id; tool_use_id; readonly} in
@@ -598,13 +628,18 @@ let begin_attempt worker ~node_id ~tool_name ~input ~execution_id ~tool_use_id ~
     | Error error -> None, Error error
     | Ok occurrence -> Some (row (attempt_event worker.journal.source_sha occurrence)), Ok {worker; occurrence})
 
-let settle_attempt ?failure_effect_disposition attempt ~result ~result_bytes ~truncated_to =
+let settle_attempt ?failure_effect_disposition ?deferred_kind attempt ~result ~result_bytes ~truncated_to =
   let completed = {execution_id = attempt.occurrence.execution_id; tool_use_id = attempt.occurrence.tool_use_id; result; result_bytes; truncated_to} in
   let phase = match failure_effect_disposition, result with
     | Some phase, _ -> Some phase
     | None, Tool_result.Failed failure -> Some failure.effect_disposition
     | None, (Tool_result.Completed _ | Deferred _) -> None in
+  let job_wait = match deferred_kind with
+    | Some (Keeper_tool_execution.Owned_job_result_wait job_id) -> Some job_id
+    | None | Some (Generic_deferred | External_effect_deferred _) -> None in
   let* encoded = Result.map_error (fun detail -> Invalid_result detail) (decode (fun () ->
+    Option.iter (fun job_id -> require (valid_job_wait attempt.occurrence result phase job_id)
+      "owned job wait does not match the exact read-only result leaf") job_wait;
     require (result_bytes >= 0 && Option.fold ~none:true ~some:(fun value -> value >= 0) truncated_to) "negative result size";
     require (String.equal (Tool_result.tool_name result) attempt.occurrence.tool_name) "result tool mismatch";
     let encoded = completed_json completed in valid_json encoded;
@@ -618,8 +653,9 @@ let settle_attempt ?failure_effect_disposition attempt ~result ~result_bytes ~tr
       let record = Nodes.find_opt (Plan.Node_id.to_string attempt.occurrence.node_id) state.nodes in
       match record with
       | Some (Attempting current) when same_occurrence current attempt.occurrence ->
-        let json = event "settled" state.source_sha ["occurrence", occurrence_json current; "completed", encoded; "failure_effect_disposition", option_json effect_json phase] in
+        let json = event "settled" state.source_sha ["occurrence", occurrence_json current; "completed", encoded;
+          "failure_effect_disposition", option_json effect_json phase; "owned_job_wait", job_wait_json job_wait] in
         Some (row json), Ok ()
-      | Some (Settled (current, prior, prior_phase)) when same_occurrence current attempt.occurrence
-          && completed_json prior = encoded && prior_phase = phase -> None, Ok ()
+      | Some (Settled (current, prior, prior_phase, prior_wait)) when same_occurrence current attempt.occurrence
+          && completed_json prior = encoded && prior_phase = phase && prior_wait = job_wait -> None, Ok ()
       | Some (Attempting _ | Settled _) | None -> None, Error (Attempt_conflict attempt.occurrence.node_id))

@@ -1,10 +1,12 @@
 type deferred_kind =
   | Generic_deferred
   | External_effect_deferred of { approval_id : string option }
+  | Owned_job_result_wait of Keeper_owned_job_store.Job_id.t
 
 let deferred_kind_to_string = function
   | Generic_deferred -> "generic_deferred"
   | External_effect_deferred _ -> "external_effect_deferred"
+  | Owned_job_result_wait _ -> "owned_job_result_wait"
 ;;
 
 type terminal_effect_receipt =
@@ -91,6 +93,11 @@ let deferred_external_effect_data ?approval_id ?(effect_disposition = Tool_resul
   ; terminal_effect_receipt = None
   ; file_change_evidence = None
   }
+;;
+
+let deferred_owned_job_result ~job_id data =
+  { (deferred_data ~effect_disposition:Tool_result.Proven_pre_effect data) with
+    deferred_kind = Some (Owned_job_result_wait job_id) }
 ;;
 
 let failure

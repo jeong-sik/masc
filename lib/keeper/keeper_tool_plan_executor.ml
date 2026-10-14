@@ -333,7 +333,7 @@ let execute_one
            ~data:(Keeper_tool_execution_journal.error_to_json error)
            (Keeper_tool_execution_journal.error_to_string error))
     in
-    let dispatch_fresh () =
+    let dispatch_fresh ~tool_use_id () =
       Cancel_safe.protect
         ~on_exn:(fun exn ->
           dispatch_result
@@ -347,7 +347,7 @@ let execute_one
     in
     let execution_id, tool_use_id, execution_origin, result, journal_error =
       match journal with
-      | None -> execution_id, tool_use_id, Fresh_dispatch, dispatch_fresh (), None
+      | None -> execution_id, tool_use_id, Fresh_dispatch, dispatch_fresh ~tool_use_id (), None
       | Some worker ->
         (match Keeper_tool_execution_journal.lookup worker
                  ~node_id ~tool_name:node.tool_name ~input with
@@ -357,7 +357,13 @@ let execute_one
            stored.execution_id, stored.tool_use_id, Retained_completion,
            dispatch_result ~result_bytes:stored.result_bytes
              ?truncated_to:stored.truncated_to stored.result, None
-         | Ok Keeper_tool_execution_journal.Dispatch ->
+         | Ok ((Keeper_tool_execution_journal.Dispatch
+              | Keeper_tool_execution_journal.Recheck_job_result _) as replay) ->
+           let execution_id, tool_use_id = match replay with
+             | Keeper_tool_execution_journal.Recheck_job_result stored ->
+                 stored.execution_id, stored.tool_use_id
+             | Keeper_tool_execution_journal.Dispatch
+             | Keeper_tool_execution_journal.Reuse_completed _ -> execution_id, tool_use_id in
            let readonly =
              Keeper_tool_descriptor.readonly_for_input scheduled.descriptor ~input
              = Some true
@@ -368,7 +374,7 @@ let execute_one
            | Error error ->
              execution_id, tool_use_id, Dispatch_refused, journal_failure error, None
            | Ok attempt ->
-             let result = dispatch_fresh () in
+             let result = dispatch_fresh ~tool_use_id () in
              let result_bytes = match result.result_bytes with
                | Some bytes -> bytes
                | None -> String.length (Tool_result.message result.result)
@@ -376,6 +382,7 @@ let execute_one
              let journal_error =
                match Keeper_tool_execution_journal.settle_attempt
                        ?failure_effect_disposition:result.failure_effect_disposition
+                       ?deferred_kind:result.deferred_kind
                        attempt
                        ~result:result.result ~result_bytes
                        ~truncated_to:result.truncated_to with

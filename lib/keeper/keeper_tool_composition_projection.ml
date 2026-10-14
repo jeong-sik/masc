@@ -161,7 +161,8 @@ let plan_execution_error_kind = function
 
 let node_deferral = function
   | None -> Keeper_terminal_effect_detail.Deferral_unrecorded
-  | Some Keeper_tool_execution.Generic_deferred ->
+  | Some Keeper_tool_execution.Generic_deferred
+  | Some (Keeper_tool_execution.Owned_job_result_wait _) ->
     Keeper_terminal_effect_detail.Generic_deferral
   | Some (Keeper_tool_execution.External_effect_deferred _) ->
     Keeper_terminal_effect_detail.External_effect_deferral

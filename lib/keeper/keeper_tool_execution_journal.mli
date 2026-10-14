@@ -25,7 +25,7 @@ type completed =
   ; truncated_to : int option
   }
 
-type replay = Dispatch | Reuse_completed of completed
+type replay = Dispatch | Reuse_completed of completed | Recheck_job_result of completed
 
 type error =
   | Invalid_source of string
@@ -78,9 +78,11 @@ val lookup
   -> tool_name:string
   -> input:Yojson.Safe.t
   -> (replay, error) result
-(** Completed results alone are reusable. A producer-proven pre-effect failure
-    or a previous statically read-only Attempting record may dispatch again.
-    Deferred and unproven effect outcomes reject replay. *)
+(** Completed results are reusable. A producer-owned job-result wait permits
+    only rechecking that exact read-only leaf, preserving its occurrence IDs.
+    A producer-proven pre-effect failure or a previous statically read-only
+    Attempting record may dispatch again. Other deferred and unproven effect
+    outcomes reject replay. *)
 
 val begin_attempt
   : worker
@@ -94,6 +96,7 @@ val begin_attempt
 
 val settle_attempt
   : ?failure_effect_disposition:Tool_result.failure_effect_disposition
+  -> ?deferred_kind:Keeper_tool_execution.deferred_kind
   -> attempt
   -> result:Tool_result.result
   -> result_bytes:int

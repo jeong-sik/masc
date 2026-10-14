@@ -2331,7 +2331,7 @@ let keeper_owned_job_descriptor (definition : Tool_schemas_owned_job.definition)
     ~name:schema.name
     ~description:schema.description
     ~handler:Tool_keeper_job_dispatch
-    ~ordinary_execution_mode:Serial
+    ~ordinary_execution_mode:(if definition.read_only then Concurrent else Serial)
     ~readonly:definition.read_only
     ()
   |> with_composable_output (Json_output { schema = owned_job_output_schema })

@@ -62,13 +62,31 @@ authority sources. A program's output files or symlinks therefore cannot become
 durable GC ownership evidence. Input and terminal-output references stay in the
 canonical owner journal.
 
-These direct tools use serial admission and return while the isolated program
-runs. This producer is the first owned-job backend: shared mutable workspace
-claims, remote Docker bind authority, automatic job-completion wakes,
-composition suspension/resume and terminal container/workspace cleanup need
-their own execution contracts. Prepared read-only draft continuation does not
-reinterpret these jobs as retryable ordinary leaves. Those remaining contracts
-are tracked in
+`keeper_job_result` reads the same job's owner journal without contacting the
+backend. It is read-only and permits concurrent admission. It returns Deferred
+until a confirmed exit has both complete stdout/stderr artifacts, or until a
+before-start cancellation is committed. A nonzero program exit remains an
+observed result with its exact exit code; consumers decide how to handle it.
+An unavailable or corrupt owner journal is a refusal, not a pending result.
+
+Use this result read as a leaf of a prepared async Composition. Its dependent
+nodes wait while independent branches may complete. After `keeper_job_status`
+has committed the outputs, pass the same draft sha256 and original
+`composition_run_id` as `resume_run_id` to `keeper_composition_run`. The previous
+worker must have canonically settled before another worker owns that run.
+The journal retains the exact producer-owned job wait separately from the
+provider-facing body. Only this exact read-only leaf may be rechecked; it keeps
+its original execution ID and tool-use ID. Completed siblings reuse their full
+saved results, while dependents consume the original job's complete outputs.
+Ordinary Deferred, unknown effects and launch/status/cancel calls receive no
+retry authorization from this receipt. A direct pending result read lets the
+Keeper continue other work instead of parking it without a completion wake.
+
+Start, status and cancel use serial admission and return while the isolated
+program runs. Shared mutable workspace claims, remote Docker bind authority,
+automatic job-completion reconciliation/wakes and effectful draft admission
+remain separate contracts. This explicit result-read continuation does not
+automatically resume a plan when a container exits. Those remaining contracts are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).
 
 Terminal jobs do not clean up automatically yet. A finished or cancelled job

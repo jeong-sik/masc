@@ -125,7 +125,7 @@ let test_both_tokens_present_is_available () =
    module-private atomic written only by the run loop, so an in-process test
    cannot report [Connected] without a socket. Adding a setter for the test
    would be a backdoor into production state, so the divergence stays closed by
-   construction (one function, [transport_connected]) rather than by this
+   construction (one function, [gateway_connected]) rather than by this
    assertion. What this does catch is a status field that stops tracking the
    registry export at all — a hardcoded value, or a fold that ignores the
    transport. *)

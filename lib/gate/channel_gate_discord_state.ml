@@ -231,10 +231,11 @@ let directory_phase_label = function
   | Directory_partial -> "partial"
 
 (* One reading of the connector, rendered by [status_json] and
-   [connector_json] alike so the two views cannot disagree. *)
+   [connector_json] alike so the two views cannot disagree. Values computed
+   from other fields ([connected] from [gateway_state], [pid] from
+   [available]) are computed at render time, not stored beside their source. *)
 type status = {
   available : bool;
-  connected : bool;
   error : string;
   token_present : bool;
   gateway_state : Discord_gateway_state.connection_state;
@@ -272,7 +273,6 @@ let read_status ~audit_limit =
     | Reconnect_pending _ | Failed _ -> true
   in
   let available = transport_available && Result.is_ok configured_bindings_result in
-  let connected = gateway_connected gateway_state in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      only reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -293,7 +293,6 @@ let read_status ~audit_limit =
   in
   {
     available;
-    connected;
     error;
     token_present;
     gateway_state;
@@ -311,11 +310,13 @@ let read_status ~audit_limit =
     guild_count = List.length (current_guild_ids ());
   }
 
+let status_connected status = gateway_connected status.gateway_state
+
 let status_label status =
   (* The gateway state machine is the liveness source; it has no heartbeat
      file that could age out, so it is never stale. *)
   Channel_gate_connector.connector_state_label ~available:status.available
-    ~connected:status.connected ~stale:false
+    ~connected:(status_connected status) ~stale:false
 
 let last_ready_at status =
   (* The READY timestamp survives reconnect_pending/resuming dips, so
@@ -346,9 +347,9 @@ let directory_fields directory =
       `String (Option.value ~default:"" directory.updated_at) );
   ]
 
-let gate_healthy_json status = if status.connected then `Bool true else `Null
+let gate_healthy_json status = if status_connected status then `Bool true else `Null
 
-let gate_health_checked_at status = if status.connected then status.updated_at else ""
+let gate_health_checked_at status = if status_connected status then status.updated_at else ""
 
 (* NDT-OK: pid is process identity telemetry for operators; availability and
    connection status come from the gateway state. *)
@@ -359,7 +360,7 @@ let pid status = if status.available then Unix.getpid () else 0
 let status_fields status =
   [
     ("available", `Bool status.available);
-    ("connected", `Bool status.connected);
+    ("connected", `Bool (status_connected status));
     ("status", `String (status_label status));
     ("error", `String status.error);
     ("bot_token_present", `Bool status.token_present);

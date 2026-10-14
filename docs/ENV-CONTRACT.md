@@ -179,7 +179,7 @@ Precedence:
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `MASC_SEARXNG_URL` | `http://localhost:8888` | Enables the self-hosted SearXNG provider and gives it first priority when present. Use `scripts/searxng-local.sh start` to run a Docker-backed local instance with JSON output enabled. |
+| `MASC_SEARXNG_URL` | `http://localhost:8888` | Enables the self-hosted SearXNG provider and gives it first priority when present. Use `scripts/searxng-local.sh start` from a checkout, or `masc prerequisite-actions searxng` (then `--execute searxng_docker_run`) from an installed binary, to run a Docker-backed local instance with JSON output enabled. The second writes `<base>/.masc/searxng/settings.yml` and runs the container `masc-searxng` on `127.0.0.1:8888`; it does not set this variable or `web_search.searxng_url`. |
 | `MASC_WEB_SEARCH_PROVIDER` | `auto` | Pins one provider instead of auto order selection. |
 | `MASC_WEB_SEARCH_PROVIDER_ORDER` | built-in order | Overrides provider order for auto mode. |
 | `MASC_WEB_SEARCH_FALLBACKS` | built-in fallback order | Overrides fallback providers after the primary provider fails. |

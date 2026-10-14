@@ -39,6 +39,7 @@ let protect ~module_name ~finally_label ~finally f =
 
 let masc_dirname = ".masc"
 let browser_lane_dirname = "browser-lane"
+let searxng_dirname = "searxng"
 let browser_lane_token_name = "token"
 
 (* OUTPUT root segment for server-written keeper runtime state (meta json +

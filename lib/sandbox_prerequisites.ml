@@ -1,11 +1,13 @@
 type distribution = Debian | Ubuntu | Other
+type searxng_container = Searxng_absent | Searxng_stopped | Searxng_running
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
-  | Geckodriver | Firefox
+  | Geckodriver | Firefox | Searxng of { config_dir : string }
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
   | Build_without_rosetta of { user_config : string }
+  | Start_searxng of { config_dir : string; container : searxng_container }
 type apple_builder = Builder_unchecked | Needs_missing_rosetta of { user_config : string option }
                    | Needs_default_kernel
 type action = { id : string; label : string; detail : string;
@@ -48,6 +50,7 @@ let sox_formula_source = "https://formulae.brew.sh/formula/sox"
 let sox_source = "https://sourceforge.net/projects/sox/"
 let geckodriver_formula_source = "https://formulae.brew.sh/formula/geckodriver"
 let geckodriver_source = "https://github.com/mozilla/geckodriver/releases"
+let searxng_docker_source = "https://docs.searxng.org/admin/installation-docker.html"
 let firefox_cask_source = "https://formulae.brew.sh/cask/firefox"
 let firefox_linux_source = "https://support.mozilla.org/en-US/kb/install-firefox-linux"
 
@@ -59,6 +62,56 @@ let whisper_model_file = "ggml-large-v3-turbo.bin"
 
 let whisper_model_url =
   "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" ^ whisper_model_file
+
+(* The container SearXNG runs in. One name, so a second run finds the first
+   rather than starting another, and so [scripts/searxng-local.sh], which
+   names its container the same, is the same container. The tag is dated and
+   fixed: [latest] is a different program each day this is run. It is the
+   build measured on 2026-10-14 (same digest as [latest] that day, answering
+   22 queries). GHCR rather than Docker Hub, whose anonymous pulls are rate
+   limited (docs.searxng.org, Docker installation). *)
+let searxng_container_name = "masc-searxng"
+let searxng_image = "ghcr.io/searxng/searxng:2026.10.13-22c64b8d3"
+let searxng_container_port = 8080
+let searxng_settings_file = "settings.yml"
+let searxng_settings_path config_dir = Filename.concat config_dir searxng_settings_file
+
+(* What the container reads from [/etc/searxng]. JSON is on because masc's
+   search tool asks for it; the limiter is off because the only client is this
+   host; the secret key is generated for this install. The container listens
+   on all of its own interfaces, and the host publishes the port on 127.0.0.1
+   only, so nothing outside this computer reaches it. *)
+let searxng_settings ~secret_key =
+  String.concat "\n"
+    [ "use_default_settings: true"
+    ; ""
+    ; "search:"
+    ; "  formats:"
+    ; "    - html"
+    ; "    - json"
+    ; ""
+    ; "server:"
+    ; "  bind_address: \"0.0.0.0\""
+    ; Printf.sprintf "  port: %d" searxng_container_port
+    ; "  limiter: false"
+    ; Printf.sprintf "  secret_key: \"%s\"" secret_key
+    ; "" ]
+
+let searxng_published_port = Masc_network_defaults.searxng_default_port
+
+let searxng_pull = ["docker"; "pull"; searxng_image]
+let searxng_run ~config_dir =
+  ["docker"; "run"; "--detach"; "--name"; searxng_container_name;
+   "--restart"; "unless-stopped";
+   "--publish"; Printf.sprintf "127.0.0.1:%d:%d" searxng_published_port searxng_container_port;
+   "--volume"; config_dir ^ ":/etc/searxng:ro"; searxng_image]
+let searxng_start = ["docker"; "start"; searxng_container_name]
+
+(* Steps after the settings file is in place, by what the container is now. *)
+let searxng_steps ~config_dir = function
+  | Searxng_absent -> [searxng_pull; searxng_run ~config_dir]
+  | Searxng_stopped -> [searxng_start]
+  | Searxng_running -> []
 
 let open_action ~host ~id ~label ~detail ~source_url url =
   let argv = match host with
@@ -86,7 +139,8 @@ let rosetta_choices ~user_config =
   without @ [commands ~id:"rosetta_install" ~label:"Install Rosetta"
     ~detail:"Runs Apple's Rosetta installer, which shows Apple's license and may ask for your password. Rosetta also lets this Mac run Intel apps and build amd64 images."
     ~source_url:rosetta_source ~requires_admin:true [["softwareupdate";"--install-rosetta"]]]
-let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distribution dependency =
+let rec catalog ?model_dir ?(apple_builder=Builder_unchecked)
+    ?(searxng_container=Searxng_absent) ~host ~distribution dependency =
   let open_ = open_action ~host in
   (* whisper-cli needs a model as well as a binary, on either host, and -m is
      a path the voice configuration then names. Written once because the hosts
@@ -239,6 +293,25 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked) ~host ~distributio
     [open_ ~id:"firefox_install_instructions" ~label:"Open Firefox installation instructions"
        ~detail:"Install Firefox the way this distribution packages it, then refresh detection."
        ~source_url:firefox_linux_source firefox_linux_source]
+ (* SearXNG is the one search provider that needs no key. Both hosts run it
+     the same way, in a container the operator's Docker already provides; a
+     host without Docker gets the start action and a failure that names the
+     missing program, not a guess at how to install Docker. A container that
+     is already running has nothing left to start. *)
+  | Searxng {config_dir}, (Macos _ | Linux _) ->
+    (match searxng_container with
+     | Searxng_running -> []
+     | Searxng_absent | Searxng_stopped ->
+       let existing = (match searxng_container with Searxng_stopped -> true | Searxng_absent | Searxng_running -> false) in
+       [{id = (if existing then "searxng_docker_start_existing" else "searxng_docker_run");
+         label = (if existing then "Start the SearXNG container" else "Run SearXNG in a Docker container");
+         detail = Printf.sprintf "Writes %s if it is not there (JSON output on, a generated secret key, no request limiter), then %s. The port is published on 127.0.0.1 only. Docker must be running."
+                    (searxng_settings_path config_dir)
+                    (if existing then "starts the existing " ^ searxng_container_name ^ " container"
+                     else Printf.sprintf "pulls %s and starts a container named %s on 127.0.0.1:%d" searxng_image searxng_container_name searxng_published_port);
+         source_url = searxng_docker_source; requires_admin = false;
+         action_effect = Start_searxng {config_dir; container = searxng_container};
+         writes = Some (searxng_settings_path config_dir)}])
   | Pdf_tools, Macos _ ->
     [commands ~id:"poppler_install" ~label:"Install PDF inspection tools with Homebrew"
        ~detail:"Install Poppler through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Both PDF commands are checked after installation."
@@ -320,6 +393,12 @@ let effect_json = function
   | Build_without_rosetta {user_config} -> `Assoc ["kind",`String "build_without_rosetta";
       "user_config",`String user_config;
       "argv_steps",`List (List.map (fun argv -> `List (List.map (fun s -> `String s) argv)) container_restart)]
+  (* The secret key is generated when the action runs and is not part of what
+     the catalog prints; the file it lands in is [writes]. *)
+  | Start_searxng {config_dir; container} -> `Assoc ["kind",`String "start_searxng";
+      "settings_file",`String (searxng_settings_path config_dir);
+      "argv_steps",`List (List.map (fun argv -> `List (List.map (fun s -> `String s) argv))
+                            (searxng_steps ~config_dir container))]
 let to_json actions = `Assoc ["schema",`String "masc.prerequisite_actions.v1";
   "actions",`List (List.map (fun action -> `Assoc [
     "id",`String action.id; "label",`String action.label; "detail",`String action.detail;
@@ -404,6 +483,29 @@ let write_build_without_rosetta user_config =
        | Ok true | Error _ ->
          Error ("The edit did not leave [build] rosetta = false in " ^ target ^ "; nothing was written."))
 
+(* The settings file is the operator's once it exists: a file that is there is
+   kept, so a hand edit (an engine turned off, a port changed) survives the
+   next run, and the generated secret key is not replaced under a running
+   container. Written with the key readable by this account only. *)
+let searxng_settings_permissions = 0o600
+let searxng_secret_bytes = 32
+let write_searxng_settings config_dir =
+  let path = searxng_settings_path config_dir in
+  if Sys.file_exists path then Ok ()
+  else
+    match Fs_compat.mkdir_p config_dir with
+    | exception Unix.Unix_error (error, _, _) ->
+      Error ("Could not create " ^ config_dir ^ ": " ^ Unix.error_message error)
+    | () ->
+      let contents = searxng_settings ~secret_key:(Random_id.hex ~bytes:searxng_secret_bytes) in
+      (match Fs_compat.save_file_atomic_strict path contents with
+       | Error reason -> Error ("Could not write " ^ path ^ ": " ^ reason)
+       | Ok () ->
+         (match Unix.chmod path searxng_settings_permissions with
+          | () -> Ok ()
+          | exception Unix.Unix_error (error, _, _) ->
+            Error ("Wrote " ^ path ^ " but could not make it readable by this account only: " ^ Unix.error_message error)))
+
 let execute ~run action =
   let rec commands completed index = function
     | [] -> completed
@@ -429,6 +531,10 @@ let execute ~run action =
     (match write_build_without_rosetta user_config with
      | Error reason -> Failed {step=1; reason}
      | Ok () -> commands Commands_completed_recheck_required 2 container_restart)
+  | Start_searxng {config_dir; container} ->
+    (match write_searxng_settings config_dir with
+     | Error reason -> Failed {step=1; reason}
+     | Ok () -> commands Commands_completed_recheck_required 2 (searxng_steps ~config_dir container))
 let outcome_to_json outcome =
   let status, fields = match outcome with
     | External_step_pending -> "external_step_pending", []

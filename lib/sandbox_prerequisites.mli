@@ -1,9 +1,16 @@
 (** User-selected prerequisite actions. Catalog inspection never installs or
     starts anything; successful action execution still requires readiness checks. *)
 type distribution = Debian | Ubuntu | Other
+type searxng_container = Searxng_absent | Searxng_stopped | Searxng_running
+(** What Docker reports for the container [searxng_container_name]: no such
+    container, one that is not running, or one that is. *)
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
   | Geckodriver | Firefox
+  | Searxng of { config_dir : string }
+  (** A SearXNG instance in a Docker container, the one search provider that
+      needs no key. [config_dir] is the directory mounted as the container's
+      [/etc/searxng]; its [settings.yml] is written when absent. *)
   (** The two programs the browser lanes start: [\[browser.automation\]] names
       geckodriver by absolute path and starts it with the server;
       [\[browser.live.bidi\]] names Firefox. Neither is installed with MASC, and
@@ -14,6 +21,11 @@ type action_effect = Open_official_installer of { url : string; argv : string li
   | Build_without_rosetta of { user_config : string }
       (** Set [build] rosetta = false in Apple Container's user configuration,
           then restart its service so the next image build reads it. *)
+  | Start_searxng of { config_dir : string; container : searxng_container }
+      (** Write [config_dir]/settings.yml unless it exists (a generated secret
+          key, JSON output on, no limiter), then pull the pinned image and run
+          the container, or start the existing one. [container] is what Docker
+          said when the plan was made. *)
 type apple_builder =
   | Builder_unchecked
   | Needs_missing_rosetta of { user_config : string option }
@@ -39,14 +51,26 @@ val distribution_of_os_release : string -> distribution
 (** [model_dir] is where a downloaded model should land. Absent, the actions
     that would need a path open the downloads page instead of offering a
     command that has nowhere to write. *)
+val searxng_container_name : string
+val searxng_image : string
+(** The pinned image reference the run action pulls. *)
+
+val searxng_settings : secret_key:string -> string
+(** The text of the settings file for [secret_key]. Exposed so a test reads
+    what the container will read. *)
+
 val catalog :
   ?model_dir:string ->
   ?apple_builder:apple_builder ->
+  ?searxng_container:searxng_container ->
   host:Sandbox_readiness.host -> distribution:distribution -> dependency -> action list
 (** [apple_builder] defaults to [Builder_unchecked]. When it is
     [Needs_missing_rosetta], Apple Container offers the two ways past it --
     build without Rosetta, or install it -- instead of its installers. When it
-    is [Needs_default_kernel], it offers installing the recommended kernel. *)
+    is [Needs_default_kernel], it offers installing the recommended kernel.
+    [searxng_container] defaults to [Searxng_absent] and only [Searxng] reads
+    it: a container that is running has no action, a stopped one is started,
+    an absent one is created. *)
 val to_json : action list -> Yojson.Safe.t
 type run_failure =
   | Program_not_found  (** argv's program is not on PATH; nothing ran *)

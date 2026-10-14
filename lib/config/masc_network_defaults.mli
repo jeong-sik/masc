@@ -143,6 +143,10 @@ val vite_dev_default_origins : string list
 
 (** {1 SearXNG & OpenTelemetry} *)
 
+val searxng_default_port : int
+(** The port {!searxng_default_url} names, for a caller that publishes a
+    container on it. *)
+
 val searxng_default_url : string
 
 val otel_default_enabled : bool

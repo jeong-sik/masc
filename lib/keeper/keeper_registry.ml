@@ -543,12 +543,11 @@ let crash_log_of ~base_path name =
   | None -> []
 ;;
 
-let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts ~crash_log =
+let restore_supervisor_state ~base_path name ~restart_count ~crash_log =
   Error_tracking.restore_supervisor_state
     ~base_path
     name
     ~restart_count
-    ~last_restart_ts
     ~crash_log
     ~update_entry:update_entry_unit
 ;;

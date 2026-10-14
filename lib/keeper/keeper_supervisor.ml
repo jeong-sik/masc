@@ -345,7 +345,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                      (fun current ->
                         { current with
                           restart_count = attempt
-                        ; last_restart_ts = now
                         ; crash_log = keep_last_n 5 (now, crash_msg) old_crash_log
                         ; last_failure_reason = None
                         })

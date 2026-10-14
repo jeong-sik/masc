@@ -506,13 +506,12 @@ let test_restart_state_preservation () =
   (* Simulate sweep restart: re-register then restore state *)
   let _reg2 = R.For_testing.register ~base_path:bp "restartable" meta in
   R.restore_supervisor_state ~base_path:bp "restartable"
-    ~restart_count:1 ~last_restart_ts:200.0
+    ~restart_count:1
     ~crash_log:[(100.0, "first crash")];
   match R.get ~base_path:bp "restartable" with
   | None -> fail "expected restartable"
   | Some e ->
     check int "restart_count preserved" 1 e.restart_count;
-    check (float 0.1) "last_restart_ts preserved" 200.0 e.last_restart_ts;
     check int "crash_log preserved" 1 (List.length e.crash_log);
     (* failure_reason should be cleared by re-register *)
     check bool "failure_reason cleared" true

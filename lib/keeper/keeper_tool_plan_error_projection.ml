@@ -123,4 +123,3 @@ let plan_execution_error_to_json = function
       ; "tool_name", `String tool_name
       ]
 ;;
-

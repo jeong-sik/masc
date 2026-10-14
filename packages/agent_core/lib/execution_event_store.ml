@@ -2111,7 +2111,33 @@ let verify_write_fence_locked store =
   | Error (Corrupt_store _ as error) ->
     poison_after_corrupt_read store error;
     Error error
-  | (Error (Writer_already_active | (Store_already_attached | (Store_released | (Store_release_forbidden | (Store_already_exists | (Store_not_found | (Store_initialization_incomplete | (Store_initialization_conflict | (Correlation_mismatch | (Cursor_scope_mismatch | (Commit_authority_identity_changed | (Invalid_argument _ | (Identity_failure _ | (Io_failure _ | (Codec_failure _ | (Resource_cleanup_failed _ | (Construction_cleanup_failed _ | (Unsupported_store_version _ | (Sequence_conflict _ | (Committed_content_conflict _ | (Cursor_ahead _ | (Commit_authority_regressed _ | ( Store_poisoned _ | Commit_outcome_unknown _))))))))))))))))))))))) | Ok _) as result -> result
+  | ( Error
+        ( Writer_already_active
+        | Store_already_attached
+        | Store_released
+        | Store_release_forbidden
+        | Store_already_exists
+        | Store_not_found
+        | Store_initialization_incomplete
+        | Store_initialization_conflict
+        | Correlation_mismatch
+        | Cursor_scope_mismatch
+        | Commit_authority_identity_changed
+        | Invalid_argument _
+        | Identity_failure _
+        | Io_failure _
+        | Codec_failure _
+        | Resource_cleanup_failed _
+        | Construction_cleanup_failed _
+        | Unsupported_store_version _
+        | Sequence_conflict _
+        | Committed_content_conflict _
+        | Cursor_ahead _
+        | Commit_authority_regressed _
+        | Store_poisoned _
+        | Commit_outcome_unknown _
+        )
+    | Ok _ ) as result -> result
 ;;
 
 let rollback_storage store ~offset =

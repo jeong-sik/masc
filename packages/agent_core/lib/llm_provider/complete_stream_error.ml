@@ -686,9 +686,46 @@ let%test "semantic parse failure uses the active NDJSON wire format" =
             { format = Http_client.Ndjson; kind = Http_client.Malformed_payload }
       ; message
       } -> message = "NDJSON parse failed: bad shape raw=\"{}\""
-  | Http_client.ProviderFailure { kind = Http_client.Provider_wire_error { format = Http_client.Ndjson; kind = (Http_client.Unknown_event | (Http_client.Incomplete_stream | Http_client.Oversized_payload)) }; message = _ }
-  | Http_client.ProviderFailure { kind = Http_client.Provider_wire_error { format = Http_client.Sse; kind = _ }; message = _ }
-  | Http_client.ProviderFailure { kind = (Http_client.Provider_interrupted | (Http_client.Capacity_exhausted _ | (Http_client.Hard_quota _ | (Http_client.Capability_mismatch _ | (Http_client.Cli_policy_invalid _ | (Http_client.Cli_startup_failed _ | (Http_client.Provider_parse_error _ | (Http_client.Provider_reported_error _ | (Http_client.Response_body_too_large _ | (Http_client.Empty_completion _ | (Http_client.Context_overflow _ | (Http_client.Repeating_generation _ | Http_client.Unknown_provider_failure _)))))))))))); message = _ }
+  | Http_client.ProviderFailure
+      { kind =
+          Http_client.Provider_wire_error
+            { format = Http_client.Ndjson
+            ; kind =
+                ( Http_client.Unknown_event
+                | Http_client.Incomplete_stream
+                | Http_client.Oversized_payload )
+            }
+      ; message = _
+      }
+  | Http_client.ProviderFailure
+      { kind =
+          Http_client.Provider_wire_error
+            { format = Http_client.Sse
+            ; kind =
+                ( Http_client.Malformed_payload
+                | Http_client.Unknown_event
+                | Http_client.Incomplete_stream
+                | Http_client.Oversized_payload )
+            }
+      ; message = _
+      }
+  | Http_client.ProviderFailure
+      { kind =
+          ( Http_client.Provider_interrupted
+          | Http_client.Capacity_exhausted _
+          | Http_client.Hard_quota _
+          | Http_client.Capability_mismatch _
+          | Http_client.Cli_policy_invalid _
+          | Http_client.Cli_startup_failed _
+          | Http_client.Provider_parse_error _
+          | Http_client.Provider_reported_error _
+          | Http_client.Response_body_too_large _
+          | Http_client.Empty_completion _
+          | Http_client.Context_overflow _
+          | Http_client.Repeating_generation _
+          | Http_client.Unknown_provider_failure _ )
+      ; message = _
+      }
   | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
@@ -704,9 +741,46 @@ let%test "stream incompleteness remains distinct from malformed payload" =
             { format = Http_client.Sse; kind = Http_client.Incomplete_stream }
       ; message
       } -> message = "SSE stream incomplete: terminal marker missing"
-  | Http_client.ProviderFailure { kind = Http_client.Provider_wire_error { format = Http_client.Sse; kind = (Http_client.Malformed_payload | (Http_client.Unknown_event | Http_client.Oversized_payload)) }; message = _ }
-  | Http_client.ProviderFailure { kind = Http_client.Provider_wire_error { format = Http_client.Ndjson; kind = _ }; message = _ }
-  | Http_client.ProviderFailure { kind = (Http_client.Provider_interrupted | (Http_client.Capacity_exhausted _ | (Http_client.Hard_quota _ | (Http_client.Capability_mismatch _ | (Http_client.Cli_policy_invalid _ | (Http_client.Cli_startup_failed _ | (Http_client.Provider_parse_error _ | (Http_client.Provider_reported_error _ | (Http_client.Response_body_too_large _ | (Http_client.Empty_completion _ | (Http_client.Context_overflow _ | (Http_client.Repeating_generation _ | Http_client.Unknown_provider_failure _)))))))))))); message = _ }
+  | Http_client.ProviderFailure
+      { kind =
+          Http_client.Provider_wire_error
+            { format = Http_client.Sse
+            ; kind =
+                ( Http_client.Malformed_payload
+                | Http_client.Unknown_event
+                | Http_client.Oversized_payload )
+            }
+      ; message = _
+      }
+  | Http_client.ProviderFailure
+      { kind =
+          Http_client.Provider_wire_error
+            { format = Http_client.Ndjson
+            ; kind =
+                ( Http_client.Malformed_payload
+                | Http_client.Unknown_event
+                | Http_client.Incomplete_stream
+                | Http_client.Oversized_payload )
+            }
+      ; message = _
+      }
+  | Http_client.ProviderFailure
+      { kind =
+          ( Http_client.Provider_interrupted
+          | Http_client.Capacity_exhausted _
+          | Http_client.Hard_quota _
+          | Http_client.Capability_mismatch _
+          | Http_client.Cli_policy_invalid _
+          | Http_client.Cli_startup_failed _
+          | Http_client.Provider_parse_error _
+          | Http_client.Provider_reported_error _
+          | Http_client.Response_body_too_large _
+          | Http_client.Empty_completion _
+          | Http_client.Context_overflow _
+          | Http_client.Repeating_generation _
+          | Http_client.Unknown_provider_failure _ )
+      ; message = _
+      }
   | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
@@ -765,7 +839,23 @@ let%test "unsupported content part is a capability mismatch" =
        = "provider emitted an unsupported content part: gemini.part.executableCode \
           raw=\"{}\""
   | Http_client.ProviderFailure { kind = Http_client.Capability_mismatch { capability = None }; message = _ }
-  | Http_client.ProviderFailure { kind = (Http_client.Provider_interrupted | (Http_client.Capacity_exhausted _ | (Http_client.Hard_quota _ | (Http_client.Cli_policy_invalid _ | (Http_client.Cli_startup_failed _ | (Http_client.Provider_parse_error _ | (Http_client.Provider_wire_error _ | (Http_client.Provider_reported_error _ | (Http_client.Response_body_too_large _ | (Http_client.Empty_completion _ | (Http_client.Context_overflow _ | (Http_client.Repeating_generation _ | Http_client.Unknown_provider_failure _)))))))))))); message = _ }
+  | Http_client.ProviderFailure
+      { kind =
+          ( Http_client.Provider_interrupted
+          | Http_client.Capacity_exhausted _
+          | Http_client.Hard_quota _
+          | Http_client.Cli_policy_invalid _
+          | Http_client.Cli_startup_failed _
+          | Http_client.Provider_parse_error _
+          | Http_client.Provider_wire_error _
+          | Http_client.Provider_reported_error _
+          | Http_client.Response_body_too_large _
+          | Http_client.Empty_completion _
+          | Http_client.Context_overflow _
+          | Http_client.Repeating_generation _
+          | Http_client.Unknown_provider_failure _ )
+      ; message = _
+      }
   | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
@@ -783,7 +873,23 @@ let%test "unsupported response is a capability mismatch" =
     && message
        = "provider emitted an unsupported response: gemini.response.candidates raw=\"{}\""
   | Http_client.ProviderFailure { kind = Http_client.Capability_mismatch { capability = None }; message = _ }
-  | Http_client.ProviderFailure { kind = (Http_client.Provider_interrupted | (Http_client.Capacity_exhausted _ | (Http_client.Hard_quota _ | (Http_client.Cli_policy_invalid _ | (Http_client.Cli_startup_failed _ | (Http_client.Provider_parse_error _ | (Http_client.Provider_wire_error _ | (Http_client.Provider_reported_error _ | (Http_client.Response_body_too_large _ | (Http_client.Empty_completion _ | (Http_client.Context_overflow _ | (Http_client.Repeating_generation _ | Http_client.Unknown_provider_failure _)))))))))))); message = _ }
+  | Http_client.ProviderFailure
+      { kind =
+          ( Http_client.Provider_interrupted
+          | Http_client.Capacity_exhausted _
+          | Http_client.Hard_quota _
+          | Http_client.Cli_policy_invalid _
+          | Http_client.Cli_startup_failed _
+          | Http_client.Provider_parse_error _
+          | Http_client.Provider_wire_error _
+          | Http_client.Provider_reported_error _
+          | Http_client.Response_body_too_large _
+          | Http_client.Empty_completion _
+          | Http_client.Context_overflow _
+          | Http_client.Repeating_generation _
+          | Http_client.Unknown_provider_failure _ )
+      ; message = _
+      }
   | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;

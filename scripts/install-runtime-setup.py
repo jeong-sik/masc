@@ -1013,13 +1013,13 @@ def docker_account_action(binary, base_path, port, action):
     return True
 
 
-# The wire spells PDF tool readiness with exactly these two words. Naming them
-# once is what keeps five call sites from each carrying their own copy of the
-# literal, where a renamed or added word would change what the installer does
-# without anything here failing. Presentation and browser (geckodriver,
-# Firefox) readiness use the same two words, so they read these constants too.
-PDF_TOOLS_AVAILABLE = 'tools_available'
-PDF_TOOLS_UNAVAILABLE = 'unavailable'
+# The wire spells tool readiness with exactly these two words, for PDF tools,
+# presentation tools and the browser programs (geckodriver, Firefox) alike.
+# Naming them once is what keeps the call sites from each carrying their own
+# copy of the literal, where a renamed or added word would change what the
+# installer does without anything here failing.
+TOOLS_AVAILABLE = 'tools_available'
+TOOLS_UNAVAILABLE = 'unavailable'
 
 
 # slots=True is absent on purpose: this script targets Python 3.8 (see the
@@ -1041,7 +1041,7 @@ class PdfToolsReadiness:
 
 def decode_pdf_tools_readiness(value):
     if (not isinstance(value, dict) or value.get('schema') != 'masc.pdf_tools_readiness.v1'
-            or value.get('status') not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE)
+            or value.get('status') not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)
             or value.get('pdf_inspection') != 'not_run'
             or value.get('scope') != 'current_process_environment'):
         raise SetupError('MASC returned unreadable PDF tool readiness')
@@ -1052,7 +1052,7 @@ def decode_pdf_tools_readiness(value):
             or {row.get('command') for row in checks} != {'pdftotext', 'pdftoppm'}):
         raise SetupError('MASC did not check both PDF inspection tools')
     started = all(row['status'] == 'started' for row in checks)
-    if started != (value['status'] == PDF_TOOLS_AVAILABLE):
+    if started != (value['status'] == TOOLS_AVAILABLE):
         raise SetupError('MASC returned inconsistent PDF tool readiness')
     return PdfToolsReadiness(
         available=started,
@@ -1161,7 +1161,7 @@ class BrowserToolReadiness:
 def decode_browser_tools_readiness(value, program):
     if (not isinstance(value, dict) or value.get('schema') != 'masc.browser_tools_readiness.v1'
             or value.get('program') != program
-            or value.get('status') not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE)
+            or value.get('status') not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)
             or value.get('scope') != 'current_process_environment'
             or value.get('lane') != 'not_checked'):
         raise SetupError('MASC returned unreadable ' + BROWSER_TOOL_NAMES.get(program, program) + ' readiness')
@@ -1171,7 +1171,7 @@ def decode_browser_tools_readiness(value, program):
         raise SetupError('MASC did not check ' + BROWSER_TOOL_NAMES[program])
     row = checks[0]
     started = row['status'] == 'started'
-    if started != (value['status'] == PDF_TOOLS_AVAILABLE):
+    if started != (value['status'] == TOOLS_AVAILABLE):
         raise SetupError('MASC returned inconsistent ' + BROWSER_TOOL_NAMES[program] + ' readiness')
     path = row.get('path')
     if started and not (isinstance(path, str) and os.path.isabs(path)):
@@ -1252,30 +1252,30 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
             raise ValueError('invalid result')
         state = receipt['status']
         readiness = receipt.get('readiness')
-        if dependency == 'pdf-tools' and readiness in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE):
+        if dependency == 'pdf-tools' and readiness in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE):
             pdf = decode_pdf_tools_readiness(receipt.get('dependency_readiness'))
-            if (readiness == PDF_TOOLS_AVAILABLE) != pdf.available:
+            if (readiness == TOOLS_AVAILABLE) != pdf.available:
                 raise ValueError('inconsistent PDF recheck')
             if state == 'commands_completed' and not pdf.available:
                 raise ValueError('PDF tools were not available after installation')
-        elif dependency in BROWSER_TOOLS and readiness in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE):
+        elif dependency in BROWSER_TOOLS and readiness in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE):
             browser = decode_browser_tools_readiness(receipt.get('dependency_readiness'), dependency)
-            if (readiness == PDF_TOOLS_AVAILABLE) != browser.available:
+            if (readiness == TOOLS_AVAILABLE) != browser.available:
                 raise ValueError('inconsistent browser tool recheck')
             if state == 'commands_completed' and not browser.available:
                 raise ValueError('browser tool was not available after installation')
         elif dependency == 'presentation-tools':
             presentation = decode_presentation_tools_readiness(receipt.get('dependency_readiness'), base_path)
-            if readiness not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE) or (readiness == PDF_TOOLS_AVAILABLE) != presentation.available:
+            if readiness not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE) or (readiness == TOOLS_AVAILABLE) != presentation.available:
                 raise ValueError('inconsistent presentation recheck')
             if state == 'commands_completed' and not presentation.available:
                 raise ValueError('presentation installation was not ready')
         elif readiness != 'not_checked':
             raise ValueError('invalid readiness')
-        if dependency == 'pdf-tools' and state == 'commands_completed' and readiness != PDF_TOOLS_AVAILABLE:
+        if dependency == 'pdf-tools' and state == 'commands_completed' and readiness != TOOLS_AVAILABLE:
             raise ValueError('PDF installation was not rechecked')
         if (dependency in BROWSER_TOOLS and state == 'commands_completed'
-                and readiness not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE)):
+                and readiness not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)):
             raise ValueError('browser installation was not rechecked')
     except (KeyError, TypeError, ValueError):
         raise SetupError('Installation action did not return a readable result; recheck the prerequisite')

@@ -956,9 +956,9 @@ let test_bundle_effect_contracts () =
    bundle a keeper is handed, so the next tool that carries a reference fails
    here and not in a keeper's turn.
 
-   It does not look for a cycle: any [$ref] or [$defs] key fails. No schema in
-   the repository holds either, and it is not known whether Muse also refuses a
-   reference that does not recurse. *)
+   It does not look for a cycle: any [$ref] or [$defs] key fails. No tool in
+   the bundle holds either today, and it is not known whether Muse also
+   refuses a reference that does not recurse. *)
 let rec has_schema_reference = function
   | `Assoc fields ->
     List.exists

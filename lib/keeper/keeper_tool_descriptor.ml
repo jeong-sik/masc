@@ -2290,7 +2290,7 @@ let keeper_spawn_descriptor (definition : Tool_schemas_spawn.definition) =
 
 (* All owned-job actions use Keeper_owned_job_store.result_json. Composition
    schemas describe its field structure; enum refinements are unsupported.
-   Phase/status values come from the store's closed phase codec and projection,
+   Phase/status and cleanup values come from the store's closed codecs and projection,
    while artifacts retain the canonical normalized _blob wrapper. Status may
    persist terminal evidence, so it shares the Serial effectful policy. *)
 let owned_job_output_schema =
@@ -2318,9 +2318,7 @@ let owned_job_output_schema =
       ; "source", source_schema
       ; "phase", `Assoc [ "type", `String "string" ]
       ; "cancel_requested", `Assoc [ "type", `String "boolean" ]
-      ; "cleanup", `Assoc [ "type", `String "string"; "enum", `List
-          (List.map (fun value -> `String (Keeper_owned_job_cleanup_state.to_string value))
-            Keeper_owned_job_cleanup_state.all) ]
+      ; "cleanup", `Assoc [ "type", `String "string" ]
       ; "artifacts", `Assoc
           [ "type", `String "array"; "items", normalized_artifact_ref_schema ]
       ; "detail", nullable_string

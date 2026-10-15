@@ -1,8 +1,6 @@
 type t = Resources_retained | Container_removal_requested | Container_removed
   | Data_removal_requested | Resources_removed
 
-let all = [Resources_retained;Container_removal_requested;Container_removed;
-  Data_removal_requested;Resources_removed]
 let to_string = function
   | Resources_retained -> "resources_retained"
   | Container_removal_requested -> "container_removal_requested"

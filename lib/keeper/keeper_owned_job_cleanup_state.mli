@@ -6,7 +6,6 @@ type t =
   | Container_removed
   | Data_removal_requested
   | Resources_removed
-val all : t list
 val to_string : t -> string
 val of_string : string -> t option
 val can_transition : t -> t -> bool

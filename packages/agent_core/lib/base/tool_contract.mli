@@ -7,6 +7,21 @@
     @stability Evolving
     @since 0.221.0 *)
 
+module Resource_scope : sig
+  type identity
+  type identity_error = Empty_namespace | Empty_key
+  type t
+
+  val identity : namespace:string -> key:string -> (identity, identity_error) result
+  val create : occupied:identity -> ancestors:identity list -> t
+  val conflicts : t -> t -> bool
+  (** Two claims conflict when their occupied identities agree, or one
+      occupied identity occurs in the other's ancestry. Sharing only an
+      ancestor does not make disjoint siblings conflict. The producer owns
+      identity resolution and the complete ancestry; the SDK assigns no
+      filesystem, authorization, or replay meaning to these identities. *)
+end
+
 type execution_mode =
   | Concurrent
   | Serial

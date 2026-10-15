@@ -54,6 +54,11 @@
  (modules test_wire_parse_dump)
  (libraries llm_provider unix))
 
+(test
+ (name test_resource_scoped_execution)
+ (modules test_resource_scoped_execution)
+ (libraries agent_core_test_deps agent_core alcotest))
+
 ; --- AUTO-WIRED ORPHANS (fix/test-dune-orphans) ---
 ; ---- (1) compile failures — not wired until bodies are fixed ----
 ; The following files are NOT wired here because they fail to compile

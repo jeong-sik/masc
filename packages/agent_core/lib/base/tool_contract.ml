@@ -1,5 +1,29 @@
 (** Canonical dependency-leaf contract for one tool invocation. *)
 
+module Resource_scope = struct
+  type identity = { namespace : string; key : string }
+  type identity_error = Empty_namespace | Empty_key
+  type t = { occupied : identity; ancestors : identity list }
+
+  let identity ~namespace ~key =
+    if String.equal namespace "" then Error Empty_namespace
+    else if String.equal key "" then Error Empty_key
+    else Ok { namespace; key }
+  ;;
+
+  let create ~occupied ~ancestors = { occupied; ancestors }
+
+  let equal_identity left right =
+    String.equal left.namespace right.namespace && String.equal left.key right.key
+  ;;
+
+  let conflicts left right =
+    equal_identity left.occupied right.occupied
+    || List.exists (equal_identity left.occupied) right.ancestors
+    || List.exists (equal_identity right.occupied) left.ancestors
+  ;;
+end
+
 type execution_mode =
   | Concurrent
   | Serial

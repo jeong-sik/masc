@@ -21,17 +21,32 @@ end
 
 type execution_env_tool_handler = Execution_env.t -> Yojson.Safe.t -> Types.tool_result
 
+type scoped_call
+
+val scoped_call
+  :  scope:Tool_contract.Resource_scope.t
+  -> ?additional_scopes:Tool_contract.Resource_scope.t list
+  -> execution_env_tool_handler
+  -> scoped_call
+(** A producer's resolved occupied resources and the handler that consumes
+    that resolution. A scope is neither execution permission nor safe-retry
+    evidence. The handler must still perform its ordinary authorization and
+    verify that its resolved authority remains bound to these resources. *)
+
 (** How an ordinary tool is admitted to a concurrent batch.
 
     [Static] fixes the mode for every call. [Concurrent_when] carries a
     predicate over the call input that must {e prove} the call reads only:
     an input it cannot prove is scheduled [Serial], so an unclassified input
-    never widens admission. There is no third state for "unknown".
+    never widens admission. [Resource_scoped] prepares a bound call using
+    producer-owned resource identities; it does not prove the call read-only.
 
     @since 0.233.0 *)
 type ordinary_admission =
   | Static of Tool_contract.execution_mode
   | Concurrent_when of (Yojson.Safe.t -> bool)
+  | Resource_scoped of
+      (sw:Eio.Switch.t -> Yojson.Safe.t -> (scoped_call option, Types.tool_error) result)
 
 type call_effect = Read_only | Effect_possible
 (** The tool producer's contract for one input. [Read_only] proves that
@@ -54,6 +69,23 @@ val ordinary_descriptor :
 
     @since 0.233.0 *)
 val ordinary_descriptor_concurrent_when : (Yojson.Safe.t -> bool) -> descriptor
+
+val ordinary_descriptor_scoped
+  :  prepare:(sw:Eio.Switch.t -> Yojson.Safe.t -> (scoped_call option, Types.tool_error) result)
+  -> descriptor
+(** An effect-possible ordinary call. Its pure execution mode remains Serial.
+    Batch preparation may resolve a scope, then schedule disjoint calls in
+    parallel while preserving the order of conflicting calls.
+
+    Preparation may inspect and pin resources on [sw], but must not perform
+    the tool's effect or grant permission. [Ok None] is a Serial fallback and
+    [Error error] returns that unavailable result without invoking the original
+    handler. Before either return, the producer must release any partial
+    preparation it cannot transfer to a scoped call. Cancellation propagates;
+    [sw] bounds the lifetime of transferred resources. Pair through [of_schema]
+    (or [create]), which binds the descriptor to that exact handler. Replacing
+    the public record's handler invalidates scoped admission and retains the
+    replacement handler's ordinary Serial path. *)
 
 val terminal_descriptor : Tool_contract.failure_effect_disposition -> descriptor
 
@@ -131,6 +163,23 @@ val execute
   -> Yojson.Safe.t
   -> Types.tool_result
 
+type prepared_call
+
+val prepare_call : sw:Eio.Switch.t -> t -> input:Yojson.Safe.t -> prepared_call
+val has_scoped_admission : t -> bool
+(** Whether the descriptor opts into preparation. Ordinary execution paths
+    without any such calls need no additional preparation scope. *)
+val prepared_call_scopes : prepared_call -> Tool_contract.Resource_scope.t list option
+val execute_prepared
+  :  ?context:Context.t
+  -> ?invocation:Tool_contract.Invocation.t
+  -> prepared_call
+  -> Types.tool_result
+(** Execute the exact input and handler frozen together by [prepare_call].
+    There is no replacement-input argument. The batch owner must validate the
+    original schema and retain [sw] until all executions and observers finish.
+    Direct {!execute} retains its ordinary handler and admission behavior. *)
+
 val descriptor : t -> descriptor option
 
 (** Execution mode for this call, or [Serial] when no descriptor exists.
@@ -181,5 +230,6 @@ val wire_bytes_of_schema : Types.tool_schema -> int
 val schema_to_json : t -> Yojson.Safe.t
 
 (** Wrap a tool to inject default arguments when not provided.
-    Defaults are merged into the input JSON before the handler runs. *)
+    Defaults are merged into the input JSON before the handler runs. Scoped
+    preparation and its bound handler receive the same merged input. *)
 val with_defaults : (string * Yojson.Safe.t) list -> t -> t

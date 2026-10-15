@@ -42,6 +42,9 @@ type scheduled_tool_use =
   ; input : Yojson.Safe.t
   ; execution_mode : Tool_contract.execution_mode
   ; completion : Tool_contract.completion
+  ; prepared_call : Tool.prepared_call option
+  ; preparation_exception : (exn * Printexc.raw_backtrace) option
+  ; restored_invocation : Tool_contract.Invocation.t option
   }
 
 type tool_index = (string, Tool.t) Hashtbl.t
@@ -336,7 +339,62 @@ let schedule_tool_use ~tool_index index (id, name, input) =
        "tool name suffix normalized"
        [ Log.S ("requested", name); Log.S ("resolved", resolved) ]
    | _ -> ());
-  { index; id; name = resolved; input; execution_mode; completion }
+  { index; id; name = resolved; input; execution_mode; completion
+  ; prepared_call = None; preparation_exception = None; restored_invocation = None }
+;;
+
+let restore_attempted_tool ~turn_count ~durable (call : scheduled_tool_use) =
+  match durable with
+  | None | Some (_, Error _) -> call
+  | Some (provider, Ok authorities) ->
+    let matching = List.filter (fun (authority : Execution_agent_scope.invocation_authority) ->
+      Tool_contract.Invocation.planned_index authority.invocation = call.index) authorities in
+    (match matching with
+     | [ authority ] ->
+       (match Execution_agent_scope.validate_invocation_authority authority
+                ~turn:turn_count ~planned_index:call.index ~tool_use_id:call.id
+                ~tool_name:call.name ~input:call.input with
+        | Error _ -> call
+        | Ok () ->
+          (match Execution_agent_scope.find_invocation provider ~invocation:authority.invocation
+                   ~tool_name:call.name ~input:call.input with
+           | Error _ | Ok None -> call
+           | Ok (Some original) ->
+             (match Execution_agent_scope.invocation_progress original with
+              | Error _ | Ok Execution_agent_scope.Invocation_unattempted -> call
+              | Ok Execution_agent_scope.Invocation_attempted_or_settled ->
+                (* Only canonical settlement decides replay or unknown-effect
+                   refusal. Current resource preparation cannot mask either.
+                   No new effect is admitted by this conservative batch barrier. *)
+                { call with restored_invocation = Some authority.invocation
+                          ; execution_mode = Tool_contract.Serial
+                          ; completion = Tool_contract.Invocation.completion authority.invocation })))
+     | [] | _ :: _ :: _ -> call)
+;;
+
+let prepare_scheduled_tool ~sw ~tool_index (call : scheduled_tool_use) =
+  match call.restored_invocation, Hashtbl.find_opt tool_index call.name with
+  | Some _, (Some _ | None) | None, None -> call
+  | None, Some tool when not (Tool.has_scoped_admission tool) -> call
+  | None, Some tool ->
+    (* Invalid public input never reaches a producer's resource resolver. The
+       existing dispatch boundary still owns the canonical validation result. *)
+    (match Tool_input_validation.validate tool.Tool.schema call.input with
+     | Tool_input_validation.Invalid _ -> call
+     | Tool_input_validation.Valid _ ->
+       try
+         let prepared_call = Tool.prepare_call ~sw tool ~input:call.input in
+         let execution_mode =
+           match Tool.prepared_call_scopes prepared_call with
+           | Some _ -> Tool_contract.Concurrent
+           | None -> call.execution_mode
+         in
+         { call with prepared_call = Some prepared_call; execution_mode }
+       with
+       | exception_ ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         Llm_provider.Reserved_exn.reraise_if_reserved exception_;
+         { call with preparation_exception = Some (exception_, backtrace) })
 ;;
 
 let hook_schedule_of_tool_use ~batch_index ~batch_size (tool_use : scheduled_tool_use)
@@ -485,6 +543,7 @@ let find_and_execute_tool_with_index
       ?on_hook_invoked
       ~publish_event_bus
       ~invocation
+      ?prepared_call
       name
       input
   =
@@ -620,7 +679,9 @@ let find_and_execute_tool_with_index
          let t0 = Unix.gettimeofday () in
          let result =
            Agent_tool_terminal_boundary.execute_handler ~tool ~name (fun () ->
-             Tool.execute ~context ~invocation tool exact_input)
+             match prepared_call with
+             | Some prepared -> Tool.execute_prepared ~context ~invocation prepared
+             | None -> Tool.execute ~context ~invocation tool exact_input)
          in
          let duration_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
          let result_bytes =
@@ -827,11 +888,14 @@ let execute_scheduled_tool
   =
   let { index; id; name; input; _ } = tool_use in
   let invocation =
-    Tool_contract.Invocation.create
-      ~tool_use_id:id
-      ~turn:turn_count
-      ~schedule
-      ~completion:tool_use.completion
+    match tool_use.restored_invocation with
+    | Some original -> original
+    | None ->
+      Tool_contract.Invocation.create
+        ~tool_use_id:id
+        ~turn:turn_count
+        ~schedule
+        ~completion:tool_use.completion
   in
   let id = Tool_contract.Invocation.tool_use_id invocation in
   let turn_count = Tool_contract.Invocation.turn invocation in
@@ -910,6 +974,7 @@ let execute_scheduled_tool
         ?on_hook_invoked
         ~publish_event_bus:true
         ~invocation
+        ?prepared_call:tool_use.prepared_call
         tool_name
         input
     in
@@ -1032,6 +1097,11 @@ let execute_scheduled_tool
     | Agent_tool_pre_execution_gate.Run_admitted -> execute_admitted ()
     | Agent_tool_pre_execution_gate.Return_outcome outcome -> outcome
   in
+  let require_preparation () =
+    match tool_use.preparation_exception with
+    | None -> ()
+    | Some (exception_, backtrace) -> Printexc.raise_with_backtrace exception_ backtrace
+  in
   try
     let execution_provider = Execution_context.provider_attempt () in
     let existing =
@@ -1050,10 +1120,13 @@ let execute_scheduled_tool
       (match Execution_agent_scope.invocation_progress durable with
        | Error error -> durability_failure error
        | Ok Execution_agent_scope.Invocation_unattempted ->
-         settle_gate ~settle_blocked:(settle_existing_block durable) execute_existing
+         settle_gate ~settle_blocked:(settle_existing_block durable) (fun () ->
+           require_preparation ();
+           execute_existing ())
        | Ok Execution_agent_scope.Invocation_attempted_or_settled -> execute_existing ())
     | Ok None ->
       let execute_admitted () =
+        require_preparation ();
         let idem_key = Durable_event.make_idempotency_key ~tool_name:name ~input in
         try
           let dispatch =
@@ -1148,7 +1221,13 @@ let execute_tools
   =
   let tool_index = build_index tools in
   let tool_use_blocks = Agent_tool_terminal_boundary.tool_use_blocks tool_uses in
-  let scheduled = List.mapi (schedule_tool_use ~tool_index) tool_use_blocks in
+  let durable = Option.map (fun provider ->
+    provider, Execution_agent_scope.provider_invocations provider)
+      (Execution_context.provider_attempt ()) in
+  let scheduled =
+    List.mapi (schedule_tool_use ~tool_index) tool_use_blocks
+    |> List.map (restore_attempted_tool ~turn_count ~durable)
+  in
   let plan =
     Agent_tool_batch_plan.create
       ~execution_mode:(fun tool_use -> tool_use.execution_mode)
@@ -1247,9 +1326,38 @@ let execute_tools
          ~name:(fun tool_use -> tool_use.name)
          ~input:(fun tool_use -> tool_use.input)
          scheduled)
-  | Agent_tool_batch_plan.Admitted batches ->
+  | Agent_tool_batch_plan.Admitted batches when not
+      (List.exists (fun call ->
+        match Hashtbl.find_opt tool_index call.name with
+        | Some tool -> Tool.has_scoped_admission tool
+        | None -> false) scheduled) ->
     if batches <> [] then Option.iter (fun callback -> callback ()) before_tool_execution;
     run_batches 0 [] Continue_after_batch batches
+  | Agent_tool_batch_plan.Admitted _ ->
+    Eio.Switch.run @@ fun sw ->
+    let prepared = List.map (prepare_scheduled_tool ~sw ~tool_index) scheduled in
+    let prepared_plan =
+      Agent_tool_batch_plan.create
+        ~resource_scopes:(fun call ->
+          Option.bind call.prepared_call Tool.prepared_call_scopes)
+        ~execution_mode:(fun call -> call.execution_mode)
+        ~completion:(fun call -> call.completion)
+        prepared
+    in
+    (match prepared_plan with
+     | Agent_tool_batch_plan.Rejected_terminal_mix rejected ->
+       Ok
+         (Agent_tool_terminal_boundary.rejected_report
+            ~turn:turn_count
+            ~schedule:(hook_schedule_of_tool_use ~batch_index:0 ~batch_size:(List.length rejected))
+            ~completion:(fun call -> call.completion)
+            ~id:(fun call -> call.id)
+            ~name:(fun call -> call.name)
+            ~input:(fun call -> call.input)
+            rejected)
+     | Agent_tool_batch_plan.Admitted batches ->
+       if batches <> [] then Option.iter (fun callback -> callback ()) before_tool_execution;
+       run_batches 0 [] Continue_after_batch batches)
 ;;
 
 let recovered_batch_completion = Agent_tool_terminal_boundary.recovered_batch_completion

@@ -428,6 +428,133 @@ let test_durable_truth_precedes_current_preparation () =
     | Error error -> fail (Writer.scope_failure_to_string error)) [ true; false ]
 ;;
 
+
+let test_unattempted_sibling_preserves_original_wave () =
+  let module Internal = Agent_core__ in
+  let module Scope = Internal.Execution_agent_scope in
+  let module Writer = Internal.Execution_lane_writer in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let runtime = match Internal.Execution_runtime.create ~sw
+      ~domain_mgr:(Eio.Stdenv.domain_mgr env) ~domain_count:1 with
+    | Ok runtime -> runtime
+    | Error error -> fail (Internal.Execution_runtime.create_error_to_string error) in
+  let codec = Internal.Execution_codec_executor.of_runtime runtime in
+  List.iter (fun scoped ->
+    let native_path = Filename.temp_file "unattempted-sibling-" ".dir" in
+    Sys.remove native_path;
+    let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
+    Fun.protect ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir) @@ fun () ->
+    Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir;
+    let require = function Ok value -> value | Error error -> fail (Scope.error_to_string error) in
+    match Writer.run ~codec ~dir (fun ~sw writer ->
+      let owner = Scope.start ~writer ~agent_name:"unattempted-sibling-fixture" |> require in
+      let turn = Scope.open_turn owner ~ordinal:0 |> require in
+      let provider_config = Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat ~model_id:"fixture"
+          ~base_url:"http://unused.invalid" ~api_key:"" ~request_path:"/v1/chat/completions" () in
+      let binding = match Binding_identity.of_provider_config
+          ~transport:Binding_identity.Injected provider_config with
+        | Ok binding -> binding | Error detail -> fail detail in
+      let provider = Scope.open_provider_attempt turn ~ordinal:0 binding |> require in
+      let calls = [ call "left"; call "right" ] in
+      let response =
+        { id = "unattempted-sibling-response"; model = "fixture"; stop_reason = StopToolUse
+        ; content = calls; usage = None; telemetry = None } in
+      Scope.record_provider_response provider response |> require;
+      let counts = Hashtbl.create 2 in
+      let count name = match Hashtbl.find_opt counts name with Some value -> value | None -> 0 in
+      let perform name _env _input =
+        Hashtbl.replace counts name (count name + 1);
+        output (name ^ " original result") in
+      let preparations = ref [] and hooks_seen = ref [] in
+      let make ~current name =
+        if scoped then
+          prepared_tool ~name (fun ~sw:_ _ ->
+            if current && name = "left" then fail "settled sibling re-entered preparation";
+            preparations := name :: !preparations;
+            Ok (Some (Tool.scoped_call ~scope:(scope name) (perform name))))
+            (fun _ -> fail "scoped producer bypassed preparation")
+        else
+          Tool.of_schema
+            ~descriptor:(Tool.ordinary_descriptor ~call_effect:(fun _ -> Tool.Read_only) Tool_contract.Concurrent)
+            (Types.tool_schema_of_params ~name ~description:"read-only sibling fixture" ~parameters:[] ())
+            (perform name) in
+      let original_left = make ~current:false "left" in
+      let original_invocation index name =
+        Tool_contract.Invocation.create ~tool_use_id:("occurrence-" ^ name) ~turn:0
+          ~schedule:{ planned_index=index; batch_index=0; batch_size=2; execution_mode=Tool_contract.Concurrent }
+          ~completion:Tool_contract.Continue_after_success in
+      let left_invocation = original_invocation 0 "left" in
+      let right_invocation = original_invocation 1 "right" in
+      let left = Scope.open_invocation provider ~invocation:left_invocation
+          ~tool_name:"left" ~input:(`Assoc []) |> require in
+      let right = Scope.open_invocation provider ~invocation:right_invocation
+          ~tool_name:"right" ~input:(`Assoc []) |> require in
+      let prepared = Tool.prepare_call ~sw original_left ~input:(`Assoc []) in
+      ignore (Scope.execute left ~invoke:(fun ~start_child:_ ~tool_name:_ ~input:_ ->
+        match Tool.execute_prepared ~invocation:left_invocation prepared with
+        | Ok result -> result.content, Tool_succeeded
+        | Error _ -> fail "original sibling failed before durable settlement") |> require);
+      check bool "first sibling is durably settled" true
+        ((Scope.invocation_progress left |> require) = Scope.Invocation_attempted_or_settled);
+      check bool "second sibling is durably open and unattempted" true
+        ((Scope.invocation_progress right |> require) = Scope.Invocation_unattempted);
+      let left = make ~current:true "left" and right_tool = make ~current:true "right" in
+      let in_provider action = Internal.Execution_context.with_provider_attempt provider action in
+      let terminal_right = Tool.create ~descriptor:(Tool.terminal_descriptor Tool_contract.Effect_outcome_unknown)
+          ~name:"right" ~description:"changed completion must refuse" ~parameters:[]
+          (fun _ -> fail "changed terminal contract executed") in
+      (match in_provider (fun () -> execute env ~turn_count:0 [ left; terminal_right ] calls) with
+       | Ok report ->
+         check int "Terminal mix returns each rejected occurrence" 2 (List.length report.completed_results);
+         check bool "current Terminal mix refuses every call" true
+           (List.for_all (fun (row : Agent_tools.tool_execution_result) ->
+             match row.outcome with
+             | Tool_failed { failure_kind=Validation_error; _ } -> true
+             | Tool_failed {failure_kind=(Recoverable_tool_error | Non_retryable_tool_error
+                 | Reported_tool_error | Unattributed_tool_error); _}
+             | Tool_succeeded -> false) report.completed_results)
+       | Error _ -> fail "current Terminal mix lost its typed rejection");
+      List.iter (fun changed_right ->
+        let changed = [ call "left"; changed_right ] in
+        match in_provider (fun () -> execute env ~turn_count:0 [ left; right_tool ] changed) with
+        | Error { Agent_tools.cause=Agent_tools.Durability_failure _; _ } -> ()
+        | Ok _ | Error _ -> fail "changed unattempted occurrence reused old authority")
+        [ ToolUse {id="changed-right";name="right";input=`Assoc []}
+        ; ToolUse {id="occurrence-right";name="other-right";input=`Assoc []}
+        ; ToolUse {id="occurrence-right";name="right";input=`Assoc ["changed",`Bool true]} ];
+      check int "rejections never perform the unattempted effect" 0 (count "right");
+      preparations := [];
+      let hooks = { Hooks.empty with pre_tool_use=Some (function
+        | Hooks.PreToolUse { invocation; tool_name; input; _ } ->
+          hooks_seen := tool_name :: !hooks_seen;
+          check string "only unattempted sibling re-enters current Gate" "right" tool_name;
+          check bool "Gate sees original wave and exact input" true
+            (Tool_contract.Invocation.schedule invocation = Tool_contract.Invocation.schedule right_invocation
+             && Yojson.Safe.equal input (`Assoc []));
+          Hooks.Continue
+        | _ -> fail "unexpected pre-tool event") } in
+      let resumed = in_provider (fun () -> execute env ~turn_count:0 ~hooks [ left; right_tool ] calls) |> results in
+      check (list string) "resumption preserves both original results"
+        [ "left original result"; "right original result" ] (contents resumed);
+      check int "completed sibling has no duplicate effect" 1 (count "left");
+      check int "unattempted sibling performs exactly one fresh effect" 1 (count "right");
+      check (list string) "only fresh sibling is authorized" [ "right" ] !hooks_seen;
+      check (list string) "unattempted scoped sibling is freshly prepared"
+        (if scoped then [ "right" ] else []) !preparations;
+      List.iter2 (fun (row : Agent_tools.tool_execution_result) original ->
+        check string "same original occurrence" (Tool_contract.Invocation.tool_use_id original)
+          (Tool_contract.Invocation.tool_use_id row.invocation);
+        check bool "original concurrent wave identity is preserved" true
+          (Tool_contract.Invocation.schedule row.invocation = Tool_contract.Invocation.schedule original))
+        resumed [ left_invocation; right_invocation ];
+      check bool "all original invocations now have canonical durable results" true
+        (Scope.provider_invocations_settled provider |> require)) with
+    | Ok () -> ()
+    | Error error -> fail (Writer.scope_failure_to_string error)) [true; false]
+;;
+
 let () =
   run "resource-scoped execution"
     [ "actual batch execution",
@@ -439,5 +566,6 @@ let () =
       ; test_case "scoped observer failure retains completed siblings" `Quick test_scoped_observer_failure_retains_siblings
       ; test_case "real caller cancellation closes preparation" `Quick test_cancellation_releases_prepared_resources
       ; test_case "replacement handler invalidates stale preparation" `Quick test_replaced_handler_cannot_reuse_old_preparation
+      ; test_case "unattempted sibling preserves original wave" `Quick test_unattempted_sibling_preserves_original_wave
       ; test_case "durable truth precedes current preparation" `Quick test_durable_truth_precedes_current_preparation
       ] ]

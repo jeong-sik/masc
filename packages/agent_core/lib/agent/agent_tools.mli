@@ -231,6 +231,9 @@ val find_and_execute_tool
     the sole tool-effect authority: AGENT_CORE durably opens the exact invocation and
     commits an attempt before the handler, atomically settles the exact result,
     and replays a settled result without rerunning observers or the handler.
+    Restored unattempted occurrences preserve their original invocation schedule
+    only when current completion agrees, and still require current preparation
+    and the current pre-execution gate. Persisted identity is not permission.
     Legacy [journal] Tool_called/Tool_completed projections are suppressed on
     this path. A durability failure dominates hook and observer failures because
     effect-outcome truth must not be hidden.

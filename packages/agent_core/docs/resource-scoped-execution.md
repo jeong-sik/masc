@@ -34,12 +34,15 @@ the original environment and input; it cannot revive an invalidated binding.
 `Tool.with_defaults` transforms preparation and execution together and retains
 their binding; a stale descriptor cannot bypass a new wrapper.
 
-Canonical attempted or settled invocations are restored before preparation,
-using the exact current provider's persisted authority and its original
-schedule. They form conservative batch barriers. The existing durable
-settlement returns the original result or refuses an unknown effect; a changed,
-unavailable, or retired resource preparer cannot replace that truth. Fresh and
-unattempted effects still require current preparation and authorization.
+Canonical invocation identities are restored before preparation using the exact
+current provider's persisted authority and original schedule. They form
+conservative batch barriers. An unattempted occurrence retains its identity
+only when the current completion contract agrees; it still requires current
+preparation and authorization. Attempted or settled occurrences defer to durable
+settlement, which returns the original result or refuses an unknown effect;
+a changed, unavailable, or retired resource preparer cannot replace that truth.
+Restoring an open sibling preserves its original wave even after another sibling
+has settled, without converting that open identity into effect permission.
 
 Within a contiguous scoped region, every earlier conflicting call is an order
 dependency. Ready waves run concurrently and preserve transitive ordering;

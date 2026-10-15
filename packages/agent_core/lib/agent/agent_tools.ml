@@ -35,6 +35,10 @@ let failure_summary = function
   | Observer_failure { exception_; _ } -> Printexc.to_string exception_
 ;;
 
+type restored_invocation =
+  | Unattempted_invocation of Tool_contract.Invocation.t
+  | Attempted_or_settled_invocation of Tool_contract.Invocation.t
+
 type scheduled_tool_use =
   { index : int
   ; id : string
@@ -44,7 +48,7 @@ type scheduled_tool_use =
   ; completion : Tool_contract.completion
   ; prepared_call : Tool.prepared_call option
   ; preparation_exception : (exn * Printexc.raw_backtrace) option
-  ; restored_invocation : Tool_contract.Invocation.t option
+  ; restored_invocation : restored_invocation option
   }
 
 type tool_index = (string, Tool.t) Hashtbl.t
@@ -343,7 +347,7 @@ let schedule_tool_use ~tool_index index (id, name, input) =
   ; prepared_call = None; preparation_exception = None; restored_invocation = None }
 ;;
 
-let restore_attempted_tool ~turn_count ~durable (call : scheduled_tool_use) =
+let restore_durable_tool ~turn_count ~durable (call : scheduled_tool_use) =
   match durable with
   | None | Some (_, Error _) -> call
   | Some (provider, Ok authorities) ->
@@ -361,12 +365,22 @@ let restore_attempted_tool ~turn_count ~durable (call : scheduled_tool_use) =
            | Error _ | Ok None -> call
            | Ok (Some original) ->
              (match Execution_agent_scope.invocation_progress original with
-              | Error _ | Ok Execution_agent_scope.Invocation_unattempted -> call
+              | Error _ -> call
+              | Ok Execution_agent_scope.Invocation_unattempted ->
+                (* An open sibling already owns its original wave identity,
+                   even when a settled sibling now forms a replay barrier.
+                   This restores identity, not attempt or execution authority:
+                   current preparation and Gate still run. Current completion
+                   must agree before restoring an unattempted occurrence. *)
+                if call.completion = Tool_contract.Invocation.completion authority.invocation
+                then { call with restored_invocation = Some (Unattempted_invocation authority.invocation)
+                               ; execution_mode = Tool_contract.Serial }
+                else call
               | Ok Execution_agent_scope.Invocation_attempted_or_settled ->
                 (* Only canonical settlement decides replay or unknown-effect
                    refusal. Current resource preparation cannot mask either.
                    No new effect is admitted by this conservative batch barrier. *)
-                { call with restored_invocation = Some authority.invocation
+                { call with restored_invocation = Some (Attempted_or_settled_invocation authority.invocation)
                           ; execution_mode = Tool_contract.Serial
                           ; completion = Tool_contract.Invocation.completion authority.invocation })))
      | [] | _ :: _ :: _ -> call)
@@ -374,9 +388,10 @@ let restore_attempted_tool ~turn_count ~durable (call : scheduled_tool_use) =
 
 let prepare_scheduled_tool ~sw ~tool_index (call : scheduled_tool_use) =
   match call.restored_invocation, Hashtbl.find_opt tool_index call.name with
-  | Some _, (Some _ | None) | None, None -> call
-  | None, Some tool when not (Tool.has_scoped_admission tool) -> call
-  | None, Some tool ->
+  | Some (Attempted_or_settled_invocation _), (Some _ | None)
+  | (None | Some (Unattempted_invocation _)), None -> call
+  | (None | Some (Unattempted_invocation _)), Some tool when not (Tool.has_scoped_admission tool) -> call
+  | (None | Some (Unattempted_invocation _)), Some tool ->
     (* Invalid public input never reaches a producer's resource resolver. The
        existing dispatch boundary still owns the canonical validation result. *)
     (match Tool_input_validation.validate tool.Tool.schema call.input with
@@ -385,9 +400,10 @@ let prepare_scheduled_tool ~sw ~tool_index (call : scheduled_tool_use) =
        try
          let prepared_call = Tool.prepare_call ~sw tool ~input:call.input in
          let execution_mode =
-           match Tool.prepared_call_scopes prepared_call with
-           | Some _ -> Tool_contract.Concurrent
-           | None -> call.execution_mode
+           match call.restored_invocation, Tool.prepared_call_scopes prepared_call with
+           | None, Some _ -> Tool_contract.Concurrent
+           | (None | Some (Unattempted_invocation _ | Attempted_or_settled_invocation _)), None
+           | Some (Unattempted_invocation _ | Attempted_or_settled_invocation _), Some _ -> call.execution_mode
          in
          { call with prepared_call = Some prepared_call; execution_mode }
        with
@@ -889,7 +905,7 @@ let execute_scheduled_tool
   let { index; id; name; input; _ } = tool_use in
   let invocation =
     match tool_use.restored_invocation with
-    | Some original -> original
+    | Some (Unattempted_invocation original | Attempted_or_settled_invocation original) -> original
     | None ->
       Tool_contract.Invocation.create
         ~tool_use_id:id
@@ -1226,7 +1242,7 @@ let execute_tools
       (Execution_context.provider_attempt ()) in
   let scheduled =
     List.mapi (schedule_tool_use ~tool_index) tool_use_blocks
-    |> List.map (restore_attempted_tool ~turn_count ~durable)
+    |> List.map (restore_durable_tool ~turn_count ~durable)
   in
   let plan =
     Agent_tool_batch_plan.create
@@ -1339,7 +1355,9 @@ let execute_tools
     let prepared_plan =
       Agent_tool_batch_plan.create
         ~resource_scopes:(fun call ->
-          Option.bind call.prepared_call Tool.prepared_call_scopes)
+          match call.restored_invocation with
+          | Some (Unattempted_invocation _ | Attempted_or_settled_invocation _) -> None
+          | None -> Option.bind call.prepared_call Tool.prepared_call_scopes)
         ~execution_mode:(fun call -> call.execution_mode)
         ~completion:(fun call -> call.completion)
         prepared

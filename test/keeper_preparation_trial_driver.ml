@@ -109,7 +109,8 @@ access = "read-write"
 |}
 
 let publish_snapshot ~base =
-  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:base |> get Fun.id in
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:base
+      |> get Config_dir_resolver.canonical_base_path_error_to_string in
   let path = config_path base in
   (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
       ~read_config:(fun () -> {path;source_text=read path}) with

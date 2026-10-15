@@ -231,6 +231,20 @@ module For_testing : sig
     effect_disposition:Tool_result.failure_effect_disposition option ->
     Tool_result.result -> recovery_decision
   val combine_recovery : recovery_decision -> recovery_decision -> recovery_decision
+  val resume_continuation :
+    after_refusal_binding:(request_id:string -> unit) ->
+    after_refusal_settled:(unit -> unit) ->
+    capability_surface:Keeper_capability_surface.t ->
+    continuation:Keeper_tool_execution_journal.continuation ->
+    config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+    publication_recovery:Keeper_publication_recovery_availability.turn_context ->
+    ctx_snapshot:Keeper_types.working_context ->
+    turn_context:Keeper_tool_call_log_context.turn_context ->
+    invocation:Agent_core.Tool_contract.Invocation.t ->
+    ?clock:float Eio.Time.clock_ty Eio.Resource.t -> unit -> Tool_result.result
+  (** The production resume and refusal worker. Inject only after an actual
+      refusal successor binds, before its worker starts, and observe only after
+      the production settlement callbacks finish. Ordinary resume is unchanged. *)
 
   val async_worker_result :
     composition_execution:Keeper_tool_composition_catalog.execution_mode ->

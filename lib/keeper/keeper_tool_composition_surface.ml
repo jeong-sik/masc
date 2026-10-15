@@ -1625,6 +1625,7 @@ and async_submission_result
       ?before_submit
       ?observe_submission
       ?on_producer_accepted
+      ?observe_settlement
       ~plan
       ~tool_name
       ~tool_kind
@@ -1733,7 +1734,8 @@ and async_submission_result
            Keeper_composition_completion_wake.on_worker_settled
              ~base_path:config.base_path
              ~composition_tool:tool_name
-             settlement)
+             settlement;
+           Option.iter (fun observe -> observe settlement) observe_settlement)
          ~f:(fun ~request_id request_sw ->
            match journal, Atomic.get journal_worker with
            | Some _, None ->
@@ -2083,25 +2085,10 @@ and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
            message)
 ;;
 
-module For_testing = struct
-  type nonrec recovery_decision = continuation_recovery =
-    | Complete_original_result
-    | Hold_original_authority of string
-  let continuation_recovery_of_result = continuation_recovery_of_result
-  let combine_recovery = combine_recovery
-  let async_worker_result = async_worker_result
-  let node_result_to_json = node_result_to_json
-  let project_execution_result = project_execution_result
-  let result_of_execution = result_of_execution
-  let observe_node_result = observe_node_result
-  let failure_payload = failure_payload
-  let instruction_skill_description = instruction_skill_description
-  let make_instruction_skill_tool = make_instruction_skill_tool
-  let status_result = status_result
-  let cancel_result = cancel_result
-end
 
-let resume_continuation ?on_recovery_held ~capability_surface ~continuation ~(config : Workspace.config)
+
+let resume_continuation_with ?on_recovery_held ?on_refusal_accepted ?observe_refusal_settlement
+    ~capability_surface ~continuation ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) ~publication_recovery ~ctx_snapshot
     ~(turn_context : Keeper_tool_call_log_context.turn_context) ~invocation ?clock () =
   let module Draft = Keeper_composition_draft in
@@ -2186,7 +2173,12 @@ let resume_continuation ?on_recovery_held ~capability_surface ~continuation ~(co
            else match (match refusal with None -> Ok () | Some _ -> validate_original_producer_activation ~config source) with
            | Error detail -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
                ~effect_disposition:Tool_result.Proven_pre_effect detail
-           | Ok () -> async_submission_result ?on_recovery_held ?skill_reference ~journal ~continuation ?refusal
+           | Ok () ->
+           let on_producer_accepted,observe_settlement = match refusal with
+             | None -> None,None
+             | Some _ -> on_refusal_accepted,observe_refusal_settlement in
+           async_submission_result ?on_recovery_held ?skill_reference ~journal ~continuation ?refusal
+          ?on_producer_accepted ?observe_settlement
           ~nested_calls:(Draft.nested_calls draft) ?nested_activation
           ~draft_reference:source.draft_reference ~run_reference:source.run_reference
           ~composition_run_id:source.composition_run_id ~plan:(Draft.plan draft)
@@ -2199,6 +2191,40 @@ let resume_continuation ?on_recovery_held ~capability_surface ~continuation ~(co
         )
     )
 ;;
+
+let resume_continuation ?on_recovery_held ~capability_surface ~continuation ~config ~meta
+    ~publication_recovery ~ctx_snapshot ~turn_context ~invocation ?clock () =
+  resume_continuation_with ?on_recovery_held ~capability_surface ~continuation ~config ~meta
+    ~publication_recovery ~ctx_snapshot ~turn_context ~invocation ?clock ()
+;;
+
+module For_testing = struct
+  type nonrec recovery_decision = continuation_recovery =
+    | Complete_original_result
+    | Hold_original_authority of string
+  let continuation_recovery_of_result = continuation_recovery_of_result
+  let combine_recovery = combine_recovery
+  let resume_continuation ~after_refusal_binding ~after_refusal_settled
+      ~capability_surface ~continuation ~config ~meta ~publication_recovery
+      ~ctx_snapshot ~turn_context ~invocation ?clock () =
+    resume_continuation_with
+      ~on_refusal_accepted:(fun request_id -> after_refusal_binding ~request_id; Ok ())
+      ~observe_refusal_settlement:(fun _settlement -> after_refusal_settled ())
+      ~capability_surface ~continuation ~config ~meta ~publication_recovery
+      ~ctx_snapshot ~turn_context ~invocation ?clock ()
+
+  let async_worker_result = async_worker_result
+  let node_result_to_json = node_result_to_json
+  let project_execution_result = project_execution_result
+  let result_of_execution = result_of_execution
+  let observe_node_result = observe_node_result
+  let failure_payload = failure_payload
+  let instruction_skill_description = instruction_skill_description
+  let make_instruction_skill_tool = make_instruction_skill_tool
+  let status_result = status_result
+  let cancel_result = cancel_result
+end
+
 
 let make_tools_with_authority
       ?(instruction_skills : instruction_skill list = [])

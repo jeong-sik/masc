@@ -2141,6 +2141,114 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
         ~caller:keeper second_entry.request_id |> require "missing original draft keeps canonical Waiting" in
     check_json "missing draft never overwrites original Waiting" (Async.entry_to_json second_entry)
       (Async.entry_to_json (Async.durable_terminal_entry unchanged)));
+  let denied_surface = frozen_surface_with ~tool_deny:["keeper_job_result"]
+      ~tool_descriptors:(Descriptor.all_descriptors ()) ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
+  let job_owner = Filename.concat (Store.paths ~base_path:fixture.base_path
+      (Store.Job_id.of_string second_id |> require "refusal original job identity")).job_dir "owner.jsonl" in
+  let original_job_owner = read job_owner in
+  set_source fixture ~task_id:"task-D" ~turn:72;
+  let fault_settled,notify_fault_settled = Eio.Promise.create () in
+  let fault_request = ref None and fault_callbacks = ref 0 in
+  let fault_entry = Fun.protect
+      ~finally:(fun () -> if Sys.file_exists detached_draft then Unix.rename detached_draft draft_path)
+      (fun () ->
+        let invocation = Agent_core.Tool_contract.Invocation.create
+            ~tool_use_id:"physical-refusal-authority-fault" ~turn:72
+            ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+            ~completion:Agent_core.Tool_contract.Continue_after_success in
+        let accepted = Masc.Keeper_tool_composition_surface.For_testing.resume_continuation
+            ~after_refusal_binding:(fun ~request_id ->
+              check bool "refusal authority fault injects once after actual CAS" true (Option.is_none !fault_request);
+              let queued = Async.load_canonical_durable_queued ~base_path:fixture.base_path
+                  ~caller:keeper request_id |> require "actual refusal Queued before authority fault"
+                  |> Async.durable_queued_entry in
+              let accepted_journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+                  ~composition_run_id:(Journal.continuation_source second_candidate).composition_run_id
+                |> require "actual refusal journal before authority fault" in
+              Journal.validate_request accepted_journal queued |> require "refusal successor has actual journal membership";
+              fault_request := Some request_id;
+              Unix.rename draft_path detached_draft)
+            ~after_refusal_settled:(fun () ->
+              incr fault_callbacks; Eio.Promise.resolve notify_fault_settled ())
+            ~capability_surface:denied_surface ~continuation:second_candidate ~config ~meta:fixture.meta
+            ~publication_recovery:{provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper}
+            ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"actual refusal authority fault")
+            ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+            ~invocation ~clock:(Eio.Stdenv.clock env) () in
+        check bool "authority fault follows actual accepted refusal transport" true (Tool_result.is_success accepted);
+        let request_id = match !fault_request with Some request_id -> request_id
+          | None -> fail "refusal hook ran without a real bound successor" in
+        check_json "accepted transport identifies the actual faulted request" (`String request_id)
+          (Tool_result.data accepted |> member "request_id");
+        Eio.Promise.await fault_settled;
+        check int "actual refusal production settlement callback finishes once" 1 !fault_callbacks;
+        let rec lost () = match Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+            ~caller:keeper request_id with
+          | Ok proof -> let entry = Async.durable_terminal_entry proof in
+            (match entry.status with Async.Lost _ -> entry
+             | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
+             | Waiting_for_dependencies _ | Done _ ->
+               fail "post-CAS refusal authority failure became a logical terminal")
+          | Error (Async.Canonical_terminal_runtime_active _) -> Eio.Fiber.yield (); lost ()
+          | Error error -> fail (Async.canonical_terminal_error_to_string error) in
+        let entry = lost () in
+        (match Journal.completion_disposition ~base_path:fixture.base_path entry with
+         | Error _ -> ()
+         | Ok _ -> fail "unavailable frozen draft authorized a logical completion projection");
+        let reconciliation = Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
+            |> require "actual refusal outbox while original authority is unavailable" in
+        check int "faulted refusal callback/outbox announces no logical failure" 0 reconciliation.delivered;
+        check bool "unavailable authority remains an explicit outbox error" true (reconciliation.failures <> []);
+        let completions = Queue.pending_selections_result ~base_path:fixture.base_path keeper
+            |> require "actual refusal fault pending completion sources" in
+        check bool "faulted refusal enqueues no completion source" false
+          (List.exists (fun (selection : Keeper_event_queue_state.pending_selection) ->
+            match selection.source.payload with
+            | Keeper_event_queue.Composition_completed completion -> String.equal completion.cc_request_id request_id
+            | _ -> false) completions);
+        let original = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+            ~caller:keeper second_entry.request_id |> require "original Waiting survives post-CAS authority failure"
+            |> Async.durable_terminal_entry in
+        check_json "post-CAS refusal fault never overwrites original Waiting"
+          (Async.entry_to_json second_entry) (Async.entry_to_json original);
+        check string "original child job remains byte-identical during refusal interruption"
+          original_job_owner (read job_owner);
+        check int "post-CAS refusal interruption has zero backend calls" before_refusal_calls (List.length (calls fixture));
+        entry) in
+  let restored_journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+      ~composition_run_id:(Journal.continuation_source second_candidate).composition_run_id
+    |> require "restore original refusal journal" in
+  let restored = Journal.waiting_continuation restored_journal |> require "recover original refusal wait"
+      |> function Some candidate -> candidate | None -> fail "restored authority cannot recover faulted refusal owner" in
+  check string "restored continuation retains exact Lost successor owner" fault_entry.request_id
+    (Journal.continuation_request_id restored);
+  check (option string) "restored continuation keeps original Task despite current Task D" (Some "task-C")
+    (Journal.continuation_source restored).source_task_id;
+  check_json "interruption retains original dependency and result authority"
+    (`List (List.map Dependency.to_json (Journal.continuation_dependencies second_candidate)))
+    (`List (List.map Dependency.to_json (Journal.continuation_dependencies restored)));
+  (match Journal.completion_disposition ~base_path:fixture.base_path fault_entry with
+   | Ok Journal.Recovery_pending -> ()
+   | Ok (Journal.Canonical_completion | Journal.Unadmitted_attempt) | Error _ ->
+     fail "restored original authority promoted recoverable refusal Lost to logical failure");
+  let retirements () =
+    let identities = ref [] in
+    let report = Journal.For_testing.pending_continuations
+        ~before_retire:(fun path -> identities := (Yojson.Safe.from_string (read path)
+          |> member "request_id" |> to_string) :: !identities)
+        ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path:fixture.base_path
+      |> require "identity-bound continuation marker discovery" in
+    report,List.sort String.compare !identities in
+  let restored_discovery,restored_retirements = retirements () in
+  check int "restored discovery sees original and current Lost markers" 2 restored_discovery.inspected;
+  check int "restored discovery retires only the original predecessor marker" 1 restored_discovery.retired;
+  check (list string) "restored discovery retirement is bound to exact original request"
+    [second_entry.request_id] restored_retirements;
+  check int "restored discovery finds exactly one recoverable refusal owner" 1 (List.length restored_discovery.ready);
+  check int "restored original authority has no discovery error" 0 (List.length restored_discovery.failures);
+  let second_candidate = List.hd restored_discovery.ready in
+  check string "public recovery intake uses the current Lost owner" fault_entry.request_id
+    (Journal.continuation_request_id second_candidate);
   let refused,notify_refused = Eio.Promise.create () in
   let denied_wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
   Wake.pulse ~sw:context.sw denied_wake |> require "actual maintenance pulse under current Tool denial";
@@ -2193,8 +2301,6 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let old_wait = Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper second_entry.request_id
     |> require "original Waiting remains immutable after failure successor" |> Async.durable_terminal_entry in
   check_json "failure successor never rewrites old Waiting" (Async.entry_to_json second_entry) (Async.entry_to_json old_wait);
-  let denied_surface = frozen_surface_with ~tool_deny:["keeper_job_result"]
-      ~tool_descriptors:(Descriptor.all_descriptors ()) ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
   let stale = resume_parked_continuation env fixture denied_surface second_candidate in
   check bool "stale denied candidate cannot settle the newer owner" true (Tool_result.is_failed stale);
   let stable_failure = Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper refusal_entry.request_id
@@ -2222,13 +2328,29 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
     | Keeper_event_queue.Composition_completed completion -> String.equal completion.cc_request_id losing_request
     | _ -> false) sources in
   check int "CAS loser has zero logical completion notifications" 0 (List.length losing_completions);
+  check bool "restored refusal Lost never becomes a stale logical notification" false
+    (List.exists (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      match selection.source.payload with
+      | Keeper_event_queue.Composition_completed completion -> String.equal completion.cc_request_id fault_entry.request_id
+      | _ -> false) sources);
+  check_json "final refusal successor retains original Task C" (`String "task-C")
+    (Async.entry_to_json refusal_entry |> member "request_context" |> member "source_task_id");
+  check_json "final refusal successor retains original run identity"
+    (`String (Masc.Keeper_tool_plan.Composition_run_id.to_string (Journal.continuation_source restored).composition_run_id))
+    (Async.entry_to_json refusal_entry |> member "request_context" |> member "composition_run_id");
+  check string "original child job remains byte-identical after refusal recovery" original_job_owner (read job_owner);
   let again = Masc.Keeper_composition_completion_wake.reconcile
       ~base_path:fixture.base_path |> require "permanent refusal completion outbox re-reconcile" in
   check int "a settled refusal delivers exactly once" 0 again.delivered;
   (* Discovery retires the marker, so the next pulse has 0 ready candidates. *)
-  let after_refusal = pending () in
+  let after_refusal,final_retirements = retirements () in
   check int "next discovery has no ready continuation" 0 (List.length after_refusal.ready);
-  check int "original, winner and CAS loser markers all retire" 3 after_refusal.retired;
+  check int "final discovery inspects Lost, winner and CAS loser markers" 3 after_refusal.inspected;
+  check int "Lost, winner and CAS loser markers all retire" 3 after_refusal.retired;
+  check (list string) "final marker retirement preserves the three exact physical identities"
+    (List.sort String.compare [fault_entry.request_id;refusal_entry.request_id;losing_request]) final_retirements;
+  check int "both discoveries retire all four original physical request markers" 4
+    (restored_discovery.retired + after_refusal.retired);
   let quiet_wake = Wake.create ~context () in
   Wake.pulse ~sw:context.sw quiet_wake |> require "pulse after permanent refusal";
   check int "next pulse has 0 ready candidates" 0 (List.length (pending ()).ready);

@@ -2866,6 +2866,8 @@ def zai_row(base):
         return None
     notice = ('\nz.ai web search uses the GLM Coding Plan key in ' + ZAI_KEY_VARIABLE
               + ', the same key the GLM models use. A search spends that plan\'s search allowance. '
+              'The key is not stored; use this only when the server runs in an environment that sees '
+              + ZAI_KEY_VARIABLE + '. '
               'Choosing it sets web_search.provider to z.ai, replacing a provider set there: z.ai is tried '
               'first and the others follow it in their usual order. ' + PROVIDER_ORDER_SENTENCE)
     return ToolRow(ZAI_TOOL, 'z.ai web search through your GLM Coding Plan key · tried first',

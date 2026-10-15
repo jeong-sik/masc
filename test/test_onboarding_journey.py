@@ -2041,6 +2041,7 @@ class SearchChoices(unittest.TestCase):
                 self.assertIn(replaced, rows[key].notice)
                 self.assertIn('web_search.provider_order is set it decides the order', rows[key].notice)
         # The cost the reader takes on with the mark, said before the mark.
+        self.assertIn('server runs in an environment that sees ZAI_API_KEY', rows['zai'].notice)
         self.assertIn('about 380 MB', rows['searxng'].notice)
         self.assertIn('restarts the container whenever it starts', rows['searxng'].notice)
 

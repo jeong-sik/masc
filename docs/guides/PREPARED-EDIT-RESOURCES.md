@@ -25,7 +25,8 @@ A different input, Task/trace or parent cannot spend this preparation.
 The feature suite `test_keeper_prepared_edit` authors actual filesystem/SDK
 scenarios: disjoint Edit authorization boundaries overlap, conflicting patches
 consume predecessor bytes, directory aliases retain order, changed input/owner
-or parent cannot write, Manual Gate still defers, and caller cancellation leaves
+or parent cannot write, Manual Gate retains containment and the existing internal
+playground authorization, and caller cancellation leaves
 no effect and permits a later call. Authored source and parse-only checks do not
 prove these scenarios have executed.
 

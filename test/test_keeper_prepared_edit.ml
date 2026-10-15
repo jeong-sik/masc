@@ -172,7 +172,7 @@ let test_parent_swap_and_input_or_owner_change_do_not_write () =
   let prepared = prepare sw config meta input in
   check string "preparation never edits the source" "original" (read path);
   consume config meta recovery (Some prepared) (args path "original" "another") |> failed;
-  let other = {meta with current_task_id = Some (Keeper_id.Task_id.of_string "another-task" |> get)} in
+  let other = {meta with current_task_id = Some (Keeper_id.Task_id.of_string "task-902" |> get)} in
   consume config other recovery (Some prepared) input |> failed;
   let retained = directory ^ "-retained" in
   Unix.rename directory retained;
@@ -182,7 +182,7 @@ let test_parent_swap_and_input_or_owner_change_do_not_write () =
   check string "retained original remains untouched" "original" (read (Filename.concat retained "file"))
 ;;
 
-let test_prepared_edit_retains_manual_gate () =
+let test_preparation_preserves_containment_under_manual_gate () =
   fixture @@ fun _env sw config meta recovery _root ->
   Keeper_approval_queue.For_testing.reset_runtime_state ();
   Eio.Switch.on_release sw Keeper_approval_queue.For_testing.reset_runtime_state;
@@ -193,12 +193,19 @@ let test_prepared_edit_retains_manual_gate () =
   let path = Filename.concat config.base_path "project-file" in
   write path "before";
   let input = args path "before" "after" in
+  (match FS.prepare_edit ~sw ~config ~meta ~args:input with
+   | Error (FS.Edit_path_refused _) -> ()
+   | Error (FS.Edit_resource_unavailable detail) -> fail detail
+   | Ok None | Ok (Some _) -> fail "Manual Gate does not widen the Keeper's allowed root");
+  check string "outside source remains untouched" "before" (read path);
+  (* The current Shared_mount root is exactly the Keeper playground. Its
+     established capability-authorized write bypass remains under Manual. *)
+  let internal = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "inside" in
+  write internal "before";
+  let input = args internal "before" "after" in
   let prepared = prepare sw config meta input in
-  let result = consume config meta recovery (Some prepared) input in
-  (match result.disposition with
-   | Tool_result.Deferred () -> ()
-   | Tool_result.Completed () | Tool_result.Failed _ -> fail result.raw_output);
-  check string "resource preparation grants no Gate permission" "before" (read path)
+  consume config meta recovery (Some prepared) input |> completed;
+  check string "existing internal playground authorization is preserved" "after" (read internal)
 ;;
 
 let test_cancelled_prepared_edit_releases_for_a_later_call () =
@@ -230,5 +237,5 @@ let () = run "prepared actual Edit resources"
     test_case "conflicting patches read current predecessor bytes" `Quick test_successive_patches_use_current_source;
     test_case "directory aliases retain planned order" `Quick test_directory_alias_keeps_patch_order;
     test_case "changed owner input or parent cannot write" `Quick test_parent_swap_and_input_or_owner_change_do_not_write;
-    test_case "preparation retains manual Gate" `Quick test_prepared_edit_retains_manual_gate;
+    test_case "Manual Gate retains the same containment and playground authority" `Quick test_preparation_preserves_containment_under_manual_gate;
     test_case "caller cancellation releases prepared Edit" `Quick test_cancelled_prepared_edit_releases_for_a_later_call]]

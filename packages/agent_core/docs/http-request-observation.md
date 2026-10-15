@@ -6,6 +6,11 @@ streaming POST clients. An unbound client does not hash or record its body.
 No environment setting, observer registry service or runtime admission rule is
 added. A scope captures each call's owner once; concurrent and nested bindings
 do not move an in-flight call's later facts to a different observer.
+An already running actor does not inherit the submitting fiber's bindings.
+Use `capture` before handing over its work closure; invoking that closure
+rebinds the captured owner on the receiving fiber. The Keeper heartbeat carries
+this context across its existing Owner handoff. It does not change admission,
+queue ordering or dispatch. An unbound handoff retains its original closure.
 
 Each observed call has one owner-local identity and distinct facts:
 

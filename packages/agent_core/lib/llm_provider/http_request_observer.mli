@@ -24,6 +24,11 @@ type call
 
 val create : (event -> (unit, unit) result) -> t
 val with_observer : t -> (unit -> 'a) -> 'a
+val capture : (unit -> 'a) -> (unit -> 'a)
+(** Capture the current observer in a closure before an actor/executor handoff.
+    Invoking it rebinds that owner on the receiving fiber. Ordinary child
+    fibers inherit bindings, but an already running actor does not. When no
+    observer is bound, return the original closure without adding a binding. *)
 val delivery_failure_count : t -> int
 (** Rejected callbacks and ordinary callback exceptions are counted and do not
     rewrite a client result. Reserved exceptions, including cancellation, escape.

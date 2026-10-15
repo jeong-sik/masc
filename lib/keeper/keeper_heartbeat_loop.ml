@@ -892,7 +892,7 @@ let run_keepalive_unified_turn
       Keeper_owner_registry.run_autonomous_if_idle
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
-        (fun () ->
+        (Llm_provider.Http_request_observer.capture (fun () ->
            Keeper_turn_dispatch_authority.run (fun admission_token ->
     let source_batch = ref Keeper_heartbeat_source_batch.empty in
     let diagnostic_selection = ref None in
@@ -1434,7 +1434,7 @@ let run_keepalive_unified_turn
       handle_cycle_exception
         ~registry_entry
         ~meta:meta_after_triage
-        exn))
+        exn)))
     with
   | Ok (`Ran outcome) -> outcome
   | Ok `Interrupted -> interrupted_cycle_outcome ~meta:meta_after_triage

@@ -17,6 +17,10 @@ type call = { owner : t; id : int }
 let observer_key : t Eio.Fiber.key = Eio.Fiber.create_key ()
 let create observe = { observe; next_id = Atomic.make 0; delivery_failures = Atomic.make 0 }
 let with_observer observer run = Eio.Fiber.with_binding observer_key observer run
+let capture run =
+  match Eio.Fiber.get observer_key with
+  | None -> run
+  | Some observer -> fun () -> with_observer observer run
 let delivery_failure_count observer = Atomic.get observer.delivery_failures
 
 let emit call phase =

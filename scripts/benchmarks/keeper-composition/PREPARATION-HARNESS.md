@@ -185,7 +185,10 @@ provider request count, first offered inventory and response-reported model are
 not inferred from that last report. The separate `http_metrics` journal now
 observes each actual native HTTP POST client entry, submitted body size/hash,
 concrete dispatch entry, response headers and client return within the owned
-cycle. It includes synchronous and streaming POST paths. Counts and total
+cycle. It includes synchronous and streaming POST paths. The observation
+context crosses the existing Owner handoff with an explicitly captured
+closure; a binding on the submitting fiber alone cannot observe the already
+running Owner. The same real-cycle peer comparison checks this boundary. Counts and total
 serialized/submitted bytes remain null if observation delivery failed, the file
 is unavailable or a call's phase sequence is incomplete/contradictory. A client
 return is not provider/parser success, and submitted bytes are not a claim that

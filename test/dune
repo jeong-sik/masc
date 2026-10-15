@@ -5944,7 +5944,7 @@
 (test
  (name test_keeper_owned_jobs)
  (modules test_keeper_owned_jobs)
- (libraries masc_test_deps masc.skill_config masc.skill_reference masc.skill_snapshot_service mtime.clock.os))
+ (libraries masc_test_deps masc.skill_config masc.skill_reference masc.skill_snapshot_service mtime.clock.os keeper_owned_job_fixture_transport))
 
 (test
  (name test_h5_media_failover_continuity)
@@ -6035,3 +6035,34 @@
  (name test_tui_keeper_call_evidence)
  (modules test_tui_keeper_call_evidence)
  (libraries alcotest masc masc.tool_types masc_tui_keeper_call_evidence masc_tui_keeper_chat_transcript yojson))
+
+; Shared synthetic CLI bytes; no Alcotest top-level is imported by the driver.
+(library
+ (name keeper_owned_job_fixture_transport)
+ (wrapped false)
+ (modules keeper_owned_job_fixture_transport))
+
+; Opt-in harness executable. It never runs under runtest or calls a paid model.
+(executable
+ (name keeper_preparation_trial_driver)
+ (modules keeper_preparation_trial_driver)
+ (libraries masc_test_deps keeper_owned_job_fixture_transport
+  masc.skill_config masc.skill_reference masc.skill_snapshot_service mtime.clock.os))
+
+; Explicit synthetic functional case. The coordinator invokes the real driver.
+(rule
+ (alias runtest-test_keeper_preparation_trial)
+ (deps
+  test_keeper_preparation_trial.py
+  keeper_preparation_trial_driver.exe
+  ../scripts/benchmarks/keeper-composition/preparation_trial.py
+  (source_tree ../config/prompts))
+ (action
+  (run python3 %{dep:test_keeper_preparation_trial.py}
+   --driver %{exe:keeper_preparation_trial_driver.exe}
+   --coordinator %{dep:../scripts/benchmarks/keeper-composition/preparation_trial.py}
+   --prompts %{workspace_root}/config/prompts
+   --repository-root %{workspace_root}
+   --model-id preparation-synthetic-streaming-fixture
+   --max-context-tokens 1048576
+   --max-output-tokens 4096)))

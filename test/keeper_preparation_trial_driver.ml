@@ -585,6 +585,11 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
          "input_sha256",`String (sha (Yojson.Safe.to_string event.input))]);
       observations := (event,observed) :: !observations);
   Eio.Switch.on_release sw Agent_observation.reset_for_testing;
+  (* This fixture invokes the real cycle on its current Eio fiber instead of
+     launching the perpetual keepalive loop. Production registration starts
+     Offline; mark this actual fiber entry before asking the cycle to run. *)
+  Keeper_registry.dispatch_event_exact registry_entry Keeper_state_machine.Fiber_started
+    |> get Keeper_state_machine.transition_error_to_string |> ignore;
   let cycle_entered = now counter in
   let outcome = Keeper_heartbeat_loop.run_keepalive_unified_turn
       ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry ~meta_after_triage:meta

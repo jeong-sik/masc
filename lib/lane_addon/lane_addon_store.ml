@@ -358,7 +358,7 @@ let binding_inventory_with ~sync_parent ~root =
             (match Fs_compat.exact_path_kind path with
              | Fs_compat.Exact_missing -> Ok None
              | Fs_compat.Exact_unknown | Fs_compat.Exact_kind _ ->
-               Error "binding disappeared during inventory read [absent-unconfirmed]")
+               Error "[absent-unconfirmed] binding disappeared during inventory read")
         | Error _ as failure -> failure in
       let records,issues = List.fold_left (fun (records,issues) name ->
         if not (Filename.check_suffix name ".json") then records,issues

@@ -1366,10 +1366,9 @@ let test_binding_inventory_issues_carry_failure_kind_tags () =
     let parse = detail_of "corrupt.json" in
     let non_regular = detail_of "replaced.json" in
     check bool "a stable corrupt record is tagged parse"
-      true (String.length parse >= 8 && String.sub parse 0 8 = "[parse] ");
+      true (String.starts_with ~prefix:"[parse] " parse);
     check bool "a replaced file is tagged non-regular"
-      true (String.length non_regular >= 24
-            && String.sub non_regular 0 24 = "[non-regular directory] ");
+      true (String.starts_with ~prefix:"[non-regular directory] " non_regular);
     check bool "parse damage and non-regular damage read apart"
       true (parse <> non_regular);
     let identity = Store.For_testing.issue_detail
@@ -1377,8 +1376,7 @@ let test_binding_inventory_issues_carry_failure_kind_tags () =
             Fs_compat.Filesystem_identity_changed { path = "unused" }
         ; close_failure = None } in
     check bool "identity-changed carries its own tag"
-      true (String.length identity >= 19
-            && String.sub identity 0 19 = "[identity-changed] "))
+      true (String.starts_with ~prefix:"[identity-changed] " identity))
 
 let test_unlistable_binding_store_stops_reconciliation () =
   with_fixture (fun _ _ config directory packages state ->

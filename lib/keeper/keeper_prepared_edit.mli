@@ -19,6 +19,11 @@ val scopes : t -> Agent_core.Tool_contract.Resource_scope.t list
 (** Conservative occupied target/source directories. A shared ancestor alone
     permits siblings; equal or ancestor/descendant directories conflict. *)
 
+val release : t -> unit
+(** Release a preparation that an aggregate producer cannot transfer. Safe to
+    repeat; the owning switch also closes the resources. A released token
+    cannot be consumed. Cancellation cannot interrupt this cleanup. *)
+
 val with_parents
   : config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

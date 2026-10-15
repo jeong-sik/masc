@@ -46,8 +46,25 @@ physical Task/trace/execution receipts, conflicting public patches and missing
 source admission. Execution evidence must name the tested head and scenario;
 authored source and parse-only checks do not prove execution.
 
-Outer Inline Skills do not yet aggregate these resource claims. That integration
-must bind an exact resolved plan to its Executor calls and verify published
-Skill behavior. No general Bash,
+Named Inline Skills aggregate these claims when every leaf is an ordinary Edit,
+every input is resolved before execution and the original source is available.
+The opaque preparation owns the exact instantiated plan, each original member
+node, its validated model input and its file preparation. It crosses the normal
+Skill activation, bridge, Executor, Handler, receipt and result-publication
+boundaries. A mismatched plan/node/input is refused before that leaf dispatches;
+it cannot fall back under claims for different resources. All leaf footprints
+participate, including later leaves. Existing per-plan scheduling and failure
+settlement remain in use.
+
+The producer releases earlier file preparations if it cannot transfer the
+complete aggregate, including on cancellation. Released file preparations
+cannot execute; their owning switch remains responsible for final cleanup.
+Output-dependent paths, mixed plans, compiled children, Async and Terminal keep
+their ordinary admission. Published-snapshot fixture scenarios cover two Inline
+Skills' actual effects, overlap and conflict waves, physical leaf/run receipts,
+activation ownership, a conflict with direct public Edit, and a later leaf's
+shared footprint. These require their own executed-head evidence.
+
+No general Bash,
 endpoint write, Async admission, cross-process exclusion or measured model
 preparation speedup is supplied by directory claims.

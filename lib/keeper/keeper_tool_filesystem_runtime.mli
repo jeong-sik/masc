@@ -135,6 +135,8 @@ val prepare_edit :
     ordinary Serial path. This never writes, grants permission or proves replay. *)
 
 val prepared_edit_scopes : prepared_edit -> Agent_core.Tool_contract.Resource_scope.t list
+val release_prepared_edit : prepared_edit -> unit
+(** Release an untransferred preparation; repeated release is harmless. *)
 
 val handle_file_write_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

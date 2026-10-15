@@ -3180,6 +3180,7 @@ module For_testing = struct
 end
 
 let prepared_edit_scopes = Keeper_prepared_edit.scopes
+let release_prepared_edit = Keeper_prepared_edit.release
 
 let edit_preparation_error_to_execution = function
   | Edit_path_refused refusal ->

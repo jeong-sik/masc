@@ -6040,7 +6040,7 @@
 (test
  (name test_keeper_prepared_edit)
  (modules test_keeper_prepared_edit)
- (libraries masc_test_deps eio_main masc.skill_snapshot))
+ (libraries masc_test_deps eio_main masc.skill_snapshot masc.skill_snapshot_service))
 
 (library
  (name keeper_owned_job_fixture_transport)

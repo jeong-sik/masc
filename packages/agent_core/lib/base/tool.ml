@@ -193,7 +193,7 @@ let create ?descriptor ?strict ~name ~description ~parameters handler =
 ;;
 
 (** Execute a tool with its explicit execution resources. *)
-let execute ?context ?invocation tool input =
+let execute ?context ?invocation (tool : t) input =
   tool.handler (Execution_env.create ?context ?invocation ()) input
 ;;
 

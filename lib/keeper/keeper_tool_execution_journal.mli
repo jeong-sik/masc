@@ -259,11 +259,12 @@ val bind_request : t -> request_id:string -> (worker, error) result
     Repeated binding to the same accepted request is idempotent. *)
 
 val validate_plan : worker -> plan:Keeper_tool_plan.t -> (unit, error) result
+(** Integrity-read the original manifest and compare the exact frozen plan
+    (including edges and exports), then check current durable ownership. *)
+
 val validate_refusal_completion : worker -> plan:Keeper_tool_plan.t -> (unit, error) result
 (** Before a refusal successor finishes, reread exact original artifacts,
     producer/child authorities and worker ownership. No new replay authority. *)
-(** Integrity-read the original manifest and compare the exact frozen plan
-    (including edges and exports), then check current durable ownership. *)
 
 val child_origin : attempt -> plan:Keeper_tool_plan.t ->
   activation:Keeper_skill_activation_ledger.activation ->

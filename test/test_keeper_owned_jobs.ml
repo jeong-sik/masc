@@ -2143,11 +2143,18 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
       (Async.entry_to_json (Async.durable_terminal_entry unchanged)));
   let refused,notify_refused = Eio.Promise.create () in
   let denied_wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
-  let winning_result = ref None and losing_worker_calls = ref 0 in
-  (* Both real broker admissions hold the same sealed candidate. The losing
-     callback has already persisted its outbox before the actual public
-     maintenance intake binds and finishes the winner. Its subsequent CAS must
-     fail without turning that physical acceptance failure into run failure. *)
+  Wake.pulse ~sw:context.sw denied_wake |> require "actual maintenance pulse under current Tool denial";
+  let accepted_refusal = match Eio.Promise.await refused with
+    | Ok result when Tool_result.is_success result -> Tool_result.data result
+    | Ok _ -> fail "current Tool denial did not accept a failure successor"
+    | Error error -> fail (Wake.error_to_string error) in
+  let refused_ok,refusal_data,refusal_entry = await_composition env fixture accepted_refusal in
+  let losing_worker_calls = ref 0 in
+  (* The public maintenance intake completes the winner before a second broker
+     admission uses the same stale candidate. A Keeper submission lock covers
+     on_accepted, so that callback must not wait for another same-Keeper submit.
+     The loser still durably records Queued/outbox before its real Journal CAS
+     fails, preserving the exact physical failure and notification boundary. *)
   let losing = Async.submit_worker_with_request_id ?request_context:second_entry.request_context
       ~background_sw:(Async.server_background_switch () |> require "competing intake switch")
       ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
@@ -2156,12 +2163,6 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
           ~keeper_name:keeper ~request_id ~composition_tool:Masc.Keeper_tool_composition_catalog.run_tool_name
         |> Result.map_error Masc.Keeper_composition_completion_outbox.error_to_string
         |> fun prepared -> Result.bind prepared (fun () ->
-          Wake.pulse ~sw:context.sw denied_wake |> require "actual maintenance pulse under current Tool denial";
-          let accepted_refusal = match Eio.Promise.await refused with
-            | Ok result when Tool_result.is_success result -> Tool_result.data result
-            | Ok _ -> fail "current Tool denial did not accept a failure successor"
-            | Error error -> fail (Wake.error_to_string error) in
-          winning_result := Some (await_composition env fixture accepted_refusal);
           Journal.bind_continuation second_candidate ~request_id
           |> Result.map (fun _ -> ()) |> Result.map_error Journal.error_to_string))
       ~f:(fun ~request_id:_ _ ->
@@ -2182,8 +2183,6 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
    | Ok Journal.Unadmitted_attempt -> ()
    | Ok (Journal.Canonical_completion | Journal.Recovery_pending) | Error _ ->
      fail "exact-source CAS loser was promoted to logical completion");
-  let refused_ok,refusal_data,refusal_entry = match !winning_result with
-    | Some result -> result | None -> fail "competing public intake did not finish" in
   check bool "current Tool denial settles the successor as a terminal failure" false refused_ok;
   check bool "refusal successor has a distinct physical request" true
     (refusal_entry.request_id <> second_entry.request_id);
@@ -2229,7 +2228,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (* Discovery retires the marker, so the next pulse has 0 ready candidates. *)
   let after_refusal = pending () in
   check int "next discovery has no ready continuation" 0 (List.length after_refusal.ready);
-  check int "original and successor markers retire" 2 after_refusal.retired;
+  check int "original, winner and CAS loser markers all retire" 3 after_refusal.retired;
   let quiet_wake = Wake.create ~context () in
   Wake.pulse ~sw:context.sw quiet_wake |> require "pulse after permanent refusal";
   check int "next pulse has 0 ready candidates" 0 (List.length (pending ()).ready);

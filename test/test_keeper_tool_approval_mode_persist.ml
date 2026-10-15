@@ -46,7 +46,9 @@ let with_temp_dir f =
 
 let set_exn store ~base_path ~keeper_name mode =
   match Mode.set store ~base_path ~actor:"test-operator" ~keeper_name mode with
-  | Ok () -> ()
+  | Ok Mode.Applied -> ()
+  | Ok (Mode.Applied_audit_failed detail) ->
+    fail ("set applied with unexpected audit failure: " ^ detail)
   | Error detail -> fail ("set failed: " ^ detail)
 ;;
 
@@ -127,10 +129,12 @@ let test_set_on_a_corrupt_store_holds_and_recovers () =
   (match
      Mode.set store ~base_path ~actor:"test-operator" ~keeper_name Mode.Auto
    with
-   | Ok () -> fail "set Auto succeeded on a corrupt store"
+   | Ok _ -> fail "set Auto succeeded on a corrupt store"
    | Error detail ->
      check bool "the error names the corrupt store path" true
-       (Astring.String.is_infix ~affix:file detail));
+       (Astring.String.is_infix ~affix:file detail);
+     check bool "the error explains in-memory revocation and repair implication" true
+       (Astring.String.is_infix ~affix:"revoked to auto in memory" detail));
   check bool "in-memory override is revoked to Auto immediately" true
     (Mode.resolve store ~keeper_name = Mode.Auto);
   check (list string) "revoking Auto cleared the in-memory override" []
@@ -138,7 +142,7 @@ let test_set_on_a_corrupt_store_holds_and_recovers () =
   (match
      Mode.set store ~base_path ~actor:"test-operator" ~keeper_name Mode.Yolo
    with
-   | Ok () -> fail "set Yolo succeeded on a corrupt store"
+   | Ok _ -> fail "set Yolo succeeded on a corrupt store"
    | Error _ -> ());
   check (list string) "a failed Yolo set holds the registry" []
     (List.map fst (Mode.overrides store));
@@ -197,7 +201,9 @@ let test_concurrent_sets_do_not_lose_updates () =
         match
           Mode.set store ~base_path ~actor:"test-operator" ~keeper_name Mode.Yolo
         with
-        | Ok () -> ()
+        | Ok Mode.Applied -> ()
+        | Ok (Mode.Applied_audit_failed detail) ->
+          errors := ("audit: " ^ detail) :: !errors
         | Error detail -> errors := detail :: !errors)
       ()
   in
@@ -397,6 +403,164 @@ let test_get_surfaces_restore_error () =
          = `Null))
 ;;
 
+let block_audit_store ~base_path =
+  let masc_dir = Filename.concat base_path ".masc" in
+  Fs_compat.mkdir_p masc_dir;
+  let audit_path = Filename.concat masc_dir Audit_log.store_dirname in
+  match Fs_compat.save_file_atomic audit_path "not-a-directory" with
+  | Ok () -> audit_path
+  | Error detail -> fail ("could not block audit store path: " ^ detail)
+;;
+
+let test_set_applies_when_audit_log_fails () =
+  with_temp_dir @@ fun base_path ->
+  ignore (block_audit_store ~base_path : string);
+  let keeper_name = "persist-audit-fail" in
+  let store = Mode.create () in
+  (match
+     Mode.set store ~base_path ~actor:"test-operator" ~keeper_name Mode.Yolo
+   with
+   | Ok (Mode.Applied_audit_failed detail) ->
+     check bool "audit failure detail is non-empty" true
+       (Astring.String.is_infix ~affix:"tool approval mode audit failed" detail)
+   | Ok Mode.Applied ->
+     fail "expected Applied_audit_failed when audit path is a regular file"
+   | Error detail ->
+     fail ("expected stance to apply despite audit failure, got Error: " ^ detail));
+  check bool "in-memory stance is Yolo" true
+    (Mode.resolve store ~keeper_name = Mode.Yolo);
+  let after = Mode.create () in
+  (match Mode.bind ~base_path after with
+   | Ok () -> ()
+   | Error detail -> fail ("bind after audit failure failed: " ^ detail));
+  check bool "persisted stance is Yolo across restart" true
+    (Mode.resolve after ~keeper_name = Mode.Yolo)
+;;
+
+let make_keeper_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String name
+         ; "trace_id", `String ("trace-" ^ name)
+         ])
+  with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
+;;
+
+let dispatch_post
+      ?(path = "/api/v1/keepers/tool-approval-mode")
+      ~sw
+      ~clock
+      ~state
+      ~token
+      ~keeper
+      ~mode
+      ()
+  =
+  Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
+      let router =
+        Server_routes_http_routes_dashboard.add_routes
+          ~sw
+          ~clock
+          (Http_server_eio.Router.create ())
+      in
+      Server_auth.publish_server_state state;
+      let response_buf = Buffer.create 1024 in
+      let conn =
+        Httpun.Server_connection.create (fun reqd ->
+            Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+      in
+      let body = Printf.sprintf {|{"name":%S,"mode":%S}|} keeper mode in
+      let request_str =
+        Printf.sprintf
+          "POST %s HTTP/1.1\r\n\
+           Host: 127.0.0.1:8935\r\n\
+           Origin: http://127.0.0.1:8935\r\n\
+           Authorization: Bearer %s\r\n\
+           Content-Type: application/json\r\n\
+           Content-Length: %d\r\n\
+           \r\n\
+           %s"
+          path
+          token
+          (String.length body)
+          body
+      in
+      let bytes =
+        Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str
+      in
+      ignore
+        (Httpun.Server_connection.read_eof
+           conn
+           bytes
+           ~off:0
+           ~len:(Bigstringaf.length bytes));
+      let rec flush () =
+        match Httpun.Server_connection.next_write_operation conn with
+        | `Write iovecs ->
+          let written =
+            List.fold_left
+              (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+                 Buffer.add_string
+                   response_buf
+                   (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+                 total + iov.len)
+              0
+              iovecs
+          in
+          Httpun.Server_connection.report_write_result conn (`Ok written);
+          flush ()
+        | `Yield | `Close _ -> ()
+      in
+      flush ();
+      Server_auth.clear_server_state ();
+      Buffer.contents response_buf)
+;;
+
+let test_post_surfaces_audit_error_on_200 () =
+  with_temp_dir @@ fun base_path ->
+  Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with enabled = true; require_token = true };
+  let token, _ =
+    create_token_exn base_path ~agent_name:"mode-writer" ~role:Masc_domain.Admin
+  in
+  let state = Mcp_server.For_testing.create_state ~base_path in
+  let keeper = "audit-fail-route-canary" in
+  ignore
+    (Masc.Keeper_registry.For_testing.register
+       ~base_path
+       keeper
+       (make_keeper_meta keeper));
+  ignore (block_audit_store ~base_path : string);
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper;
+      write_store ~base_path
+        {|{"schema":"masc.tool_approval_modes.v1","overrides":[]}|};
+      ignore (Mode.bind ~base_path (Mode.shared ())))
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let clock = Eio.Stdenv.clock env in
+      let response =
+        dispatch_post ~sw ~clock ~state ~token ~keeper ~mode:"yolo" ()
+      in
+      check int "POST still returns 200 when stance applied but audit failed" 200
+        (status_of_response response);
+      let body = json_body_of response in
+      check string "response confirms yolo mode" "yolo"
+        (Yojson.Safe.Util.member "mode" body |> Yojson.Safe.Util.to_string);
+      (match Yojson.Safe.Util.member "audit_error" body with
+       | `String detail ->
+         check bool "response carries audit_error detail" true
+           (Astring.String.is_infix ~affix:"tool approval mode audit failed" detail)
+       | other ->
+         failf "expected string audit_error on 200 response, got %s"
+           (Yojson.Safe.to_string other)))
+;;
+
 let () =
   run
     "keeper_tool_approval_mode_persist"
@@ -413,10 +577,14 @@ let () =
             test_wrong_schema_tag_is_rejected
         ; test_case "invalid mode word is rejected" `Quick
             test_invalid_mode_word_is_rejected
+        ; test_case "set applies when audit log fails" `Quick
+            test_set_applies_when_audit_log_fails
         ] )
     ; ( "route"
       , [ test_case "GET surfaces restore_error" `Quick
             test_get_surfaces_restore_error
+        ; test_case "POST surfaces audit_error on 200" `Quick
+            test_post_surfaces_audit_error_on_200
         ] )
     ]
 ;;

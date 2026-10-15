@@ -595,7 +595,19 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
           respond_json_value_with_cors ~status:`Internal_server_error request
             reqd
             (keeper_chat_stream_error_json detail)
-        | Ok () ->
+        | Ok outcome ->
+          let audit_error =
+            match outcome with
+            | Keeper_tool_approval_mode.Applied -> None
+            | Keeper_tool_approval_mode.Applied_audit_failed detail ->
+              Log.Keeper.warn
+                "keeper_tool_approval_mode: audit failed keeper=%s mode=%s actor=%s: %s"
+                keeper_name
+                (Keeper_tool_approval_mode.mode_to_string mode)
+                actor
+                detail;
+              Some detail
+          in
           Log.Keeper.info
             "keeper_tool_approval_mode: keeper=%s mode=%s actor=%s"
             keeper_name
@@ -603,10 +615,14 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
             actor;
           respond_json_value_with_cors ~status:`OK request reqd
             (`Assoc
-               [ ("keeper", `String keeper_name)
-               ; ( "mode"
-                 , `String (Keeper_tool_approval_mode.mode_to_string mode) )
-               ])))
+               ([ ("keeper", `String keeper_name)
+                ; ( "mode"
+                  , `String (Keeper_tool_approval_mode.mode_to_string mode) )
+                ]
+                @
+                match audit_error with
+                | None -> []
+                | Some detail -> [ ("audit_error", `String detail) ]))))
 ;;
 
 let handle_keeper_run_next state ~actor request reqd =

@@ -65,13 +65,19 @@ val keeper_overrides : base_path:string -> (override_row list, string) result
     stricter [Auto] default without distinguishing corruption from an empty
     store. *)
 
+type set_outcome =
+  | Applied
+  | Applied_audit_failed of string
+      (** The stance is persisted and live in memory, but writing the
+          companion audit-log entry failed. *)
+
 val set :
   t ->
   base_path:string ->
   actor:string ->
   keeper_name:string ->
   mode ->
-  (unit, string) result
+  (set_outcome, string) result
 (** Persists the change beside the other gate state, then updates the
     in-memory registry, so a failed [Yolo] write holds neither; the whole
     read-modify-write is atomic with respect to other in-process writers in
@@ -80,11 +86,13 @@ val set :
     exactly the keepers an operator has moved off [Auto]; if the store file
     cannot be read when revoking to [Auto], the keeper's in-memory override
     is still removed immediately (failing closed to the stricter [Auto]
-    stance) while the store read error is returned and recorded in
-    {!last_restore_error}. The change is also written to the audit log as
-    actor [actor]; if that record fails ([Sys_error] from the store setup is
-    caught the same way), the error is returned even though the stance
-    itself already stands durably — the result is total, it never raises.
+    stance) while the store read error (noting that repairing the file
+    without removing the keeper's row will restore it on restart) is returned
+    and recorded in {!last_restore_error}. The change is also written to the
+    audit log as actor [actor]; if that record fails ([Sys_error] from the
+    audit store setup is caught the same way), [Ok (Applied_audit_failed _)]
+    is returned so the caller sees that the stance itself already stands
+    durably and in memory — the result is total, it never raises.
 *)
 
 val bind : base_path:string -> t -> (unit, string) result

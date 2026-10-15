@@ -144,6 +144,10 @@ let keeper_overrides ~base_path =
            Printf.sprintf "tool approval mode store (%s): %s" file detail)
 ;;
 
+type set_outcome =
+  | Applied
+  | Applied_audit_failed of string
+
 let set t ~base_path ~actor ~keeper_name mode =
   (* The mutex spans the whole read-modify-write, not just the memory part:
      the file and the registry are one logical state, so two in-process
@@ -160,15 +164,21 @@ let set t ~base_path ~actor ~keeper_name mode =
     Stdlib.Mutex.protect t.mutex (fun () ->
         match keeper_overrides ~base_path with
         | Error detail ->
-          (match mode with
-           | Auto ->
-             t.overrides <-
-               List.filter
-                 (fun (name, _) -> not (String.equal name keeper_name))
-                 t.overrides
-           | Yolo -> ());
+          let returned_error =
+            match mode with
+            | Auto ->
+              t.overrides <-
+                List.filter
+                  (fun (name, _) -> not (String.equal name keeper_name))
+                  t.overrides;
+              Printf.sprintf
+                "%s (revoked to auto in memory; repairing the store file without removing %s will restore its persisted row on restart)"
+                detail
+                keeper_name
+            | Yolo -> detail
+          in
           t.restore_error <- Some detail;
-          Error detail
+          Error returned_error
         | Ok rows ->
           let changed_at = Masc_domain.now_iso () in
           let without =
@@ -212,35 +222,33 @@ let set t ~base_path ~actor ~keeper_name mode =
   match result with
   | Error _ as error -> error
   | Ok changed_at ->
-    (* The stance stands durably from here; only its audit record can still
-       fail, and that is reported rather than swallowed — a [Sys_error]
-       from the store setup above already returned [Error] with nothing
-       changed. *)
-    (match
-       try
-         Audit_log.log_action
-           (Workspace.default_config base_path)
-           ~agent_id:actor
-           ~action:(Audit_log.Custom "keeper_tool_approval_mode_set")
-           ~details:
-             (`Assoc
-                [ "keeper_name", `String keeper_name
-                ; ( "mode"
-                  , match mode with
-                    | Auto -> `Null
-                    | Yolo -> `String "yolo" )
-                ; "changed_at", `String changed_at
-                ; "actor", `String actor
-                ])
-           ~outcome:Audit_log.Success
-           ();
-         Ok ()
-       with
-       | Sys_error detail ->
-         Error (Printf.sprintf "tool approval mode audit failed: %s" detail)
+    (* The stance stands durably and in memory from here; if its companion
+       audit record fails, report [Ok (Applied_audit_failed _)] rather than
+       [Error _] so callers do not mistake an applied permission change for
+       a rolled-back failure. *)
+    (try
+       Audit_log.log_action
+         (Workspace.default_config base_path)
+         ~agent_id:actor
+         ~action:(Audit_log.Custom "keeper_tool_approval_mode_set")
+         ~details:
+           (`Assoc
+              [ "keeper_name", `String keeper_name
+              ; ( "mode"
+                , match mode with
+                  | Auto -> `Null
+                  | Yolo -> `String "yolo" )
+              ; "changed_at", `String changed_at
+              ; "actor", `String actor
+              ])
+         ~outcome:Audit_log.Success
+         ();
+       Ok Applied
      with
-     | Ok () -> Ok ()
-     | Error _ as error -> error)
+     | Sys_error detail ->
+       Ok
+         (Applied_audit_failed
+            (Printf.sprintf "tool approval mode audit failed: %s" detail)))
 ;;
 
 let bind ~base_path t =

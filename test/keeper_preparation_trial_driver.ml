@@ -231,6 +231,8 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
   ignore (Keeper_owner_registry.create_meta ~base_path:base meta |> get Keeper_owner_registry.command_error_to_string);
   let meta = match Keeper_meta_store.read_effective_meta config keeper |> get Fun.id with
     | Some value -> value | None -> failwith "effective setup Keeper missing" in
+  let entry = Keeper_registry.register_offline ~base_path:base keeper meta in
+  Eio.Switch.on_release sw (fun () -> ignore (Keeper_registry.unregister_exact entry));
   ignore (Workspace.claim_task_r config ~agent_name:keeper ~task_id:task.task_id ()
     |> get Masc_domain.masc_error_to_string);
   let cell = Calls.create_turn_ctx_cell () in
@@ -273,7 +275,35 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
   let selected_id = string "job_id" second in
   let selection = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:base)
       ~bytes:selected_id ~mime:"text/plain" in
+  (* Fixture setup owns these two completed jobs and has consumed their complete
+     outputs. Deliver and acknowledge only those exact setup notifications
+     through supported producer/queue APIs before freezing the common input.
+     No turn completion or reaction timestamp is invented for this setup ACK. *)
+  let delivered = Keeper_owned_job_completion_wake.reconcile ~config |> get store_error in
+  require (delivered.waiting=0 && delivered.failures=[]) "fixture completion delivery is unavailable";
+  let acknowledgements = pending base |> List.map (fun (pending : Keeper_event_queue_state.pending_selection) ->
+    let completion = match pending.source.Keeper_event_queue.payload with
+      | Keeper_event_queue.Owned_job_completed completion -> completion
+      | _ -> failwith "unexpected non-job setup stimulus; refusing to discard it" in
+    let job_id = Jobs.Job_id.to_string completion.oj_job_id in
+    let expected = match List.filter (fun job -> string "job_id" job=job_id) [first;second] with
+      | [job] -> job | [] | _ :: _ -> failwith "setup notification does not belong to an original fixture job" in
+    require (Yojson.Safe.equal (Jobs.source_to_json completion.oj_source) (field "source" expected))
+      "setup notification changed its original source";
+    let record = Jobs.load ~base_path:base ~keeper_name:keeper completion.oj_job_id |> get store_error in
+    let stdout,stderr = match record.outputs with
+      | Some outputs -> outputs | None -> failwith "setup notification has no complete original output" in
+    require (sha (blob_bytes base stdout)=string "stdout_sha256" expected)
+      "setup notification stdout differs from the consumed original";
+    ignore (blob_bytes base stderr);
+    Queue.ack_pending_result ~base_path:base keeper ~selection:pending |> get Fun.id;
+    `Assoc ["job_id",`String job_id;"source_snapshot_ref",`String (Keeper_event_queue_state.source_snapshot_ref pending.source);
+      "admitted_revision",`String (Int64.to_string pending.admitted_revision);
+      "source",Jobs.source_to_json completion.oj_source;"ack_observed",now counter]) in
   require (pending base = []) "setup unexpectedly queued a stimulus";
+  json (Filename.concat base "preparation-setup-notification-acks.json")
+    (`Assoc ["scope",`String "fixture_setup_only";"acks",`List acknowledgements;
+      "producer_delivered",`Int delivered.delivered;"no_turn_completion_claim",`Bool true]);
   let manifest = `Assoc ["schema_version",`Int 1;"base_path",`String base;"keeper",`String keeper;
       "task_id",`String task.task_id;"trace_id",`String (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
       "skill_reference",Skill_reference.to_yojson reference;"skill_document_sha256",`String (sha source_document);

@@ -44,7 +44,12 @@ Setup uses the real public job start/status tools, durable complete stdout/stder
 artifacts, exact published Inline Skill, and a real claimed Task pinned to that
 reference. Two distinct original outputs prevent a verifier from accepting an
 arbitrary available stdout. Setup is outside the measured interval and has a
-separate receipt. The selection artifact contains the exact selected original
+separate receipt. The fixture registers its original Keeper before reading its
+queue. It delivers the completed setup jobs' notifications through the producer
+maintenance API, verifies their exact original sources and complete output bytes,
+and ACKs only those exact selections through the durable queue API. Its separate
+setup ACK receipt does not claim a model turn or source reaction timestamp;
+unknown setup stimuli are refused rather than discarded. The selection artifact contains the exact selected original
 job ID as UTF-8 text. No answer or resolved child argument is put into the model's
 initial context.
 

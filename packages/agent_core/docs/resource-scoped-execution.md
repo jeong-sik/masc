@@ -28,8 +28,11 @@ does not replace producer authorization or resource-binding validation.
 `Tool.of_schema` and `Tool.create` bind scoped admission to the exact ordinary
 handler. An arbitrary record update that replaces this handler falls back to
 Serial execution of the replacement, preserving its observers and permission
-checks. `Tool.with_defaults` transforms preparation and execution together and
-retains their binding; a stale descriptor cannot bypass a new wrapper.
+checks. `Tool.map_handler` applies the same instrumentation to ordinary and
+prepared execution while retaining their exact binding. Its wrapper forwards
+the original environment and input; it cannot revive an invalidated binding.
+`Tool.with_defaults` transforms preparation and execution together and retains
+their binding; a stale descriptor cannot bypass a new wrapper.
 
 Canonical attempted or settled invocations are restored before preparation,
 using the exact current provider's persisted authority and its original

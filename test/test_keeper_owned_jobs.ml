@@ -2021,11 +2021,20 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
     (List.map (fun (name,value) -> name,(if name="container" then `Null else value))
        second_daemon_state)));
-  control fixture (`Assoc ["state", `String "running"]);
+  (* Clear the first job's exit injection; only the real start command may
+     move the next container out of Created. *)
+  control fixture (`Assoc []);
   set_source fixture ~task_id:"task-C" ~turn:61;
   let second_id = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"start-second" ~turn:61 "keeper_job_start"
       (`Assoc ["argv", `List [`String "fixture-program-second"]; "inputs", `List []])) |> job_id in
+  (match (load fixture second_id).phase with
+   | Store.Running _ -> ()
+   | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+   | Store.Exited _ | Store.Cancelled_before_start _ ->
+     fail "second job did not pass its own durable start intent");
+  check int "both original jobs were actually created" 2 (effect_count fixture "create");
+  check int "both original jobs were actually started" 2 (effect_count fixture "start");
   let second_literal value = `Assoc ["kind", `String "literal"; "value", value] in
   let second_node name tool input after = `Assoc ["id", `String name; "tool", `String tool;
       "input", input; "after", `List (List.map (fun name -> `String name) after)] in
@@ -2705,14 +2714,26 @@ let test_completion_delivery_failure_and_restart () =
    | Intake.Stimulus_job_unavailable _ -> () | _ -> fail "a different Task authorized the original result");
   Event_registry.ack_pending_result ~base_path:fixture.base_path keeper ~selection
     |> require "actual completion queue consumption";
+  let before_cleanup = List.length (calls fixture) in
   let again = recover_completions fixture in
-  check int "acknowledged jobs leave the pending discovery partition" 0 again.inspected;
+  let cleanup_backend_calls = List.length (calls fixture) - before_cleanup in
+  check int "acknowledged job remains discoverable for its later cleanup round" 1 again.inspected;
+  check int "later cleanup confirms resources and retires the same owner" 1 again.retired;
+  check int "later cleanup has no unavailable authority" 0 (List.length again.failures);
+  let cleaned = load fixture id in
+  check bool "resource cleanup is canonically complete" true (cleaned.cleanup = Store.Resources_removed);
+  check bool "complete original result remains readable after cleanup" true (Store.result_ready cleaned);
+  check_json "cleanup preserves the original result source" (Store.source_to_json original.source)
+    (Store.source_to_json cleaned.source);
+  let settled = recover_completions fixture in
+  check int "confirmed cleanup leaves no pending marker work" 0 settled.inspected;
   check_no_completion fixture;
   check int "original command is created once" 1 (effect_count fixture "create");
   check int "original command is started once" 1 (effect_count fixture "start");
   Printf.printf "owned_job_completion_measurement=%s\n%!"
     (Yojson.Safe.to_string (`Assoc ["scope", `String "synthetic CLI public job, completed-output enqueue failure and restart recovery";
       "durable_result_recovery_ms", `Float recovery_ms; "backend_calls_on_delivery_recovery", `Int 0;
+      "backend_calls_on_resource_cleanup", `Int cleanup_backend_calls;
       "creates", `Int 1; "starts", `Int 1; "completion_notifications", `Int 1]))
 
 let test_completion_consumed_before_producer_ack () = with_fixture @@ fun _env initialize fixture ->

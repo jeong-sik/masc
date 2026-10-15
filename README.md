@@ -225,7 +225,9 @@ Run `masc` on an interactive terminal. The top strip has seven destinations:
 Use `Tab` / `Shift-Tab` to move, `?` for help and `:` for the command palette.
 The composer sends messages to the selected Keeper. `/task <title>` creates a
 Task and sends its ID in the same message. Chat controls let you unfold tool
-results, reasoning and context when you need them.
+results, reasoning and context when you need them. `/features` lists what the
+TUI can do — one line per feature with the command, key or name that opens it
+([the guide's first section](docs/TUI-GUIDE.md#what-can-i-do-here)).
 
 The [TUI guide](docs/TUI-GUIDE.md) covers every view, key, theme, browser lane,
 voice controls and troubleshooting.

@@ -16,6 +16,15 @@ val line_cells : cols:int -> int
     the sheet is one column, a column's width once it is two. Lines wider than
     this are cut where they are drawn, so the lines are wrapped to it first. *)
 
+val two_column_minimum_cols : int
+(** The terminal width where [sheet] folds to two columns; the frame folds
+    at the same width so its height answer matches what it draws. *)
+
+val column_width : cols:int -> int
+(** The cells one column of the folded sheet has. The feature sheet folds to
+    the same columns and draws its lines at the same width, so a reader sees
+    one layout on both sheets. *)
+
 val sheet : ?header:string list -> cols:int -> string list -> string list
 (** The rows drawn at this width: optional full-width header rows, followed by
     the lines as written, or -- once a terminal is wide enough to hold two

@@ -4546,6 +4546,7 @@
 (include stanzas/test_tui_evidence_link.inc)
 (include stanzas/test_tui_render_evidence.inc)
 (include stanzas/test_tui_keys_doc.inc)
+(include stanzas/test_tui_features.inc)
 (include stanzas/test_tui_keeper_portrait.inc)
 (include stanzas/test_tui_chat_portrait.inc)
 

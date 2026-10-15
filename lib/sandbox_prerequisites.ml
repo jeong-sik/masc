@@ -509,8 +509,13 @@ let write_build_without_rosetta user_config =
    leads nowhere) is refused: kept, the container would exit on it, and
    replaced, an operator's link would be overwritten. The file is created by
    [Filename.open_temp_file], which gives it 0o600, so the key is readable by
-   this account only from the moment it lands. A file made between the look
-   and the rename is replaced; the look is not a lock. *)
+   this account only from the moment it lands. In the pinned image
+   ([searxng_image]), [Config.User] is empty and [/usr/local/searxng/entrypoint.sh]
+   execs [granian] directly as uid 0 without dropping privileges (or in
+   rootless Docker, uid 0 maps to this host account), so 0o600 on the
+   read-only bind mount remains readable by the container process on Linux as
+   well as macOS. A file made between the look and the rename is replaced;
+   the look is not a lock. *)
 let searxng_secret_bytes = 32
 let write_searxng_settings config_dir =
   let path = searxng_settings_path config_dir in

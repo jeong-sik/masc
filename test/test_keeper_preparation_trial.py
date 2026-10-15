@@ -22,6 +22,14 @@ def require(value, detail):
         raise AssertionError(detail)
 
 
+def received_tools(body):
+    tools = body.get("tools", [])
+    require(isinstance(tools, list), "received tools member is not a list")
+    encoded = json.dumps(tools, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return {"state": "present" if "tools" in body else "absent", "wire_entries": len(tools),
+            "json_bytes": len(encoded), "json_sha256": hashlib.sha256(encoded).hexdigest()}
+
+
 def check_http_observation(directory, receipt, received, *, refused=False):
     metrics = receipt["http_metrics"]
     path = directory / "http-events.jsonl"
@@ -41,6 +49,16 @@ def check_http_observation(directory, receipt, received, *, refused=False):
     require(sorted((row["body_bytes"], row["body_sha256"]) for row in entered) ==
             sorted((row["body_bytes"], row["body_sha256"]) for row in received),
             "native submitted body metadata differs from actual independently received bytes")
+    inventories = {row["body_sha256"]: row["tool_inventory"] if "tool_inventory" in row else
+                   received_tools(read(directory / f'provider-request-{row["index"]:03d}.json'))
+                   for row in received}
+    require(all(row["tool_inventory"] == inventories[row["body_sha256"]] for row in entered),
+            "serializer-owned inventory differs from the actual peer's offered tools")
+    first = next(row["call_id"] for row in events if row["phase"] == "dispatch_entered")
+    expected = inventories[calls[first][0]["body_sha256"]]
+    require(metrics["first_dispatched_tools"] == expected and
+            receipt["first_offered_tools_sha256"] == expected["json_sha256"],
+            "first offered inventory was inferred from a later request")
     require(all(metrics[key] == len(received) for key in
                 ("calls_entered", "dispatch_entries", "response_headers_received")) and
             metrics["serialized_body_bytes"] == sum(row["body_bytes"] for row in received) and
@@ -70,6 +88,7 @@ def configured_http_refusal(args, root, head):
                         active.append(strategy)
             requests.append({"model": body.get("model"), "stream": body.get("stream"),
                              "body_bytes": len(raw), "body_sha256": hashlib.sha256(raw).hexdigest(),
+                             "tool_inventory": received_tools(body),
                              "messages_present": bool(body.get("messages")), "active": active,
                              "auth_matches_fixture": self.headers.get("Authorization") == "Bearer isolated-http-fixture"})
             response = b'{"error":{"type":"invalid_request_error","message":"Declared external fixture refusal"}}'

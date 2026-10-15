@@ -12,8 +12,18 @@
 
 type mode = Synchronous | Streaming
 type completion = Returned_ok | Returned_error | Cancelled | Raised
+type tool_inventory =
+  | No_tools_member
+  | Tools_member of { wire_entries : int; json_bytes : int; json_sha256 : string }
+  | Tools_unavailable
+(** The exact request's [tools] member, compactly re-encoded by Yojson while
+    preserving object and array order. [wire_entries] counts top-level entries,
+    not functions nested inside a provider entry. No schema content is exposed.
+    Absent, observed empty and unavailable are distinct facts. *)
 type phase =
-  | Client_entered of { mode : mode; body_bytes : int; body_sha256 : string }
+  | Client_entered of
+      { mode : mode; body_bytes : int; body_sha256 : string
+      ; tool_inventory : tool_inventory option }
   | Dispatch_entered
   | Response_headers_received of { status : int }
   | Client_finished of completion
@@ -24,6 +34,13 @@ type call
 
 val create : (event -> (unit, unit) result) -> t
 val with_observer : t -> (unit -> 'a) -> 'a
+val with_request_tools :
+  body:string -> inventory:(unit -> tool_inventory) -> (unit -> 'a) -> 'a
+(** Bind serializer-owned Tool metadata only to this exact body digest. The
+    lazy inventory is not evaluated without an observer. An ordinary producer
+    exception records [Tools_unavailable] without changing the HTTP result;
+    reserved exceptions propagate. Unrelated nested HTTP bodies cannot inherit
+    this request's inventory. [None] in a client event means unobserved. *)
 val capture : (unit -> 'a) -> (unit -> 'a)
 (** Capture the current observer in a closure before an actor/executor handoff.
     Invoking it rebinds that owner on the receiving fiber. Ordinary child

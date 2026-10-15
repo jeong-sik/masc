@@ -656,6 +656,7 @@ let complete_http
              long as the socket stayed open unless the caller declared a body
              deadline as well. *)
           let post_sync_call () =
+            with_request_tools ~body:body_str @@ fun () ->
             Http_client.dispatch_sync_request
               ?cache:connection_cache
               ?clock

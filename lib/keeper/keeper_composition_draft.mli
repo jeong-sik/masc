@@ -72,6 +72,17 @@ val load_continuation
     require the exact whole surface. This does not reserve a worker; the caller
     must bind this same sealed continuation before effects. *)
 
+type continuation_refusal = Current_tool_denied of
+  { node_id : Keeper_tool_plan.Node_id.t; tool_name : string }
+type continuation_admission = Admitted of t | Refused of t * continuation_refusal
+val continuation_refusal_to_json : continuation_refusal -> Yojson.Safe.t
+val load_continuation_admission : base_path:string ->
+  capability_surface:Keeper_capability_surface.t ->
+  Keeper_tool_execution_journal.continuation -> (continuation_admission, error) result
+(** For an ordinary recipe, explicit Tool denial can return a fully revalidated original draft
+    only as [Refused]. Missing/corrupt evidence and changed contracts stay Error.
+    Ordinary [load]/[load_continuation] never admit denied descriptors. *)
+
 val plan : t -> Keeper_tool_plan.t
 val nested_calls : t -> Keeper_composition_nested.call list
 (** Exact frozen child references, fixed arguments, leaf and export mappings.

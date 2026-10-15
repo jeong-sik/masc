@@ -29,16 +29,6 @@ val acknowledge_waiting :
     transition lock, so a concurrent refusal cannot lose its new obligation.
     It emits no composition terminal and grants no job replay permission. *)
 
-val prepare_terminal :
-  proof:Keeper_msg_async.durable_terminal_proof -> (unit, error) result
-(** Record a delivery obligation for an exact canonical
-    [Waiting_for_dependencies] terminal owned by its canonical Keeper before a
-    permanent refusal supersedes it with a failure terminal. While the record
-    remains waiting, [flush] retires the obligation without delivering; once
-    the canonical record settles, [flush] delivers the typed failure through
-    the same path as an ordinary completion. The same identity is
-    idempotent. Settlement supplies its locked canonical [proof]; this function
-    does not re-enter the request lock. *)
 
 type report =
   { inspected : int

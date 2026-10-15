@@ -57,4 +57,8 @@ val of_snapshot : ?descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_sn
 
 val snapshot_revision : t -> Skill_catalog_snapshot.snapshot_revision
 val items : t -> skill_inventory_item list
+val exact_absence_proven : t -> Skill_reference.t -> bool
+(** True only for an exact reference absent from a completely readable,
+    decoded source scan. Missing/unreadable/unresolved sources and rejected
+    candidates never prove producer absence. *)
 val invalid_error_to_yojson : invalid_error -> Yojson.Safe.t

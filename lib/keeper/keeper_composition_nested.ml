@@ -338,7 +338,7 @@ let rec validate_leaves ?(parameterized=false) plan =
   |> Result.map_error (fun (id, error) -> Inputs_rejected (id, error))
 ;;
 
-let compile ~execution ~capability_surface json =
+let compile_with ~descriptors ~execution ~capability_surface json =
   let* request = Request.shape_of_json json |> Result.map_error (fun error -> Request_rejected error) in
   let* source = List.fold_left (fun acc (index, json) ->
       let* nodes = acc in let* node = source_node ~index json in Ok (node :: nodes)) (Ok [])
@@ -349,7 +349,7 @@ let compile ~execution ~capability_surface json =
       |> Result.map (fun _ -> ()) in
   let* plan, calls =
     if List.for_all (function Ordinary _ -> true | Nested _ -> false) source then
-      let* plan = Request.plan_of_json ~descriptors:(Surface.descriptors capability_surface) json
+      let* plan = Request.plan_of_json ~descriptors json
           |> Result.map_error (fun error -> Request_rejected error) in
       Ok (plan, [])
     else
@@ -361,13 +361,26 @@ let compile ~execution ~capability_surface json =
           let* exports = acc in
           let* node_id, pointer = resolve_outer_output expanded ~node_id:export.node_id ~pointer:export.pointer in
           Ok (Plan.export ~name:export.name ~node_id ~pointer :: exports)) (Ok []) request.exports |> Result.map List.rev in
-      let* plan = Plan.create_compiled ~children ~arguments ~descriptors:(Surface.descriptors capability_surface)
+      let* plan = Plan.create_compiled ~children ~arguments ~descriptors
           ~branch_failure_policy:request.branch_failure_policy ~exports nodes
           |> Result.map_error (fun error -> Expanded_plan_rejected error) in
       let calls = List.filter_map (function Leaf _ -> None | Inline_child (_,_,call,_) | Async_child (_,_,call) -> Some call) expanded in
       Ok (plan, calls) in
   let* () = validate_leaves plan in
   Ok { plan; calls }
+;;
+
+let compile ~execution ~capability_surface json =
+  compile_with ~descriptors:(Surface.descriptors capability_surface) ~execution ~capability_surface json
+;;
+
+let compile_for_refusal ~execution ~capability_surface json =
+  let descriptors = Surface.tool_capabilities capability_surface |> List.filter_map
+      (fun (row : Surface.tool_capability) -> match row.availability with
+        | Active | Denied_by_profile -> Some row.descriptor
+        | Outside_skill_surface | Not_model_invocable | Refused_by_sandbox _
+        | Node_tools_outside_surface _ | Invalid_definition | Missing_configured_skill -> None) in
+  compile_with ~descriptors ~execution ~capability_surface json
 ;;
 
 let call_to_json (call : call) = `Assoc

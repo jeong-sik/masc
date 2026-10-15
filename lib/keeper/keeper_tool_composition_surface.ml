@@ -7,6 +7,25 @@ open Keeper_tool_composition_projection
 
 let ( let* ) = Result.bind
 
+type continuation_refusal =
+  | Current_leaf_denied of Keeper_composition_draft.continuation_refusal
+  | Original_producer_absent of Skill_reference.t
+
+let continuation_refusal_to_json = function
+  | Current_leaf_denied refusal -> Keeper_composition_draft.continuation_refusal_to_json refusal
+  | Original_producer_absent reference -> `Assoc
+      ["kind",`String "original_producer_absent";"skill_reference",Skill_reference.to_yojson reference]
+
+let validate_original_producer_activation ~config (source : Journal.source) =
+  match source.producer with
+  | Journal.Prepared | Named {origin=Nested _;_} -> Ok ()
+  | Named {origin=Standalone;activation=None;_} -> Error "original named activation context is missing"
+  | Named {origin=Standalone;activation=Some bound;tool_name;skill_reference} ->
+    let* original = Keeper_skill_activation_recorder.find_bound_composition ~config bound
+        ~tool_use_id:source.parent_tool_use_id ~source_turn:source.source_turn ~tool_name skill_reference
+        |> Result.map_error Keeper_skill_activation_recorder.error_to_string in
+    (match original with Some _ -> Ok () | None -> Error "original named activation is missing")
+
 let composition_run_summary_tool_name = "keeper_composition_run_summary"
 
 let request_id_of_validated_input = function
@@ -1725,12 +1744,35 @@ and async_submission_result
                "prepared composition worker has no accepted journal binding")
            | (None | Some _), worker ->
            match refusal with
-           | Some error ->
-             Keeper_msg_async.worker_finished
-               (Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
-                  ~class_:(Journal.failure_class error)
-                  ~effect_disposition:Tool_result.Proven_pre_effect
-                  ~data:(Journal.error_to_json error) (Journal.error_to_string error))
+           | Some refusal ->
+             let authority =
+               let* worker = match worker with
+                 | Some worker -> Ok worker | None -> Error "refusal completion requires its canonical journal owner" in
+               let* () = Journal.validate_refusal_completion worker ~plan |> Result.map_error Journal.error_to_string in
+               let* source = match journal with Some journal -> Ok (Journal.source journal)
+                 | None -> Error "refusal completion has no original source" in
+               let* () = validate_original_producer_activation ~config source in
+               let* bound = Keeper_composition_draft.load_nested_activation ~base_path:config.base_path source
+                 |> Result.map_error (fun error -> Yojson.Safe.to_string (Keeper_composition_draft.error_to_json error)) in
+               let original = Keeper_composition_nested_run.create
+                   ~calls:(match nested_calls with None -> [] | Some calls -> calls)
+                   ~composition_run_id ~parent_invocation ~tool_name
+                   ~delivery_parent_tool_use_id:(Keeper_composition_nested_run.async_result_parent composition_run_id)
+                   ~record_activation:None () in
+               Option.iter (fun bound -> Keeper_composition_nested_run.restore_admissions original
+                 ~find_activation:(fun ~invocation ~tool_name ~scope ~reference ->
+                   Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) bound;
+               Keeper_composition_nested_run.check_original_admissions original
+                 ~child_history:(Journal.worker_child_admission worker)
+               |> Result.map_error (fun (rejection : Executor.admission_rejection) -> rejection.detail) in
+             (match authority with
+              | Error reason -> Keeper_msg_async.worker_interrupted ~reason
+              | Ok () ->
+                let data = continuation_refusal_to_json refusal in
+                Keeper_msg_async.worker_finished
+                  (Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
+                    ~class_:Tool_result.Policy_rejection ~effect_disposition:Tool_result.Proven_pre_effect
+                    ~data (Yojson.Safe.to_string data)))
            | None ->
            async_worker_result
              ?on_recovery_held
@@ -2087,42 +2129,14 @@ let resume_continuation ?on_recovery_held ~capability_surface ~continuation ~(co
           match skill.surface with
           | Composition entry -> entry.execution = Catalog.Async && String.equal (Catalog.tool_name entry) tool_name
           | Instruction -> false) in
-  if not producer_admitted then
-    (* A producer Skill that left the catalog or changed its execution
-       identity is a permanent refusal: re-trying this continuation can never
-       change the outcome. Settle the run as a durable terminal failure so
-       pulse retires its marker and the parent dependency ends; unavailable
-       run evidence still refuses without durable effects. *)
-    (match Draft.load_continuation ~base_path:config.base_path ~capability_surface continuation with
-     | Error error -> Tool_result.make_err ~tool_name
-         ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
-         ~start_time ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error))
-     | Ok draft ->
-       match Journal.load ~base_path:config.base_path ~keeper_name:source.keeper_name
-           ~composition_run_id:source.composition_run_id with
-       | Error error -> refuse_journal error
-       | Ok journal ->
-         let parent_invocation = Agent_core.Tool_contract.Invocation.create
-             ~tool_use_id:source.parent_tool_use_id ~turn:source.source_turn
-             ~schedule:(Agent_core.Tool_contract.Invocation.schedule invocation)
-             ~completion:Agent_core.Tool_contract.Continue_after_success in
-         let turn_context = Some {turn_context with task_id=source.source_task_id} in
-         async_submission_result ?on_recovery_held ?skill_reference ~journal ~continuation
-           ~refusal:Journal.Source_conflict
-           ~draft_reference:source.draft_reference ~run_reference:source.run_reference
-           ~composition_run_id:source.composition_run_id ~plan:(Draft.plan draft)
-           ~tool_name ~tool_kind:Keeper_tool_descriptor.Async_composition_tool
-           ~parent_invocation ~config ~meta
-           ~capability_authority:(Keeper_tool_runtime.Frozen_surface capability_surface)
-           ~publication_recovery ~ctx_snapshot ~turn_context ?clock ()
-         |> bind_prepared_result ~composition_run_id:source.composition_run_id
-             ~run_reference:source.run_reference ~draft_reference:source.draft_reference)
-  else
-  match Draft.load_continuation ~base_path:config.base_path ~capability_surface continuation with
+  match Draft.load_continuation_admission ~base_path:config.base_path ~capability_surface continuation with
   | Error error -> Tool_result.make_err ~tool_name
       ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
       ~start_time ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error))
-  | Ok draft ->
+  | Ok admission ->
+    let draft,refusal = match admission with
+      | Draft.Admitted draft -> draft,None
+      | Draft.Refused (draft,refusal) -> draft,Some (Current_leaf_denied refusal) in
     let nested_activation = Keeper_composition_draft.load_nested_activation ~base_path:config.base_path source in
     (match nested_activation with
     | Error error -> Tool_result.make_err ~tool_name
@@ -2161,7 +2175,18 @@ let resume_continuation ?on_recovery_held ~capability_surface ~continuation ~(co
              Tool_result.make_err ~tool_name ~start_time
              ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
              ~data:rejection.data rejection.detail
-         | Keeper_composition_nested_run.Original_admitted -> async_submission_result ?on_recovery_held ?skill_reference ~journal ~continuation
+         | Ok () ->
+           let refusal = match refusal,skill_reference with
+             | Some refusal,(None | Some _) -> Some refusal
+             | None,Some reference when not producer_admitted && Draft.nested_calls draft = []
+                 && Keeper_capability_surface.exact_skill_absence_proven capability_surface reference ->
+               Some (Original_producer_absent reference)
+             | None,(None | Some _) -> None in
+           if not producer_admitted && Option.is_none refusal then refuse_journal Journal.Source_conflict
+           else match (match refusal with None -> Ok () | Some _ -> validate_original_producer_activation ~config source) with
+           | Error detail -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+               ~effect_disposition:Tool_result.Proven_pre_effect detail
+           | Ok () -> async_submission_result ?on_recovery_held ?skill_reference ~journal ~continuation ?refusal
           ~nested_calls:(Draft.nested_calls draft) ?nested_activation
           ~draft_reference:source.draft_reference ~run_reference:source.run_reference
           ~composition_run_id:source.composition_run_id ~plan:(Draft.plan draft)

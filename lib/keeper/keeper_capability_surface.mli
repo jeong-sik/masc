@@ -118,6 +118,9 @@ val tool_row_availability_for_name : t -> string -> capability_availability opti
 
 val skill_projection : t -> Keeper_skill_catalog.turn_projection
 val skill_catalog : t -> Keeper_skill_catalog.t
+val exact_skill_absence_proven : t -> Skill_reference.t -> bool
+(** Original immutable source scan evidence, not absence from the executable
+    catalog after policy withholding. *)
 val tool_capabilities : t -> tool_capability list
 
 val skill_capabilities : t -> skill_capability list

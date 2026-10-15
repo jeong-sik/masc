@@ -954,7 +954,11 @@ let test_bundle_effect_contracts () =
    turn until the build with #43150 was running: one keeper made no successful
    turn for about fourteen hours. #43150 pins that one schema. This walks the
    bundle a keeper is handed, so the next tool that carries a reference fails
-   here and not in a keeper's turn. *)
+   here and not in a keeper's turn.
+
+   It does not look for a cycle: any [$ref] or [$defs] key fails. No tool in
+   the bundle holds either today, and it is not known whether Muse also
+   refuses a reference that does not recurse. *)
 let rec has_schema_reference = function
   | `Assoc fields ->
     List.exists
@@ -967,9 +971,10 @@ let rec has_schema_reference = function
   | _ -> false
 ;;
 
-(* [tools] is every tool the turn can run. [agent_core_tools] is a part of it,
-   with the deferred schemas behind a listing, so walking [tools] covers each
-   schema either lane can put on the wire. *)
+(* [tools] is every tool the turn can run, attached-service tools included.
+   [agent_core_tools] holds the same built-ins and, in place of the
+   attached-service schemas, one listing tool that is not in [tools]. That
+   listing tool's schema is not checked here. *)
 let test_no_tool_advertises_a_schema_reference () =
   with_bundle_tools
   @@ fun _config _meta _snapshot _plan_index _surface tools ->

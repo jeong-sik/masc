@@ -62,6 +62,13 @@ def main():
         directory = receipt_path.parent
         admission = read(directory / "admission.json")
         turn = read(directory / "turn-record.json")
+        accepted = read(directory / "accepted-final-answer.json")
+        require(accepted["source"] == "TurnRecord_exact_raw_run" and
+                accepted["turn_ref"] == turn["turn_ref"] and
+                accepted["raw_trace_run_ref"] == turn["raw_trace_run_ref"],
+                "final answer was not read from this exact canonical run")
+        require(json.loads(accepted["final_text"]) == receipt["objective"],
+                "persisted run final answer differs from the independently checked objective")
         useful = receipt["timing"]["first_useful_leaf"]
         require(receipt["strategy"] == entry["strategy"] and receipt["source_ack"] is True,
                 "receipt does not belong to the assigned admitted source")

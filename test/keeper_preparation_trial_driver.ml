@@ -645,7 +645,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     | [] | _ :: _ -> unknown "no unique successful selection-read observation" in
   let _,checkpoint = Keeper_context_runtime.load_context_from_checkpoint_classified
       ~trace_id:(string "trace_id" fixture) ~base_dir:(Keeper_types_support.session_base_dir_ config) in
-  let accepted_answer = match checkpoint with
+  let checkpoint_last_assistant = match checkpoint with
     | Checkpoint_loaded context ->
       let messages = Keeper_context_runtime.messages_of_context context in
       List.filter_map (fun (message : Agent_core.Types.message) -> match message.role with
@@ -653,9 +653,30 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
         | User | System | Tool -> None) messages |> List.rev |> (function [] -> None | first :: _ -> Some first)
     | Checkpoint_absent -> None
     | Checkpoint_unread error -> failwith (Keeper_checkpoint_store.checkpoint_load_error_to_string error) in
+  (* RFC-0385 deliberately omits internal final thoughts from replay history.
+     The completed TurnRecord owns the exact durable raw run; use the same
+     strict projection as the autonomous-turn inspector, not another run or
+     the synthetic peer's own final string as proof of acceptance. *)
+  let accepted = Keeper_autonomous_turn_source.load_recent ~config ~keeper_name:keeper ~limit:1 ()
+      |> List.filter (fun (observed : Keeper_autonomous_turn_source.turn) ->
+        observed.turn_id = Ids.Turn_ref.to_string turn.turn_ref) in
+  let accepted_answer = match accepted with
+    | [observed] -> observed.final_text
+    | [] | _ :: _ -> None in
+  let raw_run = match turn.raw_trace_run_ref with
+    | None -> `Null
+    | Some run -> `Assoc ["worker_run_id",`String run.worker_run_id;"path",`String run.path;
+        "start_seq",`Int run.start_seq;"end_seq",`Int run.end_seq;
+        "agent_name",`String run.agent_name;"session_id",`String run.session_id] in
+  json (Filename.concat attempt_dir "accepted-final-answer.json") (`Assoc
+    ["source",`String "TurnRecord_exact_raw_run";"turn_ref",`String (Ids.Turn_ref.to_string turn.turn_ref);
+     "raw_trace_run_ref",raw_run;
+     "final_text",(match accepted_answer with None -> `Null | Some text -> `String text);
+     "checkpoint_last_assistant",(match checkpoint_last_assistant with None -> `Null | Some text -> `String text);
+     "checkpoint_retention",`String "internal final thoughts are excluded by the production replay contract"]);
   let final = match !final_answer,accepted_answer with
     | Some expected,Some actual ->
-      require (actual=expected) "actual persisted Keeper final answer differs from verified output";
+      require (actual=expected) "actual exact-run Keeper final answer differs from verified output";
       let answer = Yojson.Safe.from_string actual in
       require (field "job_id" answer=field "selected_job_id" fixture &&
         field "stdout_sha256" answer=field "expected_stdout_sha256" fixture) "independent objective check failed";

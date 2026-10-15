@@ -80,9 +80,15 @@ clock. The child uses the exact published Inline Skill. Publication outside the
 clock is the declared starting condition, not hidden authoring work.
 
 Success requires the complete actually returned stdout digest, the actual
-persisted Keeper final JSON, the original job source and output digests unchanged,
+persisted Keeper final JSON from the exact raw run owned by its TurnRecord,
+the original job source and output digests unchanged,
 its exact stimulus ACK, matching Task/trace and physical execution membership in
-the actual TurnRecord, and zero backend calls after complete outputs. Strategy
+the actual TurnRecord, and zero backend calls after complete outputs. Internal
+final thoughts are deliberately excluded from replay checkpoints (RFC-0385),
+so their last Assistant message is recorded separately and never substituted
+for the exact-run final response. The fixture also checks the ordinary
+autonomous inspector's exact turn/run projection; an unavailable run remains
+unverified. Strategy
 compliance is recorded separately; noncompliance stays in the assigned arm.
 `Completed` alone is insufficient. There are no latency percentiles or speedup
 calculations for these protocol samples.

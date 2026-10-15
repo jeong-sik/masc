@@ -89,12 +89,23 @@ sealed canonical continuation; completed launch nodes retain their full result
 without recreating the job. An interrupted launch node — an unfinished
 attempt, or a failure whose effect outcome is unknown — replays instead of
 refusing the whole run: the durable occurrence recorded the exact invocation
-identity (trace_id, turn_ref, tool_use_id) the launch used, and the resuming
-owner re-calls `keeper_job_start` with that recorded identity, so the owned-job
-invocation binding returns the same job (`Existing`) and never launches a
-replacement. A launch node without a recorded invocation identity keeps the
-fail-closed refusal. General effect resource admission remains work in issue
-#42799.
+identity and complete original source (Task, trace, TurnRef, tool-use ID and
+optional Keeper turn). The resuming owner passes that source to an Existing-only
+invocation transaction. It can observe only the original job; a missing,
+unreadable or different binding cannot reserve a replacement.
+
+A first interrupted launch can recover through `resume_run_id` without inventing
+a prior result wait. Unavailable replay authority leaves the physical attempt
+Lost and its logical completion pending, with no failure notification. Restore
+the exact original authority before resuming. Once a launch requires Existing-only
+recovery, a later pre-effect refusal cannot turn it into a fresh launch. A genuine
+pre-effect failure of the initial launch retains its ordinary retry behavior.
+A launch node without its complete recorded identity keeps refusing replay.
+
+These journal records use strict identity and replay-mode fields. Records from
+an older development candidate that lack those fields are rejected; the runtime
+does not infer missing original identity or rewrite them into fresh work.
+General effect resource admission remains work in issue #42799.
 
 Prepared plans admit static read-only ordinary nodes and the isolated owned-job
 launch action. The descriptor and canonical action classify admission; a job

@@ -149,8 +149,8 @@ val validate_request : t -> Keeper_msg_async.entry -> (unit, error) result
 val waiting_continuation : t -> (continuation option, error) result
 (** Read only canonical current-owner terminal proof and exact journal state.
     [None] means no bound request, an active worker, or a settled worker that
-    has no original result dependency wait, accepted-child recovery, or recorded launch recovery. A current [Lost] owner may recover that
-    wait through the journal's exact predecessor bindings and canonical
+    has no original result dependency wait, accepted-child recovery, or recorded
+    launch recovery. A current [Lost] owner may recover that wait through the journal's exact predecessor bindings and canonical
     terminal records, including repeated Lost successors. Unfinished nodes
     must prove replay: read-only nodes follow their read-only replay rules,
     and owned launch leaves retain their recorded exact invocation identity
@@ -337,7 +337,9 @@ val launch_recheck
     occurrence IDs, then apply the existing replay authority to its recorded
     actual input. [Some] means the same original launch still needs observation;
     [None] includes a producer-proven pre-effect refusal or completed result.
-    Missing/unreadable/stale authority is [Error], never fresh admission. *)
+    Missing/unreadable/stale authority is [Error], never fresh admission.
+    An Existing-only attempt keeps this authority through a later pre-effect
+    refusal; initial pre-effect failures retain their ordinary retry contract. *)
 
 val begin_attempt
   : worker

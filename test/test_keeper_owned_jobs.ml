@@ -3294,7 +3294,6 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
   let module Async = Masc.Keeper_msg_async in
   let module Draft = Masc.Keeper_composition_draft in
   let module Plan = Masc.Keeper_tool_plan in
-  let module Executor = Masc.Keeper_tool_plan_executor in
   Call_log.set_turn_context ~cell:fixture.cell ~agent_name:keeper ~task_id:"task-A"
     ~turn:41 ?keeper_turn_id
     ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ();
@@ -3400,6 +3399,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
         ~deliver:(fun ~composition_tool:_ _ -> incr delivered; Ok ()) |> require "actual pending outbox" in
     check int (label ^ " emits no outbox notification") 0 !delivered;
     check int (label ^ " delivers no terminal") 0 report.delivered;
+    check int (label ^ " keeps readable guarded outbox authority") 0 (List.length report.failures);
     check int (label ^ " leaves no false queue completion") 0 (List.length (pending_completions fixture)) in
   check_lost "first interrupted launch" (terminal first.request_id);
   (match Journal.waiting_continuation journal |> require "first Lost launch is publicly resumable" with

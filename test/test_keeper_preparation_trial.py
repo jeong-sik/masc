@@ -63,9 +63,12 @@ protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:{server.server_port}"
 credentials = {{ type = "env", key = "OPENAI_API_KEY" }}
 [models.sample]
-api-name = "gpt-4o-mini"
+api-name = "preparation-http-refusal-fixture"
 max-context = 128000
+tools-support = true
 streaming = true
+[models.sample.capabilities]
+max-output-tokens = 4096
 [preparation_http.sample]
 '''
         experiment.write_text(json.dumps({"schema_version": 1, "case": "upstream_inline", "pairs": 1,
@@ -84,7 +87,7 @@ streaming = true
                 summary["speedup"] is None, "configured transport was relabelled as real-model proof")
         require({arm for request in requests for arm in request["active"]} == {"direct", "exact_skill"},
                 "both actual configured Runtime arms must cross the external HTTP boundary")
-        require(all(request["model"] == "gpt-4o-mini" and request["stream"] is True and
+        require(all(request["model"] == "preparation-http-refusal-fixture" and request["stream"] is True and
                     request["messages_present"] and request["auth_matches_fixture"] for request in requests),
                 "Runtime did not bind the explicit model/streaming/environment credential")
         for attempt in manifest["expected_attempts"]:

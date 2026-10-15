@@ -39,16 +39,22 @@ protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:YOUR_TEST_PORT"
 credentials = { type = "env", key = "OPENAI_API_KEY" }
 [models.sample]
-api-name = "gpt-4o-mini"
+api-name = "preparation-http-refusal-fixture"
 max-context = 128000
+tools-support = true
 streaming = true
+[models.sample.capabilities]
+max-output-tokens = 4096
 [preparation_http.sample]
 ```
 
 For a real trial, explicitly select the provider endpoint, canonical model and
 capabilities under investigation; no default model or provider is supplied by
 the harness. The normal Runtime parser and adapter resolve this configuration.
-Use a catalog-backed model or its supported explicit capability declaration.
+Use an exact provider/model catalog row or its supported explicit capability
+declaration. A bare catalog model name alone does not resolve capabilities for
+an arbitrary provider ID. The loopback example declares only its synthetic
+endpoint contract; its values make no real-provider capability claim.
 The named credential must already exist in the process environment. The
 coordinator rejects inline credentials/headers before persisting the experiment;
 the driver also rejects credential files, CLI providers, Keeper assignments and

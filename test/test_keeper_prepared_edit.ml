@@ -163,6 +163,24 @@ let test_directory_alias_keeps_patch_order () =
       (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
 ;;
 
+let test_ancestor_directories_retain_planned_order () =
+  fixture @@ fun env _sw config meta recovery root ->
+  let parent = Filename.concat root "parent/file" in
+  let child = Filename.concat root "parent/child/file" in
+  write parent "parent-before"; write child "child-before";
+  let rows = batch env config meta recovery
+      [args parent "parent-before" "parent-after"; args child "child-before" "child-after"] in
+  check string "parent actual file" "parent-after" (read parent);
+  check string "child actual file" "child-after" (read child);
+  match rows with
+  | [first; second] ->
+    let schedule row = Agent_core.Tool_contract.Invocation.schedule
+        row.Agent_core.Agent_tools.invocation in
+    check bool "ancestor footprint is an actual prior wave" true
+      ((schedule first).batch_index < (schedule second).batch_index)
+  | [] | [_] | _ :: _ :: _ :: _ -> fail "ancestor Edit results changed"
+;;
+
 let test_parent_swap_and_input_or_owner_change_do_not_write () =
   fixture @@ fun _env sw config meta recovery root ->
   let directory = Filename.concat root "original" in
@@ -236,6 +254,7 @@ let () = run "prepared actual Edit resources"
     test_case "disjoint actual Edits overlap" `Quick test_disjoint_actual_edits_overlap;
     test_case "conflicting patches read current predecessor bytes" `Quick test_successive_patches_use_current_source;
     test_case "directory aliases retain planned order" `Quick test_directory_alias_keeps_patch_order;
+    test_case "ancestor directories retain planned order" `Quick test_ancestor_directories_retain_planned_order;
     test_case "changed owner input or parent cannot write" `Quick test_parent_swap_and_input_or_owner_change_do_not_write;
     test_case "Manual Gate retains the same containment and playground authority" `Quick test_preparation_preserves_containment_under_manual_gate;
     test_case "caller cancellation releases prepared Edit" `Quick test_cancelled_prepared_edit_releases_for_a_later_call]]

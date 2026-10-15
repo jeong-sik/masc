@@ -6037,6 +6037,11 @@
  (libraries alcotest masc masc.tool_types masc_tui_keeper_call_evidence masc_tui_keeper_chat_transcript yojson))
 
 ; Shared synthetic CLI bytes; no Alcotest top-level is imported by the driver.
+(test
+ (name test_keeper_prepared_edit)
+ (modules test_keeper_prepared_edit)
+ (libraries masc_test_deps eio_main))
+
 (library
  (name keeper_owned_job_fixture_transport)
  (wrapped false)

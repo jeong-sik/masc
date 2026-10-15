@@ -116,6 +116,26 @@ val write_call_summary : requested_target:string -> string option
     {!approved_write_of_gate_input}. [None] when the target is blank. *)
 
 
+type prepared_edit
+
+type edit_preparation_error =
+  | Edit_path_refused of Keeper_alerting_path.path_refusal
+  | Edit_resource_unavailable of string
+
+val edit_preparation_error_to_execution : edit_preparation_error -> Keeper_tool_execution.t
+
+val prepare_edit :
+  sw:Eio.Switch.t ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  args:Yojson.Safe.t ->
+  (prepared_edit option, edit_preparation_error) result
+(** Prepare translated Shared_mount Patch arguments against existing regular
+    source and parent directories. Unsupported or missing resources retain the
+    ordinary Serial path. This never writes, grants permission or proves replay. *)
+
+val prepared_edit_scopes : prepared_edit -> Agent_core.Tool_contract.Resource_scope.t list
+
 val handle_file_write_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
@@ -125,6 +145,7 @@ val handle_file_write_with_outcome :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
+  ?prepared_edit:prepared_edit ->
   args:Yojson.Safe.t ->
   unit ->
   Keeper_tool_execution.t
@@ -144,7 +165,10 @@ val handle_file_write_with_outcome :
 
     Writes whose selected confined root is exactly this Keeper's playground
     root proceed after the capability and root-identity checks without an
-    approval Gate. Writes through every other allowed root retain the Gate. *)
+    approval Gate. Writes through every other allowed root retain the Gate.
+    A prepared Edit revalidates its original owner, exact arguments and current
+    confinement, then consumes its pinned parents. The source file is opened
+    at execution, after preceding patches; Gate and recovery remain unchanged. *)
 
 val default_owned_target :
   ownership_root:string -> path:string -> string * string

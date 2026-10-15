@@ -13,6 +13,12 @@ type fs_write_mode = Keeper_tool_write_mode.t =
   | Append
   | Patch
 
+type prepared_edit = Keeper_prepared_edit.t
+
+type edit_preparation_error =
+  | Edit_path_refused of Keeper_alerting_path.path_refusal
+  | Edit_resource_unavailable of string
+
 let fs_write_mode_to_string = Keeper_tool_write_mode.to_string
 let valid_fs_write_mode_strings = Keeper_tool_write_mode.valid_strings
 
@@ -2311,6 +2317,7 @@ let handle_file_write_content_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?prepared_edit
       ~(args : Yojson.Safe.t)
       ()
   =
@@ -3040,22 +3047,23 @@ let handle_file_write_content_with_outcome
                 let* () =
                   check_invariant_sandbox_isolation ~turn_sandbox_factory ~confined
                 in
-                with_confined_write_parent confined
-                @@ fun ~root_dir ~parent_dir ~parent_components ~missing_parents ~leaf ->
-                if missing_parents <> []
-                then missing_target ()
-                else
-                  let endpoint_components =
-                    Keeper_alerting_path.confined_endpoint_components confined
-                  in
-                  (match split_leaf_components endpoint_components with
-                   | None -> Error "filesystem patch source has no readable leaf"
-                   | Some (source_parent_components, source_leaf) ->
-                     with_open_directory_components
-                       ~on_missing:missing_target
-                       root_dir
-                       source_parent_components
-                     @@ fun source_parent_dir ->
+                let with_parents consume =
+                  match prepared_edit with
+                  | Some prepared ->
+                    Keeper_prepared_edit.with_parents ~config ~meta ~args ~confined prepared consume
+                  | None ->
+                    with_confined_write_parent confined
+                    @@ fun ~root_dir ~parent_dir ~parent_components ~missing_parents ~leaf ->
+                    if missing_parents <> [] then missing_target ()
+                    else
+                      match split_leaf_components (Keeper_alerting_path.confined_endpoint_components confined) with
+                      | None -> Error "filesystem patch source has no readable leaf"
+                      | Some (source_parent_components, source_leaf) ->
+                        with_open_directory_components ~on_missing:missing_target root_dir source_parent_components
+                        @@ fun source_parent_dir ->
+                        consume ~parent_dir ~parent_components ~leaf ~source_parent_dir ~source_leaf
+                in
+                with_parents @@ fun ~parent_dir ~parent_components ~leaf ~source_parent_dir ~source_leaf ->
                      Eio.Switch.run @@ fun sw ->
                      (match
                         try
@@ -3101,7 +3109,7 @@ let handle_file_write_content_with_outcome
                                  updated
                                |> Result.map_error (fun error ->
                                  Content_write_capability
-                                   { error; created_parents = [] }))))
+                                   { error; created_parents = [] })))
               in
               (match
                  Keeper_external_resource_lease.with_lease
@@ -3171,8 +3179,40 @@ module For_testing = struct
   ;;
 end
 
+let prepared_edit_scopes = Keeper_prepared_edit.scopes
+
+let edit_preparation_error_to_execution = function
+  | Edit_path_refused refusal ->
+    Keeper_tool_execution.failure ~class_:refusal.failure_class (error_json refusal.message)
+  | Edit_resource_unavailable message ->
+    Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure (error_json message)
+;;
+
+let prepare_edit ~sw ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args =
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile,
+        Keeper_tool_write_mode.of_args args with
+  | Shared_mount, Ok Patch ->
+    let path = Safe_ops.json_string ~default:"" "path" args in
+    (match resolve_keeper_confined_write_path ~config ~meta
+        ~endpoint:Keeper_alerting_path.Follow_referent ~raw_path:path with
+     | Error (refusal : Keeper_alerting_path.path_refusal) ->
+       Error (Edit_path_refused refusal)
+     | Ok confined ->
+       Keeper_prepared_edit.prepare ~sw ~config ~meta ~args ~confined
+       |> Result.map_error (fun message -> Edit_resource_unavailable message))
+  | Endpoint_owned, _ | Shared_mount, (Ok (Overwrite | Append) | Error _) -> Ok None
+;;
+
 let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_meta)
-    ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ~args () =
+    ~publication_recovery ?continuation_channel ?gate_context ?gate_grant ?prepared_edit ~args () =
+  let tree = Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile in
+  let prepared_supported = match tree, Keeper_tool_write_mode.of_args args with
+    | Shared_mount, Ok Patch -> true
+    | Endpoint_owned, _ | Shared_mount, (Ok (Overwrite | Append) | Error _) -> false in
+  if Option.is_some prepared_edit && not prepared_supported then
+    Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
+      (error_json "prepared Edit cannot execute with another tree or write mode")
+  else
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Endpoint_owned ->
     Keeper_tool_filesystem_remote_write.handle
@@ -3188,4 +3228,4 @@ let handle_file_write_with_outcome ~turn_sandbox_factory ~config ~(meta : Keeper
      | Error error -> Keeper_write_content.failure error
      | Ok content -> handle_file_write_content_with_outcome ~content_source ~content
          ~turn_sandbox_factory ~config ~meta ~publication_recovery
-         ?continuation_channel ?gate_context ?gate_grant ~args ())
+         ?continuation_channel ?gate_context ?gate_grant ?prepared_edit ~args ())

@@ -8,8 +8,8 @@ reference and declared exports from Skill inventory; arguments must match the \
 child's parameter schema. Inline children share the parent's failure policy. \
 A child exposes only named exports, not its raw internal tool result. For child \
 alias child with declared export report, a parent output template is \
-{kind:"output",node:"child",pointer:"/report"}; a final export is \
-{name:"result",node:"child",pointer:"/report"}. Copy the canonical pointer from \
+{"kind":"output","node":"child","pointer":"/report"}; a final export is \
+{"name":"result","node":"child","pointer":"/report"}. Copy the canonical pointer from \
 available_exports in an export rejection; do not guess fields. Dependencies wait \
 for the whole child. Returns a durable draft reference \
 bound to this Keeper, execution mode, inputs and frozen tool/Skill contracts; pass \

@@ -1335,6 +1335,82 @@ let test_an_uncalled_load_retires_after_the_following_turn () =
       [] (Load_receipts.pending_names (bind 2)))
 ;;
 
+let test_scoped_dispatch_survives_loading_and_preparation_refusal_keeps_receipt () =
+  Eio_main.run @@ fun env ->
+  let offering = offered [ "prepared", "Prepared fixture"; "unavailable", "Unavailable fixture" ] in
+  let context = Agent_core.Context.create () in
+  let receipts = make_receipts ~task:(task_id "task-901") ~context offering in
+  let agent = Agent_core.Agent.create ~context
+      ~config:(Agent_core.Types.default_config ~model:"test-model") ~net:env#net () in
+  let ordinary_calls = ref 0 and prepared_calls = ref [] and live = ref false in
+  let output text = Ok { Agent_core.Types.content = text; content_blocks = None; _meta = None } in
+  let build_tool (offer : Keeper_identity_tools.offered_tool) =
+    let name = offer.schema.name in
+    let prepare ~sw input =
+      if String.equal name "atlassian_unavailable" then
+        Error { Agent_core.Types.message = "fixture resource unavailable"
+              ; recoverable = false; error_class = Some Agent_core.Types.Deterministic }
+      else begin
+        live := true;
+        Eio.Switch.on_release sw (fun () -> live := false);
+        let occupied =
+          Agent_core.Tool_contract.Resource_scope.identity
+            ~namespace:"discovery-fixture" ~key:"prepared" |> Result.get_ok in
+        let scope = Agent_core.Tool_contract.Resource_scope.create ~occupied ~ancestors:[] in
+        Ok (Some (Agent_core.Tool.scoped_call ~scope (fun execution input' ->
+          check bool "prepared capability remains live through dispatch" true !live;
+          check bool "loading preserves exact prepared input" true (Yojson.Safe.equal input input');
+          let invocation = match Agent_core.Tool.Execution_env.invocation execution with
+            | Some value -> value | None -> fail "loaded prepared call lost invocation" in
+          prepared_calls := Agent_core.Tool_contract.Invocation.tool_use_id invocation :: !prepared_calls;
+          output "prepared-output")))
+      end
+    in
+    Agent_core.Tool.of_schema ~descriptor:(Agent_core.Tool.ordinary_descriptor_scoped ~prepare)
+      offer.schema (fun _ _ -> incr ordinary_calls; output "ordinary-fallback")
+  in
+  let surface =
+    { Keeper_identity_tool_search.deferred =
+        List.map (fun offer ->
+          { Keeper_identity_tool_search.tool = build_tool offer; summary = "fixture" }) offering
+    ; agent_cell = ref (Some agent); history = []; receipts; carry_window = 0 } in
+  let placed = Keeper_identity_tool_search.make ~keeper_name:"search-test" surface
+      |> require_placement in
+  execute placed.tool (names_input [ "atlassian_prepared"; "atlassian_unavailable" ])
+    |> loaded_output |> ignore;
+  check (list string) "loading records both grants before any dispatch"
+    [ "atlassian_prepared"; "atlassian_unavailable" ] (Load_receipts.pending_names receipts);
+  let options = Agent_core.Agent.options agent in
+  let calls = List.map (fun (id, name) ->
+    Agent_core.Types.ToolUse {id; name; input = `Assoc []})
+      [ "prepared-dispatch", "atlassian_prepared"; "unavailable-preparation", "atlassian_unavailable" ] in
+  let rows =
+    Agent_core.Agent_tools.execute_tools ~context
+      ~tools:(Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent))
+      ~hooks:Agent_core.Hooks.empty ~event_bus:options.event_bus ~tracer:options.tracer
+      ~agent_name:(Agent_core.Agent.state agent).config.name ~turn_count:4
+      ~usage:(Agent_core.Agent.state agent).usage calls
+    |> function
+    | Ok report -> report.Agent_core.Agent_tools.completed_results
+    | Error _ -> fail "loaded prepared calls failed outside their tool results" in
+  check int "ordinary fallback is not reached after loading" 0 !ordinary_calls;
+  check (list string) "only actual prepared dispatch runs" [ "prepared-dispatch" ] !prepared_calls;
+  check bool "prepared resources are released after batch observers" false !live;
+  check (list string) "preparation refusal retains its own outstanding load"
+    [ "atlassian_unavailable" ] (Load_receipts.pending_names receipts);
+  (match rows with
+   | [ prepared; unavailable ] ->
+     check string "actual prepared output reaches the SDK result" "prepared-output" prepared.content;
+     check bool "actual prepared schedule remains Concurrent" true
+       ((Agent_core.Tool_contract.Invocation.schedule prepared.invocation).execution_mode
+         = Agent_core.Tool_contract.Concurrent);
+     check bool "unavailable preparation is a failed tool result" true
+       (match unavailable.outcome with Agent_core.Types.Tool_failed _ -> true | Tool_succeeded -> false)
+   | [] | [_] | _ :: _ :: _ :: _ -> fail "loaded SDK result occurrences changed");
+  check bool "dispatch is visible to turn discovery" true
+    (placed.observe_turn () = Keeper_identity_tool_search.Loaded_and_used)
+;;
+
 let test_invalid_restore_does_not_replace_live_state () =
   let source = Agent_core.Context.create_sync () in
   Agent_core.Context.set_scoped
@@ -1450,6 +1526,8 @@ let () =
             test_a_turn_that_loaded_and_called_records_nothing
         ; test_case "names what it loaded and never called" `Quick
             test_a_turn_that_loaded_and_called_nothing_names_what_it_loaded
+        ; test_case "preserves prepared dispatch and retains refused preparation loads" `Quick
+            test_scoped_dispatch_survives_loading_and_preparation_refusal_keeps_receipt
         ] )
     ]
 ;;

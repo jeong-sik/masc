@@ -2302,6 +2302,168 @@ let test_prepared_job_launch_and_continuation () = with_fixture @@ fun env _init
      "durable_job_notifications_before_hint",`Int (List.length job_notifications);
      "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
 
+let invocation_binding_job_ids fixture =
+  let directory = Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path)
+         "keeper_msg_requests") "owned_job_invocations" in
+  Array.to_list (Sys.readdir directory)
+  |> List.filter (fun name -> Filename.check_suffix name ".json")
+  |> List.map (fun name ->
+      Yojson.Safe.from_file (Filename.concat directory name) |> member "job_id" |> to_string)
+
+let test_interrupted_prepared_launch_resumes_the_same_job () = with_fixture @@ fun env initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  let module Async = Masc.Keeper_msg_async in
+  let module Draft = Masc.Keeper_composition_draft in
+  let module Plan = Masc.Keeper_tool_plan in
+  let module Executor = Masc.Keeper_tool_plan_executor in
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
+  control fixture (`Assoc ["mode", `String "start_blocked"]);
+  let recipe = `Assoc
+    [ "execution", `String "async"
+    ; "nodes", `List
+        [ `Assoc
+            [ "id", `String "launch"
+            ; "tool", `String "keeper_job_start"
+            ; "input", `Assoc
+                [ "kind", `String "literal"
+                ; "value", `Assoc ["argv", `List [`String "fixture-program"]] ] ] ] ] in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-interrupted" ~turn:41 "keeper_composition_prepare" recipe) in
+  let reference = prepared |> member "draft" |> composition_reference "interrupted launch draft" in
+  let capability_surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
+  let draft = Draft.load ~base_path:fixture.base_path ~capability_surface ~keeper_name:keeper
+      ~sha256:reference.sha256 |> require "interrupted launch draft" in
+  let composition_run_id = Plan.Composition_run_id.fresh () in
+  let parent_invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"run-interrupted"
+      ~turn:41 ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let run_reference = Draft.record_invocation ~base_path:fixture.base_path ~composition_run_id
+      ~invocation:parent_invocation draft |> require "interrupted launch run artifact" in
+  let source : Journal.source =
+    { keeper_name = keeper; composition_run_id
+    ; draft_reference = Draft.reference draft; run_reference
+    ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation
+    ; source_turn = 41; source_task_id = Some "task-A" } in
+  let journal = Journal.prepare ~base_path:fixture.base_path source |> require "interrupted launch journal" in
+  let request_context = Some
+      [ "composition_tool", `String Draft.run_tool_name
+      ; "parent_tool_use_id", `String source.parent_tool_use_id
+      ; "source_turn", `Int 41
+      ; "composition_run_id", `String (Plan.Composition_run_id.to_string composition_run_id)
+      ; "draft_reference", Tool_output.normalized_artifact_ref_to_json source.draft_reference
+      ; "run_artifact", Tool_output.normalized_artifact_ref_to_json source.run_reference
+      ; "source_task_id", `String "task-A" ] in
+  let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+    {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+  let config = Workspace.default_config fixture.base_path in
+  let execute worker request_sw =
+    Eio_context.with_turn_switch request_sw (fun () ->
+      Executor.execute_keeper ~capability_surface ~plan:(Draft.plan draft)
+        ~run_id:(Plan.Run_id.fresh ()) ~composition_run_id ~parent_invocation
+        ~config ~meta:fixture.meta ~publication_recovery
+        ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"interrupted launch fixture")
+        ~keeper_turn_id:(fun () -> Some 41)
+        ~source_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+        ~clock:(Eio.Stdenv.clock env) ~journal:worker ()) in
+  (* The first worker reaches the launch effect; the synthetic transport keeps
+     the start reply, and the abandoned worker leaves the launch leaf
+     Attempting between begin_attempt and settle_attempt. *)
+  let worker1 = ref None in
+  let settled1, notify_settled1 = Eio.Promise.create () in
+  let first = Async.submit_worker_with_request_id ?request_context
+      ~background_sw:(Async.server_background_switch () |> require "interrupted worker switch")
+      ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~on_accepted:(fun request_id ->
+        match Journal.bind_request journal ~request_id with
+        | Ok worker -> worker1 := Some worker; Ok ()
+        | Error error -> Error (Journal.error_to_string error))
+      ~on_worker_settled:(Eio.Promise.resolve notify_settled1)
+      ~f:(fun ~request_id:_ request_sw ->
+        let worker = match !worker1 with Some worker -> worker | None -> fail "unbound interrupted worker" in
+        let rec await_start () =
+          if Sys.file_exists (Filename.concat fixture.base_path "start-entered") then ()
+          else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.005; await_start ()) in
+        let interrupted = Eio.Fiber.first
+            (fun () -> ignore (execute worker request_sw); false)
+            (fun () -> await_start (); true) in
+        check bool "start reply interrupted after the launch effect" true interrupted;
+        Async.worker_finished (Tool_result.make_err ~tool_name:Draft.run_tool_name
+          ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Effect_outcome_unknown
+          ~start_time:(Tool_timing.start ()) "interrupted launch worker")) () in
+  ignore first;
+  ignore (Eio.Promise.await settled1);
+  let bound_ids = invocation_binding_job_ids fixture in
+  check int "interrupted launch reserved exactly one job" 1 (List.length bound_ids);
+  let id = List.hd bound_ids in
+  (match (load fixture id).phase with
+   | Store.Start_requested _ -> ()
+   | _ -> fail "interrupted launch did not retain its exact start intent");
+  check int "interrupted launch created the job exactly once" 1 (effect_count fixture "create");
+  check int "interrupted launch started the program exactly once" 1 (effect_count fixture "start");
+  (match Journal.lookup (Option.get !worker1) ~node_id:(Plan.Node_id.make "launch" |> require "launch node")
+        ~tool_name:"keeper_job_start" ~input:(`Assoc ["argv", `List [`String "fixture-program"]]) with
+   | Ok (Journal.Recheck_launch replay) ->
+     check string "interrupted launch replay preserves its recorded trace"
+       (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) replay.Journal.invocation.trace_id;
+     check int "interrupted launch replay preserves its recorded turn" 41
+       (Ids.Turn_ref.absolute_turn replay.Journal.invocation.turn_ref)
+   | Ok _ -> fail "interrupted launch leaf did not authorize a launch replay"
+   | Error error -> fail (Journal.error_to_string error));
+  Process_eio.reset_for_testing (); initialize ();
+  (* A later turn resumes the run. The ambient identity differs from the
+     recorded one; replay must still reach the same owned job. *)
+  set_source fixture ~task_id:"task-A" ~turn:52;
+  let worker2 = ref None and executed2 = ref None in
+  let settled2, notify_settled2 = Eio.Promise.create () in
+  let second = Async.submit_worker_with_request_id ?request_context
+      ~background_sw:(Async.server_background_switch () |> require "resuming worker switch")
+      ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~on_accepted:(fun request_id ->
+        match Journal.bind_request journal ~request_id with
+        | Ok worker -> worker2 := Some worker; Ok ()
+        | Error error -> Error (Journal.error_to_string error))
+      ~on_worker_settled:(Eio.Promise.resolve notify_settled2)
+      ~f:(fun ~request_id:_ request_sw ->
+        let worker = match !worker2 with Some worker -> worker | None -> fail "unbound resuming worker" in
+        let result = execute worker request_sw in
+        executed2 := Some result;
+        match result with
+        | Ok _rows ->
+          Async.worker_finished (Masc.Keeper_types_profile.tool_result_ok_data
+            ~tool_name:Draft.run_tool_name (`Assoc ["composition_run_id",
+              `String (Plan.Composition_run_id.to_string composition_run_id)]))
+        | Error _failure ->
+          Async.worker_finished (Masc.Keeper_types_profile.tool_result_error_data
+            ~tool_name:Draft.run_tool_name ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Effect_outcome_unknown
+            (`Assoc ["composition_run_id", `String (Plan.Composition_run_id.to_string composition_run_id)])))
+      () in
+  ignore second;
+  ignore (Eio.Promise.await settled2);
+  let rows = match !executed2 with
+    | Some (Ok rows) -> rows
+    | Some (Error _) | None -> fail "resumed launch run did not complete" in
+  let resumed_launch = List.find
+      (fun (row : Executor.node_result) ->
+         Plan.Node_id.equal row.Executor.node_id (Plan.Node_id.make "launch" |> require "launch node"))
+      rows in
+  check bool "resumed launch settles fresh" true
+    (resumed_launch.execution_origin = Executor.Fresh_dispatch);
+  let job = load fixture id in
+  check string "resumed launch returns the same job" id (Store.Job_id.to_string job.job_id);
+  check int "resume never recreates the original program" 1 (effect_count fixture "create");
+  check int "resume never restarts the original program" 1 (effect_count fixture "start");
+  let terminal = Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper
+      (match second with Ok outcome -> outcome.request_id | Error _ -> fail "resume not accepted")
+    |> require "resumed canonical terminal" |> Async.durable_terminal_entry in
+  (match terminal.status with
+   | Async.Done {ok=true;_} -> ()
+   | _ -> fail "resumed launch run did not settle successfully");
+  Printf.printf "OWNED_INTERRUPTED_LAUNCH_RESUME job=%s phase=%s\n%!" id
+    (match job.phase with Store.Running _ -> "running" | _ -> "other")
+
 exception Fixture_result_observer_failed
 
 let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun env _initialize fixture ->
@@ -2422,5 +2584,6 @@ let () =
       ; test_case "running with absent inventory is notified once and leaves waiting" `Quick test_running_absent_inventory_notified_once
       ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag
       ; test_case "prepared DAG launches an owned job and resumes its original result" `Quick test_prepared_job_launch_and_continuation
+      ; test_case "interrupted prepared launch resumes the same job without recreating it" `Quick test_interrupted_prepared_launch_resumes_the_same_job
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

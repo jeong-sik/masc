@@ -86,8 +86,15 @@ Missing, corrupt, foreign or conflicting run evidence remains a typed refusal;
 the tool never converts it into a fresh run. This continuation applies to
 prepared async ordinary drafts. An original owned-job result wait uses its
 sealed canonical continuation; completed launch nodes retain their full result
-without recreating the job. Unknown launch effects remain retained rather than
-granting replay. General effect resource admission remains work in issue #42799.
+without recreating the job. An interrupted launch node — an unfinished
+attempt, or a failure whose effect outcome is unknown — replays instead of
+refusing the whole run: the durable occurrence recorded the exact invocation
+identity (trace_id, turn_ref, tool_use_id) the launch used, and the resuming
+owner re-calls `keeper_job_start` with that recorded identity, so the owned-job
+invocation binding returns the same job (`Existing`) and never launches a
+replacement. A launch node without a recorded invocation identity keeps the
+fail-closed refusal. General effect resource admission remains work in issue
+#42799.
 
 Prepared plans admit static read-only ordinary nodes and the isolated owned-job
 launch action. The descriptor and canonical action classify admission; a job
@@ -103,7 +110,14 @@ with `keeper_job_start`, bind `/job_id` into `keeper_job_result`, and continue
 dependent artifact consumers when the original result is complete. Startup,
 existing maintenance and durable completion hints use the same original-run
 continuation; current denial, unavailable authority and unknown effects retain
-the original run.
+the original run. When the launch leaf itself is interrupted between its
+durable attempt and its settlement — a crash, or a lost reply around the
+backend create/start effect — the run stays resumable: the journal replays the
+leaf with the invocation identity recorded on the occurrence, the invocation
+binding resolves to the original job, and the reconciled launch settles
+without a second create. An admission that cannot derive that complete
+identity refuses the launch before any durable attempt instead of starting a
+job the run could not re-prove.
 
 [Output exports](keeper-composition-exports.md) select final fields while retaining
 original results and failure evidence. Publish a reusable Skill separately with

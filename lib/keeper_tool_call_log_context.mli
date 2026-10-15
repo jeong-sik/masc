@@ -65,6 +65,11 @@ val get_turn_context_record :
   unit ->
   turn_context
 
+val empty_turn_context : turn_context
+(** The all-[None] record a fresh cell starts with. Composers that must
+    substitute one missing field of an absent context build on this instead
+    of minting a partial record by hand. *)
+
 val get_turn_context :
   cell:cell ->
   unit ->

@@ -57,7 +57,7 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
         ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~parent_invocation ~meta
         ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell ()) in
       let produced = ref None in
-      let dispatch ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input =
+      let dispatch ?launch_replay:_ ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input () =
         let execution = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
             ~config ~meta ~args:input in
         let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())

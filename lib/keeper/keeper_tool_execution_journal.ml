@@ -26,7 +26,17 @@ type completed =
   }
 
 type recheck = { execution_id : Ids.Execution_id.t; tool_use_id : string }
-type replay = Dispatch | Reuse_completed of completed | Recheck_job_result of recheck
+type launch_invocation = { trace_id : string; turn_ref : Ids.Turn_ref.t }
+type recheck_launch =
+  { execution_id : Ids.Execution_id.t
+  ; tool_use_id : string
+  ; invocation : launch_invocation
+  }
+type replay =
+  | Dispatch
+  | Reuse_completed of completed
+  | Recheck_job_result of recheck
+  | Recheck_launch of recheck_launch
 
 type error =
   | Invalid_source of string
@@ -256,7 +266,8 @@ type binding = {request_id : string; generation : int}
 type occurrence =
   { node_id : Plan.Node_id.t; tool_name : string; input : Yojson.Safe.t;
     input_sha : string; owner : binding; sequence : int;
-    execution_id : Ids.Execution_id.t; tool_use_id : string; readonly : bool }
+    execution_id : Ids.Execution_id.t; tool_use_id : string; readonly : bool;
+    launch_invocation : launch_invocation option }
 type node_record =
   | Attempting of occurrence
   | Settled of occurrence * completed * Tool_result.failure_effect_disposition option
@@ -284,19 +295,29 @@ let binding_of_json json =
 let same_binding a b = String.equal a.request_id b.request_id && a.generation = b.generation
 let same_owner a b = match a, b with None, None -> true | Some a, Some b -> same_binding a b | _ -> false
 let occurrence_of_record = function Attempting occurrence | Settled (occurrence, _, _, _) -> occurrence
+let launch_invocation_json invocation =
+  `Assoc ["trace_id", `String invocation.trace_id; "turn_ref", `String (Ids.Turn_ref.to_string invocation.turn_ref)]
+let launch_invocation_of_json json =
+  let fields = object_fields ["trace_id"; "turn_ref"] json in
+  let trace_id = string (field "trace_id" fields) in
+  match Ids.Turn_ref.of_string (string (field "turn_ref" fields)) with
+  | Some turn_ref when exact_name trace_id -> {trace_id; turn_ref}
+  | Some _ | None -> refuse "invalid launch invocation identity"
 let occurrence_json occurrence =
   `Assoc ["node_id", `String (Plan.Node_id.to_string occurrence.node_id); "tool_name", `String occurrence.tool_name;
     "input", occurrence.input; "input_sha", `String occurrence.input_sha; "owner", binding_json occurrence.owner;
     "sequence", `Int occurrence.sequence; "execution_id", Ids.Execution_id.to_yojson occurrence.execution_id;
-    "tool_use_id", `String occurrence.tool_use_id; "readonly", `Bool occurrence.readonly]
+    "tool_use_id", `String occurrence.tool_use_id; "readonly", `Bool occurrence.readonly;
+    "launch_invocation", option_json launch_invocation_json occurrence.launch_invocation]
 let occurrence_of_json json =
-  let fields = object_fields ["node_id"; "tool_name"; "input"; "input_sha"; "owner"; "sequence"; "execution_id"; "tool_use_id"; "readonly"] json in
+  let fields = object_fields ["node_id"; "tool_name"; "input"; "input_sha"; "owner"; "sequence"; "execution_id"; "tool_use_id"; "readonly"; "launch_invocation"] json in
   let node_id = match Plan.Node_id.make (string (field "node_id" fields)) with Ok id -> id | Error _ -> refuse "invalid node identity" in
   let execution_id = match Ids.Execution_id.of_yojson (field "execution_id" fields) with Ok id -> id | Error detail -> refuse detail in
   let occurrence = {node_id; execution_id; tool_name = string (field "tool_name" fields);
     input = field "input" fields; input_sha = string (field "input_sha" fields);
     owner = binding_of_json (field "owner" fields); sequence = integer (field "sequence" fields);
-    tool_use_id = string (field "tool_use_id" fields); readonly = bool (field "readonly" fields)} in
+    tool_use_id = string (field "tool_use_id" fields); readonly = bool (field "readonly" fields);
+    launch_invocation = optional launch_invocation_of_json (field "launch_invocation" fields)} in
   require (exact_name occurrence.tool_name && exact_name occurrence.tool_use_id
     && exact_name (Ids.Execution_id.to_string execution_id) && occurrence.sequence > 0) "invalid occurrence identity";
   require (String.equal occurrence.input_sha (json_sha occurrence.input)) "input fingerprint mismatch";
@@ -345,6 +366,19 @@ let valid_job_wait occurrence result phase job_id =
   && phase = Some Tool_result.Proven_pre_effect
   && (match result with Tool_result.Deferred _ -> true | Completed _ | Failed _ -> false)
 
+let owned_job_launch occurrence =
+  match Tool_schemas_owned_job.find_definition occurrence.tool_name with
+  | Some {action=Tool_schemas_owned_job.Start;_} -> true
+  | Some {action=(Tool_schemas_owned_job.Status | Cancel | Read_result);_} | None -> false
+
+(* A launch leaf replays only through the exact invocation identity its
+   durable occurrence recorded: re-calling with it makes the owned-job
+   invocation binding return Existing, never a replacement launch. Without
+   the recorded identity the fail-closed rule below still refuses replay. *)
+let recheck_launch_for occurrence = match occurrence.launch_invocation with
+  | Some invocation -> Some {execution_id=occurrence.execution_id; tool_use_id=occurrence.tool_use_id; invocation}
+  | None -> None
+
 let replay_for binding node_id = function
   | None -> Ok Dispatch
   | Some (Settled (_, ({result = Tool_result.Completed _; _} as completed), _, _)) -> Ok (Reuse_completed completed)
@@ -359,7 +393,20 @@ let replay_for binding node_id = function
       (match result_read_job occurrence with
        | Some _ -> Ok (Recheck_job_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
        | None -> Ok Dispatch)
-  | Some (Attempting _ | Settled _) -> Error (Replay_not_proven node_id)
+  | Some (Attempting occurrence) when owned_job_launch occurrence ->
+      (match recheck_launch_for occurrence with
+       | Some replay -> Ok (Recheck_launch replay)
+       | None -> Error (Replay_not_proven node_id))
+  | Some (Settled (occurrence, {result = Tool_result.Failed _; _}, Some Tool_result.Effect_outcome_unknown, _))
+      when owned_job_launch occurrence ->
+      (match recheck_launch_for occurrence with
+       | Some replay -> Ok (Recheck_launch replay)
+       | None -> Error (Replay_not_proven node_id))
+  | Some (Attempting _)
+  | Some (Settled (_, {result=(Tool_result.Deferred _ | Tool_result.Failed _);_},
+      (Some (Tool_result.Proven_pre_effect | Tool_result.Proven_post_effect
+        | Tool_result.Effect_outcome_unknown) | None), _)) ->
+      Error (Replay_not_proven node_id)
 
 let decode_state bytes = decode (fun () ->
   require (bytes <> "" && bytes.[String.length bytes - 1] = '\n') "missing or incomplete journal identity";
@@ -407,10 +454,15 @@ let decode_state bytes = decode (fun () ->
           | Ok (Recheck_job_result stored) -> occurrence.readonly
               && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
               && occurrence.tool_use_id = stored.tool_use_id
+          | Ok (Recheck_launch stored) -> owned_job_launch occurrence
+              && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
+              && occurrence.tool_use_id = stored.tool_use_id
+              && occurrence.launch_invocation = Some stored.invocation
           | Ok (Reuse_completed _) | Error _ -> false) "unproven replay event";
         Attempting occurrence)
       else (
-        require (match prior with Some (Attempting current) -> same_occurrence current occurrence | _ -> false) "settlement without exact attempt";
+        require (match prior with Some (Attempting current) -> same_occurrence current occurrence
+                | Some (Settled _) | None -> false) "settlement without exact attempt";
         let completed = completed_of_json (field "completed" fields) in
         require (Ids.Execution_id.equal completed.execution_id occurrence.execution_id && completed.tool_use_id = occurrence.tool_use_id
           && String.equal (Tool_result.tool_name completed.result) occurrence.tool_name) "settlement identity mismatch";
@@ -544,7 +596,11 @@ let prepare ~base_path immutable_source = filesystem (fun () ->
   let existing = strict_read ~root path in
   let* absent = match existing with
     | Error Missing_journal -> Ok true
-    | Error error -> Error error
+    | Error (Invalid_source _ | Unreadable_journal _ | Corrupt_journal _ | Source_conflict
+        | Queued_request_rejected _ | Prior_owner_not_terminal _ | Ownership_changed
+        | Node_identity_conflict _ | Replay_not_proven _ | Attempt_conflict _ | Plan_identity_conflict
+        | Draft_unavailable _ | Invalid_result _ | Invalid_continuation_marker _
+        | Persistence_failed _ as error) -> Error error
     | Ok state -> let* () = check_source journal state in Ok false in
   let callback bytes =
     match validate_owned_path ~root ~path ~create:false with
@@ -732,7 +788,8 @@ let exact_waiting_jobs ~expected_owner nodes job_ids =
     | Settled (occurrence, completed, phase, Some job_id)
         when same_binding occurrence.owner expected_owner
           && valid_job_wait occurrence completed.result phase job_id -> Ok (job_id :: ids)
-    | Attempting _ | Settled _ ->
+    | Attempting _
+    | Settled (_, {result=(Tool_result.Completed _ | Tool_result.Deferred _ | Tool_result.Failed _);_}, _, _) ->
       Error (Invalid_result "waiting owner has an unsettled or non-job-wait journal node")) nodes (Ok []) in
   let recorded = normalize_job_ids recorded in
   if recorded = [] || recorded <> normalize_job_ids job_ids
@@ -762,6 +819,9 @@ let prior_owned_job_wait journal prior_owners =
           reason="predecessor terminal proof has an active status"})
   in read [] prior_owners
 
+let launch_replay_proven occurrence =
+  owned_job_launch occurrence && Option.is_some occurrence.launch_invocation
+
 let recoverable_lost_nodes nodes job_ids =
   let* recorded_jobs = Nodes.fold (fun _ record prior ->
     let* jobs = prior in
@@ -771,10 +831,17 @@ let recoverable_lost_nodes nodes job_ids =
       | Settled (_, {result=Tool_result.Completed _;_}, _, None) -> true
       | Settled (occurrence, completed, phase, Some job_id) ->
         valid_job_wait occurrence completed.result phase job_id
-      | Attempting occurrence -> occurrence.readonly
+      | Attempting occurrence ->
+        occurrence.readonly || launch_replay_proven occurrence
       | Settled (occurrence, {result=Tool_result.Failed _;_},
-          Some Tool_result.Proven_pre_effect, None) -> occurrence.readonly
-      | Settled _ -> false in
+          Some Tool_result.Proven_pre_effect, None) ->
+        occurrence.readonly || launch_replay_proven occurrence
+      | Settled (occurrence, {result=Tool_result.Failed _;_},
+          Some Tool_result.Effect_outcome_unknown, _) ->
+        launch_replay_proven occurrence
+      | Settled (_, {result=(Tool_result.Deferred _ | Tool_result.Failed _);_},
+          (Some (Tool_result.Proven_pre_effect | Tool_result.Proven_post_effect
+            | Tool_result.Effect_outcome_unknown) | None), None) -> false in
     if not replay_proven then Error (Invalid_result
         "lost continuation has a deferred or unproven node that cannot replay")
     else Ok (Option.to_list job @ jobs)) nodes (Ok []) in
@@ -792,7 +859,11 @@ let waiting_continuation journal = filesystem (fun () ->
     match Async.load_canonical_durable_terminal ~base_path:journal.base_path
         ~caller:journal.immutable_source.keeper_name expected_owner.request_id with
     | Error (Async.Canonical_terminal_runtime_active _ | Canonical_terminal_nonterminal _) -> Ok None
-    | Error error -> Error (Prior_owner_not_terminal
+    | Error (Async.Canonical_terminal_absent | Async.Canonical_terminal_unreadable _
+        | Async.Canonical_terminal_access_rejected _
+        | Async.Canonical_terminal_publication_ambiguous _
+        | Async.Canonical_terminal_noncanonical_location _ as error) ->
+      Error (Prior_owner_not_terminal
         {request_id=expected_owner.request_id;reason=Async.canonical_terminal_error_to_string error})
     | Ok proof ->
       let entry = Async.durable_terminal_entry proof in
@@ -896,7 +967,11 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
         let* () = check_source journal state in
         match Async.load_canonical_durable_terminal ~base_path ~caller:marker.keeper_name marker.request_id with
         | Error (Async.Canonical_terminal_runtime_active _ | Canonical_terminal_nonterminal _) -> Ok Still_waiting
-        | Error error -> Error (Prior_owner_not_terminal
+        | Error (Async.Canonical_terminal_absent | Async.Canonical_terminal_unreadable _
+            | Async.Canonical_terminal_access_rejected _
+            | Async.Canonical_terminal_publication_ambiguous _
+            | Async.Canonical_terminal_noncanonical_location _ as error) ->
+          Error (Prior_owner_not_terminal
             {request_id=marker.request_id;reason=Async.canonical_terminal_error_to_string error})
         | Ok proof ->
           let entry = Async.durable_terminal_entry proof in
@@ -919,7 +994,9 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
             | Async.Waiting_for_owned_jobs _ | Lost _ ->
               let* candidate = waiting_continuation journal in
               (match candidate with
-               | None when (match entry.status with Async.Lost _ -> true | _ -> false) -> retire ()
+               | None when (match entry.status with Async.Lost _ -> true
+                            | Queued | Running | Cancelling _ | Cancelled _
+                            | Persistence_failed _ | Waiting_for_owned_jobs _ | Done _ -> false) -> retire ()
                | None -> Error Ownership_changed
                | Some continuation when continuation_request_id continuation <> marker.request_id -> Error Ownership_changed
                | Some continuation ->
@@ -933,14 +1010,18 @@ let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
   let report = List.fold_left (fun report name ->
     match inspect name with
     | Ok Lock_infrastructure -> report
-    | outcome ->
+    | Ok (Ready continuation) ->
       let report = {report with inspected=report.inspected+1} in
-      match outcome with
-      | Ok (Ready continuation) -> {report with ready=continuation :: report.ready}
-      | Ok Still_waiting -> {report with waiting=report.waiting+1}
-      | Ok Retired -> {report with retired=report.retired+1}
-      | Ok Lock_infrastructure -> report
-      | Error error -> {report with failures=(name,error) :: report.failures}) empty names in
+      {report with ready=continuation :: report.ready}
+    | Ok Still_waiting ->
+      let report = {report with inspected=report.inspected+1} in
+      {report with waiting=report.waiting+1}
+    | Ok Retired ->
+      let report = {report with inspected=report.inspected+1} in
+      {report with retired=report.retired+1}
+    | Error error ->
+      let report = {report with inspected=report.inspected+1} in
+      {report with failures=(name,error) :: report.failures}) empty names in
   Ok {report with ready=List.rev report.ready;failures=List.rev report.failures})
 
 let pending_continuations ~base_path =
@@ -971,22 +1052,26 @@ let lookup (worker : worker) ~node_id ~tool_name ~input =
   update_existing worker.journal (fun state -> None,
     let* record = checked_node worker state ~node_id ~tool_name ~input in replay_for worker.binding node_id record)
 
-let begin_attempt (worker : worker) ~node_id ~tool_name ~input ~execution_id ~tool_use_id ~readonly =
+let begin_attempt (worker : worker) ~node_id ~tool_name ~input ~execution_id ~tool_use_id ~readonly ?launch_invocation () =
   update_existing worker.journal (fun state ->
     let decision =
       let* record = checked_node worker state ~node_id ~tool_name ~input in
       let* replay = replay_for worker.binding node_id record in
       match replay with
       | Reuse_completed _ -> Error (Attempt_conflict node_id)
-      | Dispatch | Recheck_job_result _ ->
+      | Dispatch | Recheck_job_result _ | Recheck_launch _ ->
         let* () = match replay with
           | Recheck_job_result stored when not readonly
               || not (Ids.Execution_id.equal execution_id stored.execution_id)
               || tool_use_id <> stored.tool_use_id -> Error (Attempt_conflict node_id)
-          | Dispatch | Reuse_completed _ | Recheck_job_result _ -> Ok () in
+          | Recheck_launch stored when readonly
+              || not (Ids.Execution_id.equal execution_id stored.execution_id)
+              || tool_use_id <> stored.tool_use_id
+              || launch_invocation <> Some stored.invocation -> Error (Attempt_conflict node_id)
+          | Dispatch | Reuse_completed _ | Recheck_job_result _ | Recheck_launch _ -> Ok () in
         if not (exact_name tool_use_id && exact_name (Ids.Execution_id.to_string execution_id)) then Error (Invalid_result "invalid execution occurrence") else
         let sequence = match record with None -> 1 | Some record -> (occurrence_of_record record).sequence + 1 in
-        Ok {node_id; tool_name; input; input_sha = json_sha input; owner = worker.binding; sequence; execution_id; tool_use_id; readonly} in
+        Ok {node_id; tool_name; input; input_sha = json_sha input; owner = worker.binding; sequence; execution_id; tool_use_id; readonly; launch_invocation} in
     match decision with
     | Error error -> None, Error error
     | Ok occurrence -> Some (row (attempt_event worker.journal.source_sha occurrence)), Ok {worker; occurrence})

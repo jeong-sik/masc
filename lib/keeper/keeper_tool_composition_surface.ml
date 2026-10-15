@@ -668,9 +668,18 @@ let async_worker_result
            | Tool_result.Completed _,_,None -> collect reversed rest
            | Tool_result.Deferred _,Some (Keeper_tool_execution.Owned_job_result_wait id),None ->
              collect (id :: reversed) rest
-           | _ -> None) in
+           | (Tool_result.Completed _ | Tool_result.Deferred _ | Tool_result.Failed _),
+             (Some (Keeper_tool_execution.Generic_deferred
+                   | Keeper_tool_execution.External_effect_deferred _
+                   | Keeper_tool_execution.Owned_job_result_wait _) | None),
+             (Some _ | None) -> None) in
       collect [] settled
-    | (None | Some _), (Ok _ | Error _) -> None in
+    | (None | Some _), (Ok _ | Error {cause=(Executor.Run_journal_rejected _
+        | Executor.Plan_execution_failed _
+        | Executor.Tool_did_not_complete {deferred_kind=(Some (Keeper_tool_execution.Generic_deferred
+            | Keeper_tool_execution.External_effect_deferred _
+            | Keeper_tool_execution.Owned_job_result_wait _) | None);_}
+        | Executor.Node_observation_failed _ | Executor.Outer_completion_mismatch _);_}) -> None in
   match waiting_job_ids with
   | None -> Keeper_msg_async.worker_finished result
   | Some job_ids ->

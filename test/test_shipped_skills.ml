@@ -57,7 +57,7 @@ let instantiate name args =
    plan with a stub dispatch goes through that check for every node. *)
 let run_plan plan ~answer =
   let calls = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
     calls := (Plan.Node_id.to_string node.Plan.id, input) :: !calls;
     Executor.dispatch_result
       (Tool_result.make_ok

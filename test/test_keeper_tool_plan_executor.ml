@@ -121,7 +121,7 @@ let test_schedule_and_parallel_dataflow () =
   let dispatched = ref [] in
   let execution_ids = ref [] in
   let both_started, release = Eio.Promise.create () in
-  let dispatch ~tool_use_id ~node ~descriptor:_ ~schedule:_ ~input =
+  let dispatch ?launch_replay:_ ~tool_use_id ~node ~descriptor:_ ~schedule:_ ~input () =
     let name = node_name node in
     dispatched := (name, tool_use_id) :: !dispatched;
     if String.equal name "left" || String.equal name "right"
@@ -185,7 +185,7 @@ let test_failed_sibling_stops_downstream_after_batch_settlement () =
   Eio_main.run @@ fun _env ->
   let plan = fixture () in
   let called = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     let name = node_name node in
     called := !called @ [ name ];
     if String.equal name "left"
@@ -234,7 +234,7 @@ let test_output_validation_precedes_node_observation () =
   let plan = fixture () in
   let called = ref [] in
   let observed = ref None in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     called := node_name node :: !called;
     Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data:`Null)
   in
@@ -262,7 +262,7 @@ let test_observation_failure_settles_siblings_and_stops_downstream () =
   Eio_main.run @@ fun _env ->
   let plan = fixture () in
   let observed = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     Executor.dispatch_result
       (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node))
   in
@@ -303,7 +303,7 @@ let test_dispatch_exception_preserves_pre_minted_tool_identity () =
   let plan = fixture () in
   let dispatched_id = ref None in
   let observed_id = ref None in
-  let dispatch ~tool_use_id ~node:_ ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id ~node:_ ~descriptor:_ ~schedule:_ ~input:_ () =
     dispatched_id := Some tool_use_id;
     failwith "dispatch exploded before returning evidence"
   in
@@ -347,7 +347,7 @@ let test_deferred_effect_evidence_is_not_invented () =
   Eio_main.run @@ fun _env ->
   List.iter (fun (evidence, expected) ->
     let plan = fixture () in
-    let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
       if String.equal (node_name node) "left" then
         let result = Tool_result.make_deferred ~tool_name:"left" ~start_time:(Tool_timing.start ()) () in
         let execution = Masc.Keeper_tool_execution.of_tool_result
@@ -372,7 +372,7 @@ let test_deferred_effect_evidence_is_not_invented () =
 let test_deferred_cause_does_not_mask_unknown_sibling () =
   Eio_main.run @@ fun _env ->
   let plan = fixture () in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     match node_name node with
     | "left" ->
       Executor.dispatch_result
@@ -416,7 +416,7 @@ let test_malformed_declared_output_stops_before_consumer () =
   Eio_main.run @@ fun _env ->
   let plan = fixture () in
   let called = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     called := node_name node :: !called;
     Executor.dispatch_result
       (completed
@@ -490,7 +490,7 @@ let test_typed_output_flows_to_consumer_dispatch_input () =
       fail ("Read -> Grep executor plan was rejected: " ^ Plan.error_to_string error)
   in
   let captured_grep_input = ref None in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
     match node_name node with
     | "read" ->
       Executor.dispatch_result
@@ -578,7 +578,7 @@ let json_pointer value =
   | Error _ -> failf "unexpected invalid JSON pointer: %S" value
 ;;
 
-let never_dispatched ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+let never_dispatched ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
   failf "node %s ran although a later node input was invalid" (node_name node)
 ;;
 
@@ -743,7 +743,7 @@ let test_output_value_outside_enum_is_refused_when_its_node_runs () =
     | Error error -> fail ("Read -> search plan was rejected: " ^ Plan.error_to_string error)
   in
   let dispatched = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     dispatched := node_name node :: !dispatched;
     match node_name node with
     | "read" ->
@@ -853,7 +853,7 @@ let test_ready_wave_starts_dependent_before_unrelated_release () =
   let events = ref [] in
   let log event = events := !events @ [ event ] in
   let release_b, resolve_release_b = Eio.Promise.create () in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     match node_name node with
     | "b" ->
       Eio.Promise.await release_b;
@@ -916,7 +916,7 @@ let test_continue_independent_preserves_unrelated_branch () =
   Eio_main.run @@ fun _env ->
   let plan = independent_branch_fixture () in
   let called = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     let name = node_name node in
     called := !called @ [ name ];
     if String.equal name "b"
@@ -1010,7 +1010,7 @@ let test_serial_failure_stops_successor_fail_fast () =
   Eio_main.run @@ fun _env ->
   let plan = serial_chain_failure_fixture ~branch_failure_policy:Plan.Fail_fast in
   let called = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     let name = node_name node in
     called := !called @ [ name ];
     match name with
@@ -1057,7 +1057,7 @@ let test_serial_failure_stops_successor_continue_independent () =
     serial_chain_failure_fixture ~branch_failure_policy:Plan.Continue_independent
   in
   let called = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     let name = node_name node in
     called := !called @ [ name ];
     match name with
@@ -1105,7 +1105,7 @@ let test_serial_nodes_run_alone_in_schedule_order () =
   let active = Atomic.make 0 in
   let max_active = Atomic.make 0 in
   let entered = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     let name = node_name node in
     entered := !entered @ [ name ];
     let current = Atomic.fetch_and_add active 1 + 1 in
@@ -1294,7 +1294,7 @@ let test_export_success_preserves_durable_original () =
   with_export_base @@ fun base_path ->
   let plan = exported_read_fixture () in
   let calls = ref 0 in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     incr calls;
     Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data:read_export_data)
   in
@@ -1363,7 +1363,7 @@ let test_export_failure_preserves_independent_branch () =
     | Error error -> fail (Plan.error_to_string error)
   in
   let dispatches = ref 0 in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     incr dispatches;
     if String.equal (node_name node) "b" then
       Executor.dispatch_result ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
@@ -1461,7 +1461,7 @@ let test_export_failure_preserves_independent_branch () =
 
 let run_exported_read ~base_path ?(pointer = "/path") ?(retained = []) () =
   let plan = exported_read_fixture ~pointer () in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     completed ~tool_name:node.Plan.tool_name ~data:read_export_data
     |> Tool_result.with_retained_artifacts retained
     |> Executor.dispatch_result
@@ -1600,7 +1600,7 @@ let test_export_storage_failure_does_not_advertise_result () =
   Fun.protect ~finally:(fun () -> Sys.remove base_path) @@ fun () ->
   let plan = exported_read_fixture () in
   let calls = ref 0 in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     incr calls;
     Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data:read_export_data)
   in

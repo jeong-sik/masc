@@ -2,8 +2,8 @@
 
 > Current package version: v0.56.0
 > Latest changelog entry: v0.56.0 (2026-10-14)
-> Latest published GitHub release: v0.51.0 (2026-10-11)
-> Updated: 2026-10-14
+> Latest published GitHub release: v0.56.0 (2026-10-14)
+> Updated: 2026-10-15
 
 A planning view, not a release promise. The operating model behind it
 (labels, priority, pull-request and release rules) is
@@ -21,6 +21,45 @@ historical feature-train rules are
 | Supporting | Keepers, sandboxes, the Gate | Advanced paths; behaviour depends on runtime and configuration |
 | Maintained | Dashboard | Kept building, type-checked, and truthful. New operator features land in the TUI first |
 | Deferred | Extraction, cluster mode, broad architecture cleanup | Visible, not scheduled |
+
+## Release train
+
+State read on 2026-10-15 02:3xZ from `gh release list`, the main branch, and
+the release ledger posts. The cut date holds and scope varies.
+
+| Version | Published (UTC) | Note |
+|---|---|---|
+| v0.52.0 | 2026-10-12 06:54 | |
+| v0.53.0 | 2026-10-13 10:32 | |
+| v0.54.0 | 2026-10-13 23:50 | |
+| v0.55.0 | 2026-10-14 06:18 | |
+| v0.56.0 | 2026-10-14 16:36 | latest |
+| v0.57.0 | not cut | 30 commits on `main` since the v0.56.0 tag |
+
+v0.57.0 has no `release/v0.57.0` branch yet. What stands between `main` and the
+cut:
+
+- **`main` is not type-clean.** `dune build @check` fails on four test files
+  that build a failure record without `fenced_empty_turn_runtime`
+  (`test_server_runtime_bootstrap`, `test_runtime_blocker_classification`,
+  `test_keeper_terminal_reason_typed`, `test_keeper_registry_provenance`). The
+  lib-only `Main minimal build` does not see it. A small repair PR comes
+  first.
+- **A full regression green on the tip.** The last green full run is on a head
+  three shared-input commits behind the tip, so it does not stand for the
+  tip.
+- **The stacked-PR queue.** Stack #43146 (50 layers, with draft and
+  changes-requested layers mixed in) is being split: the ready run at the
+  bottom lands first, and the authors re-stack the rest.
+- **Carried in from the v0.56.0 cycle.** Promote `masc_wiki_lint` out of
+  Experimental; a conversion tool for binding files written by v0.48.0 and
+  earlier (#42868); `merge-guard` and `approve-guard` support for
+  release-candidate PRs whose base is `release/*`; the composition completion
+  and Ask-path delivery work.
+
+The cut order is unchanged: freeze, `release/v0.57.0`, bump and notes, RC, an
+independent release approval bound to the head and the RC run, tag, publish
+check.
 
 ## Where the backlog comes from
 

@@ -194,12 +194,29 @@ def main():
                 "actual exact Skill admission differs from assigned arm")
         calls = read(directory / "tool-calls.json")
         stdout_ids = receipt["verified_stdout_read_execution_ids"]
-        require(stdout_ids and set(stdout_ids) <= set(turn["execution_ids"]),
-                "the final digest needs an actual complete stdout read in this original turn")
+        require(stdout_ids, "the final digest needs an actual complete stdout read")
         stdout_rows = [row for row in calls if row.get("execution_id") in stdout_ids]
         require(all(row["tool"] == "keeper_artifact_read" and
-                    row["input"]["sha256"] == receipt["objective"]["stdout_sha256"] for row in stdout_rows),
+                    row["input"]["sha256"] == receipt["objective"]["stdout_sha256"] and
+                    row["keeper_turn_id"] == turn["absolute_turn"] for row in stdout_rows),
                 "copied result metadata must not stand in for physical stdout reading")
+        if entry["strategy"] == "direct":
+            require(set(stdout_ids) <= set(turn["execution_ids"]) and
+                    all(row.get("composition_node_id") is None for row in stdout_rows),
+                    "direct stdout read escaped the exact SDK turn")
+        else:
+            parents = [row for row in calls if row["tool"] == "keeper_composition_run" and
+                       row.get("execution_id") in turn["execution_ids"]]
+            require(len(parents) == 1, "nested stdout needs its unique original SDK parent")
+            nodes = read(directory / "actual-composition-execution.json")["nodes"]
+            require(all(row["parent_tool_use_id"] == parents[0]["tool_use_id"] and
+                        any(node["node_id"] == row["composition_node_id"] and
+                            node["execution_id"] == row["execution_id"] and
+                            node["tool_name"] == row["tool"] and node["input"] == row["input"]
+                            for node in nodes) for row in stdout_rows),
+                    "nested physical stdout lost its canonical execution/SDK parent join")
+            require(not (set(stdout_ids) & set(turn["execution_ids"])),
+                    "this fixture must exercise child IDs outside the outer SDK trajectory")
         raw_records = read(directory / "exact-run-records.json")
         require(raw_records and all(record["worker_run_id"] == turn["raw_trace_run_ref"]["worker_run_id"]
                                     for record in raw_records), "tool evidence escaped the exact SDK run")

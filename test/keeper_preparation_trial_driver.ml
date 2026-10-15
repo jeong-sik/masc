@@ -384,39 +384,66 @@ let decode_evidence f =
   try Some (f ()) with
   | Failure _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
-let actual_member ~fixture ~(turn : Turn_record.t) row =
+let original_turn_source ~fixture ~(turn : Turn_record.t) row =
   field "task_id" row=field "task_id" fixture && field "trace_id" row=field "trace_id" fixture &&
-  List.exists (fun id -> field "execution_id" row=`String (Ids.Execution_id.to_string id)) turn.execution_ids &&
+  field "keeper_turn_id" row=`Int turn.absolute_turn &&
   match Tool_result.recorded_call_outcome row with
   | Recorded_succeeded -> true
   | Recorded_deferred | Recorded_failed | Recorded_unsettled | Recorded_malformed -> false
 
-let full_stdout_reads ~base ~fixture ~turn rows =
+let sdk_member ~fixture ~(turn : Turn_record.t) row =
+  original_turn_source ~fixture ~turn row &&
+  List.exists (fun id -> field "execution_id" row=`String (Ids.Execution_id.to_string id)) turn.execution_ids
+
+let exact_sdk_reply ~base ~raw_records parent =
+  let replies = List.filter_map (fun (record : Agent_core.Raw_trace.record) ->
+    match record.record_type, record.tool_use_id, record.tool_name, record.tool_error with
+    | Tool_execution_finished, Some id, Some name, Some false
+      when field "tool_use_id" parent=`String id && field "tool" parent=`String name -> record.tool_result
+    | (Run_started | Assistant_block | Tool_execution_started | Tool_execution_finished
+      | Native_tool_started | Native_tool_finished | Hook_invoked | Run_finished), _, _, _ -> None) raw_records in
+  match replies with
+  | [bytes] -> document ~base bytes
+  | [] | _ :: _ -> failwith "no unique original SDK run reply"
+
+let stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row =
+  if field "composition_node_id" row=`Null then
+    sdk_member ~fixture ~turn row && field "parent_tool_use_id" row=`Null
+  else
+    let parents = List.filter (fun parent -> sdk_member ~fixture ~turn parent &&
+      field "tool_use_id" parent=field "parent_tool_use_id" row) rows in
+    match parents with
+    | [parent] -> decode_evidence (fun () ->
+      let reply = exact_sdk_reply ~base ~raw_records parent in
+      require (field "composition_run_id" reply=field "composition_run_id" row)
+        "physical stdout belongs to a different composition";
+      let execution = document ~base (blob_bytes base (reference (field "execution_artifact" reply))) in
+      List.exists (fun node ->
+        field "node_id" node=field "composition_node_id" row &&
+        field "execution_id" node=field "execution_id" row &&
+        field "tool_name" node=field "tool" row &&
+        Yojson.Safe.equal (field "input" node) (field "input" row)) (field "nodes" execution |> to_list)) = Some true
+    | [] | _ :: _ -> false
+
+let full_stdout_reads ~base ~fixture ~turn ~raw_records rows =
   List.filter (fun row ->
-    actual_member ~fixture ~turn row && field "tool" row=`String "keeper_artifact_read" &&
+    original_turn_source ~fixture ~turn row && field "tool" row=`String "keeper_artifact_read" &&
     field "sha256" (field "input" row)=field "expected_stdout_sha256" fixture &&
     decode_evidence (fun () ->
       let page = row_document ~base row in
       field "offset" page=`Int 0 && field "eof" page=`Bool true &&
-      sha (string "content" page)=string "expected_stdout_sha256" fixture) = Some true) rows
+      sha (string "content" page)=string "expected_stdout_sha256" fixture) = Some true &&
+    stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row) rows
 
 let nested_execution_proven ~base ~fixture ~turn ~skill_reference
     ~(scope : Keeper_skill_activation_ledger.nested_composition_scope) ~raw_records rows stdout_rows =
   let parents = List.filter (fun row ->
-    actual_member ~fixture ~turn row &&
+    sdk_member ~fixture ~turn row &&
     field "tool" row=`String Keeper_composition_draft.run_tool_name &&
     field "tool_use_id" row=`String scope.Keeper_skill_activation_ledger.parent_tool_use_id) rows in
   match parents with
   | [parent] -> decode_evidence (fun () ->
-    let replies = List.filter_map (fun (record : Agent_core.Raw_trace.record) ->
-      match record.record_type, record.tool_use_id, record.tool_name, record.tool_error with
-      | Tool_execution_finished, Some id, Some name, Some false
-        when id=scope.parent_tool_use_id && name=Keeper_composition_draft.run_tool_name -> record.tool_result
-      | (Run_started | Assistant_block | Tool_execution_started | Tool_execution_finished
-        | Native_tool_started | Native_tool_finished | Hook_invoked | Run_finished), _, _, _ -> None) raw_records in
-    let run = match replies with
-      | [bytes] -> document ~base bytes
-      | [] | _ :: _ -> failwith "no unique original SDK run reply" in
+    let run = exact_sdk_reply ~base ~raw_records parent in
     require (field "composition_run_id" run=`String scope.composition_run_id) "activation run mismatch";
     let execution = document ~base (blob_bytes base (reference (field "execution_artifact" run))) in
     let draft_sha = string "sha256" (field "input" parent) in
@@ -838,7 +865,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     | None -> [] | Some ledger -> Keeper_skill_activation_ledger.activations ledger in
   json (Filename.concat attempt_dir "skill-activations.json")
     (`List (List.map Keeper_skill_activation_ledger.activation_to_yojson activations));
-  let stdout_rows = full_stdout_reads ~base ~fixture ~turn rows in
+  let stdout_rows = full_stdout_reads ~base ~fixture ~turn ~raw_records rows in
   let compliant = match strategy,activations with
     | Direct,[] -> List.exists (fun row -> field "composition_node_id" row=`Null) stdout_rows
     | Direct,_ :: _ | Exact_skill,[] -> false

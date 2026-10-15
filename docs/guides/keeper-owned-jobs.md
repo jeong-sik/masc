@@ -122,24 +122,30 @@ observed result with its exact exit code; consumers decide how to handle it.
 An unavailable or corrupt owner journal is a refusal, not a pending result.
 
 Use this result read as a leaf of a prepared async Composition. Its dependent
-nodes wait while independent branches may complete. After the completion
-notification or `keeper_job_status` confirms complete outputs, pass the same draft sha256 and original
-`composition_run_id` as `resume_run_id` to `keeper_composition_run`. The previous
-worker must have canonically settled before another worker owns that run.
+nodes wait while independent branches may complete. The server's maintenance
+pulse and durable producer-completion hint can continue the original ready run
+without a new Keeper model turn, subject to current admission and its original
+recorded continuation. A job-completion notification does not require another
+submission. If explicitly continuing a prepared draft, pass the same draft
+sha256 and original `composition_run_id` as `resume_run_id` to
+`keeper_composition_run`. The previous worker must have canonically settled
+before another worker owns that run; an already-advanced owner refuses a stale
+continuation.
 When a prepared async attempt has only producer-owned job waits, its status is
 `waiting_for_dependencies`, with tagged `dependencies` and the execution artifact.
 Owned job entries have `{kind:"owned_job",job_id}`; named Composition result
 entries have `{kind:"composition_result",binding}`.
 The worker has released its scope; the prepared run is still waiting. This
 does not emit a failed composition notification. The original job completion
-notification supplies the result; resumption remains explicit as above.
+notification supplies the result and hints the original continuation supervisor.
 Other failures and unsupported deferrals retain their failure behavior.
 Resuming a waiting run captures its exact previous worker and saved node
 results before admission. A competing resume that advances the owner makes
 that captured candidate stale, including when the competing worker has already
 finished. One job may supply several waiting nodes; each keeps its own occurrence
-identity while the waiting job IDs form a set. These reads and admission do not
-automatically start a continuation on job completion.
+identity while the waiting job IDs form a set. The result read itself submits no
+worker. Only an accepted run's recorded producer wait participates in server
+continuation; a standalone read creates no plan to resume.
 Each prepared worker admission records a separate pending discovery marker
 before it can own the journal or execute a node. Recovery reads this pending
 partition and the exact original journal, request and job records; it can find
@@ -253,14 +259,15 @@ validates the full committed prefix and exact job owner before recovering an
 incomplete final append under the journal lock; complete
 malformed rows remain a refusal, and missing owners are never created. If the canonical
 result cannot be read at intake, the source stays pending and its error remains
-visible; independent sources can continue. These notifications let the Keeper
-resume an original Composition explicitly; they do not start another worker
-automatically.
+visible; independent sources can continue. The durable completion observer can
+hint eligible original continuations immediately. Explicit prepared-draft resume
+uses the same original run and current admission, without replaying launch.
 
 Start, status and cancel use serial admission and return while the isolated
 program runs. Shared mutable workspace claims, remote Docker bind authority
-and effectful draft admission remain separate contracts. This result-read continuation does not
-automatically resume a plan when a container exits. Those remaining contracts are tracked in
+and general effectful draft admission remain separate contracts. A container exit
+alone is insufficient: complete original outputs and an admitted recorded
+continuation are required. Those remaining contracts are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).
 
 ### Waiting for an already submitted named async Composition

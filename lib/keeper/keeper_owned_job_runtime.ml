@@ -195,7 +195,7 @@ let finish ~tool_name ~start_time ~job_id = function
   | Error error -> failure ~job_id ~effect_disposition:Tool_result.Effect_outcome_unknown
       Tool_result.Runtime_failure (Store.error_to_string error)
 
-let handle ~config ~meta ~source_context ~continuation_channel ~tool_use_id ~turn_ref ~trace_id ~name ~args =
+let handle ~config ~meta ~owned_job_replay ~source_context ~continuation_channel ~tool_use_id ~turn_ref ~trace_id ~name ~args =
   let start_time = Tool_timing.start () in
   let invalid message = failure ~effect_disposition:Tool_result.Proven_pre_effect
       Tool_result.Policy_rejection message in
@@ -215,10 +215,13 @@ let handle ~config ~meta ~source_context ~continuation_channel ~tool_use_id ~tur
                   | Some trace_id, Some absolute_turn -> Some (Ids.Turn_ref.make ~trace_id ~absolute_turn)
                   | None, _ | _, None -> None)
              | None, None -> None in
-           let source = Store.
+           let current_source = Store.
              { task_id = Option.bind source_context (fun context -> context.Keeper_tool_call_log_context.task_id)
              ; keeper_turn_id = Option.bind source_context (fun context -> context.Keeper_tool_call_log_context.keeper_turn_id)
              ; turn_ref; tool_use_id; trace_id } in
+           let source = match owned_job_replay with
+             | Some replay -> Invocation.replay_source replay
+             | None -> current_source in
            let prepare job_id =
              let* base_path = Store.canonical_base_path config.Workspace.base_path in
              let* paths = Store.prepare_workspace ~base_path job_id inputs in
@@ -236,29 +239,38 @@ let handle ~config ~meta ~source_context ~continuation_channel ~tool_use_id ~tur
              | Ok record -> finish ~tool_name:name ~start_time ~job_id (launch record) in
            (match Invocation.invocation_of_source source with
             | Error detail -> invalid detail
+            | Ok invocation ->
+           let reservation = match owned_job_replay with
+             | Some replay ->
+                 Invocation.reserve_existing ~base_path:config.base_path ~keeper_name:meta.name
+                   replay ~argv ~inputs |> Result.map (fun prior -> Some (Invocation.Existing prior))
+             | None ->
+                 (match invocation with
+                  | None -> Ok None
+                  | Some invocation ->
+                      Invocation.reserve ~base_path:config.base_path ~keeper_name:meta.name
+                        ~invocation ~source ~argv ~inputs |> Result.map Option.some) in
+           (match reservation with
             | Ok None -> start_new (Store.Job_id.fresh ())
-            | Ok (Some invocation) ->
-                (match Invocation.reserve ~base_path:config.base_path ~keeper_name:meta.name
-                    ~invocation ~source ~argv ~inputs with
-                 | Error error -> failure ?job_id:error.Invocation.job_id
-                     ~effect_disposition:Tool_result.Effect_outcome_unknown
-                     Tool_result.Policy_rejection (Store.error_to_string error.cause)
-                 | Ok (Invocation.Fresh reservation) -> start_new reservation.job_id
-                 | Ok (Invocation.Existing reservation) ->
-                     let job_id = reservation.job_id in
-                     let result =
-                       let* record = Store.load ~base_path:reservation.base_path
-                           ~keeper_name:reservation.keeper_name job_id in
-                       let spec = Backend.specification record.preparation in
-                       if Store.source_to_json record.source <> Store.source_to_json reservation.source
-                          || spec.argv <> argv || record.inputs <> inputs
-                       then Error (Store.Invalid_authority "invocation binding differs from its original job journal")
-                       else match record.phase with
-                         | Store.Prepared when not record.cancel_requested -> launch record
-                         | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
-                         | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _
-                         | Store.Cancelled_unconfirmed_launch -> reconcile record in
-                     finish ~tool_name:name ~start_time ~job_id result)))
+            | Ok (Some (Invocation.Fresh reservation)) -> start_new reservation.job_id
+            | Error error -> failure ?job_id:error.Invocation.job_id
+                ~effect_disposition:Tool_result.Effect_outcome_unknown
+                Tool_result.Policy_rejection (Store.error_to_string error.cause)
+            | Ok (Some (Invocation.Existing reservation)) ->
+              let job_id = reservation.job_id in
+              let result =
+                let* record = Store.load ~base_path:reservation.base_path
+                    ~keeper_name:reservation.keeper_name job_id in
+                let spec = Backend.specification record.preparation in
+                if Store.source_to_json record.source <> Store.source_to_json reservation.source
+                   || spec.argv <> argv || record.inputs <> inputs
+                then Error (Store.Invalid_authority "invocation binding differs from its original job journal")
+                else match record.phase with
+                  | Store.Prepared when not record.cancel_requested -> launch record
+                  | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+                  | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _
+                  | Store.Cancelled_unconfirmed_launch -> reconcile record in
+              finish ~tool_name:name ~start_time ~job_id result)))
   | Some {action=Tool_schemas_owned_job.Read_result;_} ->
       (match job_argument args with
        | Error detail -> invalid detail

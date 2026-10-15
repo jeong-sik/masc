@@ -48,7 +48,8 @@ type completed =
   }
 
 type recheck = { execution_id : Ids.Execution_id.t; tool_use_id : string }
-type launch_invocation = { trace_id : string; turn_ref : Ids.Turn_ref.t }
+type launch_invocation =
+  { trace_id : string; turn_ref : Ids.Turn_ref.t; keeper_turn_id : int option }
 type recheck_launch =
   { execution_id : Ids.Execution_id.t
   ; tool_use_id : string
@@ -421,13 +422,18 @@ let binding_of_json json =
 let same_binding a b = String.equal a.request_id b.request_id && a.generation = b.generation
 let same_owner a b = match a, b with None, None -> true | Some a, Some b -> same_binding a b | _ -> false
 let occurrence_of_record = function Attempting occurrence | Settled (occurrence, _, _, _) -> occurrence
-let launch_invocation_json invocation =
-  `Assoc ["trace_id", `String invocation.trace_id; "turn_ref", `String (Ids.Turn_ref.to_string invocation.turn_ref)]
+let launch_invocation_json (invocation : launch_invocation) =
+  `Assoc ["trace_id", `String invocation.trace_id;
+    "turn_ref", `String (Ids.Turn_ref.to_string invocation.turn_ref);
+    "keeper_turn_id", option_json (fun value -> `Int value) invocation.keeper_turn_id]
 let launch_invocation_of_json json =
-  let fields = object_fields ["trace_id"; "turn_ref"] json in
+  let fields = object_fields ["trace_id"; "turn_ref"; "keeper_turn_id"] json in
+  let keeper_turn_id = optional integer (field "keeper_turn_id" fields) in
+  require (Option.fold ~none:true ~some:(fun value -> value >= 0) keeper_turn_id) "invalid launch keeper turn";
   let trace_id = string (field "trace_id" fields) in
   match Ids.Turn_ref.of_string (string (field "turn_ref" fields)) with
-  | Some turn_ref when exact_name trace_id -> {trace_id; turn_ref}
+  | Some turn_ref when exact_name trace_id
+      && String.equal trace_id (Ids.Turn_ref.trace_id turn_ref) -> {trace_id; turn_ref; keeper_turn_id}
   | Some _ | None -> refuse "invalid launch invocation identity"
 let occurrence_json occurrence =
   `Assoc ["node_id", `String (Plan.Node_id.to_string occurrence.node_id); "tool_name", `String occurrence.tool_name;
@@ -717,6 +723,7 @@ let decode_state bytes = decode (fun () ->
     {source; source_sha; owner = None; prior_owners = []; nodes = Nodes.empty;children=Nodes.empty} events)
 
 let source journal = journal.immutable_source
+let worker_source (worker : worker) = worker.journal.immutable_source
 let path_for ~base_path ~keeper_name ~composition_run_id =
   let root = Common.masc_dir_from_base_path ~base_path in
   let directory = Filename.concat (Filename.concat (Filename.concat root "keeper_msg_requests") "execution_journals") (sha keeper_name) in

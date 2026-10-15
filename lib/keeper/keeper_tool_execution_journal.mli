@@ -56,11 +56,13 @@ type recheck = { execution_id : Ids.Execution_id.t; tool_use_id : string }
 type launch_invocation =
   { trace_id : string
   ; turn_ref : Ids.Turn_ref.t
+  ; keeper_turn_id : int option
   }
 (** Exact invocation identity a launch leaf used when its owned-job binding was
     reserved. A replayed launch must re-call with this identity so the
     invocation binding returns the same job instead of launching a
-    replacement. *)
+    replacement. [keeper_turn_id] preserves the original source snapshot's
+    optional K coordinate; it is not reconstructed from the resuming turn. *)
 
 type recheck_launch =
   { execution_id : Ids.Execution_id.t
@@ -109,6 +111,9 @@ val load
 (** Strict read-only load. Missing/corrupt authority never creates a run. *)
 
 val source : t -> source
+val worker_source : worker -> source
+(** Immutable original source; this getter does not authorize node dispatch. *)
+
 val same_source : source -> source -> bool
 (** Compare serialized immutable coordinates, including sealed recorder facts. *)
 

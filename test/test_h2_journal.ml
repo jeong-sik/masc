@@ -975,7 +975,8 @@ let make_launch_plan () =
   |> require "valid owned launch plan"
 let launch_invocation_fixture absolute_turn =
   { Journal.trace_id = "launch-trace-fixture"
-  ; turn_ref = Ids.Turn_ref.make ~trace_id:"launch-trace-fixture" ~absolute_turn }
+  ; turn_ref = Ids.Turn_ref.make ~trace_id:"launch-trace-fixture" ~absolute_turn
+  ; keeper_turn_id = Some absolute_turn }
 let launch_success (node : Plan.node) =
   Executor.dispatch_result
     (Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())

@@ -17,7 +17,7 @@ on:
           - lane-fusion-container
 
       candidate_sha:
-        description: Exact candidate source SHA (required for preparation-driver target)
+        description: Candidate source SHA (required for preparation driver; optional for macOS runtime)
         type: string
         default: ""
 
@@ -246,12 +246,33 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Select immutable runtime source
+        id: candidate
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          python3 - <<'PYCODE'
+          import os, re
+          candidate = os.environ['CANDIDATE_SHA'] or os.environ['GITHUB_SHA']
+          if re.fullmatch(r'[0-9a-f]{40}', candidate) is None:
+              raise SystemExit('macOS runtime source must be a full candidate SHA')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('sha=' + candidate + '\n')
+          PYCODE
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.candidate.outputs.sha }}
+          persist-credentials: false
       - uses: ./.github/actions/setup-ocaml-toolchain
       - name: Set isolated probe directories
+        env:
+          SOURCE_SHA: ${{ steps.candidate.outputs.sha }}
         run: |
-          echo "PROBE_OUT=$RUNNER_TEMP/masc-macos-arm64-probe" >> "$GITHUB_ENV"
-          echo "PROBE_STAGE=$RUNNER_TEMP/masc-macos-arm64-stage" >> "$GITHUB_ENV"
+          {
+            echo "SOURCE_SHA=$SOURCE_SHA"
+            echo "PROBE_OUT=$RUNNER_TEMP/masc-macos-arm64-probe"
+            echo "PROBE_STAGE=$RUNNER_TEMP/masc-macos-arm64-stage"
+          } >> "$GITHUB_ENV"
       - name: Install native build dependencies
         run: |
           brew install flock gmp libpq openssl@3 zstd
@@ -274,12 +295,16 @@ jobs:
           opam install ./masc.opam --deps-only --locked --with-test --yes
       - name: Build runtime companions
         run: |
+          set -euo pipefail
+          git diff --exit-code HEAD --
           test "$(uname -m)" = arm64
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           scripts/check-version-truth.sh
           opam exec -- dune build --release \
             bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code HEAD --
       - name: Bundle relocatable runtime with release filenames
         run: |
           mkdir -p "$PROBE_OUT"
@@ -289,19 +314,19 @@ jobs:
           cp _build/default/bin/deployment_preflight_helper.exe "$PROBE_OUT/masc-deployment-preflight-helper-macos-arm64"
           cp scripts/check-runtime-deployment-preflight.sh "$PROBE_OUT/masc-check-runtime-deployment-preflight-macos-arm64"
           python3 scripts/package-macos-runtime.py --dist "$PROBE_OUT" \
-            --stage "$PROBE_STAGE" --platform macos-arm64 --source-commit "$GITHUB_SHA"
+            --stage "$PROBE_STAGE" --platform macos-arm64 --source-commit "$SOURCE_SHA"
       - name: Validate packaged identity and record dependencies
         run: |
           set -euo pipefail
           # Identity flags exit before opening a TTY or contacting a server.
           "$PROBE_STAGE/masc-tui" --version | tee "$PROBE_OUT/tui-version.txt"
           "$PROBE_STAGE/masc-tui" --build-commit | tee "$PROBE_OUT/tui-build-commit.txt"
-          test "$(cat "$PROBE_OUT/tui-build-commit.txt")" = "$GITHUB_SHA"
+          test "$(cat "$PROBE_OUT/tui-build-commit.txt")" = "$SOURCE_SHA"
           test -s "$PROBE_OUT/tui-version.txt"
           # Both companions use the same linked dune-build-info version.
           "$PROBE_STAGE/masc" --version > "$PROBE_OUT/server-version.txt"
           cmp "$PROBE_OUT/tui-version.txt" "$PROBE_OUT/server-version.txt"
-          test "$("$PROBE_STAGE/masc" build-commit)" = "$GITHUB_SHA"
+          test "$("$PROBE_STAGE/masc" build-commit)" = "$SOURCE_SHA"
           cp "$PROBE_STAGE/runtime-provenance.json" "$PROBE_OUT/"
           {
             uname -a
@@ -315,9 +340,14 @@ jobs:
             done
           } > "$PROBE_OUT/dependencies.txt"
           python3 - <<'PYCODE'
-          import json, os
+          import json, os, subprocess
           from pathlib import Path
-          receipt = dict(source_commit=os.environ['GITHUB_SHA'], platform='macos-arm64',
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if source != os.environ['SOURCE_SHA']:
+              raise SystemExit('Packaged source identity changed')
+          receipt = dict(source_commit=source,
+                         source_tree=subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+                         workflow_head=os.environ['GITHUB_SHA'], platform='macos-arm64',
                          run_id=os.environ['GITHUB_RUN_ID'], run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
                          release_verified=False, published=False)
           (Path(os.environ['PROBE_OUT']) / 'probe.json').write_text(json.dumps(receipt, indent=2) + '\n')
@@ -328,7 +358,7 @@ jobs:
       - name: Upload macOS arm64 runtime probe
         uses: actions/upload-artifact@v7
         with:
-          name: macos-arm64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          name: macos-arm64-probe-${{ steps.candidate.outputs.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/masc-macos-arm64-probe/
           if-no-files-found: error
           retention-days: 7

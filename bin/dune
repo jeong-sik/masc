@@ -1166,7 +1166,7 @@
  (name masc_tui_features)
  (wrapped false)
  (modules masc_tui_features)
- (libraries masc_tui_message_layout masc_tui_theme))
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_roster_pane)

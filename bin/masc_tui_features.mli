@@ -30,6 +30,7 @@ val all_rows : row list
 (** Every row, for the test that checks the openers. *)
 
 val lines : width:int -> string list
-(** The sheet's body at [width] inner cells, already styled: section
-    headings in the help sheet's dim diamond, openers and wrapped sentences
-    after them. *)
+(** The sheet's body at [width] inner cells, as plain text (no ANSI escapes,
+    so rows pass through [Keeper_chat.terminal_safe_text] unchanged): section
+    headings with a leading diamond, openers and wrapped sentences after
+    them. *)

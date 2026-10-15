@@ -9,7 +9,9 @@
    the key table's global row and its exported key constants, surfaces
    against the help sheet's own section list. A row without a real door is a
    build failure, and so is a door renamed under a sheet still advertising
-   the old spelling. *)type opener =
+   the old spelling. *)
+
+type opener =
   | Command of string  (** the word after the slash; checked against the parser *)
   | Key of string  (** a key as the table spells it *)
   | Surface of string  (** a route, named the way the help sheet names it *)

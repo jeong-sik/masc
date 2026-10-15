@@ -725,7 +725,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     | Some run ->
       let original : Agent_core.Raw_trace.run_ref =
         {worker_run_id=run.worker_run_id;path=run.path;start_seq=run.start_seq;end_seq=run.end_seq;
-         agent_name=run.agent_name;session_id=run.session_id} in
+         agent_name=run.agent_name;session_id=Some run.session_id} in
       Agent_core.Raw_trace_query.read_run original |> get Agent_core.Error.to_string in
   json (Filename.concat attempt_dir "exact-run-records.json")
     (`List (List.map Agent_core.Raw_trace.record_to_yojson raw_records));

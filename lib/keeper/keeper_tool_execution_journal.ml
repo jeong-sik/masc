@@ -381,11 +381,12 @@ let result_of_json json : Tool_result.result =
   | _ -> refuse "unknown result disposition"
 
 type binding = {request_id : string; generation : int}
+type launch_mode = Initial_launch | Existing_only
 type occurrence =
   { node_id : Plan.Node_id.t; tool_name : string; input : Yojson.Safe.t;
     input_sha : string; owner : binding; sequence : int;
     execution_id : Ids.Execution_id.t; tool_use_id : string; readonly : bool;
-    launch_invocation : launch_invocation option }
+    launch_invocation : launch_invocation option; launch_mode : launch_mode }
 type node_record =
   | Attempting of occurrence
   | Settled of occurrence * completed * Tool_result.failure_effect_disposition option
@@ -440,16 +441,23 @@ let occurrence_json occurrence =
     "input", occurrence.input; "input_sha", `String occurrence.input_sha; "owner", binding_json occurrence.owner;
     "sequence", `Int occurrence.sequence; "execution_id", Ids.Execution_id.to_yojson occurrence.execution_id;
     "tool_use_id", `String occurrence.tool_use_id; "readonly", `Bool occurrence.readonly;
-    "launch_invocation", option_json launch_invocation_json occurrence.launch_invocation]
+    "launch_invocation", option_json launch_invocation_json occurrence.launch_invocation;
+    "launch_mode", `String (match occurrence.launch_mode with
+      | Initial_launch -> "initial" | Existing_only -> "existing_only")]
 let occurrence_of_json json =
-  let fields = object_fields ["node_id"; "tool_name"; "input"; "input_sha"; "owner"; "sequence"; "execution_id"; "tool_use_id"; "readonly"; "launch_invocation"] json in
+  let fields = object_fields ["node_id"; "tool_name"; "input"; "input_sha"; "owner"; "sequence"; "execution_id"; "tool_use_id"; "readonly"; "launch_invocation"; "launch_mode"] json in
   let node_id = match Plan.Node_id.make (string (field "node_id" fields)) with Ok id -> id | Error _ -> refuse "invalid node identity" in
   let execution_id = match Ids.Execution_id.of_yojson (field "execution_id" fields) with Ok id -> id | Error detail -> refuse detail in
   let occurrence = {node_id; execution_id; tool_name = string (field "tool_name" fields);
     input = field "input" fields; input_sha = string (field "input_sha" fields);
     owner = binding_of_json (field "owner" fields); sequence = integer (field "sequence" fields);
     tool_use_id = string (field "tool_use_id" fields); readonly = bool (field "readonly" fields);
-    launch_invocation = optional launch_invocation_of_json (field "launch_invocation" fields)} in
+    launch_invocation = optional launch_invocation_of_json (field "launch_invocation" fields);
+    launch_mode = (match field "launch_mode" fields with
+      | `String "initial" -> Initial_launch
+      | `String "existing_only" -> Existing_only
+      | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+          refuse "invalid launch replay mode")} in
   require (exact_name occurrence.tool_name && exact_name occurrence.tool_use_id
     && exact_name (Ids.Execution_id.to_string execution_id) && occurrence.sequence > 0) "invalid occurrence identity";
   require (String.equal occurrence.input_sha (json_sha occurrence.input)) "input fingerprint mismatch";
@@ -608,6 +616,10 @@ let replay_for children binding node_id record =
         | Some Tool_result.Proven_pre_effect ->
           if child_intent_proven children occurrence then
             Ok (Recheck_child_submission {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+          else if owned_job_launch occurrence && occurrence.launch_mode = Existing_only then
+            (match recheck_launch_for occurrence with
+             | Some original -> Ok (Recheck_launch original)
+             | None -> refuse ())
           else recheck_or_dispatch occurrence
         | Some Tool_result.Effect_outcome_unknown when owned_job_launch occurrence ->
           (match recheck_launch_for occurrence with
@@ -694,15 +706,15 @@ let decode_state bytes = decode (fun () ->
       let record = if kind = "attempting" then (
         require (occurrence.sequence = (match prior with None -> 1 | Some record -> (occurrence_of_record record).sequence + 1)) "attempt sequence mismatch";
         require (match replay_for state.children occurrence.owner occurrence.node_id prior with
-          | Ok Dispatch -> true
-          | Ok (Recheck_result stored) -> occurrence.readonly
+          | Ok Dispatch -> occurrence.launch_mode = Initial_launch
+          | Ok (Recheck_result stored) -> occurrence.launch_mode = Initial_launch && occurrence.readonly
               && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
               && occurrence.tool_use_id = stored.tool_use_id
-          | Ok (Recheck_launch stored) -> owned_job_launch occurrence
+          | Ok (Recheck_launch stored) -> occurrence.launch_mode = Existing_only && owned_job_launch occurrence
               && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
               && occurrence.tool_use_id = stored.tool_use_id
               && occurrence.launch_invocation = Some stored.invocation
-          | Ok (Recheck_child_submission stored) -> not occurrence.readonly
+          | Ok (Recheck_child_submission stored) -> occurrence.launch_mode = Initial_launch && not occurrence.readonly
               && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
               && occurrence.tool_use_id = stored.tool_use_id
           | Ok (Reuse_completed _) | Error _ -> false) "unproven replay event";
@@ -1294,7 +1306,7 @@ let validate_lost_without_wait children expected_owner nodes =
     let* () = prior in
     let occurrence = occurrence_of_record record in
     if child_ack_proven children occurrence then Ok () else match record with
-    | Attempting occurrence when occurrence.readonly -> Ok ()
+    | Attempting occurrence when occurrence.readonly || launch_replay_proven occurrence -> Ok ()
     | Attempting _ -> Error (Replay_not_proven occurrence.node_id)
     | Settled _ -> replay_for children expected_owner occurrence.node_id (Some record)
         |> Result.map (fun _ -> ())) nodes (Ok ())
@@ -1347,7 +1359,9 @@ let waiting_continuation journal = filesystem (fun () ->
            let* () = validate_lost_without_wait state.children expected_owner state.nodes in
            let* child_admitted = nested_parent_accepted journal in
            let has_accepted_child = Nodes.exists (fun _ link -> Option.is_some link.accepted) state.children in
-           if child_admitted || has_accepted_child then
+           let has_recheck_launch = Nodes.exists (fun _ record ->
+             launch_replay_proven (occurrence_of_record record)) state.nodes in
+           if child_admitted || has_accepted_child || has_recheck_launch then
              Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals=[];
                suspended_nodes=state.nodes;suspended_children=state.children;dependencies=[]})
            else Ok None
@@ -1830,6 +1844,25 @@ let lookup (worker : worker) ~node_id ~tool_name ~input =
   update_existing worker.journal (fun state -> None,
     let* record = checked_node worker state ~node_id ~tool_name ~input in replay_for state.children worker.binding node_id record)
 
+let launch_recheck (worker : worker) ~node_id ~tool_name ~input ~execution_id ~tool_use_id =
+  update_existing worker.journal (fun state -> None,
+    let* () = check_worker worker state in
+    match Nodes.find_opt (Plan.Node_id.to_string node_id) state.nodes with
+    | None -> Error (Node_identity_conflict node_id)
+    | Some record ->
+      let occurrence = occurrence_of_record record in
+      if not (same_node_identity occurrence ~node_id ~tool_name ~input
+          && Ids.Execution_id.equal occurrence.execution_id execution_id
+          && String.equal occurrence.tool_use_id tool_use_id
+          && owned_job_launch occurrence)
+      then Error (Node_identity_conflict node_id) else
+      let* record = checked_node worker state ~node_id ~tool_name ~input in
+      let* replay = replay_for state.children worker.binding node_id record in
+      match replay with
+      | Recheck_launch original -> Ok (Some original)
+      | Dispatch | Reuse_completed _ -> Ok None
+      | Recheck_result _ | Recheck_child_submission _ -> Error (Node_identity_conflict node_id))
+
 let begin_attempt (worker : worker) ~node_id ~tool_name ~input ~execution_id ~tool_use_id ~readonly ?launch_invocation () =
   update_existing worker.journal (fun state ->
     let decision =
@@ -1853,7 +1886,10 @@ let begin_attempt (worker : worker) ~node_id ~tool_name ~input ~execution_id ~to
           | Recheck_launch _ | Recheck_child_submission _ -> Ok () in
         if not (exact_name tool_use_id && exact_name (Ids.Execution_id.to_string execution_id)) then Error (Invalid_result "invalid execution occurrence") else
         let sequence = match record with None -> 1 | Some record -> (occurrence_of_record record).sequence + 1 in
-        Ok {node_id; tool_name; input; input_sha = json_sha input; owner = worker.binding; sequence; execution_id; tool_use_id; readonly; launch_invocation} in
+        let launch_mode = match replay with Recheck_launch _ -> Existing_only
+          | Dispatch | Reuse_completed _ | Recheck_result _ | Recheck_child_submission _ -> Initial_launch in
+        Ok {node_id; tool_name; input; input_sha = json_sha input; owner = worker.binding; sequence;
+          execution_id; tool_use_id; readonly; launch_invocation; launch_mode} in
     match decision with
     | Error error -> None, Error error
     | Ok occurrence -> Some (row (attempt_event worker.journal.source_sha occurrence)), Ok {worker; occurrence})

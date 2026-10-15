@@ -1340,6 +1340,7 @@ let rec async_worker_result
       ?(on_recovery_held=(fun ~request_id:_ ~reason:_ -> ()))
       ?after_child_submission
       ?before_child_dispatch
+      ?keeper_turn_id
       ?before_plan_execution
       ?after_node_observation
       ?before_child_result_publication
@@ -1513,7 +1514,8 @@ let rec async_worker_result
     ~meta
     ~publication_recovery
     ~ctx_snapshot
-    ~keeper_turn_id:(keeper_turn_id_of turn_context)
+    ~keeper_turn_id:(match keeper_turn_id with Some callback -> callback
+            | None -> keeper_turn_id_of turn_context)
     ~admit_node:(Keeper_composition_nested_run.admit_node nested_run)
     ~dispatch_compiled
     ?source_context:turn_context
@@ -1587,6 +1589,20 @@ let rec async_worker_result
        | Executor.Run_journal_rejected _ | Plan_execution_failed _
        | Node_observation_failed _ | Outer_completion_mismatch _ -> None)
   in
+  let launch_interrupted (node : Executor.node_result) =
+    match node.result,Plan.contract plan node.node_id,journal with
+    | Tool_result.Failed _,Some {target=Plan.Descriptor_target descriptor;_},Some worker
+      when Keeper_tool_descriptor.prepared_leaf_admission descriptor
+           = Keeper_tool_descriptor.Owned_job_launch_leaf ->
+        (match Journal.launch_recheck worker ~node_id:node.node_id
+            ~tool_name:node.tool_name ~input:node.input ~execution_id:node.execution_id ~tool_use_id:node.tool_use_id with
+         | Ok (Some _) -> Some (Tool_result.message node.result)
+         | Error error -> Some (Journal.error_to_string error)
+         | Ok None -> None)
+    | (Tool_result.Completed _ | Tool_result.Deferred _ | Tool_result.Failed _),
+      (None | Some {target=(Plan.Descriptor_target _ | Plan.Child_arguments _
+                          | Plan.Child_submission _ | Plan.Child_result _);_}),
+      (None | Some _) -> None in
   let recovery = match execution with
     | Ok _ -> Complete_original_result
     | Error failure ->
@@ -1595,6 +1611,9 @@ let rec async_worker_result
           (match node.execution_origin with
            | Executor.Dispatch_refused -> node_continuation_recovery node
            | Executor.Fresh_dispatch | Executor.Retained_completion ->
+              match launch_interrupted node with
+              | Some reason -> Hold_original_authority reason
+              | None ->
              if List.exists (Plan.Node_id.equal node.node_id) !unavailable_results
                  || List.exists (Plan.Node_id.equal node.node_id) !accepted_children
              then Hold_original_authority (Tool_result.message node.result)

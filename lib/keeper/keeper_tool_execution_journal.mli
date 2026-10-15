@@ -149,7 +149,7 @@ val validate_request : t -> Keeper_msg_async.entry -> (unit, error) result
 val waiting_continuation : t -> (continuation option, error) result
 (** Read only canonical current-owner terminal proof and exact journal state.
     [None] means no bound request, an active worker, or a settled worker that
-    has no original result dependency wait or accepted-child recovery. A current [Lost] owner may recover that
+    has no original result dependency wait, accepted-child recovery, or recorded launch recovery. A current [Lost] owner may recover that
     wait through the journal's exact predecessor bindings and canonical
     terminal records, including repeated Lost successors. Unfinished nodes
     must prove replay: read-only nodes follow their read-only replay rules,
@@ -163,7 +163,9 @@ val waiting_continuation : t -> (continuation option, error) result
     with committed original child acceptance can recover that acknowledgement
     with its original occurrence IDs and an empty dependency list; a Nested
     child may similarly resume replay-proven work only through its parent's
-    committed original acceptance. Neither case invents a prior result wait.
+    committed original acceptance. A first Lost owned launch with its complete
+    recorded invocation can similarly resume Existing-only observation, with
+    no invented prior result wait.
     Other unfinished effectful attempts or unproven outcomes still return
     [Replay_not_proven]. Such a run
     cannot become fresh work through the [None] fallback, and discovery keeps
@@ -322,6 +324,20 @@ val lookup
     Other producer-proven pre-effect failures and previous statically read-only
     Attempting records may dispatch again. Other deferred and unproven effect
     outcomes reject replay. *)
+
+val launch_recheck
+  : worker
+  -> node_id:Keeper_tool_plan.Node_id.t
+  -> tool_name:string
+  -> input:Yojson.Safe.t
+  -> execution_id:Ids.Execution_id.t
+  -> tool_use_id:string
+  -> (recheck_launch option, error) result
+(** Under the canonical run lock, require the current worker and exact launch
+    occurrence IDs, then apply the existing replay authority to its recorded
+    actual input. [Some] means the same original launch still needs observation;
+    [None] includes a producer-proven pre-effect refusal or completed result.
+    Missing/unreadable/stale authority is [Error], never fresh admission. *)
 
 val begin_attempt
   : worker

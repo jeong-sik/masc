@@ -130,7 +130,7 @@ type submission =
   ; execution : (Executor.node_result list, Executor.failure) result option ref }
 let submit ?request_context ?(caller = keeper) ?(target = keeper)
     ?(on_acceptance_probe = fun _ -> ())
-    ?(before_execute = fun _ -> ()) ?plan ?observe ?launch_invocation_of base_path sw prepared dispatch =
+    ?(before_execute = fun _ -> ()) ?plan ?observe ?launch_invocation_of ?admit_node base_path sw prepared dispatch =
   let bound = ref None and admission_error = ref None and execution = ref None in
   let terminal, resolver = Eio.Promise.create () in
   let request_context = Option.value request_context ~default:(context prepared.source) in
@@ -150,7 +150,7 @@ let submit ?request_context ?(caller = keeper) ?(target = keeper)
         let worker = match !bound with Some worker -> worker | None -> fail "unbound worker dispatched" in
         before_execute worker;
         let result = Executor.execute ~plan:(Option.value plan ~default:(Draft.plan prepared.draft))
-            ~run_id:(Plan.Run_id.fresh ()) ~journal:worker ~dispatch ?launch_invocation_of ?observe_node_result:observe () in
+            ~run_id:(Plan.Run_id.fresh ()) ~journal:worker ~dispatch ?launch_invocation_of ?admit_node ?observe_node_result:observe () in
         execution := Some result;
         let data = `Assoc ["composition_run_id", `String (Plan.Composition_run_id.to_string prepared.source.composition_run_id)] in
         match result with
@@ -1080,6 +1080,41 @@ let test_unknown_launch_effect_replays_with_recorded_identity () = with_workspac
    | Error _ -> fail "replayed unknown launch effect did not complete");
   check_completion base_path prepared second)
 
+let test_launch_replay_mode_survives_pre_effect_refusal () =
+  List.iter (fun unknown -> with_workspace (fun _env sw base_path ->
+    let prepared = prepare ~plan:(make_launch_plan ()) base_path in
+    let recorded = launch_invocation_fixture 41 in
+    let phase = if unknown then Tool_result.Effect_outcome_unknown else Tool_result.Proven_pre_effect in
+    let first_dispatch ?launch_replay:_ ~tool_use_id:_ ~(node : Plan.node) ~descriptor:_ ~schedule:_ ~input:_ () =
+      Executor.dispatch_result ~failure_effect_disposition:phase
+        (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Runtime_failure
+           ~effect_disposition:phase ~start_time:(Tool_timing.start ()) "first launch observation") in
+    let first = submit ~launch_invocation_of:(fun () -> Some recorded)
+        base_path sw prepared first_dispatch |> accepted in
+    ignore (await base_path first);
+    let calls = ref 0 in
+    let resume ?launch_replay ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+      incr calls;
+      check bool "only the original unknown effect requires Existing-only replay" unknown (Option.is_some launch_replay);
+      launch_success node in
+    let denied = submit ~launch_invocation_of:(fun () -> Some recorded)
+        ~admit_node:(fun ~node:_ -> Error Executor.{detail="explicit admission refusal";data=`Assoc []})
+        base_path sw prepared resume |> accepted in
+    ignore (await base_path denied);
+    check int "supported admission API refuses before producer dispatch" 0 !calls;
+    (match Journal.lookup denied.worker ~node_id:(node_id "launcher")
+        ~tool_name:"keeper_job_start" ~input:launch_input with
+     | Ok (Journal.Recheck_launch original) when unknown ->
+         check_recheck_identity "pre-effect refusal preserves original unknown launch" recorded original
+     | Ok Journal.Dispatch when not unknown -> ()
+     | Ok _ -> fail "pre-effect refusal changed the canonical launch mode"
+     | Error error -> fail (Journal.error_to_string error));
+    let restored = submit ~launch_invocation_of:(fun () -> Some (launch_invocation_fixture 63))
+        base_path sw prepared resume |> accepted in
+    ignore (await base_path restored);
+    ignore (executed restored |> require "restored launch admission completes");
+    check int "only restored admission reaches the producer" 1 !calls)) [true;false]
+
 let test_launch_leaf_refuses_incomplete_invocation_identity () = with_workspace (fun _env sw base_path ->
   let prepared = prepare ~plan:(make_launch_plan ()) base_path in
   let calls = ref 0 in
@@ -1131,4 +1166,5 @@ let () = match Array.to_list Sys.argv with
         test_case "exact Queued admission and matched inventory read measurements" `Quick test_exact_queued_admission;
         test_case "interrupted launch leaf replays with its recorded identity" `Quick test_interrupted_launch_replays_with_recorded_identity;
         test_case "unknown launch effect replays with its recorded identity" `Quick test_unknown_launch_effect_replays_with_recorded_identity;
+        test_case "launch replay mode survives a later pre-effect admission refusal" `Quick test_launch_replay_mode_survives_pre_effect_refusal;
         test_case "launch leaf refuses incomplete invocation identity" `Quick test_launch_leaf_refuses_incomplete_invocation_identity]]

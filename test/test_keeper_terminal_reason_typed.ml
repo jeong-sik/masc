@@ -1773,6 +1773,7 @@ max-concurrent = 1
       ; http_status = None
       ; runtime_id = Some "kimi_code.kimi-for-coding"
       ; agent_core_timeout = None
+      ; fenced_empty_turn_runtime = None
       ; reason = None
       }
   in

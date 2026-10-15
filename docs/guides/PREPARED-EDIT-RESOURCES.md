@@ -22,17 +22,32 @@ Gate, sandbox containment, external-resource lease, publication recovery,
 patch application, snapshots and effect evidence remain on the execution path.
 A different input, Task/trace or parent cannot spend this preparation.
 
-The feature suite `test_keeper_prepared_edit` authors actual filesystem/SDK
+The frozen public Keeper bundle registers resource admission for canonical Edit
+descriptors. It translates the model input through the descriptor's existing
+policy and requires the original Keeper, Task, trace and turn source. Missing
+source or unavailable preparation retains ordinary Serial execution, including
+its validation and failure observation. No tool name or provider-supplied path
+claim decides admission.
+
+The prepared handler crosses the ordinary bridge, Handler, dispatch and write
+consumer with the same opaque value. It retains the original source snapshot
+and actual SDK invocation. Each dispatch forks the then-current turn Gate
+context and contributes its result to the turn aggregate, so a later conflicting
+wave sees predecessor results without concurrent siblings sharing a mutable
+call context. Physical call receipts still commit through the ordinary hooks.
+
+The feature suite `test_keeper_prepared_edit` covers actual filesystem/SDK
 scenarios: disjoint Edit authorization boundaries overlap, conflicting patches
 consume predecessor bytes, directory aliases and ancestor directories retain order, changed input/owner
 or parent cannot write, Manual Gate retains containment and the existing internal
-playground authorization, and caller cancellation leaves
-no effect and permits a later call. Authored source and parse-only checks do not
-prove these scenarios have executed.
+playground authorization, and caller cancellation leaves no effect and permits
+a later call. Public bundle scenarios additionally exercise actual hooks and
+physical Task/trace/execution receipts, conflicting public patches and missing
+source admission. Execution evidence must name the tested head and scenario;
+authored source and parse-only checks do not prove execution.
 
-This producer layer does not yet register resource admission on public MASC
-Edit tools or aggregate it through outer Inline Skills. That integration must
-thread the same opaque preparation through the actual descriptor, Handler and
-Executor boundaries and verify published Skill behavior. No general Bash,
+Outer Inline Skills do not yet aggregate these resource claims. That integration
+must bind an exact resolved plan to its Executor calls and verify published
+Skill behavior. No general Bash,
 endpoint write, Async admission, cross-process exclusion or measured model
 preparation speedup is supplied by directory claims.

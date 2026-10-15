@@ -2101,6 +2101,7 @@ let delete_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
 ;;
 
 let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
+  Http_request_observer.with_call ~mode:Synchronous ~body @@ fun observation ->
   let* deadline =
     resolve_explicit_deadline
       ~operation:"post_sync"
@@ -2120,6 +2121,7 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
       in
       let hdr = Http.Header.of_list headers_with_length in
       with_explicit_deadline deadline (fun () ->
+        Http_request_observer.dispatch_entered observation;
         let resp, resp_body =
           Cohttp_eio.Client.post
             ~sw
@@ -2129,6 +2131,7 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
             origin.uri
         in
         let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+        Http_request_observer.response_headers_received observation ~status:code;
         let resp_headers = Cohttp.Response.headers resp in
         let* body_str = read_response_body resp_body in
         profile_opaque_client_error
@@ -2154,6 +2157,7 @@ let post_sync_once_after_validation
       ~(request : validated_sync_request)
       ()
   =
+  Http_request_observer.with_call ~mode:Synchronous ~body:request.body @@ fun observation ->
   Eio.Switch.run
   @@ fun sw ->
   let { origin; header; body } = request in
@@ -2276,6 +2280,7 @@ let post_sync_once_after_validation
         in
         phase := Dispatch_started;
         Http_client_phase_observer.observe Http_client_phase_observer.Dispatch_started;
+        Http_request_observer.dispatch_entered observation;
         let response, response_body =
           Cohttp_eio.Client.post
             ~sw:request_sw
@@ -2287,6 +2292,7 @@ let post_sync_once_after_validation
         let response_status =
           Cohttp.Response.status response |> Cohttp.Code.code_of_status
         in
+        Http_request_observer.response_headers_received observation ~status:response_status;
         let response_header_evidence, retry_after_header =
           Cohttp.Response.headers response |> capture_response_header_evidence
         in
@@ -2610,6 +2616,7 @@ let with_post_stream
       ~f
       ()
   =
+  Http_request_observer.with_call ~mode:Streaming ~body @@ fun observation ->
   let* connect_deadline =
     resolve_explicit_deadline
       ~operation:"with_post_stream"
@@ -2708,6 +2715,7 @@ let with_post_stream
             let client =
               Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked_conn)
             in
+            Http_request_observer.dispatch_entered observation;
             match
               Cohttp_eio.Client.post
                 ~sw:request_sw
@@ -2718,6 +2726,8 @@ let with_post_stream
             with
             | resp, resp_body ->
               let status = Cohttp.Response.status resp in
+              Http_request_observer.response_headers_received observation
+                ~status:(Cohttp.Code.code_of_status status);
               Option.iter
                 (fun observe -> observe (Cohttp.Code.code_of_status status))
                 on_response_status;

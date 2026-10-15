@@ -766,17 +766,22 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
      Offline; mark this actual fiber entry before asking the cycle to run. *)
   Keeper_registry.dispatch_event_exact registry_entry Keeper_state_machine.Fiber_started
     |> get Keeper_state_machine.transition_error_to_string |> ignore;
+  let http_observation = Keeper_preparation_http_observation.create
+      ~path:(Filename.concat attempt_dir "http-events.jsonl") ~now:(fun () -> now counter) in
   let cycle_entered = now counter in
-  let outcome = Keeper_heartbeat_loop.run_keepalive_unified_turn
+  let outcome = Keeper_preparation_http_observation.within http_observation @@ fun () ->
+    Keeper_heartbeat_loop.run_keepalive_unified_turn
       ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry ~meta_after_triage:meta
       ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true ~reactive_wake:true
       ~shared_context:(Agent_core.Context.create ()) ~deferred_runtime_lane:None
       ~on_deferred_runtime_consumed:(fun () -> ())
       ~settle_deferred_runtime_lane:(function None -> () | Some _ -> failwith "unexpected runtime failover") in
   let cycle_returned = now counter in
+  let http_metrics = Keeper_preparation_http_observation.snapshot http_observation in
   let previous = load receipt |> to_assoc |> List.remove_assoc "timing" in
   json receipt (`Assoc (("timing",`Assoc ["admission",admission;
     "cycle_entered",cycle_entered;"cycle_returned",cycle_returned])::
+    ("http_metrics",http_metrics)::
     ("common_instruction_sha256",`String (sha common_instruction))::previous));
   let batch = Calls.read_after ~keeper_name:keeper ~after:frontier ~project:Option.some |> get index_error in
   let rows = List.map (fun (row : Yojson.Safe.t Keeper_tool_call_index.positioned) -> row.value) batch.rows in
@@ -942,6 +947,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     "provider_requests",(if synthetic then `Int (List.length !requests) else `Null);
     "configured_runtime_sha256",(match runtime_mode runtime with
       | Synthetic_streaming -> `Null | Configured_http configuration -> `String (sha configuration));
+    "http_metrics",http_metrics;
     "verified_stdout_read_execution_ids",`List (List.map (field "execution_id") stdout_rows);
     "provider_metrics",`Assoc ["selected_model",field "selected_model" turn_json;
       "reported_usage",`Assoc (List.map (fun name -> name,field name turn_json)

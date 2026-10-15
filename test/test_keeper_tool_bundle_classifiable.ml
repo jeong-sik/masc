@@ -19,7 +19,10 @@
     looks at the bundle. So this walks the bundle the keeper actually gets and
     fails on any name the policy cannot place, whatever the reason it was
     added. A fifth kind of undescribed tool trips it on the way in rather than
-    after an operator wonders why they are being asked. *)
+    after an operator wonders why they are being asked.
+
+    The same bundle is walked once more for a rule a provider applies to the
+    whole tool list: no input schema holds [$ref] or [$defs]. *)
 
 open Alcotest
 open Masc
@@ -943,12 +946,55 @@ let test_bundle_effect_contracts () =
   check_effect "Execute" (`Assoc []) Agent_core.Tool.Effect_possible
 ;;
 
+(* A provider that refuses recursive JSON Schemas rejects the whole request,
+   not only a call to the tool that carries one (Muse: 400 "Recursive JSON
+   schemas are not currently supported"). keeper_composition_prepare was
+   advertised with a recursive [$defs] and [$ref] (#43137), and every Muse
+   keeper that loaded that schema through its own tool search then failed each
+   turn until the build with #43150 was running: one keeper made no successful
+   turn for about fourteen hours. #43150 pins that one schema. This walks the
+   bundle a keeper is handed, so the next tool that carries a reference fails
+   here and not in a keeper's turn. *)
+let rec has_schema_reference = function
+  | `Assoc fields ->
+    List.exists
+      (fun (key, value) ->
+         String.equal key "$ref"
+         || String.equal key "$defs"
+         || has_schema_reference value)
+      fields
+  | `List items -> List.exists has_schema_reference items
+  | _ -> false
+;;
+
+(* [tools] is every tool the turn can run. [agent_core_tools] is a part of it,
+   with the deferred schemas behind a listing, so walking [tools] covers each
+   schema either lane can put on the wire. *)
+let test_no_tool_advertises_a_schema_reference () =
+  with_bundle_tools
+  @@ fun _config _meta _snapshot _plan_index _surface tools ->
+  check bool "the prepare control is in the bundle the gate walks" true
+    (List.exists
+       (fun (tool : Agent_core.Tool.t) ->
+          String.equal tool.schema.name Keeper_composition_draft.prepare_tool_name)
+       tools);
+  List.iter
+    (fun (tool : Agent_core.Tool.t) ->
+       match tool.schema.input_schema with
+       | Some schema when has_schema_reference schema ->
+         failf "%s advertises an input schema holding $ref or $defs" tool.schema.name
+       | Some _ | None -> ())
+    tools
+;;
+
 let () =
   run
     "keeper_tool_bundle_classifiable"
     [ ( "the bundle"
       , [ test_case "effect contracts survive bundle construction" `Quick
             test_bundle_effect_contracts
+        ; test_case "no tool advertises a schema reference" `Quick
+            test_no_tool_advertises_a_schema_reference
         ; test_case "is not empty" `Quick test_the_bundle_is_not_empty
         ; test_case "requires activation context" `Quick
             test_skill_bundle_without_activation_context_is_rejected

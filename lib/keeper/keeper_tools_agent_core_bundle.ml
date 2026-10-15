@@ -479,7 +479,7 @@ let make_tool_bundle_for_descriptors_with_policy
                  h
                    ?agent_core_invocation:
                      (Agent_core.Tool.Execution_env.invocation execution_env)
-                   ~result_projection:(model_projection_for_call descriptor ())
+                   ?result_projection:(Some (model_projection_for_call descriptor ()))
                    input)
              in
              let ordinary = bridge (make_h ()) in

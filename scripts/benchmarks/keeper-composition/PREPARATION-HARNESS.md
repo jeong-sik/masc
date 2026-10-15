@@ -21,9 +21,10 @@ The synthetic experiment JSON has exactly these fields:
 - `runtime`: exactly `mode="synthetic_streaming"`, a nonblank `model_id`, and
   positive `max_context_tokens` / `max_output_tokens`. These are explicit
   synthetic capability declarations, with no implicit model or capability cap.
-- `synthetic_outcome`: `"success"` or `"provider_refusal"`. The latter lets the
-  actual Runtime reject the fixture response while keeping every planned sample
-  in the denominator.
+- `synthetic_outcome`: `"success"`, `"provider_refusal"` or `"malformed_final"`.
+  Refusal exercises the actual Runtime error boundary. A malformed final
+  contains the correct JSON in prose after actual physical work, so objective
+  validation must refuse it while retaining the failed attempt's measurements.
 
 For an external HTTP Runtime, keep `schema_version`, `case` and `pairs`, omit
 `synthetic_outcome`, and supply `runtime` with exactly `mode="configured_http"`
@@ -89,6 +90,12 @@ unknown setup stimuli are refused rather than discarded. The selection artifact 
 job ID as UTF-8 text. No answer or resolved child argument is put into the model's
 initial context.
 
+Both arms share a read-only instruction requiring exactly one JSON object,
+without prose or Markdown, and excluding new program execution to recheck
+completed output. Its SHA256 is recorded and compared across each pair. This
+clarified instruction is a new measurement protocol: do not compare its results
+against older instruction hashes as an effect of source changes.
+
 Both arms restore the same private fixture into the **same canonical base**.
 Restore keeps every original directory inode because backend preparations freeze
 those identities. It checks the snapshot file hashes, removes only extra entries
@@ -140,6 +147,16 @@ argument and physical stdout execution. Model-generated tool-use IDs and child
 aliases need not match the scripted peer. There are no latency percentiles or
 speedup calculations in this harness yet.
 
+Final validation records a closed outcome: verified JSON, missing/malformed
+final, wrong object shape, wrong original job/digest, or scripted wire mismatch.
+It never extracts a JSON fragment from prose. A returned cycle first persists
+its admission/entry/return clocks; after evidence collection, the receipt also
+retains physical stdout ownership, first useful observation, strategy compliance
+and reported provider usage before any later boundary rejection. The final
+`validation_finished` clock is present only when those checks return. Failed
+attempts stay failed with their available metrics; absent observations stay
+unknown. Backend call counts come from the actual synthetic peer's saved calls.
+
 Admission records canonical source ID, snapshot reference, revision and
 `first_admitted_at`, plus separate enqueue entry/return observations. A synchronous
 actual tool observation is joined to a unique committed physical execution row
@@ -178,6 +195,9 @@ Skill activation, resolved child argument, persisted final digest and backend0.
 It also crosses an independently hosted loopback HTTP refusal through the
 configured Runtime branch for both arms, checks the fixture environment
 credential binding, and retains both refusals as explicit failures. That server
-is synthetic and does not exercise a paid provider.
+is synthetic and does not exercise a paid provider. A malformed-final pair
+verifies that already completed physical work, source ACKs, clocks and usage
+remain available when the final response violates the JSON contract; both
+attempts remain explicit failures in the denominator.
 It is not a no-argument invocation of the parameterized driver. Authoring this
 alias is not evidence that it has executed.

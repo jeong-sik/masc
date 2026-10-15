@@ -78,8 +78,8 @@ def validate(experiment: dict) -> None:
     for name in ("max_context_tokens", "max_output_tokens"):
         if type(runtime[name]) is not int or runtime[name] <= 0:
             raise ValueError(f"{name} must be an explicit positive capability")
-    if experiment["synthetic_outcome"] not in ("success", "provider_refusal"):
-        raise ValueError("synthetic_outcome must be success or provider_refusal")
+    if experiment["synthetic_outcome"] not in ("success", "provider_refusal", "malformed_final"):
+        raise ValueError("unsupported synthetic outcome")
 
 
 def inventory(root: Path) -> dict:
@@ -226,7 +226,8 @@ def run(args) -> None:
         if len(completed) == 2:
             matching.append({"pair": pair, "first_offered_inventory_observed":
                              all(result.get("first_offered_tools_sha256") is not None for result in completed)})
-            for key in ("fixture_sha256", "skill_reference", "input", "runtime", "first_offered_tools_sha256"):
+            for key in ("fixture_sha256", "skill_reference", "input", "runtime", "first_offered_tools_sha256",
+                        "common_instruction_sha256"):
                 if completed[0][key] != completed[1][key]:
                     for attempt, result in zip(attempts, results):
                         if attempt["pair"] == pair:

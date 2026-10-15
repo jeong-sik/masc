@@ -202,7 +202,12 @@ A child output is its declared named export. `/profile` selects export `profile`
 `/document/items/0` selects within export `document`. RFC 6901 escaping applies to
 export names too. The compiler maps the export to its exact leaf producer and
 revalidates the combined pointer against that producer's schema. Whole-child root
-output and undeclared exports are explicit errors.
+output and undeclared exports are explicit errors. Those rejections include
+`available_exports`, taken from that exact admitted child, with each public name
+and its canonical escaped pointer. Copy the pointer with the rejection's child
+`node_id` into an output template or final export; internal leaf fields are not
+additional child exports. An empty list means the child declares none. Repairing
+the pointer still goes through the original schema and whole-child validation.
 
 Every dependency on an inline child, including a reference to its exported output,
 waits on all its leaves. An async child uses its canonical whole-result barrier.

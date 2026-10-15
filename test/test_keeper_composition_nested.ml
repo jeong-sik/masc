@@ -395,6 +395,26 @@ let test_nested_draft_freezes_and_revalidates_recipe () =
   Eio_main.run @@ fun _ ->
   with_base @@ fun base_path ->
   let surface, reference = fixture () in
+  List.iter (fun invalid_pointer ->
+    let recipe pointer = request ~exports:[ exported "answer" "child" pointer ]
+        [ nested "child" reference ] in
+    let error = match Draft.prepare ~base_path ~capability_surface:surface ~keeper_name:"fixture"
+        ~execution:Masc.Keeper_tool_composition_catalog.Inline (recipe invalid_pointer) with
+      | Error (Draft.Nested_rejected ((Nested.Child_output_requires_export _ | Nested.Unknown_child_export _) as error)) -> error
+      | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error))
+      | Ok _ -> fail "undeclared child output accepted" in
+    let open Yojson.Safe.Util in
+    let rejection = Draft.error_to_json (Draft.Nested_rejected error) in
+    check string "repair keeps the public child alias" "child" (rejection |> member "node_id" |> to_string);
+    let available = rejection |> member "available_exports" |> to_list in
+    let selected = match available with
+      | [export] -> export
+      | [] | _ :: _ -> fail "repair did not expose the exact admitted export set" in
+    check string "public export name is retained" "profile/~name" (selected |> member "name" |> to_string);
+    let advertised_pointer = selected |> member "pointer" |> to_string in
+    let repaired = prepare ~base_path surface (recipe advertised_pointer) in
+    check int "copying the advertised pointer repairs preparation" 1
+      (List.length (Plan.exports (Draft.plan repaired)))) ["";"/not-exported"];
   let recipe = request ~exports:[ exported "answer" "child" pointer ] [ nested "child" reference ] in
   let dynamic_inline = request [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;
     "input",`Assoc ["kind",`String "literal";"value",`Assoc ["query",`String "docker"]]]] in

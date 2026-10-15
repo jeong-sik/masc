@@ -36,8 +36,8 @@ type error =
   | Binding_rejected of Plan.Node_id.t * Catalog.instantiation_error
   | Duplicate_alias of Plan.Node_id.t
   | Unknown_alias of Plan.Node_id.t
-  | Child_output_requires_export of Plan.Node_id.t
-  | Unknown_child_export of { alias : Plan.Node_id.t; name : string }
+  | Child_output_requires_export of { alias : Plan.Node_id.t; available_exports : string list }
+  | Unknown_child_export of { alias : Plan.Node_id.t; name : string; available_exports : string list }
   | Unsupported_leaf of { node_id : Plan.Node_id.t; tool_name : string }
   | Inputs_rejected of Plan.Node_id.t * Plan.execution_error
   | Expanded_plan_rejected of Plan.error
@@ -238,11 +238,12 @@ let resolve_outer_output nodes ~node_id ~pointer =
   match producer with
   | Leaf (_, id) -> Ok (id, pointer)
   | Inline_child (_,_,call,_) | Async_child (_,_,call) ->
+    let available_exports = List.map (fun (export : Plan.export) -> export.name) call.exports in
     (match Plan.Json_pointer.uncons pointer with
-     | None -> Error (Child_output_requires_export node_id)
+     | None -> Error (Child_output_requires_export { alias = node_id; available_exports })
      | Some (name, suffix) ->
        (match List.find_opt (fun (export : Plan.export) -> String.equal export.name name) call.exports with
-        | None -> Error (Unknown_child_export { alias = node_id; name })
+        | None -> Error (Unknown_child_export { alias = node_id; name; available_exports })
         | Some export ->
           Ok (export.node_id, Plan.Json_pointer.append export.pointer suffix)))
 ;;
@@ -408,6 +409,11 @@ let calls_to_json compiled = `List (List.map call_to_json compiled.calls)
 let error_to_json error =
   let tag kind fields = `Assoc (("kind", `String kind) :: fields) in
   let node kind id = tag kind [ "node_id", id_json id ] in
+  let exports names =
+    [ "available_exports", `List (List.map (fun name -> `Assoc
+        [ "name", `String name
+        ; "pointer", `String (Plan.Json_pointer.to_string (Plan.Json_pointer.of_segments [name])) ]) names)
+    ; "detail", `String "A child exposes only its declared named exports. Use an available_exports pointer with this child node_id; the root and internal tool fields are not child outputs." ] in
   match error with
   | Request_rejected error -> Request.error_to_json error
   | Invalid_call_field { index; field; detail } -> tag "invalid_child_field"
@@ -424,8 +430,10 @@ let error_to_json error =
   | Binding_rejected (id, error) -> tag "child_binding_rejected" [ "node_id", id_json id; "error", Catalog.instantiation_error_to_json error ]
   | Duplicate_alias id -> node "duplicate_alias" id
   | Unknown_alias id -> node "unknown_alias" id
-  | Child_output_requires_export id -> node "child_output_requires_export" id
-  | Unknown_child_export { alias; name } -> tag "unknown_child_export" [ "node_id", id_json alias; "name", `String name ]
+  | Child_output_requires_export { alias; available_exports } ->
+    tag "child_output_requires_export" ([ "node_id", id_json alias ] @ exports available_exports)
+  | Unknown_child_export { alias; name; available_exports } ->
+    tag "unknown_child_export" ([ "node_id", id_json alias; "name", `String name ] @ exports available_exports)
   | Unsupported_leaf { node_id; tool_name } -> tag "unsupported_leaf" [ "node_id", id_json node_id; "tool_name", `String tool_name ]
   | Inputs_rejected (id, error) -> tag "inputs_rejected" [ "node_id", id_json id
       ; "error", Keeper_tool_plan_error_projection.plan_execution_error_to_json error ]

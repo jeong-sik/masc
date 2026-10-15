@@ -622,10 +622,12 @@ let first_loss_plan ~readonly =
        ~input:(Plan.Json_template.literal input) ()]
   |> require "first-loss canonical plan"
 
-let first_loss_success (node : Plan.node) =
+let first_loss_success_result (node : Plan.node) =
   Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
     ~data:(`Assoc ["profile", `String "original-profile"; "lane", `Null; "endpoint", `Null;
       "probe", `Null; "last_dispatch", `Null; "operator_action", `Null]) ()
+
+let first_loss_success node = first_loss_success_result node
   |> Executor.dispatch_result
 
 let child_first_loss base_path run_id mode =
@@ -635,28 +637,65 @@ let child_first_loss base_path run_id mode =
   let prepared = reconstruct base_path run_id in
   let snapshot () = write (Filename.concat base_path "first-loss-journal")
       (read (journal_path base_path prepared.source.composition_run_id)) in
+  let record_effect () =
+    let channel = open_out_gen [Open_wronly; Open_creat; Open_append; Open_binary] 0o600
+        (Filename.concat base_path "first-loss-effect") in
+    Fun.protect ~finally:(fun () -> close_out channel)
+      (fun () -> output_string channel "one dispatch entry\n") in
+  let retain_unproven_producer worker =
+    if mode <> "readonly" then (
+      (* Author unproven producer evidence through the canonical journal API.
+         The modern Executor correctly refuses an identity-less owned launch
+         before Attempting; it must not be claimed as this evidence's author.
+         Real async acceptance still owns this worker, source and marker. *)
+      let plan = Draft.plan prepared.draft in
+      Journal.validate_plan worker ~plan |> journal_value "unproven producer plan";
+      let run_id = Plan.Run_id.fresh () in
+      let begin_node name ~readonly =
+        let node = List.find (fun node -> node_name node = name) (Plan.nodes plan) in
+        let input = Plan.resolve_input plan ~run_id ~node_id:node.id ~lookup:(fun _ -> None)
+            |> require "original literal producer input" in
+        let attempt = Journal.begin_attempt worker ~node_id:node.id ~tool_name:node.tool_name
+            ~input ~execution_id:(Ids.Execution_id.generate ())
+            ~tool_use_id:("original-first-loss-" ^ name) ~readonly ()
+            |> journal_value "original producer attempt" in
+        node, input, attempt in
+      let settle ?failure_effect_disposition attempt result =
+        Journal.settle_attempt ?failure_effect_disposition attempt ~result
+          ~result_bytes:(String.length (Tool_result.message result)) ~truncated_to:None
+        |> journal_value "original producer settlement" in
+      let sibling, _, sibling_attempt = begin_node "completed-sibling" ~readonly:true in
+      settle sibling_attempt (first_loss_success_result sibling);
+      let node, input, attempt = begin_node "interrupted" ~readonly:false in
+      record_effect ();
+      (match mode with
+       | "attempting" -> ()
+       | "unknown" | "post_effect" ->
+         let phase = if mode = "unknown" then Tool_result.Effect_outcome_unknown
+           else Tool_result.Proven_post_effect in
+         settle ~failure_effect_disposition:phase attempt
+           (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Dependency_unavailable
+             ~start_time:(Tool_timing.start ()) ~effect_disposition:phase "producer failure")
+       | "deferred" -> settle attempt
+           (Tool_result.make_deferred ~tool_name:node.tool_name ~start_time:(Tool_timing.start ()) ())
+       | _ -> fail "invalid unproven producer mode");
+      (match Journal.lookup worker ~node_id:node.id ~tool_name:node.tool_name ~input with
+       | Error (Journal.Replay_not_proven id) ->
+         check string "stored original producer is genuinely unproven" "interrupted" (Plan.Node_id.to_string id)
+       | Error error -> fail (Journal.error_to_string error)
+       | Ok _ -> fail "producer fixture did not persist the unproven occurrence");
+      snapshot ();
+      Unix._exit 0) in
   let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     if node_name node = "interrupted" then (
-      (* This is an actual callback effect after Executor's Attempting append.
-         Process exit leaves the real broker/worker and journal unfinished;
-         the fixture never fabricates an owner, occurrence or Lost record. *)
-      let channel = open_out_gen [Open_wronly; Open_creat; Open_append; Open_binary] 0o600
-          (Filename.concat base_path "first-loss-effect") in
-      Fun.protect ~finally:(fun () -> close_out channel)
-        (fun () -> output_string channel "one dispatch entry\n");
-      match mode with
-      | "attempting" | "readonly" -> snapshot (); Unix._exit 0
-      | "unknown" -> failing Tool_result.Effect_outcome_unknown node
-      | "post_effect" -> failing Tool_result.Proven_post_effect node
-      | "deferred" -> Executor.dispatch_result
-          (Tool_result.make_deferred ~tool_name:node.tool_name
-            ~start_time:(Tool_timing.start ()) ())
-      | _ -> fail "invalid first-loss child mode")
+      (* The readonly control still crosses the real Executor's Attempting
+         boundary and callback. Loss does not invent a prior result wait. *)
+      check string "only the readonly control uses modern dispatch" "readonly" mode;
+      record_effect ();
+      snapshot ();
+      Unix._exit 0)
     else first_loss_success node in
-  let observe row =
-    if Plan.Node_id.to_string row.Executor.node_id = "interrupted"
-    then (snapshot (); Unix._exit 0) else Ok () in
-  let submission = submit ~observe
+  let submission = submit ~before_execute:retain_unproven_producer
       ~on_acceptance_probe:(fun request_id -> write (Filename.concat base_path "first-loss-request") request_id)
       base_path sw prepared dispatch |> accepted in
   ignore (await base_path submission);
@@ -673,6 +712,8 @@ let test_first_loss_retains_unproven_effects mode () =
        Plan.Composition_run_id.to_string prepared.source.composition_run_id; mode];
     let request_id = read (Filename.concat base_path "first-loss-request") in
     let original = read (Filename.concat base_path "first-loss-journal") in
+    check string "original producer actually entered before loss" "one dispatch entry\n"
+      (read (Filename.concat base_path "first-loss-effect"));
     let path = journal_path base_path prepared.source.composition_run_id in
     let recovered = Async.recover_lost_disk_records ~base_path () in
     check int "exclusive recovery publishes one real Lost owner" 1 recovered.lost;

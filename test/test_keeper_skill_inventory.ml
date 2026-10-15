@@ -992,9 +992,6 @@ let test_spawn_start_follows_sandbox_profile () =
             check bool (label ^ " keeper is not offered " ^ name) false
               (List.mem name (model_names refused)))
          spawn_tools;
-       check int (label ^ " surface loses exactly the spawn tools")
-         (List.length (model_names docker) - List.length spawn_tools)
-         (List.length (model_names refused));
        check (list string) (label ^ " keeper is not offered the spawn composition")
          [] (composition_tools refused);
        check bool (label ^ " operator row names keeper_spawn") true

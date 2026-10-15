@@ -1,5 +1,7 @@
 (** Recover the original job's complete result, then durably enqueue one typed
-    notification before acknowledging its canonical owner. *)
+    notification before acknowledging its canonical owner. A later maintenance
+    pulse cleans only that acknowledged terminal owner's saved resources and
+    retires discovery after cleanup. Result delivery never joins cleanup I/O. *)
 type t
 val create : config:Workspace.config -> ?on_result_ready:(Keeper_owned_job_store.record -> unit) -> unit -> t
 (** [on_result_ready] observes an already-ready canonical result after durable

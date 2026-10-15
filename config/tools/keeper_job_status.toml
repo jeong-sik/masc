@@ -1,11 +1,12 @@
 name = "keeper_job_status"
 description = """
 Reconcile the exact durable isolated job_id and return its phase, original source context, \
-cancellation request, and stdout/stderr artifact references when terminal output is available. \
+cancellation request, resource cleanup stage, and stdout/stderr artifact references when terminal output is available. \
 The handle survives Keeper turns and server restarts. Jobs run only in a private Docker \
 workspace without network access or Keeper/host identity. This call may persist reconciled \
 or terminal evidence. Unconfirmed create or launch remains unconfirmed; inspecting status \
-does not authorize relaunching or retrying the original command."""
+does not authorize relaunching or retrying the original command. Complete results remain \
+readable after maintenance removes the original container and private job data."""
 additional_properties = false
 defer_loading = true
 

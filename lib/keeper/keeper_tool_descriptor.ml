@@ -2318,13 +2318,16 @@ let owned_job_output_schema =
       ; "source", source_schema
       ; "phase", `Assoc [ "type", `String "string" ]
       ; "cancel_requested", `Assoc [ "type", `String "boolean" ]
+      ; "cleanup", `Assoc [ "type", `String "string"; "enum", `List
+          (List.map (fun value -> `String (Keeper_owned_job_cleanup_state.to_string value))
+            Keeper_owned_job_cleanup_state.all) ]
       ; "artifacts", `Assoc
           [ "type", `String "array"; "items", normalized_artifact_ref_schema ]
       ; "detail", nullable_string
       ; "container_id", nullable_string
       ; "exit_code", nullable_integer
       ]
-    ~required:[ "job_id"; "status"; "source"; "phase"; "cancel_requested";
+    ~required:[ "job_id"; "status"; "source"; "phase"; "cancel_requested"; "cleanup";
                 "artifacts"; "detail"; "container_id"; "exit_code" ]
 ;;
 

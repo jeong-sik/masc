@@ -304,6 +304,19 @@ val read_owned_directory_if_present
 (** Eio-native, deterministically sorted directory inventory. *)
 val read_dir : string -> string list
 
+type cleanup_directory = Fs_compat_internal.Owned_tree_cleanup.directory =
+  { path : string
+  ; device : int
+  ; inode : int
+  ; owner_uid : int
+  ; permissions : int
+  }
+val remove_owned_tree : cleanup_directory list -> (unit, string) result
+(** Remove an execution-owned stopped writer's tree beneath its frozen,
+    descriptor-bound parent chain. Never follows links. Missing target recovery
+    still requires all retained parent identities. Partial/uncertain deletion
+    remains an error. Blocking; caller supplies the ownership transaction. *)
+
 (** Load entire file as string. *)
 val load_file : string -> string
 

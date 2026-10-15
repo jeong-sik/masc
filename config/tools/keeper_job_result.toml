@@ -9,7 +9,9 @@ to read this same job and continue its dependent nodes. Completed siblings are r
 On a completed exit, artifacts contains stdout then stderr as normalized {_blob: {...}} \
 references; use /artifacts/0/_blob/sha256 to pass stdout to keeper_artifact_read. \
 The original job's owner reconciles and delivers completion through the existing maintenance \
-pulse. This result read itself performs no backend operation; Composition resumption remains explicit."""
+pulse. After delivery, maintenance cleans the original container and private workspace; \
+the owner journal retains these result artifacts and the original source. This result read \
+itself performs no backend operation; Composition resumption remains explicit."""
 additional_properties = false
 defer_loading = true
 

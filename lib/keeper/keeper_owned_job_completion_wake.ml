@@ -40,14 +40,16 @@ let deliver ~on_result_ready (record : Store.record) =
        (Store.Job_id.to_string record.job_id) (Printexc.to_string exn));
   (* Cleanup or producer ACK failure cannot suppress the committed queue's hint. *)
   wake_hint record;
-  let* acknowledged = Store.acknowledge_completion record in
-  let* () = Store.retire_delivery_marker acknowledged in
+  let* _ = Store.acknowledge_completion record in
+  (* Result delivery ends before cleanup I/O. Retain this discovery marker:
+     a later maintenance fiber settles the same acknowledged terminal owner. *)
   Ok Delivered
 
 let recover ~on_result_ready ~base_path (marker : Store.pending_delivery) =
   try
     let* record = Store.recover ~base_path ~keeper_name:marker.keeper_name marker.job_id in
     if record.completion_delivered then
+      let* record = Keeper_owned_job_runtime.cleanup record in
       let* () = Store.retire_delivery_marker record in Ok Retired
     else if Store.result_ready record then deliver ~on_result_ready record
     else

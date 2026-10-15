@@ -395,7 +395,9 @@ let step_name = function
   | Select -> "select" | Direct_result -> "direct-result" | Direct_stdout -> "direct-stdout"
   | Prepare -> "prepare" | Run -> "run" | Finish -> "finish" | Finished -> "finished"
 
-let recipe fixture =
+type composition_projection = Selected_stdout | Full_actions
+
+let recipe ~projection fixture =
   let output = `Assoc ["kind",`String "output";"node",`String "arguments";"pointer",`String "/content"] in
   `Assoc ["execution",`String "inline";"nodes",`List
     [`Assoc ["id",`String "arguments";"tool",`String "keeper_artifact_read";
@@ -403,7 +405,9 @@ let recipe fixture =
      `Assoc ["id",`String "resolved_stdout";"skill_reference",field "skill_reference" fixture;
       "input",`Assoc ["kind",`String "object";"fields",`List
         [`Assoc ["name",`String "job_id";"value",output]]]]];
-    "exports",`List [`Assoc ["name",`String "stdout";"node",`String "resolved_stdout";"pointer",`String "/stdout"]]]
+    "exports",`List (match projection with
+      | Selected_stdout -> [`Assoc ["name",`String "stdout";"node",`String "resolved_stdout";"pointer",`String "/stdout"]]
+      | Full_actions -> [])]
 
 let reference value = match Tool_output.normalized_artifact_ref_of_json value with
   | Decoded_normalized_artifact_ref reference -> reference
@@ -440,6 +444,16 @@ let exact_sdk_reply ~base ~raw_records parent =
   | [bytes] -> document ~base bytes
   | [] | _ :: _ -> failwith "no unique original SDK run reply"
 
+(* Both are current producer contracts: selected exports retain a complete
+   execution artifact; a run without outer exports retains its full actions.
+   The caller has already verified the exact SDK reply's sealed manifest. *)
+let execution_nodes ~base run =
+  match field "execution_artifact" run with
+  | `Null ->
+    require (field "exports" run=`Null) "selected exports have no canonical execution artifact";
+    field "actions" run |> to_list
+  | artifact -> document ~base (blob_bytes base (reference artifact)) |> field "nodes" |> to_list
+
 let stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row =
   if field "composition_node_id" row=`Null then
     sdk_member ~fixture ~turn row && field "parent_tool_use_id" row=`Null
@@ -451,12 +465,11 @@ let stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row =
       let reply = exact_sdk_reply ~base ~raw_records parent in
       require (field "composition_run_id" reply=field "composition_run_id" row)
         "physical stdout belongs to a different composition";
-      let execution = document ~base (blob_bytes base (reference (field "execution_artifact" reply))) in
       List.exists (fun node ->
         field "node_id" node=field "composition_node_id" row &&
         field "execution_id" node=field "execution_id" row &&
         field "tool_name" node=field "tool" row &&
-        Yojson.Safe.equal (field "input" node) (field "input" row)) (field "nodes" execution |> to_list)) = Some true
+        Yojson.Safe.equal (field "input" node) (field "input" row)) (execution_nodes ~base reply)) = Some true
     | [] | _ :: _ -> false
 
 let full_stdout_reads ~base ~fixture ~turn ~raw_records rows =
@@ -479,7 +492,7 @@ let nested_execution_proven ~base ~fixture ~turn ~skill_reference
   | [parent] -> decode_evidence (fun () ->
     let run = exact_sdk_reply ~base ~raw_records parent in
     require (field "composition_run_id" run=`String scope.composition_run_id) "activation run mismatch";
-    let execution = document ~base (blob_bytes base (reference (field "execution_artifact" run))) in
+    let nodes = execution_nodes ~base run in
     let draft_sha = string "sha256" (field "input" parent) in
     let draft = Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base) ~sha256:draft_sha
       |> get Tool_blob_store.fetch_error_to_string
@@ -490,7 +503,6 @@ let nested_execution_proven ~base ~fixture ~turn ~skill_reference
       Yojson.Safe.equal (field "reference" call) (Skill_reference.to_yojson skill_reference) &&
       field "kind" (field "arguments" call)=`String "upstream" &&
       let child_scope = field "scope" call in
-      let nodes = field "nodes" execution |> to_list in
       let arguments = List.filter (fun node -> field "node_id" node=field "argument_node" child_scope) nodes in
       List.exists (fun node -> field "input" node=`Assoc ["job_id",field "selected_job_id" fixture]) arguments &&
       List.exists (fun mapping -> field "source" mapping=`String "consume" &&
@@ -521,6 +533,12 @@ let sse ~model ~delta ~finish =
 let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~strategy events =
   let runtime = settings experiment in
   let model = string "model_id" runtime in
+  (* Exercise both valid result presentations with the existing scenarios.
+     The malformed-final case still fails solely its final JSON contract. *)
+  let projection = match string "synthetic_outcome" experiment with
+    | "success" | "provider_refusal" -> Selected_stdout
+    | "malformed_final" -> Full_actions
+    | _ -> failwith "unsupported synthetic outcome" in
   let next_step = ref Select in
   let awaiting = ref None in
   let loading = ref None in
@@ -582,21 +600,27 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             draft_sha := Some reference.sha256;
             next_step := Run
           | Run ->
-            let artifact = reference (field "execution_artifact" value) in
-            let execution = document ~base (blob_bytes base artifact) in
-            json (Filename.concat attempt_dir "actual-composition-execution.json") execution;
+            let nodes = execution_nodes ~base value in
+            json (Filename.concat attempt_dir "actual-composition-execution.json")
+              (`Assoc ["nodes",`List nodes;"source_result",value]);
             let prepared = match !prepared_reply with Some prepared -> prepared | None -> failwith "actual prepare reply absent" in
             let argument_node = match field "nested_calls" prepared |> to_list with
               | [call] -> call |> field "scope" |> string "argument_node"
               | [] | _ :: _ -> failwith "one actual nested call was required" in
-            let arguments = field "nodes" execution |> to_list |> List.filter (fun node ->
+            let arguments = nodes |> List.filter (fun node ->
                 field "node_id" node=`String argument_node) in
             (match arguments with
              | [node] ->
                require (field "input" node=`Assoc ["job_id",field "selected_job_id" fixture])
                  "actual child barrier did not preserve resolved upstream input"
              | [] | _ :: _ -> failwith "actual argument barrier was not uniquely executed");
-            let selected_stdout = value |> field "exports" |> field "stdout" in
+            let exports = match projection with
+              | Selected_stdout -> field "exports" value
+              | Full_actions ->
+                (match field "nested_scopes" value |> to_list with
+                 | [scope] -> field "exports" scope
+                 | [] | _ :: _ -> failwith "one actual child result was required") in
+            let selected_stdout = field "stdout" exports in
             require (field "available" selected_stdout = `Bool true) "Skill stdout is unavailable";
             stdout := Some (string "value" selected_stdout);
             next_step := Finish
@@ -627,7 +651,7 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             | Select -> "keeper_artifact_read",`Assoc ["sha256",field "selection_sha256" fixture]
             | Direct_result -> "keeper_job_result",`Assoc ["job_id",`String (needed !selected)]
             | Direct_stdout -> "keeper_artifact_read",`Assoc ["sha256",`String (needed !draft_sha)]
-            | Prepare -> Keeper_composition_draft.prepare_tool_name,recipe fixture
+            | Prepare -> Keeper_composition_draft.prepare_tool_name,recipe ~projection fixture
             | Run -> Keeper_composition_draft.run_tool_name,`Assoc ["sha256",`String (needed !draft_sha)]
             | Finish | Finished -> failwith "final step cannot dispatch a tool" in
           let id = Printf.sprintf "call-%d-%s" request_number (step_name step) in

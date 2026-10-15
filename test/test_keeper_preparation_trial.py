@@ -169,6 +169,11 @@ def malformed_final_evidence(args, root, head):
                     "cache_creation_input_tokens", "cache_read_input_tokens", "usage_scope")),
                 "failed attempt lost observed provider metrics or relabelled their scope")
         instructions.append(receipt["common_instruction_sha256"])
+        if entry["strategy"] == "exact_skill":
+            execution = read((output / entry["path"]).parent / "actual-composition-execution.json")
+            require("execution_artifact" not in execution["source_result"] and
+                    execution["source_result"]["actions"] == execution["nodes"],
+                    "unprojected physical execution was not verified through its canonical full actions")
         peer = read((output / entry["path"]).parent / "provider-events.json")
         check_http_observation((output / entry["path"]).parent, receipt,
                                [row for row in peer if row["kind"] == "synthetic_provider_received"])

@@ -6,6 +6,7 @@ type t =
     }
   | Task_missing_title
   | Help
+  | Features
   | Show_load_errors
   | About
   | Lane_addons of string
@@ -249,6 +250,11 @@ let catalog =
     ; args = ""
     ; summary = "this list"
     }
+  ; { word = "features"
+    ; aliases = []
+    ; args = ""
+    ; summary = "what this TUI can do: features, one line each, with the way to open each"
+    }
   ; { word = "about"
     ; aliases = [ "splash" ]
     ; args = ""
@@ -361,6 +367,7 @@ let parse text =
     | "task", title -> Task_for_keeper { title; body }
     | "errors", "" -> Show_load_errors
     | "help", _ -> Help
+    | "features", _ -> Features
     | "about", _ | "splash", _ -> About
     | "addons", arg -> Lane_addons arg
     | "play", "" | "play", "invites" -> Play_invites

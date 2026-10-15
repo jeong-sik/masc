@@ -10329,7 +10329,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
     Option.is_some state.msg_recall_replaces
     && match command with
       | Masc_tui_command.Say _ -> false
-      | Masc_tui_command.Task_for_keeper _ | Task_missing_title | Help | Show_load_errors | About
+      | Masc_tui_command.Task_for_keeper _ | Task_missing_title | Help | Features
+      | Show_load_errors | About
       | Lane_addons _ | Play_invites | Play_link _ | Play_invite _ | Play_revoke _ | Play_invalid _
       | Open_metrics | Account_login _ | Open_settings | Open_diff | Open_patch_modal | Open_usage
       | Open_link_preview _ | Open_links_list | Copy_latest_reply | Set_embeds _ | Open_changes
@@ -10447,6 +10448,16 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       Masc_tui_message_input.clear state.msg_input;
       notice ~kind:Notice_reply
         (String.concat "\n" Masc_tui_command.help_lines)
+  | Masc_tui_command.Features ->
+      Masc_tui_message_input.clear state.msg_input;
+      let _, cols = get_terminal_size () in
+      let width =
+        if cols < Masc_tui_help.two_column_minimum_cols then
+          Masc_tui_frame.inner_width ~cols
+        else Masc_tui_help.column_width ~cols
+      in
+      notice ~kind:Notice_reply
+        (String.concat "\n" (Masc_tui_features.lines ~width))
   | Masc_tui_command.About ->
       Masc_tui_message_input.clear state.msg_input;
       state.about_open <- true;
@@ -15254,7 +15265,8 @@ let handle_composer_key state ~base_path ~mailbox key =
            end;
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
-       | Masc_tui_command.Help | Masc_tui_command.Show_load_errors
+       | Masc_tui_command.Help | Masc_tui_command.Features
+       | Masc_tui_command.Show_load_errors
        | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
         | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
         | Masc_tui_command.Open_usage | Masc_tui_command.Open_changes

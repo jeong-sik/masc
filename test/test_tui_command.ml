@@ -8,6 +8,7 @@ let describe = function
   | Command.Task_for_keeper { title; body } -> Printf.sprintf "task:%s|%s" title body
   | Command.Task_missing_title -> "task-missing-title"
   | Command.Help -> "help"
+  | Command.Features -> "features"
   | Command.Show_load_errors -> "show-load-errors"
   | Command.About -> "about"
   | Command.Open_settings -> "open-settings"
@@ -101,6 +102,7 @@ let describe = function
   | Command.Preset_show_missing_name -> "preset-show-missing-name"
   | Command.Preset_delete name -> "preset-delete:" ^ name
   | Command.Preset_delete_missing_name -> "preset-delete-missing-name"
+  | Command.Listen -> "listen"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_measurement_command () =

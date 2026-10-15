@@ -30,6 +30,14 @@ Keepers. Keeper operations are reached from their parent only.
 Header clocks and ordinary row times use the terminal's timezone. Usage trends
 and Task completion days are explicitly labeled UTC.
 
+## What can I do here
+
+Type `/features` in any composer and the feature sheet lists what this TUI
+can do — one sentence per feature, beside the command, key or name that
+opens it (`/keeper <name>`, `Ctrl-L`, `masc_tool_help`, ...). Names are wire
+names, so a row can be copied and typed as it is printed. The key-level
+reference is [`?`](guides/TUI-KEYS.md); `/help` lists the slash commands.
+
 ## Quick Start
 
 ```bash

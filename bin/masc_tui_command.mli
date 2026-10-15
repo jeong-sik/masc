@@ -23,6 +23,10 @@ type t =
     }
   | Task_missing_title  (** [/task] with nothing after it on the line. *)
   | Help  (** [/help] — draw the command list into the pane. *)
+  | Features
+      (** [/features] — draw the feature sheet into the pane: what this TUI
+          can do, one sentence each, with the command, key or name that opens
+          each. *)
   | Show_load_errors
       (** [/errors] — put current chat loading failures in the scrollable local log. *)
   | About

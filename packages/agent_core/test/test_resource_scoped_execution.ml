@@ -317,10 +317,33 @@ let test_replaced_handler_cannot_reuse_old_preparation () =
   check int "stale scoped resolver is not invoked" 0 !preparations;
   check int "ordinary handler executes once" 1 !ordinary_calls;
   check int "wrapper executes once" 1 !wrapper_calls;
-  match rows with
+  (match rows with
   | [ row ] -> check bool "replacement retains Serial admission" true
       ((Tool_contract.Invocation.schedule row.invocation).execution_mode = Tool_contract.Serial)
-  | _ -> fail "expected the exact wrapped invocation"
+  | _ -> fail "expected the exact wrapped invocation");
+  let observations = ref [] in
+  let observe handler execution_env input =
+    let invocation = Option.get (Tool.Execution_env.invocation execution_env) in
+    observations := (Tool_contract.Invocation.tool_use_id invocation, input) :: !observations;
+    handler execution_env input in
+  let instrumented = Tool.map_handler observe original in
+  let rows = execute env [ instrumented ] [ call "wrapped" ] |> results in
+  check (list string) "typed instrumentation consumes the prepared handler"
+    [ "stale handler" ] (contents rows);
+  check int "typed instrumentation retains real preparation" 1 !preparations;
+  check int "prepared execution does not run ordinary handler" 1 !ordinary_calls;
+  check bool "instrumentation sees exact occurrence and input" true
+    (!observations = [ "occurrence-wrapped", `Assoc [] ]);
+  (match rows with
+   | [ row ] -> check bool "instrumented prepared invocation remains Concurrent" true
+       ((Tool_contract.Invocation.schedule row.invocation).execution_mode = Tool_contract.Concurrent)
+   | _ -> fail "expected the exact instrumented invocation");
+  let invalid = Tool.map_handler observe wrapped in
+  let rows = execute env [ invalid ] [ call "wrapped" ] |> results in
+  check (list string) "typed instrumentation cannot revive an invalid binding"
+    [ "ordinary" ] (contents rows);
+  check int "invalid preparation stays unused" 1 !preparations;
+  check int "existing replacement wrapper still executes" 2 !wrapper_calls
 ;;
 
 let test_durable_truth_precedes_current_preparation () =

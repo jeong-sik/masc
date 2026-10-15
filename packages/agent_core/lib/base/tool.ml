@@ -120,6 +120,24 @@ let has_scoped_admission (tool : t) =
   | Some (Terminal_descriptor _) | None -> false
 ;;
 
+let map_handler wrap (tool : t) =
+  let handler = wrap tool.handler in
+  let descriptor = match tool.descriptor with
+    | Some (Ordinary_descriptor ({ admission = Resource_scoped prepare; _ } as ordinary))
+      when has_scoped_admission tool ->
+      let prepare ~sw input =
+        Result.map
+          (Option.map (fun (scoped : scoped_call) -> { scoped with handler = wrap scoped.handler }))
+          (prepare ~sw input)
+      in
+      Some (Ordinary_descriptor
+        { ordinary with admission = Resource_scoped prepare; prepared_for = Some handler })
+    | Some (Ordinary_descriptor { admission = (Static _ | Concurrent_when _ | Resource_scoped _); _ })
+    | Some (Terminal_descriptor _) | None -> tool.descriptor
+  in
+  { tool with handler; descriptor }
+;;
+
 let execute_prepared ?context ?invocation (call : prepared_call) =
   call.handler (Execution_env.create ?context ?invocation ()) call.input
 ;;

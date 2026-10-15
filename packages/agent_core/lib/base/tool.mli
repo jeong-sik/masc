@@ -163,6 +163,13 @@ val execute
   -> Yojson.Safe.t
   -> Types.tool_result
 
+val map_handler : (execution_env_tool_handler -> execution_env_tool_handler) -> t -> t
+(** Wrap the ordinary handler and every valid producer-prepared handler with
+    the same instrumentation. The wrapper must forward the exact execution
+    environment and input; argument transformation belongs in [with_defaults]
+    or the producer's preparation contract. A stale binding invalidated by a
+    record handler replacement stays invalid; this function cannot revive it. *)
+
 type prepared_call
 
 val prepare_call : sw:Eio.Switch.t -> t -> input:Yojson.Safe.t -> prepared_call

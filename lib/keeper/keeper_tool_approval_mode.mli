@@ -23,8 +23,9 @@
     call hit its 180s approval timeout until diagnosed. The trade-off is now
     the opposite of what it was: a stance this permissive outlives the
     process that was told to take it, so an operator who wants it gone must
-    set [Auto] rather than wait for a restart. An unreadable store is an
-    error surfaced via {!last_restore_error}, never a quiet return to [Auto]. *)
+    set [Auto] rather than wait for a restart. An unreadable store at boot
+    falls back to the stricter [Auto] default; the error (including the store
+    path) is visible through {!last_restore_error}. *)
 
 type mode =
   | Auto  (** The approval policy decides, call by call. *)
@@ -59,8 +60,10 @@ type override_row =
 
 val keeper_overrides : base_path:string -> (override_row list, string) result
 (** The persisted overrides. A missing file is an empty list; a file that
-    cannot be read or decoded is an error, because answering "nobody was
-    singled out" would be the quiet way back to the looser [Auto] default. *)
+    cannot be read or decoded is an error (naming the store path), because
+    answering "nobody was singled out" would silently fall back to the
+    stricter [Auto] default without distinguishing corruption from an empty
+    store. *)
 
 val set :
   t ->
@@ -70,12 +73,16 @@ val set :
   mode ->
   (unit, string) result
 (** Persists the change beside the other gate state, then updates the
-    in-memory registry, so a failed write holds neither; the whole
-    read-modify-write is atomic with respect to other in-process writers.
-    Setting [Auto] removes the keeper's row rather than storing a synonym
-    for the default, so the file lists exactly the keepers an operator has
-    moved off [Auto]. The change is also written to the audit log as actor
-    [actor]; if that record fails ([Sys_error] from the store setup is
+    in-memory registry, so a failed [Yolo] write holds neither; the whole
+    read-modify-write is atomic with respect to other in-process writers in
+    the single running server process. Setting [Auto] removes the keeper's
+    row rather than storing a synonym for the default, so the file lists
+    exactly the keepers an operator has moved off [Auto]; if the store file
+    cannot be read when revoking to [Auto], the keeper's in-memory override
+    is still removed immediately (failing closed to the stricter [Auto]
+    stance) while the store read error is returned and recorded in
+    {!last_restore_error}. The change is also written to the audit log as
+    actor [actor]; if that record fails ([Sys_error] from the store setup is
     caught the same way), the error is returned even though the stance
     itself already stands durably — the result is total, it never raises.
 *)
@@ -83,8 +90,8 @@ val set :
 val bind : base_path:string -> t -> (unit, string) result
 (** Replay the persisted overrides into the registry; the server calls this
     once, synchronously, at boot. A missing file leaves an empty registry;
-    an unreadable one keeps whatever the registry held and reports via
-    {!last_restore_error}. *)
+    an unreadable one keeps whatever the registry held and reports the
+    store path and reason via {!last_restore_error}. *)
 
 val last_restore_error : t -> string option
 (** The store error the most recent failed {!set} or {!bind} hit, if any.

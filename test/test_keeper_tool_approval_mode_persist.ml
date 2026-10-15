@@ -4,8 +4,10 @@
     of this test file. A yolo override must survive a restart (an operator's
     other authorization choices already do), setting [Auto] must remove the
     row rather than store a synonym for the default, and a store that cannot
-    be read must surface an error — resolving to [Auto] is the looser answer,
-    so it must never be the quiet fallback for a broken file.
+    be read must surface an error via [last_restore_error] (including the
+    store path) rather than silently appearing as an empty store. Revoking to
+    the stricter [Auto] default must remove the in-memory override immediately
+    even if the disk store cannot be read.
 *)
 
 open Alcotest
@@ -98,30 +100,47 @@ let test_auto_removes_the_row () =
 let test_a_corrupt_store_is_an_error_not_a_quiet_auto () =
   with_temp_dir @@ fun base_path ->
   let keeper_name = "persist-corrupt" in
-  ignore (write_corrupt_store ~base_path);
+  let file = write_corrupt_store ~base_path in
   let store = Mode.create () in
   (match Mode.bind ~base_path store with
    | Ok () -> fail "bind succeeded on a corrupt store"
    | Error _ -> ());
   check bool "resolve falls back to Auto" true
     (Mode.resolve store ~keeper_name = Mode.Auto);
-  check bool "the error is recorded, not silent" true
+  check bool "the error is recorded and names the store path" true
     (match Mode.last_restore_error store with
-     | Some _ -> true
+     | Some detail -> Astring.String.is_infix ~affix:file detail
      | None -> false)
 ;;
 
 let test_set_on_a_corrupt_store_holds_and_recovers () =
   with_temp_dir @@ fun base_path ->
   let keeper_name = "persist-corrupt-set" in
-  let file = write_corrupt_store ~base_path in
   let store = Mode.create () in
+  set_exn store ~base_path ~keeper_name Mode.Yolo;
+  check bool "yolo is active before corruption" true
+    (Mode.resolve store ~keeper_name = Mode.Yolo);
+  let file = write_corrupt_store ~base_path in
+  (* Revoking to [Auto] when the disk store is unreadable still removes the
+     in-memory [Yolo] override immediately (failing closed to the stricter
+     [Auto] default) while reporting the store read failure. *)
+  (match
+     Mode.set store ~base_path ~actor:"test-operator" ~keeper_name Mode.Auto
+   with
+   | Ok () -> fail "set Auto succeeded on a corrupt store"
+   | Error detail ->
+     check bool "the error names the corrupt store path" true
+       (Astring.String.is_infix ~affix:file detail));
+  check bool "in-memory override is revoked to Auto immediately" true
+    (Mode.resolve store ~keeper_name = Mode.Auto);
+  check (list string) "revoking Auto cleared the in-memory override" []
+    (List.map fst (Mode.overrides store));
   (match
      Mode.set store ~base_path ~actor:"test-operator" ~keeper_name Mode.Yolo
    with
-   | Ok () -> fail "set succeeded on a corrupt store"
+   | Ok () -> fail "set Yolo succeeded on a corrupt store"
    | Error _ -> ());
-  check (list string) "a failed set holds the registry" []
+  check (list string) "a failed Yolo set holds the registry" []
     (List.map fst (Mode.overrides store));
   (* Once the store reads again, a set both lands and clears the recorded
      error — the operator can repair forward without a restart. *)

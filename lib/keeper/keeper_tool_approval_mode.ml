@@ -127,9 +127,9 @@ let rows_of_file_json = function
 ;;
 
 (* An unreadable store is an error rather than an empty list. Reading it as
-   "nobody was singled out" would resolve every keeper to [Auto], which is
-   the looser answer — a file that cannot be read must not be the quiet way
-   back to it (same rule as [Keeper_gate_mode.keeper_overrides]). *)
+   "nobody was singled out" would silently fall back to the stricter [Auto]
+   default without distinguishing a broken store from an empty one (same rule
+   as [Keeper_gate_mode.keeper_overrides]). *)
 let keeper_overrides ~base_path =
   let file = Keeper_gate_path.tool_approval_modes ~base_path in
   if not (Sys.file_exists file)
@@ -137,8 +137,11 @@ let keeper_overrides ~base_path =
   else
     match Safe_ops.read_json_file_safe file with
     | Error detail ->
-      Error (Printf.sprintf "tool approval mode store read failed: %s" detail)
-    | Ok json -> rows_of_file_json json
+      Error (Printf.sprintf "tool approval mode store read failed (%s): %s" file detail)
+    | Ok json ->
+      rows_of_file_json json
+      |> Result.map_error (fun detail ->
+           Printf.sprintf "tool approval mode store (%s): %s" file detail)
 ;;
 
 let set t ~base_path ~actor ~keeper_name mode =
@@ -146,7 +149,10 @@ let set t ~base_path ~actor ~keeper_name mode =
      the file and the registry are one logical state, so two in-process
      writers must not interleave read and write phases — the second would
      read the first's pre-image and clobber it. The durable write still
-     lands before memory, so a failed [set] holds neither. The audit record
+     lands before memory for [Yolo], so a failed [set] holds neither. When
+     revoking to [Auto], if the store cannot be read, the keeper's in-memory
+     override is removed immediately so the operator can always fail closed
+     to [Auto] even while the disk store awaits repair. The audit record
      is deliberately outside the mutex: it must not couple the per-call
      [resolve] path to event-bus latency, and a failed record does not
      change the durable answer. *)
@@ -154,6 +160,13 @@ let set t ~base_path ~actor ~keeper_name mode =
     Stdlib.Mutex.protect t.mutex (fun () ->
         match keeper_overrides ~base_path with
         | Error detail ->
+          (match mode with
+           | Auto ->
+             t.overrides <-
+               List.filter
+                 (fun (name, _) -> not (String.equal name keeper_name))
+                 t.overrides
+           | Yolo -> ());
           t.restore_error <- Some detail;
           Error detail
         | Ok rows ->

@@ -1,7 +1,8 @@
 (** Descriptor-aware execution of a validated Keeper tool-composition plan.
 
-    The executor schedules only explicit dependency layers. Descriptor
-    [Serial], [Concurrent], and [Terminal] values determine execution batches;
+    The ordinary schedule follows explicit dependency layers and descriptor
+    [Serial], [Concurrent], and [Terminal] declarations. Exact filesystem-owned
+    Inline Edit preparations additionally supply resource ordering at runtime;
     display groups and tool names never do. Every node result retains the
     canonical {!Tool_result.disposition}. *)
 
@@ -189,7 +190,11 @@ val execute
     returns the same job. [prepared_edits] binds an exact instantiated Inline
     plan to its original node inputs and opaque directory capabilities. A
     mismatched node/input is refused before the handler; it never falls back
-    under a claim for different resources. Its consumer retains authorization. *)
+    under a claim for different resources. Its consumer retains authorization.
+    Exact prepared leaves can overlap when their producer-owned resources do
+    not conflict. Conflicting leaves follow dependency-layer order, standing
+    down after a failed predecessor; explicit plan dependencies still apply.
+    Each such leaf captures immutable Gate evidence before its handler runs. *)
 val execute_keeper
   :  capability_surface:Keeper_capability_surface.t
   -> plan:Keeper_tool_plan.t

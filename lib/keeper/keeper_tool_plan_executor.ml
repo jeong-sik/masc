@@ -12,14 +12,6 @@ type unscheduled_batch =
   | Unscheduled_serial of Keeper_tool_plan.node * Keeper_tool_plan.contract
   | Unscheduled_concurrent of (Keeper_tool_plan.node * Keeper_tool_plan.contract) list
 
-let execution_mode_of_contract (contract : Keeper_tool_plan.contract) =
-  match contract.execution with
-  | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
-    Agent_core.Tool_contract.Concurrent
-  | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
-  | Keeper_tool_descriptor.Terminal -> Agent_core.Tool_contract.Serial
-;;
-
 let contract_exn plan node =
   match Keeper_tool_plan.contract plan node.Keeper_tool_plan.id with
   | Some contract -> contract
@@ -50,7 +42,28 @@ let unscheduled_layer plan nodes =
   build [] [] nodes
 ;;
 
-let schedule plan =
+let predecessors dependencies node_id =
+  match List.find_opt (fun (id, _) -> Keeper_tool_plan.Node_id.equal id node_id) dependencies with
+  | Some (_, predecessors) -> predecessors
+  | None -> invalid_arg "prepared Inline Edit lost its resource ordering"
+;;
+
+let prepared_layer plan dependencies nodes =
+  let rec waves = function
+    | [] -> []
+    | pending ->
+      let ready, waiting = List.partition (fun (node : Keeper_tool_plan.node) ->
+        let earlier = predecessors dependencies node.id in
+        not (List.exists (fun (other : Keeper_tool_plan.node) ->
+          List.exists (Keeper_tool_plan.Node_id.equal other.id) earlier) pending)) pending in
+      if ready = [] then invalid_arg "prepared Inline Edit resource ordering contains a cycle";
+      Unscheduled_concurrent (List.map (fun node -> node, contract_exn plan node) ready)
+      :: waves waiting
+  in
+  waves nodes
+;;
+
+let schedule_with_resources ?resource_dependencies plan =
   let planned_indexes =
     Keeper_tool_plan.nodes plan
     |> List.mapi (fun index node -> node.Keeper_tool_plan.id, index)
@@ -65,25 +78,32 @@ let schedule plan =
     | None -> invalid_arg "validated composition plan lost a canonical node"
   in
   Keeper_tool_plan.dependency_layers plan
-  |> List.concat_map (unscheduled_layer plan)
+  |> List.concat_map (match resource_dependencies with
+    | None -> unscheduled_layer plan
+    | Some dependencies -> prepared_layer plan dependencies)
   |> List.mapi (fun batch_index batch ->
-    let scheduled_node ~batch_size (node, contract) =
+    let scheduled_node ~execution_mode ~batch_size (node, contract) =
       { node
       ; contract
       ; schedule =
           { Agent_core.Tool_contract.planned_index = planned_index node
           ; batch_index
           ; batch_size
-          ; execution_mode = execution_mode_of_contract contract
+          ; execution_mode
           }
       }
     in
     match batch with
     | Unscheduled_serial (node, contract) ->
-      Serial_batch (scheduled_node ~batch_size:1 (node, contract))
+      Serial_batch (scheduled_node ~execution_mode:Agent_core.Tool_contract.Serial
+        ~batch_size:1 (node, contract))
     | Unscheduled_concurrent nodes ->
       let batch_size = List.length nodes in
-      Concurrent_batch (List.map (scheduled_node ~batch_size) nodes))
+      Concurrent_batch (List.map
+        (scheduled_node ~execution_mode:Agent_core.Tool_contract.Concurrent ~batch_size) nodes))
+;;
+
+let schedule plan = schedule_with_resources plan
 ;;
 
 let outer_completion plan =
@@ -536,6 +556,7 @@ let execute_with_tool_use_id
       ~run_id
       ~tool_use_id_for_node
       ~dispatch
+      ?prepared_edits
       ?launch_invocation_of
       ?admit_node
       ?dispatch_compiled
@@ -543,6 +564,8 @@ let execute_with_tool_use_id
       ?observe_node_result
       ()
   =
+  let resource_dependencies = Option.bind prepared_edits
+    (Keeper_prepared_inline_edit.resource_dependencies ~plan) in
   let node_effect_disposition (result : node_result) =
     match result.result with
     | Tool_result.Deferred _ | Tool_result.Failed _ ->
@@ -571,8 +594,9 @@ let execute_with_tool_use_id
   in
   (* Dynamic ready-wave runner: every node owns one fiber that starts when all
      of its dependencies have settled, instead of waiting for a static batch
-     barrier. Serial and terminal nodes additionally follow the static
-     schedule order and run alone behind [Exclusive_gate]. A node whose
+     barrier. Ordinary serial and terminal nodes additionally follow the static
+     schedule order and run alone behind [Exclusive_gate]. Exact prepared Edit
+     leaves instead wait for every earlier conflicting resource owner. A node whose
      dependency failed or was skipped never dispatches; under [Fail_fast] no
      new node dispatches once any node is blocked, while under
      [Continue_independent] only the failed branch's descendants are blocked.
@@ -620,6 +644,10 @@ let execute_with_tool_use_id
           else previous (Some candidate) rest
       in
       previous None serial_chain
+    in
+    let ordering_predecessors node_id = match resource_dependencies with
+      | Some dependencies -> predecessors dependencies node_id
+      | None -> Option.to_list (serial_predecessor node_id)
     in
     let outcomes =
       List.map
@@ -688,26 +716,23 @@ let execute_with_tool_use_id
         let _, resolve = find_outcome node_id in
         Eio.Promise.resolve resolve Wave_skipped
       in
-      (* Serial and terminal nodes follow the static schedule order, so a serial
-         chain stands down as a chain: when the serial predecessor failed or
-         deferred (cause <> None) or was skipped, this node dispatches no tool
-         under either branch failure policy — a serial slot never waits on a
-         predecessor whose effect never landed. The failed predecessor itself
-         still carries the plan cause through planned_index ordering. *)
-      let serial_predecessor_stopped =
-        match serial_predecessor node_id with
-        | None -> false
-        | Some predecessor ->
+      (* Serial order or producer-owned conflicts preserve predecessor effects.
+         Await every such predecessor, including a transitively blocked owner;
+         a disjoint sibling has no resource-order wait. Under either failure
+         policy a failed/deferred/skipped predecessor prevents this dispatch. *)
+      let predecessor_outcomes = List.map (fun predecessor ->
           let promise, _ = find_outcome predecessor in
-          match Eio.Promise.await promise with
+          predecessor, Eio.Promise.await promise) (ordering_predecessors node_id) in
+      let predecessor_stopped = List.exists (fun (_, outcome) -> match outcome with
           | Wave_skipped -> true
-          | Wave_settled (settlement, _) -> Option.is_some settlement.cause
-      in
-      if serial_predecessor_stopped
+          | Wave_settled (settlement, _) -> Option.is_some settlement.cause)
+          predecessor_outcomes in
+      if predecessor_stopped
       then skip ()
       else (
         (* A node commits once every dependency has settled: its commit ticket
-           is the latest dependency completion. Under [Fail_fast] a node stops
+           is the latest dependency completion, including prepared resource
+           predecessors when present. Under [Fail_fast] a node stops
            only when a failure completed before that commit, so siblings that
            were already unblocked still settle exactly like one static batch.
            Later or concurrent failures never retroactively stop a committed
@@ -720,7 +745,9 @@ let execute_with_tool_use_id
               | Wave_settled (_, ticket) ->
                 ((if ticket > latest then ticket else latest), blocked_found || is_blocked dependency))
             (-1, false)
-            dependency_outcomes
+            (dependency_outcomes @ (match resource_dependencies with
+              | Some _ -> predecessor_outcomes
+              | None -> []))
         in
         let failure_before_ready =
           List.exists
@@ -836,7 +863,7 @@ let execute_with_tool_use_id
        Error { settled; cause; additional_causes=List.map snd rest;
          effect_disposition = aggregate_effect_disposition settled })
   in
-  let batches = schedule plan in
+  let batches = schedule_with_resources ?resource_dependencies plan in
   let journal_admission = match journal with
     | None -> Ok ()
     | Some worker -> Keeper_tool_execution_journal.validate_plan worker ~plan
@@ -1020,6 +1047,12 @@ let execute_keeper_with_authority
              ~effect_disposition:Tool_result.Effect_outcome_unknown
              ~start_time:(Tool_timing.start ()) detail)
     | Ok prepared_edit, Ok owned_job_replay ->
+    let gate_context = match prepared_edit, gate_context with
+      | Some _, Some current ->
+        let captured = current () in
+        Some (fun () -> captured)
+      | None, context | Some _, (None as context) -> context
+    in
     let terminal_on_completed, terminal_on_failed =
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed
@@ -1132,6 +1165,7 @@ let execute_keeper_with_authority
     ~run_id
     ~tool_use_id_for_node
     ~dispatch:dispatch_admitted
+    ?prepared_edits
     ~launch_invocation_of
     ?admit_node
     ?dispatch_compiled

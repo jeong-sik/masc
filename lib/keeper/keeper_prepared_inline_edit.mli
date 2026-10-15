@@ -23,6 +23,15 @@ val plan : t -> Keeper_tool_plan.t
 val source : t -> Keeper_tool_call_log_context.turn_context
 val scopes : t -> Agent_core.Tool_contract.Resource_scope.t list
 
+val resource_dependencies
+  : plan:Keeper_tool_plan.t
+  -> t
+  -> (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t list) list option
+(** Earlier conflicting prepared leaves in dependency-layer order. Only the
+    exact immutable plan has this ordering; [None] means a different plan.
+    Disjoint siblings share no ordering edge. These edges grant neither
+    authorization nor replay and do not replace the plan's dependencies. *)
+
 val for_node
   : plan:Keeper_tool_plan.t
   -> node:Keeper_tool_plan.node

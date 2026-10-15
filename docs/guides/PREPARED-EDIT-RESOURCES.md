@@ -53,8 +53,15 @@ node, its validated model input and its file preparation. It crosses the normal
 Skill activation, bridge, Executor, Handler, receipt and result-publication
 boundaries. A mismatched plan/node/input is refused before that leaf dispatches;
 it cannot fall back under claims for different resources. All leaf footprints
-participate, including later leaves. Existing per-plan scheduling and failure
-settlement remain in use.
+participate, including later leaves. Within that exact plan, disjoint prepared
+leaves can overlap. Every conflict with an earlier leaf in dependency-layer
+order adds an ordering edge, including conflicts with owners already waiting
+on another owner. Explicit dependencies remain in force. Failed or skipped
+resource predecessors stand down their successors, while unrelated branches
+follow the plan's failure policy. A newly ready resource successor uses those
+predecessor completions for the existing fail-fast decision. Each leaf captures
+immutable Gate evidence before entering its ordinary handler and contributes
+its result to the original invocation and turn aggregates.
 
 The producer releases earlier file preparations if it cannot transfer the
 complete aggregate, including on cancellation. Released file preparations
@@ -63,7 +70,10 @@ Output-dependent paths, mixed plans, compiled children, Async and Terminal keep
 their ordinary admission. Published-snapshot fixture scenarios cover two Inline
 Skills' actual effects, overlap and conflict waves, physical leaf/run receipts,
 activation ownership, a conflict with direct public Edit, and a later leaf's
-shared footprint. These require their own executed-head evidence.
+shared footprint. Single-Skill scenarios additionally cover inner overlap,
+physical alias order, explicit dependencies, failed conflict predecessors with
+a successful disjoint sibling, and cancellation followed by a fresh invocation.
+These require their own executed-head evidence.
 
 No general Bash,
 endpoint write, Async admission, cross-process exclusion or measured model

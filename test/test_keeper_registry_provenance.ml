@@ -79,6 +79,7 @@ let test_provider_runtime_error_carrier_none () =
       ; http_status = None
       ; runtime_id = None
       ; agent_core_timeout = None
+      ; fenced_empty_turn_runtime = None
       ; reason = None
       }
   in

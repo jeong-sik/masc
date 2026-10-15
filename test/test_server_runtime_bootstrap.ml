@@ -1332,6 +1332,7 @@ let mark_keeper_dead_with_registry_cause config
             http_status = Some 500;
             runtime_id = Some "runtime-a";
             agent_core_timeout = None;
+            fenced_empty_turn_runtime = None;
             reason = None;
           }));
   Keeper_registry.set_last_error_entry ~base_path ~name:meta.name

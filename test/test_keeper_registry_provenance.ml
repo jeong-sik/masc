@@ -97,6 +97,7 @@ let test_provider_runtime_error_carrier_some () =
       ; http_status = Some 502
       ; runtime_id = None
       ; agent_core_timeout = None
+      ; fenced_empty_turn_runtime = None
       ; reason = None
       }
   in

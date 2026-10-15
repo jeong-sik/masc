@@ -618,6 +618,31 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     | Evidence_complete evidence -> evidence
     | Evidence_quarantined _ -> failwith "measured source reaction evidence is quarantined" in
   let unknown reason = `Assoc ["state",`String "unknown";"reason",`String reason] in
+  let manifest_path = Keeper_runtime_manifest.path_for_trace config ~keeper_name:keeper
+      ~trace_id:turn.trace_id in
+  let manifest_rows = read manifest_path |> String.split_on_char '\n'
+      |> List.filter (fun line -> String.trim line <> "") |> List.map Yojson.Safe.from_string in
+  json (Filename.concat attempt_dir "runtime-manifest.json") (`List manifest_rows);
+  let entries = List.filter_map (fun value ->
+    match Keeper_runtime_manifest.decode_persisted_row value |> get Fun.id with
+    | Active_row row when row.event=Keeper_runtime_manifest.Turn_started &&
+        row.keeper_name=keeper && row.trace_id=turn.trace_id &&
+        row.keeper_turn_id=Some (integer "absolute_turn" turn_json) -> Some row
+    | Active_row _ | Unsupported_row _ -> None) manifest_rows in
+  let expected_sources = `List [`Assoc (List.map (fun key -> key,field key admission)
+      ["stimulus_id";"source_snapshot_ref";"admitted_revision";"first_admitted_at"])] in
+  let intake_turn_entry = match entries with
+    | [row] when Yojson.Safe.equal (field "intake_sources" row.decision) expected_sources ->
+      let persisted = Keeper_runtime_manifest.to_json row in
+      json (Filename.concat attempt_dir "turn-entry-manifest.json") persisted;
+      require (field "intake_sources" (field "decision" (Keeper_runtime_manifest.public_to_json row))=`Null)
+        "private intake source identity leaked through public manifest projection";
+      `Assoc ["state",`String "observed";"ts",`String row.ts;
+        "trace_id",`String row.trace_id;"keeper_turn_id",`Int (integer "absolute_turn" turn_json);
+        "sources",expected_sources;"clock_refs",field "clock_refs" row.decision;
+        "manifest_sha256",`String (sha (read (Filename.concat attempt_dir "turn-entry-manifest.json")))]
+    | [_] -> unknown "exact turn-entry manifest did not retain this intake selection"
+    | [] | _ :: _ -> unknown "no unique exact-turn entry manifest" in
   let useful =
     let candidates = List.filter (fun ((event : Agent_observation.tool_event),_) ->
       event.tool_name="keeper_artifact_read" && event.turn_id=string "task_id" fixture &&
@@ -730,7 +755,8 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     (field "jobs" fixture |> to_list);
   let outcome_name = if correct then "correct" else "explicit_failure" in
   let timing = `Assoc ["admission",admission;"cycle_entered",cycle_entered;"cycle_returned",cycle_returned;
-      "turn_started",(match evidence.turn_started_recorded_at with
+      "intake_turn_entry",intake_turn_entry;
+      "replay_turn_started",(match evidence.turn_started_recorded_at with
         | Some epoch -> `Assoc ["state",`String "observed";"epoch",`Float epoch]
         | None -> unknown "current production Board source does not own a Turn_started reaction");
       "first_useful_leaf",useful;"verified_outcome_observed",now counter] in

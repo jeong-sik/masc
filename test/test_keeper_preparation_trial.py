@@ -70,6 +70,24 @@ def main():
         require(json.loads(accepted["final_text"]) == receipt["objective"],
                 "persisted run final answer differs from the independently checked objective")
         useful = receipt["timing"]["first_useful_leaf"]
+        intake = receipt["timing"]["intake_turn_entry"]
+        marker = read(directory / "turn-entry-manifest.json")
+        require(intake["state"] == "observed" and marker in read(directory / "runtime-manifest.json"),
+                "turn entry did not come from an actual persisted runtime manifest")
+        require(marker["event"] == "turn_started" and marker["trace_id"] == turn["trace_id"] and
+                marker["keeper_turn_id"] == turn["absolute_turn"] and marker["ts"] == intake["ts"],
+                "intake marker lost its exact canonical turn identity")
+        require(intake["sources"] == marker["decision"]["intake_sources"] == [{
+                key: admission[key] for key in ("stimulus_id", "source_snapshot_ref",
+                                               "admitted_revision", "first_admitted_at")}],
+                "intake marker does not name the exact original admitted selection")
+        require(intake["manifest_sha256"] == hashlib.sha256((directory / "turn-entry-manifest.json").read_bytes()).hexdigest(),
+                "recorded intake manifest changed")
+        require(intake["clock_refs"] == marker["decision"]["clock_refs"] and
+                intake["clock_refs"]["source_clock"] == "wall",
+                "wall clock evidence was relabelled as a monotonic timing")
+        require(receipt["timing"]["replay_turn_started"]["state"] == "unknown",
+                "observing Board intake must not add replay-owned reaction authority")
         require(receipt["strategy"] == entry["strategy"] and receipt["source_ack"] is True,
                 "receipt does not belong to the assigned admitted source")
         require(receipt["remaining_queue"] == 0 and receipt["backend_calls_after_ready"] == 0,
@@ -108,7 +126,7 @@ def main():
         receipts.append(receipt)
         print("PREPARATION_FUNCTIONAL_RECEIPT " + json.dumps({
             "synthetic_only": True, "strategy": receipt["strategy"], "source": admission,
-            "useful": useful, "objective": receipt["objective"], "turn_ref": receipt["turn_ref"],
+            "intake_turn_entry": intake, "useful": useful, "objective": receipt["objective"], "turn_ref": receipt["turn_ref"],
             "backend_calls_after_ready": 0, "driver_sha256": manifest["driver_sha256"]}, ensure_ascii=False))
     for field in ("fixture_sha256", "skill_reference", "input", "runtime", "first_offered_tools_sha256", "objective"):
         require(receipts[0][field] == receipts[1][field], "paired common identity differs: " + field)

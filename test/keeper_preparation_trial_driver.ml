@@ -536,8 +536,9 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   require (Keeper_id.Trace_id.to_string meta.runtime.trace_id = string "trace_id" fixture) "original trace changed";
   require (Option.map Keeper_id.Task_id.to_string meta.current_task_id = Some (string "task_id" fixture))
     "original Task changed";
+  let registry_entry = Keeper_registry.register_offline ~base_path:base keeper meta in
+  Eio.Switch.on_release sw (fun () -> ignore (Keeper_registry.unregister_exact registry_entry));
   require (pending base = []) "setup stimulus would steal measured intake";
-  let registry_entry = Keeper_registry.For_testing.register ~base_path:base keeper meta in
   Masc_test_deps.with_publication_recovery_registry ~sw ~fs:env#fs
       ~registry_root:(Workspace.masc_dir config) @@ fun publication_registry ->
   let ctx : _ Keeper_types_profile.context =

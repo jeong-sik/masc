@@ -163,7 +163,9 @@ let receipt_of_tool_result ~tool_use_id ~content =
    non-Tool, rather than only the very last message -- the previous rule
    dropped the receipt whenever anything followed the results, and the skill
    ledger then never matched. Non-trailing history is not scanned: a result
-   older than this turn was already offered at its own boundary. *)
+   older than this turn was already offered at its own boundary. Prepending
+   each message's forward [results] onto [acc] while walking [List.rev messages]
+   restores chronological message and content order without a second reverse. *)
 let trailing_tool_result_contents messages =
   let rec take acc = function
     | {Agent_core.Types.role=Tool;content;_}::rest ->

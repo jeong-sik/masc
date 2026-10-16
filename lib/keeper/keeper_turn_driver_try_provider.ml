@@ -45,7 +45,7 @@ type provider_progress_sample =
 type checkpoint_progress =
   | No_checkpoint_stage
   | Checkpoint_stage_reached
-  | Tool_results_saved
+  | Tool_results_saved of { tool_result_saves : int }
 
 type continuity =
   | Without_snapshot
@@ -582,6 +582,7 @@ let accept_rejected_error ~runtime_id ~(response : Agent_core.Types.api_response
 
 let apply_accept
       ~runtime_id
+      ~tool_results_saved_in_attempt
       ~accept
       (run_result : Runtime_agent.run_result)
   =
@@ -597,7 +598,11 @@ let apply_accept
        discarding typed control evidence. *)
     Ok run_result
   | Runtime_agent.Completed ->
-    if accept run_result.response then Ok run_result
+    if accept run_result.response
+       || (tool_results_saved_in_attempt
+           && run_result.response.content = []
+           && run_result.response.stop_reason = Agent_core.Types.EndTurn)
+    then Ok run_result
     else
       Error
         (accept_rejected_error
@@ -619,12 +624,12 @@ let apply_accept
    result, and a stage reached after one does not lower it. *)
 let progress_advances ~current ~next =
   match current, next with
-  | No_checkpoint_stage, (Checkpoint_stage_reached | Tool_results_saved)
-  | Checkpoint_stage_reached, Tool_results_saved ->
+  | No_checkpoint_stage, (Checkpoint_stage_reached | Tool_results_saved _)
+  | Checkpoint_stage_reached, Tool_results_saved _ ->
     true
   | No_checkpoint_stage, No_checkpoint_stage
   | Checkpoint_stage_reached, (No_checkpoint_stage | Checkpoint_stage_reached)
-  | Tool_results_saved, (No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved) ->
+  | Tool_results_saved _, (No_checkpoint_stage | Checkpoint_stage_reached | Tool_results_saved _) ->
     false
 ;;
 
@@ -652,11 +657,30 @@ let observe_checkpoint_stage progress (_ : Agent_core.Agent.checkpoint_stage) =
    ([Keeper_agent_run], [Keeper_checkpoint_store.Stale_noop]). Reading progress
    off that answer would claim a checkpoint the operation would not resume
    from, and the tools it holds would run a second time. *)
+let tool_result_save_count progress =
+  match Atomic.get progress with
+  | Tool_results_saved { tool_result_saves } -> tool_result_saves
+  | No_checkpoint_stage | Checkpoint_stage_reached -> 0
+;;
+
+let rec record_saved_tool_stage progress ~after_tool_results =
+  let current = Atomic.get progress in
+  let count = match current with
+    | Tool_results_saved { tool_result_saves } -> tool_result_saves
+    | No_checkpoint_stage | Checkpoint_stage_reached -> 0
+  in
+  let next = Tool_results_saved
+      { tool_result_saves = if after_tool_results then count + 1 else count } in
+  if not (Atomic.compare_and_set progress current next)
+  then record_saved_tool_stage progress ~after_tool_results
+;;
+
 let observe_checkpoint_saved progress (stage : Agent_core.Agent.checkpoint_stage) =
   match stage with
-  | Agent_core.Agent.After_tool_results_appended
+  | Agent_core.Agent.After_tool_results_appended ->
+    record_saved_tool_stage progress ~after_tool_results:true
   | Agent_core.Agent.After_context_injection ->
-    advance_checkpoint_progress progress Tool_results_saved
+    record_saved_tool_stage progress ~after_tool_results:false
   | Agent_core.Agent.After_assistant_collected
   | Agent_core.Agent.After_rejected_response_dropped ->
     ()
@@ -679,12 +703,12 @@ let observing_checkpoint_sink progress sink (snapshot : Agent_core.Agent.checkpo
 let same_run_retry_allowed progress =
   match Atomic.get progress with
   | No_checkpoint_stage -> true
-  | Checkpoint_stage_reached | Tool_results_saved -> false
+  | Checkpoint_stage_reached | Tool_results_saved _ -> false
 ;;
 
 let tool_results_saved progress =
   match Atomic.get progress with
-  | Tool_results_saved -> true
+  | Tool_results_saved _ -> true
   | No_checkpoint_stage | Checkpoint_stage_reached -> false
 ;;
 
@@ -1802,6 +1826,10 @@ let bounded_model_input_projection
 ;;
 
 let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (ctx : try_provider_ctx) candidate =
+  (* The dispatch-wide progress also protects retries. Acceptance needs a
+     narrower fact: this attempt wrote a tool-result checkpoint. Earlier
+     attempts and context-only saves do not authorize a quiet terminal. *)
+  let tool_result_saves_before = tool_result_save_count ctx.checkpoint_progress in
   let last_request = state.last_request in
   (* Named so the trace attributes runs during the provider attempt (request
      assembly, streaming, tool loop) to [turn:provider]. *)
@@ -2277,6 +2305,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         (match
            apply_accept
              ~runtime_id:ctx.error_runtime_id
+             ~tool_results_saved_in_attempt:
+               (tool_result_save_count ctx.checkpoint_progress > tool_result_saves_before)
              ~accept:ctx.accept
              run_result
          with
@@ -3212,6 +3242,7 @@ let run_try_provider_with_truncation_recovery
 module For_testing = struct
   let observe_provider_lease = observe_provider_lease
   let apply_accept = apply_accept
+  let tool_result_save_count = tool_result_save_count
   let checkpoint_before_incomplete_response = checkpoint_before_incomplete_response
   let max_tokens_truncation_error = max_tokens_truncation_error
 

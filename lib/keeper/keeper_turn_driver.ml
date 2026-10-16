@@ -155,6 +155,7 @@ let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
   | (Runtime_agent.Completed, (Keeper_tools_agent_core.Terminal_effect_open | (Keeper_tools_agent_core.Deferred_tool_result | (Keeper_tools_agent_core.External_effect_deferred | Keeper_tools_agent_core.Terminal_effect_failed _))))
   | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | (Runtime_agent_context.Yielded_after_repeated_tool_call _ | (Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _)))), _) -> Keeper_turn_driver_try_provider.apply_accept
       ~runtime_id
+      ~tool_results_saved_in_attempt:false
       ~accept
       run_result
 ;;

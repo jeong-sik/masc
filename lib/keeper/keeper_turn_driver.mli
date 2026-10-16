@@ -473,6 +473,7 @@ module For_testing : sig
 
   val apply_accept :
     runtime_id:string ->
+    tool_results_saved_in_attempt:bool ->
     accept:(Agent_core.Types.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result

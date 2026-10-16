@@ -93,6 +93,20 @@ let check_agent_empty_failure agent = function
   | Ok _ -> Alcotest.fail "expected EmptyCompletion, got Ok"
 ;;
 
+let check_agent_empty_result agent stop_reason result =
+  match stop_reason, result with
+  | Types.EndTurn, Ok response ->
+    Alcotest.(check int) "empty response preserved" 0 (List.length response.Types.content);
+    Alcotest.(check bool) "terminal stop preserved" true (response.stop_reason = Types.EndTurn);
+    Alcotest.(check int) "completed agent turn" 1 (Agent.state agent).turn_count
+  | Types.EndTurn, Error error ->
+    Alcotest.failf "terminal response became provider failure: %s" (Error.to_string error)
+  | (Types.MaxTokens | Types.StopToolUse | Types.StopSequence | Types.Refusal
+    | Types.ContentFilter | Types.RepetitionTruncation | Types.PauseTurn
+    | Types.Compaction | Types.ContextWindowExceeded | Types.UnmatchedToolCalls
+    | Types.Unknown _), _ -> check_agent_empty_failure agent result
+;;
+
 let test_sync_dispatches_via_complete_triggers_metrics () =
   Eio_main.run
   @@ fun env ->
@@ -198,7 +212,7 @@ let test_stage_route_passes_trace_context_headers () =
      | None -> Alcotest.fail "missing traceparent header")
 ;;
 
-let test_agent_run_rejects_injected_empty_completion () =
+let test_agent_run_preserves_injected_empty_terminal () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -208,11 +222,11 @@ let test_agent_run_rejects_injected_empty_completion () =
        let agent =
          make_empty_agent ~net:(Eio.Stdenv.net env) ~stop_reason ~name:"agent-sync-empty"
        in
-       Agent.run ~sw agent "ping" |> check_agent_empty_failure agent)
+       Agent.run ~sw agent "ping" |> check_agent_empty_result agent stop_reason)
     [ Types.EndTurn; Types.MaxTokens ]
 ;;
 
-let test_agent_run_stream_rejects_injected_empty_completion () =
+let test_agent_run_stream_preserves_injected_empty_terminal () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -226,7 +240,7 @@ let test_agent_run_stream_rejects_injected_empty_completion () =
            ~name:"agent-stream-empty"
        in
        Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "ping"
-       |> check_agent_empty_failure agent)
+       |> check_agent_empty_result agent stop_reason)
     [ Types.EndTurn; Types.MaxTokens ]
 ;;
 
@@ -401,13 +415,13 @@ let () =
             `Quick
             test_stage_route_passes_trace_context_headers
         ; Alcotest.test_case
-            "Agent.run rejects injected empty completion"
+            "Agent.run preserves injected empty terminal"
             `Quick
-            test_agent_run_rejects_injected_empty_completion
+            test_agent_run_preserves_injected_empty_terminal
         ; Alcotest.test_case
-            "Agent.run_stream rejects injected empty completion"
+            "Agent.run_stream preserves injected empty terminal"
             `Quick
-            test_agent_run_stream_rejects_injected_empty_completion
+            test_agent_run_stream_preserves_injected_empty_terminal
         ] )
     ]
 ;;

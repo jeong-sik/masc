@@ -35,7 +35,9 @@ type provider_progress_sample =
 type checkpoint_progress =
   | No_checkpoint_stage
   | Checkpoint_stage_reached
-  | Tool_results_saved
+  | Tool_results_saved of { tool_result_saves : int }
+      (** Number of actual [After_tool_results_appended] saves. Context-only
+          saves establish retry continuity but do not advance this count. *)
 
 type continuity
 (** A snapshot verified against the dispatch's original checkpoint. *)
@@ -429,6 +431,7 @@ type try_provider_ctx =
 
 val apply_accept :
   runtime_id:string ->
+  tool_results_saved_in_attempt:bool ->
   accept:(Agent_core.Types.api_response -> bool) ->
   Runtime_agent.run_result ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -815,9 +818,12 @@ module For_testing : sig
 
   val apply_accept :
     runtime_id:string ->
+    tool_results_saved_in_attempt:bool ->
     accept:(Agent_core.Types.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
+
+  val tool_result_save_count : checkpoint_progress Atomic.t -> int
 
   val memoize_message_measurement :
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int

@@ -127,6 +127,19 @@ let check_typed_empty_completion expected = function
     failf "expected typed empty completion, got %s" (string_of_http_error err)
 ;;
 
+let check_empty_completion expected result =
+  match expected, result with
+  | Types.EndTurn, Ok response ->
+    check bool "terminal stop preserved" true (response.Types.stop_reason = Types.EndTurn);
+    check int "empty content preserved" 0 (List.length response.content)
+  | Types.EndTurn, Error error ->
+    failf "terminal empty response became a transport error: %s" (string_of_http_error error)
+  | (Types.MaxTokens | Types.StopToolUse | Types.StopSequence | Types.Refusal
+    | Types.ContentFilter | Types.RepetitionTruncation | Types.PauseTurn
+    | Types.Compaction | Types.ContextWindowExceeded | Types.UnmatchedToolCalls
+    | Types.Unknown _), _ -> check_typed_empty_completion expected result
+;;
+
 (* ── Provider defaults / public helpers ───────────────── *)
 
 let test_gemini_url_variants () =
@@ -323,7 +336,7 @@ let test_opaque_transport_cache_bypass_does_not_require_http_serialization () =
   check int "opaque request always reaches its transport" 2 !calls
 ;;
 
-let test_complete_injected_transport_rejects_typed_empty () =
+let test_complete_injected_transport_preserves_empty_terminal () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -343,11 +356,11 @@ let test_complete_injected_transport_rejects_typed_empty () =
          ~config
          ~messages:[ Types.user_msg "hello" ]
          ()
-       |> check_typed_empty_completion stop_reason)
+       |> check_empty_completion stop_reason)
     [ Types.EndTurn; Types.MaxTokens ]
 ;;
 
-let test_complete_stream_injected_transport_rejects_typed_empty () =
+let test_complete_stream_injected_transport_preserves_empty_terminal () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -368,7 +381,7 @@ let test_complete_stream_injected_transport_rejects_typed_empty () =
          ~messages:[ Types.user_msg "hello" ]
          ~on_event:(fun _ -> ())
          ()
-       |> check_typed_empty_completion stop_reason)
+       |> check_empty_completion stop_reason)
     [ Types.EndTurn; Types.MaxTokens ]
 ;;
 
@@ -680,11 +693,11 @@ let () =
         ; test_case
             "injected sync rejects typed empty"
             `Quick
-            test_complete_injected_transport_rejects_typed_empty
+            test_complete_injected_transport_preserves_empty_terminal
         ; test_case
             "injected stream rejects typed empty"
             `Quick
-            test_complete_stream_injected_transport_rejects_typed_empty
+            test_complete_stream_injected_transport_preserves_empty_terminal
         ; test_case
             "cached empty fails before transport"
             `Quick

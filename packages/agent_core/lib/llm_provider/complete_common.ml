@@ -209,14 +209,13 @@ let latency_ms_float = function
 let round_latency_ms ms = int_of_float (Float.round ms)
 let latency_ms_int counter = Option.map round_latency_ms (latency_ms_float counter)
 
-(** Enforce the deliverable-assistant-turn policy at completion consumption
-    boundaries. Structural parsers and injected transports may legitimately
-    assemble [content = []], but production completion entry points must fail
-    closed while preserving the typed stop reason. *)
+(** Preserve an empty EndTurn for the run owner's history-aware acceptance.
+    Other empty stops retain their existing typed failure classification. *)
 let ensure_nonempty_completion
       (result : (Types.api_response, Http_client.http_error) result)
   =
   match result with
+  | Ok ({ stop_reason = Types.EndTurn; _ } : Types.api_response) -> result
   | Ok ({ content = []; stop_reason; _ } : Types.api_response) ->
     Error (Http_client.empty_completion_error ~stop_reason)
   | Ok _ | Error _ -> result

@@ -230,6 +230,18 @@ let check_typed_empty_completion expected = function
   | Error _ -> fail "expected typed empty completion provider failure"
 ;;
 
+let check_empty_completion expected result =
+  match expected, result with
+  | Types.EndTurn, Ok response ->
+    check bool "terminal stop preserved" true (response.Types.stop_reason = Types.EndTurn);
+    check int "empty content preserved" 0 (List.length response.content)
+  | Types.EndTurn, Error _ -> fail "terminal empty response became a transport error"
+  | (Types.MaxTokens | Types.StopToolUse | Types.StopSequence | Types.Refusal
+    | Types.ContentFilter | Types.RepetitionTruncation | Types.PauseTurn
+    | Types.Compaction | Types.ContextWindowExceeded | Types.UnmatchedToolCalls
+    | Types.Unknown _), _ -> check_typed_empty_completion expected result
+;;
+
 (* ── complete: success ───────────────────────────────── *)
 
 let test_complete_anthropic_ok () =
@@ -258,7 +270,7 @@ let test_complete_anthropic_ok () =
   | Exit -> ()
 ;;
 
-let test_complete_http_rejects_typed_empty_completion () =
+let test_complete_http_preserves_empty_terminal () =
   let run expected wire_stop_reason =
     Eio_main.run
     @@ fun env ->
@@ -269,7 +281,7 @@ let test_complete_http_rejects_typed_empty_completion () =
         start_mock_server ~sw ~net:env#net (anthropic_empty_response wire_stop_reason)
       in
       Complete.complete ~sw ~net:env#net ~config:(make_config url) ~messages ()
-      |> check_typed_empty_completion expected;
+      |> check_empty_completion expected;
       Eio.Switch.fail sw Exit
     with
     | Exit -> ()
@@ -279,7 +291,7 @@ let test_complete_http_rejects_typed_empty_completion () =
     [ Types.EndTurn, "end_turn"; Types.MaxTokens, "max_tokens" ]
 ;;
 
-let test_complete_stream_http_rejects_typed_empty_completion () =
+let test_complete_stream_http_preserves_empty_terminal () =
   let run expected wire_stop_reason =
     Eio_main.run
     @@ fun env ->
@@ -296,7 +308,7 @@ let test_complete_stream_http_rejects_typed_empty_completion () =
         ~messages
         ~on_event:(fun _ -> ())
         ()
-      |> check_typed_empty_completion expected;
+      |> check_empty_completion expected;
       Eio.Switch.fail sw Exit
     with
     | Exit -> ()
@@ -4474,9 +4486,9 @@ let () =
             `Quick
             test_complete_openai_compatible_kimi_uses_openai_codec
         ; test_case
-            "HTTP rejects typed empty completion"
+            "HTTP preserves empty terminal and classifies other empty stops"
             `Quick
-            test_complete_http_rejects_typed_empty_completion
+            test_complete_http_preserves_empty_terminal
         ; test_case "http error" `Quick test_complete_http_error
         ; test_case
             "wire observer sees exact sync body"
@@ -4656,9 +4668,9 @@ let () =
             `Quick
             test_complete_request_wire_observer_sees_exact_stream_body
         ; test_case
-            "HTTP stream rejects typed empty completion"
+            "HTTP stream preserves empty terminal and classifies other empty stops"
             `Quick
-            test_complete_stream_http_rejects_typed_empty_completion
+            test_complete_stream_http_preserves_empty_terminal
         ; test_case
             "preserves thinking signature"
             `Quick

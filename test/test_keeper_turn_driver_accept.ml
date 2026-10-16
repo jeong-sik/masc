@@ -163,6 +163,7 @@ let test_keeper_hook_relaxes_strict_tool_choice () =
 let test_accept_keeps_result () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"ollama.test"
       ~accept:(fun _ -> true)
       (run_result ())
@@ -173,6 +174,97 @@ let test_accept_keeps_result () =
   | Error err ->
     Alcotest.failf "accepted response should pass through: %s"
       (Agent_core.Error.to_string err)
+
+let test_empty_terminal_acceptance_uses_only_new_saved_tool_results () =
+  let module Attempt = Masc.Keeper_turn_driver_try_provider in
+  let accept = Keeper_tooling.Response.response_has_text_or_tool_progress in
+  let progress = Atomic.make Attempt.No_checkpoint_stage in
+  let saved_count () = Attempt.For_testing.tool_result_save_count progress in
+  let decide ~before ?(stop_reason = Agent_core.Types.EndTurn) () =
+    Attempt.apply_accept ~runtime_id:"fixture.empty-terminal"
+      ~tool_results_saved_in_attempt:(saved_count () > before) ~accept
+      (run_result ~content:[] ~stop_reason ())
+  in
+  let check_decision label expected decision =
+    Alcotest.(check bool) label expected (Result.is_ok decision)
+  in
+  let before = saved_count () in
+  check_decision "tool-free terminal remains rejected" false (decide ~before ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_context_injection;
+  check_decision "context-only save is not a completed tool" false (decide ~before ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_tool_results_appended;
+  check_decision "new saved tool result completes terminal" true (decide ~before ());
+  check_decision "truncation remains rejected after tool results" false
+    (decide ~before ~stop_reason:Agent_core.Types.MaxTokens ());
+  let next_attempt = saved_count () in
+  check_decision "an earlier attempt cannot authorize a terminal" false
+    (decide ~before:next_attempt ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_context_injection;
+  check_decision "later context-only save cannot reuse the earlier tool proof" false
+    (decide ~before:next_attempt ());
+  Attempt.observe_checkpoint_stage progress Agent_core.Agent.After_tool_results_appended;
+  check_decision "reaching a save stage is not a successful save" false
+    (decide ~before:next_attempt ());
+  Attempt.observe_checkpoint_saved progress Agent_core.Agent.After_tool_results_appended;
+  check_decision "a later attempt's own tool save authorizes its terminal" true
+    (decide ~before:next_attempt ())
+;;
+
+let test_tool_then_empty_terminal_completes_without_reexecution () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let module Core = Agent_core in
+  let module Attempt = Masc.Keeper_turn_driver_try_provider in
+  let progress = Atomic.make Attempt.No_checkpoint_stage in
+  let before = Attempt.For_testing.tool_result_save_count progress in
+  let tool_executions = ref 0 in
+  let provider_calls = ref 0 in
+  let replies = ref
+      [ response ~stop_reason:Core.Types.StopToolUse
+          ~content:[Core.Types.ToolUse {id="observed-1"; name="observe"; input=`Assoc []}] ()
+      ; response ~content:[] () ] in
+  let next () =
+    incr provider_calls;
+    match !replies with
+    | reply :: rest -> replies := rest; reply
+    | [] -> Alcotest.fail "completed tool was retried after terminal response"
+  in
+  let transport : Llm_provider.Llm_transport.t =
+    { complete_sync = (fun _ -> {response=Ok (next ()); latency_ms=None})
+    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok (next ())) } in
+  let provider_config = Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"test"
+      ~api_key:"" ~base_url:"http://mock.local" ~request_path:"/v1/chat/completions"
+      ~model_id:"mock-model" () in
+  let tool = Core.Tool.create ~name:"observe" ~description:"Observe once" ~parameters:[]
+      (fun _ -> incr tool_executions;
+        Ok {Core.Types.content="observed"; content_blocks=None; _meta=None}) in
+  let options = {Core.Agent.default_options with
+      provider_config=Some provider_config; transport=Some transport} in
+  let checkpoint_sink snapshot =
+    (* Models the durable sink owner's Saved branch, not a generic Ok/no-op. *)
+    Attempt.observe_checkpoint_saved progress snapshot.Core.Agent.stage;
+    Ok () in
+  let agent = Core.Agent.create ~net:(Eio.Stdenv.net env)
+      ~config:(Core.Types.default_config ~model:"mock-model") ~options ~tools:[tool]
+      ~checkpoint_sink () in
+  let final = match Core.Agent.run ~sw agent "observe once" with
+    | Ok response -> response
+    | Error error -> Alcotest.fail (Core.Error.to_string error) in
+  let completed = {(run_result ()) with response=final} in
+  (match Attempt.apply_accept ~runtime_id:"test.mock-model"
+      ~tool_results_saved_in_attempt:
+        (Attempt.For_testing.tool_result_save_count progress > before)
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress completed with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Core.Error.to_string error));
+  Alcotest.(check int) "one tool execution" 1 !tool_executions;
+  Alcotest.(check int) "tool request then terminal response" 2 !provider_calls;
+  Alcotest.(check (result string string)) "existing tool-backed finalization completes"
+    (Ok "")
+    (Keeper_tooling.Response.normalize_response_text
+       ~text:(Core.Types.visible_text_of_response final) ~tool_names:["observe"] ())
+;;
 
 let test_input_required_bypasses_response_accept () =
   let accept_calls = ref 0 in
@@ -188,6 +280,7 @@ let test_input_required_bypasses_response_accept () =
   in
   (match
      Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
        ~runtime_id:"runtime.reasoning-model"
        ~accept:reject
        result
@@ -293,6 +386,7 @@ let test_replay_projection_failure_rejects_completed_attempt () =
 let test_rejects_as_typed_accept_error () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"ollama.gemma4-26b-a4b-qat"
       ~accept:(fun _ -> false)
       (run_result ())
@@ -580,6 +674,7 @@ let test_accept_rejected_threads_stop_reason () =
   let threaded sr =
     match
       Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
         ~runtime_id:"runtime.truncation"
         ~accept:(fun _ -> false)
         (run_result ~stop_reason:sr ())
@@ -718,6 +813,7 @@ let test_max_tokens_without_content_keeps_rotation_kind () =
 let test_reject_reason_describes_thinking_only_response () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.thinking-model"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
@@ -865,6 +961,7 @@ let test_finalization_does_not_surface_hidden_reasoning () =
 let test_thinking_with_text_is_accepted () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.thinking-text"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
@@ -886,6 +983,7 @@ let test_thinking_with_text_is_accepted () =
 let test_thinking_with_tool_use_is_accepted () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.thinking-tool"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
@@ -958,6 +1056,7 @@ let test_accept_contract_delegates_to_agent_core_response_shape () =
 let test_thinking_only_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.thinking-stop-sequence"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
@@ -986,6 +1085,7 @@ let test_thinking_only_non_end_turn_response_is_rejected () =
 let test_thinking_only_no_tool_can_try_next_candidate () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.thinking-only-no-tool"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
@@ -1023,6 +1123,7 @@ let test_thinking_only_no_tool_can_try_next_candidate () =
 let test_empty_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.empty-stop-sequence"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result ~stop_reason:Agent_core.Types.StopSequence ())
@@ -1077,6 +1178,7 @@ let test_empty_non_end_turn_response_is_rejected () =
 let test_blank_text_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.blank-max-tokens"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
@@ -1105,6 +1207,7 @@ let test_blank_text_non_end_turn_response_is_rejected () =
 let test_quiet_final_passes_when_policy_allows () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.quiet-final"
       ~accept:
         (Keeper_tooling.Response.accepts_response
@@ -1125,6 +1228,7 @@ let test_quiet_final_passes_when_policy_allows () =
 let test_quiet_final_rejected_when_policy_requires_progress () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.require-progress"
       ~accept:
         (Keeper_tooling.Response.accepts_response
@@ -1140,6 +1244,7 @@ let test_quiet_final_rejected_when_policy_requires_progress () =
 let test_quiet_final_does_not_extend_past_end_turn () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.quiet-max-tokens"
       ~accept:
         (Keeper_tooling.Response.accepts_response
@@ -1367,6 +1472,7 @@ let test_response_policy_non_autonomous_input_requires_progress () =
 let test_max_tokens_text_is_rejected_for_checkpoint_continuation () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.max-tokens"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
@@ -1437,6 +1543,7 @@ let test_truncation_checkpoint_drops_only_incomplete_assistant () =
 let test_custom_accept_reject_preserves_predicate_reason () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.custom"
       ~accept:(fun _ -> false)
       (run_result ~content:[ Agent_core.Types.Text "visible answer" ] ())
@@ -1458,6 +1565,7 @@ let test_custom_accept_reject_preserves_predicate_reason () =
 let test_media_with_tool_result_is_deliverable () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~tool_results_saved_in_attempt:false
       ~runtime_id:"runtime.mixed"
       ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
@@ -1860,6 +1968,10 @@ let () =
             test_official_success_observation_is_preserved;
           Alcotest.test_case "accepted response passes through" `Quick
             test_accept_keeps_result;
+          Alcotest.test_case "empty terminal requires this attempt's saved tool results"
+            `Quick test_empty_terminal_acceptance_uses_only_new_saved_tool_results;
+          Alcotest.test_case "tool then empty terminal completes without reexecution"
+            `Quick test_tool_then_empty_terminal_completes_without_reexecution;
           Alcotest.test_case
             "InputRequired bypasses response acceptance"
             `Quick

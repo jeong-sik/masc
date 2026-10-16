@@ -58,13 +58,13 @@ val of_snapshot : ?descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_sn
 val snapshot_revision : t -> Skill_catalog_snapshot.snapshot_revision
 val items : t -> skill_inventory_item list
 val exact_absence_proven : t -> Skill_reference.t -> bool
-(** True only for an exact reference absent from a completely readable,
+(** True only for a producer identity absent from a completely readable,
     decoded source scan. Missing/unreadable/unresolved sources and rejected
     candidates never prove producer absence: one malformed or unreadable
     sibling Skill in the same source blocks absence proof for every producer
     in that source. *)
 
-val exact_reference_valid_proven : t -> Skill_reference.t -> bool
-(** True when the exact reference is present as a valid, diagnostic-free item
-    in a completely readable, decoded source scan of its source. *)
+val identity_valid_proven : t -> Skill_reference.t -> bool
+(** True when the exact producer identity is present as a valid, diagnostic-free
+    item in a complete decoded source scan, including a changed content revision. *)
 val invalid_error_to_yojson : invalid_error -> Yojson.Safe.t

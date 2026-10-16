@@ -116,9 +116,9 @@ visible UI and whole-task speedup remain separate evidence.
 Continuation refusal does not by itself establish a terminal run failure.
 Missing or unreadable source, ledger, profile or Task-selection authority stays
 recoverable. A stale intake cannot change the winning owner or an immutable
-Waiting predecessor. For an original draft whose ordinary and nested contracts are fully revalidated, an explicit current
-Tool denial can become a failure only after its exact frozen plan and contracts
-have been revalidated. A removed ordinary producer also requires a complete,
+Waiting predecessor. An explicit current Tool denial can become a failure only
+after the exact frozen plan, including its ordinary and nested contracts, has
+been revalidated. A removed ordinary producer also requires a complete,
 readable scan of its original Skill source; catalog projection or selection
 absence alone is insufficient. Nested withholding remains recoverable.
 

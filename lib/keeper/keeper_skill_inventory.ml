@@ -127,11 +127,11 @@ let exact_absence_proven inventory (reference : Skill_reference.t) =
       same_source rejection.source_id) (Skill_catalog_snapshot.rejections snapshot))
     && not (List.exists (function
       | Valid valid -> same_source valid.reference.identity.source_id
-          && (valid.diagnostics <> [] || Skill_reference.equal reference valid.reference)
+          && (valid.diagnostics <> [] || Skill_reference.equal_identity reference.identity valid.reference.identity)
       | Invalid invalid -> same_source invalid.source_id) inventory.items)
 ;;
 
-let exact_reference_valid_proven inventory (reference : Skill_reference.t) =
+let identity_valid_proven inventory (reference : Skill_reference.t) =
   let snapshot = inventory.snapshot in
   match Skill_catalog_snapshot.config_state snapshot with
   | Config_rejected _ | Config_unreadable _ -> false
@@ -153,7 +153,7 @@ let exact_reference_valid_proven inventory (reference : Skill_reference.t) =
       | Valid valid -> same_source valid.reference.identity.source_id && valid.diagnostics <> []
       | Invalid invalid -> same_source invalid.source_id) inventory.items)
     && List.exists (function
-      | Valid valid -> valid.diagnostics = [] && Skill_reference.equal reference valid.reference
+      | Valid valid -> valid.diagnostics = [] && Skill_reference.equal_identity reference.identity valid.reference.identity
       | Invalid _ -> false) inventory.items
 ;;
 

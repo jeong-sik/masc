@@ -1551,7 +1551,26 @@ let test_named_producer_switched_to_inline_settles_run_and_ends_parent () =
   let inline_md = String.concat {|execution = "inline"|}
       (Astring.String.cuts ~sep:{|execution = "async"|} (read skill_md)) in
   write skill_md inline_md;
-  let inline_surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+      |> require "refusal fixture workspace" in
+  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
+  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
+   | Published _ | Unchanged _ -> () | Workspace_retired -> fail "changed producer snapshot retired");
+  let snapshot = Skill_catalog_snapshot_service.current ~workspace
+      |> function Some snapshot -> snapshot | None -> fail "changed producer snapshot missing" in
+  let descriptors = Descriptor.all_descriptors () in
+  let catalog,diagnostics = Masc.Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
+  check int "changed producer document has no catalog diagnostics" 0 (List.length diagnostics);
+  let inline_surface = Masc.Keeper_capability_surface.create_with_descriptors
+      ~tool_descriptors:descriptors ~tool_deny:[] ~sandbox_profile:fixture.meta.sandbox_profile
+      ~skill_names:None ~global_skill_catalog:catalog
+      ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot) ~task_skills:[] in
+  check bool "a new producer revision does not prove producer absence" false
+    (Masc.Keeper_capability_surface.exact_skill_absence_proven inline_surface parked.reference);
+  check bool "changed producer identity remains proven present" true
+    (Masc.Keeper_capability_surface.exact_skill_present_proven inline_surface parked.reference);
   let settled = resume_parked_continuation env fixture inline_surface parked.child_continuation in
   check bool "present-but-changed producer accepts a refusal successor" true (Tool_result.is_success settled);
   let refused_ok,refusal_data,refusal_entry = await_composition env fixture (Tool_result.data settled) in
@@ -1575,10 +1594,6 @@ sandbox_image = "base"
 network_mode = "inherit"
 instructions = "Refusal fixture"
 |};
-  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
-  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
-      |> require "refusal fixture workspace" in
-  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
   ignore (Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
       ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}));
   let metadata_path = Masc.Keeper_types_profile.keeper_meta_path parked.config keeper in
@@ -3709,12 +3724,18 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
      | _ -> fail "denied nested parent did not reach canonical terminal failure");
     check bool "permanent refusal has a new physical successor" true
       (parent_completed.request_id <> parent_entry.request_id);
+    let predecessor = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+        ~caller:keeper parent_entry.request_id |> require "immutable nested parent predecessor"
+        |> Async.durable_terminal_entry in
+    (match predecessor.status with
+     | Async.Waiting_for_dependencies _ -> ()
+     | _ -> fail "permanent refusal rewrote the original waiting predecessor");
     let discovery = Journal.pending_continuations
         ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
         ~base_path:fixture.base_path |> require "terminal denied parent discovery" in
     check bool "permanent refusal never re-readies the original parent" false
       (List.exists (fun continuation ->
-        Journal.continuation_request_id continuation = parent_completed.request_id) discovery.ready))
+        (Journal.continuation_source continuation).composition_run_id = parent_run) discovery.ready))
   else (
   if child_failure then
     check_json "failed canonical child provides no successful parent export" (`Bool false)

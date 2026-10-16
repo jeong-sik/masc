@@ -380,7 +380,7 @@ let skill_catalog surface = surface.skill_projection.catalog
 let exact_skill_absence_proven surface reference =
   Keeper_skill_inventory.exact_absence_proven surface.skill_inventory reference
 let exact_skill_present_proven surface reference =
-  Keeper_skill_inventory.exact_reference_valid_proven surface.skill_inventory reference
+  Keeper_skill_inventory.identity_valid_proven surface.skill_inventory reference
 let tool_capabilities surface = surface.tool_capabilities
 
 let ordinary_tool_reference capability =

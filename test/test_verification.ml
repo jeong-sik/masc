@@ -2436,6 +2436,189 @@ let test_raw_workspace_submission_notifies_once () =
             (String.length verification_id > 0)
         | _ -> Alcotest.fail "expected one raw Workspace submit notification"))
 
+let with_scoped_hook hook replacement f =
+  let previous = Atomic.exchange hook replacement in
+  Fun.protect ~finally:(fun () -> Atomic.set hook previous) f
+
+let receipt_task config =
+  match W.get_tasks_raw config with
+  | [task] -> task
+  | _ -> Alcotest.fail "expected one submission task"
+
+let receipt_submission (task : Masc_domain.task) =
+  match task.task_status with
+  | Masc_domain.AwaitingVerification { assignee; started_at; verification_id; _ } ->
+      assignee, started_at, verification_id
+  | _ -> Alcotest.fail "expected a persisted verification submission"
+
+let receipt_submit config notes =
+  W.transition_task_r config ~agent_name:"receipt-worker" ~task_id:"task-001"
+    ~action:Masc_domain.Submit_for_verification ~notes ()
+
+let real_submit_request config ~task ~assignee ~verification_id ~claim =
+  VP.create_submit_request ~config ~task ~assignee ~verification_id ~claim
+
+let real_delete_request config ~verification_id =
+  VP.delete_verification_request ~config ~verification_id
+
+let with_pending_receipt_task f =
+  with_eio_temp_dir @@ fun base_path ->
+  with_scoped_hook Workspace_hooks.verification_submit_request_fn real_submit_request @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_delete_request_fn real_delete_request @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_submitted_fn
+    (fun _ ~task:_ ~assignee:_ ~verification_id:_ -> ()) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_notify_submit_fn
+    (fun _ ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ -> ()) @@ fun () ->
+  with_scoped_hook Workspace_hooks.observe_task_transition_fn
+    (fun _ ~agent_name:_ ~task_id:_ ~transition:_ ~details:_ -> ()) @@ fun () ->
+  let config = W.default_config base_path in
+  ignore (W.init config ~agent_name:(Some "receipt-worker"));
+  ignore (W.add_task config ~title:"Submission commit receipt" ~priority:1
+    ~description:"Preserve persisted evidence across transition failures");
+  let accepted = function
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error) in
+  accepted (W.claim_task_r config ~agent_name:"receipt-worker" ~task_id:"task-001" ());
+  accepted (W.transition_task_r config ~agent_name:"receipt-worker" ~task_id:"task-001"
+    ~action:Masc_domain.Start ());
+  accepted (receipt_submit config "note:first submission evidence");
+  f config (receipt_task config)
+
+let request_ids base_path =
+  readable_requests_exn base_path
+  |> List.map (fun (request : V.verification_request) -> request.id)
+  |> List.sort String.compare
+
+let test_resubmission_notifies_after_late_projection_error () =
+  with_pending_receipt_task @@ fun config original ->
+  let assignee, started_at, old_id = receipt_submission original in
+  let steps = ref [] in
+  let notifications = ref [] in
+  let injected = Failure "late transition observer failed" in
+  with_scoped_hook Workspace_hooks.verification_submitted_fn
+    (fun _ ~task:_ ~assignee:_ ~verification_id ->
+      steps := ("scheduled", verification_id) :: !steps) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_delete_request_fn
+    (fun config ~verification_id ->
+      steps := ("deleted", verification_id) :: !steps;
+      real_delete_request config ~verification_id) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_notify_submit_fn
+    (fun config ~task ~assignee ~verification_id ~claim:_ ->
+      steps := ("notified", verification_id) :: !steps;
+      notifications :=
+        (task.id, assignee, verification_id, receipt_submission (receipt_task config),
+         request_ids config.W.base_path) :: !notifications) @@ fun () ->
+  with_scoped_hook Workspace_hooks.observe_task_transition_fn
+    (fun _ ~agent_name:_ ~task_id:_ ~transition:_ ~details:_ -> raise injected) @@ fun () ->
+  (match receipt_submit config "note:replacement evidence" with
+   | Error (Masc_domain.System (Masc_domain.System_error.IoError detail)) ->
+       Alcotest.(check string) "public result retains the late failure"
+         (Printexc.to_string injected) detail
+   | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+   | Ok _ -> Alcotest.fail "late projection failure must remain a public error");
+  let current_assignee, current_start, new_id = receipt_submission (receipt_task config) in
+  Alcotest.(check bool) "resubmission commits a fresh identity" false (new_id = old_id);
+  Alcotest.(check string) "owner survives the failed projection" assignee current_assignee;
+  Alcotest.(check string) "original start survives resubmission" started_at current_start;
+  Alcotest.(check (list (pair string string))) "schedule, supersede deletion, notification"
+    ["scheduled", new_id; "deleted", old_id; "notified", new_id] (List.rev !steps);
+  (match !notifications with
+   | [(task_id, producer, notified_id, (stored_owner, stored_start, stored_id), requests)] ->
+       Alcotest.(check string) "notification names the task" original.id task_id;
+       Alcotest.(check string) "notification names the producer" assignee producer;
+       Alcotest.(check string) "notification names the new request" new_id notified_id;
+       Alcotest.(check string) "notification reads the committed request" new_id stored_id;
+       Alcotest.(check string) "notification reads the committed owner" assignee stored_owner;
+       Alcotest.(check string) "notification reads the original start" started_at stored_start;
+       Alcotest.(check (list string)) "old request is deleted before the one notification"
+         [new_id] requests
+   | _ -> Alcotest.fail "expected exactly one notification despite the public error");
+  Alcotest.(check (list string)) "new request is retained without compensation"
+    [new_id] (request_ids config.W.base_path);
+  (match W.commit_verdict_r config ~task_id:original.id ~verification_id:old_id
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "receipt-authority" })
+      ~verdict:Masc_domain.Verdict_approved () with
+   | Error (Masc_domain.Task (Masc_domain.Task_error.VerificationSuperseded { requested; current; _ })) ->
+       Alcotest.(check string) "stale verdict names the superseded request" old_id requested;
+       Alcotest.(check string) "stale verdict sees the committed replacement" new_id current
+   | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+   | Ok _ -> Alcotest.fail "superseded evidence must not approve the replacement")
+
+let test_precommit_failure_compensates_only_new_request () =
+  with_pending_receipt_task @@ fun config original ->
+  let _, _, old_id = receipt_submission original in
+  let backlog = W.read_backlog config in
+  W.write_backlog config { backlog with version = max_int - 1 };
+  let before = W.read_backlog config in
+  Alcotest.(check int) "fixture reaches revision exhaustion" max_int before.version;
+  let prepared = ref [] in
+  let deleted = ref [] in
+  let scheduled = ref [] in
+  let notified = ref [] in
+  with_scoped_hook Workspace_hooks.verification_submit_request_fn
+    (fun config ~task ~assignee ~verification_id ~claim ->
+      let result = real_submit_request config ~task ~assignee ~verification_id ~claim in
+      (match result with Ok () -> prepared := verification_id :: !prepared | Error _ -> ());
+      result) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_delete_request_fn
+    (fun config ~verification_id ->
+      deleted := verification_id :: !deleted;
+      real_delete_request config ~verification_id) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_submitted_fn
+    (fun _ ~task:_ ~assignee:_ ~verification_id -> scheduled := verification_id :: !scheduled) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_notify_submit_fn
+    (fun _ ~task:_ ~assignee:_ ~verification_id ~claim:_ -> notified := verification_id :: !notified) @@ fun () ->
+  (match receipt_submit config "note:prepared but not committed" with
+   | Error (Masc_domain.System (Masc_domain.System_error.IoError detail)) ->
+       Alcotest.(check bool) "failure came from exhausted revision" true
+         (String_util.contains_substring detail "revision exhausted")
+   | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+   | Ok _ -> Alcotest.fail "revision exhaustion must refuse the backlog commit");
+  (match !prepared with
+   | [new_id] ->
+       Alcotest.(check bool) "prepared request was distinct" false (new_id = old_id);
+       Alcotest.(check (list string)) "only the prepared request is compensated" [new_id] !deleted
+   | _ -> Alcotest.fail "expected one real request prepared before the failed commit");
+  Alcotest.(check bool) "failed commit preserves the full authoritative backlog" true
+    (W.read_backlog config = before);
+  Alcotest.(check (list string)) "previous request remains readable" [old_id]
+    (request_ids config.W.base_path);
+  Alcotest.(check (list string)) "failed commit schedules no review" [] !scheduled;
+  Alcotest.(check (list string)) "failed commit sends no notification" [] !notified
+
+let test_late_raised_cancellation_skips_submission_finalization () =
+  with_pending_receipt_task @@ fun config original ->
+  let _, _, old_id = receipt_submission original in
+  let deleted = ref [] in
+  let scheduled = ref [] in
+  let notified = ref [] in
+  let cause = Failure "injected late observer cancellation" in
+  with_scoped_hook Workspace_hooks.verification_delete_request_fn
+    (fun config ~verification_id ->
+      deleted := verification_id :: !deleted;
+      real_delete_request config ~verification_id) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_submitted_fn
+    (fun _ ~task:_ ~assignee:_ ~verification_id -> scheduled := verification_id :: !scheduled) @@ fun () ->
+  with_scoped_hook Workspace_hooks.verification_notify_submit_fn
+    (fun _ ~task:_ ~assignee:_ ~verification_id ~claim:_ -> notified := verification_id :: !notified) @@ fun () ->
+  with_scoped_hook Workspace_hooks.observe_task_transition_fn
+    (fun _ ~agent_name:_ ~task_id:_ ~transition:_ ~details:_ ->
+      raise (Eio.Cancel.Cancelled cause)) @@ fun () ->
+  (* Deliberately raise the cancellation exception without cancelling the
+     caller's Eio context, so persisted state can be inspected afterwards. *)
+  (match receipt_submit config "note:committed before cancellation" with
+   | exception Eio.Cancel.Cancelled actual ->
+       Alcotest.(check bool) "cancellation preserves its cause" true (actual == cause)
+   | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+   | Ok _ -> Alcotest.fail "late cancellation must escape the transition");
+  let _, _, new_id = receipt_submission (receipt_task config) in
+  Alcotest.(check bool) "backlog committed before cancellation" false (new_id = old_id);
+  Alcotest.(check (list string)) "review scheduling preceded cancellation" [new_id] !scheduled;
+  Alcotest.(check (list string)) "cancellation runs no compensation or supersede deletion" [] !deleted;
+  Alcotest.(check (list string)) "cancellation runs no outside-lock notification" [] !notified;
+  Alcotest.(check (list string)) "both requests retain their existing cancellation evidence"
+    (List.sort String.compare [old_id; new_id]) (request_ids config.W.base_path)
+
 (* --- Storage tests --- *)
 
 let test_create_and_load () =
@@ -4682,6 +4865,12 @@ let () =
     "workspace_boundary", [
       Alcotest.test_case "raw submit notifies once" `Quick
         test_raw_workspace_submission_notifies_once;
+      Alcotest.test_case "committed resubmission notifies after a late projection error" `Quick
+        test_resubmission_notifies_after_late_projection_error;
+      Alcotest.test_case "precommit failure compensates only the new request" `Quick
+        test_precommit_failure_compensates_only_new_request;
+      Alcotest.test_case "late raised cancellation skips submission finalization" `Quick
+        test_late_raised_cancellation_skips_submission_finalization;
     ];
     "id_generation", [
       Alcotest.test_case "vrf- prefix" `Quick test_generate_id_prefix;

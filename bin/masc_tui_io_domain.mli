@@ -38,7 +38,9 @@ val run : t -> (unit -> 'a) -> 'a
     leaves while its job is still queued leaves [work] unstarted.
 
     [work] must not touch state the caller's domain owns: a switch, an
-    [Eio.Mutex] it holds, a value it mutates. Pass it what it needs.
+    [Eio.Mutex] it holds, a value it mutates. Pass it what it needs. The
+    clock and network of [Eio.Stdenv] are not such state: they act on the
+    domain that calls them, so a request can take its clock from the caller.
 
     The domain stops when [start]'s [sw] finishes, so call [run] only from
     fibers that [sw] outlives. A job added after that is never run, and its

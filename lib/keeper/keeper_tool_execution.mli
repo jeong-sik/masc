@@ -6,6 +6,7 @@
 type deferred_kind =
   | Generic_deferred
   | External_effect_deferred of { approval_id : string option }
+  | Owned_job_result_wait of Keeper_owned_job_store.Job_id.t
 
 val deferred_kind_to_string : deferred_kind -> string
 (** Stable producer-owned wire label for deferred settlement evidence. *)
@@ -50,6 +51,12 @@ val success_data : ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
 val deferred_data :
   ?effect_disposition:Tool_result.failure_effect_disposition ->
   ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
+
+(** A read of an existing owned job has no effect. The producer supplies the
+    exact private job identity independently of the provider-facing body.
+    This permits only another result read, never a launch/status/cancel replay. *)
+val deferred_owned_job_result :
+  job_id:Keeper_owned_job_store.Job_id.t -> Yojson.Safe.t -> t
 
 (** Typed deferral for an external effect whose durable resolution resumes the
     Keeper later. *)

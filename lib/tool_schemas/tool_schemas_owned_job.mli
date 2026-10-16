@@ -1,7 +1,7 @@
 (** Restart-surviving isolated job tools. Input schemas and descriptions are
     decoded from the canonical [config/tools/keeper_job_*.toml] definitions. *)
 
-type action = Start | Status | Cancel
+type action = Start | Status | Cancel | Read_result
 
 type definition =
   { action : action
@@ -9,8 +9,9 @@ type definition =
   ; schema : Masc_domain.tool_schema
   ; read_only : bool
   }
-(** Every action is effectful and Serial. In particular, [Status] reconciles
-    backend state and may persist terminal evidence. *)
+(** [Read_result] only reads the original owner journal and is Concurrent.
+    Other actions are effectful and Serial: [Status] reconciles backend state
+    and may persist terminal evidence. *)
 
 val definitions : definition list
 val schemas : Masc_domain.tool_schema list

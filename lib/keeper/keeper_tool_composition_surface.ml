@@ -261,14 +261,21 @@ let observe_node_result
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Log.Keeper.warn
-      "composition action telemetry degraded without changing execution: tool=%s node=%s error=%s"
-      composition_tool
-      (Keeper_tool_plan.Node_id.to_string result.node_id)
-      (Printexc.to_string exn);
-    if not !committed && Tool_result.retained_artifacts result.result <> [] then
+    if not !committed && Tool_result.retained_artifacts result.result <> [] then (
+      Log.Keeper.error
+        "composition retained result receipt failed; execution stopped: tool=%s node=%s error=%s"
+        composition_tool
+        (Keeper_tool_plan.Node_id.to_string result.node_id)
+        (Printexc.to_string exn);
       Error ("retained composition observation receipt failed: " ^ Printexc.to_string exn)
-    else Ok ()
+    ) else (
+      Log.Keeper.warn
+        "composition action telemetry degraded without changing execution: tool=%s node=%s error=%s"
+        composition_tool
+        (Keeper_tool_plan.Node_id.to_string result.node_id)
+        (Printexc.to_string exn);
+      Ok ()
+    )
 ;;
 
 let observe_composition_run_summary

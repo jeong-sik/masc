@@ -118,7 +118,8 @@ type dispatch =
     or [Failed] tool result is carried unchanged in [Tool_did_not_complete];
     no text or payload inference is performed. A deferred node produces no
     composable output, so it cannot satisfy a downstream output reference and
-    terminates the plan instead of being resumed as a producer.
+    ends this worker attempt. A prepared run can later recheck a producer-owned
+    [keeper_job_result] wait for that same job; other deferrals reject replay.
     The executor mints one non-empty [tool_use_id] before calling [dispatch];
     the dispatch, exception settlement, durable row, and live refresh all share
     that identity. [observe_node_result], when supplied, is part of settlement: an observation

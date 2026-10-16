@@ -454,6 +454,25 @@ let test_unproven_outcomes_refuse_replay () =
     check_completion base_path prepared second))
     [`Failure Tool_result.Effect_outcome_unknown; `Failure Proven_post_effect;
      `Deferred None; `Deferred (Some Tool_result.Proven_pre_effect)]
+
+let test_foreign_job_wait_receipt_is_rejected () = with_workspace (fun _env sw base_path ->
+  let prepared = prepare base_path in
+  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    if node_name node <> "consumer" then Executor.dispatch_result (success base_path node "original-profile")
+    else Executor.dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
+      ~deferred_kind:(Masc.Keeper_tool_execution.Owned_job_result_wait
+        (Masc.Keeper_owned_job_store.Job_id.fresh ()))
+      (Tool_result.make_deferred ~tool_name:node.tool_name
+        ~start_time:(Tool_timing.start ()) ~data:(`String "not an owned result leaf") ()) in
+  let first = submit base_path sw prepared dispatch |> accepted in
+  ignore (await base_path first);
+  (match executed first with
+   | Error {cause=Executor.Node_observation_failed _;_} -> ()
+   | _ -> fail "foreign producer receipt was accepted by the run journal");
+  (match Journal.lookup first.worker ~node_id:(node_id "consumer") ~tool_name:"masc_board_search"
+      ~input:(`Assoc ["query", `String "original-profile"]) with
+   | Error (Journal.Replay_not_proven _) -> ()
+   | Error _ | Ok _ -> fail "foreign receipt authorized job result rechecking"))
 let test_cancelled_readonly_attempt () = with_workspace (fun _env sw base_path ->
   let prepared = prepare base_path in
   let entered, enter = Eio.Promise.create () and never, _ = Eio.Promise.create () in
@@ -709,6 +728,7 @@ let () = match Array.to_list Sys.argv with
         test_case "unavailable original evidence refuses dispatch" `Quick test_unavailable_evidence;
         test_case "canonical ownership, concurrent resume and stale worker" `Quick test_owned_transport_and_race;
         test_case "unknown, post-effect and deferred results are not replayed" `Quick test_unproven_outcomes_refuse_replay;
+        test_case "foreign owned-job wait receipt cannot authorize rechecking" `Quick test_foreign_job_wait_receipt_is_rejected;
         test_case "owned cancellation retries only declared readonly unfinished work" `Quick test_cancelled_readonly_attempt;
         test_case "public prepare run resume preserves original task" `Quick test_public_run_resume_keeps_original_task;
         test_case "exact Queued admission and matched inventory read measurements" `Quick test_exact_queued_admission]]

@@ -158,7 +158,7 @@ let valid_node = function
        let valid_deferred_kind =
          match deferred_kind with
          | `Null -> true
-         | `String ("generic_deferred" | "external_effect_deferred") -> true
+         | `String ("generic_deferred" | "external_effect_deferred" | "owned_job_result_wait") -> true
          | _ -> false
        in
        let valid_truncation =

@@ -617,12 +617,13 @@ let%test "build_request emits exactly one thinking key for ZAI GLM (Agent Core c
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> false
 ;;
 
-let%test "build_request with thinking=false injects disabled" =
+let%test "build_request with declared thinking=false injects disabled" =
   let config =
     Provider_config.make
       ~kind:Glm
-      ~model_id:"glm-4.5"
-      ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+      ~provider_id:"glm"
+      ~model_id:"glm-5.1"
+      ~base_url:"https://api.z.ai/api/paas/v4"
       ~enable_thinking:false
       ()
   in

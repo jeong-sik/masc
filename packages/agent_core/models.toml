@@ -1147,7 +1147,6 @@ supports_native_streaming = true
 [[models]]
 id_prefix = "glm-5.2"
 base = "glm"
-thinking_control_format = "thinking_object_only"
 max_context_tokens = 1000000
 max_output_tokens = 128000
 supports_tools = true
@@ -1507,7 +1506,6 @@ cache_read_multiplier = 1.0
 [[models]]
 id_prefix = "glm-5.1"
 base = "glm"
-thinking_control_format = "thinking_object_only"
 max_context_tokens = 200000
 max_output_tokens = 128000
 supports_tools = true
@@ -1693,7 +1691,6 @@ cache_read_multiplier = 0.2
 [[models]]
 id_prefix = "glm-5"
 base = "glm"
-thinking_control_format = "thinking_object_only"
 max_context_tokens = 200000
 max_output_tokens = 128000
 supports_tools = true
@@ -1710,7 +1707,6 @@ cache_read_multiplier = 0.2
 [[models]]
 id_prefix = "glm-4.6"
 base = "glm"
-thinking_control_format = "thinking_object_only"
 max_context_tokens = 200000
 max_output_tokens = 128000
 supports_tools = true
@@ -1727,7 +1723,6 @@ cache_read_multiplier = 0.18333333333333332
 [[models]]
 id_prefix = "glm-4.7"
 base = "glm"
-thinking_control_format = "thinking_object_only"
 max_context_tokens = 200000
 max_output_tokens = 128000
 supports_tools = true

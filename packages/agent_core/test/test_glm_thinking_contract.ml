@@ -99,6 +99,23 @@ let test_response_separation () =
     (Types.visible_text_of_response response)
 ;;
 
+let test_native_binding model can_disable () =
+  with_catalog (fun () ->
+    let disabled =
+      Provider_config.make ~kind:Glm ~model_id:model
+        ~base_url:"https://api.z.ai/api/paas/v4" ~enable_thinking:false ()
+    in
+    let caps = Backend_openai_request.capabilities_of_config disabled in
+    Alcotest.(check bool) "anonymous native binding uses exact declaration" can_disable
+      (caps.thinking_control_format = Capabilities.Thinking_object_only);
+    Alcotest.(check bool) "anonymous native disable admission" can_disable
+      (Option.is_none (Complete_common.thinking_control_request_rejection ~caps disabled));
+    let expected = if can_disable then `Assoc [ "type", `String "disabled" ] else `Null in
+    Alcotest.(check string) "prefix resemblance cannot grant a wire toggle"
+      (Yojson.Safe.to_string expected)
+      (body disabled |> field "thinking" |> Yojson.Safe.to_string))
+;;
+
 let () =
   let bindings models test =
     List.concat_map (fun provider ->
@@ -108,6 +125,12 @@ let () =
   Alcotest.run "GLM exact thinking contract"
     [ "documented hybrid", bindings [ "glm-5.2"; "glm-5.1"; "glm-5"; "glm-4.7"; "glm-4.6" ] test_hybrid
     ; "forced and undeclared", bindings [ "glm-5.3"; "glm-5.3-flash"; "unlisted-glm-model" ] test_no_toggle
+    ; "anonymous native", List.map (fun (model, can_disable) ->
+        Alcotest.test_case model `Quick (test_native_binding model can_disable))
+        [ "glm-5.1", true; "glm-4.6", true; "glm-5.3", false
+        ; "glm-5.3-flash", false; "glm-5.4", false; "glm-4.7-unlisted", false
+        ; "unlisted-glm-model", false
+        ]
     ; "response", [ Alcotest.test_case "reasoning does not become JSON" `Quick test_response_separation ]
     ]
 ;;

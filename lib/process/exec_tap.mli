@@ -21,10 +21,27 @@ type call_kind =
   | Process_eio_run_argv_with_stdin_and_status
   | Process_eio_run_argv_with_status
 
+(** Observed process boundaries. These events never decide timeout,
+    cancellation, retry or ownership. Spawn argv uses the existing redactor. *)
+type lifecycle_stage =
+  | Spawned of string list
+  | Waitpid_started
+  | Waitpid_returned
+  | Exit_published
+  | Stdout_closed
+  | Stderr_closed
+  | Awaiting_exit
+  | Exit_observed
+
+val record_lifecycle : pid:int -> stage:lifecycle_stage -> unit -> unit
+(** Emit [kind=Process.lifecycle] through the same opt-in writer, with the
+    actual child PID and closed stage. Default OFF. A stage record is not an
+    exec invocation and must not be counted as one by corpus consumers. *)
+
 (** {1 Control} *)
 
 val enable : writer:(string -> unit) -> unit
-(** Enable the tap.  [writer] is invoked once per exec call with a complete
+(** Enable the tap.  [writer] is invoked per exec call or lifecycle observation with a complete
     JSONL line (trailing newline included).  Subsequent [enable] calls
     replace the writer.  Thread-safe. *)
 

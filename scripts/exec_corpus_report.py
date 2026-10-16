@@ -108,6 +108,10 @@ def build_report(entries):
     bin_top = Counter()
     git_sub = Counter()
     for e in entries:
+        # Lifecycle observations share the opt-in corpus writer but do not
+        # represent another generated exec invocation.
+        if e.get("kind") == "Process.lifecycle":
+            continue
         kinds[e.get("kind", "?")] += 1
         argv = e.get("argv") or []
         buckets[classify(argv)] += 1

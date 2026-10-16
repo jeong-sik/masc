@@ -339,6 +339,14 @@ let append_entry st e =
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
+(* A file that is there and will not read (a directory, a permission, a short
+   read) is a typed refusal. It happens before the machine is replaced, so the
+   previous machine and its ledger are untouched. *)
+let read_file_result path =
+  try Ok (read_file path)
+  with Sys_error message -> Error (Unreadable message)
+;;
+
 let rec mkdir_p dir =
   if not (Sys.file_exists dir) then begin
     mkdir_p (Filename.dirname dir);
@@ -356,20 +364,31 @@ let load_roms (roms_dir : string option) =
   | Some dir -> (
     match List.find_opt (fun f -> not (Sys.file_exists (Filename.concat dir f))) bios_files with
     | Some missing -> Error (Unreadable (Printf.sprintf "no %s in %s" missing dir))
-    | None -> Ok (List.map (fun f -> read_file (Filename.concat dir f)) bios_files))
+    | None ->
+      List.fold_left
+        (fun acc f ->
+          let* read = acc in
+          let* bytes = read_file_result (Filename.concat dir f) in
+          Ok (bytes :: read))
+        (Ok []) bios_files
+      |> Result.map List.rev)
 ;;
 
 let load_cart = function
   | None -> Ok None
   | Some path ->
-    if Sys.file_exists path then Ok (Some (path, read_file path))
+    if Sys.file_exists path then
+      let* bytes = read_file_result path in
+      Ok (Some (path, bytes))
     else Error (Unreadable (Printf.sprintf "cartridge not found: %s" path))
 ;;
 
 let load_disk = function
   | None -> Ok None
   | Some path ->
-    if Sys.file_exists path then Ok (Some (path, read_file path))
+    if Sys.file_exists path then
+      let* bytes = read_file_result path in
+      Ok (Some (path, bytes))
     else Error (Unreadable (Printf.sprintf "disk not found: %s" path))
 ;;
 
@@ -407,6 +426,18 @@ let medium_of (st : machine option) =
      | None, None -> None)
 ;;
 
+(* A new machine starts a new ledger: create its directory and truncate the
+   file. Both fail at the open, before the ledger changes, and the previous
+   machine is still installed, so a failure here is a refusal. *)
+let fresh_ledger ledger_dir =
+  let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+  try
+    mkdir_p ledger_dir;
+    Out_channel.with_open_bin ledger_path (fun _ -> ());
+    Ok ledger_path
+  with Sys_error message -> Error (Unreadable message)
+;;
+
 let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
   let* () = require_activity () in
   locked (fun () ->
@@ -437,10 +468,9 @@ let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
       | Error e -> Error e
       | Ok pre_frames ->
         Msx.step m ~frames:boot_frames;
-        mkdir_p ledger_dir;
-        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-        (* A new machine starts a new ledger: truncate. *)
-        Out_channel.with_open_bin ledger_path (fun _ -> ());
+        match fresh_ledger ledger_dir with
+        | Error e -> Error e
+        | Ok ledger_path ->
         let st =
           { m
           ; incarnation = fresh_incarnation ()
@@ -592,6 +622,21 @@ let releasing_on_raise st keys body =
     Printexc.raise_with_backtrace exn backtrace
 ;;
 
+(* An edge the ledger file would not take (ENOSPC, EIO, a replaced path). The
+   call may already have run frames and written earlier edges, so the effect
+   is unknown rather than refused: the ledger can then hold a key-down with no
+   key-up. The keys are already released when this runs. *)
+let ledger_write_failed detail =
+  Error (Effect_unknown ("input ledger write failed after the press began: " ^ detail))
+;;
+
+let recording_ledger body =
+  try body () with
+  | Sys_error message -> ledger_write_failed message
+  | Unix.Unix_error (error, fn, arg) ->
+    ledger_write_failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+;;
+
 let press ~who ~keys ~hold_frames ~step_frames ~sequence =
   let* () = require_activity () in
   with_machine (fun st ->
@@ -614,26 +659,28 @@ let press ~who ~keys ~hold_frames ~step_frames ~sequence =
              a chord held together. *)
           (* See Msx.set_key: press_all just checked every key, so these cannot miss. *)
           List.iter (fun k -> ignore (Msx.set_key st.m k ~pressed:false : bool)) keys;
-          releasing_on_raise st keys (fun () ->
-            List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
-            Ok (observe st))
+          recording_ledger (fun () ->
+            releasing_on_raise st keys (fun () ->
+              List.iter (tap_one st ~who ~hold_frames ~step_frames) keys;
+              Ok (observe st)))
         | Ok () ->
-          releasing_on_raise st keys (fun () ->
-            List.iter
-              (fun k ->
-                append_entry st
-                  { at_frame = st.frame; who; key_name = key_to_string k; down = true })
-              keys;
-            advance st hold_frames;
-            List.iter
-              (fun k ->
-                (* See Msx.set_key: the key went down a moment ago, so its release cannot miss. *)
-                ignore (Msx.set_key st.m k ~pressed:false : bool);
-                append_entry st
-                  { at_frame = st.frame; who; key_name = key_to_string k; down = false })
-              keys;
-            advance st (step_frames - hold_frames);
-            Ok (observe st))))
+          recording_ledger (fun () ->
+            releasing_on_raise st keys (fun () ->
+              List.iter
+                (fun k ->
+                  append_entry st
+                    { at_frame = st.frame; who; key_name = key_to_string k; down = true })
+                keys;
+              advance st hold_frames;
+              List.iter
+                (fun k ->
+                  (* See Msx.set_key: the key went down a moment ago, so its release cannot miss. *)
+                  ignore (Msx.set_key st.m k ~pressed:false : bool);
+                  append_entry st
+                    { at_frame = st.frame; who; key_name = key_to_string k; down = false })
+                keys;
+              advance st (step_frames - hold_frames);
+              Ok (observe st)))))
 ;;
 
 let ledger () =
@@ -743,13 +790,60 @@ let hex_pairs bytes lo hi =
     (List.init (hi - lo) (fun i -> Printf.sprintf "%02x" (Char.code (Bytes.get bytes (lo + i)))))
 ;;
 
+(* A logical address is 16 bits. The type holds only values in that range, so
+   [address + length] cannot wrap and the 64K snapshot cannot be indexed out
+   of bounds. *)
+module Address = struct
+  type t = int
+
+  let max_value = address_space - 1
+  let of_int n = if n >= 0 && n <= max_value then Some n else None
+  let to_int address = address
+
+  let hex_digit_value = function
+    | '0' .. '9' as c -> Some (Char.code c - Char.code '0')
+    | 'a' .. 'f' as c -> Some (Char.code c - Char.code 'a' + 10)
+    | _ -> None
+  ;;
+
+  (* Hex only, as memory is talked about and as the DOS lane reads it: an
+     optional "0x", then hex digits, so "4096" is 0x4096. The value is bounded
+     while it is read, so no spelling can wrap an int. *)
+  let parse input =
+    let text = String.lowercase_ascii (String.trim input) in
+    let digits =
+      if String.starts_with ~prefix:"0x" text then String.sub text 2 (String.length text - 2)
+      else text
+    in
+    let not_hex () =
+      Error
+        (Printf.sprintf
+           "address %S is not hex: write hex digits with or without 0x (e000, 0xE000); \
+            digits alone are hex too, so 4096 is 0x4096"
+           input)
+    in
+    let rec accumulate value i =
+      if i = String.length digits then Ok value
+      else
+        match hex_digit_value digits.[i] with
+        | None -> not_hex ()
+        | Some digit ->
+          let value = (value * 16) + digit in
+          if value > max_value then
+            Error (Printf.sprintf "address %S is outside 0x0000-0xFFFF" input)
+          else accumulate value (i + 1)
+    in
+    if digits = "" then not_hex () else accumulate 0 0
+  ;;
+end
+
 let peek ~address ~length =
-  if address < 0 || length < 1 || length > peek_max_bytes
-     || address + length > address_space then
+  let address = Address.to_int address in
+  if length < 1 || length > peek_max_bytes || address + length > address_space then
     Error
       (Invalid_request
-         (Printf.sprintf "peek needs 1..%d bytes inside 0x0000-0xFFFF, got %d..%d"
-            peek_max_bytes address (address + length)))
+         (Printf.sprintf "peek needs 1..%d bytes inside 0x0000-0xFFFF, got %d bytes at %d"
+            peek_max_bytes length address))
   else
     with_machine (fun st ->
       let snap = Bytes.create address_space in

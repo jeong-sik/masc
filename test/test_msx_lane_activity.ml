@@ -49,7 +49,7 @@ let test_off_retains () = with_machine @@ fun directory ->
   check string "same machine" before.incarnation after.incarnation;
   check int "same frame" before.observation.frame after.observation.frame;
   check bool "same input ledger" true (ledger = Msx_lane.ledger ());
-  ignore (require (Msx_lane.peek ~address:0 ~length:1));
+  ignore (require (Msx_lane.peek ~address:(Result.get_ok (Msx_lane.Address.parse "0")) ~length:1));
   ignore (require (Msx_lane.ram_diff ()));
   let path = Filename.concat directory "retained.json" in
   ignore (require (Msx_lane.save ~path));

@@ -1319,15 +1319,17 @@ let resume_parked_continuation env fixture ?meta ?on_recovery_held surface conti
     ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
     ~invocation ~clock:(Eio.Stdenv.clock env) ()
 
-(* An unproven failure of original authority reports hold before any worker
-   admission: resuming under another Keeper's metadata fails intake and
-   names the sealed request exactly once, instead of reusing or replacing
-   the original evidence. The keeper-identity gate runs before readiness,
-   so no job completion is needed to reach it. *)
+(* Resuming under another Keeper's metadata fails intake and holds exactly
+   once naming the sealed request: the keeper-identity gate runs before
+   readiness is consulted, so no job completion is needed to reach it. *)
 let test_owner_mismatch_reports_hold_before_readiness () =
   with_fixture @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR", None] @@ fun () ->
   with_parked_named_producer env fixture @@ fun parked ->
+  let readiness = Journal.continuation_readiness
+      ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+      parked.child_continuation in
+  check bool "child still waits on its owned job" true (readiness = Ok Journal.Waiting_for_results);
   let wrong_meta = { fixture.meta with name = "someone-else" } in
   let held = ref [] in
   let resumed = resume_parked_continuation env fixture ~meta:wrong_meta parked.surface
@@ -1335,7 +1337,9 @@ let test_owner_mismatch_reports_hold_before_readiness () =
       ~on_recovery_held:(fun ~request_id ~reason -> held := (request_id, reason) :: !held) in
   check bool "foreign metadata fails intake" true (Tool_result.is_failed resumed);
   check int "failing intake reports hold once" 1 (List.length !held);
-  check string "hold names the sealed request" parked.binding.request_id (fst (List.hd !held))
+  check string "hold names the sealed request" parked.binding.request_id (fst (List.hd !held));
+  check string "hold reason pins the keeper-identity gate"
+    (Journal.error_to_string Journal.Source_conflict) (snd (List.hd !held))
 
 (* A pulse that reports held original authority is not resumed again by the
    same supervisor: the hold suppresses the repeat attempt for that exact
@@ -1356,7 +1360,10 @@ let test_held_continuation_is_not_retried_until_restart () =
     Journal.pending_continuations
       ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
       ~base_path:fixture.base_path |> require "hold-proof discovery" in
-  let ready0 = (discover ()).ready in
+  let report0 = discover () in
+  let ready0 = report0.ready in
+  let ready_ids report =
+    List.sort String.compare (List.map Journal.continuation_request_id report.Journal.ready) in
   check bool "the parked child reads ready after collection" true
     (List.exists (fun candidate ->
        String.equal (Journal.continuation_request_id candidate) parked.binding.request_id) ready0);
@@ -1367,7 +1374,7 @@ let test_held_continuation_is_not_retried_until_restart () =
     Option.iter
       (fun observe -> observe ~request_id ~reason:"hold-proof stub holds every intake")
       on_recovery_held;
-    Error Wake.Keeper_paused in
+    Error (Wake.Original_activation_unavailable Masc.Keeper_composition_draft.Draft_not_found) in
   let context =
     Eio.Switch.run @@ fun sw ->
     let open Masc.Keeper_types_profile in
@@ -1391,11 +1398,19 @@ let test_held_continuation_is_not_retried_until_restart () =
   check int "first pulse resumes every ready candidate" (List.length ready0) first;
   pulse supervisor;
   check int "second pulse resumes nothing while held" first (List.length !calls);
-  let ready1 = (discover ()).ready in
-  check int "held pulses settle nothing" (List.length ready0) (List.length ready1);
+  let report1 = discover () in
+  check int "held pulses settle nothing" (List.length ready0) (List.length report1.ready);
+  check (list string) "held pulses keep the same ready candidates"
+    (ready_ids report0) (ready_ids report1);
+  check int "held pulses keep the same waiting count" report0.waiting report1.waiting;
+  check int "held pulses retire nothing" report0.retired report1.retired;
+  check int "held pulses add no discovery failure"
+    (List.length report0.failures) (List.length report1.failures);
   let restarted = Wake.create ~context () in
   pulse restarted;
-  check int "a restarted supervisor retries once" (first * 2) (List.length !calls)
+  check int "a restarted supervisor retries once" (first * 2) (List.length !calls);
+  pulse restarted;
+  check int "a restarted supervisor holds again after one retry" (first * 2) (List.length !calls)
 
 let test_named_producer_skill_loss_settles_run_and_ends_parent () =
   with_fixture @@ fun env _initialize fixture ->

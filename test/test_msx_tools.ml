@@ -915,6 +915,24 @@ let test_disk_export_survives_fresh_boot () =
   check bool "no disk refused" true (rejected (export "no-disk.dsk"))
 ;;
 
+(* A fresh volume has no carts/ directory. Exporting a floppy is the first
+   thing that writes there, so it creates the directory instead of failing on
+   the missing one. *)
+let test_disk_export_creates_the_missing_catalog () =
+  with_workspace @@ fun base_path ->
+  let ledger_dir, _, _ = disk_swap_fixture base_path in
+  let catalog = Filename.concat ledger_dir "carts" in
+  Fs_compat.remove_tree catalog;
+  check bool "the volume has no catalog" false (Sys.file_exists catalog);
+  let result = dispatch ~base_path "masc_msx_export_disk" ["filename", `String "first.dsk"] in
+  check bool "the first export on a fresh volume succeeds" true (is_completed result);
+  check bool "the catalog now exists" true (Sys.file_exists catalog && Sys.is_directory catalog);
+  check bool "and holds the exported floppy" true
+    (Sys.file_exists (Filename.concat catalog "first.dsk"));
+  check bool "a second export names a new file" true
+    (is_completed (dispatch ~base_path "masc_msx_export_disk" ["filename", `String "second.dsk"]))
+;;
+
 let test_disk_backup_failure_preserves_machine () =
   with_workspace @@ fun base_path ->
   let ledger_dir, _, b = disk_swap_fixture base_path in
@@ -1636,6 +1654,7 @@ let () =
         ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip
         ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint
         ; test_case "exported guest disk survives fresh boot" `Quick test_disk_export_survives_fresh_boot
+        ; test_case "export creates the missing catalog" `Quick test_disk_export_creates_the_missing_catalog
         ; test_case "failed disk backup preserves machine and ledger" `Quick test_disk_backup_failure_preserves_machine
         ; test_case "failed disk boot preserves machine and ledger" `Quick test_rejected_disk_preserves_machine
         ; test_case "a press that raises releases its keys" `Quick test_press_that_raises_releases_its_keys

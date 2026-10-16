@@ -350,8 +350,8 @@ let equal_window_kind left right =
 ;;
 
 (* {!record} keeps one row per (limit_id, kind), so a report that states the
-   same key twice would keep whichever came last.  Such a report is refused
-   instead. *)
+   same key twice would retain only the first equal-time observation. Such a
+   report is refused instead. *)
 let distinct_windows ~path (report : report) =
   let same (a : window) (b : window) =
     Option.equal String.equal a.limit_id b.limit_id && equal_window_kind a.kind b.kind

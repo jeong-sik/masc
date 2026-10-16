@@ -210,14 +210,21 @@ type ran = {
           machine they leave is not one worth resuming. *)
 }
 
+type boot_fault =
+  | Unimplemented_instruction of string
+      (** the program ran something the core does not implement, with the
+          core's message *)
+  | Core_exception of string
+      (** the core raised while the program ran (a malformed EXEC child, for
+          one), with the exception *)
+
 type boot =
   | Booted of ran
-  | Boot_faulted of string
-      (** the program ran something the core does not implement while it
-          booted, with the core's message. The machine is installed, stopped
-          at that instruction, and the loader holds the controller; the
-          screen shows how far it got. No autosave was written, so the
-          previous one stays. *)
+  | Boot_faulted of boot_fault
+      (** the boot stopped on a fault. The machine is installed, stopped
+          where it was, and the loader holds the controller; the screen shows
+          how far it got. No autosave was written, so the previous one stays.
+          {!load} announces and returns [Ok] whichever way the boot ends. *)
 
 val settle_chunk : int
 (** Instructions between two screen readings while waiting for {!ran.settled}. *)

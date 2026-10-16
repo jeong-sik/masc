@@ -291,7 +291,15 @@ let of_lane_run ?(extra = []) ~base_path ~tool_name ~start_time
 let boot_fields = function
   | Dos_lane.Booted _ -> [ ("boot", `Assoc [ ("status", `String "booted") ]) ]
   | Dos_lane.Boot_faulted fault ->
-    [ ("boot", `Assoc [ ("status", `String "faulted"); ("fault", `String fault) ]) ]
+    let kind, message =
+      match fault with
+      | Dos_lane.Unimplemented_instruction message -> ("unimplemented_instruction", message)
+      | Dos_lane.Core_exception message -> ("core_exception", message)
+    in
+    [ ( "boot"
+      , `Assoc
+          [ ("status", `String "faulted"); ("kind", `String kind); ("fault", `String message) ] )
+    ]
 ;;
 
 let of_lane_load ?(extra = []) ~base_path ~tool_name ~start_time

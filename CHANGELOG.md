@@ -2,6 +2,75 @@
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-10-16
+
+### Added
+
+- The alphaTex tab renderer keeps `\title`, `\tempo` and `\ts` and draws a header line ahead of the tab (`♩=96 · 4/4 · "Riff"`, only what exists) plus a physical measure-number row above each system (#43163).
+- New pure SMF reader `Masc_tui_midi`: format, tracks, names, PPQ, merged tempo map, time signatures (denominator decoded as a power of two), duration through the tempo map; SMPTE division and format 3 fail as explicit variants. User-visible from #43166 (#43164).
+- Board read pane: attachments are numbered `[N]` and digit keys 1-9 open them — audio plays locally, MIDI plays via fluidsynth (new `[tui] midi_soundfont` setting, read at boot) or opens externally with the reason, Guitar Pro and other files save to the local cache and open in the default app. A status line at the pane bottom reports what happened, including a parsed MIDI summary (tracks, BPM, time signature, length) (#43166).
+- Candle 지갑별 누적 반감기 차감액(`decayed_milli`), 마지막 이벤트 시각(`last_event_at`), 유통 통화량·활동 키퍼 수 요약(`supply_summary`) 및 `[shop.pricing]` 통화량 연동 동적 가격(`Fixed` | `Supply_scaled`)과 구매 시점 가격 상한 검증(`expected_price_milli` / `Price_changed`)을 더한다 (#43172).
+- Add typed exact-lane admission (`Runtime.lane_requirement`, `Runtime.runtime_capability`, `Runtime.refusal`, `Runtime.admits`) and CLI slot partitioning (`Keeper_lane_cli_oneshot.partition_cli_slots`) with per-slot refusal reasons surfaced in workspace curator execution metadata and TUI lane inventory details (#43174).
+- `Workspace_memory_log` and `Workspace_memory_reader` add the append-only shared workspace memory JSONL log (`Prepared` -> `Change*` -> `Committed | Aborted`) with file-locked monotonic sequence validation, mid-append truncated-tail crash recovery, and per-keeper reader cursors with context-overflow bisection and single-entry reference fallback (#43175).
+- Keeper chat: `/listen` plays the newest playable attachment in the conversation — audio through the local player chain, MIDI through fluidsynth with `[tui] midi_soundfont` (same machinery as the board numbered keys). Bytes resolve from the block, the workspace media store, or a local file (#43189).
+- The alphaTex score reader reads rhythm effects: a dot (`{d}`), a double
+  dot (`{dd}`), a tuplet (`{tu 3}`) and a grace note (`{gr}`) change the
+  latest beat's length, counted in ticks so every form lands on an integer
+  (#43194).
+- Lane Add-on binding inventory issues now name their failure kind: details carry a bracketed tag (`[identity-changed]`, `[absent-unconfirmed]`, `[parse]`, `[non-regular directory]`, `[unreadable]`) so publication contention reads apart from real damage without opening the store (#43212).
+- `/features` opens a one-screen feature sheet — five sections, 31 rows, one sentence per feature beside the wire name that opens it (`?` keeps the key-level reference, `/help` keeps the command catalog) (#43217).
+- Sheet rows draw plain text on purpose: the chat notice path renders control bytes as text, so a styled row shipped as a visible `[2m`; hierarchy lives in the diamond and the column instead of colour (#43217).
+- `docs/TUI-GUIDE.md` "What can I do here" now names `/features` as the discovery one-liner (#43217).
+
+### Changed
+
+- `/health` `.scheduler` now nests its single-pass wake-up lag percentiles and 50ms/200ms threshold counts under `.scheduler.lag` directly from `Scheduler_lag` (#43176).
+- `masc_wiki_search` and `keeper_wiki_search` list the closest page first
+  inside each tier, by BM25 over the wiki's pages. Hangul is cut into
+  two-character pieces, so a two-character Korean word is a term of its own.
+  The matching rule is unchanged. For a page whose header reads, only the title,
+  summary, tags and body are searched, so a query no longer matches the
+  `author` or `source` line. A page whose header does not read is still
+  searched whole (#43178).
+- The Keepers detail "Current failure" section now leads a fenced empty
+  assistant turn that observed no effect with a human sentence and the next
+  action (message the keeper again to retry; this runtime never switches to
+  another runtime automatically) instead of the
+  `provider_attempt_effect_fenced` wire. A fenced turn where a tool may have
+  run keeps the wire, since a retry could repeat that tool. The
+  wire follows dimmed underneath as `runtime_blocker_signature`, so log
+  searches keep their key, and the dashboard summary follows the same
+  reading (#43195).
+
+### Fixed
+
+- `Candle_payout.validate_settlement` and `Candle_appraise.decide` enforce per-task Keeper eligibility consistency across all candidate tasks of the same assignee before calling the appraiser and validate `due_date` / `overdue_hours` against the confirmed `Snapshot` at CAS time (#43173).
+- `Candle_shop.purchase_with_expected_price` separates the optional expected-price slippage check from `Candle_shop.purchase` so 4-argument callers compile without OCaml Warning 16 (`[unerasable-optional-argument]`) (#43186).
+- Lane Add-on binding inventory reads no longer report a damaged store when a record's own rename/unlink publication races the read: `binding_inventory_with` retries an identity-changed read once and accepts a confirmed absence, so a successful concurrent write no longer flips every declaration application to `unknown` (#43209).
+
+### Documentation
+
+- The glossary's `Board Attachment` and `alphaTex 펜스` entries now match the TUI after #43163–#43166: attachments are numbered `[N]` and opened with digit keys (audio plays locally, MIDI through fluidsynth or, without it, only a saved path and summary; image/video open only for allow-listed extensions; file/score are saved only), and the alphaTex renderer draws a tempo/time-signature/title header and measure numbers (#43183).
+- The glossary's `Candle` entry now describes `[shop.pricing]`: `fixed` (or no table) charges the base price, `supply_scaled` scales it by circulating supply per active Keeper within `min_permille`..`max_permille`, and a purchase whose effective price exceeds `expected_price_milli` is refused as `price_changed` (#43193).
+
+### Internal
+
+- New `Masc_tui_attachment_action` library: the kind-to-action decision (audio plays through the afplay/ffplay/mpg123/play chain, MIDI through fluidsynth with a configured soundfont and an honest external-open fallback, everything else saved to the OS-temp cache and opened locally), one playback at a time, one-line outcomes. Wired to keys in #43166 (#43165).
+- `scripts/harness/perf/compare_checkpoint_history.py` merges the nested `lag`
+  percentiles of a `/health` scheduler block over its top-level shape fields,
+  the way `scheduler_lag_probe.sh` reads the same probe. After #43176 nested the
+  percentiles under `.scheduler.lag`, the comparison died on
+  `KeyError: 'samples'` and its summary table reported `None/None` for the
+  scheduler column (#43199).
+- `test/test_tui_command.ml`'s total `describe` matcher sweeps `Command.Listen` again: #43189 added `/listen` without updating it, so warning 8 [partial-match] became an error under `-warn-error +a` and the `Test` lane died in the compiler instead of in a case (#43203).
+- `test/test_lane_addon_reconcile.ml`'s `check_application` prints the `application` JSON on failure, so the three distinct causes behind a `"unknown"` declaration application are told apart in the log instead of collapsing into `Expected/Received` (#43204).
+- A test now fails when any tool in the bundle a keeper is handed advertises an input schema holding `$ref` or `$defs`, because Muse rejects the whole request when one tool carries a recursive schema (#43218).
+- `eio_posix` is pinned to 1.3 plus the upstream-pending fix that retries the
+  scheduler's wake-up pipe on `EINTR`, so a signal that interrupts that read no
+  longer raises `Unix_error(EINTR)` out of `Eio_main.run` and ends the server
+  (#43225, #43255). Run `scripts/opam-pin-external-deps.sh --install` once to
+  update a local switch.
+
 ## [0.56.0] - 2026-10-14
 
 ### Upgrade notes

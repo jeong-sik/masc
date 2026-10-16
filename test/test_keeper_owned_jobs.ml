@@ -1581,8 +1581,7 @@ instructions = "Refusal fixture"
   Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
   ignore (Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
       ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}));
-  let metadata_path = Filename.concat (Workspace.keepers_runtime_dir parked.config)
-      (Masc.Keeper_runtime_root_entry.keeper_basename ~keeper_name:keeper Metadata) in
+  let metadata_path = Masc.Keeper_types_profile.keeper_meta_path parked.config keeper in
   if Sys.file_exists metadata_path then Unix.unlink metadata_path;
   let context : _ Masc.Keeper_types_profile.context =
     {config=parked.config;agent_name="continuation-refusal-fixture";

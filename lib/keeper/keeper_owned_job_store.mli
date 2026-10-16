@@ -68,4 +68,5 @@ val transition :
     Cleanup failure is unconfirmed, never authorization for the pending effect. *)
 val phase_to_string : phase -> string
 val source_to_json : source -> Yojson.Safe.t
+val source_of_json : Yojson.Safe.t -> (source, error) result
 val result_json : record -> Yojson.Safe.t

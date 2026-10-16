@@ -4044,9 +4044,29 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
     ~path
     (fun () ->
     Stdlib.Mutex.protect path_mu (fun () ->
+      let require_binding = function
+        | Ok () -> ()
+        | Error (Private_jsonl_operation_failed failure) ->
+          Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+        | Error ((Stable_lock_contended _ | Unexpected_stable_lock_permissions _
+            | Invalid_stable_lock_state _ | Cursor_mismatch _
+            | Unexpected_transaction_file_kind _ | Ambiguous_transaction_file_identity _
+            | Transaction_path_binding_changed _ | Incomplete_transaction_tail _
+            | Invalid_transaction_suffix | Rewrite_stage_failed _
+            | Rewrite_published_durability_unknown _ | Transaction_settlement_failed _
+            | Transaction_append_failed _) as error) ->
+          raise (Sys_error (private_jsonl_transaction_error_to_string error))
+      in
+      (* A pathname cannot authorize bytes read from a different opened inode.
+         Keep the creating updater's setup/read exception contract, while
+         sharing the existing-only updater's canonical binding validation. *)
+      (match Unix.lstat path with
+       | stats -> require_binding (private_jsonl_validate_unique_regular_binding
+           ~path ~path_stats:stats ~fd_stats:stats)
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) when create -> ());
       let fd =
         Unix.openfile path
-          ([ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CLOEXEC ] @ if create then [Unix.O_CREAT] else [])
+          ([ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] @ if create then [Unix.O_CREAT] else [])
           0o600
       in
       private_jsonl_with_fd_outcome
@@ -4054,11 +4074,16 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
         ~close_fd:io.close_fd
         fd
         (fun () ->
+           let validate_binding () = require_binding
+             (private_jsonl_validate_open_binding ~operation:Inspect_transaction_path ~path fd) in
+           validate_binding ();
            Unix.fchmod fd 0o600;
+           io.before_sync_parent dir;
            fsync_parent_directory dir;
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
            lock_whole_file fd;
+           validate_binding ();
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
            let from =
@@ -4080,6 +4105,7 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
              | Some newline ->
                String.sub existing (newline + 1) (String.length existing - newline - 1)
            in
+           validate_binding ();
            let recovered =
              if not recover_incomplete_tail || existing = ""
                 || existing.[String.length existing - 1] = '\n' then Ok existing
@@ -4093,7 +4119,9 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
                  |> Result.map_error failure in
                Ok (String.sub existing 0 complete_length) in
            Result.bind recovered (fun existing ->
+           validate_binding ();
            let suffix, result = decide existing in
+           validate_binding ();
            match suffix with
             | None -> Ok result
             | Some suffix ->
@@ -4104,7 +4132,7 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(recover_incomple
                 ~fd
                 ~original_length
                 suffix
-              |> Result.map (fun () -> result)))))
+              |> Result.map (fun () -> validate_binding (); result)))))
 ;;
 
 let update_private_file_durable_locked_result ?(create=true) path decide =

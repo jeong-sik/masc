@@ -3481,6 +3481,15 @@ module Http_refresh_order = struct
   let is_current latest ticket = latest = ticket
 end
 
+(** Display-only result from a refresh whose other reads are still running.
+    The final bundle alone updates [state.overview] and workspace authority. *)
+type overview_preview = {
+  op_ticket: Http_refresh_order.ticket;
+  op_authority: workspace_authority;
+  op_identity: Tui_decode.server_identity;
+  op_snapshot: overview_snapshot;
+}
+
 type scoped_refresh_followup =
   | No_scoped_followup
   | Revalidate_after_scoped
@@ -7088,6 +7097,7 @@ type state = {
   mutable live_context: Masc_tui_context_state.t;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
+  mutable overview_preview: overview_preview option;
   mutable transport: Tui_decode.transport_health option;
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
@@ -11155,6 +11165,7 @@ let create_state
   live_context = Masc_tui_context_state.empty;
   overview = None;
   overview_error = None;
+  overview_preview = None;
   transport = None;
   transport_error = None;
   approval_snapshot = None;

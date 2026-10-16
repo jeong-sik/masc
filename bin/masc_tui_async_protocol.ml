@@ -186,6 +186,7 @@ type async_msg =
      rather than a silence: the microphone worked. *)
   | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
+  | Http_overview_loaded of overview_preview
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
@@ -786,7 +787,7 @@ let rec workspace_message_is_read = function
   | Voice_silent _
   | Voice_discarded _
   | Voice_failed _
-  | Http_refresh_done _
+  | Http_overview_loaded _ | Http_refresh_done _
   | Http_refresh_failed _
   (* Not a reply: the refresh that recovered the identity tells the loop to
      read the confirm queue again. It belongs to that refresh, which is
@@ -893,7 +894,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
     | Voice_config_loaded (_, _, _) | Voice_level _ | Voice_transcribed _
-    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_refresh_done _
+    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_overview_loaded _ | Http_refresh_done _
     | Http_refresh_failed (_, _, _) | Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _) | Surface_composer_released
     | Http_scoped_refresh_done (_, _, _)
@@ -1030,7 +1031,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
   | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_level _
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-  | Http_refresh_done _ | Http_refresh_failed (_, _, _)
+  | Http_overview_loaded _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
   | Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _)
   | Surface_composer_released | Http_scoped_refresh_done (_, _, _)
   | Http_scoped_refresh_failed (_, _, _, _, _) | Board_post_refresh_done (_, _)

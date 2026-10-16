@@ -287,8 +287,17 @@ let render_overview (state : state) =
   let all_decisions = Masc_tui_home.home_decision_rows state in
   let continuation = Masc_tui_home.home_continue_rows state in
   let selected = Masc_tui_home.home_selected_action state in
+  let overview_error, overview =
+    match state.overview_preview with
+    | Some preview
+      when Option.is_some state.http_refresh_started_ns
+        && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
+        && preview.op_authority = state.workspace_authority ->
+        None, Some preview.op_snapshot
+    | Some _ | None -> state.overview_error, state.overview
+  in
   let health =
-    match Terminal_text.optional_single_line state.overview_error, state.overview with
+    match Terminal_text.optional_single_line overview_error, overview with
     | Some error, _ -> " Health: unavailable · " ^ error
     | None, None ->
         let status =

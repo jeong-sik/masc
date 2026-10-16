@@ -37,6 +37,7 @@ type status_options =
   ; include_context : bool
   ; include_metrics_overview : bool
   ; include_history_tail : bool
+  ; include_repository_checkouts : bool
   }
 
 let normalize_status_name = String.trim
@@ -210,6 +211,12 @@ let status_options_of_fields fields =
       Keeper_status_options_defaults.Argument.include_history_tail
       ~default:(not fast)
   in
+  let* include_repository_checkouts =
+    optional_bool_argument
+      fields
+      Keeper_status_options_defaults.Argument.include_repository_checkouts
+      ~default:(not fast)
+  in
   Ok
     { tail_turns
     ; tail_messages
@@ -219,6 +226,7 @@ let status_options_of_fields fields =
     ; include_context
     ; include_metrics_overview
     ; include_history_tail
+    ; include_repository_checkouts
     }
 
 let apply_tail_order order items =
@@ -317,6 +325,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
         ; include_context
         ; include_metrics_overview
         ; include_history_tail
+        ; include_repository_checkouts
         }
         = options
       in
@@ -679,6 +688,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("include_context", `Bool include_context);
              ("include_metrics_overview", `Bool include_metrics_overview);
              ("include_history_tail", `Bool include_history_tail);
+             ("include_repository_checkouts", `Bool include_repository_checkouts);
              ("tail_order", `String (tail_order_to_string tail_order));
            ]);
            ("context_budget", context_budget);
@@ -737,6 +747,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("sandbox_live", sandbox_live);
              ("repository_checkouts",
                Keeper_sandbox_control.repository_checkouts_json
+                 ~include_repository_checkouts
                  ~config:config ~meta:m);
            ]);
          ]) in

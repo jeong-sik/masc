@@ -27,5 +27,6 @@ module Argument : sig
   val include_context : string
   val include_metrics_overview : string
   val include_history_tail : string
+  val include_repository_checkouts : string
   val all : string list
 end

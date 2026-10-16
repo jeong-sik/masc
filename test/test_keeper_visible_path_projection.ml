@@ -305,7 +305,7 @@ let test_repository_checkout_projection_reports_typed_freshness () =
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   seed_masc_checkout_one_ahead ~config ~meta ~playground;
   let projection =
-    Keeper_sandbox_control.repository_checkouts_json ~config ~meta
+    Keeper_sandbox_control.repository_checkouts_json ~include_repository_checkouts:true ~config ~meta
   in
   let entry =
     projection |> Json.member "entries" |> Json.to_list |> List.hd
@@ -344,7 +344,7 @@ let test_repository_checkout_without_origin_is_unregistered () =
   ignore
     (run_git_or_fail ~cwd:local [ "remote"; "add"; "origin"; Filename.concat playground "elsewhere" ]);
   let states =
-    Keeper_sandbox_control.repository_checkouts_json ~config ~meta
+    Keeper_sandbox_control.repository_checkouts_json ~include_repository_checkouts:true ~config ~meta
     |> Json.member "entries"
     |> Json.to_list
     |> List.map (fun entry ->
@@ -367,7 +367,7 @@ let test_repository_checkout_projection_ignores_symlinked_directory () =
   ensure_dir repos;
   Unix.symlink outside (Filename.concat repos "linked-checkout");
   let entries =
-    Keeper_sandbox_control.repository_checkouts_json ~config ~meta
+    Keeper_sandbox_control.repository_checkouts_json ~include_repository_checkouts:true ~config ~meta
     |> Json.member "entries"
     |> Json.to_list
   in
@@ -749,7 +749,7 @@ let test_equal_checkout_requires_recent_target_ref () =
   in
   if Sys.command old_update <> 0 then Alcotest.fail "old update-ref failed";
   let entry () =
-    Keeper_sandbox_control.repository_checkouts_json ~config ~meta
+    Keeper_sandbox_control.repository_checkouts_json ~include_repository_checkouts:true ~config ~meta
     |> Json.member "entries" |> Json.to_list |> List.hd
     |> Json.member "freshness"
   in

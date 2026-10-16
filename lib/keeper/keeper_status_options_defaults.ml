@@ -57,6 +57,7 @@ module Argument = struct
   let include_context = "include_context"
   let include_metrics_overview = "include_metrics_overview"
   let include_history_tail = "include_history_tail"
+  let include_repository_checkouts = "include_repository_checkouts"
 
   let all =
     [ name
@@ -68,5 +69,6 @@ module Argument = struct
     ; include_context
     ; include_metrics_overview
     ; include_history_tail
+    ; include_repository_checkouts
     ]
 end

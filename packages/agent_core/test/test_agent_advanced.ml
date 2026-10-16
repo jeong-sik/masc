@@ -595,7 +595,14 @@ let test_context_checkpoint_failure_prevents_boundary_and_resume () =
     | Agent.After_rejected_response_dropped -> Ok ()
   in
   let context_injector ~tool_name:_ ~input:_ ~output:_ =
-    Some { Hooks.context_updates = []; extra_messages = [] }
+    (* The message has to be real: an injector that reports no updates and no
+       messages is [No_injection], which skips the [After_context_injection]
+       checkpoint (#43303), so the sink above would never be asked to fail. *)
+    Some
+      { Hooks.context_updates = []
+      ; extra_messages =
+          [ Types.make_message ~role:Types.User [ Types.Text "projected context" ] ]
+      }
   in
   let lease_events = ref [] in
   let tool_executed = ref false in

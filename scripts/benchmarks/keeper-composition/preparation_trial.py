@@ -78,7 +78,7 @@ def validate(experiment: dict) -> None:
     for name in ("max_context_tokens", "max_output_tokens"):
         if type(runtime[name]) is not int or runtime[name] <= 0:
             raise ValueError(f"{name} must be an explicit positive capability")
-    if experiment["synthetic_outcome"] not in ("success", "provider_refusal", "malformed_final"):
+    if experiment["synthetic_outcome"] not in ("success", "provider_refusal", "malformed_final", "fixed_child"):
         raise ValueError("unsupported synthetic outcome")
 
 

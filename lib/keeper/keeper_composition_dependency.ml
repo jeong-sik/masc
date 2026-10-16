@@ -62,6 +62,7 @@ let composition_of_request_context ~request_id context =
     List.filter (fun (name, _) -> name <> "draft_reference" && name <> "run_artifact") fields))
 
 type t = Owned_job of Keeper_owned_job_identity.Job_id.t | Composition_result of composition
+type readiness = Waiting | Ready
 
 let to_json = function
   | Owned_job id -> `Assoc ["kind", `String "owned_job";

@@ -3,6 +3,14 @@
     requires the previous owner's exact canonical terminal proof; every node
     operation checks the current durable binding under the run transaction. *)
 
+type producer =
+  | Prepared
+  | Named of
+      { tool_name : string
+      ; skill_reference : Skill_reference.t
+      ; activation : Keeper_skill_activation_recorder.bound_context option
+      }
+
 type source =
   { keeper_name : string
   ; composition_run_id : Keeper_tool_plan.Composition_run_id.t
@@ -11,6 +19,7 @@ type source =
   ; parent_tool_use_id : string
   ; source_turn : int
   ; source_task_id : string option
+  ; producer : producer
   }
 
 type t
@@ -87,6 +96,18 @@ val load
 (** Strict read-only load. Missing/corrupt authority never creates a run. *)
 
 val source : t -> source
+val same_source : source -> source -> bool
+(** Compare serialized immutable coordinates, including sealed recorder facts. *)
+
+val named_binding : t -> (Keeper_composition_dependency.composition, error) result
+(** Read the first admitted canonical named request. Successor workers retain
+    this original public result binding. No request or membership is created. *)
+
+val named_result_owner :
+  t -> Keeper_composition_dependency.composition -> (Keeper_msg_async.entry, error) result
+(** Validate the exact original named membership and every canonical predecessor,
+    then read only the journal's current owner. Recheck ownership after the read.
+    Waiting and active owners remain pending; no dispatch or collection occurs. *)
 
 val validate_request : t -> Keeper_msg_async.entry -> (unit, error) result
 (** Read-only proof of actual durable current/prior request ownership and every
@@ -134,7 +155,11 @@ val worker_child_admission : worker -> node_ids:Keeper_tool_plan.Node_id.t list 
     worker's exact durable ownership before any retained result is reused. *)
 
 type readiness = Waiting_for_results | Results_ready
-val continuation_readiness : continuation -> (readiness, error) result
+type read_composition_result =
+  base_path:string -> keeper_name:string -> Keeper_composition_dependency.composition ->
+  (Keeper_composition_dependency.readiness, string) result
+val continuation_readiness :
+  read_composition_result:read_composition_result -> continuation -> (readiness, error) result
 (** Strict owner reads only. No collection, backend call, launch or Task
     inference. The read does not reserve execution or replace admission. *)
 
@@ -146,7 +171,8 @@ type pending_continuations =
   ; failures : (string * error) list
   }
 
-val pending_continuations : base_path:string -> (pending_continuations, error) result
+val pending_continuations :
+  read_composition_result:read_composition_result -> base_path:string -> (pending_continuations, error) result
 (** Discover only per-request pending markers published before journal
     ownership and worker effects. Canonical journal/request/dependency records decide
     readiness. Completed or superseded markers retire only after exact terminal
@@ -162,7 +188,7 @@ module For_testing : sig
   (** The hook runs after canonical terminal proof and before the guarded
       marker retirement transaction, enabling physical replacement scenarios. *)
   val pending_continuations :
-    before_retire:(string -> unit) -> base_path:string ->
+    before_retire:(string -> unit) -> read_composition_result:read_composition_result -> base_path:string ->
     (pending_continuations, error) result
 end
 

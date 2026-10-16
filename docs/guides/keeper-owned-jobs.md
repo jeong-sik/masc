@@ -234,6 +234,19 @@ absent Task. Pass it unchanged as `binding` to `keeper_composition_result`. This
 read verifies durable producer membership as well as the canonical request source.
 A generic worker that copied the context has no named-run membership.
 
+Named async execution freezes its instantiated ordinary plan before acceptance
+and journals its original Skill, invocation, Task and recorder selection. Named async Skills retain their existing static read-only admission. Completed
+independent nodes are reused; a pending owned result rechecks only its original
+read occurrence. Maintenance
+uses the existing continuation pulse and current capability admission to resume
+that logical run. The first public binding remains unchanged when a successor
+worker takes ownership. Reads validate every predecessor and the current journal
+owner; a recoverable `Lost` successor remains pending, while cancellation and
+terminal failure remain failed. Original Task Skill selection comes from sealed
+recorder facts, never from the current Task. The internal descriptor-only
+compatibility adapter cannot execute a named async run without a frozen turn
+surface; production Keeper bundles supply that surface.
+
 Pending reads return a typed dependency. An enclosing prepared async DAG releases
 its worker, retains completed independent nodes, and rechecks the same occurrences
 after canonical completion. The result includes the full original structured
@@ -245,13 +258,24 @@ artifact references. A missing or changed original source refuses the read.
 
 This is explicit submit-then-read composition. Exact async Skill child nodes in
 `keeper_composition_prepare` still require compiler support; their syntax is not
-admitted by this layer. A binding identifies one accepted named request, not a
-logical chain of suspended child successors. The current request codec is v5
-and the prepared journal codec is v2; unknown versions are refused.
+admitted by this layer. A binding identifies the original admitted logical run,
+including its canonically bound suspended successors. The current request codec
+is v5 and the execution journal codec is v3; unknown versions are refused.
+Finish or explicitly resolve pending v2 runs on their original runtime, preserve
+the original base and artifacts, and use a fresh base for this candidate. No
+conversion or deletion occurs.
 
 `test_keeper_owned_jobs` exercises the actual named Tool, holds the original owner transaction during its read, prepares a waiting parent with independent work, and resumes in a new
 turn. Success reads the original full result artifact and stdout; original-owner read failure keeps its diagnostic. Both scenarios reject changed bindings and a copied
 generic request, preserve occurrence IDs, and measure zero extra child backend
-calls during parent resume. Authored scenarios are not execution evidence until
+calls during parent resume. A further public scenario parks the named child
+itself on a running owned job after a completed independent node, causes a real
+post-binding worker-fork loss, resumes the child under its original binding,
+and then resumes the parent. It checks original Task and occurrence IDs, retained
+independent completion, stale-owner refusal, and zero extra backend calls in either
+resume. A handler effects-boundary interleave replaces a just-read Lost owner
+with a real successful successor; the read selects the current logical result
+instead of publishing stale Lost failure. An actual broker cancellation retains its exact actor/reason and grants
+no child continuation. Authored scenarios are not execution evidence until
 the selected head's run completes, and their component intervals do not measure
 whole-task preparation improvement or installed runtime/UI behavior.

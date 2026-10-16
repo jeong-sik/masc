@@ -199,7 +199,7 @@ let record_status state ~entry ~invocation ~result =
     let* () = match previous with
       | Some known when equal_invocation known.invocation invocation ->
         if Async.same_entry_record known.entry binding.entry
-           && known.source = binding.source && known.manifest = binding.manifest
+           && Journal.same_source known.source binding.source && known.manifest = binding.manifest
            && known.inline_bytes = binding.inline_bytes
            && String.equal known.inline_sha256 binding.inline_sha256
         then Ok () else Error (Invocation_collision id)
@@ -243,7 +243,7 @@ let observe_result state ~binding ~runtime_id ~boundary ~content ~presentation ~
       |> Result.map_error (fun error -> Journal_failed error) in
     let* () = Journal.validate_request journal binding.entry
       |> Result.map_error (fun error -> Journal_failed error) in
-    if Journal.source journal = binding.source then Ok () else Error Request_changed in
+    if Journal.same_source (Journal.source journal) binding.source then Ok () else Error Request_changed in
   match valid with
   | Error error -> on_error error
   | Ok () -> observe {binding;physical_turn_ref=state.physical_turn_ref;runtime_id;boundary;
@@ -300,7 +300,7 @@ let persist ~(config : Workspace.config) (observation : observation) =
     |> Result.map_error (fun error -> Journal_failed error) in
   let* () = Journal.validate_request journal binding.entry
     |> Result.map_error (fun error -> Journal_failed error) in
-  let* () = if Journal.source journal = binding.source then Ok () else Error Request_changed in
+  let* () = if Journal.same_source (Journal.source journal) binding.source then Ok () else Error Request_changed in
   let* result = match binding.entry.status with
     | Async.Done {data=Some data;_} -> Ok data
     | Done {data=None;_} | Queued | Running | Cancelling _ | Lost _ | Cancelled _

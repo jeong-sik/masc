@@ -68,7 +68,10 @@ let resume ~context continuation =
   List.iter (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
     Log.Keeper.warn ~keeper_name:source.keeper_name "continuation Skill projection unavailable: %s"
       (Keeper_skill_catalog.error_to_string diagnostic.error)) diagnostics;
-  let* task_selection = match nested_activation with
+  let original_activation = match source.producer with
+    | Journal.Prepared -> nested_activation
+    | Journal.Named {activation;tool_name=_;skill_reference=_} -> activation in
+  let* task_selection = match original_activation with
     | None -> Ok Keeper_task_skill_turn.empty
     | Some bound -> Keeper_task_skill_turn.resolve ~snapshot
         (Keeper_skill_activation_recorder.bound_task_references bound)
@@ -189,7 +192,7 @@ let log_result candidate outcome =
 let create ~context ?(on_result=log_result) () = {context;on_result;active=Run_set.empty}
 
 let pulse ~sw supervisor =
-  let* pending = Journal.pending_continuations ~base_path:supervisor.context.config.base_path in
+  let* pending = Journal.pending_continuations ~read_composition_result:Keeper_composition_dependency_result.readiness ~base_path:supervisor.context.config.base_path in
   List.iter (fun (identity,error) -> Log.Server.warn "prepared continuation discovery retained request=%s error=%s"
       identity (Journal.error_to_string error)) pending.failures;
   List.iter (fun candidate ->

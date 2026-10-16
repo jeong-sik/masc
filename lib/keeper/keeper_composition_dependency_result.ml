@@ -2,7 +2,7 @@ module Async = Keeper_msg_async
 module Dependency = Keeper_composition_dependency
 open Result.Syntax
 
-type readiness = Waiting | Ready
+type readiness = Dependency.readiness = Waiting | Ready
 type observed = Pending | Terminal of Async.entry
 
 let original_matches binding (entry : Async.entry) =
@@ -14,7 +14,7 @@ let original_matches binding (entry : Async.entry) =
         (Dependency.composition_to_json binding)
     then Ok () else Error "composition request differs from the original result binding"
 
-let observe ~base_path ~keeper_name binding =
+let rec observe ~after_owner_read ~base_path ~keeper_name binding =
   let* () = Keeper_composition_named_run.validate ~base_path ~keeper_name binding in
   let* entry = match Async.load_canonical_request ~base_path ~caller:keeper_name binding.Dependency.request_id with
     | Found entry -> Ok entry
@@ -24,23 +24,43 @@ let observe ~base_path ~keeper_name binding =
   let* () = if String.equal entry.keeper_name keeper_name then Ok ()
     else Error "composition result belongs to a different Keeper lane" in
   let* () = original_matches binding entry in
+  let* journal = Keeper_tool_execution_journal.load ~base_path ~keeper_name
+      ~composition_run_id:binding.composition_run_id
+    |> Result.map_error Keeper_tool_execution_journal.error_to_string in
+  let* entry = Keeper_tool_execution_journal.named_result_owner journal binding
+    |> Result.map_error Keeper_tool_execution_journal.error_to_string in
+  after_owner_read entry;
   match entry.status with
   | Queued | Running | Cancelling _ -> Ok Pending
   | Waiting_for_dependencies _ -> Ok Pending
-  | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
-    let* proof = Async.load_canonical_durable_terminal ~base_path ~caller:keeper_name binding.request_id
+  | Lost _ ->
+    let* continuation = Keeper_tool_execution_journal.waiting_continuation journal
+      |> Result.map_error Keeper_tool_execution_journal.error_to_string in
+    let* current = Keeper_tool_execution_journal.named_result_owner journal binding
+      |> Result.map_error Keeper_tool_execution_journal.error_to_string in
+    if not (Async.same_entry_record entry current)
+    then observe ~after_owner_read ~base_path ~keeper_name binding
+    else (match continuation with
+     | Some continuation when String.equal
+         (Keeper_tool_execution_journal.continuation_request_id continuation) entry.request_id -> Ok Pending
+     | Some _ -> Error "named result ownership changed during recovery observation"
+     | None -> Ok (Terminal entry))
+  | Done _ | Cancelled _ | Persistence_failed _ ->
+    let* proof = Async.load_canonical_durable_terminal ~base_path ~caller:keeper_name entry.request_id
       |> Result.map_error Async.canonical_terminal_error_to_string in
     let terminal = Async.durable_terminal_entry proof in
-    let* () = original_matches binding terminal in
+    let* () = if Async.same_entry_record entry terminal then Ok ()
+      else Error "named result owner changed during terminal observation" in
     (* Re-read membership after the canonical terminal proof. The initial
        membership read alone cannot validate the result observed afterward. *)
     let* () = Keeper_composition_named_run.validate ~base_path ~keeper_name binding in
     Ok (Terminal terminal)
 
 let readiness ~base_path ~keeper_name binding =
-  observe ~base_path ~keeper_name binding |> Result.map (function Pending -> Waiting | Terminal _ -> Ready)
+  observe ~after_owner_read:(fun _ -> ()) ~base_path ~keeper_name binding
+  |> Result.map (function Pending -> Waiting | Terminal _ -> Ready)
 
-let handle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~args =
+let handle_with ~after_owner_read ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~args =
   let failure detail = Keeper_tool_execution.failure
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail in
   let decoded =
@@ -73,7 +93,7 @@ let handle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_met
         ~effect_disposition:Tool_result.Proven_pre_effect
         ~data:(`Assoc ["binding", Dependency.composition_to_json binding;
                        "request", Async.entry_to_json entry]) detail |> publish in
-    match observe ~base_path:config.base_path ~keeper_name:meta.name binding with
+    match observe ~after_owner_read ~base_path:config.base_path ~keeper_name:meta.name binding with
     | Error detail -> failure detail
     | Ok Pending ->
       Keeper_tool_execution.deferred_composition_result ~binding
@@ -111,3 +131,9 @@ let handle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_met
       | Persistence_failed {reason; attempted_status = _} -> terminal_failure entry ("composition result publication failed: " ^ reason)
       | Queued | Running | Cancelling _ | Waiting_for_dependencies _ ->
         failure "canonical terminal proof unexpectedly contains a pending composition"
+
+let handle = handle_with ~after_owner_read:(fun _ -> ())
+
+module For_testing = struct
+  let handle = handle_with
+end

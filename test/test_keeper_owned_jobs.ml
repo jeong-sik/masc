@@ -1404,8 +1404,9 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
      still Waiting_for_owned_jobs retires that pre-settlement obligation, yet
      settle_waiting_request_as_failed re-establishes the obligation inside the
      store transition lock before overwriting the terminal record. *)
-  Keeper_composition_completion_outbox.prepare_terminal ~base_path:fixture.base_path
-    ~keeper_name:keeper ~request_id:second_entry.request_id
+  let waiting_proof = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+      ~caller:keeper second_entry.request_id |> require "canonical pre-settlement waiting proof" in
+  Keeper_composition_completion_outbox.prepare_terminal ~proof:waiting_proof
     |> Result.map_error Keeper_composition_completion_outbox.error_to_string
     |> require "pre-settlement obligation write while waiting";
   let raced_reconcile = Masc.Keeper_composition_completion_wake.reconcile

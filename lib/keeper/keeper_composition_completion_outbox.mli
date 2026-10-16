@@ -25,17 +25,20 @@ val acknowledge_waiting :
   (unit, error) result
 (** Retire a notification obligation only after exact canonical proof of a
     released owned-job waiting attempt and its immutable producer identity.
+    The canonical re-read and obligation removal share the request's store
+    transition lock, so a concurrent refusal cannot lose its new obligation.
     It emits no composition terminal and grants no job replay permission. *)
 
 val prepare_terminal :
-  base_path:string -> keeper_name:string -> request_id:string -> (unit, error) result
+  proof:Keeper_msg_async.durable_terminal_proof -> (unit, error) result
 (** Record a delivery obligation for an exact canonical
-    [Waiting_for_owned_jobs] terminal owned by [keeper_name] before a
+    [Waiting_for_owned_jobs] terminal owned by its canonical Keeper before a
     permanent refusal supersedes it with a failure terminal. While the record
     remains waiting, [flush] retires the obligation without delivering; once
     the canonical record settles, [flush] delivers the typed failure through
     the same path as an ordinary completion. The same identity is
-    idempotent. *)
+    idempotent. Settlement supplies its locked canonical [proof]; this function
+    does not re-enter the request lock. *)
 
 type report =
   { inspected : int

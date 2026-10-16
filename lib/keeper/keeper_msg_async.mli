@@ -432,6 +432,17 @@ val load_canonical_durable_terminal :
   string ->
   (durable_terminal_proof, canonical_terminal_error) result
 
+val with_canonical_durable_terminal :
+  base_path:string ->
+  caller:string ->
+  string ->
+  f:(durable_terminal_proof -> 'a) ->
+  ('a, canonical_terminal_error) result
+(** Read canonical terminal evidence and consume it before releasing the same
+    request store-transition lock. Use this when an effect depends on the
+    observed terminal status, such as retiring a waiting notification.
+    [f] must not re-enter canonical request operations for the same request. *)
+
 val load_canonical_durable_queued :
   base_path:string ->
   caller:string ->
@@ -486,7 +497,7 @@ val settle_waiting_request_as_failed :
   request_id:string ->
   body:string ->
   ?data:Yojson.Safe.t ->
-  ?before_persist:(entry -> (unit, string) result) ->
+  ?before_persist:(durable_terminal_proof -> (unit, string) result) ->
   unit ->
   (unit, waiting_settlement_rejection) result
 (** Supersede exactly one canonical [Waiting_for_owned_jobs] terminal record

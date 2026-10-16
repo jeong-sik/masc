@@ -145,34 +145,21 @@ let settle_permanent_refusal supervisor candidate refusal =
   let request_id = Journal.continuation_request_id candidate in
   let run_id = Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id in
   match
-    Keeper_composition_completion_outbox.prepare_terminal
-      ~base_path ~keeper_name:source.keeper_name ~request_id
+    Keeper_msg_async.settle_waiting_request_as_failed ~base_path ~caller:source.keeper_name
+      ~request_id ~body:(refusal_message refusal) ~data:(refusal_data refusal)
+      ~before_persist:(fun proof ->
+        Keeper_composition_completion_outbox.prepare_terminal ~proof
+        |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
+      ()
   with
   | Error error ->
     Log.Keeper.warn ~keeper_name:source.keeper_name
-      "prepared continuation refusal delivery retained run=%s request=%s error=%s"
-      run_id request_id (Keeper_composition_completion_outbox.error_to_string error)
+      "prepared continuation refusal settlement retained run=%s request=%s error=%s"
+      run_id request_id (Keeper_msg_async.waiting_settlement_rejection_to_string error)
   | Ok () ->
-    (match
-       Keeper_msg_async.settle_waiting_request_as_failed ~base_path ~caller:source.keeper_name
-         ~request_id ~body:(refusal_message refusal) ~data:(refusal_data refusal)
-         ~before_persist:(fun _ ->
-           Keeper_composition_completion_outbox.prepare_terminal
-             ~base_path ~keeper_name:source.keeper_name ~request_id
-           |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
-         ()
-     with
-     | Error error ->
-       (* The delivery obligation stays pending; while the canonical record
-          remains waiting, the outbox retires it without delivering, and the
-          next pulse retries this refusal end to end. *)
-       Log.Keeper.warn ~keeper_name:source.keeper_name
-         "prepared continuation refusal settlement retained run=%s request=%s error=%s"
-         run_id request_id (Keeper_msg_async.waiting_settlement_rejection_to_string error)
-     | Ok () ->
-       Log.Keeper.info ~keeper_name:source.keeper_name
-         "prepared continuation refused permanently run=%s request=%s; failure terminal settled and delivery obligated"
-         run_id request_id)
+    Log.Keeper.info ~keeper_name:source.keeper_name
+      "prepared continuation refused permanently run=%s request=%s; failure terminal settled and delivery obligated"
+      run_id request_id
 
 let log_result candidate outcome =
   let source = Journal.continuation_source candidate in

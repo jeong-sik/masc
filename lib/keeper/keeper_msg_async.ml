@@ -2153,7 +2153,7 @@ let poll ~base_path ~caller request_id : load_result =
          | Located_rejected rejection -> Rejected rejection))
 ;;
 
-let load_canonical_durable_terminal ~base_path ~caller request_id =
+let with_canonical_durable_terminal ~base_path ~caller request_id ~f =
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Canonical_terminal_access_rejected rejection)
   | Ok (base_path, caller) ->
@@ -2184,10 +2184,14 @@ let load_canonical_durable_terminal ~base_path ~caller request_id =
                 then Error (Canonical_terminal_nonterminal entry.status)
                 else
                   match location with
-                  | Terminal_location -> Ok { terminal_entry = entry }
+                  | Terminal_location -> Ok (f { terminal_entry = entry })
                   | Active_location ->
                     Error
                       (Canonical_terminal_noncanonical_location entry.status))))
+;;
+
+let load_canonical_durable_terminal ~base_path ~caller request_id =
+  with_canonical_durable_terminal ~base_path ~caller request_id ~f:Fun.id
 ;;
 
 let queued_proof_of_record ~caller ~location ~local (entry : entry) =
@@ -2314,7 +2318,7 @@ let settle_waiting_request_as_failed ~base_path ~caller ~request_id ~body ?data 
                            let pre_ok =
                              match before_persist with
                              | None -> Ok ()
-                             | Some f -> f entry
+                             | Some f -> f { terminal_entry = entry }
                            in
                            (match pre_ok with
                             | Error reason -> Error (Settle_persistence_failed reason)

@@ -471,6 +471,31 @@ let test_schedule_create_actor_comes_from_auth () =
   | rows -> failf "expected one stored schedule, got %d" (List.length rows)
 ;;
 
+(* A credential the store cannot read is the server's failure, not the
+   client's request: a schedule write with an unreadable credential answers
+   503 so the client retries instead of concluding its token is wrong. A
+   mode-0 file stands in for the failed open. Root opens a mode-0 file, so
+   there is nothing to make unreadable. *)
+let test_schedule_create_with_unreadable_credential_answers_503 () =
+  if Unix.geteuid () = 0 then skip ();
+  with_authenticated_activity_router
+    ~prefix:"schedule-create-unreadable-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  let cred_file = Auth.credential_file base_path "credential-owner" in
+  Unix.chmod cred_file 0o000;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.chmod cred_file 0o600 with Unix.Unix_error _ -> ()))
+    (fun () ->
+       let status, _ =
+         dispatch_response ~router ~token
+           ~path:"/api/v1/tools/masc_schedule_create"
+           ~extra_headers:[] ~body:"{}" ()
+       in
+       check int "an unreadable credential answers 503" 503 status)
+;;
+
 let test_goal_transition_uses_authenticated_actor () =
   with_authenticated_activity_router
     ~prefix:"goal-transition-http-actor-"
@@ -1640,6 +1665,8 @@ let () =
             test_no_tools_route_drift
         ; test_case "schedule create actor comes from auth" `Quick
             test_schedule_create_actor_comes_from_auth
+        ; test_case "schedule create with unreadable credential answers 503" `Quick
+            test_schedule_create_with_unreadable_credential_answers_503
         ; test_case "a worker credential cancelling is not the operator" `Quick
             test_schedule_cancel_with_a_worker_credential_is_not_the_operator
         ; test_case "schedule cancel actor comes from auth" `Quick

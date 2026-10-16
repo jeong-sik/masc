@@ -170,3 +170,17 @@ val verify_token :
 (** Static verification through a UUID or stored redirect alias requires the
     complete credential to still match its owner's current named binding.
     Direct UUID data reads do not grant independent bearer authority. *)
+
+(** {1 Testing} *)
+
+module For_testing : sig
+  val credential_matches_live_disk :
+    string -> agent_credential -> (bool, masc_error) result
+  (** [Ok true] when the named file still holds the credential, [Ok false]
+      when it holds something else or is gone, [Error] when a file is
+      there and could not be read. *)
+
+  val live_matches_hold : string -> agent_credential list -> (bool, masc_error) result
+  (** [Ok true] when every match holds, [Ok false] when some match differs
+      and none failed to read, [Error] when any match could not be read. *)
+end

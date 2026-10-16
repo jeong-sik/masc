@@ -48,12 +48,25 @@ let dispatch ?caller ?access state operation args =
   Runtime.dispatch ?caller ?access ~config:(Mcp_server.workspace_config state) ~operation args
   |> Result.map_error Runtime.error_to_string
 
+(* Route errors share [Server_auth.request_error] with the schedule routes.
+   Access resolution only ever fails one way, so it carries its own
+   single-constructor error and the call sites map it. *)
+type source_access_error = Source_credential_unreadable
+
+let respond_unavailable request reqd =
+  respond_json_value_with_cors ~status:`Service_unavailable request reqd
+    (error_json "credential store is unavailable; retry")
+
 let source_access state request caller =
   let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
   match request_credential_standing ~base_path request with
-  | Operator_credential -> Lane_addon_sources.Operator_configuration
-  | Agent_credential -> Lane_addon_sources.Keeper caller
-  | Player_credential | No_credential -> Lane_addon_sources.Unauthenticated
+  | Operator_credential -> Ok Lane_addon_sources.Operator_configuration
+  | Agent_credential -> Ok (Lane_addon_sources.Keeper caller)
+  | Player_credential | No_credential -> Ok Lane_addon_sources.Unauthenticated
+  (* The route admitted the request on an earlier read; narrowing an
+     operator to Unauthenticated on a later read failure would silently
+     shrink what they may see or change. Callers answer 503. *)
+  | Unreadable_credential -> Error Source_credential_unreadable
 
 let broadcast_principal_for_standing standing caller =
   match standing with
@@ -64,17 +77,58 @@ let broadcast_principal_for_standing standing caller =
   | Operator_credential | Agent_credential
   | Player_credential | No_credential ->
       Error "Broadcast recovery requires an authenticated operator or Keeper principal"
+  (* Fail closed for direct callers. The route screens this standing first
+     and answers 503 (see [broadcast_principal]), so this arm never sets
+     the route's status. *)
+  | Unreadable_credential -> Error "credential store is unavailable; retry"
 
 let broadcast_principal ~base_path request caller =
-  broadcast_principal_for_standing
-    (request_credential_standing ~base_path request) caller
+  match request_credential_standing ~base_path request with
+  | Unreadable_credential -> Error Credential_store_unreadable
+  | Operator_credential | Agent_credential | Player_credential | No_credential as standing ->
+    broadcast_principal_for_standing standing caller
+    |> Result.map_error (fun detail -> Bad_request_detail detail)
 
 let read_context state request =
   let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
   match dashboard_actor_resolution_for_request ~base_path request with
-  | Authenticated_actor caller -> Ok (Some caller, source_access state request caller)
+  | Authenticated_actor caller ->
+    let* access =
+      source_access state request caller
+      |> Result.map_error (fun Source_credential_unreadable -> Credential_store_unreadable)
+    in
+    Ok (Some caller, access)
   | Anonymous_actor_hint _ -> Ok (None, Lane_addon_sources.Unauthenticated)
-  | Rejected_credential _ -> Error "Lane read credential is unavailable"
+  (* A credential the store could not read is the server's failure, not a
+     bad request: answer 503 so the client retries. Only a store that
+     failed to answer qualifies; a refused or absent credential stays a
+     400. Every outcome is named: no catch-all may silently adopt a future
+     rejection. *)
+  | Rejected_credential
+      (Auth_error_kind.Outcome_error
+         { err =
+             Masc_domain.System
+               (Masc_domain.System_error.IoError _
+               | Masc_domain.System_error.LockContention _)
+         ; _
+         }) ->
+      Error Credential_store_unreadable
+  (* The complement names every remaining error constructor, mirroring
+     [Server_auth.request_credential_standing]: a wildcard over [err]
+     here would silently adopt future errors (warning 4). *)
+  | Rejected_credential
+      (Auth_error_kind.Outcome_none
+      | Auth_error_kind.Outcome_error
+          { err =
+              Masc_domain.System
+                (Masc_domain.System_error.NotInitialized
+                | Masc_domain.System_error.ValidationError _)
+              | Masc_domain.Task _
+              | Masc_domain.Agent _
+              | Masc_domain.Auth _
+          ; _
+          }) ->
+      Error (Bad_request_detail "Lane read credential is unavailable")
 
 let query_fields request =
   Uri.query (Uri.of_string request.Httpun.Request.target)
@@ -88,10 +142,13 @@ let decode_inspect_query = function
 
 let get_inspect request reqd =
   with_read_auth (fun state _request reqd ->
-    let result = let* caller, access = read_context state request in
-      let* args = decode_inspect_query (query_fields request) in
-      dispatch ?caller ~access state Runtime.Inspect args in
-    respond request reqd result) request reqd
+    match read_context state request with
+    | Error Credential_store_unreadable -> respond_unavailable request reqd
+    | Error (Bad_request_detail detail) -> respond request reqd (Error detail)
+    | Ok (caller, access) ->
+      let result = let* args = decode_inspect_query (query_fields request) in
+        dispatch ?caller ~access state Runtime.Inspect args in
+      respond request reqd result) request reqd
 
 let package_catalog_payload state fields =
   let* directory = match fields with
@@ -156,22 +213,28 @@ let get_package_preview request reqd =
 
 let get_slice request reqd =
   with_read_auth (fun state _request reqd ->
-    let result = let* caller, access = read_context state request in
-      let* args = decode_slice_query (query_fields request) in dispatch ?caller ~access state Runtime.Slice args in
-    respond request reqd result) request reqd
+    match read_context state request with
+    | Error Credential_store_unreadable -> respond_unavailable request reqd
+    | Error (Bad_request_detail detail) -> respond request reqd (Error detail)
+    | Ok (caller, access) ->
+      let result = let* args = decode_slice_query (query_fields request) in dispatch ?caller ~access state Runtime.Slice args in
+      respond request reqd result) request reqd
 
 let get_action request reqd =
   with_read_auth (fun state _request reqd ->
-    let result =
-      let* caller, access = read_context state request in
-      let fields = query_fields request |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
-      let* args = match fields with
-        | ["instance_id", instance_id; "request_id", request_id]
-            when String.trim instance_id <> "" && String.trim request_id <> "" ->
-            Ok (`Assoc ["instance_id", `String instance_id; "request_id", `String request_id])
-        | _ -> Error "action status requires exactly instance_id and request_id" in
-      dispatch ?caller ~access state Runtime.Action_status args in
-    respond request reqd result) request reqd
+    match read_context state request with
+    | Error Credential_store_unreadable -> respond_unavailable request reqd
+    | Error (Bad_request_detail detail) -> respond request reqd (Error detail)
+    | Ok (caller, access) ->
+      let result =
+        let fields = query_fields request |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
+        let* args = match fields with
+          | ["instance_id", instance_id; "request_id", request_id]
+              when String.trim instance_id <> "" && String.trim request_id <> "" ->
+              Ok (`Assoc ["instance_id", `String instance_id; "request_id", `String request_id])
+          | _ -> Error "action status requires exactly instance_id and request_id" in
+        dispatch ?caller ~access state Runtime.Action_status args in
+      respond request reqd result) request reqd
 
 (* Use the source binding's kind table so a new kind must say whether it has a
    current screen before the live route can decode it. *)
@@ -333,10 +396,13 @@ let get_live request reqd =
     request reqd
 
 let post ~operation ~tool_name request reqd =
-  with_tool_actor_auth ~tool_name (fun state caller _request reqd ->
+  with_tool_actor_auth ~tool_name (fun state caller request reqd ->
     Http.Request.read_body_async reqd (fun body ->
-      let result = let* args = decode_body body in dispatch ~caller ~access:(source_access state request caller) state operation args in
-      respond request reqd result)) request reqd
+      match source_access state request caller with
+      | Error Source_credential_unreadable -> respond_unavailable request reqd
+      | Ok access ->
+        let result = let* args = decode_body body in dispatch ~caller ~access state operation args in
+        respond request reqd result)) request reqd
 
 let respond_declaration request reqd = function
   | Ok json -> respond_json_value_with_cors request reqd json
@@ -347,17 +413,22 @@ let respond_declaration request reqd = function
       respond_json_value_with_cors ~status request reqd (Lane_addon_declaration.error_to_json error)
 
 let read_declaration request reqd =
-  with_tool_actor_auth ~tool_name:"masc_lane_declaration_read" (fun state caller _request reqd ->
+  with_tool_actor_auth ~tool_name:"masc_lane_declaration_read" (fun state caller request reqd ->
     let args = `Assoc (List.map (fun (key,value) -> key,`String value) (query_fields request)) in
-    respond_declaration request reqd (Runtime.read_declaration ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) args)) request reqd
+    match source_access state request caller with
+    | Error Source_credential_unreadable -> respond_unavailable request reqd
+    | Ok access -> respond_declaration request reqd (Runtime.read_declaration ~access ~config:(Mcp_server.workspace_config state) args)) request reqd
 
 let save_declaration request reqd =
-  with_tool_actor_auth ~tool_name:"masc_lane_declaration_save" (fun state caller _request reqd ->
+  with_tool_actor_auth ~tool_name:"masc_lane_declaration_save" (fun state caller request reqd ->
     Http.Request.read_body_async reqd (fun body ->
-      let result = match decode_body body with
-        | Error message -> Error {Lane_addon_declaration.code=Invalid_request;message;current=None}
-        | Ok args -> Runtime.save_declaration ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) args in
-      respond_declaration request reqd result)) request reqd
+      match source_access state request caller with
+      | Error Source_credential_unreadable -> respond_unavailable request reqd
+      | Ok access ->
+        let result = match decode_body body with
+          | Error message -> Error {Lane_addon_declaration.code=Invalid_request;message;current=None}
+          | Ok args -> Runtime.save_declaration ~access ~config:(Mcp_server.workspace_config state) args in
+        respond_declaration request reqd result)) request reqd
 
 let register_delivery ~sw ~clock =
   Runtime.register_delivery_handler (fun ~config ~caller ~keeper_name ~prompt ->
@@ -389,18 +460,22 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/lane-addons/broadcast-principal"
        (with_tool_actor_auth ~tool_name:"masc_lane_evidence" (fun state caller request reqd ->
          let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-         let result = broadcast_principal ~base_path request caller
-           |> Result.map (fun principal -> `Assoc ["principal",`String principal]) in
-         respond request reqd result))
+         match broadcast_principal ~base_path request caller with
+         | Ok principal -> respond request reqd (Ok (`Assoc ["principal",`String principal]))
+         | Error (Bad_request_detail detail) -> respond request reqd (Error detail)
+         | Error Credential_store_unreadable -> respond_unavailable request reqd))
   |> Http.Router.get "/api/v1/lane-addons/package-catalog" get_package_catalog
   |> Http.Router.get "/api/v1/lane-addons/package-preview" get_package_preview
   |> Http.Router.post "/api/v1/lane-addons/subscriptions"
        (with_tool_actor_auth ~tool_name:"masc_lane_updates" (fun state caller request reqd ->
          Http.Request.read_body_async reqd (fun body ->
-           let result = let* args=decode_body body in
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Lane_addon_subscription.handle ~access:(source_access state request caller) ~config:(Mcp_server.workspace_config state) ~caller args) in
-           respond request reqd result)))
+           match source_access state request caller with
+           | Error Source_credential_unreadable -> respond_unavailable request reqd
+           | Ok access ->
+             let result = let* args=decode_body body in
+               Domain_pool_ref.submit_io_or_inline (fun () ->
+                 Lane_addon_subscription.handle ~access ~config:(Mcp_server.workspace_config state) ~caller args) in
+             respond request reqd result)))
   |> Http.Router.get "/api/v1/lane-addons/declaration" read_declaration
   |> Http.Router.post "/api/v1/lane-addons/declaration" save_declaration
   |> Http.Router.get "/api/v1/lane-addons" get_inspect

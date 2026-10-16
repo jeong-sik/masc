@@ -33,6 +33,10 @@ let metric_auth_credential_index_cache_misses =
   Otel_metric_store_core.declare_counter "masc_auth_credential_index_cache_misses_total"
 ;;
 
+let metric_auth_credential_unreadable_index_miss =
+  Otel_metric_store_core.declare_counter "masc_auth_credential_unreadable_index_miss_total"
+;;
+
 let metric_silent_auth_token_resolve_error =
   Otel_metric_store_core.declare_counter "masc_silent_auth_token_resolve_error_total"
 ;;

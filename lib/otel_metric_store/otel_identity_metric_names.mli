@@ -11,6 +11,7 @@ val metric_auth_credential_ambiguous_lookup : string
 val metric_auth_credential_hash_collision : string
 val metric_auth_credential_index_cache_hits : string
 val metric_auth_credential_index_cache_misses : string
+val metric_auth_credential_unreadable_index_miss : string
 val metric_silent_auth_token_resolve_error : string
 val metric_silent_dashboard_actor_fallback : string
 val metric_auth_strict_would_reject : string

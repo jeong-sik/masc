@@ -123,16 +123,23 @@ let schedule_write_schema tool =
    request and names it, but a same-origin request with no bearer and a
    keeper holding the internal token are admitted too, and neither is the
    operator. Only an operator credential makes the operator. *)
-let schedule_caller ~state ~agent_name request =
+(* Route errors share [Server_auth.request_error] with the lane routes. *)
+let schedule_caller ~state ~agent_name request
+  : (Tool_schedule.caller, Server_auth.request_error) result =
   let base_path = (Mcp_server.workspace_config state).base_path in
   match Server_auth.request_credential_standing ~base_path request with
-  | Server_auth.Operator_credential -> Tool_schedule.Operator_caller agent_name
-  | Server_auth.Agent_credential -> Tool_schedule.Named_caller agent_name
+  | Server_auth.Operator_credential -> Ok (Tool_schedule.Operator_caller agent_name)
+  | Server_auth.Agent_credential -> Ok (Tool_schedule.Named_caller agent_name)
   (* The schedule tools need CanReadState or CanBroadcast, which a Player
      does not hold, so [with_tool_actor_auth] refuses it before this runs.
      Were one admitted, it is a named caller who is not the operator. *)
-  | Server_auth.Player_credential -> Tool_schedule.Named_caller agent_name
-  | Server_auth.No_credential -> Tool_schedule.Unnamed_caller
+  | Server_auth.Player_credential -> Ok (Tool_schedule.Named_caller agent_name)
+  | Server_auth.No_credential -> Ok Tool_schedule.Unnamed_caller
+  (* The request passed admission on an earlier read, so the role lookup
+     failed after it. Recording the write under a guessed caller would
+     misattribute a mutation; the handler answers 503 so the client
+     retries. *)
+  | Server_auth.Unreadable_credential -> Error Credential_store_unreadable
 ;;
 
 let handle_schedule_write_request
@@ -147,19 +154,25 @@ let handle_schedule_write_request
     let ( let* ) r f =
       match r with
       | Ok value -> f value
-      | Error message ->
+      | Error (Bad_request_detail message) ->
         respond_json_value_with_cors ~status:`Bad_request request reqd
           (activity_result_json ~ok:false ~message)
+      | Error Credential_store_unreadable ->
+        respond_json_value_with_cors ~status:`Service_unavailable request reqd
+          (activity_result_json ~ok:false
+             ~message:"credential store is unavailable; retry")
     in
     let* args =
       try Ok (Yojson.Safe.from_string body_str) with
-      | Yojson.Json_error message -> Error ("Invalid JSON: " ^ message)
+      | Yojson.Json_error message ->
+        Error (Bad_request_detail ("Invalid JSON: " ^ message))
     in
     let schedule_tool = if update then Schedule_update else Schedule_create in
     let tool_name = schedule_write_tool_name schedule_tool in
     let* schema =
       schedule_write_schema schedule_tool
-      |> Result.map_error schedule_write_schema_error_message
+      |> Result.map_error (fun error ->
+        Bad_request_detail (schedule_write_schema_error_message error))
     in
     let* args =
       Tool_input_validation.validate_args
@@ -167,12 +180,14 @@ let handle_schedule_write_request
         ~name:tool_name
         ~args
         ()
-      |> Result.map_error Tool_result.message
+      |> Result.map_error (fun error ->
+        Bad_request_detail (Tool_result.message error))
     in
+    let* caller = schedule_caller ~state ~agent_name request in
     let config = (Mcp_server.workspace_scope state).Mcp_server.config in
     let context : Tool_schedule.context =
       { config
-      ; caller = schedule_caller ~state ~agent_name request
+      ; caller
       ; stamp_keeper_wake_result_delivery =
           (fun ~payload ->
              Schedule_payload_projection.set_keeper_wake_result_delivery
@@ -1452,18 +1467,24 @@ let add_routes ~sw ~clock router =
              let ( let* ) r f =
                match r with
                | Ok v -> f v
-               | Error msg ->
+               | Error (Bad_request_detail msg) ->
                    respond_json_value_with_cors ~status:`Bad_request request reqd
                      (activity_result_json ~ok:false ~message:msg)
+               | Error Credential_store_unreadable ->
+                   respond_json_value_with_cors ~status:`Service_unavailable request reqd
+                     (activity_result_json ~ok:false
+                        ~message:"credential store is unavailable; retry")
              in
              let* args =
                try Ok (Yojson.Safe.from_string body_str)
-               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+               with Yojson.Json_error msg ->
+                 Error (Bad_request_detail ("Invalid JSON: " ^ msg))
              in
+             let* caller = schedule_caller ~state ~agent_name request in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
              let context : Tool_schedule.context =
                { config
-               ; caller = schedule_caller ~state ~agent_name request
+               ; caller
                ; stamp_keeper_wake_result_delivery =
                    (fun ~payload ->
                       Schedule_payload_projection.set_keeper_wake_result_delivery

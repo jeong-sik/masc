@@ -350,6 +350,34 @@ let test_a_player_reaches_only_the_seat () =
   check bool "the standing is a player's" true
     (Server_auth.request_credential_standing ~base_path mcp = Server_auth.Player_credential)
 
+(* A credential the store could not be read for is [Unreadable_credential],
+   never [No_credential]: the credential may be the operator's, and answering
+   "no credential" demoted it to an unnamed caller on the schedule routes and
+   to unauthenticated on the lane routes. A mode-0 file stands in for the
+   failed open. Root opens a mode-0 file, so there is nothing to make
+   unreadable. *)
+let test_unreadable_credential_standing_is_not_no_credential () =
+  if Unix.geteuid () = 0 then skip ();
+  with_temp_base_path @@ fun base_path ->
+  let operator_file = Auth.credential_file base_path "operator" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.chmod operator_file 0o600 with Unix.Unix_error _ -> ()))
+    (fun () ->
+      let token =
+        match Auth.create_token base_path ~agent_name:"operator" ~role:Masc_domain.Admin with
+        | Ok (token, _) -> token
+        | Error err -> failf "create_token failed: %s" (Masc_domain.masc_error_to_string err)
+      in
+      let request = request ~token ~actor:"operator" () in
+      check bool "a readable operator credential is the operator's" true
+        (Server_auth.request_credential_standing ~base_path request
+         = Server_auth.Operator_credential);
+      Unix.chmod operator_file 0o000;
+      check bool "an unreadable credential is unknown, not absent" true
+        (Server_auth.request_credential_standing ~base_path request
+         = Server_auth.Unreadable_credential))
+
 let () =
   Eio_main.run @@ fun _env ->
   Server_request_authority.with_current
@@ -371,5 +399,7 @@ let () =
                  test_authenticated_owner_overrides_request_hint
              ; test_case "a player reaches only the seat" `Quick
                  test_a_player_reaches_only_the_seat
+             ; test_case "an unreadable credential is unknown, not absent" `Quick
+                 test_unreadable_credential_standing_is_not_no_credential
              ] )
          ])

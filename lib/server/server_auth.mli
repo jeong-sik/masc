@@ -221,7 +221,9 @@ val http_status_of_auth_error :
     matches every constructor (mirroring [Masc_error.code]). The signature
     stays row-polymorphic so callers can narrow to [Httpun.Status.t] or
     [H2.Status.t] at the use site — both protocols include these six
-    tags. A system I/O failure answers [`Service_unavailable]. *)
+    tags. A system I/O failure, and a store too contended to answer
+    ([LockContention]), answer [`Service_unavailable]: both are retryable
+    server-side failures, not bad requests. *)
 
 val current_server_state : unit -> Mcp_server.server_state option
 (** Return the currently published process-wide server state snapshot. *)
@@ -370,6 +372,14 @@ val authorize_tool_request_with_actor :
     or ["dashboard"] when it supplies no name. The returned name alone does
     not distinguish credential identity from local attribution. *)
 
+(** Route error for credential-standing failures: a bad request detail, or
+    a credential store that could not be read (answer 503 so the client
+    retries). Shared by the schedule and lane routes so the two mappings
+    cannot drift apart. *)
+type request_error =
+  | Bad_request_detail of string
+  | Credential_store_unreadable
+
 (** What the request's credential says about who is calling, beyond the name
     {!authorize_tool_request_with_actor} returns. *)
 type request_credential_standing =
@@ -388,7 +398,14 @@ type request_credential_standing =
           keeper. *)
   | No_credential
       (** No bearer, or one that resolves to no credential: any name on the
-          request is the caller's own claim. *)
+          request is the caller's own claim. A bearer the store could not
+          be read for is never this; see [Unreadable_credential]. *)
+  | Unreadable_credential
+      (** A bearer is present but the credential store could not be read
+          (an I/O failure or lock contention), so the role is unknown.
+          Callers must not treat this as an unauthenticated request: the
+          credential may be the operator's. Answer 503 so the client
+          retries. *)
 
 val request_credential_standing :
   base_path:string -> Httpun.Request.t -> request_credential_standing

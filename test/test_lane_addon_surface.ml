@@ -64,6 +64,8 @@ let broadcast_principal_requires_authenticated_actor () =
     check bool "unverified or Player identity cannot own Broadcast recovery" true
       (Result.is_error (principal standing "operator-a")))
     [Server_auth.No_credential; Server_auth.Player_credential];
+  check bool "an unreadable credential fails closed, not open" true
+    (Result.is_error (principal Server_auth.Unreadable_credential "operator-a"));
   check bool "blank authenticated actor is refused" true
     (Result.is_error (principal Server_auth.Operator_credential ""))
 

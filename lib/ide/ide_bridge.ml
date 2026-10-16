@@ -443,14 +443,16 @@ let ingest_tool_event_from_hook
     ()
 
 let install_agent_observation_sinks () =
-  (* Tool/turn sinks fire on the keeper turn fiber (main Eio domain). Their
-     bodies parse tool output (Yojson) and append JSONL — synchronous I/O that
-     stalls the fleet under load. Defer that work to the ingestion writer fiber
-     via [Ide_ingest_queue.submit]: the hot path only allocates a closure and
-     enqueues; the parse+append run off-domain. When no writer is installed
-     (tests, pre-bootstrap) [submit] runs inline, preserving prior behavior. *)
+  (* Only addressed facts belong in this store. Filter before admission so
+     pathless/unaddressed bus events do not consume capacity or wait for it.
+     The writer fiber defers append work; at capacity the producer yields until
+     space is available. This does not move filesystem work to another domain. *)
   Agent_observation.register_tool_event_sink
     (fun (event : Agent_observation.tool_event) ->
+      match event.attribution with
+      | Agent_observation.Pathless
+      | Agent_observation.File (Agent_observation.Unaddressed _) -> ()
+      | Agent_observation.File (Agent_observation.Addressed _) ->
       Ide_ingest_queue.submit (fun () ->
         ingest_tool_event_from_hook
           ~base_path:event.base_path

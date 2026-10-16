@@ -7,9 +7,12 @@
     the corresponding data file disappears. Changed/cold files verify their
     prefix content in the blocking worker without locking out appenders.
     This costs O(existing prefix bytes) on a changed ledger, including ordinary
-    appends. The unchanged-observation fast path assumes the filesystem reports
-    external modification in inode/size/mtime/ctime; it is not byte proof against
-    metadata-preserving raw edits. Storage ownership optimization is separate.
+    appends. The prefix is hashed at most once per advance, and again only when
+    the file's inode/size/mtime/ctime changed during the scan. That post-scan
+    check and the unchanged-observation fast path both assume the filesystem
+    reports external modification in inode/size/mtime/ctime; neither is byte
+    proof against metadata-preserving raw edits. Storage ownership optimization
+    is separate.
 
     There is no gate. Each read advances the index to the ledger's
     current end before it queries, so "is the index current" is not a
@@ -108,4 +111,14 @@ module For_testing : sig
     (Yojson.Safe.t list, string) result
   (** Inject a filesystem failure after the index transaction starts. The
       callback runs in the blocking worker and must not use Eio effects. *)
+
+  val empty_digest : string
+  val extend_digest : string -> string -> string
+  val digest_prefix : path:string -> from:int -> until:int -> string -> string option
+  (** The continuity witness: [extend_digest digest line] is the next link of
+      the chain, and [digest_prefix ~path ~from ~until digest] continues
+      [digest] over the complete lines of [path] from [from], answering
+      [None] unless a line ends exactly at [until]. Continuity records on disk
+      hold these values, so a change to either changes what every saved
+      record matches. *)
 end

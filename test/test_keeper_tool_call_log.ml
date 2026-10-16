@@ -2895,6 +2895,37 @@ let test_frontier_restarts_a_same_inode_rewrite ~grow ~rebuild () =
     Alcotest.(check int) "the new run is read once" 0 (List.length (read second.frontier).rows))
 ;;
 
+(* The same rewrite, landing after the index proved the prefix and before it
+   finished scanning. The scan's own reading cannot vouch for a prefix that
+   changed under it, so the read that saw the change must not move the
+   continuity on, and the next read takes every rewritten row as new
+   evidence. *)
+let test_frontier_restarts_a_rewrite_during_the_scan () =
+  with_tmp_log (fun () ->
+    let module Index = Keeper_tool_call_index in
+    let store = log_store () in
+    let read after = match Index.rows_after ~store ~keeper_name:"alice" ~after ~project:Option.some with
+      | Ok batch -> batch | Error detail -> Alcotest.fail detail in
+    let names batch = tool_names (List.map (fun (row : _ Index.positioned) -> row.value) batch.Index.rows) in
+    write_rows store ~keeper:"alice" ~count:4 ~base_ts:(Unix.gettimeofday ()) ~label:"aaa";
+    let first = read Index.empty_frontier in
+    let path = match Keeper_tool_call_log.current_log_path () with
+      | Some path -> path | None -> Alcotest.fail "missing fixture ledger path" in
+    let rewrite_in_place ~path:_ =
+      let rewritten =
+        String_util.replace_substring ~needle:"alice-aaa-" ~by:"alice-bbb-" (Fs_compat.load_file path) in
+      let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+        ignore (Unix.write_substring fd rewritten 0 (String.length rewritten) : int)) in
+    (match Index.For_testing.recent_rows ~before_scan:rewrite_in_place ~store ~keeper_name:"alice" ~n:50 () with
+     | Ok _ | Error _ -> ());
+    let second = read first.frontier in
+    Alcotest.(check (list string)) "the rows rewritten during the scan are all new evidence"
+      [ "alice-bbb-3"; "alice-bbb-2"; "alice-bbb-1"; "alice-bbb-0" ] (names second);
+    Alcotest.(check bool) "cached evidence of the old run is released" true
+      (Index.equal_frontiers Index.empty_frontier second.retained))
+;;
+
 let test_frontier_survives_disposable_index_rebuild ~schema_mismatch () =
   with_tmp_log (fun () ->
     let module Index = Keeper_tool_call_index in
@@ -3223,6 +3254,8 @@ let () =
             (test_frontier_restarts_a_same_inode_rewrite ~grow:true ~rebuild:false)
         ; eio_test "frontier sees larger rewrite even after index loss"
             (test_frontier_restarts_a_same_inode_rewrite ~grow:true ~rebuild:true)
+        ; eio_test "frontier restarts a rewrite during the scan"
+            test_frontier_restarts_a_rewrite_during_the_scan
         ; eio_test "frontier survives index file deletion"
             (test_frontier_survives_disposable_index_rebuild ~schema_mismatch:false)
         ; eio_test "frontier survives schema replacement"

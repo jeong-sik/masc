@@ -82,7 +82,7 @@ goal 은 keeper 의 시야에서 사라지고 영원히 `Completed` 에 도달�
 |---|---|
 | 닫힌 합타입 | 새 상태는 전부 닫힌 variant다: phase 2종(`Goal_phase.t`), criterion 4종, completion 5종(`Goal_verification`). 문자열 상태 금지 |
 | strict parse | `goal_verifications.json` 디코더는 unknown 필드/unknown variant 문자열을 Error로 거절한다. 레거시 row(필드 부재)만 명시적 default(`Criterion_unchecked` / `Completion_idle`)로 읽힌다 |
-| 권위 저장소 fail-closed | `Goal_verification`의 쓰기 경로는 `Goal_store.update_state`와 같은 discipline을 따른다: 읽기가 decode 실패하면 mutation 불승인(`.last-good` mirror 포함) |
+| 권위 저장소 fail-closed | `Goal_verification`의 쓰기 경로는 Goal 저장소 내부 `commit_state`와 같은 원칙을 따른다: primary decode 실패 시 mutation을 거부하며 `.last-good` mirror로 승인하지 않는다 |
 | persist_before_model_call | `Criterion_pending`은 goal 생성 직후(모델 호출 전), `Proof_pending`은 `Verifying` phase 전이 전에 durable하게 쓴다. 영속화 실패 시 phase 전이/판정 커밋 모두 중단 |
 | wall-clock 만료 금지 | `Criterion_pending`/`Proof_pending`에는 만료가 없다. 재시도는 명시적이다: `Verifying`에서의 `request_complete` 재호출이 `Already`를 답하며 pending 상태를 그대로 보고한다 |
 | 실패 시 증거 보존 | `Refuted` 판정은 verdict(authority·evidence·recorded_at)째 ledger에 남고 goal 은 `Executing` 으로 돌아간다. 기각 사유는 `goal_events.jsonl` 에 남는다 |
@@ -96,9 +96,10 @@ goal 은 keeper 의 시야에서 사라지고 영원히 `Completed` 에 도달�
 모두 non-blank를 요구한다. 기존 row 갱신은 요구하지 않는다 — B1은 생성 시 선언 의무다.
 
 - 생성/갱신 판정은 **write lock 안**, 방금 decode된 state 위에서 이뤄진다. pre-lock
-  `read_state` 휴리스틱은 쓰지 않는다: decode 불가 저장소는 `update_state`의 fail-closed
-  거절이 먼저 잡으므로, B1 거절 메시지는 저장소를 실제로 읽고 row가 없음을 확인한 경우에만
-  나간다 (corruption을 "metric/target_value 누락"으로 오보하지 않는다).
+  `read_state` 휴리스틱은 쓰지 않는다: 현재 구현에서는 Goal 저장소 내부 `commit_state`가
+  decode 불가 저장소를 먼저 거절하므로, B1 거절 메시지는 저장소를 실제로 읽고 row가 없음을
+  확인한 경우에만 나간다 (corruption을 "metric/target_value 누락"으로 오보하지 않는다).
+  B1 거절은 `Error (Rejected ...)`로 반환되어 Goal과 감사 outbox를 쓰지 않는다.
 - 툴 스키마(`masc_goal_upsert`)는 create-or-update 겸용이라 JSON Schema `required`(무조건
   적용)로는 B1을 표현할 수 없다 — `required`에 넣으면 기존 goal의 메타데이터 갱신이 전부
   깨진다. 생성 경로 강제는 handler(`Goal_store.upsert_goal`)가 담당하며, 스키마는 두 필드의

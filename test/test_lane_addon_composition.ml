@@ -568,7 +568,7 @@ let test_native_msx_history_crosses_worker_freeze_and_detach () =
       with_msx_worker ~clock ~base_path:root (fun client ->
       machine := Some (store, client);
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-      ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
+      ignore (msx (Msx_lane.load ~ledger_dir ~boot:Msx_lane.Bare_machine));
       let press who name =
         let key = unwrap (Msx_lane.key_of_string name) in
         ignore (msx (Msx_lane.press ~who ~keys:[key] ~hold_frames:1 ~step_frames:2 ~sequence:false)) in

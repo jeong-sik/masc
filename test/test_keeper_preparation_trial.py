@@ -208,6 +208,76 @@ def malformed_final_evidence(args, root, head):
         "real_model": False, "speedup": None}))
 
 
+def named_skill_reuse(args, root, head):
+    experiment = root / "named-inline-experiment.json"
+    experiment.write_text(json.dumps({"schema_version": 1, "case": "named_inline", "pairs": 1,
+        "runtime": {"mode": "synthetic_streaming", "model_id": args.model_id,
+                    "max_context_tokens": args.max_context_tokens, "max_output_tokens": args.max_output_tokens},
+        "synthetic_outcome": "success"}) + "\n", encoding="utf-8")
+    output = root / "named-inline"
+    code = subprocess.run([sys.executable, str(args.coordinator.resolve()),
+        "--driver", str(args.driver.resolve()), "--source-head", head,
+        "--experiment", str(experiment), "--prompts", str(args.prompts.resolve()),
+        "--output", str(output)], check=False).returncode
+    require(code == 0, f"named Inline Skill scenario failed; preserved evidence: {root}")
+    manifest, summary = read(output / "manifest.json"), read(output / "summary.json")
+    require(summary["expected"] == len(manifest["expected_attempts"]) == 2 and
+            summary["outcomes"] == {"correct": 2, "explicit_failure": 0, "unfinished": 0} and
+            summary["strategy_compliant"] == 2, "named reuse lost an assigned arm or objective")
+    require(summary["speedup"] is None and summary["latency_percentiles"] is None,
+            "named synthetic calls cannot establish model speedup")
+    for entry in manifest["expected_attempts"]:
+        directory = (output / entry["path"]).parent
+        receipt, turn = read(directory / "attempt.json"), read(directory / "turn-record.json")
+        fixture = read(output / f"pair-{entry['pair']:04d}" / "base" / "preparation-fixture.json")
+        require(receipt["case"] == "named_inline" and receipt["source_ack"] is True and
+                receipt["remaining_queue"] == receipt["backend_calls_after_ready"] == 0,
+                "named reuse lost the case or original completed source")
+        calls, activations = read(directory / "tool-calls.json"), read(directory / "skill-activations.json")
+        stdout_rows = [row for row in calls if row.get("execution_id") in
+                       receipt["verified_stdout_read_execution_ids"]]
+        require(stdout_rows and all(row["tool"] == "keeper_artifact_read" and
+                    row["input"]["sha256"] == receipt["objective"]["stdout_sha256"] and
+                    row["task_id"] == fixture["task_id"] and row["trace_id"] == turn["trace_id"] and
+                    row["keeper_turn_id"] == turn["absolute_turn"] for row in stdout_rows),
+                "named reuse substituted a digest for an original physical stdout read")
+        if entry["strategy"] == "direct":
+            require(activations == [] and all(row.get("composition_node_id") is None and
+                    row["execution_id"] in turn["execution_ids"] for row in stdout_rows),
+                    "named-case direct baseline escaped its actual SDK trajectory")
+        else:
+            require(len(activations) == 1, "named reuse needs one original Skill activation")
+            activation = activations[0]
+            invocation = activation["invocation"]
+            require(invocation == {"kind": "composition", "origin": {"kind": "task_composition",
+                    "task_ids": [fixture["task_id"]]}, "tool_name": fixture["skill_tool_name"]} and
+                    activation["identity"] == fixture["skill_reference"]["identity"] and
+                    activation["content_revision"] == fixture["skill_reference"]["content_revision"] and
+                    activation["turn_ref"] == turn["turn_ref"] and
+                    activation["runtime_id"] == turn["runtime_profile"],
+                    "named reuse was not the exact Task Skill in this turn and Runtime")
+            parents = [row for row in calls if row["tool"] == fixture["skill_tool_name"] and
+                       row.get("execution_id") in turn["execution_ids"] and
+                       row["tool_use_id"] == activation["skill_tool_use_id"] and
+                       row["turn"] == activation["agent_core_turn"]]
+            require(len(parents) == 1 and parents[0]["input"] == {"job_id": fixture["selected_job_id"]},
+                    "named reuse lost its original SDK invocation or selected job")
+            execution = read(directory / "actual-composition-execution.json")
+            require(all(row["parent_tool_use_id"] == parents[0]["tool_use_id"] and
+                    row["composition_run_id"] == execution["source_result"]["composition_run_id"] and
+                    any(node["node_id"] == row["composition_node_id"] and
+                        node["execution_id"] == row["execution_id"] and
+                        node["tool_name"] == row["tool"] and node["input"] == row["input"]
+                        for node in execution["nodes"]) for row in stdout_rows) and
+                    not any(row["tool"] in ("keeper_composition_prepare", "keeper_composition_run")
+                            for row in calls), "named reuse required a new plan or lost physical parent ownership")
+        peer = read(directory / "provider-events.json")
+        check_http_observation(directory, receipt,
+                               [row for row in peer if row["kind"] == "synthetic_provider_received"])
+    print("PREPARATION_NAMED_INLINE_PASS " + json.dumps({"case": "named_inline", "expected": 2,
+        "correct": 2, "strategy_compliant": 2, "real_model": False, "speedup": None}))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--driver", type=Path, required=True)
@@ -357,6 +427,7 @@ def main():
         "evidence": str(root), "summary_sha256": hashlib.sha256((output / "summary.json").read_bytes()).hexdigest()}))
     configured_http_refusal(args, root, head)
     malformed_final_evidence(args, root, head)
+    named_skill_reuse(args, root, head)
 
 
 if __name__ == "__main__":

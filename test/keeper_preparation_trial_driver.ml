@@ -45,6 +45,12 @@ let exact_keys expected value =
 
 type runtime_mode = Synthetic_streaming | Configured_http of string
 
+type preparation_case = Upstream_inline | Named_inline
+let preparation_case experiment = match string "case" experiment with
+  | "upstream_inline" -> Upstream_inline
+  | "named_inline" -> Named_inline
+  | _ -> failwith "unsupported preparation case"
+
 let runtime_mode runtime = match string "mode" runtime with
   | "synthetic_streaming" -> Synthetic_streaming
   | "configured_http" -> Configured_http (string "configuration" runtime)
@@ -70,7 +76,7 @@ let validate_http_configuration configuration =
 
 let settings experiment =
   require (integer "schema_version" experiment = 1) "unsupported experiment schema";
-  require (string "case" experiment = "upstream_inline") "only upstream_inline is implemented";
+  ignore (preparation_case experiment : preparation_case);
   require (integer "pairs" experiment > 0) "pairs must be positive";
   let runtime = field "runtime" experiment in
   (match runtime_mode runtime with
@@ -248,8 +254,14 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
   let workspace,snapshot,reference = publish_snapshot ~base in
   Eio.Switch.on_release sw (fun () -> Skill_catalog_snapshot_service.retire ~workspace);
   let descriptors = Keeper_tool_descriptor.all_descriptors () in
-  let _,diagnostics = Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
+  let catalog,diagnostics = Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
   require (diagnostics=[]) "published Skill is not executable";
+  let named_fields = match preparation_case experiment with
+    | Upstream_inline -> []
+    | Named_inline ->
+      (match Keeper_skill_catalog.composition_entries catalog with
+       | [entry] -> ["skill_tool_name",`String (Keeper_tool_composition_catalog.tool_name entry)]
+       | [] | _ :: _ -> failwith "one executable named Inline Skill is required") in
   let task = Workspace.add_task_with_result ~created_by:"preparation-operator" ~skills:[reference]
       config ~title:"Read selected original stdout" ~priority:1
       ~description:"Read the immutable selection input and return the selected original job's complete stdout SHA-256."
@@ -341,12 +353,12 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
   json (Filename.concat base "preparation-setup-notification-acks.json")
     (`Assoc ["scope",`String "fixture_setup_only";"acks",`List acknowledgements;
       "producer_delivered",`Int delivered.delivered;"no_turn_completion_claim",`Bool true]);
-  let manifest = `Assoc ["schema_version",`Int 1;"base_path",`String base;"keeper",`String keeper;
+  let manifest = `Assoc (named_fields @ ["schema_version",`Int 1;"base_path",`String base;"keeper",`String keeper;
       "task_id",`String task.task_id;"trace_id",`String (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
       "skill_reference",Skill_reference.to_yojson reference;"skill_document_sha256",`String (sha source_document);
       "selection",Tool_output.normalized_artifact_ref_to_json selection;"selection_sha256",`String selection.sha256;
       "jobs",`List [first;second];"selected_job_id",`String selected_id;
-      "expected_stdout_sha256",field "stdout_sha256" second;"runtime",settings experiment] in
+      "expected_stdout_sha256",field "stdout_sha256" second;"runtime",settings experiment]) in
   json (fixture_path base) manifest;
   json receipt (`Assoc ["outcome",`String "setup_complete";"observed",now counter;"fixture",manifest])
 
@@ -390,10 +402,11 @@ let objective_validation_json = function
   | Wrong_stdout_digest -> `String "wrong_stdout_digest"
   | Scripted_wire_mismatch -> `String "scripted_wire_mismatch"
 
-type step = Select | Direct_result | Direct_stdout | Prepare | Run | Finish | Finished
+type step = Select | Direct_result | Direct_stdout | Prepare | Run | Named_skill | Finish | Finished
 let step_name = function
   | Select -> "select" | Direct_result -> "direct-result" | Direct_stdout -> "direct-stdout"
-  | Prepare -> "prepare" | Run -> "run" | Finish -> "finish" | Finished -> "finished"
+  | Prepare -> "prepare" | Run -> "run" | Named_skill -> "named-skill"
+  | Finish -> "finish" | Finished -> "finished"
 
 type composition_projection = Selected_stdout | Full_actions
 
@@ -481,6 +494,26 @@ let full_stdout_reads ~base ~fixture ~turn ~raw_records rows =
       field "offset" page=`Int 0 && field "eof" page=`Bool true &&
       sha (string "content" page)=string "expected_stdout_sha256" fixture) = Some true &&
     stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row) rows
+
+let named_execution_proven ~base ~fixture ~turn ~raw_records rows stdout_rows
+    ~(activation : Keeper_skill_activation_ledger.activation) ~tool_name =
+  let parents = List.filter (fun row -> sdk_member ~fixture ~turn row &&
+    field "tool" row=`String tool_name &&
+    field "tool_use_id" row=`String activation.skill_tool_use_id &&
+    field "turn" row=`Int activation.agent_core_turn &&
+    field "input" row=`Assoc ["job_id",field "selected_job_id" fixture]) rows in
+  match parents with
+  | [parent] -> decode_evidence (fun () ->
+    let run = exact_sdk_reply ~base ~raw_records parent in
+    let nodes = execution_nodes ~base run in
+    List.exists (fun row ->
+      field "parent_tool_use_id" row=field "tool_use_id" parent &&
+      field "composition_run_id" row=field "composition_run_id" run &&
+      List.exists (fun node -> field "execution_id" node=field "execution_id" row &&
+        field "node_id" node=field "composition_node_id" row &&
+        field "tool_name" node=field "tool" row &&
+        Yojson.Safe.equal (field "input" node) (field "input" row)) nodes) stdout_rows) = Some true
+  | [] | _ :: _ -> false
 
 let nested_execution_proven ~base ~fixture ~turn ~skill_reference
     ~(scope : Keeper_skill_activation_ledger.nested_composition_scope) ~raw_records rows stdout_rows =
@@ -595,10 +628,11 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             let id = string "content" value in
             require (id = string "selected_job_id" fixture) "input selected the wrong original job";
             selected := Some id;
-            next_step := (match strategy,projection with
-              | Direct,_ -> Direct_result
-              | Exact_skill,Selected_stdout -> Prepare
-              | Exact_skill,Full_actions -> Run)
+            next_step := (match strategy,preparation_case experiment,projection with
+              | Direct,_,_ -> Direct_result
+              | Exact_skill,Named_inline,_ -> Named_skill
+              | Exact_skill,Upstream_inline,Selected_stdout -> Prepare
+              | Exact_skill,Upstream_inline,Full_actions -> Run)
           | Direct_result ->
             let artifacts = field "artifacts" value |> to_list in
             let value = match artifacts with first :: _ -> first | [] -> failwith "result has no stdout artifact" in
@@ -615,6 +649,14 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             let reference = reference (field "draft" value) in
             draft_sha := Some reference.sha256;
             next_step := Run
+          | Named_skill ->
+            let nodes = execution_nodes ~base value in
+            json (Filename.concat attempt_dir "actual-composition-execution.json")
+              (`Assoc ["nodes",`List nodes;"source_result",value]);
+            let selected_stdout = field "stdout" (field "exports" value) in
+            require (field "available" selected_stdout = `Bool true) "named Skill stdout is unavailable";
+            stdout := Some (string "value" selected_stdout);
+            next_step := Finish
           | Run ->
             let nodes = execution_nodes ~base value in
             json (Filename.concat attempt_dir "actual-composition-execution.json")
@@ -664,12 +706,13 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
           next_step := Finished;
           sse ~model ~finish:"stop" ~delta:(`Assoc ["role",`String "assistant";"content",`String answer])
         | Finished -> failwith "unexpected provider call after scripted final answer"
-        | (Select | Direct_result | Direct_stdout | Prepare | Run) as step ->
+        | (Select | Direct_result | Direct_stdout | Prepare | Run | Named_skill) as step ->
           let name,args = match step with
             | Select -> "keeper_artifact_read",`Assoc ["sha256",field "selection_sha256" fixture]
             | Direct_result -> "keeper_job_result",`Assoc ["job_id",`String (needed !selected)]
             | Direct_stdout -> "keeper_artifact_read",`Assoc ["sha256",`String (needed !draft_sha)]
             | Prepare -> Keeper_composition_draft.prepare_tool_name,recipe ~projection fixture
+            | Named_skill -> string "skill_tool_name" fixture,`Assoc ["job_id",`String (needed !selected)]
             | Run -> Keeper_composition_draft.run_tool_name,(match projection with
                 | Selected_stdout -> `Assoc ["sha256",`String (needed !draft_sha)]
                 | Full_actions -> `Assoc ["recipe",recipe ~projection fixture])
@@ -743,9 +786,10 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
       string "skill_document_sha256" fixture) "Skill source bytes changed";
   let common_instruction =
     "Complete this read-only task using the completed original artifacts. Read the selection artifact first and the complete selected stdout. Return exactly one JSON object with only job_id and stdout_sha256; no prose or Markdown. The artifact address is its SHA-256 and the harness independently checks the returned full bytes. Do not execute new programs, declare the Task complete, or modify any source." in
-  let assignment = match strategy with
-    | Direct -> "Assigned strategy: direct. Use ordinary keeper_job_result and keeper_artifact_read for the selected original job."
-    | Exact_skill -> "Assigned strategy: exact_skill. Prepare and run the exact Inline Skill through an explicit upstream input template; use the offered exact reference." in
+  let assignment = match strategy,preparation_case experiment with
+    | Direct,_ -> "Assigned strategy: direct. Use ordinary keeper_job_result and keeper_artifact_read for the selected original job."
+    | Exact_skill,Upstream_inline -> "Assigned strategy: exact_skill. Prepare and run the exact Inline Skill through an explicit upstream input template; use the offered exact reference."
+    | Exact_skill,Named_inline -> "Assigned strategy: exact_skill. Reuse the offered named Inline Skill directly with the selected original job_id; use the offered exact reference." in
   configure_keeper ~base ~instructions:(common_instruction ^ "\n" ^ assignment);
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir prompt_root;
@@ -961,13 +1005,21 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
       Skill_reference.equal_identity activation.identity reference.Skill_reference.identity &&
       Skill_reference.equal_content_revision activation.content_revision reference.content_revision &&
       Ids.Turn_ref.equal activation.turn_ref turn.turn_ref &&
-      (match activation.invocation with
-       | A.Nested_composition_invocation {origin=A.Task_composition {task_ids};scope;_} ->
+      (match preparation_case experiment,activation.invocation with
+       | Upstream_inline,A.Nested_composition_invocation {origin=A.Task_composition {task_ids};scope;_} ->
          nested_execution_proven ~base ~fixture ~turn ~skill_reference:reference ~scope ~raw_records rows stdout_rows &&
          List.exists (fun id -> Keeper_id.Task_id.to_string id=string "task_id" fixture)
            (A.task_id_set_to_list task_ids)
-       | A.Instruction_invocation _ | A.Composition_invocation _
-       | A.Nested_composition_invocation {origin=A.Session_composition;_} -> false)
+       | Named_inline,A.Composition_invocation {origin=A.Task_composition {task_ids};tool_name} ->
+         tool_name=string "skill_tool_name" fixture && activation.runtime_id=turn.runtime_profile &&
+         named_execution_proven ~base ~fixture ~turn ~raw_records rows stdout_rows ~activation ~tool_name &&
+         List.exists (fun id -> Keeper_id.Task_id.to_string id=string "task_id" fixture)
+           (A.task_id_set_to_list task_ids)
+       | (Upstream_inline | Named_inline),A.Instruction_invocation _
+       | Upstream_inline,A.Composition_invocation _
+       | Named_inline,A.Nested_composition_invocation _
+       | Named_inline,A.Composition_invocation {origin=A.Session_composition;_}
+       | Upstream_inline,A.Nested_composition_invocation {origin=A.Session_composition;_} -> false)
     | Exact_skill,_ :: _ :: _ -> false in
   let correct = Option.is_some final && stdout_rows<>[] &&
       evidence.event_queue_ack_seen && outcome.stimuli_acked &&
@@ -987,6 +1039,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   let observations = ["schema_version",`Int 1;
     "scope",`String (if synthetic then "synthetic_isolated_keeper_explicit_cycle_preparation"
       else "configured_http_isolated_keeper_explicit_cycle_preparation");
+    "case",field "case" experiment;
     "strategy",`String (strategy_name strategy);"strategy_compliant",`Bool compliant;
     "common_instruction_sha256",`String (sha common_instruction);
     "fixture_sha256",`String (sha (read (fixture_path base)));"input",field "selection" fixture;

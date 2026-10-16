@@ -177,19 +177,22 @@ module For_testing : sig
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
-    stop : unit -> (unit, string) result;
+    stop : unit -> (unit, Lane_addon_lifecycle.failure) result;
     container_id : string;
   }
   type backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
-      on_created:(connection -> unit) -> (connection, string) result;
+      on_created:(connection -> unit) -> (connection, Lane_addon_lifecycle.failure) result;
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : runtime:Lane_addon_types.runtime -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> container_id:string option ->
-      (unit, string) result;
+      (unit, Lane_addon_lifecycle.failure) result;
     image_ready : package:Lane_addon_types.package -> (unit, string) result;
+    condition_met : runtime:Lane_addon_types.runtime -> Lane_addon_lifecycle.condition -> bool;
+    (** Whether a waiting failure's condition holds now. False also when it
+        cannot be established. *)
   }
   val with_backend : backend -> (unit -> 'a) -> 'a
   val with_action_writer :

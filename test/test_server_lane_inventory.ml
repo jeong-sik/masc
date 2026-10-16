@@ -84,7 +84,8 @@ let retained_metadata () = with_fixture (fun _env _sw config root directory ->
   let put id configuration =
     let json = `Assoc ["instance_id",`String id;"incarnation",`String id;"run_id",`String "world";
       "addon_id",`String "observer";"title",`String "Retained observer";"revision",`String "1";
-      "phase",Lane_addon_types.phase_to_json (Failed "cleanup incomplete");"configuration",configuration;
+      "phase",Lane_addon_types.phase_to_json (Failed "cleanup incomplete: refused");
+      "lifecycle",Lane_addon_lifecycle.state_to_json (Lane_addon_lifecycle.Failed (Lane_addon_lifecycle.failed (Lane_addon_lifecycle.Cleanup_unconfirmed "refused")));"configuration",configuration;
       "visibility",`Assoc ["kind",`String "shared"];
       "source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated] in
     match Lane_addon_store.save_binding store ~instance_id:id json with Ok () -> () | Error e -> fail e in
@@ -103,7 +104,7 @@ let retained_metadata () = with_fixture (fun _env _sw config root directory ->
   let removed = List.find (fun (row : Inventory.row) -> row.selection=Inventory.Declaration path) rows in
   (match removed.state with
    | Inventory.Package_state {declaration=Some Absent;instances=[i]} ->
-       check bool "cleanup failure is retained" true (i.phase=Lane_addon_types.Failed "cleanup incomplete")
+       check bool "cleanup failure is retained" true (i.phase=Lane_addon_types.Failed "cleanup incomplete: refused")
    | _ -> fail "retained declaration owner disappeared");
   let incomplete : Config.snapshot = {declarations=[];paths=[];issues=[];complete=false} in
   let rows = Inventory.For_testing.package_rows ~declarations:incomplete ~instances:owner.instances in
@@ -262,7 +263,8 @@ let retained_binding config id incarnation configuration =
   let store = Lane_addon_store.create ~root:(Filename.concat masc "lane-addons") in
   let json = `Assoc ["instance_id",`String id;"incarnation",`String incarnation;"run_id",`String "world";
     "addon_id",`String "observer";"title",`String "Retained observer";"revision",`String "1";
-    "phase",Lane_addon_types.phase_to_json (Failed "cleanup incomplete");"configuration",configuration;
+    "phase",Lane_addon_types.phase_to_json (Failed "cleanup incomplete: refused");
+      "lifecycle",Lane_addon_lifecycle.state_to_json (Lane_addon_lifecycle.Failed (Lane_addon_lifecycle.failed (Lane_addon_lifecycle.Cleanup_unconfirmed "refused")));"configuration",configuration;
     "visibility",`Assoc ["kind",`String "shared"];
     "source_access",Lane_addon_sources.access_to_json Lane_addon_sources.Unauthenticated] in
   match Lane_addon_store.save_binding store ~instance_id:id json with Ok () -> () | Error e -> fail e

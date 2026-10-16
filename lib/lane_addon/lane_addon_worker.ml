@@ -45,6 +45,25 @@ let error_to_string = function
   | Invalid_observation detail -> "invalid Add-on observation: " ^ detail
   | Stopped -> "Add-on worker is stopped"
 
+(* The runtime acts on typed failures, so the one place that turns a worker
+   error into one lists every error. An engine that does not answer is a wait;
+   everything else is the worker's own failure, or an unconfirmed cleanup. *)
+let start_failure = function
+  | Engine_fault { fault = Lane_addon_lifecycle.Unreachable detail; _ } ->
+      Lane_addon_lifecycle.Engine_unreachable detail
+  | (Invalid_package _ | Docker_failed _ | Engine_failed _
+    | Engine_fault { fault = Lane_addon_lifecycle.Identity_unreadable _; _ }
+    | Protocol_failed _ | Host_refusal _ | Invalid_observation _ | Stopped) as error ->
+      Lane_addon_lifecycle.Worker_failed (error_to_string error)
+
+let cleanup_failure = function
+  | Engine_fault { fault = Lane_addon_lifecycle.Unreachable detail; _ } ->
+      Lane_addon_lifecycle.Engine_unreachable detail
+  | (Invalid_package _ | Docker_failed _ | Engine_failed _
+    | Engine_fault { fault = Lane_addon_lifecycle.Identity_unreadable _; _ }
+    | Protocol_failed _ | Host_refusal _ | Invalid_observation _ | Stopped) as error ->
+      Lane_addon_lifecycle.Cleanup_unconfirmed (error_to_string error)
+
 let ( let* ) = Result.bind
 let container_id t = t.id
 let container_name t = t.name

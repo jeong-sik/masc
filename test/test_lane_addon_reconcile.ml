@@ -53,6 +53,8 @@ type fake = {
   startup_barrier : unit Eio.Promise.t option ref;
   cleanup_available : bool ref;
   image_available : bool ref;
+  engine_reachable : bool ref;
+  condition_checks : int ref;
 }
 
 let output : Types.output = {
@@ -66,7 +68,7 @@ let output : Types.output = {
 let make_backend () =
   let state = { events = ref []; state_owners=Hashtbl.create 4; recovered_state_owners=Hashtbl.create 4; recovered_runtimes=Hashtbl.create 4; observations = ref []; recovery_barrier = ref None;
                 startup_available = ref true; startup_barrier = ref None; cleanup_available = ref true;
-                image_available = ref true } in
+                image_available = ref true; engine_reachable = ref true; condition_checks = ref 0 } in
   let record event = state.events := event :: !(state.events) in
   let backend : Runtime.For_testing.backend = {
     start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
@@ -87,7 +89,7 @@ let make_backend () =
           | _ -> Ok output);
         stop = (fun () ->
           record (Stop_requested instance_id);
-          if not !(state.cleanup_available) then Error "cleanup dependency unavailable"
+          if not !(state.cleanup_available) then Error (Lane_addon_lifecycle.Cleanup_unconfirmed "cleanup dependency unavailable")
           else begin
           if not !stop_sent then begin
             stop_sent := true;
@@ -97,9 +99,12 @@ let make_backend () =
           Ok ()
           end);
       } in
-      if not !(state.startup_available) then begin
+      if not !(state.engine_reachable) then begin
         record (Startup_failed instance_id);
-        Error "worker dependency unavailable"
+        Error (Lane_addon_lifecycle.Engine_unreachable "fixture engine is down")
+      end else if not !(state.startup_available) then begin
+        record (Startup_failed instance_id);
+        Error (Lane_addon_lifecycle.Worker_failed "worker dependency unavailable")
       end else begin
         record (Started instance_id);
         on_created connection;
@@ -114,16 +119,19 @@ let make_backend () =
       Hashtbl.replace state.recovered_state_owners instance_id
         (Option.map (Lane_addon_worker_state.volume_name ~runtime) state_owner);
       if Option.exists (fun id -> id <> Store.digest instance_id) container_id
-      then Error "persisted container does not belong to instance"
+      then Error (Lane_addon_lifecycle.Cleanup_unconfirmed "persisted container does not belong to instance")
       else begin
         record (Recovery_requested (instance_id, container_id));
-        if not !(state.cleanup_available) then Error "historical cleanup dependency unavailable"
+        if not !(state.cleanup_available) then Error (Lane_addon_lifecycle.Cleanup_unconfirmed "historical cleanup dependency unavailable")
         else begin
           Option.iter Eio.Promise.await !(state.recovery_barrier);
           record (Recovery_completed (instance_id, container_id));
           Ok ()
         end
       end);
+    condition_met = (fun ~runtime:_ condition ->
+      incr state.condition_checks;
+      match condition with Lane_addon_lifecycle.Engine_reachable -> !(state.engine_reachable));
   } in
   state, backend
 
@@ -1091,7 +1099,9 @@ let bindings_directory config =
 let replace_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
   | _ -> fail "a retained record is an object"
-let still_attached = replace_field "phase" (Types.phase_to_json Types.Attached)
+let still_attached json =
+  replace_field "lifecycle" (Lane_addon_lifecycle.state_to_json Lane_addon_lifecycle.Attached)
+    (replace_field "phase" (Types.phase_to_json Types.Attached) json)
 let fixture_records ?(transform = Fun.id) () =
   List.map (fun name -> transform (fixture_record name)) retained_without_read_authority
 let seed_records config records =
@@ -1349,6 +1359,113 @@ let test_unparsable_file_holds_every_declaration_but_not_inspect () =
    non-regular) without opening the store (task-2382). The production path is
    exercised: a corrupt record and a replaced file land in one issues list and
    the two details differ by their bracketed tag. *)
+let lifecycle value = member "lifecycle" value
+let failed_record value = lifecycle value |> member "failed"
+let attempts state =
+  List.length (List.filter (function Started _ | Startup_failed _ -> true | _ -> false) !(state.events))
+let recovery_requests state =
+  List.length (List.filter (function Recovery_requested _ -> true | _ -> false) !(state.events))
+
+(* A start that fails and a cleanup that then fails are two different causes.
+   The second must not erase the first: the operator reads why the worker
+   never started, not only that its cleanup was refused. *)
+let test_a_failed_start_keeps_its_first_cause_through_a_failed_cleanup () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    state.startup_available := false;
+    ignore (reconcile config directory);
+    let first_id = declared_instance config "observer" |> text "instance_id" in
+    await clock (fun () -> phase (instance config first_id) = "failed");
+    state.cleanup_available := false;
+    ignore (reconcile config directory);
+    await clock (fun () ->
+      text "kind" (failed_record (instance config first_id) |> member "cause") = "cleanup_unconfirmed");
+    let record = failed_record (instance config first_id) in
+    check string "the cleanup failure is the current cause" "cleanup_unconfirmed"
+      (member "cause" record |> text "kind");
+    check string "the start failure is kept as the first cause" "worker_failed"
+      (member "first" record |> text "kind");
+    check string "the first cause names why the worker did not start"
+      "worker dependency unavailable" (member "first" record |> text "detail");
+    check bool "the display message names both" true
+      (let message = instance config first_id |> member "phase" |> text "message" in
+       String_util.contains_substring message "cleanup incomplete"
+       && String_util.contains_substring message "worker dependency unavailable");
+    state.cleanup_available := true;
+    state.startup_available := true;
+    ignore (reconcile config directory);
+    await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> first_id) (instances config));
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    detach clock config id)
+
+(* An unreachable engine is a cause that only the engine can remove. Beats
+   read the one condition and do nothing else: no new start, no cleanup, no
+   event. When the engine answers, the same beat retires the failed attempt
+   and the next one attaches. *)
+let test_a_waiting_failure_is_probed_and_not_retried () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    state.engine_reachable := false;
+    ignore (reconcile config directory);
+    let failed_id = declared_instance config "observer" |> text "instance_id" in
+    await clock (fun () -> phase (instance config failed_id) = "failed");
+    check string "the failure says the engine is unreachable" "engine_unreachable"
+      (failed_record (instance config failed_id) |> member "cause" |> text "kind");
+    check int "one attempt so far" 1 (attempts state);
+    let probes_before = !(state.condition_checks) in
+    for _ = 1 to 5 do ignore (reconcile config directory) done;
+    check int "five beats start nothing" 1 (attempts state);
+    check int "five beats clean up nothing" 0 (recovery_requests state);
+    check int "each beat read the condition once" (probes_before + 5) !(state.condition_checks);
+    check string "the failed attempt is still the one on record" failed_id
+      (declared_instance config "observer" |> text "instance_id");
+    state.engine_reachable := true;
+    ignore (reconcile config directory);
+    await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> failed_id) (instances config));
+    check int "the failed attempt was cleaned up once the engine answered" 1 (recovery_requests state);
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    check int "the next attempt is the second start" 2 (attempts state);
+    detach clock config id)
+
+(* A record written by an earlier shape carries a phase but no lifecycle. It
+   is not read as detached, so it cannot be mistaken for a confirmed release:
+   it is an unreadable record that holds the declaration it names. *)
+let test_a_record_without_the_current_lifecycle_is_unreadable () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    (* Readable authority is present, so the only fault is the lifecycle. *)
+    let readable_without_lifecycle json =
+      match json
+        |> replace_field "visibility" (`Assoc ["kind", `String "shared"])
+        |> replace_field "source_access" (Lane_addon_sources.access_to_json Lane_addon_sources.Operator_configuration) with
+      | `Assoc fields -> `Assoc (List.remove_assoc "lifecycle" fields)
+      | _ -> fail "a retained record is an object" in
+    let records = fixture_records ~transform:readable_without_lifecycle () in
+    ignore (seed_records config records);
+    write (Filename.concat directory "dos-counter.toml") (declaration ~id:"dos-counter" ~manifest ());
+    let result = reconcile config directory in
+    check (list string) "a record that is only a bare detached phase holds the declaration" [] (starts state);
+    check bool "the refusal names the missing lifecycle" true
+      (List.exists (fun issue -> String_util.contains_substring (text "message" issue) "lifecycle")
+         (values "issues" (member "configuration" (inspect config))));
+    check bool "the declaration is refused beside its unreadable records" true
+      (issues_of "dos-counter" result <> []);
+    check_unchanged config records;
+    remove_seeded_files config;
+    ignore (reconcile config directory);
+    let id = declared_instance config "dos-counter" |> text "instance_id" in
+    await_ready clock config id;
+    detach clock config id)
+
 let test_binding_inventory_issues_carry_failure_kind_tags () =
   with_fixture (fun _ _ config _directory _packages _state ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1459,4 +1576,10 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_unlistable_binding_store_stops_reconciliation;
   test_case "binding inventory issues carry failure-kind tags" `Quick
     test_binding_inventory_issues_carry_failure_kind_tags;
+  test_case "a failed start keeps its first cause through a failed cleanup" `Quick
+    test_a_failed_start_keeps_its_first_cause_through_a_failed_cleanup;
+  test_case "a waiting failure is probed and not retried" `Quick
+    test_a_waiting_failure_is_probed_and_not_retried;
+  test_case "a record without the current lifecycle is unreadable" `Quick
+    test_a_record_without_the_current_lifecycle_is_unreadable;
 ]]

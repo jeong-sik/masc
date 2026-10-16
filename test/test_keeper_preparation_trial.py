@@ -30,6 +30,44 @@ def received_tools(body):
             "json_bytes": len(encoded), "json_sha256": hashlib.sha256(encoded).hexdigest()}
 
 
+def received_components(raw):
+    """Measure actual peer byte slices; JSONDecoder owns key/value parsing."""
+    text = raw.decode("utf-8")
+    require(isinstance(json.loads(text), dict), "peer request must be a JSON object")
+    decoder = json.JSONDecoder()
+
+    def skip_space(at):
+        while at < len(text) and text[at] in " \t\r\n":
+            at += 1
+        return at
+
+    cursor = skip_space(0)
+    require(text[cursor] == "{", "peer object opening missing")
+    cursor = skip_space(cursor + 1)
+    members = []
+    while text[cursor] != "}":
+        key_start = cursor
+        name, cursor = decoder.raw_decode(text, cursor)
+        require(isinstance(name, str), "peer object key is not a string")
+        cursor = skip_space(cursor)
+        require(text[cursor] == ":", "peer member colon missing")
+        value_start = skip_space(cursor + 1)
+        _, value_end = decoder.raw_decode(text, value_start)
+        value = text[value_start:value_end].encode("utf-8")
+        members.append({"name": name,
+                        "wire_bytes": len(text[key_start:value_end].encode("utf-8")),
+                        "value_json_bytes": len(value),
+                        "value_json_sha256": hashlib.sha256(value).hexdigest()})
+        cursor = skip_space(value_end)
+        if text[cursor] == "}":
+            break
+        require(text[cursor] == ",", "peer member separator missing")
+        cursor = skip_space(cursor + 1)
+    require(skip_space(cursor + 1) == len(text), "peer object has trailing content")
+    return {"state": "observed", "members": members,
+            "framing_bytes": len(raw) - sum(member["wire_bytes"] for member in members)}
+
+
 def check_http_observation(directory, receipt, received, *, refused=False):
     metrics = receipt["http_metrics"]
     path = directory / "http-events.jsonl"
@@ -54,11 +92,25 @@ def check_http_observation(directory, receipt, received, *, refused=False):
                    for row in received}
     require(all(row["tool_inventory"] == inventories[row["body_sha256"]] for row in entered),
             "serializer-owned inventory differs from the actual peer's offered tools")
+    def peer_components(row):
+        if "request_components" in row:
+            return row["request_components"]
+        raw = (directory / f'provider-request-{row["index"]:03d}.body').read_bytes()
+        require(len(raw) == row["body_bytes"] and
+                hashlib.sha256(raw).hexdigest() == row["body_sha256"],
+                "synthetic peer raw body lost its size/digest identity")
+        return received_components(raw)
+
+    components = {row["body_sha256"]: peer_components(row) for row in received}
+    require(all(row["request_components"] == components[row["body_sha256"]] for row in entered),
+            "serializer component attribution differs from independently received byte slices")
     first = next(row["call_id"] for row in events if row["phase"] == "dispatch_entered")
     expected = inventories[calls[first][0]["body_sha256"]]
     require(metrics["first_dispatched_tools"] == expected and
             receipt["first_offered_tools_sha256"] == expected["json_sha256"],
             "first offered inventory was inferred from a later request")
+    require(metrics["first_dispatched_components"] == components[calls[first][0]["body_sha256"]],
+            "first request component attribution was inferred from a later request")
     require(all(metrics[key] == len(received) for key in
                 ("calls_entered", "dispatch_entries", "response_headers_received")) and
             metrics["serialized_body_bytes"] == sum(row["body_bytes"] for row in received) and
@@ -89,6 +141,7 @@ def configured_http_refusal(args, root, head):
             requests.append({"model": body.get("model"), "stream": body.get("stream"),
                              "body_bytes": len(raw), "body_sha256": hashlib.sha256(raw).hexdigest(),
                              "tool_inventory": received_tools(body),
+                             "request_components": received_components(raw),
                              "messages_present": bool(body.get("messages")), "active": active,
                              "auth_matches_fixture": self.headers.get("Authorization") == "Bearer isolated-http-fixture"})
             response = b'{"error":{"type":"invalid_request_error","message":"Declared external fixture refusal"}}'

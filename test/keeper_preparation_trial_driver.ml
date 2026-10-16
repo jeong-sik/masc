@@ -684,6 +684,7 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
     let request = Yojson.Safe.from_string raw in
     incr serial;
     let request_number = !serial in
+    write (Filename.concat attempt_dir (Printf.sprintf "provider-request-%03d.body" request_number)) raw;
     json (Filename.concat attempt_dir (Printf.sprintf "provider-request-%03d.json" request_number)) request;
     observed_requests := request :: !observed_requests;
     add_event "synthetic_provider_received" ["index",`Int request_number;"body_sha256",`String (sha raw);

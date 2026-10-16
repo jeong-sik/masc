@@ -235,6 +235,29 @@ never from the last input snapshot. Response-reported model remains unobserved.
 Do not substitute zero for missing evidence. The same failure/unfinished
 denominator applies to configured HTTP trials, including noncompliant arms.
 
+The same `client_entered` rows now retain `request_components`, and the receipt
+retains `first_dispatched_components` from the first actual dispatch. Observed
+components list each top-level JSON field occurrence's encoded key/colon/value
+bytes and value size/SHA256, plus the outer framing bytes. These sum to the exact
+submitted body only when the serializer's compact re-encoding reproduces it
+byte-for-byte. Unavailable metadata remains explicitly unavailable; an unobserved
+producer stays null. No field value crosses this metadata channel.
+
+Compare protocol fields in their own codec: `messages` may contain system text,
+while `system` or `systemInstruction` can be separate fields in other codecs.
+Compare first and subsequent calls under their actual call IDs, retain growing
+conversation members, and report unchanged value digests separately from saved
+bytes. Repeated Tool or system encoding is not evidence it can be removed from
+the provider protocol. This unit changes observation only, so it establishes no
+request reduction or preparation speedup.
+
+The scripted peer additionally saves its original synthetic request in
+`provider-request-<n>.body`, alongside the existing decoded JSON view. Verification
+binds raw bytes to the peer's reported size/hash and independently measures JSON
+value slices using Python's decoder. It does not re-encode pretty JSON and call
+that the received wire body. Configured external Runtime calls keep metadata
+only; this does not enable full-body capture for them.
+
 The explicit targeted CI entry is `test_keeper_preparation_trial`, declared as
 `@runtest-test_keeper_preparation_trial`. Its Dune action declares the compiled
 driver dependency and explicit synthetic model/capability inputs. It launches

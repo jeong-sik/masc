@@ -12,6 +12,23 @@ let stimuli batch =
 let count = function Empty -> 0 | Selected (_, rest) -> 1 + List.length rest
 let first = function Empty -> None | Selected (first, _) -> Some first
 
+let observed_sources_to_yojson batch =
+  `List
+    (List.map
+       (fun (selection : Keeper_event_queue_state.pending_selection) ->
+          `Assoc
+            [ "stimulus_id",
+              `String (Keeper_reaction_ledger.stimulus_id_of_event_queue selection.source)
+            ; "source_snapshot_ref",
+              `String (Keeper_event_queue_state.source_snapshot_ref selection.source)
+            ; "admitted_revision", `String (Int64.to_string selection.admitted_revision)
+            ; "first_admitted_at",
+              (match selection.first_admitted_at with
+               | None -> `Null
+               | Some epoch -> `Float epoch)
+            ])
+       (selections batch))
+
 let validate ~diagnostic ~standing batch =
   let checked = match batch with
     | Empty -> Option.to_list diagnostic

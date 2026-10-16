@@ -47,6 +47,29 @@ Epoch observations can be compared across a fresh process, but clock regressions
 remain unknown rather than being clamped to a convincing zero. They are not a
 monotonic end-to-end latency measurement.
 
+## Source-bound turn entry
+
+The private runtime manifest's existing `Turn_started` row records
+`decision.intake_sources` from the exact immutable batch supplied to that cycle.
+Each selection retains its canonical stimulus id, source snapshot reference,
+admitted revision and optional first-admission clock, in intake order. An empty
+batch records an empty list. Source payload text is not copied, and public
+manifest projection does not expose these identities.
+
+Join this row by Keeper, trace and Keeper turn number, then compare the full
+source selection tuple. A matching post id or nearby timestamp alone is not a
+join. This is initial turn-entry observation: provider-dispatch validation can
+later withdraw a source. The row proves neither delivery, acknowledgement nor
+the start of a useful effect. It does not change the reaction ledger, whose
+`Turn_started` reactions have separate replay/deduplication semantics.
+
+The manifest retains its existing wall-clock timestamp and clock provenance.
+It does not add a monotonic admission-to-turn measurement or fill missing clocks.
+The isolated paired protocol harness saves the actual persisted manifest and
+requires this exact source/turn join for both arms. Its successful useful-action
+observer follows tool result/log commit. Neither that single synthetic pair nor
+the new identity join establishes real-model speedup or fleet latency.
+
 ## Verification and remaining intervals
 
 The focused fleet feature scenario uses actual durable enqueue, duplicate intake,
@@ -56,9 +79,9 @@ residence. Additional scenarios preserve unknown evidence, incomplete reads,
 mixed recorded/unrecorded entries and invalid clocks. Health and Dashboard direct
 consumers retain the measured observation without changing the work verdict.
 
-Before using a before/after preparation percentage, add the turn/first-task-action
-and outcome joins above, freeze the same task/provider/tool conditions, and include
+Before using a before/after preparation percentage, measure those boundaries with
+comparable clocks, freeze the same task/provider/tool conditions, and include
 failed, missing and unfinished samples in the denominator. This admission change
-does not establish those joins, an installed runtime result, or a preparation
+alone does not establish an installed runtime result or a preparation
 speedup by itself. Effectful job ownership/resume and fresh Ask Question TUI
 evidence remain separately tracked in #42799.

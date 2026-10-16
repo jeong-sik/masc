@@ -656,6 +656,9 @@ let run_keeper_cycle
           [
             ( "channel",
               `String (Keeper_world_observation.channel_to_string channel) );
+            ( "intake_sources",
+              Keeper_heartbeat_source_batch.observed_sources_to_yojson
+                (Keeper_heartbeat_source_batch.sources turn_input) );
           ])
       Keeper_runtime_manifest.Turn_started
   in

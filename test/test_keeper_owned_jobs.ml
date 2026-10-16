@@ -2031,7 +2031,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (match (load fixture second_id).phase with
    | Store.Running _ -> ()
    | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
-   | Store.Exited _ | Store.Cancelled_before_start _ ->
+   | Store.Exited _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch ->
      fail "second job did not pass its own durable start intent");
   check int "both original jobs were actually created" 2 (effect_count fixture "create");
   check int "both original jobs were actually started" 2 (effect_count fixture "start");

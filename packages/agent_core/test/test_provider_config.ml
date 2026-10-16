@@ -1602,6 +1602,128 @@ let with_repository_model_catalog f =
        Fun.protect f ~finally:restore)
 ;;
 
+let openai_chat_catalog_schema =
+  `Assoc
+    [ "title", `String "ChatCatalogReply"
+    ; "type", `String "object"
+    ; "properties", `Assoc [ "answer", `Assoc [ "type", `String "string" ] ]
+    ; "required", `List [ `String "answer" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let openai_chat_catalog_config ?provider_id ?reasoning_effort model_id base_url =
+  Provider_config.make ~kind:OpenAI_compat ?provider_id ~model_id ~base_url
+    ~request_path:"/chat/completions" ~max_tokens:128
+    ~tool_choice:(Types.Tool "lookup")
+    ~response_format:(Types.JsonSchema openai_chat_catalog_schema)
+    ?reasoning_effort ()
+;;
+
+let test_openai_chat_catalog_wire model_id () =
+  with_repository_model_catalog (fun () ->
+    let config = openai_chat_catalog_config ~provider_id:"openai" model_id
+        "https://api.openai.com/v1" in
+    check_bool "declared Chat schema passes preflight" true
+      (Result.is_ok (Provider_config.validate_output_schema_request config));
+    check_bool "declared Chat named tool passes preflight" true
+      (Result.is_ok (Provider_config.validate_tool_choice_request config));
+    let caps = Provider_config.capabilities_for_config_model config |> Option.get in
+    check_bool "exact row advertises tools" true caps.supports_tools;
+    check_bool "exact row advertises structured output" true caps.supports_structured_output;
+    let tool = `Assoc [ "name", `String "lookup"; "description", `String "Look up a fact"
+        ; "input_schema", `Assoc [ "type", `String "object"; "properties", `Assoc [] ] ] in
+    List.iter (fun stream ->
+      let json = Backend_openai.build_request ~stream ~config
+          ~messages:[ Types.make_message ~role:User [ Text "Find the answer." ] ]
+          ~tools:[ tool ] () |> Yojson.Safe.from_string in
+      let open Yojson.Safe.Util in
+      check_string "exact model reaches Chat body" model_id (json |> member "model" |> to_string);
+      check_bool "Chat messages are present" true (member "messages" json <> `Null);
+      check_bool "Responses input is absent" true (member "input" json = `Null);
+      check_string "Chat schema format" "json_schema"
+        (json |> member "response_format" |> member "type" |> to_string);
+      check_bool "exact schema reaches wire" true
+        (json |> member "response_format" |> member "json_schema" |> member "schema"
+         = openai_chat_catalog_schema);
+      check_bool "strict schema reaches wire" true
+        (json |> member "response_format" |> member "json_schema" |> member "strict" = `Bool true);
+      check_string "named function reaches wire" "lookup"
+        (json |> member "tool_choice" |> member "function" |> member "name" |> to_string);
+      check_int "one actual function definition" 1 (json |> member "tools" |> to_list |> List.length);
+      check_bool "stream field reflects this request" true
+        (member "stream" json = if stream then `Bool true else `Null))
+      [ false; true ])
+;;
+
+let test_openai_chat_catalog_binding_is_explicit () =
+  with_repository_model_catalog (fun () ->
+    List.iter (fun (provider_id, model_id, base_url) ->
+      let config = openai_chat_catalog_config ?provider_id model_id base_url in
+      check_bool "host or model text does not grant a scoped capability" true
+        (Option.is_none (Provider_config.capabilities_for_config_model config));
+      check_bool "undeclared schema is refused before dispatch" true
+        (Result.is_error (Provider_config.validate_output_schema_request config)))
+      [ None, "gpt-5.5", "https://api.openai.com/v1"
+      ; None, "gpt-5.5", "https://unknown-openai-compatible.example/v1"
+      ; Some "unknown", "gpt-5.5", "https://api.openai.com/v1"
+      ; Some "openai", "gpt-5.5-undeclared-snapshot", "https://api.openai.com/v1"
+      ; Some "openai", "gpt-5.5-pro", "https://api.openai.com/v1"
+      ; Some "openai", "gpt-4o-2024-05-13", "https://api.openai.com/v1"
+      ])
+;;
+
+let test_openai_chat_catalog_reasoning_and_output_field () =
+  with_repository_model_catalog (fun () ->
+    List.iter (fun model_id ->
+      List.iter (fun effort ->
+        let config = openai_chat_catalog_config ~provider_id:"openai"
+            ~reasoning_effort:effort model_id "https://api.openai.com/v1" in
+        check_bool "declared effort passes typed preflight" true
+          (Result.is_ok (Provider_config.validate_reasoning_effort_request_typed config));
+        let json = Backend_openai.build_request ~config ~messages:[] () |> Yojson.Safe.from_string in
+        check_string "exact effort reaches Chat wire" (Reasoning_effort.to_string effort)
+          Yojson.Safe.Util.(json |> member "reasoning_effort" |> to_string);
+        check_bool "reasoning budget uses max_completion_tokens" true
+          (Yojson.Safe.Util.member "max_completion_tokens" json = `Int 128);
+        check_bool "deprecated max_tokens is absent" true
+          (Yojson.Safe.Util.member "max_tokens" json = `Null))
+        [ Reasoning_effort.None_; Low; Medium; High; XHigh ];
+      let unsupported = openai_chat_catalog_config ~provider_id:"openai"
+          ~reasoning_effort:Reasoning_effort.Minimal model_id "https://api.openai.com/v1" in
+      check_bool "unsupported minimal effort is refused" true
+        (Result.is_error (Provider_config.validate_reasoning_effort_request_typed unsupported)))
+      [ "gpt-5.5"; "gpt-5.4" ])
+;;
+
+let test_openai_chat_catalog_endpoint_identity () =
+  with_repository_model_catalog (fun () ->
+    let catalog = Model_catalog.global () |> Option.get in
+    let provider = Model_catalog.provider_entry_for_label catalog "openai" |> Option.get in
+    check_string "Chat declares its exact endpoint" "/chat/completions" provider.request_path;
+    check_string "Chat declares its exact base" "https://api.openai.com/v1" provider.base_url;
+    let registered =
+      Provider_registry.find (Provider_registry.default ()) "openai" |> Option.get
+    in
+    check_string "registered Chat endpoint" "/chat/completions" registered.defaults.request_path;
+    check_string "registered Chat base" "https://api.openai.com/v1" registered.defaults.base_url;
+    check_bool "registered Chat requires credentials" true registered.defaults.requires_api_key;
+    check_bool "registered Chat uses the declared codec" true
+      (registered.defaults.kind = OpenAI_compat);
+    List.iter (fun (base_url, request_path, expected) ->
+      Alcotest.(check (option string)) "endpoint keeps its declared provider" (Some expected)
+        (Model_catalog.provider_label_for_endpoint catalog ~kind:OpenAI_compat ~base_url ~request_path))
+      [ "https://api.openai.com/v1", "/chat/completions", "openai"
+      ; "https://api.openai.com/v1", "/images/generations", "openai-image"
+      ; "https://api.openai.com/v1", "/audio/speech", "openai-speech"
+      ; "https://api.openai.com", "/v1/responses", "openai-responses"
+      ];
+    Alcotest.(check (option string)) "base-only legacy identity winner is preserved"
+      (Some "openai-image")
+      (Model_catalog.provider_label_for_base_url catalog ~kind:OpenAI_compat
+         ~base_url:"https://api.openai.com/v1"))
+;;
+
 (* xAI documents the effort ladder per model, not per provider: grok-4.3
    accepts "none" (reasoning can be turned off) and the four levels, while
    grok-4.5 and later cannot disable reasoning. The catalog row must carry that
@@ -2831,6 +2953,15 @@ let () =
             "mimo registered endpoint"
             `Quick
             test_provider_name_of_config_mimo_registered_endpoint
+        ] )
+    ; ( "openai_chat_catalog"
+      , [ Alcotest.test_case "gpt-5.5 Chat schema and tools" `Quick (test_openai_chat_catalog_wire "gpt-5.5")
+        ; Alcotest.test_case "gpt-5.4 Chat schema and tools" `Quick (test_openai_chat_catalog_wire "gpt-5.4")
+        ; Alcotest.test_case "gpt-4o Chat schema and tools" `Quick (test_openai_chat_catalog_wire "gpt-4o")
+        ; Alcotest.test_case "gpt-4o-mini Chat schema and tools" `Quick (test_openai_chat_catalog_wire "gpt-4o-mini")
+        ; Alcotest.test_case "explicit binding and exact model identity" `Quick test_openai_chat_catalog_binding_is_explicit
+        ; Alcotest.test_case "reasoning ladder and output budget wire" `Quick test_openai_chat_catalog_reasoning_and_output_field
+        ; Alcotest.test_case "endpoint identities stay distinct" `Quick test_openai_chat_catalog_endpoint_identity
         ] )
     ; ( "kind_of_string"
       , [ Alcotest.test_case "roundtrip all variants" `Quick test_kind_roundtrip

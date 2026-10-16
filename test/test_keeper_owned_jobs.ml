@@ -3346,7 +3346,10 @@ let test_fixed_async_skill_child ?(child_failure=false) () =
       ~invocation ~clock:(Eio.Stdenv.clock env) () in
   let recovery_started = Mtime_clock.counter () in
   let restore_output = if child_failure then (
-      let stdout = match (load fixture id).outputs with Some (stdout,_) -> stdout
+      let stdout = match (load fixture id).outputs with
+        | Some (Store.Outputs_complete (stdout,_)) -> stdout
+        | Some (Store.Outputs_unavailable {evidence}) ->
+          failf "original completed job output is unavailable: %s" evidence
         | None -> fail "original completed job has no canonical stdout" in
       let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:fixture.base_path) in
       let path = Filename.concat (Filename.concat root (String.sub stdout.sha256 0 2)) stdout.sha256 in

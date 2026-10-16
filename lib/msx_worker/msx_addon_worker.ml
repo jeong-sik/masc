@@ -112,7 +112,8 @@ let observation history () =
       "coverage", `List []])
   | Error
       (( Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved
-       | Msx_lane.Invalid_request _ | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ ) as error) ->
+       | Msx_lane.Invalid_request _ | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _
+       | Msx_lane.Dependency_unavailable _ ) as error) ->
     Error (Msx_lane.error_to_string error)
   | Ok capture ->
       let o = capture.Msx_lane.observation in

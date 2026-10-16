@@ -96,7 +96,7 @@ let test_worker_capture () =
                  boots the shared lane the worker serves with no image. *)
               let boot () = match Msx_lane.load
                   ~ledger_dir:(Filename.concat (Filename.concat base_path ".masc") "msx")
-                  ~roms_dir:None ~cart_path:None ~disk_path:None with
+                  ~boot:Msx_lane.Bare_machine with
                 | Ok _ -> () | Error error -> fail (Msx_lane.error_to_string error) in
               boot ();
               let before,frame = match Msx_lane.capture () with

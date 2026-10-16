@@ -1,7 +1,7 @@
 (* MSX lane tools (RFC-0439 §6.1) — the five tools through the shared worker implementation.
 
-   The machine boots without ROMs (bus reads 0xFF) so the tests need no game
-   image. What they pin: the no-machine refusal, that every refusal declares
+   Most tests start a bare machine (no BIOS, bus reads 0xFF) and the load
+   tests boot a zero-filled BIOS and blank images, so none needs a game image. What they pin: the no-machine refusal, that every refusal declares
    it took no effect, the frame clock, the ledger
    edges with the caller's name, the key vocabulary, the per-call frame cap,
    and that the descriptors and schemas exist. *)
@@ -17,10 +17,16 @@ let dispatch ~base_path ?(agent = "msx-test") name assoc =
   | None -> fail (name ^ " is not an MSX tool")
 ;;
 
+(* A host that exports MSX_ROMS would hand every load without roms_dir its own
+   C-BIOS, and the tests would then depend on the machine they run on. The
+   variable is emptied for the run, which resolves like an unset one. *)
 let with_workspace f =
   let base_path = Filename.temp_dir "masc-msx-tools-" "" in
+  let host_roms = Sys.getenv_opt "MSX_ROMS" in
+  Unix.putenv "MSX_ROMS" "";
   Fun.protect
     ~finally:(fun () ->
+      Unix.putenv "MSX_ROMS" (Option.value host_roms ~default:"");
       Msx_lane.install_activity_observer None;
       ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
       Fs_compat.remove_tree base_path)
@@ -44,12 +50,46 @@ let write_cart carts name content =
     output_string oc content)
 ;;
 
+(* A BIOS of zeros: the core runs it as a stream of NOPs. It lets a test boot an
+   image, which the lane refuses to do without a BIOS. *)
+let blank_bios =
+  Msx_lane.Present
+    { Msx_lane.main = String.make 32768 '\000'
+    ; logo = String.make 16384 '\000'
+    ; sub = String.make 16384 '\000' }
+;;
+
+(* The same BIOS as files, for a tool call that names roms_dir. *)
+let blank_bios_dir base_path =
+  let dir = Filename.concat base_path "blank-bios" in
+  if not (Sys.file_exists dir) then begin
+    Sys.mkdir dir 0o755;
+    List.iter (fun (name, size) ->
+      Out_channel.with_open_bin (Filename.concat dir name) (fun oc ->
+        output_string oc (String.make size '\000')))
+      [ "cbios_main_msx2.rom", 32768; "cbios_logo_msx2.rom", 16384; "cbios_sub.rom", 16384 ]
+  end;
+  dir
+;;
+
+let load_blank_bios_image ~ledger_dir image =
+  Msx_lane.load ~ledger_dir ~boot:(Msx_lane.Boot_image { bios = blank_bios; image })
+;;
+
+(* Boot an image with the BIOS that [roms_dir] holds. *)
+let load_image ~ledger_dir ~roms_dir image =
+  match Msx_lane.read_bios ~dir:roms_dir with
+  | Error e -> Error e
+  | Ok triple ->
+    Msx_lane.load ~ledger_dir ~boot:(Msx_lane.Boot_image { bios = Msx_lane.Present triple; image })
+;;
+
 (* A machine for the tests that exercise something other than load. The load
    tool boots an image and nothing else, so these boot through the lane, with
    no image and no BIOS, and report it the way a load does. *)
 let boot_machine base_path =
   let ledger_dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
-  match Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None with
+  match Msx_lane.load ~ledger_dir ~boot:Msx_lane.Bare_machine with
   | Ok loaded ->
     Msx_machine_tools.of_lane ~tool_name:"masc_msx_load" ~start_time:(Tool_timing.start ())
       (Ok loaded.Msx_lane.observation)
@@ -147,8 +187,7 @@ let test_rendered_pixel_snapshot () =
     0xc3; 0x1b; 0x40 ];
   let cart_path = Filename.concat base_path "pixel-toggle.rom" in
   Out_channel.with_open_bin cart_path (fun oc -> output_bytes oc cart);
-  ignore (require (Msx_lane.load ~ledger_dir ~roms_dir:(Some roms_dir)
-                     ~cart_path:(Some cart_path) ~disk_path:None));
+  ignore (require (load_image ~ledger_dir ~roms_dir (Msx_lane.Cartridge_file cart_path)));
   let first = read () in
   let bytes = String.sub first.rgb 0 (String.length first.rgb) in
   let allocated = Gc.allocated_bytes () in
@@ -449,7 +488,7 @@ let test_inventory () =
        | _ -> fail "inventory has no carts")
     | None -> fail "no inventory" in
   check (list string) "empty inventory is an empty list" [] (listed ());
-  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "hero") ] in
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String "hero") ] in
   check bool "an unknown name is refused" true (rejected r);
   (* Two images in the inventory: a 16KB one named with .rom, a 32KB one without. *)
   Fs_compat.mkdir_p carts;
@@ -459,13 +498,13 @@ let test_inventory () =
     output_string oc (String.make 0x8000 '\000'));
   check (list string) "inventory lists both, sorted" [ "big"; "hero.rom" ] (listed ());
   check bool "reading the inventory loads no machine" true (Option.is_none (Msx_lane.frame ()));
-  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "hero") ] in
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String "hero") ] in
   check bool "a name without .rom resolves" true (is_completed r);
   check (option string) "the cartridge is named by its file" (Some "hero.rom")
     (match member "cartridge" (Tool_result.data r) with Some (`String s) -> Some s | _ -> None);
-  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "big") ] in
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String "big") ] in
   check bool "an exact inventory name resolves" true (is_completed r);
-  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "nope") ] in
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String "nope") ] in
   check bool "an unknown name is still refused" true (rejected r);
   check bool "the refusal names the inventory" true
     (let m = Tool_result.message r in
@@ -473,6 +512,66 @@ let test_inventory () =
        let rec go i = i + ln <= lm && (String.sub m i ln = needle || go (i + 1)) in go 0 in
      has "hero.rom" && has "big")
 ;;
+
+(* A cartridge or disk loaded with no C-BIOS used to "succeed": the machine ran
+   blind, the screen stayed black, and step and press changed nothing. With no
+   BIOS in any source the load is now refused as a missing dependency that names
+   the ROMs, and the machine that was running is left alone. *)
+let test_image_without_bios_is_refused () =
+  with_workspace @@ fun base_path ->
+  let carts = carts_dir base_path in
+  Fs_compat.mkdir_p carts;
+  write_cart carts "hero.rom" (String.make 0x4000 '\000');
+  let load () = dispatch ~base_path "masc_msx_load" [ ("cart", `String "hero") ] in
+  let contains ~needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0 in
+  let refused r =
+    check (option string) "the refusal is a missing dependency"
+      (Some (Tool_result.tool_failure_class_to_string Tool_result.Dependency_unavailable))
+      (Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class r));
+    check bool "it took no effect" true (took_no_effect r);
+    List.iter (fun rom ->
+      check bool ("it names " ^ rom) true (contains ~needle:rom (Tool_result.message r)))
+      [ "cbios_main_msx2.rom"; "cbios_logo_msx2.rom"; "cbios_sub.rom" ] in
+  refused (load ());
+  check bool "no machine was started" true (Option.is_none (Msx_lane.frame ()));
+  (* The same holds with a machine running: it is not replaced by a blind one. *)
+  ignore (boot_machine base_path);
+  let running = incarnation () in
+  refused (load ());
+  check string "the running machine is left alone" running (incarnation ());
+  (* With the BIOS in the Add-on's inventory, the same call boots. *)
+  let bios = Filename.concat (Filename.dirname carts) "bios" in
+  Fs_compat.mkdir_p bios;
+  List.iter (fun (name, size) -> write_cart bios name (String.make size '\000'))
+    [ "cbios_main_msx2.rom", 32768; "cbios_logo_msx2.rom", 16384; "cbios_sub.rom", 16384 ];
+  check bool "the inventory BIOS lets the same load boot" true (is_completed (load ()))
+
+(* At the lane, the BIOS is a value. Absent refuses an image; the only way to
+   start a machine without one is the Bare_machine constructor. *)
+let test_lane_boot_needs_a_bios_value () =
+  with_workspace @@ fun base_path ->
+  let ledger_dir = Filename.concat base_path "ledger" in
+  let cart = Filename.concat base_path "hero.rom" in
+  Out_channel.with_open_bin cart (fun oc -> output_string oc (String.make 0x4000 '\000'));
+  List.iter (fun (label, image) ->
+    match Msx_lane.load ~ledger_dir ~boot:(Msx_lane.Boot_image { bios = Msx_lane.Absent; image }) with
+    | Error (Msx_lane.Dependency_unavailable message) ->
+      check bool (label ^ " names the main ROM") true
+        (let needle = "cbios_main_msx2.rom" in
+         let n = String.length needle in
+         let rec go i = i + n <= String.length message && (String.sub message i n = needle || go (i + 1)) in
+         go 0)
+    | Error e -> fail (label ^ ": wrong refusal " ^ Msx_lane.error_to_string e)
+    | Ok _ -> fail (label ^ ": an image must not boot without a BIOS"))
+    [ "a cartridge", Msx_lane.Cartridge_file cart; "a disk", Msx_lane.Disk_file cart ];
+  check bool "the refusals started no machine" true (Option.is_none (Msx_lane.frame ()));
+  (match Msx_lane.load ~ledger_dir ~boot:Msx_lane.Bare_machine with
+   | Ok _ -> ()
+   | Error e -> fail (Msx_lane.error_to_string e));
+  check bool "a bare machine is started by naming it" true (Option.is_some (Msx_lane.frame ()))
 
 (* A load replaces the running machine and truncates its input ledger. With no
    image named it used to do exactly that and call the result an inventory, so
@@ -560,7 +659,7 @@ let test_cart_is_a_name_never_a_path () =
   Sys.mkdir (Filename.concat carts "folder.rom") 0o755;
   Unix.symlink "/nonexistent-target" (Filename.concat carts "dangling.rom");
   let load name =
-    dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String name) ] in
+    dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String name) ] in
   check bool "an inventory name loads" true (is_completed (load "hero"));
   let loaded = incarnation () in
   List.iter (fun (label, name) ->
@@ -594,7 +693,7 @@ let test_arcade_relay_posts_once_per_medium_change () =
   with_board base_path @@ fun () ->
   ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
   let load name =
-    dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String name) ]
+    dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String name) ]
   in
   let posts = list string in
   check posts "the board holds no arcade post before the first load" [] (arcade_posts ());
@@ -643,7 +742,7 @@ let test_load_activity_precedes_board_relay () =
           (Msx_machine_tools.handle_load ~tool_name:"masc_msx_load"
              ~start_time:(Tool_timing.start ()) ~base_path ~agent_name:"msx-test"
              ~after_load:(fun () -> notified := true) ~relay
-             (`Assoc [ ("roms_dir", `String ""); ("cart", `String "hero") ]));
+             (`Assoc [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String "hero") ]));
         false
       with Exit -> true
     in
@@ -667,7 +766,7 @@ let test_concurrent_loads_announce_the_medium_once () =
   let load () =
     Atomic.incr arrived;
     while Atomic.get arrived < racers do Domain.cpu_relax () done;
-    Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:(Some cart_path) ~disk_path:None
+    load_blank_bios_image ~ledger_dir (Msx_lane.Cartridge_file cart_path)
   in
   let transitions =
     List.init racers (fun _ -> Domain.spawn load)
@@ -700,13 +799,13 @@ let test_disk_load () =
     [ Filename.concat base_path ".masc"; Filename.dirname carts; carts ];
   Out_channel.with_open_bin (Filename.concat carts "war.dsk") (fun oc ->
     output_string oc (String.make (720 * 1024) '\xf9'));
-  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "war") ] in
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String "war") ] in
   check bool "a name ending in .dsk resolves and loads" true (is_completed r);
   check (option string) "the disk is named under disk" (Some "war.dsk")
     (match member "disk" (Tool_result.data r) with Some (`String s) -> Some s | _ -> None);
   check (option string) "no cartridge is claimed while a disk runs" None
     (match member "cartridge" (Tool_result.data r) with Some (`String s) -> Some s | _ -> None);
-  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "war.dsk") ] in
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String "war.dsk") ] in
   check bool "the full file name resolves too" true (is_completed r)
 ;;
 
@@ -732,7 +831,7 @@ let test_rejected_disk_preserves_machine () =
   List.iter (fun size ->
     let disk_path = Filename.concat base_path (Printf.sprintf "short-%d.dsk" size) in
     Out_channel.with_open_bin disk_path (fun oc -> output_string oc (String.make size '\000'));
-    (match Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:(Some disk_path) with
+    (match load_blank_bios_image ~ledger_dir (Msx_lane.Disk_file disk_path) with
      | Error (Msx_lane.Invalid_request _) -> ()
      | Error e -> fail (Msx_lane.error_to_string e)
      | Ok _ -> fail "unreadable boot sector must reject load");
@@ -742,7 +841,7 @@ let test_rejected_disk_preserves_machine () =
   Out_channel.with_open_bin (Filename.concat (carts_dir base_path) "short-0.dsk") (fun oc ->
     output_string oc "");
   let failed_load = dispatch ~base_path "masc_msx_load"
-    [ ("roms_dir", `String ""); ("cart", `String "short-0.dsk") ]
+    [ ("roms_dir", `String (blank_bios_dir base_path)); ("cart", `String "short-0.dsk") ]
   in
   check bool "public load reports disk boot rejection" true (rejected failed_load);
   check_preserved ()
@@ -849,7 +948,7 @@ let disk_swap_fixture base_path =
   Bytes.fill disk 512 512 'B';
   Out_channel.with_open_bin b (fun oc -> output_bytes oc disk);
   let ledger_dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
-  let loaded = Msx_lane.load ~ledger_dir ~roms_dir:(Some roms) ~cart_path:None ~disk_path:(Some a)
+  let loaded = load_image ~ledger_dir ~roms_dir:roms (Msx_lane.Disk_file a)
     |> lane_observation "synthetic disk boot" in
   check (option string) "disk A is mounted" (Some "A.dsk") loaded.observation.disk;
   ledger_dir, a, b
@@ -950,12 +1049,12 @@ let test_disk_export_survives_fresh_boot () =
   Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
   ignore (Msx_lane.eject () |> lane_observation "eject");
   check bool "missing machine refused" true (rejected (export "no-machine.dsk"));
-  ignore (Msx_lane.load ~ledger_dir ~roms_dir:(Some (Filename.concat base_path "synthetic-bios"))
-    ~cart_path:None ~disk_path:(Some a) |> lane_observation "fresh boot");
+  ignore (load_image ~ledger_dir ~roms_dir:(Filename.concat base_path "synthetic-bios")
+    (Msx_lane.Disk_file a) |> lane_observation "fresh boot");
   check bool "fresh boot loads exported catalog disk" true
     (is_completed (call "masc_msx_change_disk" ["disk", `String "campaign-data.dsk"]));
   read_guest_disk '!';
-  ignore (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None
+  ignore (Msx_lane.load ~ledger_dir ~boot:Msx_lane.Bare_machine
     |> lane_observation "BIOS-only boot");
   check bool "no disk refused" true (rejected (export "no-disk.dsk"))
 ;;
@@ -1113,11 +1212,10 @@ let test_bitmap_mode_classification () =
    and through the tool (a runtime failure carrying that name). The
    inventory chain and the [bios] report field are read from the same
    decision (F363): an inventory with only the main ROM is still the source
-   the load refuses, and no inventory at all reports bios=false. *)
+   the load refuses, and no inventory at all is a missing dependency. *)
 let test_incomplete_bios_triple_is_refused () =
   with_workspace @@ fun base_path ->
   ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
-  let ledger_dir = Filename.concat base_path "ledger" in
   let zeros = Bytes.make 16384 '\000' in
   let write_roms dir names =
     Sys.mkdir dir 0o755;
@@ -1127,10 +1225,10 @@ let test_incomplete_bios_triple_is_refused () =
       names
   in
   let refusal dir =
-    match Msx_lane.load ~ledger_dir ~roms_dir:(Some dir) ~cart_path:None ~disk_path:None with
+    match Msx_lane.read_bios ~dir with
     | Error (Msx_lane.Unreadable message) -> message
     | Error e -> fail ("wrong refusal: " ^ Msx_lane.error_to_string e)
-    | Ok _ -> fail "an incomplete BIOS triple must not load"
+    | Ok _ -> fail "an incomplete BIOS triple must not read"
   in
   let contains ~needle haystack =
     let n = String.length needle and h = String.length haystack in
@@ -1505,10 +1603,9 @@ let test_peek_address_bounds () =
 let test_load_file_failures_are_typed () =
   with_workspace @@ fun base_path ->
   let ledger_dir = Filename.concat base_path "ledger" in
-  let load ?(ledger_dir = ledger_dir) ~cart_path ~disk_path () =
-    Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path ~disk_path
-  in
-  (match load ~cart_path:None ~disk_path:None () with
+  let load ?(ledger_dir = ledger_dir) boot = Msx_lane.load ~ledger_dir ~boot in
+  let image image = Msx_lane.Boot_image { bios = blank_bios; image } in
+  (match load Msx_lane.Bare_machine with
    | Ok _ -> ()
    | Error e -> fail (Msx_lane.error_to_string e));
   let loaded = incarnation () in
@@ -1520,12 +1617,12 @@ let test_load_file_failures_are_typed () =
   in
   let directory = Filename.concat base_path "a-directory" in
   Sys.mkdir directory 0o755;
-  unreadable "a directory as the cartridge" (load ~cart_path:(Some directory) ~disk_path:None ());
-  unreadable "a directory as the disk" (load ~cart_path:None ~disk_path:(Some directory) ());
+  unreadable "a directory as the cartridge" (load (image (Msx_lane.Cartridge_file directory)));
+  unreadable "a directory as the disk" (load (image (Msx_lane.Disk_file directory)));
   let blocked = Filename.concat base_path "ledger-is-a-file" in
   Out_channel.with_open_bin blocked (fun oc -> output_string oc "not a directory");
   unreadable "a ledger directory that is a file"
-    (load ~ledger_dir:blocked ~cart_path:None ~disk_path:None ());
+    (load ~ledger_dir:blocked Msx_lane.Bare_machine);
   check string "the loaded machine is still installed" loaded (incarnation ());
   check bool "its ledger is unchanged" true (ledger_before = Msx_lane.ledger ())
 ;;
@@ -1694,6 +1791,8 @@ let () =
         ; test_case "cartridge inventory" `Quick test_inventory
         ; test_case "a cart is a name, never a path" `Quick test_cart_is_a_name_never_a_path
         ; test_case "a load without media changes nothing" `Quick test_load_without_media_changes_nothing
+        ; test_case "an image without a BIOS is refused" `Quick test_image_without_bios_is_refused
+        ; test_case "the lane boots an image only with a BIOS value" `Quick test_lane_boot_needs_a_bios_value
         ; test_case "rendered snapshot reuse and invalidation" `Quick test_rendered_pixel_snapshot
         ; test_case "arcade relay posts once per medium change" `Quick
             test_arcade_relay_posts_once_per_medium_change

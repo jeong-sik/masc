@@ -42,8 +42,20 @@ let test_stdio_machine_lifecycle () =
   Unix.mkdir carts 0o700;
   Out_channel.with_open_bin (Filename.concat carts "fixture.rom") (fun channel ->
     output_string channel "inventory-only fixture");
+  (* The worker takes its C-BIOS from the volume's bios/ inventory: three
+     zero-filled ROMs stand in for it. A host MSX_ROMS would override the
+     inventory, so it is emptied for the run. *)
+  let bios = Filename.concat msx "bios" in
+  Unix.mkdir bios 0o700;
+  List.iter (fun (name, size) ->
+    Out_channel.with_open_bin (Filename.concat bios name) (fun channel ->
+      output_string channel (String.make size '\000')))
+    ["cbios_main_msx2.rom", 32768; "cbios_logo_msx2.rom", 16384; "cbios_sub.rom", 16384];
+  let host_roms = Sys.getenv_opt "MSX_ROMS" in
+  Unix.putenv "MSX_ROMS" "";
   Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
   Fun.protect ~finally:(fun () ->
+    Unix.putenv "MSX_ROMS" (Option.value host_roms ~default:"");
     ignore (Msx_lane.eject ());
     Msx_lane.install_activity_observer None;
     remove_owned_tree base_path) (fun () ->

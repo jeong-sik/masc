@@ -76,7 +76,8 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
     let code = match e with
       | Msx_lane.Activity_disabled -> "activity_disabled"
       | Msx_lane.Activity_unobserved | Msx_lane.No_machine | Msx_lane.Invalid_request _
-      | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ -> "activity_unobserved" in
+      | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _
+      | Msx_lane.Dependency_unavailable _ -> "activity_unobserved" in
     reject ~tool_name ~start_time (Msx_lane.error_to_string e)
     |> Tool_result.with_metadata (`Assoc ["io.github.jeong-sik/masc.machine.errorCode", `String code])
   | Error (Msx_lane.No_machine as e) ->
@@ -91,6 +92,9 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message
   | Error (Msx_lane.Unreadable _ as e) ->
     refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
+      (Msx_lane.error_to_string e)
+  | Error (Msx_lane.Dependency_unavailable _ as e) ->
+    refuse ~class_:Tool_result.Dependency_unavailable ~tool_name ~start_time
       (Msx_lane.error_to_string e)
 ;;
 
@@ -131,10 +135,10 @@ type bios_source =
   | Argument of string (* the caller's roms_dir *)
   | Env of string (* MSX_ROMS through the config floor *)
   | Inventory of string (* .masc/msx/bios/ holding the main ROM *)
-  | None_available (* the machine boots without a BIOS; the bus reads 0xFF *)
+  | None_available (* no source names a BIOS; a load that needs one is refused *)
 
 (* roms_dir argument, then MSX_ROMS, then the bios/ inventory when it holds
-   the main ROM, else no BIOS at all. *)
+   the main ROM, else no source at all. *)
 let resolve_roms_dir ~base_path args =
   match String.trim (get_string args "roms_dir" "") with
   | "" -> (
@@ -150,9 +154,13 @@ let resolve_roms_dir ~base_path args =
   | dir -> Argument dir
 ;;
 
-let roms_dir_of_source = function
-  | Argument dir | Env dir | Inventory dir -> Some dir
-  | None_available -> None
+(* The BIOS the source names, read whole: [Absent] only when no source names
+   one. A source that names a directory missing a ROM is an error naming the
+   file, never a downgrade to no BIOS. *)
+let bios_of_source = function
+  | Argument dir | Env dir | Inventory dir ->
+    Result.map (fun triple -> Msx_lane.Present triple) (Msx_lane.read_bios ~dir)
+  | None_available -> Ok Msx_lane.Absent
 ;;
 
 (* A cart is a name in carts/, with or without .rom/.dsk. It is never a path:
@@ -214,7 +222,7 @@ let is_dsk_path path =
    reloads the disk already in the drive says nothing, and every post is a
    board_signal to the whole fleet. The decision reads only the transition
    the lane captured under its lock, so two loads that serialised there
-   announce the medium once between them. A BIOS-only boot announces
+   announce the medium once between them. A bare machine announces
    nothing. *)
 let arcade_announcement ~agent_name
     ({ Msx_lane.before; after } : Msx_lane.transition) =
@@ -236,8 +244,6 @@ let arcade_announcement ~agent_name
 
 let handle_load ?(after_load = fun () -> ()) ~relay ~tool_name
     ~start_time ~base_path ~agent_name args =
-  let bios_source = resolve_roms_dir ~base_path args in
-  let roms_dir = roms_dir_of_source bios_source in
   let media =
     match get_string_opt args "cart" with
     | Some n when String.trim n <> "" -> Some (resolve_cart ~base_path n)
@@ -256,18 +262,30 @@ let handle_load ?(after_load = fun () -> ()) ~relay ~tool_name
      | Error _ -> ());
     Result.map (fun (l : Msx_lane.loaded) -> l.Msx_lane.observation) loaded
   in
+  (* The lane names the ROMs it lacks; this adds where an operator puts them. *)
+  let explain_missing_bios = function
+    | Error (Msx_lane.Dependency_unavailable message) ->
+      Error (Msx_lane.Dependency_unavailable
+        (Printf.sprintf "%s. Pass roms_dir, set MSX_ROMS, or put them in %s" message
+           (bios_dir ~base_path)))
+    | Ok _ | Error ( Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved
+                   | Msx_lane.No_machine | Msx_lane.Invalid_request _
+                   | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ ) as other -> other
+  in
+  let boot image =
+    match resolve_roms_dir ~base_path args |> bios_of_source with
+    | Error e -> of_lane ~tool_name ~start_time (Error e)
+    | Ok bios ->
+      of_lane ~tool_name ~start_time
+        (relayed
+           (explain_missing_bios
+              (Msx_lane.load ~ledger_dir:(msx_dir ~base_path)
+                 ~boot:(Msx_lane.Boot_image { bios; image }))))
+  in
   match media with
   | Some (Error message) -> reject ~tool_name ~start_time message
-  | Some (Ok path) when is_dsk_path path ->
-    of_lane ~tool_name ~start_time
-      (relayed
-         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-            ~cart_path:None ~disk_path:(Some path)))
-  | Some (Ok path) ->
-    of_lane ~tool_name ~start_time
-      (relayed
-         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-            ~cart_path:(Some path) ~disk_path:None))
+  | Some (Ok path) when is_dsk_path path -> boot (Msx_lane.Disk_file path)
+  | Some (Ok path) -> boot (Msx_lane.Cartridge_file path)
   | None ->
     (* A load replaces the running machine and truncates its input ledger, so
        it never runs without something to load. The inventory is read through
@@ -473,7 +491,8 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
              ; ("sha256", `String info.sha256)
              ]))
         ()
-    | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved) as e) ->
+    | Error ((Msx_lane.Invalid_request _ | Msx_lane.No_machine | Msx_lane.Activity_disabled | Msx_lane.Activity_unobserved
+             | Msx_lane.Dependency_unavailable _) as e) ->
       reject ~tool_name ~start_time (Msx_lane.error_to_string e)
     | Error (Msx_lane.Effect_unknown message) ->
       Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time message

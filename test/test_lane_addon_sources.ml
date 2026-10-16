@@ -283,7 +283,7 @@ let test_native_input_history_is_frozen_with_capture () = with_store (fun dir st
     Msx_lane.install_activity_observer None;
     ignore (Msx_lane.eject ())) (fun () ->
     Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-    ignore (msx (Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None));
+    ignore (msx (Msx_lane.load ~ledger_dir ~boot:Msx_lane.Bare_machine));
     let capture () =
       let c = msx (Msx_lane.capture_with_identity ()) in
       let snapshot = retained_machine_output ~store ~machine:Masc.Machine_lane.Msx

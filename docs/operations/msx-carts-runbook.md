@@ -22,7 +22,9 @@ The C-BIOS ROMs the machine boots from are separate. The worker takes them from
 the `roms_dir` argument, else from `MSX_ROMS`, else from
 `/state/.masc/msx/bios/` when it holds `cbios_main_msx2.rom`. The directory must
 hold all three (`cbios_main_msx2.rom`, `cbios_logo_msx2.rom`, `cbios_sub.rom`);
-a load names the first one missing and refuses.
+a load names the first one missing and refuses. With no source at all the load
+is refused too, naming the three ROMs: a cartridge or disk never starts on a
+machine that has no BIOS to run it.
 
 ## What the machine accepts
 

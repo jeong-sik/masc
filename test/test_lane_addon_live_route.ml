@@ -47,7 +47,7 @@ let with_machine f =
       Msx_lane.install_activity_observer None;
       eject_if_loaded ()) (fun () ->
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-      ok "load" (Lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None);
+      ok "load" (Lane.load ~ledger_dir ~boot:Lane.Bare_machine);
       f ~dir ~ledger_dir))
 
 let mark () =
@@ -126,14 +126,15 @@ let test_counter_moves_on_every_change () =
       (match Lane.live ~since:(Some { before_eject with Lane.count = c }) with
        | Lane.Nothing_loaded -> true
        | Lane.Unchanged _ | Lane.Changed _ -> false);
-    ok "reload" (Lane.load ~ledger_dir ~roms_dir:None ~cart_path:None ~disk_path:None);
+    ok "reload" (Lane.load ~ledger_dir ~boot:Lane.Bare_machine);
     let c = rises "eject and a new load (the count is never reused)" c in
-    (* A press that raises: the ledger file is now a directory, so recording
-       the first edge raises before any frame runs, and the keys go back up.
+    (* A press whose ledger write fails: the ledger file is now a directory, so
+       recording the first edge fails before any frame runs, and the keys go
+       back up. The press answers with an unknown effect rather than raising.
        Nothing a watcher sees moved, so the count stays. No test can make a
-       later edge fail; a raise after frames ran finds the count moved because
-       the enclosing operation publishes its final mark when it releases the
-       machine lock. *)
+       later edge fail; a failure after frames ran finds the count moved
+       because the enclosing operation publishes its final mark when it
+       releases the machine lock. *)
     let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
     Sys.remove ledger_path;
     Sys.mkdir ledger_path 0o755;
@@ -141,8 +142,8 @@ let test_counter_moves_on_every_change () =
        Lane.press ~who:"live-test" ~keys:[space; return] ~hold_frames:1 ~step_frames:2
          ~sequence:true
      with
-     | exception Sys_error _ -> ()
-     | Ok _ | Error _ -> fail "a press over a directory ledger must raise");
+     | Error (Lane.Effect_unknown _) -> ()
+     | Error _ | Ok _ -> fail "a press over a directory ledger must be an unknown effect");
     stays "a press that raised before any frame" c;
     published_matches "a press that raised before any frame")
 

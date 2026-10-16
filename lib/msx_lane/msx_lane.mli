@@ -87,6 +87,10 @@ type error =
       (** a file that is there and will not read: a ROM, a cartridge, a
           checkpoint. A path that does not exist is [Invalid_request] --
           the caller named it. *)
+  | Dependency_unavailable of string
+      (** something the request needs is not installed, such as the C-BIOS a
+          cartridge or disk boots from. Nothing was started; the message names
+          what is missing. *)
 
 val error_to_string : error -> string
 
@@ -125,7 +129,7 @@ type transition = {
 (** The medium a load replaced and the one it installed, both read inside
     the critical section the load commits under. A medium is the disk when
     one is in the drive (the slot is empty then), else the cartridge; [None]
-    with no machine or a BIOS-only boot. Two loads that serialise on the lane
+    with no machine or a bare machine. Two loads that serialise on the lane
     see distinct transitions: the second one's [before] is the first one's
     [after]. *)
 
@@ -134,30 +138,51 @@ type loaded = {
   transition : transition;
 }
 
-val load :
-  ledger_dir:string ->
-  roms_dir:string option ->
-  cart_path:string option ->
-  disk_path:string option ->
-  (loaded, error) result
-(** Creates the workspace machine, replacing any previous one. [Some roms_dir]
-    holds the C-BIOS triple (cbios_main_msx2 / cbios_logo_msx2 / cbios_sub),
-    all three required -- a directory missing one is [Unreadable] naming that
-    file, never a machine with an empty ROM in it. [None] means no BIOS and
-    the bus reads 0xFF. The ledger is
+type bios_triple = { main : string; logo : string; sub : string }
+(** The three C-BIOS ROM images, as bytes: main, logo and sub, in the order
+    the core wants them. *)
+
+(** Whether the C-BIOS is there to boot from. *)
+type bios =
+  | Present of bios_triple
+  | Absent  (** none was found in any source *)
+
+type image =
+  | Cartridge_file of string  (** a cartridge image, into the slot *)
+  | Disk_file of string
+      (** a raw .dsk floppy image, into drive A: and booted through the
+          warm-up replay *)
+
+(** What a load starts. *)
+type boot =
+  | Boot_image of { bios : bios; image : image }
+      (** a game: needs a C-BIOS to run. With [Absent] the load is refused as
+          {!Dependency_unavailable} naming the ROMs it lacks, rather than
+          starting a machine that runs blind. *)
+  | Bare_machine
+      (** no C-BIOS and no image: the bus reads 0xFF. A machine to exercise
+          the lane's own calls on. Nothing in the server asks for it; it is a
+          constructor for tests, so a BIOS-less boot is always written out. *)
+
+val read_bios : dir:string -> (bios_triple, error) result
+(** Reads [cbios_main_msx2.rom], [cbios_logo_msx2.rom] and [cbios_sub.rom] from
+    [dir]. All three are required: a directory missing one is [Unreadable]
+    naming the first that is absent, never a machine with an empty ROM in it. *)
+
+val load : ledger_dir:string -> boot:boot -> (loaded, error) result
+(** Creates the workspace machine, replacing any previous one. The ledger is
     [ledger_dir/ledger.jsonl], truncated: a new machine starts a new ledger.
+
+    A [Disk_file] boots through the warm-up replay: {!disk_boot_frames} of
+    C-BIOS, then [Msx.boot_disk] re-enters the image's boot sector with the
+    loader running -- the path a game's loader reaches its title screen on (the
+    cart-INIT path the core also wires reboots mid-boot). A rejected disk boot
+    preserves the previous machine and ledger. Successful loading alone is not
+    evidence that a game reaches an interactive screen.
+
     A media file or the ledger that cannot be read or created (a directory in
     place of a file, a permission) is [Unreadable]; the previous machine and
-    ledger are untouched.
-
-    [disk_path] plugs a raw .dsk floppy image into drive A and boots it
-    through the warm-up replay: {!disk_boot_frames} of C-BIOS, then
-    [Msx.boot_disk] re-enters the image's boot sector with the loader
-    running — the path a game's loader reaches its title screen on (the
-    cart-INIT path the core also wires reboots mid-boot). A disk therefore
-    wins over [cart_path] — the slot is one, and the replay wants it empty.
-    A rejected disk boot preserves the previous machine and ledger. Successful
-    loading alone is not evidence that a game reaches an interactive screen. *)
+    ledger are untouched. *)
 
 val eject : unit -> (unit, error) result
 

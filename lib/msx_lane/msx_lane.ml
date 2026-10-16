@@ -29,13 +29,14 @@ type error =
   | Invalid_request of string
   | Effect_unknown of string
   | Unreadable of string
+  | Dependency_unavailable of string
 
 let error_to_string = function
   | Activity_disabled -> "machines.msx is off; enable it before new machine work"
   | Activity_unobserved -> "Machine activity configuration is unavailable"
   | No_machine -> "no MSX machine is loaded: call masc_msx_load first"
   | Invalid_request message -> message
-  | Unreadable message | Effect_unknown message -> message
+  | Unreadable message | Effect_unknown message | Dependency_unavailable message -> message
 ;;
 
 let ( let* ) = Result.bind
@@ -354,24 +355,33 @@ let rec mkdir_p dir =
   end
 ;;
 
-(* No directory means no BIOS: the bus reads 0xFF. A directory must hold the
-   whole C-BIOS triple -- a missing logo or sub ROM used to board as an empty
-   string and the machine booted with a hole in it, which is no evidence of
-   anything. The first file that is not there names the refusal. *)
-let load_roms (roms_dir : string option) =
-  match roms_dir with
-  | None -> Ok []
-  | Some dir -> (
-    match List.find_opt (fun f -> not (Sys.file_exists (Filename.concat dir f))) bios_files with
-    | Some missing -> Error (Unreadable (Printf.sprintf "no %s in %s" missing dir))
-    | None ->
-      List.fold_left
-        (fun acc f ->
-          let* read = acc in
-          let* bytes = read_file_result (Filename.concat dir f) in
-          Ok (bytes :: read))
-        (Ok []) bios_files
-      |> Result.map List.rev)
+type bios_triple = { main : string; logo : string; sub : string }
+
+type bios =
+  | Present of bios_triple
+  | Absent
+
+type image =
+  | Cartridge_file of string
+  | Disk_file of string
+
+type boot =
+  | Boot_image of { bios : bios; image : image }
+  | Bare_machine
+
+(* A directory must hold the whole C-BIOS triple -- a missing logo or sub ROM
+   used to board as an empty string and the machine booted with a hole in it,
+   which is no evidence of anything. The first file that is not there names
+   the refusal. *)
+let read_bios ~dir =
+  match List.find_opt (fun f -> not (Sys.file_exists (Filename.concat dir f))) bios_files with
+  | Some missing -> Error (Unreadable (Printf.sprintf "no %s in %s" missing dir))
+  | None ->
+    let read f = read_file_result (Filename.concat dir f) in
+    let* main = read "cbios_main_msx2.rom" in
+    let* logo = read "cbios_logo_msx2.rom" in
+    let* sub = read "cbios_sub.rom" in
+    Ok { main; logo; sub }
 ;;
 
 let load_cart = function
@@ -438,16 +448,18 @@ let fresh_ledger ledger_dir =
   with Sys_error message -> Error (Unreadable message)
 ;;
 
-let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
-  let* () = require_activity () in
+(* The machine installs from a BIOS (three ROMs, or none for a bare machine)
+   and at most one image. A disk wins over a cartridge in the old call shape;
+   the image type carries only one, so that rule is gone. *)
+let install ~ledger_dir ~roms ~cart_path ~disk_path =
   locked (fun () ->
     (* Read under the lock the load commits under: two loads that serialise
        here see the machine each one replaced, not the one both started
        from. *)
     let before = medium_of !state in
-    match load_roms roms_dir, load_cart cart_path, load_disk disk_path with
-    | Error e, _, _ | _, Error e, _ | _, _, Error e -> Error e
-    | Ok roms, Ok cart, Ok disk ->
+    match load_cart cart_path, load_disk disk_path with
+    | Error e, _ | _, Error e -> Error e
+    | Ok cart, Ok disk ->
       let m = Msx.create ~machine:{ Msx.ram_kb = 512; vram_kb = 128; roms } in
       (* A disk wins over a cartridge: the image boots through the warm-up
          replay, which wants the cartridge slot empty -- a C-BIOS boot that
@@ -491,6 +503,25 @@ let load ~ledger_dir ~(roms_dir : string option) ~cart_path ~disk_path =
         mark_change ();
         Ok { observation = observe st
            ; transition = { before; after = medium_of (Some st) } })
+;;
+
+let bios_missing_message image =
+  let name = match image with Cartridge_file path | Disk_file path -> Filename.basename path in
+  Printf.sprintf
+    "no C-BIOS is available, so %s cannot boot: it needs %s"
+    name (String.concat ", " bios_files)
+;;
+
+let load ~ledger_dir ~boot =
+  let* () = require_activity () in
+  match boot with
+  | Bare_machine -> install ~ledger_dir ~roms:[] ~cart_path:None ~disk_path:None
+  | Boot_image { bios = Absent; image } -> Error (Dependency_unavailable (bios_missing_message image))
+  | Boot_image { bios = Present { main; logo; sub }; image } ->
+    let roms = [ main; logo; sub ] in
+    (match image with
+     | Cartridge_file path -> install ~ledger_dir ~roms ~cart_path:(Some path) ~disk_path:None
+     | Disk_file path -> install ~ledger_dir ~roms ~cart_path:None ~disk_path:(Some path))
 ;;
 
 let eject () =

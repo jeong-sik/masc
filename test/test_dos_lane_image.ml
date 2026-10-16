@@ -173,6 +173,43 @@ let test_the_check_agrees_with_the_loader_on_exe () =
   check bool "the sample holds both outcomes" true (!refused_count > 0 && !refused_count < !checked)
 ;;
 
+(* The reason the COM bound sits where it does, shown with the real loader:
+   a COM of 65,278 bytes keeps its last byte, and one byte more loses its
+   tail to the return word at PSP:FFFE (linear address 0x1FFFE). The loader
+   places both without raising. *)
+let test_the_com_bound_is_where_the_loader_starts_overwriting_the_image () =
+  let image_start = 0x10100 in
+  let last_byte_of length =
+    let machine = Dos_machine.create () in
+    Dos_machine.load_com machine (String.make length '\x90');
+    Dos_machine.mem_read machine (image_start + length - 1)
+  in
+  check int "the bound is 65,278 bytes" 65_278 Dos_lane.max_com_bytes;
+  check int "an image of 65,278 bytes keeps its last byte" 0x90 (last_byte_of 65_278);
+  check int "an image of 65,279 bytes has its last byte overwritten" 0x00 (last_byte_of 65_279);
+  check bool "so the lane refuses 65,279 and accepts 65,278" true
+    (Result.is_ok (Dos_lane.image_of_bytes ~program_name:"a.com" (String.make 65_278 '\x90'))
+     && Result.is_error
+          (Dos_lane.image_of_bytes ~program_name:"a.com" (String.make 65_279 '\x90')))
+;;
+
+(* "ZM" is a DOS executable signature. The core's EXE loader takes MZ only, so
+   a ZM file goes to the COM loader and runs its header as code. *)
+let test_zm_is_not_loaded_as_a_com () =
+  let zm = "ZM" ^ String.make 100 '\x90' in
+  check bool "the EXE loader refuses it" true
+    (match Dos_machine.load_exe (Dos_machine.create ()) zm with
+     | () -> false
+     | exception Invalid_argument _ -> true);
+  check bool "the lane refuses it, small or large" true
+    (Result.is_error (Dos_lane.image_of_bytes ~program_name:"z.exe" zm)
+     && Result.is_error
+          (Dos_lane.image_of_bytes ~program_name:"z.exe" ("ZM" ^ String.make 100_000 '\x90')));
+  check bool "a COM whose second byte is M or whose first is Z alone is not a ZM" true
+    (Result.is_ok (Dos_lane.image_of_bytes ~program_name:"c.com" "ZX")
+     && Result.is_ok (Dos_lane.image_of_bytes ~program_name:"c.com" "\x90M"))
+;;
+
 let test_the_check_agrees_with_the_loader_at_the_memory_edge () =
   List.iter
     (fun delta ->
@@ -181,9 +218,8 @@ let test_the_check_agrees_with_the_loader_at_the_memory_edge () =
       let accepted = Result.is_ok (Dos_lane.image_of_bytes ~program_name:"edge.exe" image) in
       check bool (Printf.sprintf "payload bound %+d" delta) expected accepted)
     [ -2; -1; 0; 1; 2 ];
-  (* A COM bound is stricter than the loader: past it the loader still places
-     the bytes, but the stack word overwrites the end of the image. What the
-     check accepts the loader must place. *)
+  (* The COM bound is stricter than the loader (see the test above): what the
+     check accepts, the loader must place. *)
   List.iter
     (fun delta ->
       let image = String.make (Dos_lane.max_com_bytes + delta) '\x90' in
@@ -202,6 +238,9 @@ let () =
         ; test_case "the boundary images load" `Quick test_the_boundary_images_load
         ; test_case "the check agrees with the loader on EXE" `Quick
             test_the_check_agrees_with_the_loader_on_exe
+        ; test_case "the COM bound is where the loader starts overwriting the image" `Quick
+            test_the_com_bound_is_where_the_loader_starts_overwriting_the_image
+        ; test_case "ZM is not loaded as a COM" `Quick test_zm_is_not_loaded_as_a_com
         ; test_case "the check agrees with the loader at the memory edge" `Quick
             test_the_check_agrees_with_the_loader_at_the_memory_edge
         ] )

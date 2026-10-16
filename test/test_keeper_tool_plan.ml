@@ -793,6 +793,11 @@ let test_composable_output_registry_is_closed () =
     ; "Read"
     ; "Write"
     ; "keeper_artifact_read"
+    ; "keeper_composition_result"
+    ; "keeper_job_cancel"
+    ; "keeper_job_result"
+    ; "keeper_job_start"
+    ; "keeper_job_status"
     ; "keeper_lane_status"
     ; "keeper_portrait_read"
       (* keeper_spawn answers a start with the handle every later spawn call

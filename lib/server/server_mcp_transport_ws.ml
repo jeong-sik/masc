@@ -953,6 +953,17 @@ let session_count () =
   with_sessions_rw (fun () ->
     Hashtbl.length sessions)
 
+(** Non-blocking session count for fatal paths: the mutex is only ever
+    held across short hashtable operations, but a fatal handler must not
+    wait on another domain. *)
+let try_session_count () =
+  if Stdlib.Mutex.try_lock sessions_mutex then
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock sessions_mutex)
+      (fun () -> Some (Hashtbl.length sessions))
+  else None
+;;
+
 let heartbeat_interval_s = 30.0
 
 (** Whether the heartbeat should close a session for pong-timeout.  Liveness is

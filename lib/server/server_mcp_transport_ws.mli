@@ -188,6 +188,11 @@ val session_count : unit -> int
     hook, the bootstrap loops, and the read-model
     transport probe. *)
 
+val try_session_count : unit -> int option
+(** Like {!session_count} but never blocks: [Some n] when the sessions
+    mutex was free, [None] when another domain holds it. For fatal paths
+    (the scheduler-EINTR report) that must not hang. *)
+
 val new_session : runtime_authority:Sse.runtime_authority -> id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
 (** Builds a fresh {!ws_session} with [closed = false]
     and the dashboard handshake state cleared.  Caller

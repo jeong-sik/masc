@@ -1,6 +1,6 @@
 module Plan = Keeper_tool_plan
 module Catalog = Keeper_tool_composition_catalog
-module Descriptor = Keeper_tool_descriptor
+module Nested = Keeper_composition_nested
 
 type authored_source =
   { package_id : Skill_reference.package_id
@@ -9,6 +9,7 @@ type authored_source =
 
 type t =
   { plan : Plan.t
+  ; compiled : Nested.t
   ; execution : Catalog.execution_mode
   ; reference : Tool_output.artifact_ref
   ; authored_source : authored_source option
@@ -27,12 +28,16 @@ type error =
   | Publication_rejected of Keeper_skill_catalog.authored_source_error
   | Skill_not_prepared
   | Different_package
+  | Nested_rejected of Nested.error
+  | Nested_async_requires_worker_binding
+  | Nested_publication_requires_catalog
 
 let prepare_tool_name = Catalog.prepare_tool_name
 let run_tool_name = Catalog.run_tool_name
 let ( let* ) = Result.bind
 
 let plan draft = draft.plan
+let nested_calls draft = Nested.calls draft.compiled
 let execution draft = draft.execution
 let reference draft = draft.reference
 let authored_source draft = draft.authored_source
@@ -42,11 +47,19 @@ let failure_class = function
   | Storage_failed _ | Draft_read_failed _ -> Tool_result.Runtime_failure
   | Plan_rejected _ | Inputs_rejected _ | Unsupported_node _ | Draft_not_found
   | Malformed_draft _ | Different_keeper | Capability_changed | Publication_rejected _
-  | Skill_not_prepared | Different_package -> Tool_result.Policy_rejection
+  | Skill_not_prepared | Different_package | Nested_rejected _
+  | Nested_async_requires_worker_binding | Nested_publication_requires_catalog -> Tool_result.Policy_rejection
 ;;
 
 let error_to_json = function
   | Plan_rejected error -> Keeper_tool_plan_request.error_to_json error
+  | Nested_rejected error -> Nested.error_to_json error
+  | Nested_async_requires_worker_binding -> `Assoc
+      [ "kind", `String "nested_async_requires_worker_binding"
+      ; "detail", `String "Nested child activation currently binds to the active inline turn; async outer execution requires a durable worker binding." ]
+  | Nested_publication_requires_catalog -> `Assoc
+      [ "kind", `String "nested_publication_requires_catalog"
+      ; "detail", `String "Publishable nested recipes require the named catalog grammar; omitting child identities from published flattened plans is refused." ]
   | Inputs_rejected (node_id, error) ->
     `Assoc [ "kind", `String "inputs_rejected"
            ; "node_id", `String (Plan.Node_id.to_string node_id)
@@ -108,7 +121,7 @@ let rec without_recursive_refs = function
 
 let prepare_schema : Masc_domain.tool_schema =
   let input_schema =
-    match Keeper_tool_plan_request.input_schema |> without_recursive_refs with
+    match Nested.input_schema |> without_recursive_refs with
     | `Assoc fields ->
       let properties = match List.assoc_opt "properties" fields with
         | Some (`Assoc properties) -> properties | _ -> invalid_arg "canonical plan schema has no properties" in
@@ -132,22 +145,11 @@ let run_schema = Tool_schemas_composition_control.run_schema
 ;;
 
 let validate_plan ~capability_surface json =
-  let* plan = Keeper_tool_plan_request.plan_of_json
-      ~descriptors:(Keeper_capability_surface.descriptors capability_surface) json
-      |> Result.map_error (fun error -> Plan_rejected error) in
-  let* () =
-    List.fold_left (fun acc (node : Plan.node) ->
-      let* () = acc in
-      match Plan.descriptor plan node.id with
-      | Some descriptor ->
-        (match descriptor.Descriptor.execution, Descriptor.readonly_static_hint descriptor with
-         | Descriptor.Ordinary _, Some true -> Ok ()
-         | Descriptor.Terminal, _ | Descriptor.Ordinary _, (Some false | None) ->
-           Error (Unsupported_node { node_id = node.id; tool_name = node.tool_name }))
-      | None -> Error (Unsupported_node { node_id = node.id; tool_name = node.tool_name })) (Ok ()) (Plan.nodes plan)
-  in
-  let* _inputs = Plan.prepare_inputs plan |> Result.map_error (fun (node_id, error) -> Inputs_rejected (node_id, error)) in
-  Ok plan
+  Nested.compile ~capability_surface json |> Result.map_error (function
+    | Nested.Request_rejected error -> Plan_rejected error
+    | Nested.Unsupported_leaf { node_id; tool_name } -> Unsupported_node { node_id; tool_name }
+    | Nested.Inputs_rejected (node_id, error) -> Inputs_rejected (node_id, error)
+    | error -> Nested_rejected error)
 ;;
 
 let contracts ~capability_surface plan =
@@ -155,11 +157,11 @@ let contracts ~capability_surface plan =
     match Plan.descriptor plan node.id with
     | None -> `Null
     | Some descriptor ->
-      let output_schema = match descriptor.Descriptor.composable_output with
-        | Descriptor.Opaque_output -> `Null
-        | Descriptor.Json_output { schema } -> schema in
+      let output_schema = match descriptor.Keeper_tool_descriptor.composable_output with
+        | Keeper_tool_descriptor.Opaque_output -> `Null
+        | Keeper_tool_descriptor.Json_output { schema } -> schema in
       `Assoc [ "node_id", `String (Plan.Node_id.to_string node.id)
-             ; "route", Descriptor.route_evidence_json descriptor
+             ; "route", Keeper_tool_descriptor.route_evidence_json descriptor
              ; "input_schema", descriptor.input_schema
              ; "output_schema", output_schema ]) (Plan.nodes plan) in
   `Assoc [ "surface_digest", `String (Keeper_capability_surface.digest capability_surface)
@@ -233,7 +235,12 @@ let prepare ~base_path ~capability_surface ~keeper_name ~execution json =
   let* plan_json, metadata = match json with
     | `Assoc fields -> Ok (`Assoc (List.remove_assoc "skill" fields), List.assoc_opt "skill" fields)
     | _ -> Ok (json, None) in
-  let* plan = validate_plan ~capability_surface plan_json in
+  let* compiled = validate_plan ~capability_surface plan_json in
+  let plan = Nested.plan compiled in
+  let* () = match Nested.calls compiled, execution, metadata with
+    | [], _, _ | _ :: _, Catalog.Inline, None -> Ok ()
+    | _ :: _, Catalog.Async, _ -> Error Nested_async_requires_worker_binding
+    | _ :: _, Catalog.Inline, Some _ -> Error Nested_publication_requires_catalog in
   let* canonical = encode_plan plan in
   let* authored_source = match metadata with
     | None -> Ok None
@@ -241,19 +248,22 @@ let prepare ~base_path ~capability_surface ~keeper_name ~execution json =
   let document = `Assoc
     [ "keeper", `String keeper_name
     ; "execution", `String (Catalog.execution_mode_to_string execution)
+    ; "recipe", plan_json
     ; "plan", canonical
+    ; "nested_calls", Nested.calls_to_json compiled
     ; "contracts", contracts ~capability_surface plan
     ; "skill", (match authored_source with None -> `Null | Some source -> source_to_json source) ] in
   let* reference = put_document ~base_path document in
-  Ok { plan; execution; reference; authored_source }
+  Ok { plan; compiled; execution; reference; authored_source }
 ;;
 
 let draft_fields = function
   | `Assoc fields ->
     let names = List.map fst fields in
     if List.length (List.sort_uniq String.compare names) <> List.length names then Error (Malformed_draft "duplicate field")
-    else if List.sort String.compare names <> List.sort String.compare [ "keeper"; "execution"; "plan"; "contracts"; "skill" ] then
-      Error (Malformed_draft "expected keeper, execution, plan, contracts and skill")
+    else if List.sort String.compare names <> List.sort String.compare
+      [ "keeper"; "execution"; "recipe"; "plan"; "nested_calls"; "contracts"; "skill" ] then
+      Error (Malformed_draft "expected keeper, execution, recipe, plan, nested_calls, contracts and skill")
     else Ok fields
   | _ -> Error (Malformed_draft "expected object")
 ;;
@@ -281,9 +291,24 @@ let load ~base_path ~capability_surface ~keeper_name ~sha256 =
   let* execution = match raw_execution with
     | "inline" -> Ok Catalog.Inline | "async" -> Ok Catalog.Async
     | _ -> Error (Malformed_draft "execution must be inline or async") in
-  let* plan = match List.assoc_opt "plan" fields with
+  let* () = match List.assoc_opt "contracts" fields with
+    | Some (`Assoc contracts) when List.assoc_opt "surface_digest" contracts =
+        Some (`String (Keeper_capability_surface.digest capability_surface)) -> Ok ()
+    | Some _ | None -> Error Capability_changed in
+  let* compiled = match List.assoc_opt "recipe" fields with
     | Some json -> validate_plan ~capability_surface json
-    | None -> Error (Malformed_draft "missing plan") in
+    | None -> Error (Malformed_draft "missing recipe") in
+  let plan = Nested.plan compiled in
+  let* canonical = encode_plan plan in
+  let same left right = Yojson.Safe.equal (Yojson.Safe.sort left) (Yojson.Safe.sort right) in
+  let* () = match List.assoc_opt "plan" fields, List.assoc_opt "nested_calls" fields with
+    | Some recorded_plan, Some recorded_calls when same recorded_plan canonical
+        && same recorded_calls (Nested.calls_to_json compiled) -> Ok ()
+    | _ -> Error (Malformed_draft "recipe differs from frozen plan or child mappings") in
+  let* () = match Nested.calls compiled, execution, List.assoc_opt "skill" fields with
+    | [], _, _ | _ :: _, Catalog.Inline, Some `Null -> Ok ()
+    | _ :: _, Catalog.Async, _ -> Error Nested_async_requires_worker_binding
+    | _ :: _, Catalog.Inline, _ -> Error Nested_publication_requires_catalog in
   let* () = match List.assoc_opt "contracts" fields with
     | Some recorded when Yojson.Safe.equal (Yojson.Safe.sort recorded) (Yojson.Safe.sort (contracts ~capability_surface plan)) -> Ok ()
     | Some _ | None -> Error Capability_changed in
@@ -299,7 +324,7 @@ let load ~base_path ~capability_surface ~keeper_name ~sha256 =
   let* reference = Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
       ~preview:"" ~mime:Tool_output.artifact_manifest_mime
       |> Result.map_error (fun error -> Malformed_draft (Tool_output.make_error_to_string error)) in
-  Ok { plan; execution; reference; authored_source }
+  Ok { plan; compiled; execution; reference; authored_source }
 ;;
 
 let load_authored ~base_path ~capability_surface ~keeper_name ~package_id ~sha256 =
@@ -322,6 +347,7 @@ let preview draft =
             [ "sha256", `String Digestif.SHA256.(digest_string source.source_text |> to_hex)
             ; "bytes", `Int (String.length source.source_text); "filename", `String "SKILL.md" ] ] in
   `Assoc [ "draft", Tool_output.normalized_artifact_ref_to_json draft.reference
+         ; "nested_calls", Nested.calls_to_json draft.compiled
          ; "skill", skill
          ; "execution", `String (Catalog.execution_mode_to_string draft.execution)
          ; "branch_failure_policy", `String (Plan.branch_failure_policy_to_string (Plan.branch_failure_policy draft.plan))
@@ -335,6 +361,7 @@ let preview draft =
 let record_invocation ~base_path ~composition_run_id ~invocation draft =
   put_document ~base_path (`Assoc
     [ "draft", Tool_output.normalized_artifact_ref_to_json draft.reference
+    ; "nested_calls", Nested.calls_to_json draft.compiled
     ; "composition_run_id", `String (Plan.Composition_run_id.to_string composition_run_id)
     ; "tool_use_id", `String (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
     ; "source_turn", `Int (Agent_core.Tool_contract.Invocation.turn invocation) ])

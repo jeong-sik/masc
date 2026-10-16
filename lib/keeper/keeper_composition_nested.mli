@@ -8,6 +8,7 @@ type call = private
   ; reference : Skill_reference.t
   ; args : Yojson.Safe.t
   ; node_mapping : (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t) list
+  ; exports : Keeper_tool_plan.export list
   }
 
 type t
@@ -55,6 +56,7 @@ val compile :
 
 val plan : t -> Keeper_tool_plan.t
 val calls : t -> call list
+val call_to_json : call -> Yojson.Safe.t
 val calls_to_json : t -> Yojson.Safe.t
 (** Exact references, bound arguments and explicit leaf mappings for durable
     draft/run evidence. Preparation does not constitute Skill activation. *)

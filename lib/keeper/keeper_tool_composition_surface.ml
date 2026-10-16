@@ -1479,6 +1479,7 @@ let make_tools_with_authority
       ?composition_plan_index
       ?record_instruction_activation
       ?record_composition_activation
+      ?record_nested_composition_activation
       ~(config : Workspace.config)
       ~meta
       ~capability_authority
@@ -2024,11 +2025,15 @@ let make_tools_with_authority
                       ~parent_invocation ~config ~meta ~capability_authority ~publication_recovery
                       ~ctx_snapshot ~turn_context ?clock ()
                   | Catalog.Inline ->
+                    let nested_run = Keeper_composition_nested_run.create
+                        ~calls:(Draft.nested_calls draft) ~composition_run_id ~parent_invocation
+                        ~tool_name:Draft.run_tool_name ~record_activation:record_nested_composition_activation in
                     let execution = execute_keeper_plan ~capability_authority ~plan ~composition_run_id
                         ~run_id:(Keeper_tool_plan.Run_id.fresh ()) ~parent_invocation ~config ~meta
                         ~publication_recovery ~ctx_snapshot ~keeper_turn_id:(keeper_turn_id_of turn_context)
                         ?turn_sandbox_factory ?clock ?continuation_channel ?gate_context ?gate_grant ?record_gate_result
                         ?on_deferred ?on_external_effect_deferred
+                        ~admit_node:(Keeper_composition_nested_run.admit_node nested_run)
                         ?observe_node_result:(Option.map (fun turn_context ->
                           observe_node_result ?on_receipt_committed:None
                             ~composition_tool:Draft.run_tool_name ~composition_execution:Catalog.Inline
@@ -2036,7 +2041,9 @@ let make_tools_with_authority
                             ~parent_invocation ~meta ~turn_context) turn_context) () in
                     let result = result_of_execution ~tool_name:Draft.run_tool_name
                         ~tool_kind:Keeper_tool_descriptor.Composition_tool ~start_time execution in
-                    let result = match Keeper_composition_result.project ~base_path:config.base_path ~plan ~execution result with
+                    let nested_scopes = match Draft.nested_calls draft with [] -> None | _ :: _ ->
+                      Some (Keeper_composition_nested_run.evidence_to_json nested_run ~plan ~execution) in
+                    let result = match Keeper_composition_result.project ?nested_scopes ~base_path:config.base_path ~plan ~execution result with
                       | Ok result -> result
                       | Error { message; _ } -> Tool_result.make_err ~tool_name:Draft.run_tool_name
                           ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Effect_outcome_unknown

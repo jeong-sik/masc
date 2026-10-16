@@ -20,6 +20,9 @@ type error =
   | Publication_rejected of Keeper_skill_catalog.authored_source_error
   | Skill_not_prepared
   | Different_package
+  | Nested_rejected of Keeper_composition_nested.error
+  | Nested_async_requires_worker_binding
+  | Nested_publication_requires_catalog
 
 val prepare_tool_name : string
 val run_tool_name : string
@@ -35,11 +38,14 @@ val prepare
   -> execution:Keeper_tool_composition_catalog.execution_mode
   -> Yojson.Safe.t
   -> (t, error) result
-(** Parse with the canonical JSON request codec, preflight every fixed input,
-    and durably store the exact plan, owner, execution mode and tool contracts.
-    Currently admits only static read-only ordinary nodes, in both modes. *)
+(** Compile ordinary nodes or exact frozen inline child Skill references,
+    preflight every fixed argument/input, and durably store the original recipe,
+    flattened plan, child provenance, owner, execution mode and contracts.
+    Every leaf must be statically read-only and ordinary. Nested recipes use
+    inline execution; async worker binding and named nested publication are
+    separate contracts. Ordinary drafts support both execution modes. *)
 (* Optional [skill] metadata freezes [package_id] and [description] into a
-   validated SKILL.md using the exact parameter-free plan. No publication
+   validated SKILL.md using an ordinary parameter-free plan. No publication
    occurs. A task-only draft need not carry reusable Skill metadata. *)
 
 val load
@@ -53,6 +59,9 @@ val load
     not a rebind of the old preview. *)
 
 val plan : t -> Keeper_tool_plan.t
+val nested_calls : t -> Keeper_composition_nested.call list
+(** Exact frozen child references, fixed arguments, leaf and export mappings.
+    These describe prepared scopes, not dispatched Skill activations. *)
 val execution : t -> Keeper_tool_composition_catalog.execution_mode
 val reference : t -> Tool_output.artifact_ref
 val authored_source : t -> authored_source option

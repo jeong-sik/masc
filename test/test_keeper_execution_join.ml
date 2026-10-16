@@ -726,13 +726,20 @@ let test_structured_state_projection_preserves_closed_reason () =
     (fun state ->
        let error = Agent_core.Error.Serialization (StructuredOutputStateError state) in
        let projection = Error_json.agent_failed_error_projection error in
-       check string "state projection contains only kind and closed reason"
-         (Yojson.Safe.to_string
-            (`Assoc
-               [ "variant", `String "structured_output_state_error"
-               ; "reason", `String (Agent_core.Error.structured_response_state_label state)
-               ]))
-         (Yojson.Safe.to_string projection.error_detail))
+       (* [error_detail] is the canonical envelope (domain, code, retryable)
+          followed by the variant's own fields; a state carries only its
+          closed reason beyond that. *)
+       let keys = match projection.error_detail with
+         | `Assoc fields -> List.map fst fields
+         | _ -> [] in
+       check (list string) "state projection contains only the envelope, kind and closed reason"
+         [ "domain"; "code"; "retryable"; "variant"; "reason" ] keys;
+       check (option string) "state projection kind"
+         (Some "structured_output_state_error")
+         (string_of_field (member "variant" projection.error_detail));
+       check (option string) "state projection closed reason"
+         (Some (Agent_core.Error.structured_response_state_label state))
+         (string_of_field (member "reason" projection.error_detail)))
     Agent_core.Error.
       [ Awaiting_tool_results
       ; Refused_response Policy_refusal

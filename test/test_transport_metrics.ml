@@ -478,6 +478,8 @@ let test_transport_health_json () =
     "grpc exact keys"
     [ "configured"
     ; "listening"
+    ; "listen_status"
+    ; "listen_failure"
     ; "port"
     ; "active_streams"
     ; "subscribers"

@@ -768,14 +768,17 @@ let http_status_of_auth_error = function
       | Masc_domain.Task_error.InvalidId _) -> `Bad_request
   | Masc_domain.Task (Masc_domain.Task_error.VerificationSuperseded _) -> `Conflict
   | Masc_domain.Agent (Masc_domain.Agent_error.InvalidName _) -> `Bad_request
-  (* A system I/O failure is the server's, not the request's: 503 tells the
-     client to retry. A credential the server could not read answers this
-     way, not 401 (the token is fine) and not 400 (the request is fine). *)
-  | Masc_domain.System (Masc_domain.System_error.IoError _) -> `Service_unavailable
+  (* A system failure is the server's, not the request's: 503 tells the
+     client to retry. A credential the server could not read, or a store
+     too contended to answer ([LockContention] is retryable congestion),
+     answers this way, not 401 (the token is fine) and not 400 (the
+     request is fine). Mirrors [Masc_error.code]. *)
+  | Masc_domain.System
+      (Masc_domain.System_error.IoError _
+      | Masc_domain.System_error.LockContention _) -> `Service_unavailable
   | Masc_domain.System
       (Masc_domain.System_error.ValidationError _
-      | Masc_domain.System_error.NotInitialized
-      | Masc_domain.System_error.LockContention _) -> `Bad_request
+      | Masc_domain.System_error.NotInitialized) -> `Bad_request
 
 (** Server state - initialized at startup.  The published handle is replaced
     atomically so request domains never race a plain ref read with startup or
@@ -1124,6 +1127,7 @@ type request_credential_standing =
   | Agent_credential
   | Player_credential
   | No_credential
+  | Unreadable_credential
 
 let request_credential_standing ~base_path request =
   match token_of_request_auth_credential (request_auth_credential_from_request request) with
@@ -1137,6 +1141,11 @@ let request_credential_standing ~base_path request =
       | Ok { Masc_domain.role = Masc_domain.Admin; _ } -> Operator_credential
       | Ok { Masc_domain.role = Masc_domain.Worker; _ } -> Agent_credential
       | Ok { Masc_domain.role = Masc_domain.Player; _ } -> Player_credential
+      (* A read failure is not an absent credential: the bearer may be
+         the operator's, and answering [No_credential] demoted it to an
+         unnamed caller. Only a token the store positively refused is
+         [No_credential]. *)
+      | Error (Masc_domain.System _) -> Unreadable_credential
       | Error _ -> No_credential)
 
 let authorize_tool_request ~base_path ~tool_name ~request_authority request :

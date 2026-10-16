@@ -1604,23 +1604,25 @@ let credential_token_index config : (credential_index, masc_error) result =
                (masc_error_to_string error);
              failed
          in
-         let credentials, unreadable =
+         (* The scan already read every file through [load_credential_checked]
+            under this transaction, so no managed writer ran between the scan
+            and this filter: opening each file again could only repeat the
+            same answer while doubling opens under fd pressure. Re-apply the
+            exact-name binding check to the credential the scan kept. *)
+         let credentials =
            listing.listed_credentials
            |> List.map (fun (credential : agent_credential) -> credential.agent_name)
            |> List.sort_uniq String.compare
-           |> List.fold_left
-                (fun (credentials, unreadable) name ->
-                   match load_credential_checked config name with
-                   | Ok (Some credential) when String.equal credential.agent_name name ->
-                     credential :: credentials, unreadable
-                   | Ok (Some _) | Ok None -> credentials, unreadable
-                   | Error error -> credentials, (name, error) :: unreadable)
-                ([], listing.unreadable_files)
+           |> List.filter_map (fun name ->
+             List.find_opt
+               (fun (credential : agent_credential) ->
+                  String.equal credential.agent_name name)
+               listing.listed_credentials)
          in
          let unreadable_credentials =
            List.sort_uniq
              (fun (left, _) (right, _) -> String.compare left right)
-             unreadable
+             listing.unreadable_files
          in
          (match unreadable_credentials with
           | [] -> ()
@@ -1637,7 +1639,7 @@ let credential_token_index config : (credential_index, masc_error) result =
                     (fun (name, error) -> name ^ ": " ^ masc_error_to_string error)
                     unreadable_credentials)));
          let index =
-           { by_token = build_token_index (List.rev credentials); unreadable_credentials }
+           { by_token = build_token_index credentials; unreadable_credentials }
          in
          with_credential_index_cache_lock (fun () ->
            Hashtbl.replace credential_index_cache key

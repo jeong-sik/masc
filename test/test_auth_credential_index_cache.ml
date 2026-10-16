@@ -403,6 +403,65 @@ let test_unreadable_credential_recovers_after_the_retry_bound () =
       fail ("a token stayed refused past the retry bound: "
             ^ Masc_domain.masc_error_to_string e))
 
+(* The live-disk recheck behind the token lookup answers three ways: a file
+   that still holds the credential is [Ok true], one that holds something
+   else or is gone is [Ok false], and a file that cannot be read is [Error].
+   Only [Ok false] may surface as "changed" (401); an unreadable match must
+   stay a read failure (503), and it outranks a differing match because the
+   token may belong to the file that could not be read. A mode-0 file stands
+   in for the failed open. Root opens a mode-0 file, so there is nothing to
+   make unreadable. *)
+let test_live_disk_check_reports_unreadable_as_error () =
+  if Unix.geteuid () = 0 then skip ();
+  let dir = setup_test_workspace () in
+  let beta_file = Auth.credential_file dir "beta" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.chmod beta_file 0o600 with Unix.Unix_error _ -> ());
+      cleanup_test_workspace dir)
+    (fun () ->
+      with_eio_runtime (fun () ->
+        let beta = create_token_for dir ~agent_name:"beta" ~role:Masc_domain.Worker in
+        let cred =
+          match Auth.find_credential_by_token dir ~token:beta with
+          | Ok cred -> cred
+          | Error e -> fail ("beta warm: " ^ Masc_domain.masc_error_to_string e)
+        in
+        let rotated = { cred with Masc_domain.token = "rotated-credential-material" } in
+        let matches = Auth_credential_token.For_testing.credential_matches_live_disk in
+        let hold = Auth_credential_token.For_testing.live_matches_hold in
+        check bool "an unchanged credential still matches" true
+          (matches dir cred = Ok true);
+        check bool "a rotated credential no longer matches" true
+          (matches dir rotated = Ok false);
+        check bool "every match holding is Ok true" true
+          (hold dir [ cred ] = Ok true);
+        check bool "a differing match without a failure is Ok false" true
+          (hold dir [ rotated ] = Ok false);
+        Unix.chmod beta_file 0o000;
+        (match matches dir cred with
+         | Error (Masc_domain.System _) -> ()
+         | Ok _ -> fail "an unreadable credential matched or differed instead of erroring");
+        check bool "an unreadable match outranks a differing one" true
+          (Result.is_error (hold dir [ rotated; cred ]));
+        check bool "order does not matter: unreadable still outranks" true
+          (Result.is_error (hold dir [ cred; rotated ]))))
+
+(* A miss answered as a read failure because some file was unreadable is
+   counted apart, so a wrong token's 503 during an unreadable window does
+   not mix into the 503s that name a genuinely failing store. *)
+let test_unreadable_window_miss_is_counted_apart () =
+  with_unreadable_beta (fun ~dir ~beta_file:_ ~alpha:_ ~beta:_ ->
+    let metric = Masc.Otel_metric_store.metric_auth_credential_unreadable_index_miss in
+    check string "unreadable-miss metric name"
+      "masc_auth_credential_unreadable_index_miss_total" metric;
+    let before = Masc.Otel_metric_store.metric_total metric in
+    (match Auth.find_credential_by_token dir ~token:"not-a-real-token" with
+     | Error _ -> ()
+     | Ok cred -> fail ("an unknown token resolved to " ^ cred.agent_name));
+    check (float 0.0001) "one miss during the window counts once"
+      (before +. 1.) (Masc.Otel_metric_store.metric_total metric))
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; flag; dir; agent_name; token_out ] when String.equal flag mint_child_flag ->
@@ -443,5 +502,9 @@ let () =
           `Quick test_a_rebuild_that_reads_every_file_answers_mismatch_again
         ; test_case "an unreadable credential recovers after the retry bound"
           `Slow test_unreadable_credential_recovers_after_the_retry_bound
+        ; test_case "live-disk check reports unreadable as error"
+          `Quick test_live_disk_check_reports_unreadable_as_error
+        ; test_case "unreadable-window miss is counted apart"
+          `Quick test_unreadable_window_miss_is_counted_apart
         ] )
     ]

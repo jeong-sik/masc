@@ -97,7 +97,12 @@ let test_a_read_failure_is_unavailable () =
      = `Service_unavailable);
   check bool "a validation failure still answers 400" true
     (status (Masc_domain.System (Masc_domain.System_error.ValidationError "not a regular file"))
-     = `Bad_request)
+     = `Bad_request);
+  check bool "store contention answers 503, mirroring Masc_error.code" true
+    (status
+       (Masc_domain.System
+          (Masc_domain.System_error.LockContention { key = "credential"; attempts = 3 }))
+     = `Service_unavailable)
 
 let () =
   run "server_auth_refusal_log"

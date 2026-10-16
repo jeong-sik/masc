@@ -184,37 +184,69 @@ let rec check_credential_collisions ~token_hash_prefix first = function
        Error (Auth (Auth_error.InvalidToken "Token hash collision detected")))
 ;;
 
-let credential_matches_live_disk config (cred : agent_credential) =
-  match load_credential config cred.agent_name with
-  | None -> false
-  | Some current ->
-    Option.equal Credential_id.equal current.id cred.id
-    && Option.equal Agent_id.equal current.agent_id cred.agent_id
-    && String.equal current.agent_name cred.agent_name
-    && current.role = cred.role
-    && String.equal current.created_at cred.created_at
-    && Option.equal String.equal current.expires_at cred.expires_at
-    && constant_time_string_equal current.token cred.token
+(* [Ok true] when the named file still holds this exact credential,
+   [Ok false] when it holds something else or is gone, [Error] when a file
+   is there and could not be read. A read failure is not a change:
+   reporting it as one refused a valid token with 401 instead of asking
+   for a retry with 503. *)
+let credential_matches_live_disk config (cred : agent_credential)
+  : (bool, masc_error) result
+  =
+  match load_credential_checked config cred.agent_name with
+  | Error _ as error -> error
+  | Ok None -> Ok false
+  | Ok (Some current) ->
+    Ok
+      (Option.equal Credential_id.equal current.id cred.id
+       && Option.equal Agent_id.equal current.agent_id cred.agent_id
+       && String.equal current.agent_name cred.agent_name
+       && current.role = cred.role
+       && String.equal current.created_at cred.created_at
+       && Option.equal String.equal current.expires_at cred.expires_at
+       && constant_time_string_equal current.token cred.token)
+;;
+
+(* [Ok true] when every match still holds on disk, [Ok false] when some
+   match differs and none failed to read, [Error] when any match could
+   not be read. An unreadable match outranks a differing one: the token
+   may belong to the file that could not be read, so the lookup must
+   retry rather than report a change. Stops at the first read failure so
+   a pressured store is not re-read for an answer already forced to 503. *)
+let rec live_matches_hold config = function
+  | [] -> Ok true
+  | cred :: rest ->
+    (match credential_matches_live_disk config cred with
+     | Error _ as error -> error
+     | Ok false ->
+       (match live_matches_hold config rest with
+        | Error _ as error -> error
+        | Ok _ -> Ok false)
+     | Ok true -> live_matches_hold config rest)
 ;;
 
 (* The matches for [token_hash] that still hold on disk, with the index they
-   were answered from. A match that changed on disk sends the lookup to a fresh
-   index, and the miss reported with it is judged against that one. *)
+   were answered from. A match that changed on disk, or could not be read,
+   sends the lookup to a fresh index once — a file that reads again only
+   shows there — and the miss reported with it is judged against that one.
+   Only a match the fresh index still contradicts is a change; a match it
+   still cannot read stays a read failure. *)
 let fresh_matches_for_token_hash config index token_hash matches =
-  if List.for_all (credential_matches_live_disk config) matches
-  then Ok (matches, index)
-  else (
+  match live_matches_hold config matches with
+  | Ok true -> Ok (matches, index)
+  | Ok false | Error _ ->
     invalidate_credential_index_cache config;
     let open Result.Syntax in
     let* fresh = credential_token_index config in
     (* DET-OK: exact token-hash cache miss means there are no indexed
        credential candidates; this does not infer state from ambiguous input. *)
-    match Hashtbl.find_opt fresh.by_token token_hash with
-    | Some matches ->
-      if List.for_all (credential_matches_live_disk config) matches
-      then Ok (matches, fresh)
-      else Error (Auth (Auth_error.InvalidToken "Credential changed during token lookup"))
-    | None -> Ok ([], fresh))
+    (match Hashtbl.find_opt fresh.by_token token_hash with
+     | Some matches ->
+       (match live_matches_hold config matches with
+        | Ok true -> Ok (matches, fresh)
+        | Ok false ->
+          Error (Auth (Auth_error.InvalidToken "Credential changed during token lookup"))
+        | Error error -> Error error)
+     | None -> Ok ([], fresh))
 ;;
 
 (** Find credential by raw token (hash lookup + expiry check).
@@ -242,7 +274,13 @@ let find_static_credential_by_token config ~token : (agent_credential, masc_erro
     (* A bearer the index does not hold may sit in a file it could not read:
        that is a read failure to retry, not a token to refuse. *)
     (match unreadable_credentials_error answered_from with
-     | Some read_failure -> Error read_failure
+     | Some read_failure ->
+       (* Counted apart so a wrong token's 503 during an unreadable window
+          does not mix into the 503s that name a genuinely failing store. *)
+       Auth_metric_store.inc_counter
+         Auth_metric_store.metric_auth_credential_unreadable_index_miss
+         ();
+       Error read_failure
      | None -> Error (Auth (Auth_error.InvalidToken "Token mismatch")))
   | first :: rest ->
     (match check_credential_collisions ~token_hash_prefix:(token_hash_prefix_of token_hash) first rest with
@@ -732,7 +770,16 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
     else (
       let open Result.Syntax in
       let* credential = require_live_credential ~now:(Time_compat.now ()) cred in
-      if credential_matches_live_disk config credential
-      then Ok credential
-      else Error (Auth (Auth_error.InvalidToken "Credential changed during token verification")))
+      (match credential_matches_live_disk config credential with
+       | Ok true -> Ok credential
+       | Ok false ->
+         Error (Auth (Auth_error.InvalidToken "Credential changed during token verification"))
+       (* No index to rebuild against on this path; the 503 asks the client
+          to retry, which re-reads. *)
+       | Error error -> Error error))
 ;;
+
+module For_testing = struct
+  let credential_matches_live_disk = credential_matches_live_disk
+  let live_matches_hold = live_matches_hold
+end

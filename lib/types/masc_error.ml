@@ -256,10 +256,12 @@ let code = function
          | Task_error.InvalidId _) -> 400
   | Task (Task_error.VerificationSuperseded _) -> 409
   | Agent (Agent_error.InvalidName _) -> 400
-  | System (System_error.NotInitialized
-           | System_error.IoError _
-           | System_error.ValidationError _) -> 400
-  | System (System_error.LockContention _) -> 503
+  | System (System_error.NotInitialized | System_error.ValidationError _) -> 400
+  (* A store that failed to answer is the server's failure, not the
+     request's: like [LockContention], [IoError] is transient and
+     retryable ([is_retryable]), so it answers 503. This keeps [code] the
+     SSOT [Server_auth.http_status_of_auth_error] mirrors. *)
+  | System (System_error.IoError _ | System_error.LockContention _) -> 503
 
 (* [dashboard_auth_error_code] is the SSOT mapping from a typed
    [masc_error] to the stable dashboard auth-error-code string that the

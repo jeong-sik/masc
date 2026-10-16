@@ -95,6 +95,19 @@ let read_context state request =
     let* access = source_access state request caller in
     Ok (Some caller, access)
   | Anonymous_actor_hint _ -> Ok (None, Lane_addon_sources.Unauthenticated)
+  (* A credential the store could not read is the server's failure, not a
+     bad request: answer 503 so the client retries. Only a store that
+     failed to answer qualifies; a refused or absent credential stays a
+     400. *)
+  | Rejected_credential
+      (Auth_error_kind.Outcome_error
+         { err =
+             Masc_domain.System
+               (Masc_domain.System_error.IoError _
+               | Masc_domain.System_error.LockContention _)
+         ; _
+         }) ->
+      Error Credential_store_unreadable
   | Rejected_credential _ -> Error (Bad_request_detail "Lane read credential is unavailable")
 
 let query_fields request =

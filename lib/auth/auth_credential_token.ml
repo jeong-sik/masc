@@ -721,9 +721,13 @@ let verify_token_owner_alias config ~agent_name ~token =
 ;;
 
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =
-  match load_credential config agent_name with
+  (* A read failure is not an absent credential: [load_credential_checked]
+     keeps the two apart so an unreadable file answers 503 downstream
+     instead of 401. *)
+  let ( let* ) = Result.bind in
+  let* cred_opt = load_credential_checked config agent_name in
+  match cred_opt with
   | None ->
-    let ( let* ) = Result.bind in
     let* present = credential_path_exists (credential_file config agent_name) in
     if present then Error (Auth (Auth_error.InvalidToken
       "The exact credential exists but cannot be decoded; alias fallback is refused"))

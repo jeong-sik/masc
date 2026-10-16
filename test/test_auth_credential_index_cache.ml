@@ -410,7 +410,12 @@ let test_unreadable_credential_recovers_after_the_retry_bound () =
    stay a read failure (503), and it outranks a differing match because the
    token may belong to the file that could not be read. A mode-0 file stands
    in for the failed open. Root opens a mode-0 file, so there is nothing to
-   make unreadable. *)
+   make unreadable.
+
+   Two files, not one: the differing match must come from a file that still
+   reads (rotated alpha beside mode-0 beta). A rotated record of the
+   unreadable file itself would error on the first element either way, and
+   the outranking assertion could not fail. *)
 let test_live_disk_check_reports_unreadable_as_error () =
   if Unix.geteuid () = 0 then skip ();
   let dir = setup_test_workspace () in
@@ -421,31 +426,50 @@ let test_live_disk_check_reports_unreadable_as_error () =
       cleanup_test_workspace dir)
     (fun () ->
       with_eio_runtime (fun () ->
+        let alpha = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
         let beta = create_token_for dir ~agent_name:"beta" ~role:Masc_domain.Worker in
-        let cred =
-          match Auth.find_credential_by_token dir ~token:beta with
+        let resolve token name =
+          match Auth.find_credential_by_token dir ~token with
           | Ok cred -> cred
-          | Error e -> fail ("beta warm: " ^ Masc_domain.masc_error_to_string e)
+          | Error e -> fail (name ^ " warm: " ^ Masc_domain.masc_error_to_string e)
         in
-        let rotated = { cred with Masc_domain.token = "rotated-credential-material" } in
+        let alpha_cred = resolve alpha "alpha" in
+        let beta_cred = resolve beta "beta" in
+        let rotated_alpha =
+          { alpha_cred with Masc_domain.token = "rotated-credential-material" }
+        in
         let matches = Auth_credential_token.For_testing.credential_matches_live_disk in
         let hold = Auth_credential_token.For_testing.live_matches_hold in
         check bool "an unchanged credential still matches" true
-          (matches dir cred = Ok true);
+          (matches dir alpha_cred = Ok true);
         check bool "a rotated credential no longer matches" true
-          (matches dir rotated = Ok false);
+          (matches dir rotated_alpha = Ok false);
         check bool "every match holding is Ok true" true
-          (hold dir [ cred ] = Ok true);
+          (hold dir [ alpha_cred ] = Ok true);
         check bool "a differing match without a failure is Ok false" true
-          (hold dir [ rotated ] = Ok false);
+          (hold dir [ rotated_alpha ] = Ok false);
         Unix.chmod beta_file 0o000;
-        (match matches dir cred with
+        (match matches dir beta_cred with
          | Error (Masc_domain.System _) -> ()
          | Ok _ -> fail "an unreadable credential matched or differed instead of erroring");
         check bool "an unreadable match outranks a differing one" true
-          (Result.is_error (hold dir [ rotated; cred ]));
+          (Result.is_error (hold dir [ rotated_alpha; beta_cred ]));
         check bool "order does not matter: unreadable still outranks" true
-          (Result.is_error (hold dir [ cred; rotated ]))))
+          (Result.is_error (hold dir [ beta_cred; rotated_alpha ]))))
+
+(* [verify_token] reads the named file, not the token index: an unreadable
+   file is a read failure (503 downstream), not an undecodable credential
+   (401). *)
+let test_verify_token_reports_unreadable_as_read_failure () =
+  with_unreadable_beta (fun ~dir ~beta_file:_ ~alpha ~beta ->
+    (match Auth.verify_token dir ~agent_name:"alpha" ~token:alpha with
+     | Ok cred ->
+       check string "the readable credential still verifies" "alpha" cred.agent_name
+     | Error e ->
+       fail ("a readable credential failed to verify: "
+             ^ Masc_domain.masc_error_to_string e));
+    check bool "verify_token on an unreadable credential is a read failure, not InvalidToken"
+      true (is_read_failure (Auth.verify_token dir ~agent_name:"beta" ~token:beta)))
 
 (* A miss answered as a read failure because some file was unreadable is
    counted apart, so a wrong token's 503 during an unreadable window does
@@ -504,6 +528,8 @@ let () =
           `Slow test_unreadable_credential_recovers_after_the_retry_bound
         ; test_case "live-disk check reports unreadable as error"
           `Quick test_live_disk_check_reports_unreadable_as_error
+        ; test_case "verify_token reports unreadable as read failure"
+          `Quick test_verify_token_reports_unreadable_as_read_failure
         ; test_case "unreadable-window miss is counted apart"
           `Quick test_unreadable_window_miss_is_counted_apart
         ] )

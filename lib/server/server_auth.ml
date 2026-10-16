@@ -1143,9 +1143,15 @@ let request_credential_standing ~base_path request =
       | Ok { Masc_domain.role = Masc_domain.Player; _ } -> Player_credential
       (* A read failure is not an absent credential: the bearer may be
          the operator's, and answering [No_credential] demoted it to an
-         unnamed caller. Only a token the store positively refused is
+         unnamed caller. Only a store that failed to answer (I/O failure
+         or lock contention) is [Unreadable_credential]; a token the
+         store positively refused, and any other error, is
          [No_credential]. *)
-      | Error (Masc_domain.System _) -> Unreadable_credential
+      | Error
+          (Masc_domain.System
+             (Masc_domain.System_error.IoError _
+             | Masc_domain.System_error.LockContention _)) ->
+          Unreadable_credential
       | Error _ -> No_credential)
 
 let authorize_tool_request ~base_path ~tool_name ~request_authority request :

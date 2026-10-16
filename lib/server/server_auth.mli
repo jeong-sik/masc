@@ -393,10 +393,11 @@ type request_credential_standing =
           request is the caller's own claim. A bearer the store could not
           be read for is never this; see [Unreadable_credential]. *)
   | Unreadable_credential
-      (** A bearer is present but the credential store could not be read,
-          so the role is unknown. Callers must not treat this as an
-          unauthenticated request: the credential may be the operator's.
-          Answer 503 so the client retries. *)
+      (** A bearer is present but the credential store could not be read
+          (an I/O failure or lock contention), so the role is unknown.
+          Callers must not treat this as an unauthenticated request: the
+          credential may be the operator's. Answer 503 so the client
+          retries. *)
 
 val request_credential_standing :
   base_path:string -> Httpun.Request.t -> request_credential_standing

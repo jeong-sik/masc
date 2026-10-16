@@ -156,11 +156,11 @@ let metric_tool_bind_required_guard =
 let metric_keeper_tool_call_log_queue_dropped =
   Otel_metric_store_core.declare_counter "masc_keeper_tool_call_log_queue_dropped_total"
 
-(* keeper_tool_surface.cached_text_by_key CAS conflicts.
-   Incremented once per recursive retry caused by an
-   [Atomic.compare_and_set cache_ref] failure in the helper.  Each
-   conflict triggers a second [compute ()] call, so sustained non-zero
-   rate is a recompute-amplification signal.  No labels: the helper is
+(* keeper_tool_surface_ops.cached_json_by_key publication conflicts.
+   A competing reader's publication reuses the completed result; only an
+   explicit invalidation generation forces another computation. This
+   counter counts both kinds of conflict, not just recomputations.
+   No labels: the helper is
    currently used only for keeper_list_cache; add a cache label if a
    second caller is introduced. *)
 let metric_tool_keeper_cache_cas_conflicts =

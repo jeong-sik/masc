@@ -98,6 +98,7 @@ let endpoint ?base_url ?api_key_env ?timeout_seconds ?model ~id ~kind () : Voice
   ; enabled = true
   ; timeout_seconds
   ; default_voice = None
+  ; agent_voices = []
   ; command = None
   ; model
   }

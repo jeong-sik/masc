@@ -102,6 +102,7 @@ let endpoint ~kind ~base_url =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; agent_voices = []
   ; command = None
   ; model = None
   }

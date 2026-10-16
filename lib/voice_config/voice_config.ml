@@ -16,6 +16,7 @@ type endpoint = {
   enabled : bool;
   timeout_seconds : float option;
   default_voice : string option;
+  agent_voices : (string * string) list;
   command : string option;
   model : string option;
 }
@@ -239,6 +240,27 @@ let string_of_endpoint_kind = function
   | Espeak_ng -> "espeak_ng"
   | Whisper_cli -> "whisper_cli"
 
+let parse_agent_voices ~ctx json =
+  match Json_util.assoc_member_opt "agent_voices" json with
+  | Some (`Assoc pairs) ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | (agent_id, value) :: rest -> (
+            match trim_nonempty_json value with
+            | Some voice ->
+                loop ((String.trim agent_id, voice) :: acc) rest
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "%s.agent_voices.%s must be a non-empty string" ctx agent_id) )
+      in
+      loop [] pairs
+  | None | Some `Null -> Ok []
+  | Some other ->
+      Error
+        (Printf.sprintf "%s.agent_voices must be an object, got %s: %s" ctx
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
 let parse_endpoint ~ctx json =
   let open Result in
   let* () =
@@ -253,6 +275,7 @@ let parse_endpoint ~ctx json =
         ; "enabled"
         ; "timeout_seconds"
         ; "default_voice"
+        ; "agent_voices"
         ; "command"
         ; "model"
         ]
@@ -297,6 +320,7 @@ let parse_endpoint ~ctx json =
   (* A voice id is provider vocabulary, so it belongs to the endpoint that
      answers to it rather than to the workspace (#24068). *)
   let default_voice = Json_util.get_string_nonempty json "default_voice" in
+  let* agent_voices = parse_agent_voices ~ctx json in
   (* Which executable answers, for the kinds that are a command rather than an
      address. Optional: each command kind knows the name it is normally
      installed under, and this overrides it for a path the PATH does not
@@ -349,6 +373,7 @@ let parse_endpoint ~ctx json =
       enabled;
       timeout_seconds;
       default_voice;
+      agent_voices;
       command;
       model;
     }
@@ -363,27 +388,6 @@ let rec parse_endpoints ~ctx acc = function
       (match parse_endpoint ~ctx:next_ctx item with
       | Ok endpoint -> parse_endpoints ~ctx (endpoint :: acc) rest
       | Error _ as error -> error)
-
-let parse_agent_voices json =
-  match Json_util.assoc_member_opt "agent_voices" json with
-  | Some (`Assoc pairs) ->
-      let rec loop acc = function
-        | [] -> Ok (List.rev acc)
-        | (agent_id, value) :: rest -> (
-            match trim_nonempty_json value with
-            | Some voice ->
-                loop ((String.trim agent_id, voice) :: acc) rest
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "tts.agent_voices.%s must be a non-empty string" agent_id) )
-      in
-      loop [] pairs
-  | None | Some `Null -> Ok []
-  | Some other ->
-      Error
-        (Printf.sprintf "tts.agent_voices must be an object, got %s: %s"
-           (Json_util.kind_name other) (Json_util.excerpt other))
 
 let parse_voice_tuning ~ctx json =
   match json with
@@ -482,7 +486,7 @@ let parse_tts json =
           (Option.value ~default:`Null
              (Json_util.assoc_member_opt "default_voice_settings" tts_json))
       in
-      let* agent_voices = parse_agent_voices tts_json in
+      let* agent_voices = parse_agent_voices ~ctx:"tts" tts_json in
       let* agent_voice_settings =
         parse_agent_voice_settings tts_json
       in
@@ -884,9 +888,10 @@ let voice_for_agent (tts : tts_config) agent_id =
   | None -> tts.default_voice
 
 let voice_for_agent_at_endpoint (tts : tts_config) (endpoint : endpoint) agent_id =
-  match endpoint.default_voice with
-  | Some voice -> voice
-  | None -> voice_for_agent tts agent_id
+  match List.assoc_opt agent_id endpoint.agent_voices, endpoint.default_voice with
+  | Some voice, _ -> voice
+  | None, Some voice -> voice
+  | None, None -> voice_for_agent tts agent_id
 ;;
 
 let tuning_for_agent (tts : tts_config) agent_id =

@@ -47,6 +47,7 @@ type endpoint = {
   enabled : bool;
   timeout_seconds : float option;
   default_voice : string option;
+  agent_voices : (string * string) list;
   command : string option;
   model : string option;
 }
@@ -60,7 +61,8 @@ type endpoint = {
     alphanumerics, an OpenAI voice is a name like ["alloy"] -- so the fallback
     chain handing one endpoint's id to the next endpoint asks for a voice that
     does not exist there (#24068). [None] means the endpoint has none declared
-    and falls back to [tts.default_voice].
+    and falls back to the workspace voice selection. [agent_voices] overrides
+    this default for named agents using this endpoint's voice vocabulary.
 
     [model] is the model this endpoint is asked for: a provider's model name for
     an address kind, the model file for [whisper_cli]. [None] falls back to the
@@ -318,8 +320,8 @@ val voice_for_agent : tts_config -> string -> string
     speaking through a specific endpoint wants {!voice_for_agent_at_endpoint}. *)
 
 val voice_for_agent_at_endpoint : tts_config -> endpoint -> string -> string
-(** The voice to ask [endpoint] for on [agent_id]'s behalf: the endpoint's own
-    [default_voice] when it declares one, otherwise {!voice_for_agent}. The
+(** The voice to ask [endpoint] for on [agent_id]'s behalf: its [agent_voices]
+    mapping, then its [default_voice], otherwise {!voice_for_agent}. The
     fallback chain resolves this per endpoint rather than once, so switching
     endpoints does not carry the previous provider's voice vocabulary along. *)
 

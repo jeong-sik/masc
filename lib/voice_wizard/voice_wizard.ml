@@ -169,6 +169,7 @@ let endpoint_of_draft ?voice draft : Voice_config.endpoint =
   ; timeout_seconds = draft.timeout_seconds
   (* Set only where the section default is someone else's; see {!changes}. *)
   ; default_voice = voice
+  ; agent_voices = []
   (* Left unset so the command kinds run the name they are normally
      installed under, which the overlay supplies. Pointing an endpoint at a
      binary PATH does not carry is an edit to the file, not a question worth

@@ -1553,7 +1553,7 @@ status: reference
 
 **DOS Program Inventory (DOS 프로그램 인벤토리)**
 : 공유 DOS 머신에 배치된 연산자 소유 프로그램들의 정적 자산 목록 및 메타데이터 계약(#41819).
-  기본 위치는 `<base-path>/.masc/dos/programs/`이며, MASC 설치나 네트워크 다운로드로 채워지지 않고
+  위치는 DOS 애드온 워커 상태 볼륨 안의 `/state/.masc/dos/programs/`이며, MASC 설치나 네트워크 다운로드로 채워지지 않고
   연산자가 직접 배치한다. 읽기 전용 도구 `masc_dos_inventory`를 통해 머신을 기동하거나 조종권
   (`Controller`)을 획득하지 않고도 무부작용으로 기본 자산을 조회할 수 있다.
   - **기본 자산 범위 (Base Inventory Scope)**: 최상위의 단독 일반 파일(Regular)과 프로그램 디렉터리를

@@ -135,6 +135,21 @@ type menu_action =
   | Swap_disk of string
   | Load of string  (** plug this cartridge in *)
 
+val carts_of_inventory :
+  (Yojson.Safe.t, string) result -> Masc_tui_types.msx_carts
+(** The menu's inventory from the server's [GET /api/v1/msx/carts] answer. A
+    read that failed, or an answer that is not an inventory, is
+    [Carts_unavailable]; only a list that is really empty is [No_carts]. *)
+
+(** Why the menu has no image to pick. *)
+type media_gap =
+  | Volume_has_no_images  (** the Add-on volume holds no cartridge or disk *)
+  | Volume_has_no_disk_images  (** disk-change mode, and none of the images is a .dsk *)
+  | Inventory_unavailable of string  (** the inventory could not be read; the reason *)
+
+val media_gap : Masc_tui_types.state -> media_gap option
+(** [None] while the menu has at least one image to pick. *)
+
 val open_menu : write:(string -> unit) -> ?mode:Masc_tui_types.msx_menu_mode -> Masc_tui_types.state -> unit
 (** Take the terminal over and draw the picker over the cartridge inventory
     [state.msx_carts]. The caller fetches the inventory first. Selection starts

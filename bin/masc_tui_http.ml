@@ -949,17 +949,13 @@ let post_msx_press ~expected_workspace ~(host : string) ~(port : int) ~(keys : s
       match member "message" json with `String m -> Error m | _ -> Error "press refused"))
 ;;
 
-(* The cartridge inventory for the load menu (RFC-0439 §3.7). The empty list on
-   any transport or shape error is the honest answer for the menu: "nothing to
-   pick right now", the same way the frame poll treats a missing frame. *)
-let fetch_msx_carts ~(host : string) ~(port : int) : string list =
-  match get_json ~host ~port ~path:msx_carts_path with
-  | Error _ -> []
-  | Ok json -> (
-    let open Yojson.Safe.Util in
-    match member "carts" json with
-    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
-    | _ -> [])
+(* The cartridge inventory for the load menu (RFC-0439 §3.7). An unreachable
+   worker, a refusal and an answer that is not an inventory are
+   [Carts_unavailable] with the reason; only an inventory that is really empty
+   is [No_carts], so the menu never tells the operator to fill a volume when the
+   fault is the server. *)
+let fetch_msx_carts ~(host : string) ~(port : int) : Masc_tui_types.msx_carts =
+  Masc_tui_msx.carts_of_inventory (get_json ~host ~port ~path:msx_carts_path)
 
 (* Plug a cartridge into the shared machine on the human's behalf (RFC-0439
    §3.7). The server runs the same loader masc_msx_load does; on success the
@@ -1057,9 +1053,12 @@ let tick_msx ~(expected_workspace : Masc.Tui_decode.server_identity)
         ~host ~port ~path:msx_tick_path ~body with
     | Error _ as error -> error
     | Ok (status_code, body) ->
-        (* Only the tick decoder may interpret a typed activity refusal. *)
+        (* Only the tick decoder may interpret a typed refusal: 409 for the
+           activity and workspace gates, 503 for a worker that is unavailable
+           or whose result was lost. *)
+        let typed_refusal = status_code = 409 || status_code = 503 in
         Result.map (fun json -> status_code,json)
-          (decode_json ~allow_empty:false ~status_code:(if status_code=409 then 200 else status_code) ~body)
+          (decode_json ~allow_empty:false ~status_code:(if typed_refusal then 200 else status_code) ~body)
   in
   Masc_tui_msx_tick.fetch ~body_fields msx_tick_cache ~host ~port ~headers ~request
 ;;

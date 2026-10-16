@@ -23,6 +23,7 @@ let loaded = function Client.Advanced (Some frame, Some _) -> frame
   | Advanced (None,None) -> fail "no frame"
   | Advanced (Some _,None) | Advanced (None,Some _) -> fail "frame and mark disagree"
   | Not_started _ -> fail "tick was refused"
+  | Worker_unavailable _ -> fail "tick found no worker"
 let failure = function Error _ -> () | Ok _ -> fail "failure returned a successful frame"
 let fetch ?(host = "localhost") ?(port = 8935) ?(headers = auth "a") cache request =
   Client.fetch cache ~host ~port ~headers ~request:(fun ~body -> Result.map (fun json -> 200,json) (request ~body))
@@ -39,7 +40,7 @@ let test_retained_metadata () =
       Ok (frame ~player:"bob" number (retained tag))) |> require in
     check (option int) "tick mark follows its frame" (Some number)
       (match observation with Advanced (_,mark) -> Option.map (fun (mark : Masc_tui_machine_live.mark) -> mark.count) mark
-       | Not_started _ -> None);
+       | Not_started _ | Worker_unavailable _ -> None);
     let current = loaded observation in
     check int "clock is fresh" number current.msx_number;
     check (option (list string)) "players are fresh" (Some ["bob"])
@@ -173,6 +174,39 @@ let test_refusal_body_is_not_matched_by_field_set () =
     failure result)
     [Msx_wire.Worker_unavailable; Msx_wire.Outcome_unknown]
 
+(* A 503 is two different answers. [worker_unavailable] ran nothing, so the
+   next poll asks again and the retained pixels stay; [outcome_unknown] may have
+   run, so the poll stops until the operator observes. A 503 with neither code
+   proves nothing, and stops the poll too. *)
+let test_unavailable_worker_keeps_polling () =
+  let cache = Client.create () and tag = revision 'a' in
+  let initial = fetch cache (fun ~body:_ -> Ok (frame 1 (inline tag "rgb"))) |> require |> loaded in
+  let calls = ref 0 in
+  let reply = Client.fetch cache ~host:"localhost" ~port:8935 ~headers:(auth "a") ~request:(fun ~body:_ ->
+    incr calls;
+    Ok (503, Msx_wire.encode ~code:Msx_wire.Worker_unavailable "No attached shared Add-on provides masc_msx_step")) in
+  check bool "the answer names the missing worker" true
+    (reply = Ok (Client.Worker_unavailable (Some "No attached shared Add-on provides masc_msx_step")));
+  check int "an unavailable worker is not retried inside the call" 1 !calls;
+  check bool "the poll keeps advancing" true (Client.policy_after_tick reply = Client.Advancing);
+  let resumed = fetch cache (fun ~body ->
+    check bool "the retained pixel basis survives the unavailable worker" true
+      (known body = `Assoc (reference tag));
+    Ok (frame 2 (retained tag))) |> require |> loaded in
+  check bool "retained pixels are reused after the worker returns" true (resumed.msx_rgb == initial.msx_rgb)
+
+let test_lost_tick_answer_stops_polling () =
+  let stops label answer =
+    let reply = Client.fetch (Client.create ()) ~host:"localhost" ~port:8935 ~headers:[]
+      ~request:(fun ~body:_ -> Ok answer) in
+    failure reply;
+    check bool (label ^ " leaves the outcome unknown") true
+      (Client.policy_after_tick reply = Client.Outcome_unknown) in
+  stops "outcome_unknown" (503, Msx_wire.encode ~code:Msx_wire.Outcome_unknown "reply lost");
+  stops "a 503 with no code" (503, `Assoc ["ok", `Bool false; "message", `String "gateway"]);
+  stops "a 503 that is not JSON refusal" (503, `String "upstream");
+  stops "a 503 carrying an activity code" (503, Msx_wire.encode ~code:Msx_wire.Activity_disabled "off")
+
 let test_workspace_refusal_is_unstarted_and_cannot_rearm () =
   let cache = Client.create () in
   let tag = revision 'a' in
@@ -210,6 +244,8 @@ let () =
   run "retained MSX tick"
     ["response protocol",
       [test_case "a refusal is read by code, not by field set" `Quick test_refusal_body_is_not_matched_by_field_set;
+       test_case "an unavailable worker keeps the poll advancing" `Quick test_unavailable_worker_keeps_polling;
+       test_case "a lost tick answer stops the poll" `Quick test_lost_tick_answer_stops_polling;
        test_case "workspace refusal never executes or rearms from activity" `Quick test_workspace_refusal_is_unstarted_and_cannot_rearm;
        test_case "typed activity refusal preserves pixels and resumes only from observation" `Quick test_activity_refusal_and_recovery;
        test_case "malformed activity cannot authorize execution" `Quick test_malformed_activity_is_not_permission;

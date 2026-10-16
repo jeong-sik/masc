@@ -259,18 +259,59 @@ let test_tick_validation_precedes_mutation () =
         ; {|{"pixel_response":"retained","pixel_response":"retained"}|}
         ; {|{"pixel_response":"retained","known_pixels":{"revision":"bad","width":1,"height":1}}|}
         ];
-      let status, _ = Route.tick_response ~config:(Lazy.force unwatched_config) ~body:"{}" in
+      let status, body = Route.tick_response ~config:(Lazy.force unwatched_config) ~body:"{}" in
       check
         bool
         "missing attached worker cannot fall back to host mutation"
         true
         (status = `Service_unavailable);
+      check bool "and says no worker took the call" true
+        (match Msx_wire.decode body with
+         | Ok {Msx_wire.code = Some Msx_wire.Worker_unavailable; _} -> true
+         | Ok _ | Error _ -> false);
+      check bool "the inventory read says the same when no worker is attached" true
+        (match Route.carts_response ~config:(Lazy.force unwatched_config) with
+         | `Service_unavailable, body ->
+             (match Msx_wire.decode body with
+              | Ok {Msx_wire.code = Some Msx_wire.Worker_unavailable; _} -> true
+              | Ok _ | Error _ -> false)
+         | _ -> false);
       check
         int
         "missing attached worker preserves the local machine"
         before
         (current_frame_number ())))
 ;;
+
+(* Two worker failures share HTTP 503 and differ in what they allow: nothing
+   was dispatched, or the call was dispatched and its result was lost. The
+   terminal tells them apart by code alone. *)
+let test_503_codes_separate_unavailable_from_outcome_unknown () =
+  let answer error =
+    let status, body = Route.call_error_answer error in
+    status, Result.get_ok (Msx_wire.decode body), body in
+  List.iter (fun (label, error, expected) ->
+    let status, refusal, _ = answer error in
+    check bool (label ^ " is 503") true (status = `Service_unavailable);
+    check bool (label ^ " is told apart by code") true (refusal.Msx_wire.code = Some expected))
+    ["no attached worker", Masc.Lane_addon_runtime.Unavailable "No attached shared Add-on provides masc_msx_step",
+       Msx_wire.Worker_unavailable;
+     "control port unavailable",
+       Masc.Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable "control port closed"),
+       Msx_wire.Worker_unavailable;
+     "result lost after dispatch", Masc.Lane_addon_runtime.Outcome_unknown "transport closed",
+       Msx_wire.Outcome_unknown];
+  (* What the terminal concludes from each real body. *)
+  let reads error =
+    let _, _, body = answer error in
+    Tick.fetch (Tick.create ()) ~host:"localhost" ~port:1 ~headers:[]
+      ~request:(fun ~body:_ -> Ok (503, body)) in
+  check bool "the terminal keeps polling past an unavailable worker" true
+    (match reads (Masc.Lane_addon_runtime.Unavailable "no worker") with
+     | Ok (Tick.Worker_unavailable (Some _)) -> true
+     | Ok _ | Error _ -> false);
+  check bool "the terminal stops on a lost result" true
+    (Result.is_error (reads (Masc.Lane_addon_runtime.Outcome_unknown "transport closed")))
 
 let test_tick_worker_advances_and_returns_frame () =
   with_tick_machine (fun () ->
@@ -1277,6 +1318,9 @@ let () =
             `Quick
             test_checkpoint_route
         ] )
+    ; ( "worker_failures"
+      , [ test_case "503 codes separate unavailable from outcome unknown" `Quick
+            test_503_codes_separate_unavailable_from_outcome_unknown ] )
     ; ( "press_json"
       , [ test_case "press result carries ok and the new frame" `Quick (fun () ->
             with_tick_machine (fun () ->

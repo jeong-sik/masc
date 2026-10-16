@@ -18622,6 +18622,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                   state.msx_notice <- Some (Masc_tui_msx_tick.refusal_notice refusal);
                   render_spectator state
                 end
+            | Ok (Worker_unavailable detail) ->
+                (* Nothing was dispatched, so the poll stays Advancing and the
+                   retained screen stays up until the worker answers again. *)
+                if request.poll_view == !msx_poll_view && request.poll_port = state.port
+                   && state.msx_open && not state.msx_menu_open
+                   && state.machine_source = Masc.Machine_lane.Msx then begin
+                  state.msx_notice <- Some (Masc_tui_msx_tick.worker_unavailable_notice detail);
+                  render_spectator state
+                end
             | Ok (Advanced (frame, mark)) ->
                 if request.poll_view == !msx_poll_view && request.poll_port = state.port
                    && state.msx_open && not state.msx_menu_open then begin

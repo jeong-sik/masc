@@ -77,25 +77,46 @@ type worker_response = {
 let succeeded (response : worker_response) =
   match response.outcome with Succeeded -> true | Failed _ -> false
 
+(* A worker call that returned no result. [Unavailable] and a host refusal
+   precede the dispatch, so nothing ran and the caller may ask again;
+   [Outcome_unknown] follows it, so the effect may have happened. Both are HTTP
+   503, told apart by their code: a client that retries or stops reads the
+   code, never the status or the message. *)
+let call_error_response (error : Lane_addon_runtime.tool_call_error) : worker_response =
+  let refused code status message =
+    {status;outcome=Failed Tool_result.Proven_pre_effect;message;data=`Null;code;machine_absent=false} in
+  match error with
+  | Lane_addon_runtime.Unavailable message
+  | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable message) ->
+      refused (Some Msx_wire.Worker_unavailable) `Service_unavailable message
+  | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message) ->
+      refused None `Bad_request message
+  | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_disabled message) ->
+      refused (Some Msx_wire.Activity_disabled) `Conflict message
+  | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_unobserved message) ->
+      refused (Some Msx_wire.Activity_unobserved) `Conflict message
+  | Lane_addon_runtime.Outcome_unknown message ->
+      {(refused (Some Msx_wire.Outcome_unknown) `Service_unavailable
+          (message ^ "; inspect the current machine before retrying"))
+       with outcome=Failed Tool_result.Effect_outcome_unknown}
+
+(* The body of a worker call that did not succeed: the shared refusal body with
+   the call's typed code. *)
+let failure_json (response : worker_response) =
+  Msx_wire.encode ?code:response.code response.message
+
+let call_error_answer error =
+  let response = call_error_response error in
+  response.status, failure_json response
+
 let worker_response ~config ~principal ~(schema : Masc_domain.tool_schema) ~arguments =
-  let failed ?(disposition = Tool_result.Proven_pre_effect) status message =
-    {status;outcome=Failed disposition;message;data=`Null;code=None;machine_absent=false} in
   match Tool_input_validation.validate_args ~schema:schema.input_schema ~name:schema.name ~args:arguments () with
-  | Error refusal -> failed `Bad_request (Tool_result.message refusal)
+  | Error refusal ->
+      {status=`Bad_request;outcome=Failed Tool_result.Proven_pre_effect;
+       message=Tool_result.message refusal;data=`Null;code=None;machine_absent=false}
   | Ok arguments ->
       match Machine_addon_host.call_shared ~config ~principal ~name:schema.name ~arguments with
-      | Error (Lane_addon_runtime.Unavailable message
-          | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable message)) ->
-          failed `Service_unavailable message
-      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message)) ->
-          failed `Bad_request message
-      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_disabled message)) ->
-          {(failed `Conflict message) with code=Some Msx_wire.Activity_disabled}
-      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_unobserved message)) ->
-          {(failed `Conflict message) with code=Some Msx_wire.Activity_unobserved}
-      | Error (Lane_addon_runtime.Outcome_unknown message) ->
-          failed ~disposition:Tool_result.Effect_outcome_unknown `Service_unavailable
-            (message ^ "; inspect the current machine before retrying")
+      | Error error -> call_error_response error
       | Ok result ->
           let field name = match result.Mcp_protocol.Mcp_types._meta with
             | Some (`Assoc fields) -> List.assoc_opt name fields | _ -> None in
@@ -152,7 +173,7 @@ let handle_press ~state ~who request reqd =
 let carts_response ~config =
   let result = worker_response ~config ~principal:Lane_addon_call_context.Anonymous
     ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Meta) ~arguments:(`Assoc ["include_inventory", `Bool true]) in
-  if not (succeeded result) then result.status, `Assoc ["ok", `Bool false; "message", `String result.message]
+  if not (succeeded result) then result.status, failure_json result
   else match result.data with
     | `Assoc fields -> (match List.assoc_opt "inventory" fields with
         | Some (`Assoc _ as inventory) -> `OK, inventory
@@ -166,6 +187,14 @@ let load_result_json ~ok ~message : Yojson.Safe.t =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
+(* The answer to a load, disk change or unbound checkpoint: [{ok, message}] on
+   success, and on failure the shared refusal body, which carries the call's
+   typed code. *)
+let answer_json (result : worker_response) =
+  if succeeded result then load_result_json ~ok:true ~message:result.message
+  else failure_json result
+;;
+
 (* The worker resolves inventory names against its persistent storage. *)
 let load_response ~(config : Workspace.config) ~agent_name ~body =
   match decode_write_body ~config ~body with
@@ -173,7 +202,7 @@ let load_response ~(config : Workspace.config) ~agent_name ~body =
   | Ok arguments ->
       let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor agent_name)
         ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Load) ~arguments in
-      result.status, load_result_json ~ok:(succeeded result) ~message:result.message
+      result.status, answer_json result
 ;;
 
 let handle_load ~state ~agent_name request reqd =
@@ -283,7 +312,7 @@ let checkpoint_legacy_response ~(config : Workspace.config) ~restore ~body =
   | Ok arguments ->
       let schema = Tool_schemas_misc_toml.msx_schema (if restore then Msx_tool.Restore else Msx_tool.Save) in
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator ~schema ~arguments in
-      result.status, load_result_json ~ok:(succeeded result) ~message:result.message
+      result.status, answer_json result
 ;;
 ;;
 
@@ -509,7 +538,7 @@ let change_disk_response ~(config : Workspace.config) ~body =
   | Ok arguments ->
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
         ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Change_disk) ~arguments in
-      result.status, load_result_json ~ok:(succeeded result) ~message:result.message
+      result.status, answer_json result
 ;;
 
 let handle_change_disk ~state request reqd =

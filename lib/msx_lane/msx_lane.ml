@@ -551,7 +551,7 @@ type until_change = {
 let step_until_change ~max_frames =
   let* () = require_activity () in
   with_machine (fun st ->
-    match check_frames ~what:"frames" max_frames with
+    match check_frames ~what:"max_frames" max_frames with
     | Error e -> Error e
     | Ok () ->
       let cfg = Screen_change.default in

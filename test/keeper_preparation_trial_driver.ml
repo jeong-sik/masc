@@ -261,7 +261,10 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
     let record = Jobs.load ~base_path:base ~keeper_name:keeper (Jobs.Job_id.of_string id |> get Fun.id)
       |> get store_error in
     let stdout,stderr = match record.outputs with
-      | Some pair -> pair | None -> failwith "setup original outputs are not complete" in
+      | Some (Jobs.Outputs_complete (stdout,stderr)) -> stdout,stderr
+      | Some (Jobs.Outputs_unavailable {evidence}) ->
+        failwith ("setup original outputs are unavailable: " ^ evidence)
+      | None -> failwith "setup original outputs are not complete" in
     let body = blob_bytes base stdout in
     require (record.source.task_id=Some task.task_id) "setup job lost original Task identity";
     if Sys.file_exists (Filename.concat base "daemon.json") then Unix.unlink (Filename.concat base "daemon.json");
@@ -292,7 +295,10 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
       "setup notification changed its original source";
     let record = Jobs.load ~base_path:base ~keeper_name:keeper completion.oj_job_id |> get store_error in
     let stdout,stderr = match record.outputs with
-      | Some outputs -> outputs | None -> failwith "setup notification has no complete original output" in
+      | Some (Jobs.Outputs_complete (stdout,stderr)) -> stdout,stderr
+      | Some (Jobs.Outputs_unavailable {evidence}) ->
+        failwith ("setup notification output is unavailable: " ^ evidence)
+      | None -> failwith "setup notification has no complete original output" in
     require (sha (blob_bytes base stdout)=string "stdout_sha256" expected)
       "setup notification stdout differs from the consumed original";
     ignore (blob_bytes base stderr);
@@ -715,7 +721,11 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
         (Jobs.Job_id.of_string (string "job_id" job) |> get Fun.id) |> get store_error in
     require (Yojson.Safe.equal (Jobs.source_to_json record.source) (field "source" job))
       "trial changed an original job source";
-    let stdout,_ = match record.outputs with Some pair -> pair | None -> failwith "trial lost original complete output" in
+    let stdout = match record.outputs with
+      | Some (Jobs.Outputs_complete (stdout,_)) -> stdout
+      | Some (Jobs.Outputs_unavailable {evidence}) ->
+        failwith ("trial original output is unavailable: " ^ evidence)
+      | None -> failwith "trial lost original complete output" in
     require (sha (blob_bytes base stdout)=string "stdout_sha256" job) "trial changed an original output")
     (field "jobs" fixture |> to_list);
   let outcome_name = if correct then "correct" else "explicit_failure" in

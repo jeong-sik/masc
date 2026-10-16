@@ -162,6 +162,16 @@ type error =
           leaves it: a host-side failure, not something the CLI sent. The
           string is the exception. That catch-all re-raises
           [Out_of_memory], [Stack_overflow] and [Sys.Break] instead. *)
+  | Child_fd_ceiling_exceeded of
+      { count : int option
+      ; ceiling : int
+      }
+      (** The CLI child was failed for file-table safety, not for anything
+          it answered. [Some count] past [ceiling] is a sick workspace
+          (deterministic: refiring the same turn re-kills it, so the
+          workspace needs operator action, not retries). [None] means the
+          sample itself hit EMFILE/ENFILE on a live child: system pressure,
+          refused closed rather than risk ENFILE. *)
   | Timeout of float
 
 val error_to_string : error -> string

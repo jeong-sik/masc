@@ -1796,6 +1796,43 @@ let test_an_unhandled_runtime_exception_recovers_as_protocol_failed () =
     true
 ;;
 
+(* #43259: a file-table safety kill is the provider's terminal failure, not
+   an unavailable provider — refiring the same turn re-kills it, so the
+   mapping must not invite blind retries. Recovery is Ambiguous
+   (Transport_interrupted), never Transient. *)
+let test_child_fd_ceiling_reports_and_recovers () =
+  let open Keeper_antigravity_runtime.For_testing in
+  let counted =
+    Runtime_antigravity.Child_fd_ceiling_exceeded { count = Some 45000; ceiling = 16000 }
+  in
+  let pressured =
+    Runtime_antigravity.Child_fd_ceiling_exceeded { count = None; ceiling = 16000 }
+  in
+  let check_reported error =
+    match runtime_error_to_core_error error with
+    | Agent_core.Error.Provider
+        (Llm_provider.Error.ProviderReportedError { provider; error_type; detail }) ->
+      check string "provider" "antigravity_cli" provider;
+      check
+        (option string)
+        "error type"
+        (Some "child_fd_ceiling_exceeded")
+        error_type;
+      check bool "detail names the ceiling" true (detail <> "")
+    | core -> fail ("expected ProviderReportedError, got " ^ Agent_core.Error.to_string core)
+  in
+  check_reported counted;
+  check_reported pressured;
+  check bool "counted recovery"
+    (recovery_failure_of_runtime_error counted
+    = Keeper_official_client_session_store.Transport_interrupted)
+    true;
+  check bool "pressured recovery"
+    (recovery_failure_of_runtime_error pressured
+    = Keeper_official_client_session_store.Transport_interrupted)
+    true
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -1814,6 +1851,10 @@ let () =
             "an unhandled runtime exception recovers as protocol failed"
             `Quick
             test_an_unhandled_runtime_exception_recovers_as_protocol_failed
+          ; test_case
+            "child fd ceiling reports and recovers without blind retry"
+            `Quick
+            test_child_fd_ceiling_reports_and_recovers
           ; test_case
             "every declared loading is eager on Antigravity"
             `Quick

@@ -265,6 +265,11 @@ let retryable_claude_error = function
   | Runtime_claude_code.Timeout _ -> true
 let retryable_antigravity_error = function
   | Runtime_antigravity.Invalid_config _ -> false
+  (* A counted breach is deterministic — the same turn re-kills — so the
+     workspace needs operator action, not a retry. A pressure refusal may
+     pass with the pressure, so it stays retryable. *)
+  | Runtime_antigravity.Child_fd_ceiling_exceeded { count = None; _ } -> true
+  | Runtime_antigravity.Child_fd_ceiling_exceeded { count = Some _; _ } -> false
   | Runtime_antigravity.Spawn_failed _
   | Runtime_antigravity.Protocol_error _
   | Runtime_antigravity.State_callback_failed _

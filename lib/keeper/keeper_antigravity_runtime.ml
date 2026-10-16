@@ -27,6 +27,26 @@ let runtime_error_to_core_error = function
          ; error_type = Some "turn_failed"
          ; detail
          })
+  (* A file-table safety kill, not a spawn failure: refiring the same turn
+     re-kills it, so report it as the provider's terminal failure rather
+     than an unavailable provider that invites blind retries. *)
+  | Runtime_antigravity.Child_fd_ceiling_exceeded { count; ceiling } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "antigravity_cli"
+         ; error_type = Some "child_fd_ceiling_exceeded"
+         ; detail =
+             (match count with
+              | Some count ->
+                Printf.sprintf
+                  "CLI held %d open files past the %d ceiling; clean the workspace and retry (#43259)"
+                  count
+                  ceiling
+              | None ->
+                Printf.sprintf
+                  "CLI file usage unobservable under fd pressure at the %d-file ceiling; retry after pressure passes (#43259)"
+                  ceiling)
+         })
   | Runtime_antigravity.Timeout seconds ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
@@ -53,6 +73,10 @@ let runtime_error_to_core_error = function
 
 let recovery_failure_of_runtime_error = function
   | Runtime_antigravity.Spawn_failed _ -> Session_store.Transient_spawn_failed
+  | Runtime_antigravity.Child_fd_ceiling_exceeded _ ->
+    (* Killed mid-turn for file-table safety: Ambiguous, needs a look —
+       a sick workspace (operator cleans) or system pressure (passes). *)
+    Session_store.Transport_interrupted
   | Runtime_antigravity.Process_exited _ | Runtime_antigravity.Timeout _ ->
     Session_store.Transport_interrupted
   | Runtime_antigravity.Invalid_config _

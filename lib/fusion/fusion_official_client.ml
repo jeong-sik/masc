@@ -307,6 +307,7 @@ let panel_failure ~runtime_id = function
        | Runtime_antigravity.State_callback_failed _
        | Runtime_antigravity.Turn_failed _
        | Runtime_antigravity.Process_exited _
+       | Runtime_antigravity.Child_fd_ceiling_exceeded _
        | Runtime_antigravity.Unhandled_exception _ ) as error) ->
     provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
   | Muse_failure (Runtime_muse_serve.Timeout _) -> Fusion_types.Timeout

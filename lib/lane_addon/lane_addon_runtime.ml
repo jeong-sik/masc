@@ -2449,8 +2449,11 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
       | Ok _ -> () | Error message -> add_issue ~id:owner.id owner.source_path message in
     (* Containers a dead server left behind are found by their labels, not by
        a record. Each engine runtime that a declaration or a retained record
-       uses is swept once, on the first beat its engine answers. An engine that
-       does not answer is an issue of this beat; nothing is logged per beat. *)
+       uses is swept on the first beat its engine answers, and again on later
+       beats while a refusal in it is one [Lifecycle.heal] says to retry (the
+       removal itself failed). A refusal that waits for a condition, such as a
+       foreign holder, ends the sweep for this process. An engine that does
+       not answer is an issue of this beat. *)
     let runtimes_in_use =
       let declared = List.map (fun (d : Lane_addon_config.declaration) -> d.package.runtime) snapshot.declarations in
       let retained = List.filter_map (fun (_, fields) ->
@@ -2462,7 +2465,13 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
         if not (List.mem runtime m.swept) then
           match engine_control.sweep ~runtime ~is_live_instance:(is_live_instance m) with
           | Ok items ->
-              m.swept <- runtime :: m.swept;
+              let retry = List.exists (fun (item : Lane_addon_slot.sweep_item) -> match item.verdict with
+                | Lane_addon_slot.Refused failure ->
+                    (match Lifecycle.heal failure with
+                     | Lifecycle.Retry -> true
+                     | Lifecycle.Wait_until _ -> false)
+                | Lane_addon_slot.Removed | Lane_addon_slot.Live -> false) items in
+              if not retry then m.swept <- runtime :: m.swept;
               List.iter (fun (item : Lane_addon_slot.sweep_item) -> match item.verdict with
                 | Lane_addon_slot.Live -> ()
                 | Lane_addon_slot.Removed -> Log.Misc.info "%s" (Lane_addon_slot.sweep_item_to_string item)

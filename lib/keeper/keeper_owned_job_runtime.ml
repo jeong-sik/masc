@@ -60,6 +60,18 @@ let observe (record : Store.record) observation =
       | Store.Cancelled_unconfirmed_launch), Backend.Unconfirmed detail -> preserve detail
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
       | Store.Cancelled_before_start _), Backend.Absent ->
+      (* Termination policy for Absent without a cancel request (tracked in
+         #42799 checklist "termination policy for Absent without cancellation").
+         Chosen: (a) surface, not (b) time bound.
+         - No relaunch: a same-label container may still appear late, so closing
+           or retrying on a clock could run the job twice.
+         - The record has no timestamp field, so a time bound would need a
+           durable schema change; (a) needs none: [note] stores the reason in
+           [detail] and [Store.result_json] reports it, so the owner can see the
+           launch is unconfirmed and call keeper_job_cancel, which closes via
+           Cancelled_unconfirmed_launch above.
+         Known residual: until someone cancels, the marker stays and each pulse
+         re-inspects. *)
       preserve "saved backend job is absent; launch intent is retained, no relaunch"
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
     | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _),

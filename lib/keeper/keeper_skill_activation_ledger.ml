@@ -2023,7 +2023,9 @@ let recorded_part (activation : activation) =
   { activation with delivery = None; actions = [] }
 ;;
 
-let record ~config ~trace_id (activation : activation) =
+type activation_clock = Exact_activation_clock | Original_activation_clock
+
+let record_with_clock ~activation_clock ~config ~trace_id (activation : activation) =
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
     let* () =
       if
@@ -2036,17 +2038,29 @@ let record ~config ~trace_id (activation : activation) =
     let* log = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
     let current = log.ledger in
     match List.find_opt (exact_key_equal activation) current.activations with
-    | Some existing
-      when Yojson.Safe.equal
-             (activation_to_yojson (recorded_part existing))
-             (activation_to_yojson (recorded_part activation)) ->
-      Ok (current, Already_recorded existing)
-    | Some _ -> Error (Invocation_id_collision activation.skill_tool_use_id)
+    | Some existing ->
+      let expected = match activation_clock,activation.invocation with
+        | Original_activation_clock,Nested_composition_invocation _ ->
+          {activation with activated_at=existing.activated_at}
+        | Exact_activation_clock,_
+        | Original_activation_clock,(Instruction_invocation _ | Composition_invocation _) -> activation in
+      if Yojson.Safe.equal (activation_to_yojson (recorded_part existing))
+          (activation_to_yojson (recorded_part expected))
+      then Ok (current, Already_recorded existing)
+      else Error (Invocation_id_collision activation.skill_tool_use_id)
     | None ->
       let* stored =
         commit_event_locked session_dir log (Activation_recorded activation)
       in
       Ok (stored, Recorded activation))
+;;
+
+let record ~config ~trace_id activation =
+  record_with_clock ~activation_clock:Exact_activation_clock ~config ~trace_id activation
+;;
+
+let record_original_invocation ~config ~trace_id activation =
+  record_with_clock ~activation_clock:Original_activation_clock ~config ~trace_id activation
 ;;
 
 (* The rejection is evidence in its own right: it is recorded, and the

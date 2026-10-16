@@ -13,6 +13,8 @@ type error =
   | Snapshot_missing
   | Snapshot_rejected of Skill_catalog_snapshot.config_state
   | Runtime_failed of string
+  | Original_activation_unavailable of Keeper_composition_draft.error
+  | Original_task_skills_unavailable of Keeper_task_skill_turn.error
 
 let error_to_string = function
   | Profile_unavailable error -> Keeper_types_profile.keeper_toml_load_error_to_string error
@@ -20,6 +22,8 @@ let error_to_string = function
   | Metadata_missing -> "original Keeper metadata is missing"
   | Metadata_owner_mismatch -> "metadata does not belong to the original Keeper"
   | Profile_rejected detail | Runtime_failed detail -> detail
+  | Original_activation_unavailable error -> Yojson.Safe.to_string (Keeper_composition_draft.error_to_json error)
+  | Original_task_skills_unavailable error -> Keeper_task_skill_turn.error_to_string error
   | Keeper_paused -> "original Keeper is paused"
   | Snapshot_lookup_failed error -> Config_dir_resolver.canonical_base_path_error_to_string error
   | Snapshot_missing -> "current workspace Skill snapshot is unavailable"
@@ -55,6 +59,8 @@ let resume ~context continuation =
     |> Result.map_error (fun detail -> Profile_rejected detail) in
   let* () = if meta.paused then Error Keeper_paused else Ok () in
   let* snapshot = current_snapshot ~base_path:config.base_path in
+  let* nested_activation = Keeper_composition_draft.load_nested_activation ~base_path:config.base_path source
+    |> Result.map_error (fun error -> Original_activation_unavailable error) in
   let addons = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:source.keeper_name in
   let descriptors = Keeper_tool_descriptor.all_descriptors ()
     @ List.map Keeper_lane_addon_descriptor.create addons.exports in
@@ -62,12 +68,18 @@ let resume ~context continuation =
   List.iter (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
     Log.Keeper.warn ~keeper_name:source.keeper_name "continuation Skill projection unavailable: %s"
       (Keeper_skill_catalog.error_to_string diagnostic.error)) diagnostics;
-  (* Prepared async recipes have ordinary leaves, not named/nested Skills.
-     Their original recipe is compiled by the sealed intake below. *)
+  let* task_selection = match nested_activation with
+    | None -> Ok Keeper_task_skill_turn.empty
+    | Some bound -> Keeper_task_skill_turn.resolve ~snapshot
+        (Keeper_skill_activation_recorder.bound_task_references bound)
+        |> Result.map_error (fun error -> Original_task_skills_unavailable error) in
+  let* task_selection = Keeper_task_skill_turn.with_descriptors ~descriptors ~snapshot task_selection
+    |> Result.map_error (fun error -> Original_task_skills_unavailable error) in
   let capability_surface = Keeper_capability_surface.create_with_descriptors
       ~tool_descriptors:descriptors ~tool_deny:defaults.tool_deny ~sandbox_profile:meta.sandbox_profile
       ~skill_names:defaults.skill_names ~global_skill_catalog:catalog
-      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors snapshot) ~task_skills:[] in
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
+      ~task_skills:(Keeper_task_skill_turn.skills task_selection) in
   let cell = Keeper_tool_call_log_context.create_cell () in
   Keeper_tool_call_log_context.set_turn_context ~cell ~agent_name:source.keeper_name
     ?task_id:source.source_task_id ~turn:source.source_turn

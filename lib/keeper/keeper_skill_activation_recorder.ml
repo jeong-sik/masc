@@ -22,12 +22,15 @@ and recorded_task_provenance =
   ; task_ids : Ledger.task_id_set option
   }
 
+type bound_context = { context : t; runtime : string }
+
 type error =
   | Turn_scope_mismatch
   | Runtime_attempt_missing
   | Invalid_task_id of string
   | Activation_rejected of Ledger.decode_error
   | Store_failed of Ledger.store_error
+  | Invalid_bound_context of string
 
 let make ~trace_id ~turn_ref ~runtime_id ~snapshot_revision ~task_selection =
   let task_provenance =
@@ -89,6 +92,107 @@ let composition_origin context reference =
   with
   | Some { task_ids = Some task_ids; _ } -> Ledger.Task_composition { task_ids }
   | Some { task_ids = None; _ } | None -> Ledger.Session_composition
+;;
+
+let bind_async context =
+  match context.runtime_id () with
+  | None -> Error Runtime_attempt_missing
+  | Some runtime when String.trim runtime = "" -> Error Runtime_attempt_missing
+  | Some runtime -> Ok {context;runtime}
+;;
+
+let bound_context_to_yojson {context;runtime} = `Assoc
+  ["trace_id",`String (Keeper_id.Trace_id.to_string context.trace_id);
+   "turn_ref",Ids.Turn_ref.to_yojson context.turn_ref;
+   "runtime_id",`String runtime;
+   "snapshot_revision",`String (Skill_catalog_snapshot.snapshot_revision_to_string context.snapshot_revision);
+   "task_provenance",`List (List.map (fun provenance -> `Assoc
+     ["reference",Skill_reference.to_yojson provenance.reference;
+      "task_ids",(match provenance.task_ids with None -> `Null | Some ids ->
+        `List (List.map (fun id -> `String (Keeper_id.Task_id.to_string id)) (Ledger.task_id_set_to_list ids)))]) context.task_provenance)]
+;;
+
+let bound_context_of_yojson json =
+  let invalid detail = Error (Invalid_bound_context detail) in
+  let fields names = function
+    | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
+    | _ -> invalid "unexpected, duplicate or missing bound context fields" in
+  let string name fields = match List.assoc name fields with
+    | `String value -> Ok value | _ -> invalid ("expected string " ^ name) in
+  let* fields = fields ["trace_id";"turn_ref";"runtime_id";"snapshot_revision";"task_provenance"] json in
+  let* raw_trace = string "trace_id" fields in
+  let* trace_id = Keeper_id.Trace_id.of_string raw_trace |> Result.map_error (fun _ -> Invalid_bound_context "invalid trace") in
+  let* turn_ref = Ids.Turn_ref.of_yojson (List.assoc "turn_ref" fields)
+    |> Result.map_error (fun detail -> Invalid_bound_context detail) in
+  let* () = if Ids.Turn_ref.trace_id turn_ref = raw_trace then Ok () else Error Turn_scope_mismatch in
+  let* runtime = string "runtime_id" fields in
+  let* () = if String.trim runtime <> "" then Ok () else invalid "empty runtime identity" in
+  let* raw_snapshot = string "snapshot_revision" fields in
+  let* snapshot_revision = Skill_catalog_snapshot.snapshot_revision_of_string raw_snapshot
+    |> Result.map_error (fun _ -> Invalid_bound_context "invalid snapshot revision") in
+  let* rows = match List.assoc "task_provenance" fields with `List rows -> Ok rows
+    | _ -> invalid "expected Task provenance list" in
+  let* task_provenance = List.fold_left (fun result row ->
+    let* previous = result in
+    let* row = match row with
+      | `Assoc row when List.sort String.compare (List.map fst row) = ["reference";"task_ids"] -> Ok row
+      | _ -> invalid "invalid Task provenance fields" in
+    let* reference = Skill_reference.of_yojson (List.assoc "reference" row)
+      |> Result.map_error (fun _ -> Invalid_bound_context "invalid exact Task reference") in
+    let* () = if List.exists (fun old -> Skill_reference.equal old.reference reference) previous
+      then invalid "duplicate Task reference" else Ok () in
+    let* task_ids = match List.assoc "task_ids" row with
+      | `Null -> Ok None
+      | `List ids ->
+        let* ids = List.fold_left (fun result -> function
+          | `String id -> let* previous = result in
+            let* id = Keeper_id.Task_id.of_string id |> Result.map_error (fun _ -> Invalid_task_id id) in Ok (id::previous)
+          | _ -> invalid "expected Task identity") (Ok []) ids in
+        Ledger.task_id_set_of_list (List.rev ids) |> Result.map Option.some
+          |> Result.map_error (fun error -> Activation_rejected error)
+      | _ -> invalid "expected Task identities or null" in
+    Ok ({reference;task_ids}::previous)) (Ok []) rows |> Result.map List.rev in
+  Ok {context={trace_id;turn_ref;runtime_id=(fun () -> Some runtime);snapshot_revision;task_provenance};runtime}
+;;
+
+let bound_task_references bound = bound.context.task_provenance
+  |> List.filter_map (fun provenance -> match provenance.task_ids with
+      | Some _ -> Some provenance.reference | None -> None)
+;;
+
+let bound_nested_activation bound ~invocation ~tool_name ~scope ~reference ~activated_at =
+  Ledger.make_activation ~identity:reference.Skill_reference.identity ~content_revision:reference.content_revision
+    ~snapshot_revision:bound.context.snapshot_revision ~turn_ref:bound.context.turn_ref ~runtime_id:bound.runtime
+    ~skill_tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+    ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation)
+    ~invocation:(Ledger.Nested_composition_invocation
+      {origin=composition_origin bound.context reference;tool_name;scope}) ~activated_at
+  |> Result.map_error (fun error -> Activation_rejected error)
+;;
+
+let find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference =
+  let* ledger = Ledger.load_existing ~config ~trace_id:bound.context.trace_id
+    |> Result.map_error (fun error -> Store_failed error) in
+  let existing = Option.bind ledger (fun ledger -> Ledger.activations ledger |> List.find_opt (fun activation ->
+    activation.Ledger.skill_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation)) in
+  match existing with
+  | None -> Ok None
+  | Some existing ->
+    let* expected = bound_nested_activation bound ~invocation ~tool_name ~scope ~reference ~activated_at:existing.activated_at in
+    if Skill_reference.equal_identity expected.identity existing.identity
+      && expected.content_revision = existing.content_revision
+      && expected.snapshot_revision = existing.snapshot_revision
+      && Ids.Turn_ref.equal expected.turn_ref existing.turn_ref
+      && expected.runtime_id = existing.runtime_id && expected.agent_core_turn = existing.agent_core_turn
+      && expected.invocation = existing.invocation
+    then Ok (Some existing) else Error (Invalid_bound_context "original child activation differs from sealed run authority")
+;;
+
+let record_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference =
+  let activated_at = Masc_domain.now_iso () in
+  let* activation = bound_nested_activation bound ~invocation ~tool_name ~scope ~reference ~activated_at in
+  Ledger.record_original_invocation ~config ~trace_id:bound.context.trace_id activation
+  |> Result.map snd |> Result.map_error (fun error -> Store_failed error)
 ;;
 
 let evidence ~relative_path contents =
@@ -214,6 +318,7 @@ let error_code = function
   | Invalid_task_id _ -> "invalid_task_id"
   | Activation_rejected _ -> "activation_rejected"
   | Store_failed _ -> "store_failed"
+  | Invalid_bound_context _ -> "invalid_bound_context"
 ;;
 
 let error_to_string = function
@@ -226,6 +331,7 @@ let error_to_string = function
   | Activation_rejected _ -> "Skill activation was rejected by the typed ledger"
   | Store_failed error ->
     "Skill activation ledger write failed: " ^ Ledger.store_error_to_string error
+  | Invalid_bound_context detail -> "Original Skill activation binding rejected: " ^ detail
 ;;
 
 let error_to_yojson error =
@@ -237,6 +343,7 @@ let error_to_yojson error =
     | Turn_scope_mismatch
     | Runtime_attempt_missing
     | Invalid_task_id _
+    | Invalid_bound_context _
       -> None
   in
   `Assoc

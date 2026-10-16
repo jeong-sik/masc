@@ -21,7 +21,6 @@ type error =
   | Skill_not_prepared
   | Different_package
   | Nested_rejected of Keeper_composition_nested.error
-  | Nested_async_requires_worker_binding
   | Nested_publication_requires_catalog
 
 val prepare_tool_name : string
@@ -42,9 +41,10 @@ val prepare
     preflight every fixed argument/input, and durably store the original recipe,
     flattened plan, child provenance, owner, execution mode and contracts.
     Ordinary leaves carry either a static read-only contract or the isolated
-    owned-job launch producer's durable Serial effect contract. Nested recipes use
-    inline execution; async worker binding and named nested publication are
-    separate contracts. Ordinary drafts support both execution modes. *)
+    owned-job launch producer's durable Serial effect contract. Child definitions
+    are inline; ordinary and nested drafts support both execution modes. Async
+    runs persist original child activation authority before worker admission.
+    Named nested publication remains a separate contract. *)
 (* Optional [skill] metadata freezes [package_id] and [description] into a
    validated SKILL.md using an ordinary parameter-free plan. No publication
    occurs. A task-only draft need not carry reusable Skill metadata. *)
@@ -95,6 +95,7 @@ val preview : t -> Yojson.Safe.t
 
 val record_invocation
   :  base_path:string
+  -> ?nested_activation:Keeper_skill_activation_recorder.bound_context
   -> composition_run_id:Keeper_tool_plan.Composition_run_id.t
   -> invocation:Agent_core.Tool_contract.Invocation.t
   -> t
@@ -104,3 +105,10 @@ val record_invocation
     The caller passes this same [composition_run_id] to the executor and
     observers, so the durable binding and actual leaf invocations identify
     one attempted run. *)
+
+val load_nested_activation : base_path:string ->
+  Keeper_tool_execution_journal.source ->
+  (Keeper_skill_activation_recorder.bound_context option, error) result
+(** Strictly read the original owned run artifact, including exact draft,
+    invocation and child mappings. Restore the sealed original recorder facts;
+    ordinary runs carry null. No activation or worker is created. *)

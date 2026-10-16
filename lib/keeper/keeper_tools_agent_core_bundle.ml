@@ -529,8 +529,10 @@ let make_tool_bundle_for_descriptors_with_policy
       match capability_surface with
       | Some capability_surface ->
         Keeper_tool_composition_surface.make_tools ~capability_surface ?record_nested_composition_activation
+          ?nested_activation_context:skill_activation_context
       | None ->
         Keeper_tool_composition_surface.Compatibility.make_tools ~descriptors ?record_nested_composition_activation
+          ?nested_activation_context:skill_activation_context
     in
     make_composition_tools
         ~instruction_skills

@@ -278,7 +278,8 @@ let test_nested_draft_freezes_and_revalidates_recipe () =
    | Error (Draft.Malformed_draft _) -> () | _ -> fail "different child mapping admitted");
   (match Draft.prepare ~base_path ~capability_surface:surface ~keeper_name:"fixture"
       ~execution:Masc.Keeper_tool_composition_catalog.Async recipe with
-   | Error Draft.Nested_async_requires_worker_binding -> () | _ -> fail "async child captured an active-turn recorder");
+   | Ok async_draft -> check int "async parent preserves exact child mappings" 1 (List.length (Draft.nested_calls async_draft))
+   | Error error -> fail (Yojson.Safe.to_string (Draft.error_to_json error)));
   let publishable = match recipe with `Assoc fields -> `Assoc (("skill", `Assoc
       [ "package_id", `String "nested-published"; "description", `String "Exact child recipe" ]) :: fields)
     | _ -> fail "expected recipe object" in
@@ -317,8 +318,12 @@ pointer = "/profile"
 |}
 ;;
 
-let test_public_nested_prepare_run_records_only_admitted_children ~reject_child () =
+let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Masc.Keeper_tool_composition_catalog.Inline) ~reject_child () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let eio_snapshot = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () -> Eio_context.restore_state eio_snapshot) @@ fun () ->
+  Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_base @@ fun base_path ->
   let surface, reference, snapshot = fixture_snapshot ~source:public_document () in
@@ -335,7 +340,8 @@ let test_public_nested_prepare_run_records_only_admitted_children ~reject_child 
   let turn_ref = Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string trace_id) ~absolute_turn:1 in
   let task_selection = Masc.Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:"task-nested" [ reference ]
       |> require "task-bound exact child" in
-  let recorder = Recorder.make ~trace_id ~turn_ref ~runtime_id:(fun () -> Some "fixture.runtime")
+  let runtime = ref "fixture.runtime" and runtime_reads = ref 0 in
+  let recorder = Recorder.make ~trace_id ~turn_ref ~runtime_id:(fun () -> incr runtime_reads; Some !runtime)
       ~snapshot_revision:(Surface.skill_snapshot_revision surface) ~task_selection |> require "turn recorder" in
   let calls = ref 0 in
   let barrier, release = Eio.Promise.create () in
@@ -348,8 +354,10 @@ let test_public_nested_prepare_run_records_only_admitted_children ~reject_child 
   let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
     { provider = Masc.Keeper_publication_recovery_availability.non_runtime_provider; keeper_name = meta.name } in
   let ctx_snapshot = Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"public nested fixture" in
+  let cell = Call_log.create_turn_ctx_cell () in
+  Call_log.set_turn_context ~cell ~agent_name:"fixture" ~task_id:"task-nested" ~turn:1 ~trace_id:"trace-nested-public" ();
   let tools = Tools.make_tools ~capability_surface:surface ~config ~meta ~publication_recovery ~ctx_snapshot
-      ~record_nested_composition_activation:record () in
+      ~record_nested_composition_activation:record ~nested_activation_context:recorder ~turn_ctx_cell:cell () in
   let invoke id name input =
     let tool = List.find_map (fun (tool, _, _) -> if tool.Agent_core.Tool.schema.name = name then Some tool else None) tools
       |> function Some value -> value | None -> fail ("public control absent: " ^ name) in
@@ -362,7 +370,20 @@ let test_public_nested_prepare_run_records_only_admitted_children ~reject_child 
       match Tool_output.decode_from_agent_core content with
       | Tool_output.Decoded reference -> read_document ~base_path reference
       | Tool_output.Not_marker ->
-        Yojson.Safe.from_string content |> Yojson.Safe.Util.member "structured_content"
+        let json = Yojson.Safe.from_string content in
+        (match Tool_output.normalized_artifact_ref_of_json (Yojson.Safe.Util.member "artifact_manifest" json) with
+         | Tool_output.Decoded_normalized_artifact_ref reference ->
+           ignore (Agent_core.Execution_json.object_fields ~context:"public typed artifact envelope"
+             ~required:["structured_content";"artifact_manifest"] ~optional:["content"] json
+             |> require "canonical public artifact envelope");
+           let projected = Yojson.Safe.Util.member "structured_content" json in
+           check bool "public inline projection matches its canonical manifest" true
+             (Yojson.Safe.equal projected (read_document ~base_path reference));
+           projected
+         | Tool_output.Invalid_normalized_artifact_ref {detail} -> fail detail
+         | Tool_output.Not_normalized_artifact_ref ->
+           if success then fail "public success has no canonical artifact envelope"
+           else Yojson.Safe.Util.member "data" json)
       | Tool_output.Invalid_marker { detail } -> fail detail
     in
     if structured = `Null then fail ("public result lacks structured content: " ^ content);
@@ -373,21 +394,44 @@ let test_public_nested_prepare_run_records_only_admitted_children ~reject_child 
           ; nested ~args:(`Assoc []) ~after:[ "reject" ] "blocked" reference ]
         else [] in
   let recipe = request ~exports:[ exported "answer" "left" "/profile" ] scopes in
-  let input = match recipe with `Assoc fields -> `Assoc (("execution", `String "inline") :: fields)
+  let input = match recipe with `Assoc fields -> `Assoc (("execution", `String (Masc.Keeper_tool_composition_catalog.execution_mode_to_string execution)) :: fields)
     | _ -> fail "recipe object" in
   let prepare_success, _, prepared = invoke "prepare-nested" Draft.prepare_tool_name input in
   check bool "public prepare accepts nested grammar" true prepare_success;
   check int "preparation is not activation" 0 !calls;
   let open Yojson.Safe.Util in
   let draft_reference = prepared |> member "draft" |> decode_reference in
-  let success, result_content, result = invoke "run-nested" Draft.run_tool_name
+  let success, accepted_content, accepted = invoke "run-nested" Draft.run_tool_name
       (`Assoc [ "sha256", `String draft_reference.sha256 ]) in
+  let success,result_content,result = match execution with
+    | Masc.Keeper_tool_composition_catalog.Inline -> success,accepted_content,accepted
+    | Masc.Keeper_tool_composition_catalog.Async ->
+      check bool "nested parent is durably accepted asynchronously" true success;
+      check int "original runtime is bound exactly once before acceptance" 1 !runtime_reads;
+      runtime := "later.runtime";
+      Call_log.set_turn_context ~cell ~agent_name:"fixture" ~task_id:"later-task" ~turn:7 ~trace_id:"trace-later" ();
+      let request_id = accepted |> member "request_id" |> to_string in
+      let module Async = Masc.Keeper_msg_async in
+      let rec await () = match Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" request_id with
+        | Ok proof -> (match (Async.durable_terminal_entry proof).status with
+          | Done {ok;body;data=Some data} ->
+            let entry = Async.durable_terminal_entry proof in
+            let context = match entry.request_context with Some fields -> `Assoc fields | None -> fail "original async context absent" in
+            check string "completed async request belongs to original Task" "task-nested"
+              (context |> member "source_task_id" |> to_string);
+            ok,body,data
+          | _ -> fail "nested async parent did not retain a canonical completed result")
+        | Error (Canonical_terminal_absent | Canonical_terminal_runtime_active _) -> Eio.Fiber.yield (); await ()
+        | Error error -> fail (Async.canonical_terminal_error_to_string error) in
+      await () in
   check bool "actual aggregate failure stays failure" (not reject_child) success;
-  check int "one admission per attempted child, independent of leaf count" (if reject_child then 3 else 2) !calls;
-  let run_reference = result |> member "run_artifact" |> decode_reference in
+  (match execution with
+   | Inline -> check int "one admission per attempted child, independent of leaf count" (if reject_child then 3 else 2) !calls
+   | Async -> check int "async worker never reads the later runtime callback" 1 !runtime_reads);
+  let run_reference = accepted |> member "run_artifact" |> decode_reference in
   let run_binding = read_document ~base_path run_reference in
   let run_id = run_binding |> member "composition_run_id" |> to_string in
-  check string "public result retains pre-dispatch run" run_id (result |> member "composition_run_id" |> to_string);
+  check string "public acceptance retains pre-dispatch run" run_id (accepted |> member "composition_run_id" |> to_string);
   check bool "run binding retains all exact child mappings" true
     (Yojson.Safe.equal (run_binding |> member "nested_calls") (prepared |> member "nested_calls"));
   check bool "usable selected answer survives independent admission failure" true
@@ -411,20 +455,109 @@ let test_public_nested_prepare_run_records_only_admitted_children ~reject_child 
   List.iter (fun (activation : Ledger.activation) ->
     match activation.invocation with
     | Ledger.Nested_composition_invocation { scope; origin = Ledger.Task_composition { task_ids }; tool_name } ->
-      check string "actual child binds original Tool receipt" "run-nested" scope.parent_tool_use_id;
+      let expected_parent = match execution with Inline -> "run-nested" | Async ->
+        Masc.Keeper_tool_plan.Composition_run_id.of_string run_id |> require "original run identity"
+          |> Masc.Keeper_composition_nested_run.async_result_parent in
+      check string "actual child binds the correct parent result receipt" expected_parent scope.parent_tool_use_id;
       check string "actual child binds same composition run" run_id scope.composition_run_id;
       check string "actual child records public Tool" Draft.run_tool_name tool_name;
       check (list string) "original task attribution retained" [ "task-nested" ]
         (Ledger.task_id_set_to_list task_ids |> List.map Keeper_id.Task_id.to_string);
-      check bool "exact source identity retained" true (Skill_reference.equal_identity reference.identity activation.identity)
+      check bool "exact source identity retained" true (Skill_reference.equal_identity reference.identity activation.identity);
+      check string "child keeps the original selected runtime" "fixture.runtime" activation.runtime_id
     | _ -> fail "canonical nested task origin missing") (Ledger.activations ledger);
+  (match execution with
+   | Inline -> ()
+   | Async ->
+     let identity = Masc.Keeper_tool_plan.Composition_run_id.of_string run_id |> require "reload original journal identity" in
+     let journal = Masc.Keeper_tool_execution_journal.load ~base_path ~keeper_name:"fixture" ~composition_run_id:identity
+       |> require "reload original owned source" in
+     let bound = Draft.load_nested_activation ~base_path (Masc.Keeper_tool_execution_journal.source journal)
+       |> require "restore original bound context from immutable run" |> function
+       | Some bound -> bound | None -> fail "nested async run lost its original binding" in
+     List.iter (fun (activation : Ledger.activation) ->
+       match activation.invocation with
+       | Ledger.Nested_composition_invocation {scope;tool_name;_} ->
+         let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:activation.skill_tool_use_id
+           ~turn:activation.agent_core_turn ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+           ~completion:Continue_after_success in
+         (match Recorder.record_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference
+                |> require "re-admit exact original child with restored authority" with
+          | Ledger.Already_recorded existing ->
+            check string "re-admission preserves the first actual activation time" activation.activated_at existing.activated_at
+          | Ledger.Recorded _ -> fail "restored child created a second activation")
+       | _ -> fail "nested child provenance absent") (Ledger.activations ledger));
   let receipt : Ledger.tool_result_receipt =
-    { tool_use_id = "run-nested"; content_bytes = String.length result_content
+    { tool_use_id = (match execution with Inline -> "run-nested" | Async ->
+        Masc.Keeper_tool_plan.Composition_run_id.of_string run_id |> require "original result receipt run"
+          |> Masc.Keeper_composition_nested_run.async_result_parent); content_bytes = String.length result_content
     ; content_sha256 = Digestif.SHA256.(digest_string result_content |> to_hex) } in
+  (match execution with
+   | Inline -> ()
+   | Async ->
+     let accepted_receipt : Ledger.tool_result_receipt =
+       {tool_use_id="run-nested";content_bytes=String.length accepted_content;
+        content_sha256=Digestif.SHA256.(digest_string accepted_content |> to_hex)} in
+     let delivered = Recorder.observe_delivery ~config recorder ~tool_results:[accepted_receipt]
+       ~boundary:(Ledger.Model_response {agent_core_turn=2}) ~runtime_id:"later.runtime"
+       |> require "observe only actual original acceptance receipt" in
+     check int "async acceptance never claims child result delivery" 0 (List.length delivered));
   let delivered = Recorder.observe_delivery ~config recorder ~tool_results:[ receipt ]
       ~boundary:(Ledger.Model_response { agent_core_turn = 2 }) ~runtime_id:"fixture.runtime"
       |> require "deliver actual public result to its children" in
   check int "actual parent result delivers both activated children" 2 (List.length delivered);
+  (match execution with
+   | Inline -> ()
+   | Async ->
+     let module Async = Masc.Keeper_msg_async in
+     let events = Filename.concat session_dir "skill-activation-events.jsonl" in
+     let saved = Filename.concat base_path "retained-original-activations.jsonl" in
+     let original_ledger = Ledger.load_existing ~config ~trace_id |> require "exact ledger after child delivery"
+       |> function Some ledger -> ledger | None -> fail "delivered original ledger missing" in
+     let original_request = accepted |> member "request_id" |> to_string in
+     let original_terminal = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
+       |> require "original completed request before authority fault" |> Async.durable_terminal_entry in
+     let resume_input = `Assoc ["sha256",`String draft_reference.sha256;"resume_run_id",`String run_id] in
+     List.iter (fun corrupt ->
+       Unix.rename events saved;
+       Fun.protect ~finally:(fun () ->
+         if Sys.file_exists events then Unix.unlink events;
+         Unix.rename saved events) (fun () ->
+         if corrupt then Eio.Path.save ~create:(`Exclusive 0o600)
+             Eio.Path.(Eio.Stdenv.fs env / events) "invalid-original-activation\n";
+         let reservations = Async.For_testing.reserved_request_id_count () in
+         let workers = Async.For_testing.active_switch_count () in
+         let resumed,_,data = invoke "resume-original-without-authority" Draft.run_tool_name resume_input in
+         check bool "completed public resume refuses missing/corrupt original activation" false resumed;
+         check bool "refusal returns no child exports" true (member "exports" data = `Null);
+         check bool "refusal accepts no successor request" true (member "request_id" data = `Null);
+         check int "refusal reserves no new async identity" reservations (Async.For_testing.reserved_request_id_count ());
+         check int "refusal starts no worker" workers (Async.For_testing.active_switch_count ());
+         let terminal = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
+           |> require "original completed request survives refused resume" |> Async.durable_terminal_entry in
+         check bool "original completed evidence stays exact" true (Async.same_entry_record original_terminal terminal);
+         check int "refused resume cannot consult the later runtime" 1 !runtime_reads)) [false;true];
+     let restored = Ledger.load_existing ~config ~trace_id |> require "restored original activation authority"
+       |> function Some ledger -> ledger | None -> fail "original ledger not restored" in
+     check bool "authority fault preserves exact child activations" true
+       (Ledger.activations restored = Ledger.activations original_ledger);
+     let resumed,_,data = invoke "resume-original-after-authority-repair" Draft.run_tool_name resume_input in
+     check bool "restored exact authority permits completed public resume" true resumed;
+     let request_id = data |> member "request_id" |> to_string in
+     let rec await_reuse () = match Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" request_id with
+       | Ok proof -> (match (Async.durable_terminal_entry proof).status with
+         | Done {ok=true;data=Some data;_} -> data
+         | _ -> fail "restored original authority did not complete retained child results")
+       | Error (Canonical_terminal_absent | Canonical_terminal_runtime_active _) -> Eio.Fiber.yield (); await_reuse ()
+       | Error error -> fail (Async.canonical_terminal_error_to_string error) in
+     let reused = await_reuse () in
+     check bool "repaired authority reuses the original available answer" true
+       (reused |> member "exports" |> member "answer" |> member "available" |> to_bool);
+     let final_ledger = Ledger.load_existing ~config ~trace_id |> require "original ledger after result reuse"
+       |> function Some ledger -> ledger | None -> fail "original activation disappeared" in
+     check bool "retained results add no child activation or clock" true
+       (Ledger.activations restored = Ledger.activations final_ledger);
+     check int "completed resume retains original runtime without callback selection" 1 !runtime_reads);
   Printf.printf "composition_nested_public_trial rejected_child=%b prepared_scopes=%d admitted_children=%d child_admission_calls=%d actual_leaf_successes=%d blocked_children=%d parent_deliveries=%d exact_run_binding=true original_task_retained=true model_latency_measured=false\n%!"
     reject_child (List.length scopes) (List.length (Ledger.activations ledger)) !calls successful_leaves blocked_children (List.length delivered)
 ;;
@@ -437,4 +570,6 @@ let () = run "exact inline composition compiler"
         ; test_case "public prepare/run admits exact children once and delivers through parent" `Quick
             (test_public_nested_prepare_run_records_only_admitted_children ~reject_child:false)
         ; test_case "public admission failure keeps independent exports and blocked scopes" `Quick
-            (test_public_nested_prepare_run_records_only_admitted_children ~reject_child:true) ] ]
+            (test_public_nested_prepare_run_records_only_admitted_children ~reject_child:true)
+        ; test_case "async parent binds original runtime and exact child results" `Quick
+            (test_public_nested_prepare_run_records_only_admitted_children ~execution:Masc.Keeper_tool_composition_catalog.Async ~reject_child:false) ] ]

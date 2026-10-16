@@ -12,6 +12,8 @@ type error =
   | Snapshot_missing
   | Snapshot_rejected of Skill_catalog_snapshot.config_state
   | Runtime_failed of string
+  | Original_activation_unavailable of Keeper_composition_draft.error
+  | Original_task_skills_unavailable of Keeper_task_skill_turn.error
 
 val error_to_string : error -> string
 val resume :

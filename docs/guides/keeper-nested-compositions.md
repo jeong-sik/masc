@@ -41,13 +41,25 @@ extra fields. This API admits fixed arguments only. Feeding upstream output into
 a child parameter requires a runtime contract barrier before any child leaf runs;
 that separate integration is pending.
 
-Call `keeper_composition_prepare` with `execution: "inline"`, the ordinary outer
+Call `keeper_composition_prepare` with `execution: "inline"` or `"async"`, the ordinary outer
 `nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of
 the form above. Pass the returned `draft.sha256` to `keeper_composition_run`.
 Preparation records no child activation. Nested drafts currently omit `skill`
 publication metadata: publishing only their flattened plan would discard child
-identities. Named recursive catalog recipes and nested async outer execution
-need their own grammar and durable worker binding and are explicit refusals.
+identities. Named recursive catalog recipes still require their own grammar.
+An async parent freezes the original trace, turn, selected runtime, snapshot and
+exact Task provenance into its immutable run evidence before worker admission.
+Children activate only when a ready leaf reaches dispatch. Continuation restores
+existing child admissions and their first activation time, while the physical
+worker retains its own execution context. Original Task references are resolved
+against the current authoritative published snapshot; current profile denial or
+changed exact revisions still refuse execution.
+Every public resume, including a completed run, checks the original child
+activation before accepting a successor. The worker checks it again before
+reusing results. A pre-effect leaf failure does not prove that child admission
+was absent. If a waiting successor stops before dispatch, the original wait
+remains recoverable only through unchanged journal nodes, matching canonical
+job IDs and exact predecessor terminal evidence.
 
 A child output is its declared named export. `/profile` selects export `profile`;
 `/document/items/0` selects within export `document`. RFC 6901 escaping applies to
@@ -122,3 +134,11 @@ The full execution artifact preserves this provenance and every raw leaf result;
 the pre-dispatch run artifact retains the original public invocation and all
 prepared mappings. Original Task attribution comes from the canonical turn
 recorder and survives the parent's result delivery.
+
+Async child result receipts use a stable `composition-result:<original run ID>`
+parent identity across request successors. The original submission receipt only
+acknowledges acceptance and cannot mark these child results delivered. The public
+fixture separately exercises the completed result receipt and original ledger
+facts. Wiring that receipt into actual provider requests and official-client
+handoffs, and the full nested owned-job wait/fresh-supervisor scenario, remain
+separate execution evidence to obtain; source binding alone does not prove them.

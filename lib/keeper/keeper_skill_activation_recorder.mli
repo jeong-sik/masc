@@ -1,6 +1,7 @@
 (** Turn-frozen authority for durable Skill activation recording. *)
 
 type t
+type bound_context
 
 type instruction_content =
   | Body of string
@@ -15,6 +16,28 @@ type error =
   | Invalid_task_id of string
   | Activation_rejected of Keeper_skill_activation_ledger.decode_error
   | Store_failed of Keeper_skill_activation_ledger.store_error
+  | Invalid_bound_context of string
+
+val bind_async : t -> (bound_context, error) result
+(** Resolve the selected runtime once, keeping the original trace, turn,
+    snapshot and exact Task provenance. This records no activation. *)
+val bound_context_to_yojson : bound_context -> Yojson.Safe.t
+val bound_context_of_yojson : Yojson.Safe.t -> (bound_context, error) result
+(** Strict immutable run-evidence codec. Only a sealed owned run supplies this
+    authority; a model's recipe cannot supply or replace it. *)
+val bound_task_references : bound_context -> Skill_reference.t list
+val find_bound_nested : config:Workspace.config -> bound_context ->
+  invocation:Agent_core.Tool_contract.Invocation.t -> tool_name:string ->
+  scope:Keeper_skill_activation_ledger.nested_composition_scope ->
+  reference:Skill_reference.t ->
+  (Keeper_skill_activation_ledger.activation option, error) result
+val record_bound_nested : config:Workspace.config -> bound_context ->
+  invocation:Agent_core.Tool_contract.Invocation.t -> tool_name:string ->
+  scope:Keeper_skill_activation_ledger.nested_composition_scope ->
+  reference:Skill_reference.t ->
+  (Keeper_skill_activation_ledger.record_outcome, error) result
+(** Reuse an existing exact activation and its original activation clock under
+    the canonical ledger transaction. New children activate only at admission. *)
 
 val make :
   trace_id:Keeper_id.Trace_id.t ->

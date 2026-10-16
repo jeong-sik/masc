@@ -341,6 +341,13 @@ val record :
     the stored activation keeps them. A later invocation of the same Skill
     remains a distinct activation. *)
 
+val record_original_invocation :
+  config:Workspace.config -> trace_id:Keeper_id.Trace_id.t -> activation ->
+  (t * record_outcome, store_error) result
+(** Re-admit a sealed original nested invocation atomically. All immutable
+    facts must match; the first actual activation clock, delivery and actions
+    are retained. A changed source or child scope remains an ID collision. *)
+
 val observe_delivery :
   config:Workspace.config ->
   trace_id:Keeper_id.Trace_id.t ->

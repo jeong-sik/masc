@@ -605,14 +605,24 @@ let apply_accept
            ~runtime_id
            ~response:run_result.response)
 
+let is_end_turn_empty_completion (error : Agent_core.Error.t) =
+  match error with
+  | Agent_core.Error.Provider provider_error ->
+    Llm_provider.Error.is_end_turn_empty_completion provider_error
+  | Agent_core.Error.Api _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+
 let complete_saved_tool_terminal ~tool_results_saved_in_attempt ~checkpoint result =
   match result, tool_results_saved_in_attempt, checkpoint with
-  | ( Error
-        (Agent_core.Error.Provider
-           (Llm_provider.Error.EmptyCompletion
-              { stop_reason = Agent_core.Types.EndTurn; _ }))
-    , true
-    , Some (checkpoint : Agent_core.Checkpoint.t) ) ->
+  | Error error, true, Some (checkpoint : Agent_core.Checkpoint.t)
+    when is_end_turn_empty_completion error ->
     (* The shared SDK still rejects empty completions. Only this Keeper owns
        proof that its tool results were saved in this attempt. The failure
        carries no provider response id or usage; do not invent either. *)
@@ -635,7 +645,7 @@ let complete_saved_tool_terminal ~tool_results_saved_in_attempt ~checkpoint resu
       ; runtime_observation = None
       ; stop_reason = Runtime_agent.Completed
       }
-  | (Ok _ | Error _), _, _ -> result
+  | Ok _, _, _ | Error _, _, _ -> result
 ;;
 
 (** Run a single provider attempt within the runtime.

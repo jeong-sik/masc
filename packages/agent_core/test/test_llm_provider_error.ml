@@ -717,12 +717,13 @@ let classification_samples : Error.provider_error list =
 ;;
 
 (* (is_repeating_generation, is_local_admission_timeout,
-   is_candidate_access_rejection) *)
-let expected_classification : Error.provider_error -> bool * bool * bool = function
-  | Error.RepeatingGeneration _ -> true, false, false
-  | Error.Timeout _ -> false, false, false (* phase None: not local admission *)
+   is_candidate_access_rejection, is_end_turn_empty_completion) *)
+let expected_classification : Error.provider_error -> bool * bool * bool * bool = function
+  | Error.RepeatingGeneration _ -> true, false, false, false
+  | Error.Timeout _ -> false, false, false, false (* phase None: not local admission *)
   | Error.AuthError _ | Error.AuthorizationError _ | Error.NotFound _ ->
-    false, false, true
+    false, false, true, false
+  | Error.EmptyCompletion _ -> false, false, false, true (* sample carries [EndTurn] *)
   | Error.MissingApiKey _
   | Error.InvalidConfig _
   | Error.ParseError _
@@ -730,14 +731,13 @@ let expected_classification : Error.provider_error -> bool * bool * bool = funct
   | Error.ProviderReportedError _
   | Error.UnknownVariant _
   | Error.ProviderUnavailable _
-  | Error.EmptyCompletion _
   | Error.RateLimit _
   | Error.HardQuota _
   | Error.CapacityExhausted _
   | Error.ServerError _
   | Error.NetworkError _
   | Error.InvalidRequest _
-  | Error.ProviderTerminal _ -> false, false, false
+  | Error.ProviderTerminal _ -> false, false, false, false
 ;;
 
 let test_classification_predicates_per_constructor () =
@@ -745,14 +745,41 @@ let test_classification_predicates_per_constructor () =
   List.iter
     (fun err ->
        let name = Error.to_string err in
-       let repeating, admission, access = expected_classification err in
+       let repeating, admission, access, end_turn_empty = expected_classification err in
        check bool (name ^ " is_repeating_generation") repeating
          (Error.is_repeating_generation err);
        check bool (name ^ " is_local_admission_timeout") admission
          (Error.is_local_admission_timeout err);
        check bool (name ^ " is_candidate_access_rejection") access
-         (Error.is_candidate_access_rejection err))
+         (Error.is_candidate_access_rejection err);
+       check bool (name ^ " is_end_turn_empty_completion") end_turn_empty
+         (Error.is_end_turn_empty_completion err))
     classification_samples
+;;
+
+(* [EmptyCompletion] matches only when the provider ended its turn: every
+   other stop reason means the turn was cut short. *)
+let test_end_turn_empty_completion_by_stop_reason () =
+  let empty stop_reason =
+    Error.EmptyCompletion { provider = "p"; stop_reason; detail = "d" }
+  in
+  check bool "EndTurn" true (Error.is_end_turn_empty_completion (empty Types.EndTurn));
+  List.iter
+    (fun stop_reason ->
+       check bool (Types.stop_reason_to_string stop_reason) false
+         (Error.is_end_turn_empty_completion (empty stop_reason)))
+    [ Types.StopToolUse
+    ; Types.MaxTokens
+    ; Types.StopSequence
+    ; Types.Refusal
+    ; Types.ContentFilter
+    ; Types.RepetitionTruncation
+    ; Types.PauseTurn
+    ; Types.Compaction
+    ; Types.ContextWindowExceeded
+    ; Types.UnmatchedToolCalls
+    ; Types.Unknown "provider-specific"
+    ]
 ;;
 
 let test_local_admission_timeout_by_phase () =
@@ -905,6 +932,10 @@ let () =
             "classification predicates, every constructor"
             `Quick
             test_classification_predicates_per_constructor
+        ; test_case
+            "end-turn empty completion, every stop reason"
+            `Quick
+            test_end_turn_empty_completion_by_stop_reason
         ; test_case
             "local admission timeout by phase"
             `Quick

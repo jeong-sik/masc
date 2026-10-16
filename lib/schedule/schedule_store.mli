@@ -116,6 +116,21 @@ val read_state : Workspace_utils.config -> state
     Never writes to disk. *)
 val read_state_result : Workspace_utils.config -> (state, read_error) result
 
+type recovery_cause = Primary_missing | Primary_unusable
+
+type read_source =
+  | Uninitialized
+  | Primary_ledger
+  | Recovery_mirror of recovery_cause
+
+val read_state_observed :
+  Workspace_utils.config -> ((state * read_source), read_error) result
+(** The same read as [read_state_result], retaining whether the primary or
+    recovery mirror supplied it. A recovered state's counts are observations
+    of that mirror, not authoritative totals or bounds on the missing primary.
+    [Primary_unusable] includes read, JSON and ledger-schema failures; raw
+    diagnostics remain in the store's existing warning/error channel. *)
+
 val state_of_yojson : Yojson.Safe.t -> (state, string) result
 
 val get_schedule :

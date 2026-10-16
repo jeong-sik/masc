@@ -58,6 +58,13 @@ type read_error =
       ; recovery_err : string option
       }
 
+type recovery_cause = Primary_missing | Primary_unusable
+
+type read_source =
+  | Uninitialized
+  | Primary_ledger
+  | Recovery_mirror of recovery_cause
+
 (* RFC-0234: a parsed-or-absent ledger load.
 
    [Fresh] = neither the primary ledger nor its [.last-good] mirror exists, so
@@ -73,7 +80,7 @@ type read_error =
    overwrite the on-disk files, because the bytes may still hold schedule intent
    worth manual recovery. *)
 type load_outcome =
-  | Loaded of state
+  | Loaded of state * read_source
   | Fresh
   | Corrupt of
       { primary_err : string
@@ -362,7 +369,7 @@ let load config : load_outcome =
   (* The next [write_state] rewrites the primary from this state. The warning
      records that the state came from the mirror, so the repair is visible
      rather than silent — for either reason the primary was unusable. *)
-  let recovered_from_mirror ~primary_err state =
+  let recovered_from_mirror ~primary_err ~cause state =
     Log.Misc.warn
       "schedule_store: %s; loaded %d schedules and %d wakes from recovery \
        mirror %s"
@@ -370,10 +377,10 @@ let load config : load_outcome =
       (List.length state.schedules)
       (List.length state.wakes)
       (recovery_path config);
-    Loaded state
+    Loaded (state, Recovery_mirror cause)
   in
   match load_primary config with
-  | Ok state -> Loaded state
+  | Ok state -> Loaded (state, Primary_ledger)
   | Error primary ->
     let primary_err = primary_failure_message ~path primary in
     (* The outcome depends on both probes, so both are matched together. The
@@ -385,8 +392,10 @@ let load config : load_outcome =
        no primary and no mirror is an uninitialised store ([Fresh]), while a
        broken primary and no mirror is corruption the operator must see. *)
     (match primary, load_recovery config with
-     | (Primary_absent | Primary_unparseable _), Recovery_loaded state ->
-       recovered_from_mirror ~primary_err state
+     | Primary_absent, Recovery_loaded state ->
+       recovered_from_mirror ~primary_err ~cause:Primary_missing state
+     | Primary_unparseable _, Recovery_loaded state ->
+       recovered_from_mirror ~primary_err ~cause:Primary_unusable state
      | Primary_absent, Recovery_absent -> Fresh
      | Primary_unparseable _, Recovery_absent ->
        Corrupt { primary_err; recovery_err = None }
@@ -400,12 +409,16 @@ let load config : load_outcome =
    mirror instead of as an empty state. [Corrupt] errors rather than returning an
    empty list, so a ledger that cannot be parsed is operator-visible instead of
    masquerading as "no schedules". Does not write to disk. *)
-let read_state_result config =
+let read_state_observed config =
   match load config with
-  | Loaded state -> Ok state
-  | Fresh -> Ok (default_state ())
+  | Loaded (state, source) -> Ok (state, source)
+  | Fresh -> Ok (default_state (), Uninitialized)
   | Corrupt { primary_err; recovery_err } ->
     Error (Corrupt_read_ledger { primary_err; recovery_err })
+;;
+
+let read_state_result config =
+  read_state_observed config |> Result.map fst
 ;;
 
 let read_state config =
@@ -424,7 +437,7 @@ let read_state config =
    and the write that follows restores the primary. *)
 let load_for_mutation config : (state, store_error) result =
   match load config with
-  | Loaded state -> Ok state
+  | Loaded (state, _) -> Ok state
   | Fresh -> Ok (default_state ())
   | Corrupt { primary_err; recovery_err } ->
     Error (Corrupt_ledger { primary_err; recovery_err })

@@ -26,6 +26,7 @@ let cached_field_names =
     "keeper_board_event_collection";
     "keeper_hitl_gate";
     "keeper_event_queue";
+    "keeper_waiting_inventory";
     "keeper_terminal_effect_policy";
     "keeper_observability_artifacts";
     "skill_catalog";

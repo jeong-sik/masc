@@ -491,6 +491,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       (fun () ->
         keeper_event_queue_health_json ~execution_snapshot ())
   in
+  let keeper_waiting_inventory_json =
+    compute_section ~name:"keeper_waiting_inventory" ?section_timings_ref
+      (fun () ->
+        match server_state with
+        | Some state ->
+          Server_keeper_waiting_inventory.health_json
+            (Mcp_server.workspace_config state)
+        | None ->
+          Server_keeper_waiting_inventory.health_placeholder ~status:Health_status.Unavailable)
+  in
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
   in
@@ -592,6 +602,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("keeper_board_event_collection", board_event_collection_json);
     ("keeper_hitl_gate", keeper_hitl_gate_json);
     ("keeper_event_queue", keeper_event_queue_json);
+    ("keeper_waiting_inventory", keeper_waiting_inventory_json);
     ( "keeper_terminal_effect_policy"
     , Keeper_terminal_effect_policy.matrix_to_yojson () );
     ( "keeper_observability_artifacts"
@@ -868,6 +879,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ; ("keepers", `List [])
         ; ("component_timed_out", `Bool component_timed_out)
         ] );
+    ( "keeper_waiting_inventory",
+      Server_keeper_waiting_inventory.health_placeholder
+        ~status:(Health_status.of_string status) );
     ( "keeper_terminal_effect_policy"
     , Keeper_terminal_effect_policy.matrix_to_yojson () );
     ( "keeper_observability_artifacts"

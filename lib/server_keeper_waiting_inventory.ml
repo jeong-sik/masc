@@ -899,9 +899,9 @@ let schedule_rows ?keeper_name ~keeper_names state =
     })
 ;;
 
-let schedule_rows_or_error ?keeper_name config ~keeper_names =
-  match Schedule_store.read_state_result config with
-  | Ok state -> schedule_rows ?keeper_name ~keeper_names state
+let schedule_rows_of_observation ?keeper_name ~keeper_names observation =
+  match observation with
+  | Ok (state, _source) -> schedule_rows ?keeper_name ~keeper_names state
   | Error err ->
     [ read_error_row
         ~waiting_on:"schedule_store"
@@ -1179,7 +1179,21 @@ let pending_approval_read_error error =
   }
 ;;
 
-let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config =
+type inventory_snapshot =
+  { base_path : string
+  ; now : float
+  ; keeper_names : string list
+  ; keeper_count_known : bool
+  ; pending_approval_state : Yojson.Safe.t
+  ; pending_confirm_count_known : bool
+  ; global_confirm_count : int
+  ; per_keeper : (string * bool * waiting_row list) list
+  ; global_rows : waiting_row list
+  ; schedule_observation :
+      ((Schedule_store.state * Schedule_store.read_source), Schedule_store.read_error) result
+  }
+
+let read_inventory_snapshot ?keeper_name ~read_pending config =
   let now = Time_compat.now () in
   let keeper_names, keeper_name_read_error_rows =
     match keeper_name with
@@ -1204,7 +1218,10 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
   let pending_confirms, pending_confirm_read_error_rows =
     pending_confirms_or_error_rows config
   in
-  let schedule_rows = schedule_rows_or_error ?keeper_name config ~keeper_names in
+  let schedule_observation = Schedule_store.read_state_observed config in
+  let schedule_rows =
+    schedule_rows_of_observation ?keeper_name ~keeper_names schedule_observation
+  in
   let busy_names = busy_keeper_names ~base_path:config.Workspace.base_path in
   let per_keeper =
     keeper_rows ~base_path:config.Workspace.base_path ~pending_approvals ~fusion_runs
@@ -1221,10 +1238,34 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     @ pending_confirm_read_error_rows
     @ pending_approval_read_error_rows
   in
+  (match keeper_name with
+   | None -> record_metrics ~now ~per_keeper ~global_rows
+   | Some _ -> ());
+  { base_path = config.Workspace.base_path
+  ; now
+  ; keeper_names
+  ; keeper_count_known = keeper_name_read_error_rows = []
+  ; pending_approval_state
+  ; pending_confirm_count_known = pending_confirm_read_error_rows = []
+  ; global_confirm_count = List.length global_confirm_rows
+  ; per_keeper
+  ; global_rows
+  ; schedule_observation
+  }
+;;
+
+let inventory_rows snapshot =
+  List.concat_map (fun (_name, _busy, rows) -> rows) snapshot.per_keeper
+  @ snapshot.global_rows
+;;
+
+let dashboard_json_of_snapshot snapshot =
+  let per_keeper = snapshot.per_keeper in
+  let global_rows = snapshot.global_rows in
   let keeper_json_rows =
     per_keeper
     |> List.map (fun (keeper_name, busy, rows) ->
-      keeper_json ~base_path:config.Workspace.base_path keeper_name ~busy rows)
+      keeper_json ~base_path:snapshot.base_path keeper_name ~busy rows)
   in
   let all_keeper_rows =
     List.flatten
@@ -1247,7 +1288,7 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
   let oldest_age_seconds =
     match oldest_since with
     | None -> `Null
-    | Some ts -> `Float (Float.max 0.0 (now -. ts))
+    | Some ts -> `Float (Float.max 0.0 (snapshot.now -. ts))
   in
   let waiting_keeper_count =
     per_keeper
@@ -1258,16 +1299,13 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
             | Busy | Waiting | Deferred -> count + 1)
          0
   in
-  (match keeper_name with
-   | None -> record_metrics ~now ~per_keeper ~global_rows
-   | Some _ -> ());
   `Assoc
     [ "schema", `String "masc.dashboard.keeper_waiting_inventory.v4"
     ; "source", `String "server_keeper_waiting_inventory"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "supported_states", `List (List.map (fun value -> `String value) [ "idle"; "busy"; "waiting"; "deferred" ])
-    ; "keeper_count_known", `Bool (List.length keeper_name_read_error_rows = 0)
-    ; "keeper_count", `Int (List.length keeper_names)
+    ; "keeper_count_known", `Bool snapshot.keeper_count_known
+    ; "keeper_count", `Int (List.length snapshot.keeper_names)
     ; "waiting_keeper_count", `Int waiting_keeper_count
     ; "row_count", `Int (List.length all_keeper_rows)
     ; "global_row_count", `Int (List.length global_rows)
@@ -1276,9 +1314,9 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     ; "oldest_since_iso", unix_iso_json oldest_since
     ; "oldest_age_seconds", oldest_age_seconds
     ; ( "global_pending_confirm_count_known"
-      , `Bool (List.length pending_confirm_read_error_rows = 0) )
-    ; "global_pending_confirm_count", `Int (List.length global_confirm_rows)
-    ; "pending_approval_state", pending_approval_state
+      , `Bool snapshot.pending_confirm_count_known )
+    ; "global_pending_confirm_count", `Int snapshot.global_confirm_count
+    ; "pending_approval_state", snapshot.pending_approval_state
     ; "source_counts", `Assoc (source_counts (all_keeper_rows @ global_rows))
     ; "rows", `List (List.map waiting_row_json all_rows)
     ; "keepers", `List keeper_json_rows
@@ -1286,11 +1324,155 @@ let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config 
     ]
 ;;
 
+let dashboard_json_with_pending_reader_scoped ?keeper_name ~read_pending config =
+  read_inventory_snapshot ?keeper_name ~read_pending config
+  |> dashboard_json_of_snapshot
+;;
+
 let dashboard_json_with_pending_reader ~read_pending config =
   dashboard_json_with_pending_reader_scoped
     ~read_pending:(fun ~base_path ->
       read_pending ~base_path |> Result.map (fun entries -> entries, []))
     config
+;;
+
+let schedule_health_observation observation =
+  let source, known, state, reasons =
+    match observation with
+    | Ok (state, Schedule_store.Uninitialized) ->
+      "uninitialized", true, Some state, []
+    | Ok (state, Primary_ledger) -> "primary", true, Some state, []
+    | Ok (state, Recovery_mirror cause) ->
+      let reason =
+        match cause with
+        | Primary_missing -> "schedule_primary_missing"
+        | Primary_unusable -> "schedule_primary_unusable"
+      in
+      "recovery", false, Some state, [ reason ]
+    | Error (Schedule_store.Corrupt_read_ledger _) ->
+      "unreadable", false, None, [ "schedule_ledger_unreadable" ]
+  in
+  let count = Option.map (fun state -> List.length state.Schedule_store.schedules) state in
+  let observed_status_counts =
+    match state with
+    | None -> `Null
+    | Some state ->
+      `Assoc
+        (List.map
+           (fun status ->
+             ( Schedule_domain.schedule_status_to_string status
+             , `Int
+                 (List.fold_left
+                    (fun count (request : Schedule_domain.schedule_request) ->
+                      if request.status = status then count + 1 else count)
+                    0 state.schedules) ))
+           Schedule_domain.all_schedule_statuses)
+  in
+  ( `Assoc
+      [ "source", `String source
+      ; "counts_known", `Bool known
+      ; "schedule_count", (if known then Json_util.int_opt_to_json count else `Null)
+      ; "observed_schedule_count", Json_util.int_opt_to_json count
+      ; "observed_status_counts", observed_status_counts
+      ]
+  , known
+  , reasons )
+;;
+
+let health_json_of_snapshot snapshot =
+  let rows = inventory_rows snapshot in
+  let read_errors = List.filter (fun row -> row.source = Read_error) rows in
+  let schedule_ledger, schedule_known, schedule_reasons =
+    schedule_health_observation snapshot.schedule_observation
+  in
+  let counts_known =
+    snapshot.keeper_count_known && read_errors = [] && schedule_known
+  in
+  let reasons =
+    schedule_reasons
+    @ List.map (fun row -> row.waiting_on ^ "_unreadable") read_errors
+    |> List.sort_uniq String.compare
+  in
+  let status =
+    match read_errors, snapshot.schedule_observation with
+    | _ :: _, _ | [], Error (Corrupt_read_ledger _) -> Health_status.Unavailable
+    | [], Ok (_, Recovery_mirror _) -> Health_status.Degraded
+    | [], Ok (_, (Uninitialized | Primary_ledger)) -> Health_status.Ok
+  in
+  let work_rows = List.filter (fun row -> row.source <> Read_error) rows in
+  let observed_count = List.length work_rows in
+  let reason_json = `List (List.map (fun reason -> `String reason) reasons) in
+  `Assoc
+    [ "schema", `String "masc.health.keeper_waiting_inventory.v1"
+    ; "status", `String (Health_status.to_string status)
+    ; "operator_action_required", `Bool (reasons <> [])
+    ; "status_reasons", reason_json
+    ; "operator_action_reasons", reason_json
+    ; "counts_known", `Bool counts_known
+    ; "keeper_count_known", `Bool snapshot.keeper_count_known
+    ; "keeper_count",
+      (if snapshot.keeper_count_known
+       then `Int (List.length snapshot.keeper_names) else `Null)
+    ; "total_row_count", (if counts_known then `Int observed_count else `Null)
+    ; "observed_row_count", `Int observed_count
+    ; "observed_source_counts", `Assoc (source_counts work_rows)
+    ; "read_error_count", `Int (List.length read_errors)
+    ; "read_errors",
+      `List
+        (List.map
+           (fun row ->
+             `Assoc
+               [ "keeper_name", Json_util.string_opt_to_json row.keeper_name
+               ; "waiting_on", `String row.waiting_on
+               ; "next_action", `String row.next_action
+               ])
+           read_errors)
+    ; "schedule_ledger", schedule_ledger
+    ]
+;;
+
+let health_placeholder ~status =
+  `Assoc
+    [ "schema", `String "masc.health.keeper_waiting_inventory.v1"
+    ; "status", `String (Health_status.to_string status)
+    ; "status_reasons", `List [ `String "inventory_not_observed" ]
+    ; "operator_action_required", `Bool (Health_status.requires_operator_action status)
+    ; "counts_known", `Bool false
+    ; "keeper_count_known", `Bool false
+    ; "keeper_count", `Null
+    ; "total_row_count", `Null
+    ; "observed_row_count", `Null
+    ; "observed_source_counts", `Null
+    ; "read_error_count", `Null
+    ; "read_errors", `Null
+    ; "schedule_ledger", `Null
+    ]
+;;
+
+let compute_health_json read_snapshot =
+  match read_snapshot () |> health_json_of_snapshot with
+  | json -> json
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Log.Misc.warn "waiting inventory health observation failed: %s"
+      (Printexc.to_string exn);
+    health_placeholder ~status:Health_status.Error
+;;
+
+let health_json_with_pending_reader ~read_pending config =
+  compute_health_json (fun () ->
+    read_inventory_snapshot
+      ~read_pending:(fun ~base_path ->
+        read_pending ~base_path |> Result.map (fun entries -> entries, []))
+      config)
+;;
+
+let health_json config =
+  compute_health_json (fun () ->
+    read_inventory_snapshot
+      ~read_pending:
+        Keeper_approval_queue.list_pending_entries_with_read_errors_for_workspace
+      config)
 ;;
 
 let dashboard_json config =
@@ -1309,6 +1491,8 @@ let dashboard_json_for_keeper config ~keeper_name =
 ;;
 
 module For_testing = struct
+  let health_json_with_pending_reader = health_json_with_pending_reader
+
   let dashboard_json_with_pending_reader = dashboard_json_with_pending_reader
 
 

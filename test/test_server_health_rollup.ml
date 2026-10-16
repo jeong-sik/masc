@@ -164,6 +164,22 @@ let test_observability_artifacts_are_rolled_up () =
   in
   check string "keeper_observability_artifacts reaches the rollup" "degraded" status
 
+let test_waiting_inventory_fault_is_cached_and_rolled_up () =
+  check bool "inventory belongs to background snapshot" true
+    (R.is_cached "keeper_waiting_inventory");
+  let status, action, reasons =
+    summary ~sections:
+      [ "keeper_waiting_inventory", `Assoc
+          [ "status", `String "degraded"
+          ; "operator_action_required", `Bool true
+          ; "status_reasons", `List [ `String "schedule_primary_unusable" ]
+          ] ] ()
+  in
+  check string "disk divergence affects overall status" "degraded" status;
+  check bool "recovery repair is actionable" true action;
+  check (list string) "stable cause survives rollup"
+    [ "keeper_waiting_inventory:schedule_primary_unusable" ] reasons
+
 (* Most cached fields are not sections: keeper_fibers is an int, and
    keeper_config_errors a list. A field with no status says nothing about
    health and must not arrive as unknown. *)
@@ -272,6 +288,8 @@ let () =
             test_an_uncached_section_is_not_reached
         ; test_case "observability artifacts are rolled up" `Quick
             test_observability_artifacts_are_rolled_up
+        ; test_case "waiting inventory fault is cached and rolled up" `Quick
+            test_waiting_inventory_fault_is_cached_and_rolled_up
         ; test_case "startup degradation is rolled up outside the cache" `Quick
             test_startup_degradation_is_rolled_up_outside_the_cache
         ] )

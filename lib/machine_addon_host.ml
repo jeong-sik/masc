@@ -5,15 +5,8 @@ let refusal = function
   | Authority.Seats_unknown message -> Lane_addon_call_context.Host_refusal (Unavailable message)
 
 let pass_target arguments =
-  match Tool_args.get_string_opt arguments "to" with
-  | None -> Ok None
-  | Some target when String.trim target = "" -> Ok None
-  | Some target ->
-      let normalized = String.trim target in
-      match Validation.Id_shape.parse normalized with
-      | Ok _ -> Ok (Some normalized)
-      | Error _ -> Error (Printf.sprintf
-          "to %S is not a Keeper name: give the name alone, without @ or spaces" target)
+  Machine_controller_contract.pass_target arguments
+    ~parse:(fun name -> Validation.Id_shape.parse name |> Result.map (fun _ -> name))
 
 let mediation ~config ~principal ~arguments ~handoff ~release_controller:_ ~snapshot ~invoke =
   match principal with

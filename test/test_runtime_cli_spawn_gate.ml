@@ -99,7 +99,7 @@ let test_ninth_waits_then_acquires_on_release () =
     bool
     "waiter acquires after release"
     true
-    (Eio.Promise.await waiter = `Acquired);
+    (Eio.Promise.await_exn waiter = `Acquired);
   check int "no waiters left" 0 (Gate.waiting_cli_spawns ());
   check int "no slots left" 0 (Gate.active_cli_spawns ())
 ;;
@@ -150,8 +150,10 @@ let test_cancelled_waiter_holds_no_slot () =
            (* Awaiting synchronizes with the waiter's death: no race on
               the gauges below. *)
            (match Eio.Promise.await waiter with
-            | `Acquired -> fail "cancelled waiter acquired a slot"
-            | exception Eio.Cancel.Cancelled _ -> ()))
+            | Ok `Acquired -> fail "cancelled waiter acquired a slot"
+            | Error (Eio.Cancel.Cancelled _) -> ()
+            | Error exn ->
+              fail ("unexpected waiter error: " ^ Printexc.to_string exn)))
        with
        | () -> fail "switch failure did not surface"
        | exception Cancel_waiter -> ());

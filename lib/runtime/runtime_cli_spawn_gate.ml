@@ -121,7 +121,7 @@ let count_lsof_lines output =
     | [] | [_] | [_; _] | [_; _; _] -> false
   in
   match String.split_on_char '\n' output with
-  | [] | [_header] -> 0
+  | [] | [_] -> 0
   | _header :: rest ->
     List.fold_left
       (fun count line ->

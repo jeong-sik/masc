@@ -20,7 +20,7 @@
 
     Scope: the machinery is provider-agnostic, but only Antigravity turns
     are wired through it today — that is where the incident came from.
-    Other CLI runtimes (Muse, Codex, Muse) still spawn ungated; wiring
+    Other CLI runtimes (Claude Code, Codex, Muse) still spawn ungated; wiring
     them needs their own fd profiles, not this ceiling. A slot spans the
     whole turn including unbounded tool phases, so {!max_concurrent_cli_spawns}
     is also the number of turns that may wait on tools at once.

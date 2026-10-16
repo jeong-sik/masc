@@ -19,6 +19,19 @@ type 'a t =
   ; parent_cancellation : cancelled option
   }
 
+let on_release sw release =
+  Eio.Switch.on_release sw (fun () ->
+    match release () with
+    | () -> ()
+    | exception exception_ ->
+      let bt = Printexc.get_raw_backtrace () in
+      Eio.Switch.fail ~bt sw exception_)
+;;
+
+let track_close ~sw resource =
+  on_release sw (fun () -> Eio.Resource.close resource)
+;;
+
 let capture_callback f =
   match f () with
   | value -> Returned value

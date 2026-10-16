@@ -26,6 +26,18 @@ type 'a t =
   ; parent_cancellation : cancelled option
   }
 
+val on_release : Eio.Switch.t -> (unit -> unit) -> unit
+(** Register a release callback which reports its exception and original
+    backtrace through [Eio.Switch.fail]. The switch still owns cancellation
+    protection and composition of multiple release failures. *)
+
+val track_close : sw:Eio.Switch.t -> [> Eio.Resource.close_ty] Eio.Resource.t -> unit
+(** Register [Eio.Resource.close] with {!on_release} after attaching a resource
+    to the switch. Its close implementation must disable or neutralize the
+    original release hook even when closing raises, as Eio POSIX files do.
+    Register before erasing the [Close] capability. This does not support the
+    POSIX directory resource, whose handler does not expose [Close]. *)
+
 (** [run_resource_only f] runs [f] in a fresh switch and captures its outcome
     before the switch releases attached resources. [callback = None] means
     that the parent cancellation context rejected entry before [f] ran. When

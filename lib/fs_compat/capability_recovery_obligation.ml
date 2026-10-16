@@ -1728,7 +1728,7 @@ let with_store ~registry ~owner ~on_release_failure f =
     Resource_scope.run_resource_only @@ fun sw ->
     Option.iter
       (fun fault ->
-         Eio.Switch.on_release sw (fun () -> raise fault.fault_exception))
+         Resource_scope.on_release sw (fun () -> raise fault.fault_exception))
       (matching_lane_scope_release_fault owner);
     match open_store_in_scope ~sw ~registry ~owner with
     | Error _ as error -> error
@@ -2047,6 +2047,7 @@ let read_raw_record ~store ~area ~operation_id ~store_effect =
         raise_io ~operation:Open_record ~subject (fun () ->
           Eio.Path.open_in ~sw path)
       in
+      Resource_scope.track_close ~sw file;
       resource := Some file;
       let opened =
         raise_io ~operation:Inspect_record ~subject (fun () ->
@@ -2334,6 +2335,7 @@ let create_record_exclusive
       match opened with
       | None -> Record_exists
       | Some file ->
+        Resource_scope.track_close ~sw file;
         entry_created := true;
         resource := Some file;
         let stat =

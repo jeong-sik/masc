@@ -425,7 +425,8 @@ let load_nested_activation ~base_path (source : Keeper_tool_execution_journal.so
     | json -> Ok json | exception Yojson.Json_error detail -> Error (Malformed_draft detail) in
   let* json = match Tool_output.artifact_manifest_of_json json with
     | Tool_output.Decoded_artifact_manifest {structured_content;_} -> Ok structured_content
-    | _ -> Error (Malformed_draft "original run is not a canonical manifest") in
+    | Tool_output.Not_artifact_manifest | Invalid_artifact_manifest _ ->
+      Error (Malformed_draft "original run is not a canonical manifest") in
   let* fields = exact_fields ~names:["draft";"nested_calls";"nested_activation";"composition_run_id";"tool_use_id";"source_turn"] json in
   let* () = if Yojson.Safe.equal (List.assoc "draft" fields) (Tool_output.normalized_artifact_ref_to_json source.draft_reference)
       && List.assoc "composition_run_id" fields = `String (Plan.Composition_run_id.to_string source.composition_run_id)

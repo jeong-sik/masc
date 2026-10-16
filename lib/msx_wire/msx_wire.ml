@@ -54,3 +54,41 @@ let decode : Yojson.Safe.t -> (refusal, string) result = function
       | Some _ | None -> Error "body is not a refusal (ok=false is required)")
   | _ -> Error "refusal body must be an object"
 ;;
+
+type pixel_reference = { revision : string; width : int; height : int }
+type pixel_response = Full_frame | Retained_pixels of pixel_reference option
+type tick = { frames : int option; pixel_response : pixel_response }
+
+let sha256_hex_length = 64
+
+let decode_pixel_reference = function
+  | `Assoc fields when List.length fields = 3 ->
+      (match List.assoc_opt "revision" fields, List.assoc_opt "width" fields,
+             List.assoc_opt "height" fields with
+       | Some (`String revision), Some (`Int width), Some (`Int height)
+         when String.length revision = sha256_hex_length && width > 0 && height > 0
+              && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision ->
+           Ok { revision; width; height }
+       | _ -> Error "known_pixels requires a SHA256 revision and positive width/height")
+  | _ -> Error "known_pixels requires exactly revision, width and height"
+
+let decode_tick : Yojson.Safe.t -> (tick, string) result = function
+  | `Assoc fields ->
+      let names = List.map fst fields in
+      let* () =
+        if List.length names <> List.length (List.sort_uniq String.compare names)
+           || List.exists (fun name -> not (List.mem name ["frames"; "pixel_response"; "known_pixels"])) names
+        then Error "tick has duplicate or unknown fields" else Ok () in
+      let* frames = match List.assoc_opt "frames" fields with
+        | None -> Ok None
+        | Some (`Int n) -> Ok (Some n)
+        | Some _ -> Error "frames must be an integer" in
+      let* pixel_response =
+        match List.assoc_opt "pixel_response" fields, List.assoc_opt "known_pixels" fields with
+        | None, None -> Ok Full_frame
+        | Some (`String "retained"), None -> Ok (Retained_pixels None)
+        | Some (`String "retained"), Some value ->
+            Result.map (fun reference -> Retained_pixels (Some reference)) (decode_pixel_reference value)
+        | _ -> Error "known_pixels requires pixel_response=retained" in
+      Ok { frames; pixel_response }
+  | _ -> Error "tick body must be an object"

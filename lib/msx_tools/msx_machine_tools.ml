@@ -345,9 +345,12 @@ let handle_screen ~tool_name ~start_time args =
     (Msx_lane.screen ())
 ;;
 
+(* Frames a step runs when the caller names none: one second of machine time. *)
+let default_step_frames = Msx_lane.frames_per_second
+
 let handle_step ~tool_name ~start_time args =
   of_lane ~tool_name ~start_time ~metadata:moved_the_machine
-    (Msx_lane.step ~frames:(get_int args "frames" 60))
+    (Msx_lane.step ~frames:(get_int args "frames" default_step_frames))
 ;;
 
 (* 화면이 안착할 때까지 한 번에 논다 — 키퍼가 step+screen 을 반복하며

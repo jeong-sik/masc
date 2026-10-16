@@ -222,41 +222,15 @@ let clamp_tick_frames requested =
   let maximum = Yojson.Safe.Util.(schema |> member "properties" |> member "frames" |> member "maximum" |> to_int) in
   max 1 (min maximum requested)
 
-type pixel_reference = { revision : string; width : int; height : int }
-type pixel_response = Full_frame | Retained_pixels of pixel_reference option
-
-let decode_pixel_reference = function
-  | `Assoc fields when List.length fields = 3 ->
-      (match List.assoc_opt "revision" fields, List.assoc_opt "width" fields,
-             List.assoc_opt "height" fields with
-       | Some (`String revision), Some (`Int width), Some (`Int height)
-         when String.length revision = 64 && width > 0 && height > 0
-              && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision ->
-           Ok { revision; width; height }
-       | _ -> Error "known_pixels requires a SHA256 revision and positive width/height")
-  | _ -> Error "known_pixels requires exactly revision, width and height"
-
+(* The terminal's frame count is bounded here, not refused: a tick that asks
+   for more than a call may run advances by the most it may. *)
 let decode_tick json =
-  match json with
-  | `Assoc fields ->
-      let ( let* ) = Result.bind in
-      let names = List.map fst fields in
-      let* () =
-        if List.length names <> List.length (List.sort_uniq String.compare names)
-           || List.exists (fun name -> not (List.mem name ["frames"; "pixel_response"; "known_pixels"])) names
-        then Error "tick has duplicate or unknown fields" else Ok () in
-      let* frames = match List.assoc_opt "frames" fields with
-        | None -> Ok msx_tick_default_frames
-        | Some (`Int n) -> Ok (clamp_tick_frames n)
-        | Some _ -> Error "frames must be an integer" in
-      let* pixels = match List.assoc_opt "pixel_response" fields, List.assoc_opt "known_pixels" fields with
-        | None, None -> Ok Full_frame
-        | Some (`String "retained"), None -> Ok (Retained_pixels None)
-        | Some (`String "retained"), Some value ->
-            Result.map (fun reference -> Retained_pixels (Some reference)) (decode_pixel_reference value)
-        | _ -> Error "known_pixels requires pixel_response=retained" in
-      Ok (frames, pixels)
-  | _ -> Error "tick body must be an object"
+  Result.map (fun (tick : Msx_wire.tick) ->
+    (match tick.frames with
+     | None -> msx_tick_default_frames
+     | Some requested -> clamp_tick_frames requested),
+    tick.pixel_response)
+    (Msx_wire.decode_tick json)
 ;;
 
 let tick_response ~config ~body =
@@ -267,10 +241,12 @@ let tick_response ~config ~body =
   | Error message -> `Bad_request, `Assoc ["ok", `Bool false; "message", `String message]
   | Ok (frames, pixel_response) ->
       let pixels = match pixel_response with
-        | Full_frame -> []
-        | Retained_pixels known -> ["pixel_response", `String "retained"] @
-            (match known with None -> [] | Some p -> ["known_pixels", `Assoc [
-              "revision", `String p.revision; "width", `Int p.width; "height", `Int p.height]]) in
+        | Msx_wire.Full_frame -> []
+        | Msx_wire.Retained_pixels known -> ["pixel_response", `String "retained"] @
+            (match known with
+             | None -> []
+             | Some (p : Msx_wire.pixel_reference) -> ["known_pixels", `Assoc [
+                 "revision", `String p.revision; "width", `Int p.width; "height", `Int p.height]]) in
       let result = worker_response ~config ~principal:Lane_addon_call_context.Operator
         ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Step)
         ~arguments:(`Assoc (["frames", `Int frames; "include_frame", `Bool true] @ pixels)) in

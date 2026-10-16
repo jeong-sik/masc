@@ -44,7 +44,45 @@ let test_decode_refuses_what_it_cannot_name () =
      "message is not a string", `Assoc ["ok", `Bool false; "message", `Int 1];
      "repeated field", `Assoc ["ok", `Bool false; "ok", `Bool false]]
 
+(* One decoder reads a tick for the route and the worker. It bounds nothing:
+   the route clamps what the terminal sends and the worker refuses what the
+   lane rejects. *)
+let test_tick_decoding () =
+  let revision = String.make 64 'a' in
+  let reference = `Assoc ["revision", `String revision; "width", `Int 256; "height", `Int 192] in
+  let decoded json = Result.get_ok (Msx_wire.decode_tick json) in
+  check bool "an empty tick names nothing" true
+    (decoded (`Assoc []) = {Msx_wire.frames = None; pixel_response = Msx_wire.Full_frame});
+  check bool "a count is passed on unbounded, in either direction" true
+    ((decoded (`Assoc ["frames", `Int 100000])).Msx_wire.frames = Some 100000
+     && (decoded (`Assoc ["frames", `Int (-4)])).Msx_wire.frames = Some (-4));
+  check bool "retained without a reference" true
+    ((decoded (`Assoc ["pixel_response", `String "retained"])).Msx_wire.pixel_response
+     = Msx_wire.Retained_pixels None);
+  check bool "retained with the client's pixels" true
+    ((decoded (`Assoc ["frames", `Int 3; "pixel_response", `String "retained";
+                       "known_pixels", reference])).Msx_wire.pixel_response
+     = Msx_wire.Retained_pixels (Some {Msx_wire.revision; width = 256; height = 192}));
+  List.iter (fun (label, json) ->
+    check bool label true (Result.is_error (Msx_wire.decode_tick json)))
+    ["not an object", `List [];
+     "an unknown field", `Assoc ["frame", `Int 3];
+     "a repeated field", `Assoc ["frames", `Int 3; "frames", `Int 4];
+     "frames that is not an integer", `Assoc ["frames", `String "3"];
+     "frames that is a float", `Assoc ["frames", `Float 1.5];
+     "pixel_response that is not retained", `Assoc ["pixel_response", `String "full"];
+     "known pixels without retained", `Assoc ["known_pixels", reference];
+     "a reference with a short revision", `Assoc ["pixel_response", `String "retained";
+       "known_pixels", `Assoc ["revision", `String "abc"; "width", `Int 1; "height", `Int 1]];
+     "a reference with an upper-case revision", `Assoc ["pixel_response", `String "retained";
+       "known_pixels", `Assoc ["revision", `String (String.make 64 'A'); "width", `Int 1; "height", `Int 1]];
+     "a reference with no height", `Assoc ["pixel_response", `String "retained";
+       "known_pixels", `Assoc ["revision", `String revision; "width", `Int 1]];
+     "a reference with a zero width", `Assoc ["pixel_response", `String "retained";
+       "known_pixels", `Assoc ["revision", `String revision; "width", `Int 0; "height", `Int 1]]]
+
 let () = run "MSX wire" ["refusal", [
   test_case "every code round-trips" `Quick test_every_code_round_trips;
   test_case "fields are read by name" `Quick test_decode_reads_fields_by_name;
-  test_case "unnameable bodies are errors" `Quick test_decode_refuses_what_it_cannot_name]]
+  test_case "unnameable bodies are errors" `Quick test_decode_refuses_what_it_cannot_name];
+  "tick", [test_case "one decoder for the route and the worker" `Quick test_tick_decoding]]

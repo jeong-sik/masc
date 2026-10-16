@@ -12,7 +12,7 @@ the original ready run under current admission without a new Keeper model turn; 
 completion/result rather than submitting another plan. An explicit prepared-draft continuation \
 uses the same draft sha256 and original composition_run_id after its previous request settles. \
 Completed siblings are retained. A standalone result read creates no plan to resume. \
-On a completed exit, artifacts contains stdout then stderr as normalized {_blob: {...}} \
+When complete output is available, artifacts contains stdout then stderr as normalized {_blob: {...}} \
 references; use /artifacts/0/_blob/sha256 to pass stdout to keeper_artifact_read. \
 The original job's owner reconciles and delivers completion through the existing maintenance \
 pulse. After delivery, maintenance cleans the original container and private workspace; \

@@ -310,7 +310,9 @@ val record_observer_failure_at : unit -> float option
     window rather than marking unrelated windows incomplete. *)
 
 val state : scope:Runtime_quota_window.scope -> scope_state
-(** The windows held for [scope], ordered by limit then kind. *)
+(** The windows held for [scope], ordered by limit then kind. If complete empty
+    reports from different sources share the latest timestamp, no source
+    precedence is promised. *)
 
 val recorded_scopes : unit -> Runtime_quota_window.scope list
 (** Every scope that reported, including complete reports without windows,

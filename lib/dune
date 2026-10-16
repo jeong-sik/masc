@@ -4,6 +4,8 @@
  (flags :standard)
  (public_name masc)
  (private_modules
+  runtime_provider_usage_types
+  runtime_provider_usage_observations
   keeper_official_client_context_projection
   keeper_board_attention_worker_disposition
   keeper_board_attention_candidate_wire

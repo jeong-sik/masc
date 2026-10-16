@@ -3396,7 +3396,7 @@ let prepared_leaf_admission descriptor =
   match descriptor.execution with
   | Terminal -> Direct_only
   | Ordinary Serial when descriptor.runtime_handler = Tool_edit_file -> Owned_file_edit_leaf
-  | Ordinary _ ->
+  | Ordinary (Serial | Concurrent) ->
     (match readonly_static_hint descriptor with
      | Some true -> Read_only_ordinary_leaf
      | None | Some false ->

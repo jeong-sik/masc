@@ -6,8 +6,9 @@ val instance_label : string
 val state_owner_label : string
 val scope_label : string
 
-(** A container as its inspection reports it. [name] is the bare name. The
-    labels are read as given; a missing label is [None], never a default. *)
+(** A container as its inspection reports it. [name] is the bare name. A label
+    that is missing, blank or only whitespace is [None]: it names nobody, and
+    no default is made up for it. *)
 type held = {
   container_id : string;
   name : string;

@@ -158,9 +158,12 @@ let verify_container runtime ~name ~resources ~image_digest raw =
              | _ -> Error "Apple container image digest differs from the inspected local image")
        | _ -> Error "Apple container identity or resource settings are absent")
 
+(* A blank label names nobody, the same as an absent one. It is read as absent
+   here so that a record naming the holder never carries a blank, which the
+   record's own decoder refuses. *)
 let label_value labels key = match Option.bind labels (member key) with
   | None | Some `Null -> Ok None
-  | Some (`String value) -> Ok (Some value)
+  | Some (`String value) -> Ok (if String.trim value = "" then None else Some value)
   | Some _ -> Error ("label " ^ key ^ " is not text")
 
 let held_of_inspect runtime raw =

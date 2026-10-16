@@ -12,6 +12,44 @@ let json_response data : S.tool_result =
   { content = [S.TextContent {type_="text";text=Yojson.Safe.to_string data;annotations=None}];
     is_error=Some false;structured_content=Some data;_meta=None }
 
+(* The one place an exception that escaped a handler stops. The MCP server
+   loop does not catch handler exceptions, and the worker is the process that
+   holds the machine, so an exception left to run its course ends the worker
+   and the machine with it. The container's log driver is [none], so the
+   exception and its backtrace ride in the result: they are the only record.
+
+   The outcome is [Effect_outcome_unknown]: the exception says nothing about
+   whether the call moved the machine. Cancellation is not a failure of the
+   call and goes on unwinding. *)
+let contained ~tool_name f =
+  let start_time = Tool_timing.start () in
+  match f () with
+  | result -> result
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception exn ->
+    let backtrace = Printexc.get_backtrace () in
+    let described = Printexc.to_string exn in
+    let data =
+      `Assoc
+        (("exception", `String described)
+         :: (if backtrace = "" then [] else [ ("backtrace", `String backtrace) ]))
+    in
+    Ok
+      (response
+         (Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+            ~effect_disposition:Tool_result.Effect_outcome_unknown ~data
+            (Printf.sprintf
+               "%s raised %s inside the DOS worker. The worker is still running and the \
+                machine may have moved: read masc_dos_screen before sending more input."
+               tool_name described)))
+;;
+
+let guarded name ?description ?input_schema handler server =
+  Server.tool name ?description ?input_schema
+    (fun context tool_name arguments ->
+      contained ~tool_name:name (fun () -> handler context tool_name arguments))
+    server
+
 let schemas () = List.map (fun tool ->
   let name = Controller.dos_tool_name tool in
   match Embedded_config.read ("tools/" ^ name ^ ".toml") with
@@ -139,7 +177,7 @@ let create ~base_path () =
       Ok (response (Tool_result.make_err ~tool_name:schema.name ~start_time:(Tool_timing.start ())
         ~class_:Tool_result.Policy_rejection ~effect_disposition:Tool_result.Proven_pre_effect
         "Machine calls require the host caller-context control port"))) server) server schemas in
-  let server = Server.tool Controller.release_tool
+  let server = guarded Controller.release_tool
     ~description:"Release only the named controller under the owning host's lifecycle authority."
     ~input_schema:Lane_addon_call_context.input_schema
     (fun _context _name arguments -> Eio.Mutex.use_ro mutex (fun () ->
@@ -175,13 +213,13 @@ let create ~base_path () =
             ~start_time:(Tool_timing.start ()) (Dos_lane.error_to_string error)) in
       Ok {answer with S._meta=Some (`Assoc ["io.github.jeong-sik/masc.machine.events",
         `List (List.rev !events)])})) server in
-  let server = Server.tool Controller.snapshot_tool
+  let server = guarded Controller.snapshot_tool
     ~description:"Read the current controller for host credential admission."
     ~input_schema:(`Assoc ["type", `String "object"; "additionalProperties", `Bool false])
     (fun _context _name _arguments -> Eio.Mutex.use_ro mutex (fun () ->
       Result.map (fun holder -> json_response (`Assoc ["holder",
         (match holder with None -> `Null | Some name -> `String name)])) (holder ()))) server in
-  let server = Server.tool Lane_addon_call_context.tool_name
+  let server = guarded Lane_addon_call_context.tool_name
     ~description:"Execute a machine tool with verified host identity and controller admission."
     ~input_schema:Lane_addon_call_context.input_schema
     (fun _context _name arguments -> Eio.Mutex.use_ro mutex (fun () ->
@@ -206,7 +244,7 @@ let create ~base_path () =
           let metadata = match answer.S._meta with Some (`Assoc fields) -> fields | _ -> [] in
           Ok { answer with S._meta = Some (`Assoc
             (("io.github.jeong-sik/masc.machine.events", `List (List.rev !events)) :: metadata)) })) server in
-  let server = Server.tool Machine_input_history.tool_name
+  let server = guarded Machine_input_history.tool_name
     ~description:"Read a page of the last observed immutable input history."
     ~input_schema:Machine_input_history.input_schema
     (fun _context _name arguments -> Eio.Mutex.use_ro mutex (fun () ->
@@ -223,7 +261,7 @@ let create ~base_path () =
             "height", `Int frame.height; "rgb_base64", `String (Base64.encode_string frame.rgb)]] in
     `Assoc (["source_kind", `String "dos_capture";
       "activity", Machine_action_feed.to_json_list (Dos_lane.recent_activity ())] @ fields) in
-  Server.tool "lane_observe" ~description:"Read this worker's DOS screen without advancing the machine."
+  guarded "lane_observe" ~description:"Read this worker's DOS screen without advancing the machine."
     ~input_schema:(`Assoc ["type", `String "object"; "properties", `Assoc [
       "binding", `Assoc ["type", `String "object"]; "sources", `Assoc ["type", `String "array"]]])
     (fun _context _name _arguments -> Eio.Mutex.use_ro mutex (fun () ->

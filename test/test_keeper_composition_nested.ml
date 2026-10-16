@@ -464,7 +464,7 @@ let test_inline_write_keeps_original_effect_and_durable_refusal () =
    | Error _ -> fail "async Write refused for an unrelated reason"
    | Ok _ -> fail "ordinary Write acquired durable replay authority");
   let declaration execution = Printf.sprintf {|[[compositions]]
-name = "nested-write"
+name = "nested-read"
 execution = %S
 [[compositions.nodes]]
 id = "save"

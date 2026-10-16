@@ -509,20 +509,27 @@ let handle_hearth_list ~tool_name ~start_time _args : Tool_result.result =
 (** {1 Delete / cleanup handlers} *)
 
 let handle_delete ~tool_name ~start_time args : Tool_result.result =
+  let refused error =
+    Tool_result.make_err ~tool_name ~start_time
+      ~class_:(Board_tool_format.board_error_failure_class error)
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      (Printf.sprintf "Delete refused: %s" (Board_tool_format.board_error_to_string error))
+  in
   let post_id = String.trim (get_string args "post_id" "") in
   if String.equal post_id ""
   then
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Workflow_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect
       ~start_time
       "post_id is required"
   else (
     match agent_id_arg ~field:"author" args with
-    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+    | Error e -> refused e
     | Ok author ->
     match require_post_author ~action:"delete" ~post_id ~author with
-    | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+    | Error e -> refused e
     | Ok () ->
     match Board_dispatch.delete_post ~post_id with
     | Ok Board.Durable_deletion ->
@@ -532,8 +539,10 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
         ~data:(`String (Printf.sprintf "Deleted post %s" post_id))
         ()
     | Ok (Board.Deletion_persistence_pending detail) ->
-      Tool_result.make_deferred
+      Tool_result.make_err
         ~tool_name ~start_time
+        ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Proven_post_effect
         ~data:(`Assoc
           [ "post_id", `String post_id
           ; "applied", `Bool true
@@ -541,15 +550,10 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
           ; "message", `String "Post deleted in memory; snapshot persistence is pending. Do not repeat the deletion."
           ; "detail", `String detail
           ])
-        ()
-    | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
         (Printf.sprintf
-           "Delete failed: %s"
-           (Board_tool_format.board_error_to_string e)))
+           "Post %s deleted in memory; persistence is pending: %s. Do not repeat the deletion."
+           post_id detail)
+    | Error e -> refused e)
 ;;
 
 (** Close a post (task-1758/#39356). The author or a configured Board
@@ -727,6 +731,7 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
     let deleted = ref 0 in
     let persistence_pending = ref [] in
     let failed = ref 0 in
+    let unknown_failures = ref 0 in
     List.iter
       (fun (p : Board.post) ->
          let pid = Board.Post_id.to_string p.id in
@@ -740,7 +745,9 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
            | Error _ -> Stdlib.incr failed
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
-         | _exn -> Stdlib.incr failed)
+         | _exn ->
+           Stdlib.incr failed;
+           Stdlib.incr unknown_failures)
       targets;
     let message =
       Printf.sprintf
@@ -751,23 +758,33 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
         (List.length all_posts)
         max_age_hours
     in
+    let message =
+      if !persistence_pending = [] then message
+      else message ^ ". Pending deletions are already applied; do not repeat them."
+    in
     let data =
       `Assoc
         [ "message", `String message
         ; "durable_deletions", `Int !deleted
         ; "persistence_pending", `List (List.rev !persistence_pending)
         ; "failed", `Int !failed
+        ; "refused_deletions", `Int (!failed - !unknown_failures)
+        ; "outcome_unknown", `Int !unknown_failures
         ]
     in
-    if !failed > 0
+    if !failed > 0 || !persistence_pending <> []
     then
+      let effect_disposition =
+        if !unknown_failures > 0 then Tool_result.Effect_outcome_unknown
+        else if !deleted > 0 || !persistence_pending <> [] then Tool_result.Proven_post_effect
+        else Tool_result.Proven_pre_effect
+      in
       Tool_result.make_err
         ~tool_name
         ~class_:Tool_result.Runtime_failure
         ~start_time
+        ~effect_disposition
         ~data
         message
-    else if !persistence_pending <> [] then
-      Tool_result.make_deferred ~tool_name ~start_time ~data ()
     else Tool_result.make_ok ~tool_name ~start_time ~data ())
 ;;

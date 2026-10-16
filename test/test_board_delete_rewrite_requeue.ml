@@ -196,7 +196,32 @@ let with_blocked_reactions f =
     ~finally:(fun () -> Unix.rmdir path; Unix.rename backup path)
     f
 
-let test_mcp_pending_delete_is_deferred () =
+let require_post_effect_failure_without_wait ~tool_name result =
+  let execution = Keeper_tool_execution.of_tool_result result in
+  Alcotest.(check bool) "pending persistence remains a typed post-effect failure" true
+    (execution.failure_effect_disposition = Tool_result.Proven_post_effect);
+  Alcotest.(check bool) "no generic deferred completion wait is invented" true
+    (execution.deferred_kind = None);
+  let terminal = ref Keeper_tools_agent_core.Terminal_effect_open in
+  (match execution.disposition with
+   | Tool_result.Failed Tool_result.Runtime_failure ->
+     Keeper_tools_agent_core_bundle.For_testing.ordinary_on_failed
+       ~mark_terminal_effect_failed:(fun failure ->
+         terminal := Keeper_tools_agent_core.Terminal_effect_failed failure)
+       Keeper_tool_descriptor.Tool_board_dispatch
+       { Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure
+       ; effect_disposition = execution.failure_effect_disposition
+       ; detail = Keeper_terminal_effect_detail.Tool_failed
+           { internal_tool_name = tool_name; message = execution.raw_output }
+       }
+   | Tool_result.Failed _ | Tool_result.Completed () | Tool_result.Deferred () ->
+     Alcotest.fail "pending persistence must remain a runtime failure");
+  match Keeper_agent_run.terminal_effect_boundary_decision !terminal with
+  | Ok Runtime_agent.Continue -> ()
+  | Error _ | Ok (Runtime_agent.Yield _) ->
+    Alcotest.fail "ordinary Board persistence failure must reach the model without parking the turn"
+
+let test_mcp_pending_delete_is_post_effect_failure () =
   let post = create_post_exn ~content:"tool deletion is applied before persistence" in
   let post_id = Board.Post_id.to_string post.id in
   flush ();
@@ -205,8 +230,7 @@ let test_mcp_pending_delete_is_deferred () =
       Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_delete"
         (`Assoc ["post_id", `String post_id; "author", `String "delete-rq-author"])
     in
-    Alcotest.(check bool) "pending deletion is deferred, not completed" true
-      (Tool_result.is_deferred result);
+    require_post_effect_failure_without_wait ~tool_name:"masc_board_delete" result;
     let open Yojson.Safe.Util in
     let data = Tool_result.data result in
     Alcotest.(check string) "receipt names the applied deletion" post_id
@@ -230,8 +254,7 @@ let test_cleanup_counts_pending_separately () =
       Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
         (`Assoc ["dry_run", `Bool false; "max_age_hours", `Int 1])
     in
-    Alcotest.(check bool) "pending cleanup is deferred" true
-      (Tool_result.is_deferred result);
+    require_post_effect_failure_without_wait ~tool_name:"masc_board_cleanup" result;
     let open Yojson.Safe.Util in
     let data = Tool_result.data result in
     Alcotest.(check int) "pending deletion is not durable" 0
@@ -241,6 +264,62 @@ let test_cleanup_counts_pending_separately () =
     let pending = data |> member "persistence_pending" |> to_list in
     Alcotest.(check (list string)) "pending deletion retains its post id" [post_id]
       (List.map (fun row -> row |> member "post_id" |> to_string) pending));
+  flush ()
+
+let test_cleanup_refusal_is_pre_effect () =
+  let post = create_post_exn ~content:"old post with an unreadable snapshot" in
+  let post_id = Board.Post_id.to_string post.id in
+  Hashtbl.replace (store ()).Board.posts post_id
+    { post with Board.created_at = Time_compat.now () -. 7200.0 };
+  Board.invalidate_post_caches (store ());
+  (store ()).Board.posts_load_result <- Error "snapshot read failed";
+  let result =
+    Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
+      (`Assoc ["dry_run", `Bool false; "max_age_hours", `Int 1])
+  in
+  let execution = Keeper_tool_execution.of_tool_result result in
+  Alcotest.(check bool) "all refused deletions remain pre-effect" true
+    (execution.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  Alcotest.(check bool) "storage refusal keeps the post" true
+    (Result.is_ok (Board_dispatch.get_post ~post_id));
+  let open Yojson.Safe.Util in
+  let data = Tool_result.data result in
+  Alcotest.(check int) "cleanup counts refused deletion" 1
+    (data |> member "refused_deletions" |> to_int);
+  Alcotest.(check int) "refusal is not an unknown exception" 0
+    (data |> member "outcome_unknown" |> to_int)
+
+let test_cleanup_mixed_pending_and_refused_is_post_effect () =
+  let pending = create_post_exn ~content:"first old post is applied" in
+  let refused = create_post_exn ~content:"second old post is refused" in
+  let pending_id = Board.Post_id.to_string pending.id in
+  let refused_id = Board.Post_id.to_string refused.id in
+  let now = Time_compat.now () in
+  Hashtbl.replace (store ()).Board.posts pending_id
+    { pending with Board.created_at = now -. 7200.0 };
+  Hashtbl.replace (store ()).Board.posts refused_id
+    { refused with Board.created_at = now -. 10800.0 };
+  Board.invalidate_post_caches (store ());
+  (store ()).Board.dirty_posts <- true;
+  flush ();
+  with_blocked_reactions (fun () ->
+    Board_dispatch.set_board_write_hook (fun () ->
+      (store ()).Board.posts_load_result <- Error "source became unreadable after first deletion");
+    let result =
+      Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
+        (`Assoc ["dry_run", `Bool false; "max_age_hours", `Int 1])
+    in
+    require_post_effect_failure_without_wait ~tool_name:"masc_board_cleanup" result;
+    let open Yojson.Safe.Util in
+    let data = Tool_result.data result in
+    Alcotest.(check int) "mixed cleanup counts one refused deletion" 1
+      (data |> member "refused_deletions" |> to_int);
+    Alcotest.(check (list string)) "mixed cleanup preserves exact pending deletion" [pending_id]
+      (data |> member "persistence_pending" |> to_list
+       |> List.map (fun row -> row |> member "post_id" |> to_string));
+    Alcotest.(check bool) "refused post remains readable" true
+      (Result.is_ok (Board_dispatch.get_post ~post_id:refused_id)));
+  (store ()).Board.posts_load_result <- Ok ();
   flush ()
 
 let () =
@@ -260,9 +339,13 @@ let () =
             (with_eio (test_individual_snapshot_failure Board.reactions_path))
         ; Alcotest.test_case "unreadable snapshot refuses without a transition" `Quick
             (with_eio test_unreadable_snapshot_refuses_before_transition)
-        ; Alcotest.test_case "MCP pending deletion is deferred" `Quick
-            (with_eio test_mcp_pending_delete_is_deferred)
+        ; Alcotest.test_case "MCP pending deletion is a post-effect failure" `Quick
+            (with_eio test_mcp_pending_delete_is_post_effect_failure)
         ; Alcotest.test_case "cleanup counts pending separately" `Quick
             (with_eio test_cleanup_counts_pending_separately)
+        ; Alcotest.test_case "cleanup refusal is pre-effect" `Quick
+            (with_eio test_cleanup_refusal_is_pre_effect)
+        ; Alcotest.test_case "mixed cleanup retains applied and refused outcomes" `Quick
+            (with_eio test_cleanup_mixed_pending_and_refused_is_post_effect)
         ] )
     ]

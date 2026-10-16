@@ -851,7 +851,8 @@ let test_delete_waiting_after_edit_keeps_other_edited_post () =
   test_snapshot_waiting_after_edit_keeps_edited_post
     (fun store ~post_id:_ () ->
       match Board.delete_post store ~post_id:victim_id with
-      | Ok () -> ()
+      | Ok Board.Durable_deletion -> ()
+      | Ok (Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
       | Error error -> Alcotest.fail (Board.show_board_error error))
     ();
   match Board_dispatch.get_post ~post_id:victim_id with

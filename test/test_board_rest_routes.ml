@@ -559,6 +559,72 @@ let with_board_store ~base_path f =
   f ()
 ;;
 
+let test_dashboard_delete_preserves_applied_pending_and_refused () =
+  with_authenticated_activity_router
+    ~prefix:"board-delete-persistence-" ~agent_name:"board-delete-operator"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path @@ fun () ->
+  let router = Server_dashboard_http_delete_actions.add_delete_action_routes router in
+  let create content =
+    match
+      Masc.Board_dispatch.create_post ~author:"board-delete-author" ~content
+        ~post_kind:Masc.Board.Human_post ()
+    with
+    | Ok post -> Masc.Board.Post_id.to_string post.id
+    | Error error -> fail (Masc.Board.show_board_error error)
+  in
+  let delete post_id =
+    dispatch_json ~router ~token ~path:"/api/v1/dashboard/board/delete"
+      ~extra_headers:[]
+      ~body:(Yojson.Safe.to_string (`Assoc ["post_id", `String post_id])) ()
+  in
+  let post_id = create "delete with a failed snapshot" in
+  let writes = ref 0 in
+  Masc.Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  let path = Masc.Board.reactions_path () in
+  let had_snapshot = Sys.file_exists path in
+  let backup = path ^ ".before-delete" in
+  if had_snapshot then Unix.rename path backup;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.rmdir path;
+      if had_snapshot then Unix.rename backup path)
+    (fun () ->
+      let status, receipt = delete post_id in
+      let open Yojson.Safe.Util in
+      check int "applied pending deletion is accepted" 202 status;
+      check string "receipt is bound to the post" post_id
+        (receipt |> member "post_id" |> to_string);
+      check bool "deletion was applied" true
+        (receipt |> member "applied" |> to_bool);
+      check string "persistence remains pending" "pending"
+        (receipt |> member "persistence" |> to_string);
+      check int "applied pending deletion invalidates projections" 1 !writes;
+      check bool "post is absent from memory" true
+        (Result.is_error (Masc.Board_dispatch.get_post ~post_id));
+      let retry_status, _ = delete post_id in
+      check int "repeating the applied deletion is a lookup miss" 404 retry_status;
+      check int "refused retry does not invalidate again" 1 !writes);
+  let store =
+    match Masc.Board_dispatch.backend () with Masc.Board_dispatch.Jsonl store -> store
+  in
+  Masc.Board.flush_dirty store;
+  let durable_id = create "delete with healthy snapshots" in
+  let status, receipt = delete durable_id in
+  check int "durable deletion succeeds" 200 status;
+  check string "durable receipt remains distinct" "durable"
+    Yojson.Safe.Util.(receipt |> member "persistence" |> to_string);
+  let refused_id = create "do not delete with an unreadable source" in
+  let writes_before_refusal = !writes in
+  store.Masc.Board.posts_load_result <- Error "snapshot read failed";
+  let status, _ = delete refused_id in
+  check int "storage refusal is not a lookup miss" 503 status;
+  check bool "refused deletion leaves the post readable" true
+    (Result.is_ok (Masc.Board_dispatch.get_post ~post_id:refused_id));
+  check int "storage refusal emits no transition" writes_before_refusal !writes
+;;
+
 let test_board_write_routes_reject_foreign_workspace () =
   with_authenticated_activity_router
     ~prefix:"board-write-workspace-" ~agent_name:"workspace-writer"
@@ -1584,6 +1650,8 @@ let () =
             test_board_write_routes_use_authenticated_actor
         ; test_case "Board writes bind the receiving workspace" `Quick
             test_board_write_routes_reject_foreign_workspace
+        ; test_case "Dashboard deletion preserves pending and refused outcomes" `Quick
+            test_dashboard_delete_preserves_applied_pending_and_refused
         ; test_case "the Board list route and projection share the kept page" `Quick
             test_board_list_route_and_projection_share_the_kept_page
         ; test_case "a Board timeout cannot become a conditional 304" `Quick

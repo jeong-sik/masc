@@ -3,6 +3,10 @@ open Masc
 module VAT = Verification_authority_tools
 let () = Mirage_crypto_rng_unix.use_default ()
 let require label = function Ok value -> value | Error _ -> fail label
+let require_durable_deletion label = function
+  | Ok Board.Durable_deletion -> ()
+  | Ok (Board.Deletion_persistence_pending detail) -> failf "%s: %s" label detail
+  | Error error -> failf "%s: %s" label (Board.show_board_error error)
 let rec remove path =
   if Sys.is_directory path then (Array.iter (fun n -> remove (Filename.concat path n)) (Sys.readdir path); Unix.rmdir path)
   else Unix.unlink path
@@ -111,7 +115,7 @@ let test_submission_freezes_sources () = with_fixture (fun config ->
     ~ttl_hours:0 () |> require "later comment");
   ignore (Board_dispatch.update_post ~post_id:(Board.Post_id.to_string f.id) ~editor:"producer"
     ~content:"New advice" ~new_author:"peer" () |> require "transfer Fusion");
-  Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string f.id) |> require "remove expiring projection";
+  Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string f.id) |> require_durable_deletion "remove expiring projection";
   List.iter (fun surface ->
     check bool "post and comments are submission bytes" true
       (read surface "masc_board_post_get" (post_args p) = original);
@@ -244,7 +248,7 @@ let test_goal_request_freezes_sources () = with_fixture (fun config ->
   let items = match record.completion with
     | Goal_verification.Proof_pending _ -> restored record.submitted_evidence
     | _ -> fail "Goal proof request not pending" in
-  Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string post.id) |> require "remove live Goal source";
+  Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string post.id) |> require_durable_deletion "remove live Goal source";
   let surface = VAT.create_goal_proof ~config ~submitted_evidence:items |> require "Goal snapshot surface" in
   let result = read surface "masc_board_post_get" (post_args post) in
   check string "Goal reads original body after deletion" post.body
@@ -262,7 +266,7 @@ let test_task_request_persists_snapshot () = with_fixture (fun config ->
     | `List rows -> List.map (fun row -> Store.submitted_evidence_item_of_yojson row |> require "decode request item") rows
     | _ -> fail "missing submission snapshot" in
   let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:items |> require "request-bound surface" in
-  Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string p.id) |> require "remove source";
+  Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string p.id) |> require_durable_deletion "remove source";
   ignore (read surface "masc_board_post_get" (post_args p));
   (match Verification_protocol.create_submit_request ~config ~task ~assignee:"producer"
     ~verification_id:"missing-request" ~claim:(Masc_domain.Completion_evidence {evidence_refs=[board_ref p]}) with

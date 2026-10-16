@@ -13,8 +13,10 @@ import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExclu
 import { route } from '../../router'
 import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference, voteComment } from '../../api/board'
+import { deleteBoardPost } from '../../api/actions'
+import { showToast } from '../common/toast'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
-import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode, detailPostId, detailPost, detailFocusedCommentId, detailComments, detailCommentPage, detailLoading, detailReadPhase, loadPostDetail } from './board-state'
+import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode, detailPostId, detailPost, detailFocusedCommentId, detailComments, detailCommentPage, detailLoading, detailReadPhase, loadPostDetail, refreshBoard } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
 
@@ -60,6 +62,14 @@ vi.mock('../../api', () => ({
 
 vi.mock('../../api/actions', () => ({
   deleteBoardPost: vi.fn(),
+}))
+
+vi.mock('../common/confirm-dialog', () => ({
+  requestConfirm: vi.fn().mockResolvedValue(true),
+}))
+
+vi.mock('../common/toast', () => ({
+  showToast: vi.fn(),
 }))
 
 vi.mock('../../api/board', () => ({
@@ -109,6 +119,7 @@ vi.mock('./board-state', async () => {
     fetchBoardPost: vi.fn(),
     commentPost: vi.fn(),
     createPost: vi.fn(),
+    refreshBoard: vi.fn(),
     refreshBoardHearths: vi.fn(),
   }
 })
@@ -276,6 +287,20 @@ describe('BoardSurface Component', () => {
     messages.value = []
     shellAuthSummary.value = null
     route.value = { params: {} } as any
+  })
+
+  it('refreshes an applied pending deletion and warns instead of claiming persistence', async () => {
+    const post = makePost({ id: 'pending-delete', title: 'Pending deletion', author: 'keeper' })
+    boardPosts.value = [post]
+    vi.mocked(deleteBoardPost).mockResolvedValueOnce({
+      status: 'persistence_pending', postId: post.id, detail: 'snapshot write failed',
+    })
+    render(h(BoardSurface, {}))
+    vi.mocked(refreshBoard).mockClear()
+    await fireEvent.click(screen.getByRole('button', { name: `게시글 삭제: ${post.id}` }))
+    await waitFor(() => expect(refreshBoard).toHaveBeenCalled())
+    expect(deleteBoardPost).toHaveBeenCalledExactlyOnceWith(post.id)
+    expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'warning')
   })
 
   it('clears retained full-view focus when returning to the same compact thread', async () => {

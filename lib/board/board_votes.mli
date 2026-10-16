@@ -203,14 +203,25 @@ val reopen :
 (** Clears a post's [closed] state back to open. Idempotent: reopening an
     already-open post is [Ok ()]. Same permission boundary as [set_closed]. *)
 
+type deletion_outcome =
+  | Durable_deletion
+  | Deletion_persistence_pending of string
+      (** The deletion is applied in memory and failed snapshot rewrites are
+          scheduled for [flush_dirty]. The detail names the write failures. *)
+
 val delete_post :
-  store -> post_id:string -> (unit, board_error) Result.t
+  store -> post_id:string -> (deletion_outcome, board_error) Result.t
 (** Removes the post and every comment under it from the
     in-memory store, then rewrites the posts, comments, vote
     and reaction snapshots without them.  Refused with
     [Io_error], before anything changes, while any of those
     four stores did not load fully: the rewrite would delete
-    the rows memory never held (#38595). *)
+    the rows memory never held (#38595). [Error] always means no deletion
+    was applied. Once applied, [Ok Durable_deletion] means all four rewrites
+    succeeded; [Ok (Deletion_persistence_pending detail)] keeps the applied
+    transition distinct from a refused write. Retrying deletion is not a
+    persistence retry: the post is already absent; [flush_dirty] retries the
+    failed snapshots. *)
 
 (** {1 Global store + lifecycle} *)
 

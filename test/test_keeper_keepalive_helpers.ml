@@ -932,7 +932,8 @@ let test_thread_signal_for_a_swept_post_delivers_nothing () =
     (fun () ->
        let meta, signal = create_thread_fixture config ~keeper_name:"sweptlane" in
        (match Board_dispatch.delete_post ~post_id:signal.signal.post_id with
-        | Ok () -> ()
+        | Ok Board.Durable_deletion -> ()
+        | Ok (Board.Deletion_persistence_pending detail) -> fail detail
         | Error error -> fail (Board.show_board_error error));
        KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
        check int "lane queue stays empty" 0 (board_queue_length config meta.name);

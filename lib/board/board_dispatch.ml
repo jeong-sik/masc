@@ -240,7 +240,8 @@ let emit_board_write () =
   | Some hook -> Safe_ops.protect ~default:() hook
   | None -> ()
 
-(* The hook runs for a write the store took, not for one it refused. *)
+(* The hook follows applied state, including a deletion whose snapshot writes
+   remain pending. Refused writes leave memory unchanged and emit no hook. *)
 let after_write = function
   | Ok _ as written ->
     emit_board_write ();

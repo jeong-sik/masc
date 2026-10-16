@@ -145,43 +145,25 @@ let expected_model_tool_names
     model_visible_descriptors
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   in
-  let entries = Keeper_skill_catalog.composition_entries skill_catalog in
+  (* Frozen turns can prepare async work without a named Skill. Derive the
+     declared, transient and request-control names from their schema owner. *)
   let composition_names =
-    List.map Keeper_tool_composition_catalog.tool_name entries
+    Keeper_skill_catalog.composition_entries skill_catalog
+    |> List.map (fun entry -> entry, ())
+    |> fun skill_compositions ->
+    Keeper_tool_composition_surface.schema_tool_rows ~include_drafts:transient_drafts ~skill_compositions ()
+    |> List.map (fun (_, (tool : Agent_core.Tool.t)) -> tool.schema.name)
   in
   let instruction_names =
     if Keeper_skill_catalog.instruction_entries skill_catalog <> []
     then [ Keeper_tool_composition_catalog.skill_tool_name ]
     else []
   in
-  (* The shared controls accompany an async composition or the transient-draft
-     tools: the same test the surface builds them under
-     ([async_controls = draft_tools <> [] || requires_async_controls]). The
-     draft tools exist on a frozen capability surface, which is every Keeper
-     turn; only the legacy compatibility authority builds none. Leaving them
-     out reported [keeper_composition_prepare] and [keeper_composition_run] as
-     unexpected on every turn and failed the projection tests on main. *)
-  let control_names =
-    (if transient_drafts
-        || Keeper_tool_composition_catalog.requires_async_controls entries
-     then
-       [ Keeper_tool_composition_catalog.status_tool_name
-       ; Keeper_tool_composition_catalog.cancel_tool_name
-       ]
-     else [])
-    @
-    if transient_drafts
-    then
-      [ Keeper_tool_composition_catalog.prepare_tool_name
-      ; Keeper_tool_composition_catalog.run_tool_name
-      ]
-    else []
-  in
   List.sort_uniq
     String.compare
     (List.filter
        (fun name -> not (is_deferred name))
-       (descriptor_names @ composition_names @ instruction_names @ control_names)
+       (descriptor_names @ composition_names @ instruction_names)
          (* What the work services this Keeper is attached to offer, as this
             surface names them: the official-client lanes carry the tools
             themselves, the Agent Core lane carries the one listing tool that

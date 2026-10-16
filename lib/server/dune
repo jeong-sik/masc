@@ -20,6 +20,7 @@
  (libraries
   mcp_protocol
   masc.lane_addon_call_context
+  masc.lane_addon_tool_result
   masc.machine_pad_layout
   masc.machine_controller_contract
   masc.msx_tool

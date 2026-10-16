@@ -75,6 +75,11 @@ default = "local.sample"
                   detach (); value)))))))
 ;;
 
+let require_ok = function
+  | Ok value -> value
+  | Error e -> fail (Lane.error_to_string e)
+;;
+
 let current_frame_number () =
   match Lane.frame () with
   | Some f -> f.number
@@ -444,6 +449,65 @@ let test_correlated_checkpoint_route () =
         let _, wrong = Route.checkpoint_status_response ~config
           ~body:(body ["checkpoint",`String "restore";"operation_id",`String "restore-1";"slot",`String "quick"]) in
         check bool "unbound inspection cannot provide pixels" true (member "live" wrong=None))))
+;;
+
+(* A checkpoint the worker refuses before it takes effect settles as a proven
+   refusal, so the terminal retires its retained intent and the next write is
+   admitted. Settled as unknown, the same refusal would leave the intent in
+   place and block every machine write until an offline acknowledgement. Each
+   case runs the real worker; the receipt is then read the way the terminal
+   reads it. *)
+let test_pre_effect_checkpoint_refusal_settles_refused () =
+  let module Pending = Masc_tui_msx_checkpoint_pending in
+  let module Tui = Masc.Tui_decode in
+  with_tick_machine (fun () ->
+    with_attached_worker (fun ~config ~env ~sw ->
+      Fs_compat.mkdir_p (Masc.Workspace.masc_dir config);
+      let masc_root = Unix.realpath (Masc.Workspace.masc_dir config) in
+      let base_path = Unix.realpath config.base_path in
+      let expected = `Assoc ["base_path",`String base_path;"masc_root",`String masc_root] in
+      let pool = Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Executor_pool_ref.For_testing.with_pool pool (fun () ->
+        let post ~restore id =
+          let body = Yojson.Safe.to_string (`Assoc ["operation_id",`String id;
+            "slot",`String "quick";"expected_workspace",expected]) in
+          snd (Route.checkpoint_response ~config ~restore ~body) in
+        let intent ~restore id : Pending.binding =
+          {operation_id=(match Keeper_operation_id.of_string id with Ok v -> v | Error m -> fail m);
+           restore; slot="quick"; base_path; masc_root} in
+        let gate_is_open label =
+          match Pending.load ~masc_root with
+          | Ok [] -> ()
+          | Ok _ -> fail (label ^ ": an intent still gates machine writes")
+          | Error detail -> fail (label ^ ": " ^ detail) in
+        let refuses label ~restore id =
+          let binding = intent ~restore id in
+          (match Pending.remember ~masc_root binding with
+           | Ok () -> () | Error detail -> fail detail);
+          let receipt = post ~restore id in
+          check (option string) (label ^ " settles as refused") (Some "refused")
+            (match member "status" receipt with Some (`String s) -> Some s | _ -> None);
+          check (option string) (label ^ " carries the pre-effect proof") (Some "proven_pre_effect")
+            (match member "effect_disposition" receipt with Some (`String s) -> Some s | _ -> None);
+          (match Tui.decode_msx_checkpoint_receipt ~operation_id:id ~restore ~slot:"quick"
+                   ~base_path ~masc_root receipt with
+           | Ok (Tui.Checkpoint_refused detail) ->
+               check bool (label ^ " names the reason") true (String.trim detail <> "")
+           | Ok _ -> fail (label ^ ": the terminal does not read this as a refusal")
+           | Error detail -> fail (label ^ ": " ^ detail));
+          (* The terminal retires an intent on [Checkpoint_refused]. *)
+          (match Pending.forget ~masc_root binding with
+           | Ok () -> () | Error detail -> fail detail);
+          gate_is_open label in
+        refuses "restore of a slot never saved" ~restore:true "restore-missing-slot";
+        ignore (require_ok (Lane.eject ()));
+        refuses "save with no machine" ~restore:false "save-without-machine";
+        (* The server needs no offline acknowledgement afterwards. *)
+        ignore (require_ok (Lane.load ~ledger_dir:(Filename.concat config.base_path "ledger")
+          ~roms_dir:None ~cart_path:None ~disk_path:None));
+        check (option string) "a later save is admitted" (Some "committed")
+          (match member "status" (post ~restore:false "save-after-refusals") with
+           | Some (`String s) -> Some s | _ -> None))))
 ;;
 
 let test_checkpoint_route () =
@@ -1190,6 +1254,7 @@ let () =
         ; test_case "checkpoint settlement notifies possible restore" `Quick test_checkpoint_settlement_notifies_possible_restore
         ; test_case "checkpoint terminal store failure recovers without replay" `Quick test_checkpoint_terminal_store_failure_can_be_recovered
         ; test_case "checkpoint receipt durable lifecycle" `Quick test_checkpoint_receipt_lifecycle
+        ; test_case "pre-effect refusal settles refused" `Quick test_pre_effect_checkpoint_refusal_settles_refused
         ; test_case
             "validation, worker, restore and storage failure"
             `Quick

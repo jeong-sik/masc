@@ -46,6 +46,12 @@ export const activeKeeperName = signal('')
 export const keeperStatusDetails = signal<Record<string, KeeperStatusDetail>>({})
 export const keeperThreads = signal<Record<string, KeeperConversationEntry[]>>({})
 export const keeperHydrating = signal<Record<string, boolean>>({})
+// Pages the operator explicitly requested survive tail refreshes and live appends.
+export const keeperChatHistoryPages = signal<Record<string, {
+  entries: KeeperConversationEntry[]
+  nextBefore: number | null
+  hasMore: boolean
+}>>({})
 // First chat-history hydration outcome per keeper. Absent means the first
 // hydration has not settled yet (including the hard-refresh render before the
 // panel's mount effect starts it), so an empty thread is not yet authoritative.
@@ -195,14 +201,15 @@ export function isAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
   return entry.source === 'autonomous_turn'
 }
 
-function capThreadEntries(entries: KeeperConversationEntry[]): KeeperConversationEntry[] {
+function capThreadEntries(name: string, entries: KeeperConversationEntry[]): KeeperConversationEntry[] {
+  const pageIds = new Set(keeperChatHistoryPages.value[name]?.entries.map(entry => entry.id) ?? [])
   let conversationSlots = THREAD_ENTRY_CAP
   const kept: KeeperConversationEntry[] = []
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index]
     if (!entry) continue
     const doesNotConsumeConversationSlot =
-      isAutonomousTurnEntry(entry) || entry.approvalLifecycle != null
+      isAutonomousTurnEntry(entry) || entry.approvalLifecycle != null || pageIds.has(entry.id)
     if (doesNotConsumeConversationSlot || conversationSlots > 0) {
       kept.push(entry)
       if (!doesNotConsumeConversationSlot) conversationSlots -= 1
@@ -1007,7 +1014,7 @@ export function appendThreadEntry(name: string, entry: KeeperConversationEntry):
   const existing = keeperThreads.value[name] ?? []
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: capThreadEntries([...existing, entry]),
+    [name]: capThreadEntries(name, [...existing, entry]),
   }
 }
 
@@ -1090,7 +1097,7 @@ export function insertThreadEntryBefore(
       : [...existing.slice(0, index), entry, ...existing.slice(index)]
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: capThreadEntries(next),
+    [name]: capThreadEntries(name, next),
   }
 }
 
@@ -1633,6 +1640,11 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // refresh / probe / recover.
   if (entries.length === 0) return
   const existing = keeperThreads.value[name] ?? []
+  const incomingIds = new Set(entries.map(entry => entry.id))
+  entries = [
+    ...(keeperChatHistoryPages.value[name]?.entries ?? []).filter(entry => !incomingIds.has(entry.id)),
+    ...entries,
+  ]
   // Shared across the map so each local trace source is claimed at most once
   // (see mergeLocalAssistantObservations): identical-text turns no longer steal
   // each other's trace (#21748).
@@ -1693,7 +1705,7 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // Autonomous observations are separately bounded by the backend's exact
   // current-record/raw-trace window. They do not consume dialogue slots: a
   // busy keeper must never evict the direct conversation it is shown beside.
-  const kept = capThreadEntries(merged)
+  const kept = capThreadEntries(name, merged)
   keeperThreads.value = {
     ...keeperThreads.value,
     [name]: kept,

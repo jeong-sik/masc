@@ -16,6 +16,7 @@ import {
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
   fetchKeeperToolApprovals,
   interruptKeeperTurn as apiInterruptKeeperTurn,
   streamKeeperMessage,
@@ -46,6 +47,7 @@ import {
   keeperActionErrors,
   keeperChatHistoryErrors,
   keeperChatHistoryHydration,
+  keeperChatHistoryPages,
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
@@ -377,6 +379,8 @@ export function _resetChatHydrationForTests(): void {
   chatHistoryHydrationRequests.clear()
   keeperChatHistoryErrors.value = {}
   keeperChatHistoryHydration.value = {}
+  keeperChatHistoryPages.value = {}
+  chatHistoryPageRequests.clear()
 }
 
 async function fetchAndMergeKeeperChatHistory(keeperName: string, request: object): Promise<void> {
@@ -1023,41 +1027,49 @@ export async function refreshKnownKeeperChatHistories(): Promise<void> {
   if (failed.length > 0) throw new Error(`Known Keeper history refresh incomplete: ${failed.join(', ')}`)
 }
 
+const chatHistoryPageRequests = new Set<string>()
+
 export async function loadFullKeeperHistory(name: string): Promise<void> {
   const keeperName = name.trim()
-  if (!keeperName) return
+  if (!keeperName || chatHistoryPageRequests.has(keeperName)) return
+  const previous = keeperChatHistoryPages.value[keeperName]
+  if (previous && !previous.hasMore) return
+  chatHistoryPageRequests.add(keeperName)
   setRecordValue(keeperHydrating, keeperName, true)
   try {
-    const text = await callMcpTool('masc_keeper_status', {
-      name: keeperName,
-      fast: false,
-      include_context: false,
-      include_metrics_overview: false,
-      include_history_tail: true,
-      tail_turns: 0,
-      tail_messages: KEEPER_HISTORY_TAIL_MESSAGES,
-    })
-    let parsed: unknown = null
-    try {
-      parsed = JSON.parse(text)
-    } catch (err) {
-      // P2 silent-failure fix: malformed status response previously
-      // produced an empty detail UI indistinguishable from "no data
-      // yet."  Logging surfaces the parse failure to DevTools while
-      // normalizeStatusDetail still degrades gracefully (uses raw
-      // text + null parsed).
-      console.warn(
-        `[keeper] masc_keeper_status response parse failed for ${keeperName}:`,
-        err instanceof Error ? err.message : err,
-      )
-      parsed = null
+    const page = await fetchKeeperChatHistoryPage(keeperName, previous?.nextBefore ?? undefined)
+    const existing = keeperThreads.value[keeperName] ?? []
+    const existingById = new Map(existing.map(entry => [entry.id, entry]))
+    // Pages carry canonical content and identity but omit stream lifecycle
+    // fields. Preserve only that richer observation on an exact existing id.
+    const pageEntries = chatHistoryEntriesFromRest(keeperName, page.messages)
+      .map(entry => {
+        const observed = existingById.get(entry.id)
+        return observed?.streamContract
+          ? { ...entry, streamContract: observed.streamContract }
+          : entry
+      })
+    const retained = new Map((previous?.entries ?? []).map(entry => [entry.id, entry]))
+    for (const entry of pageEntries) retained.set(entry.id, entry)
+    keeperChatHistoryPages.value = {
+      ...keeperChatHistoryPages.value,
+      [keeperName]: {
+        entries: [...retained.values()],
+        nextBefore: page.nextBefore,
+        hasMore: page.hasMore,
+      },
     }
-    parsed = normalizeKeeperStatusPayloadDeliveryProvenance(parsed)
-    const detail = normalizeStatusDetail(keeperName, text, parsed)
-    setStatusDetail(keeperName, detail)
+    const pageIds = new Set(pageEntries.map(entry => entry.id))
+    mergeServerHistoryEntries(keeperName, [
+      ...pageEntries,
+      ...existing.filter(entry => !pageIds.has(entry.id)),
+    ])
+    setRecordValue(keeperChatHistoryErrors, keeperName, null)
   } catch (err) {
-    console.warn(`[keeper] full history load failed for ${keeperName}`, err instanceof Error ? err.message : err)
+    setRecordValue(keeperChatHistoryErrors, keeperName,
+      err instanceof Error ? err.message : '이전 대화를 불러오지 못했습니다')
   } finally {
+    chatHistoryPageRequests.delete(keeperName)
     setRecordValue(keeperHydrating, keeperName, false)
   }
 }

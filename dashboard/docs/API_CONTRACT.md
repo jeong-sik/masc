@@ -120,6 +120,15 @@ records rather than the chat store — must carry a non-blank `id`. The schema
 an error surface. #29108 restored the autonomous projection's id after it was
 lost to a refactor that predated the required-id contract.
 
+The transcript tail and older direct conversation are separate reads.
+`GET /api/v1/keepers/:name/chat/history/page` returns the
+`masc.keeper_chat_history.page.v1` envelope with `messages`, `has_more` and
+`next_before`. The dashboard sends that cursor unchanged as `before` on the
+next user request and stops when `has_more` is false. Page rows retain their
+server-issued IDs; explicitly loaded pages survive subsequent tail refreshes
+and live appends. A failed page preserves the last successful cursor for retry. A malformed row
+rejects its entire page, so advancing a cursor cannot silently skip that row.
+
 ## Non-goals
 
 - OCaml-to-TypeScript schema code generation.

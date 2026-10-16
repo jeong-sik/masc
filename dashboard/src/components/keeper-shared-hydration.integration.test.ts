@@ -9,6 +9,7 @@ import type { ToolCallEntry } from '../api/dashboard'
 const {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
@@ -17,6 +18,7 @@ const {
 } = vi.hoisted(() => ({
   cancelQueuedKeeperMessage: vi.fn(async () => undefined),
   fetchKeeperChatHistory: vi.fn(),
+  fetchKeeperChatHistoryPage: vi.fn(),
   fetchQueuedKeeperMessageResult: vi.fn(),
   isTerminalQueuedKeeperMessage: vi.fn((result: { status: string }) => result.status === 'done'),
   queuedKeeperMessageError: vi.fn((result: { status: string }) => `request ${result.status}`),
@@ -42,6 +44,7 @@ const { exactToolCallLookup } = vi.hoisted(() => ({
 vi.mock('../api/keeper', () => ({
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
   fetchQueuedKeeperMessageResult,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
@@ -128,6 +131,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       clear: vi.fn(),
     })
     fetchKeeperChatHistory.mockReset()
+    fetchKeeperChatHistoryPage.mockReset()
     fetchKeeperToolCalls.mockReset()
     fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
     keeperThreads.value = {}
@@ -155,6 +159,37 @@ describe('KeeperConversationPanel hydration wiring', () => {
     _clearTrackedKeeperChatOperationsForTests()
     _resetChatStoreForTests()
     resetToolCallOutputs()
+  })
+
+  it('walks earlier server pages from the visible transcript and keeps retry available', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([{ id: 'new', role: 'user', content: 'Newest dialogue', ts: 1000 }])
+    fetchKeeperChatHistoryPage
+      .mockRejectedValueOnce(new Error('Page temporarily unavailable'))
+      .mockResolvedValueOnce({
+        messages: [{ id: 'middle', role: 'user', content: 'Earlier dialogue', ts: 500 }],
+        nextBefore: 500, hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [{ id: 'old', role: 'user', content: 'Oldest dialogue', ts: 100 }],
+        nextBefore: 100, hasMore: false,
+      })
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`, container)
+    const olderButton = () => Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('이전 대화 불러오기'))
+    await waitFor(() => expect(container.textContent).toContain('Newest dialogue'))
+    fireEvent.click(olderButton()!)
+    await waitFor(() => expect(container.textContent).toContain('Page temporarily unavailable'))
+    expect(olderButton()?.disabled).toBe(false)
+    fireEvent.click(olderButton()!)
+    await waitFor(() => expect(container.textContent).toContain('Earlier dialogue'))
+    fireEvent.click(olderButton()!)
+    await waitFor(() => expect(container.textContent).toContain('Oldest dialogue'))
+    expect(container.textContent).toContain('Newest dialogue')
+    expect(container.textContent).toContain('Earlier dialogue')
+    expect(olderButton()).toBeUndefined()
+    expect(fetchKeeperChatHistoryPage.mock.calls).toEqual([
+      ['sangsu', undefined], ['sangsu', undefined], ['sangsu', 500],
+    ])
   })
 
   // #26276: a hard refresh starts with an empty in-memory thread. Until the

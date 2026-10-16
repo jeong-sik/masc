@@ -154,9 +154,13 @@ type ran = {
 (* How a load's boot ended. The machine is installed and the loader holds the
    controller either way, so a guest fault during boot is a result, not an
    error: an error tells the caller nothing was loaded. *)
+type boot_fault =
+  | Unimplemented_instruction of string
+  | Core_exception of string
+
 type boot =
   | Booted of ran
-  | Boot_faulted of string
+  | Boot_faulted of boot_fault
 
 (* What a manual save found in its slot. Reads like [autosave_lookup]: a file
    that is there and will not read is its own answer. *)
@@ -1031,17 +1035,32 @@ let commit_load ~who prepared ~announce =
         state := Some st;
         mark_change ();
         note_activity ~who (Printf.sprintf "load %s" prepared.load_program);
-        let booted = running (fun () ->
-          let ran = advance st ~budget:boot_steps ~until_ready:true in
-          ran_then_kept st ~who ran) in
+        (* From here the machine is installed and the loader holds it, so
+           whatever the boot does, the answer is [Ok] with how it ended and
+           [announce] runs once: a result that said "nothing was loaded"
+           would be false, and a skipped announce would hide a machine that
+           changed. The core can raise out of a run (a malformed EXEC child);
+           that is a boot fault too. Cancellation is not a fault. *)
+        let booted =
+          match
+            running (fun () ->
+              let ran = advance st ~budget:boot_steps ~until_ready:true in
+              ran_then_kept st ~who ran)
+          with
+          | Ok settled -> Ok settled
+          | Error (Guest_fault message) -> Error (Unimplemented_instruction message)
+          | Error
+              (( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _
+               | Unreadable _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
+               | Other_program _ | Autosave_exists _ ) as error) ->
+            Error (Core_exception (error_to_string error))
+          | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+          | exception exn -> Error (Core_exception (Printexc.to_string exn))
+        in
         announce ();
         (match booted with
          | Ok (observation, ran) -> Ok (observation, Booted ran)
-         | Error (Guest_fault message) -> Ok (observe st, Boot_faulted message)
-         | Error
-             (( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _
-              | Unreadable _ | Held_by _ | Unsaveable _ | Checkpoint_refused _ | Other_program _
-              | Autosave_exists _ ) as error) -> Error error))
+         | Error fault -> Ok (observe st, Boot_faulted fault)))
 ;;
 
 let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave ~program_name ~program_bytes ~files ~announce =

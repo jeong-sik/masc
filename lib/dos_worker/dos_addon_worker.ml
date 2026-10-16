@@ -21,27 +21,29 @@ let json_response data : S.tool_result =
    The outcome is [Effect_outcome_unknown]: the exception says nothing about
    whether the call moved the machine. Cancellation is not a failure of the
    call and goes on unwinding. *)
+let failed_by_exception ~tool_name ~start_time exn : S.tool_result =
+  let backtrace = Printexc.get_backtrace () in
+  let described = Printexc.to_string exn in
+  let data =
+    `Assoc
+      (("exception", `String described)
+       :: (if backtrace = "" then [] else [ ("backtrace", `String backtrace) ]))
+  in
+  response
+    (Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+       ~effect_disposition:Tool_result.Effect_outcome_unknown ~data
+       (Printf.sprintf
+          "%s raised %s inside the DOS worker. The worker is still running and the \
+           machine may have moved: read masc_dos_screen before sending more input."
+          tool_name described))
+;;
+
 let contained ~tool_name f =
   let start_time = Tool_timing.start () in
   match f () with
   | result -> result
   | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-  | exception exn ->
-    let backtrace = Printexc.get_backtrace () in
-    let described = Printexc.to_string exn in
-    let data =
-      `Assoc
-        (("exception", `String described)
-         :: (if backtrace = "" then [] else [ ("backtrace", `String backtrace) ]))
-    in
-    Ok
-      (response
-         (Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
-            ~effect_disposition:Tool_result.Effect_outcome_unknown ~data
-            (Printf.sprintf
-               "%s raised %s inside the DOS worker. The worker is still running and the \
-                machine may have moved: read masc_dos_screen before sending more input."
-               tool_name described)))
+  | exception exn -> Ok (failed_by_exception ~tool_name ~start_time exn)
 ;;
 
 let guarded name ?description ?input_schema handler server =
@@ -234,12 +236,23 @@ let create ~base_path () =
       | Error error -> Ok (response (Tool_input_contract.rejection_result error))
       | Ok (arguments, _) ->
           events := [];
-          let answer = match authorize ~tool call with
-            | Error message -> response (Machine.reject ~tool_name:call.tool
-                ~start_time:(Tool_timing.start ()) message)
-            | Ok (actor, released_controller) ->
-                if tool = Controller.Dos_screen then screen ~arguments ()
-                else invoke ~released_controller ~actor ~tool ~arguments in
+          let start_time = Tool_timing.start () in
+          (* An exception still leaves the lines the call queued: a load or a
+             restore announces under the lane lock before anything else can
+             raise, and those lines belong to a machine that did change. They
+             go out with this call's events, with the failure as its answer. *)
+          let answer =
+            match
+              match authorize ~tool call with
+              | Error message -> response (Machine.reject ~tool_name:call.tool
+                  ~start_time message)
+              | Ok (actor, released_controller) ->
+                  if tool = Controller.Dos_screen then screen ~arguments ()
+                  else invoke ~released_controller ~actor ~tool ~arguments
+            with
+            | answer -> answer
+            | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+            | exception exn -> failed_by_exception ~tool_name:call.tool ~start_time exn in
           Machine.flush_announcements ();
           let metadata = match answer.S._meta with Some (`Assoc fields) -> fields | _ -> [] in
           Ok { answer with S._meta = Some (`Assoc

@@ -1418,6 +1418,8 @@ let test_a_fault_while_booting_is_a_load () =
     check bool "the load completes" true (is_completed loaded);
     check bool "and its boot says it faulted" true
       (member "status" (boot_status loaded) = Some (`String "faulted"));
+    check bool "of the unimplemented-instruction kind" true
+      (member "kind" (boot_status loaded) = Some (`String "unimplemented_instruction"));
     check bool "with the core's reason" true
       (match member "fault" (boot_status loaded) with
        | Some (`String reason) -> reason <> ""

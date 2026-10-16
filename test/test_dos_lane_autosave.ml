@@ -285,16 +285,21 @@ let test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave () =
   with_fixture (fun fixture ->
     let campaign_steps = play_a_campaign fixture in
     let before = Digest.file (autosave_path fixture) in
+    let announced = ref 0 in
     let faulting =
       Dos_lane.load ~who ~ledger_dir:fixture.directory ~saves_dir:fixture.saves
         ~checkpoint_dir:fixture.checkpoints ~autosave:Dos_lane.Replace_autosave
-        ~program_name:"fault.com" ~program_bytes:faulting_program ~files:[] ~announce:ignore
+        ~program_name:"fault.com" ~program_bytes:faulting_program ~files:[]
+        ~announce:(fun () -> incr announced)
     in
     (match faulting with
-     | Ok (_, Dos_lane.Boot_faulted fault) ->
-       check bool "the fault is named" true (fault <> "")
+     | Ok (_, Dos_lane.Boot_faulted (Dos_lane.Unimplemented_instruction message)) ->
+       check bool "the fault is named" true (message <> "")
+     | Ok (_, Dos_lane.Boot_faulted (Dos_lane.Core_exception _)) ->
+       fail "an unimplemented instruction is not a core exception"
      | Ok (_, Dos_lane.Booted _) -> fail "the program should have faulted"
      | Error error -> fail (Dos_lane.error_to_string error));
+    check int "the machine's change was announced once" 1 !announced;
     let screen = require (Dos_lane.screen ()) in
     check (option string) "the machine is installed and the loader holds it" (Some "fault.com")
       screen.Dos_lane.program;

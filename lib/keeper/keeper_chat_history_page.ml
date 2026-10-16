@@ -108,6 +108,40 @@ let rows_in_slice ~from bytes =
 let same_file (left : Unix.stats) (right : Unix.stats) =
   left.st_dev = right.st_dev && left.st_ino = right.st_ino
 
+type source = Absent | Present of string
+
+let source_is_present = function Absent -> false | Present _ -> true
+
+let source_fingerprint = function Absent -> "absent" | Present stamp -> stamp
+
+let stat_fingerprint (stat : Unix.stats) =
+  Printf.sprintf "%d:%d:%d:%h:%h"
+    stat.st_dev stat.st_ino stat.st_size stat.st_mtime stat.st_ctime
+
+let inspect_source ~path =
+  try
+    let opened =
+      match Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 with
+      | fd -> Some fd
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
+    in
+    match opened with
+    | None -> Ok Absent
+    | Some fd ->
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+        let opened = Unix.fstat fd in
+        if opened.Unix.st_kind <> Unix.S_REG
+        then Error (Io_error ("history source is not a regular file: " ^ path))
+        else
+          let named = Unix.stat path in
+          if not (String.equal (stat_fingerprint opened) (stat_fingerprint named))
+          then Error Stale_cursor
+          else Ok (Present (stat_fingerprint opened)))
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Error Stale_cursor
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (Io_error (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)))
+
 let read ~path ~owner ?cursor ~max_rows () =
   let ( let* ) = Result.bind in
   try

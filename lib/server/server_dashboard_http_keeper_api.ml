@@ -327,67 +327,6 @@ let cached_keeper_config_json config name =
     Dashboard_http_keeper.keeper_config_json config name)
 ;;
 
-(* Dashboard hydration fetches every keeper's chat history concurrently on
-   page load. The uncached build ran inline on the main Eio domain at
-   ~1-2 s per keeper (chat tail parse + per-trace trajectory and
-   internal-history tail reads + redaction), so a 16-keeper hydration
-   serialized 15 s+ of main-domain work and pushed unrelated HTTP/WS
-   responses past the dashboard's 35 s client timeout.
-
-   Freshness lives in the cached VALUE, not the key: the key space is
-   exactly one entry per (validated) keeper name, so append bursts can
-   never grow cache cardinality. Each entry stamps the chat file's
-   (mtime, size) observed by its compute; a request whose current stat
-   differs invalidates the entry and recomputes, so a newly persisted
-   message is served fresh on the next request without an invalidation
-   hook at every append site. Enrichment-only drift (trajectory/meta
-   appends with no chat append) is bounded by the TTL, the same
-   staleness contract as the cached trajectory handler above. *)
-let keeper_chat_history_freshness config name =
-  let base_dir = (config : Workspace.config).base_path in
-  let path = Keeper_chat_store.chat_path ~base_dir ~keeper_name:name in
-  (* Sound-partial: a missing chat file is its own state ("absent"),
-     never conflated with a real (mtime, size) pair. A half-readable
-     stat (racing writer) also maps to "absent", which only costs a
-     recompute on the next request. *)
-  let chat_stamp =
-    match Fs_compat.file_mtime path, Fs_compat.file_size path with
-    | Some mtime, Some size -> Printf.sprintf "%h:%d" mtime size
-    | Some _, None | None, Some _ | None, None -> "absent"
-  in
-  (* Autonomous turns never touch the chat file, so the chat stat alone
-     would pin a stale body for the whole TTL. Raw trace creation and the
-     authoritative turn-record append are separate commits: directory mtime
-     observes the former but cannot prove the latter. Fingerprint the newest
-     physical turn-record row as well, so a record appended after a racing
-     cache compute invalidates that value on the next request. *)
-  let trace_stamp =
-    match Fs_compat.file_mtime (Keeper_types_support.keeper_raw_trace_dir config name) with
-    | Some mtime -> Printf.sprintf "%h" mtime
-    | None -> "absent"
-  in
-  let turn_record_stamp =
-    let store = Keeper_types_support.keeper_turn_record_store config name in
-    match
-      Dated_jsonl.find_latest_entry_result store (fun entry -> Some entry)
-    with
-    | Error error -> "error:" ^ Dated_jsonl.read_error_to_string error
-    | Ok None -> "absent"
-    | Ok (Some (Dated_jsonl.Parsed json)) ->
-      Yojson.Safe.to_string json |> Digest.string |> Digest.to_hex
-    | Ok (Some (Dated_jsonl.Malformed_json { path; line_number; detail })) ->
-      Printf.sprintf "malformed:%s:%s:%s" path
-        (Option.fold ~none:"unknown" ~some:string_of_int line_number)
-        detail
-  in
-  (* Historical trace enrichment also reads committed tool-call rows. Observe
-     that dependency even when a separate writer or queued flush appends after
-     the chat, raw trace and TurnRecord files stopped changing. Keeper hooks
-     commit synchronously before publishing their completion. *)
-  let tool_call_stamp = Keeper_tool_call_log.committed_revision ~keeper_name:name in
-  Printf.sprintf "%s|%s|%s|%d" chat_stamp trace_stamp turn_record_stamp tool_call_stamp
-;;
-
 (* The canonical autonomous User/Assistant/Tool exchange lives in the Keeper's
    AGENT_CORE checkpoint, not as duplicate chat-store rows. This read projection uses
    typed turn identity only for stable dashboard grouping and exact raw-trace
@@ -587,9 +526,8 @@ let attach_keeper_chat_skill_activations ~config rows =
     as other -> other
 ;;
 
-let keeper_chat_history_json config name =
+let render_keeper_chat_history config name messages autonomous_turns =
   let base_dir = (config : Workspace.config).base_path in
-  let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
   let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
   let chat_rows = Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages in
   (* Appended without pretending the two stores share a wall clock. Each
@@ -597,8 +535,7 @@ let keeper_chat_history_json config name =
      [turn_ref] whose absolute turn is the client's structural cross-store
      order. Rows without that authority remain in their producer order. *)
   let autonomous_rows =
-    Keeper_autonomous_turn_source.load_recent ~config ~keeper_name:name ()
-    |> List.map autonomous_turn_json
+    List.map autonomous_turn_json autonomous_turns
   in
   let rows =
     match autonomous_rows, chat_rows with
@@ -613,6 +550,11 @@ let keeper_chat_history_json config name =
       other
   in
   attach_keeper_chat_skill_activations ~config rows
+;;
+
+let keeper_chat_history_json config name =
+  Server_keeper_chat_history_read.read_json ~config ~keeper_name:name
+    ~render:(render_keeper_chat_history config name)
 ;;
 
 (* Exact pages keep every role in file append order. The role-based transcript
@@ -642,38 +584,8 @@ let keeper_chat_history_page_json ?max_total config name ~cursor =
 ;;
 
 let cached_keeper_chat_history_json config name =
-  let cache_key =
-    Printf.sprintf "keeper:chat-history:%s:%s"
-      (Workspace.masc_dir config) name
-  in
-  let current = keeper_chat_history_freshness config name in
-  (match Dashboard_cache.peek cache_key with
-   | Some (`Assoc fields) ->
-     (match List.assoc_opt "freshness" fields with
-      | Some (`String stamped) when String.equal stamped current -> ()
-      | Some _ | None -> Dashboard_cache.invalidate cache_key)
-   | Some _ -> Dashboard_cache.invalidate cache_key
-   | None -> ());
-  let cached =
-    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s
-      (fun () ->
-        Domain_pool_ref.submit_io_or_inline (fun () ->
-          (* Stamp the stat observed by THIS compute (stat before load):
-             an append racing the load makes the data newer than the
-             stamp, which the next request's stat comparison detects and
-             recomputes — never silently stale. *)
-          let stamped = keeper_chat_history_freshness config name in
-          `Assoc
-            [ ("freshness", `String stamped)
-            ; ("body", keeper_chat_history_json config name)
-            ]))
-  in
-  match cached with
-  | `Assoc fields ->
-    (match List.assoc_opt "body" fields with
-     | Some body -> body
-     | None -> cached)
-  | other -> other
+  Server_keeper_chat_history_read.cached_json ~config ~keeper_name:name
+    ~ttl:keeper_hot_path_cache_ttl_s ~render:(render_keeper_chat_history config name)
 ;;
 
 let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_meta) =
@@ -911,12 +823,21 @@ let handle_keeper_get_subroutes state req request reqd =
          on the CPU executor. Responses in general stay on the serving fiber:
          the executor also runs dashboard computes, and a timeout or error
          answer must not wait behind them. *)
-      Http.Response.json_value_on_cpu
-        ~status:`OK
-        ~request
-        ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request))
-        (cached_keeper_chat_history_json config name)
-        reqd
+      (match cached_keeper_chat_history_json config name with
+       | Ok body ->
+         Http.Response.json_value_on_cpu
+           ~status:`OK ~request
+           ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request))
+           body reqd
+       | Error error ->
+         let status = match error with
+           | Server_keeper_chat_history_read.Unknown_keeper -> `Not_found
+           | Server_keeper_chat_history_read.History_unavailable detail ->
+             Log.Keeper.warn "dashboard keeper chat history unavailable for %s: %s" name detail;
+             `Service_unavailable
+         in
+         Server_auth.respond_json_value_with_cors ~status request reqd
+           (error_json (Server_keeper_chat_history_read.error_to_string error)))
   else if ends_with "/person-notes" then
     (* RFC-0229 P2: keeper-authored person notes for the roster pane.
        Read-only fold over the notes store; same shape as the tool

@@ -635,7 +635,7 @@ let test_dashboard_history_autonomous_rows_carry_id () =
   match
     Server_dashboard_http_keeper_api.keeper_chat_history_json config keeper_name
   with
-  | `List rows ->
+  | Ok (`List rows) ->
     Alcotest.(check int) "one autonomous row in history" 1 (List.length rows);
     List.iter
       (fun row ->
@@ -650,7 +650,8 @@ let test_dashboard_history_autonomous_rows_carry_id () =
                "autonomous history row without id is dropped by the dashboard schema")
         | _ -> Alcotest.fail "history row is not an object")
       rows
-  | _ -> Alcotest.fail "history body is not a list"
+  | Ok _ -> Alcotest.fail "history body is not a list"
+  | Error error -> Alcotest.fail (Server_keeper_chat_history_read.error_to_string error)
 ;;
 
 let test_transcript_rows_keep_stream_contract () =
@@ -683,7 +684,7 @@ let test_transcript_rows_keep_stream_contract () =
   match
     Server_dashboard_http_keeper_api.keeper_chat_history_json config keeper_name
   with
-  | `List rows ->
+  | Ok (`List rows) ->
     Alcotest.(check int) "one direct row in history" 1 (List.length rows);
     List.iter
       (fun row ->
@@ -694,7 +695,38 @@ let test_transcript_rows_keep_stream_contract () =
            | `Assoc fields -> List.mem_assoc "stream_contract" fields
            | _ -> false))
       rows
-  | _ -> Alcotest.fail "history body is not a list"
+  | Ok _ -> Alcotest.fail "history body is not a list"
+  | Error error -> Alcotest.fail (Server_keeper_chat_history_read.error_to_string error)
+;;
+
+let test_failed_exact_run_never_caches_empty_history () =
+  with_workspace @@ fun config ->
+  let path = trace_path config "strict-history-read" in
+  let worker_run_id = "run-strict-history-read" in
+  let lines = run_lines ~worker_run_id ~start_seq:1 ~base_ts:8000.
+      ~prompt:Keeper_unified_prompt.autonomous_wake_marker ~final_text:"repaired exact run" in
+  write_lines path lines;
+  write_turn_record config ~absolute_turn:49 ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id ~start_seq:1));
+  let oc = open_out path in
+  output_string oc "{unreadable exact run}\n";
+  close_out oc;
+  let result = Server_keeper_chat_history_read.cached_json ~config ~keeper_name ~ttl:60.
+      ~render:(fun _ _ -> Alcotest.fail "failed exact run reached successful rendering") in
+  (match result with
+   | Error (Server_keeper_chat_history_read.History_unavailable _) -> ()
+   | Error Server_keeper_chat_history_read.Unknown_keeper | Ok _ ->
+     Alcotest.fail "failed exact run became a successful empty history");
+  let key = Printf.sprintf "keeper:chat-history:%s:%s" (Workspace.masc_dir config) keeper_name in
+  Alcotest.(check bool) "failed exact run publishes no cache" false
+    (Option.is_some (Dashboard_cache.peek key));
+  Alcotest.(check int) "best-effort activity reader retains its skip behavior" 0
+    (Keeper_autonomous_turn_source.load_recent ~config ~keeper_name () |> List.length);
+  write_lines path lines;
+  match Server_dashboard_http_keeper_api.keeper_chat_history_json config keeper_name with
+  | Ok (`List [ _ ]) -> ()
+  | Ok _ -> Alcotest.fail "repaired exact run did not return its autonomous row"
+  | Error error -> Alcotest.fail (Server_keeper_chat_history_read.error_to_string error)
 ;;
 
 let () =
@@ -740,6 +772,8 @@ let () =
             test_dashboard_history_autonomous_rows_carry_id
         ; Alcotest.test_case "transcript rows keep stream_contract" `Quick
             test_transcript_rows_keep_stream_contract
+        ; Alcotest.test_case "failed exact run never caches empty history" `Quick
+            test_failed_exact_run_never_caches_empty_history
         ] )
     ; ( "wake_prompt"
       , [ Alcotest.test_case "rejects blank and over-bound values" `Quick

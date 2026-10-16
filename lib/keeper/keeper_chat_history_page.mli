@@ -15,6 +15,16 @@ val error_to_string : error -> string
 val cursor_to_string : cursor -> string
 val cursor_of_string : string -> (cursor, error) result
 
+type source
+(** An observed regular file identity, or absence. Identity includes device,
+    inode, size, modification and change times; it is not an atomic snapshot. *)
+
+val inspect_source : path:string -> (source, error) result
+(** Open and inspect the named regular file without reading its contents.
+    Only ENOENT is absence; unreadable and non-regular paths are errors. *)
+val source_is_present : source -> bool
+val source_fingerprint : source -> string
+
 type row = { offset : int; line : string }
 type page = { rows : row list; next_cursor : cursor option }
 

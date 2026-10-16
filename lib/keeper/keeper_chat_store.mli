@@ -512,9 +512,9 @@ val chat_dir : string -> string
 val transcript_provenance_readable : string -> (unit, string) result
 
 (** [chat_path ~base_dir ~keeper_name] is the on-disk JSONL path backing
-    this keeper's chat history. The file is append-only, so its
-    (mtime, size) pair changes on every persisted message — callers use
-    that pair as a freshness component in read-side cache keys. *)
+    this keeper's chat history. Read-side cache freshness must include file
+    identity and absence as well as its size/timestamps; a retained transcript
+    can be replaced independently of its normal append writer. *)
 val chat_path : base_dir:string -> keeper_name:string -> string
 
 (** [load ~base_dir ~keeper_name] returns the most recent messages in
@@ -525,6 +525,14 @@ val chat_path : base_dir:string -> keeper_name:string -> string
     skipped. *)
 val load :
   base_dir:string -> keeper_name:string -> chat_message list
+
+val load_result :
+  base_dir:string -> keeper_name:string ->
+  (chat_message list, Keeper_chat_history_page.error) result
+(** Strict version of the same 100-primary/300-secondary tail selection.
+    Reuses the descriptor-bound 4 MiB physical reader. Missing files are empty;
+    unreadable, malformed, incomplete or replaced files are errors. No cursor
+    or exact-snapshot claim is made for this transcript projection. *)
 
 (** [load_all ~base_dir ~keeper_name] returns every valid persisted row in
     source order. It is intentionally uncapped and is reserved for durable

@@ -90,7 +90,9 @@ val attach_keeper_chat_skill_activations :
     inference is used. Exposed so the server JSON contract can be tested
     without opening an HTTP listener. *)
 
-val keeper_chat_history_json : Workspace.config -> string -> Yojson.Safe.t
+val keeper_chat_history_json :
+  Workspace.config -> string ->
+  (Yojson.Safe.t, Server_keeper_chat_history_read.error) result
 (** Body for [GET /chat/history]: the chat-store tail window plus every
     autonomous turn retention still holds. Every row carries a stable [id] —
     the dashboard history schema silently drops rows without one. *)

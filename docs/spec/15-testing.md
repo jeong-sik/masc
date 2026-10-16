@@ -304,6 +304,37 @@ bisect-ppx-report html --coverage-path _coverage
 3. `trajectory` 로깅으로 재현성 확보.
 4. 외부 효과는 exact Always Allowed, configured LLM Auto Judge, nonblocking HITL의 Gate 계약을 검증.
 
+### 10.3 Keeper transcript read/cache truth
+
+`GET /api/v1/keepers/:name/chat/history` distinguishes an unknown name (404),
+known empty retained history (200 with `[]`), and unavailable history (503).
+Live registration is sufficient history authority, but current typed metadata,
+conversation files, or current TurnRecords also preserve offline/archive reads.
+History authority does not grant mutation rights.
+
+`test_server_dashboard_http_keeper_chat_page` exercises the actual GET handler
+for unknown-name cache/registry stability, offline empty history followed by
+file creation, unreadable/incomplete files, same-size/mtime atomic replacement,
+and malformed autonomous storage. A real append-once writer committing after
+the strict source read preserves HTTP 200 for that observed body, retires its
+cache ownership, and becomes visible on the next request. The suite also covers
+equivalence with the existing 100-primary/300-secondary transcript window,
+counter-only metadata writes retaining the cache, and broken metadata being
+insufficient to authorize empty history without revoking retained chat rows.
+Public 503 bodies use static refusal text; parser/provider fragments and host
+paths remain internal diagnostics.
+`test_keeper_autonomous_turn_source` covers a failed exact-run read, rejection
+of cache publication, and recovery after repair; the best-effort activity
+reader keeps its separate skip behavior.
+
+The strict transcript reader reuses the existing descriptor-bound 4 MiB physical
+reader; TurnRecord selection retains the existing retention window. Freshness
+observations include file absence and device/inode/size/mtime/ctime. Detected
+source drift retires cache ownership without rejecting an already-read body;
+initial authority/read failures still refuse success. Observations across stores do not establish
+an atomic snapshot. Intentionally absent/retired raw traces remain optional
+evidence, and trace-only enrichment retains the existing TTL policy.
+
 ---
 
 ## 11. References

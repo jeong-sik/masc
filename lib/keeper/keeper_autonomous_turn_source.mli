@@ -15,6 +15,23 @@ type turn =
   ; trace : Keeper_chat_blocks.trace_step list
   }
 
+type snapshot
+(** The existing retention-bounded recent TurnRecord rows, strictly decoded.
+    A read handle does not register an append mutex or a Keeper store cache. *)
+
+val read_snapshot_result :
+  config:Workspace.config -> keeper_name:string -> ?limit:int -> unit ->
+  (snapshot, string) result
+val snapshot_has_records : snapshot -> bool
+val snapshot_fingerprint : snapshot -> string
+val project_snapshot_result :
+  config:Workspace.config -> keeper_name:string -> snapshot ->
+  (turn list, string) result
+(** Project a previously read snapshot using the same optional exact-run and
+    execution-link evidence rules as {!load_recent}. Missing/retired run
+    evidence remains absent. Actual trace inspection/read/parse failures, store
+    reads and invalid TurnRecords cannot become an empty successful history. *)
+
 val load_recent :
   config:Workspace.config ->
   keeper_name:string ->

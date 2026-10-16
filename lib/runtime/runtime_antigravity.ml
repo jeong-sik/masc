@@ -1020,7 +1020,7 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
             clock
             Runtime_cli_spawn_gate.child_fd_probe_timeout_s
             (fun () ->
-              Runtime_cli_spawn_gate.sample_child_fds ~mgr ~cwd ~pid)
+              Ok (Runtime_cli_spawn_gate.sample_child_fds ~mgr ~cwd ~pid))
         with
         | Ok sample -> sample
         | Error `Timeout ->

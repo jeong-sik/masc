@@ -99,7 +99,7 @@ let test_ninth_waits_then_acquires_on_release () =
     bool
     "waiter acquires after release"
     true
-    (Eio.Fiber.await waiter = `Acquired);
+    (Eio.Promise.await waiter = `Acquired);
   check int "no waiters left" 0 (Gate.waiting_cli_spawns ());
   check int "no slots left" 0 (Gate.active_cli_spawns ())
 ;;
@@ -149,7 +149,7 @@ let test_cancelled_waiter_holds_no_slot () =
            Eio.Switch.fail waiter_sw Cancel_waiter;
            (* Awaiting synchronizes with the waiter's death: no race on
               the gauges below. *)
-           (match Eio.Fiber.await waiter with
+           (match Eio.Promise.await waiter with
             | `Acquired -> fail "cancelled waiter acquired a slot"
             | exception Eio.Cancel.Cancelled _ -> ()))
        with

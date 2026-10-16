@@ -41,7 +41,8 @@ let with_cli_spawn_slot ~clock ?(wait_timeout_s = max_slot_wait_s) f =
   let acquired =
     track_waiter (fun () ->
       Eio.Time.with_timeout clock wait_timeout_s (fun () ->
-        Eio.Semaphore.acquire slots))
+        Eio.Semaphore.acquire slots;
+        Ok ()))
   in
   (match acquired with
    | Error `Timeout ->

@@ -4193,10 +4193,6 @@ let handle_keeper_ask_answer ~actor state request reqd =
           respond_json_value_with_cors ~status:`Bad_request request reqd
             (keeper_chat_stream_error_json message)
       | Ok (keeper_name, ask_id, submissions, session_id) ->
-          if not (Keeper_registry.is_registered ~base_path keeper_name) then
-            respond_json_value_with_cors ~status:`Not_found request reqd
-              (keeper_chat_stream_error_json "keeper not registered")
-          else
             let responder =
               {
                 Keeper_ask.surface = Surface_ref.Dashboard { session_id };
@@ -4285,19 +4281,37 @@ let handle_keeper_asks_list state request reqd =
   let include_resolved =
     Server_utils.bool_query_param request "include_resolved" ~default:false
   in
-  let rows_for keeper_name =
-    Keeper_ask_store.rows ~base_path ~keeper_name
-    |> List.filter (fun (_, (_, resolution)) ->
+  let unavailable error =
+    respond_json_value_with_cors ~status:`Service_unavailable request reqd
+      (keeper_chat_stream_error_json (Keeper_ask_store.read_error_to_string error))
+  in
+  let project keeper_name rows =
+    let open_count =
+      List.fold_left (fun count (_, (_, resolution)) ->
+        if Keeper_ask_operator_projection.ask_row_is_open resolution then count + 1 else count)
+        0 rows
+    in
+    let rows =
+      rows
+      |> List.filter (fun (_, (_, resolution)) ->
            include_resolved || Keeper_ask_operator_projection.ask_row_is_open resolution)
-    |> List.map (Keeper_ask_operator_projection.ask_row_json ~keeper_name)
+      |> List.map (Keeper_ask_operator_projection.ask_row_json ~keeper_name)
+    in
+    open_count, rows
   in
   match Server_utils.query_param request "name" with
   | Some keeper_name ->
-      if not (Keeper_registry.is_registered ~base_path keeper_name) then
-        respond_json_value_with_cors ~status:`Not_found request reqd
-          (keeper_chat_stream_error_json "keeper not registered")
-      else
-        let rows = rows_for keeper_name in
+      (match Keeper_ask_store.rows_result ~base_path ~keeper_name with
+       | Error error -> unavailable error
+       | Ok Keeper_ask_store.Missing_log when not (Keeper_registry.is_registered ~base_path keeper_name) ->
+         respond_json_value_with_cors ~status:`Not_found request reqd
+           (keeper_chat_stream_error_json "keeper has no recorded questions")
+       | Ok snapshot ->
+        let rows = match snapshot with
+          | Keeper_ask_store.Missing_log -> []
+          | Stored_rows rows -> rows
+        in
+        let open_count, rows = project keeper_name rows in
         respond_json_value_with_cors ~status:`OK request reqd
           (`Assoc
             [
@@ -4305,35 +4319,43 @@ let handle_keeper_asks_list state request reqd =
               ("workspace", workspace);
               ("state_ready", `Bool state_ready);
               ("keeper", `String keeper_name);
-              ("open_count", `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name));
+              ("open_count", `Int open_count);
               ("returned", `Int (List.length rows));
               ("asks", `List rows);
-            ])
+            ]))
   | None ->
-      (* Fleet-wide. A surface showing questions shows them for everyone at
-         once: an operator does not know which Keeper is stuck before looking,
-         and asking them to pick a name first is asking them to guess. *)
-      let keepers =
-        List.map
-          (fun (entry : Keeper_registry_types.registry_entry) -> entry.name)
-          (Keeper_registry.all ~base_path ())
-      in
-      let rows = List.concat_map rows_for keepers in
-      let open_total =
-        List.fold_left
-          (fun total keeper_name ->
-            total + Keeper_ask_store.open_ask_count ~base_path ~keeper_name)
-          0 keepers
-      in
-      respond_json_value_with_cors ~status:`OK request reqd
-        (`Assoc
-          [
-            ("scope", `String "fleet");
-            ("workspace", workspace);
-            ("state_ready", `Bool state_ready);
-            ("keeper", `Null);
-            ("keeper_count", `Int (List.length keepers));
-            ("open_count", `Int open_total);
-            ("returned", `Int (List.length rows));
-            ("asks", `List rows);
-          ])
+      (* A durable question survives its process registration. Discover its
+         canonical owner from the owned Asked records, not the live registry
+         or a filename. An incomplete inventory cannot authorize an empty list. *)
+      (match Keeper_ask_store.discover_rows_result ~base_path with
+       | Error error -> unavailable error
+       | Ok logs ->
+           let discovered = List.fold_left (fun result log ->
+             let ( let* ) = Result.bind in
+             let* owners = result in
+             match log with
+             | Keeper_ask_store.Unreadable_log error -> Error error
+             | Canonical_rows { keeper_name; rows } -> Ok ((keeper_name, rows) :: owners))
+             (Ok []) logs
+           in
+           match discovered with
+           | Error error -> unavailable error
+           | Ok owners ->
+               let open_total, rows =
+                 List.fold_left (fun (total, all) (keeper_name, rows) ->
+                   let count, projected = project keeper_name rows in
+                   count + total, projected @ all)
+                   (0, []) owners
+               in
+               respond_json_value_with_cors ~status:`OK request reqd
+                 (`Assoc
+                   [
+                     ("scope", `String "fleet");
+                     ("workspace", workspace);
+                     ("state_ready", `Bool state_ready);
+                     ("keeper", `Null);
+                     ("keeper_count", `Int (List.length owners));
+                     ("open_count", `Int open_total);
+                     ("returned", `Int (List.length rows));
+                     ("asks", `List rows);
+                   ]))

@@ -1,11 +1,12 @@
 open Alcotest
 open Masc
 
-let wire_response ~router target =
+let wire_response ?(meth=`GET) ?(body="") ~router target =
   let output = Buffer.create 4096 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
-  let raw = Printf.sprintf "GET %s HTTP/1.1\r\nHost: localhost:8935\r\n\r\n" target in
+  let raw = Printf.sprintf "%s %s HTTP/1.1\r\nHost: localhost:8935\r\nContent-Length: %d\r\n\r\n%s"
+      (Httpun.Method.to_string meth) target (String.length body) body in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
   ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
   let rec drain () = match Httpun.Server_connection.next_write_operation connection with
@@ -14,6 +15,11 @@ let wire_response ~router target =
         Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
         total+iov.len) 0 iovecs in
       Httpun.Server_connection.report_write_result connection (`Ok written);
+      drain ()
+    | `Yield when Buffer.length output=0 ->
+      let ready,resolve = Eio.Promise.create () in
+      Httpun.Server_connection.yield_writer connection (fun () -> Eio.Promise.resolve resolve ());
+      Eio.Promise.await ready;
       drain ()
     | `Yield | `Close _ -> () in
   drain ();
@@ -58,7 +64,9 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       Keeper_ask_store.record_ask ~base_path:config.base_path ask |> valid Fun.id;
       let router = Http_server_eio.Router.create ()
         |> Http_server_eio.Router.get "/api/v1/keepers/asks"
-             (Server_routes_http_keeper_stream.handle_keeper_asks_list state) in
+             (Server_routes_http_keeper_stream.handle_keeper_asks_list state)
+        |> Http_server_eio.Router.post "/api/v1/keepers/ask-answer"
+             (Server_routes_http_keeper_stream.handle_keeper_ask_answer ~actor:"operator" state) in
       let base = Unix.realpath config.base_path and root = Unix.realpath (Workspace.masc_dir config) in
       let encode = Uri.pct_encode ~component:`Query_value in
       let query = "expected_base_path=" ^ encode base ^ "&expected_masc_root=" ^ encode root in
@@ -94,6 +102,51 @@ let test_original_questions_are_bound_to_receiving_workspace () =
       check int "fleet readers can request actual workspace identity" 200 status;
       check bool "unscoped response remains bound to actual roots" true
         (Result.is_ok (Tui_decode_asks.decode_asks_snapshot ~expected_base_path:base ~expected_masc_root:root body));
+      ignore (Keeper_registry.unregister_exact entry);
+      List.iter (fun suffix ->
+        let status,body = wire_response ~router (path ^ suffix) in
+        check int "durable questions remain visible without live registration" 200 status;
+        let snapshot = Tui_decode_asks.decode_asks_snapshot ~expected_base_path:base ~expected_masc_root:root body
+          |> valid Fun.id in
+        check int "original open question survives offline state" 1 snapshot.asn_open_count;
+        check (list string) "same original question survives" [ask.ask_id]
+          (List.map (fun (row : Tui_decode_asks.ask_row) -> row.ar_id) snapshot.asn_rows))
+        ["?" ^ query; "?name=" ^ name ^ "&" ^ query];
+      let answer ?(choice_id="later") ask_id =
+        let body = Yojson.Safe.to_string (`Assoc ["name",`String name;"ask_id",`String ask_id;
+          "answers",`List [`Assoc ["question_id",`String "window";"response",
+            `Assoc ["kind",`String "chose";"choice_ids",`List [`String choice_id]]]]]) in
+        wire_response ~meth:`POST ~body ~router "/api/v1/keepers/ask-answer" in
+      let status,_ = answer ~choice_id:"not-an-original-choice" ask.ask_id in
+      check int "offline answers still validate the original choice" 400 status;
+      let status,body = answer ask.ask_id in
+      (match Tui_decode_asks.decode_ask_answer_receipt ~expected_ask_id:ask.ask_id ~status_code:status body with
+       | Ok (Tui_decode_asks.Ask_answer_recorded _) -> ()
+       | Ok (Ask_answer_already_recorded _ | Ask_answer_written_unconfirmed _ | Ask_answer_refused _)
+       | Error _ -> fail "offline original question was not durably answered");
+      let status,body = answer ask.ask_id in
+      check int "repeated offline answer retains canonical winner" 409 status;
+      (match Tui_decode_asks.decode_ask_answer_receipt ~expected_ask_id:ask.ask_id ~status_code:status body with
+       | Ok (Tui_decode_asks.Ask_answer_already_recorded _) -> ()
+       | Ok (Ask_answer_recorded _ | Ask_answer_written_unconfirmed _ | Ask_answer_refused _)
+       | Error _ -> fail "offline duplicate lost canonical answer receipt");
+      let status,_ = answer "unknown-original-ask" in
+      check int "offline admission still requires the original recorded ask" 404 status;
+      let status,body = wire_response ~router (path ^ "?" ^ query) in
+      check int "answered offline fleet remains readable" 200 status;
+      check int "open count uses the same canonical answered fold" 0
+        (Yojson.Safe.Util.member "open_count" body |> Yojson.Safe.Util.to_int);
+      let original_log = Keeper_ask_store.log_path ~base_path:base ~keeper_name:name in
+      let original_bytes = In_channel.with_open_bin original_log In_channel.input_all in
+      let broken = Filename.concat (Filename.dirname original_log) "unreadable.jsonl" in
+      Out_channel.with_open_bin broken (fun channel -> output_string channel "{}\n{}\n");
+      Unix.chmod broken 0o600;
+      let status,body = wire_response ~router (path ^ "?" ^ query) in
+      check int "incomplete durable discovery is unavailable" 503 status;
+      check bool "incomplete discovery cannot clear questions" true (Yojson.Safe.Util.member "asks" body=`Null);
+      check string "failed read never rewrites original answer bytes" original_bytes
+        (In_channel.with_open_bin original_log In_channel.input_all);
+      Sys.remove broken;
       let ready = Server_startup_state.snapshot () in
       Server_startup_state.For_testing.restore {ready with state_ready=false};
       let status,body = wire_response ~router (path ^ "?" ^ query) in

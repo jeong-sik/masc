@@ -526,7 +526,11 @@ val handle_keeper_ask_answer :
     carrying the answer that landed rather than a bare rejection: the surface
     showing it has to be able to say what was chosen instead.
 
-    [`Not_found] means the ask or the keeper is unknown, [`Bad_request] that
+    The original durable ask owns answer admission, including when its Keeper
+    is offline or unregistered. Delivery still records its own durable wake
+    outcome and does not claim a live Keeper acted on the answer.
+
+    [`Not_found] means the recorded ask is unknown, [`Bad_request] that
     the submissions do not satisfy the recorded question, and [`Conflict] that
     the ask was already answered or withdrawn. *)
 
@@ -535,8 +539,12 @@ val handle_keeper_asks_list :
 (** Drives [GET /api/v1/keepers/asks?name=<keeper>&include_resolved=<bool>].
 
     Without [name] this covers the whole fleet and every row names the Keeper
-    it belongs to; with [name] it narrows to one and returns [`Not_found] when
-    that Keeper is not registered. Defaults to open questions only.
+    it belongs to; with [name] it narrows to one. Durable question logs remain
+    visible when their Keeper is offline or unregistered. A named read returns
+    [`Not_found] only when both its log and live registration are absent.
+    Read/discovery errors return 503, not a successful empty question list.
+    Counts and rows come from the same authoritative fold. Defaults to open
+    questions only.
 
     [expected_base_path] and [expected_masc_root], when provided, must each
     occur once and match the receiving config's canonical roots before any

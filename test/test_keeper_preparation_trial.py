@@ -193,6 +193,12 @@ def malformed_final_evidence(args, root, head):
             require("execution_artifact" not in execution["source_result"] and
                     execution["source_result"]["actions"] == execution["nodes"],
                     "unprojected physical execution was not verified through its canonical full actions")
+            calls = read((output / entry["path"]).parent / "tool-calls.json")
+            parents = [row for row in calls if row["tool"] == "keeper_composition_run" and
+                       row.get("execution_id") in turn["execution_ids"]]
+            require(len(parents) == 1 and set(parents[0]["input"]) == {"recipe"} and
+                    not any(row["tool"] == "keeper_composition_prepare" for row in calls),
+                    "fresh recipe execution still required a separate prepare call")
         peer = read((output / entry["path"]).parent / "provider-events.json")
         check_http_observation((output / entry["path"]).parent, receipt,
                                [row for row in peer if row["kind"] == "synthetic_provider_received"])

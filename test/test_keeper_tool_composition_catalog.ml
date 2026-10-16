@@ -925,7 +925,7 @@ let test_draft_rejects_effects_and_bad_fixed_inputs () =
   | Error _ | Ok _ -> fail "invalid fixed input survived prepare"
 ;;
 
-let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () =
+let test_public_draft_run_preserves_one_execution_identity ?(observe = true) ?(single_call=false) () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_draft_base @@ fun base_path ->
@@ -1009,7 +1009,10 @@ let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () 
   let draft_reference = prepared |> member "draft" |> decode_reference in
   let run_parent = "public-draft-run" in
   let result = invoke run_parent Draft.run_tool_name
-      (`Assoc [ "sha256", `String draft_reference.sha256 ]) in
+      (if single_call then `Assoc ["recipe",(match draft_request with
+         | `Assoc fields -> `Assoc (("execution",`String "inline") :: fields)
+         | _ -> fail "fixture plan object")]
+       else `Assoc [ "sha256", `String draft_reference.sha256 ]) in
   let run_reference = result |> member "run_artifact" |> decode_reference in
   let binding = document run_reference in
   let run_id = binding |> member "composition_run_id" |> to_string in
@@ -1303,7 +1306,7 @@ let () =
         ; test_case "public draft run keeps one execution identity and readable references" `Quick
             (test_public_draft_run_preserves_one_execution_identity ~observe:true)
         ; test_case "public draft run records its summary without optional turn context" `Quick
-            (test_public_draft_run_preserves_one_execution_identity ~observe:false)
+            (test_public_draft_run_preserves_one_execution_identity ~observe:false ~single_call:true)
         ; test_case "draft rejects effects and bad fixed inputs" `Quick test_draft_rejects_effects_and_bad_fixed_inputs
         ; test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
         ; test_case

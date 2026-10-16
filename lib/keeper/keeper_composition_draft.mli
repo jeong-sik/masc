@@ -59,6 +59,27 @@ val load
     and inputs before effects. A changed owner/surface/schema is a rejection,
     not a rebind of the old preview. *)
 
+val prepare_request
+  :  base_path:string
+  -> capability_surface:Keeper_capability_surface.t
+  -> keeper_name:string
+  -> Yojson.Safe.t
+  -> (t, error) result
+(** Validate the public prepare grammar, including execution mode, and freeze
+    the draft without dispatching or activating any node. *)
+
+val resolve_run_request
+  :  base_path:string
+  -> capability_surface:Keeper_capability_surface.t
+  -> keeper_name:string
+  -> Yojson.Safe.t
+  -> (t, error) result
+(** Resolve exactly one public run source: load the referenced frozen draft,
+    or prepare and durably freeze a supplied [recipe] using [prepare_request].
+    A recipe is a fresh invocation and cannot carry [resume_run_id]. This
+    function never dispatches nodes; the caller must record the original run
+    invocation before entering the ordinary executor. *)
+
 val load_continuation
   :  base_path:string
   -> capability_surface:Keeper_capability_surface.t

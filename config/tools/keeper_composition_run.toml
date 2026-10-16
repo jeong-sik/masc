@@ -1,7 +1,10 @@
 name = "keeper_composition_run"
 description = """
-Run the exact draft returned by keeper_composition_prepare. Rechecks \
-the preparing Keeper and frozen contracts before effects. Inline drafts return \
+Execute a composition from recipe or an exact prepared sha256. Use recipe with \
+the same execution/nodes/exports grammar as keeper_composition_prepare to validate, \
+freeze and run in one call. Use prepare first when you need to inspect the plan. \
+The server records the frozen draft and original invocation before effects; \
+prepared sha256 rechecks its Keeper and contracts. Inline drafts return \
 execution results, including child scope/admission/disposition/exports in nested_scopes; \
 only children reaching an actual ready leaf activate. Blocked or refused children \
 remain visible, and independent exports may be available while the whole run fails. \
@@ -25,10 +28,14 @@ defer_loading = true
 [[params]]
 name = "sha256"
 type = "string"
-required = true
 min_length = 64
 max_length = 64
 description = "Exact sha256 from the durable draft reference returned by prepare."
+
+[[params]]
+name = "recipe"
+type = "object"
+description = "Fresh composition using the public prepare grammar, including execution. Validates and freezes before running; replaces sha256. Cannot resume a previous run."
 
 [[params]]
 name = "resume_run_id"
@@ -36,3 +43,13 @@ type = "string"
 min_length = 36
 max_length = 36
 description = "For explicit continuation only: original composition_run_id of a prepared async run whose previous request has canonically settled. Eligible recorded waits also resume through server maintenance. Omit for a fresh run."
+
+[[one_of]]
+required = ["sha256"]
+forbidden = ["recipe"]
+description = "Run or explicitly continue the exact frozen draft."
+
+[[one_of]]
+required = ["recipe"]
+forbidden = ["sha256", "resume_run_id"]
+description = "Validate, freeze and execute one fresh recipe."

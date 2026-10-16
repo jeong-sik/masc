@@ -160,6 +160,9 @@ node's tool completed but before its observation committed.
 Call `keeper_composition_prepare` with `execution: "inline"` or `"async"`, the ordinary outer
 `nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of
 the form above. Pass the returned `draft.sha256` to `keeper_composition_run`.
+For immediate execution, pass that complete prepare input as
+`keeper_composition_run.recipe`. It freezes the same child references and
+records the original invocation before the existing executor admits children.
 Preparation records no child activation. Nested drafts currently omit `skill`
 publication metadata: publishing only their flattened plan would discard child
 identities. Named recursive catalog recipes still require their own grammar.

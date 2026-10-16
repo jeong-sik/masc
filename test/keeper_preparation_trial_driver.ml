@@ -493,11 +493,24 @@ let nested_execution_proven ~base ~fixture ~turn ~skill_reference
     let run = exact_sdk_reply ~base ~raw_records parent in
     require (field "composition_run_id" run=`String scope.composition_run_id) "activation run mismatch";
     let nodes = execution_nodes ~base run in
-    let draft_sha = string "sha256" (field "input" parent) in
-    let draft = Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base) ~sha256:draft_sha
-      |> get Tool_blob_store.fetch_error_to_string
-      |> function Some bytes when sha bytes=draft_sha -> document ~base bytes
-        | Some _ | None -> failwith "original prepared manifest unavailable" in
+    let draft_reference = reference (field "draft" run) in
+    let draft = document ~base (blob_bytes base draft_reference) in
+    let binding = document ~base (blob_bytes base (reference (field "run_artifact" run))) in
+    require (field "draft" binding=field "draft" run &&
+      field "composition_run_id" binding=field "composition_run_id" run &&
+      field "tool_use_id" binding=field "tool_use_id" parent &&
+      field "source_turn" binding=field "turn" parent &&
+      field "keeper" draft=field "keeper" fixture)
+      "prepared source binding differs from the original SDK invocation";
+    (match field "input" parent with
+     | `Assoc ["sha256",`String digest] ->
+       require (digest=draft_reference.sha256) "original prepared digest differs"
+     | `Assoc ["recipe",`Assoc fields] ->
+       require (List.assoc_opt "skill" fields=None &&
+         field "execution" (`Assoc fields)=field "execution" draft &&
+         Yojson.Safe.equal (`Assoc (List.remove_assoc "execution" fields)) (field "recipe" draft))
+         "original task recipe differs from the sealed draft"
+     | _ -> failwith "expected one fresh task composition source");
     List.exists (fun call ->
       field "alias" call=`String scope.alias &&
       Yojson.Safe.equal (field "reference" call) (Skill_reference.to_yojson skill_reference) &&
@@ -582,7 +595,10 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             let id = string "content" value in
             require (id = string "selected_job_id" fixture) "input selected the wrong original job";
             selected := Some id;
-            next_step := (match strategy with Direct -> Direct_result | Exact_skill -> Prepare)
+            next_step := (match strategy,projection with
+              | Direct,_ -> Direct_result
+              | Exact_skill,Selected_stdout -> Prepare
+              | Exact_skill,Full_actions -> Run)
           | Direct_result ->
             let artifacts = field "artifacts" value |> to_list in
             let value = match artifacts with first :: _ -> first | [] -> failwith "result has no stdout artifact" in
@@ -603,7 +619,9 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             let nodes = execution_nodes ~base value in
             json (Filename.concat attempt_dir "actual-composition-execution.json")
               (`Assoc ["nodes",`List nodes;"source_result",value]);
-            let prepared = match !prepared_reply with Some prepared -> prepared | None -> failwith "actual prepare reply absent" in
+            let prepared = match !prepared_reply with
+              | Some prepared -> prepared
+              | None -> document ~base (blob_bytes base (reference (field "draft" value))) in
             let argument_node = match field "nested_calls" prepared |> to_list with
               | [call] -> call |> field "scope" |> string "argument_node"
               | [] | _ :: _ -> failwith "one actual nested call was required" in
@@ -652,7 +670,9 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             | Direct_result -> "keeper_job_result",`Assoc ["job_id",`String (needed !selected)]
             | Direct_stdout -> "keeper_artifact_read",`Assoc ["sha256",`String (needed !draft_sha)]
             | Prepare -> Keeper_composition_draft.prepare_tool_name,recipe ~projection fixture
-            | Run -> Keeper_composition_draft.run_tool_name,`Assoc ["sha256",`String (needed !draft_sha)]
+            | Run -> Keeper_composition_draft.run_tool_name,(match projection with
+                | Selected_stdout -> `Assoc ["sha256",`String (needed !draft_sha)]
+                | Full_actions -> `Assoc ["recipe",recipe ~projection fixture])
             | Finish | Finished -> failwith "final step cannot dispatch a tool" in
           let id = Printf.sprintf "call-%d-%s" request_number (step_name step) in
           if List.mem name actual_tools then (

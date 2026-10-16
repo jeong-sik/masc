@@ -945,8 +945,47 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
     reject_child (List.length scopes) (List.length (Ledger.activations ledger)) !calls successful_leaves blocked_children (List.length delivered)
 ;;
 
+let test_shared_node_schema_preserves_call_shapes () =
+  let surface, reference = fixture () in
+  let field = Yojson.Safe.Util.member in
+  let schema = Masc.Keeper_composition_draft.prepare_schema.input_schema
+    |> field "properties" |> field "nodes" |> field "items" in
+  let base = ["id", `String "node"] in
+  let ordinary = ["tool", `String "keeper_lane_status"] in
+  let child = ["skill_reference", Skill_reference.to_yojson reference] in
+  let args = "args", `Assoc [] in
+  let child_args = "args", `Assoc ["query", `String "exact evidence"] in
+  let input = "input", `Assoc ["kind", `String "literal"; "value", `Assoc []] in
+  let child_input = "input", `Assoc ["kind", `String "literal";
+    "value", `Assoc ["query", `String "exact evidence"]] in
+  let check_shape expected fields =
+    let args = `Assoc (base @ fields) in
+    let checked = Masc.Tool_input_validation.check_arguments
+      ~schema:(Some schema) ~name:"composition node" ~args in
+    check bool "shared definitions retain exact node alternatives"
+      expected (Result.is_ok checked) in
+  List.iter (check_shape true)
+    [ordinary; ordinary @ [args]; ordinary @ [input]; child @ [child_args]; child @ [child_input]];
+  List.iter (check_shape false)
+    [ []; child; ordinary @ child @ [args]; ordinary @ [args;input];
+      child @ [child_args;child_input]; ordinary @ ["args", `Null];
+      ordinary @ ["after", `Null]; ordinary @ ["unknown", `String "field"] ];
+  List.iter (fun fields ->
+    ignore (Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Inline
+      ~capability_surface:surface (`Assoc ["nodes", `List [`Assoc (base @ fields)];
+        "branch_failure_policy", `String "continue_independent"])
+      |> require "advertised Tool and exact Skill nodes still compile"))
+    [ordinary @ [args]; child @ [child_args]; child @ [child_input]];
+  Printf.printf "composition_schema node_json_bytes=%d prepare_json_bytes=%d run_json_bytes=%d canonical_compiler_changed=false\n%!"
+    (String.length (Yojson.Safe.to_string schema))
+    (String.length (Yojson.Safe.to_string Masc.Keeper_composition_draft.prepare_schema.input_schema))
+    (String.length (Yojson.Safe.to_string Masc.Keeper_composition_draft.run_schema.input_schema))
+;;
+
 let () = run "exact inline composition compiler"
-    [ "composition", [ test_case "repeat exact child, bind params, namespace and map outputs" `Quick test_repeated_child_identity_bindings_and_output_mapping
+    [ "composition", [ test_case "shared node schema preserves public call shapes" `Quick
+            test_shared_node_schema_preserves_call_shapes
+        ; test_case "repeat exact child, bind params, namespace and map outputs" `Quick test_repeated_child_identity_bindings_and_output_mapping
         ; test_case "whole-child failure barrier with useful independent results" `Quick test_child_failure_blocks_whole_child_consumers_but_keeps_exports
         ; test_case "fixed async child compiles exact canonical result barrier" `Quick test_fixed_async_child_compiles_exact_result_barrier
         ; test_case "upstream arguments bind repeated exact async Skills independently" `Quick test_upstream_child_arguments_bind_exact_declared_plan

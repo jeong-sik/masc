@@ -1,5 +1,14 @@
 include Keeper_gate_types
 
+let ( let* ) = Result.bind
+
+(* Public Gate calls share the resolver's workspace identity before looking
+   up a mode, pending row, worker claim, exact rule or audit destination. *)
+let canonical_base_path base_path =
+  Config_dir_resolver.canonical_base_path base_path
+  |> Result.map_error Config_dir_resolver.canonical_base_path_error_to_string
+;;
+
 let auto_judge_resume_failure_code_to_string = Keeper_gate_projection.auto_judge_resume_failure_code_to_string
 let completion_rejection_of_exact_attempt = Keeper_gate_projection.completion_rejection_of_exact_attempt
 let completion_rejection_operator_detail = Keeper_gate_projection.completion_rejection_operator_detail
@@ -1213,6 +1222,11 @@ let reclaim_orphaned_start_reservation
 ;;
 
 let recovered_work_for_base_path ~base_path =
+  let* base_path =
+    canonical_base_path base_path
+    |> Result.map_error (fun reason ->
+      ({ path = base_path; reason } : Keeper_approval_queue_result.storage_error))
+  in
   (* Boot recovery admits owners by their EFFECTIVE mode, mirroring
      [drain_auto_judges]: a keeper override held in auto_judge above a
      manual/always_allow workspace must be recovered too, or restart —
@@ -1372,6 +1386,10 @@ and retry_blocked_auto_judge_typed
       ~expected_disposition
       approval_id
   =
+  let* base_path =
+    canonical_base_path base_path
+    |> Result.map_error (fun detail -> Retry_mode_unreadable detail)
+  in
   (* Same admission rule as [drain_auto_judges] (#31321): the entry's owner
      is judged by its EFFECTIVE mode, not the workspace mode alone. The old
      workspace-mode short-circuit refused this operator escape hatch for a
@@ -1589,6 +1607,7 @@ type operator_recovery_report =
   }
 
 let request_operator_auto_judge_recovery ~base_path =
+  let* base_path = canonical_base_path base_path in
   (* [drain_auto_judges] already admits owners by their EFFECTIVE mode
      (#31321), so refusing here on the workspace mode alone re-closed the
      escape hatch for a keeper pinned to auto_judge under an always_allow
@@ -1991,6 +2010,12 @@ let decide_without_cycle_grant ~intent ~read_mode ?observe ~keeper_always_allow 
 ;;
 
 let decide_with_mode ?(intent = Keeper_tool_execute_typed_input.Auto) ~read_mode ?cycle_grant ?observe ~keeper_always_allow request =
+  match canonical_base_path request.base_path with
+  | Error reason ->
+    Unavailable
+      (Queue_storage_unavailable { path = request.base_path; reason })
+  | Ok base_path ->
+  let request = { request with base_path } in
   let grant_result =
     match cycle_grant with
     | None -> Cycle_grant_not_applicable

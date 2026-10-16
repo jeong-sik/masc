@@ -245,7 +245,10 @@ val observed_refusal :
     function so the keeper reads the same bytes the judge does. *)
 
 (** Evaluate one exact external-effect request. [keeper_always_allow] is the
-    explicit Keeper profile switch; it carries no inferred semantics. Manual,
+    explicit Keeper profile switch; it carries no inferred semantics. The
+    public decision and retry/recovery boundaries canonicalize workspace inputs
+    through [Config_dir_resolver], so [base_path] and [base_path/.masc] share
+    the same pending owner, mode, exact rules and approval audit. Manual,
     Auto Judge, and invalid-mode outcomes enqueue durably and return without
     suspending the caller. Explicit Keeper/workspace Always Allow modes do not
     depend on the optional exact-rule store being readable. A supplied one-shot

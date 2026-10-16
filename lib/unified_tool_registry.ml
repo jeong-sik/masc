@@ -123,6 +123,7 @@ let tag_of_runtime_handler
   | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
   | Tool_keeper_webmcp_dispatch
+  | Tool_keeper_job_dispatch
   | Tool_lane_addon _
   | Tool_analyze_image -> Mod_external
 
@@ -204,6 +205,7 @@ let runtime_schema_for_descriptor
     | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
     | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
     | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
+    | Keeper_tool_descriptor.Tool_keeper_job_dispatch
     | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
     | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
     | Keeper_tool_descriptor.Tool_masc_fusion_status

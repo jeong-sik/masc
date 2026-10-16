@@ -47,6 +47,9 @@ type context =
        start/termination rows to this call. [None] on callers without
        invocation context (tests, direct dispatch). *)
   ; trace_id : string option
+  ; source_context : Keeper_tool_call_log_context.turn_context option
+    (** Immutable context captured for this invocation. None means unavailable;
+        job ownership never substitutes the Keeper current task. *)
   ; result_projection : Tool_output.model_projection option
     (* The projection this call's result crosses on its way to the model,
        resolved for the lane running the call. [None] when the caller did not
@@ -148,6 +151,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
+  | Tool_keeper_job_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
@@ -236,6 +240,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
+  | Tool_keeper_job_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
@@ -522,6 +527,10 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~name
          ~args)
+  | Tool_keeper_job_dispatch ->
+    Some (Keeper_owned_job_runtime.handle ~config:ctx.config ~meta:ctx.meta
+      ~source_context:ctx.source_context ~tool_use_id:ctx.tool_use_id
+      ~turn_ref:ctx.turn_ref ~trace_id:ctx.trace_id ~name ~args)
   | Tool_keeper_spawn_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_keeper_spawn_with_outcome

@@ -69,6 +69,7 @@ let with_fixture ?(enabled=true) ?(excluded=false) test =
   let context : Dispatch.context =
     {config;meta;publication_recovery={provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper_id};
      ctx_work=Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test";
+     source_context=None;
      turn_sandbox_factory=None;sw=Some sw;clock=Some clock;proc_mgr=None;net=Some net;
      mcp_session_id=None;continuation_channel=None;gate_context=None;
      turn_ref=Some (Ids.Turn_ref.make ~trace_id:"selection-tool-fixture" ~absolute_turn:1);
@@ -303,6 +304,7 @@ let test_stalled_endpoint_ends_at_the_turn_clock () =
   let context : Dispatch.context =
     {config;meta;publication_recovery={provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper_id};
      ctx_work=Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test";
+     source_context=None;
      turn_sandbox_factory=None;sw=Some sw;
      clock=Some (clock :> float Eio.Time.clock_ty Eio.Resource.t);proc_mgr=None;net=Some net;
      mcp_session_id=None;continuation_channel=None;gate_context=None;

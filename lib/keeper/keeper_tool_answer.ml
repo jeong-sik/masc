@@ -55,6 +55,7 @@ let reader (handler : Keeper_tool_descriptor.runtime_handler) =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
+  | Tool_keeper_job_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch

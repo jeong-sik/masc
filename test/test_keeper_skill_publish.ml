@@ -324,6 +324,7 @@ let test_editor_publishes_and_never_overwrites () =
         { provider = Keeper_publication_recovery_availability.non_runtime_provider
         ; keeper_name = meta.name }
     ; ctx_work = Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture"
+    ; source_context = None
     ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
     ; net = None; mcp_session_id = None; continuation_channel = None
     ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None
@@ -508,6 +509,7 @@ let test_owned_draft_validates_and_publishes_exact_bytes () =
         { provider = Keeper_publication_recovery_availability.non_runtime_provider
         ; keeper_name = meta.name }
     ; ctx_work = Keeper_context_runtime.create ~eio:true ~system_prompt:"fixture"
+    ; source_context = None
     ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
     ; net = None; mcp_session_id = None; continuation_channel = None
     ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None

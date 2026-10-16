@@ -19,6 +19,7 @@
   tool_schemas_identity_tool_search
   tool_schemas_spawn_toml
   tool_schemas_spawn
+  tool_schemas_owned_job
   tool_schemas_workspace
   tool_schemas_misc
   tool_schemas_workspace_core

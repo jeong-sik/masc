@@ -145,7 +145,9 @@ val execute
     and per-action I/O previews on the same boundary as a direct Keeper call.
     [admit_node], if present, runs after dependency/input validation and before
     the handler. A rejection settles the leaf as a runtime failure with
-    [Proven_pre_effect], preserving the normal branch failure policy. *)
+    [Proven_pre_effect], preserving the normal branch failure policy.
+    [source_context] is the original composition invocation snapshot passed
+    unchanged to each leaf; absence remains unavailable source context. *)
 val execute_keeper
   :  capability_surface:Keeper_capability_surface.t
   -> plan:Keeper_tool_plan.t
@@ -157,6 +159,7 @@ val execute_keeper
   -> publication_recovery:Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
   -> keeper_turn_id:(unit -> int option)
+  -> ?source_context:Keeper_tool_call_log_context.turn_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
@@ -187,6 +190,7 @@ module Compatibility : sig
          Keeper_publication_recovery_availability.turn_context
     -> ctx_snapshot:Keeper_types.working_context
     -> keeper_turn_id:(unit -> int option)
+    -> ?source_context:Keeper_tool_call_log_context.turn_context
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?continuation_channel:Keeper_continuation_channel.t

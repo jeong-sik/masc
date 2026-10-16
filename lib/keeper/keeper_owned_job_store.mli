@@ -1,0 +1,71 @@
+(** Durable ownership of an isolated job. Every backend effect requires an
+    appended intent; absent or unreadable authority never permits a relaunch. *)
+module Job_id : sig
+  type t
+  val fresh : unit -> t
+  val of_string : string -> (t, string) result
+  val to_string : t -> string
+end
+
+type source =
+  { task_id : string option
+  ; turn_ref : Ids.Turn_ref.t option
+  ; tool_use_id : string option
+  ; trace_id : string option
+  ; keeper_turn_id : int option
+  }
+
+type phase =
+  | Prepared
+  | Create_requested
+  | Created of string
+  | Start_requested of string
+  | Running of string
+  | Exited of { container_id : string; exit_code : int }
+  | Cancelled_before_start of string option
+  | Cancelled_unconfirmed_launch
+
+type input = { path : string; artifact : Tool_output.artifact_ref }
+type paths = { job_dir : string; workspace : string; cli_config_dir : string }
+type record = private
+  { job_id : Job_id.t
+  ; base_path : string
+  ; keeper_name : string
+  ; source : source
+  ; preparation : Keeper_owned_job_backend.preparation
+  ; inputs : input list
+  ; sequence : int
+  ; phase : phase
+  ; cancel_requested : bool
+  ; outputs : (Tool_output.artifact_ref * Tool_output.artifact_ref) option
+  ; detail : string option
+  }
+
+type error =
+  | Invalid_authority of string
+  | Corrupt of string
+  | Missing
+  | Conflict
+  | Io_failed of string
+  | Commit_unconfirmed of string
+
+val error_to_string : error -> string
+val canonical_base_path : string -> (string, error) result
+val paths : base_path:string -> Job_id.t -> paths
+val prepare_workspace : base_path:string -> Job_id.t -> input list -> (paths, error) result
+(** Checksum-verified immutable artifacts copied into a new job-private workspace.
+    Input names are single file components; host paths and nested mounts are absent. *)
+val create :
+  base_path:string -> keeper_name:string -> job_id:Job_id.t -> source:source ->
+  preparation:Keeper_owned_job_backend.preparation -> inputs:input list ->
+  (record, error) result
+val load : base_path:string -> keeper_name:string -> Job_id.t -> (record, error) result
+val transition :
+  record -> phase:phase -> cancel_requested:bool ->
+  outputs:(Tool_output.artifact_ref * Tool_output.artifact_ref) option ->
+  detail:string option -> (record, error) result
+(** Cross-process compare-and-append against the entire exact previous record.
+    Cleanup failure is unconfirmed, never authorization for the pending effect. *)
+val phase_to_string : phase -> string
+val source_to_json : source -> Yojson.Safe.t
+val result_json : record -> Yojson.Safe.t

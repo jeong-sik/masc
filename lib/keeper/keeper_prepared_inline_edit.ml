@@ -71,6 +71,28 @@ let plan t = t.plan
 let source t = t.source
 let scopes t = List.concat_map (fun leaf -> FS.prepared_edit_scopes leaf.edit) t.leaves
 
+let resource_dependencies ~plan t =
+  if not (plan == t.plan) then None
+  else
+    let leaves = Plan.dependency_layers plan |> List.concat_map (fun nodes ->
+      List.map (fun node ->
+        match List.find_opt (fun leaf -> leaf.node == node) t.leaves with
+        | Some leaf -> leaf
+        | None -> invalid_arg "prepared Inline Edit lost its original node") nodes) in
+    let rec collect earlier = function
+      | [] -> []
+      | leaf :: rest ->
+        let scopes = FS.prepared_edit_scopes leaf.edit in
+        let predecessors = List.filter_map (fun prior ->
+          let prior_scopes = FS.prepared_edit_scopes prior.edit in
+          if List.exists (fun scope ->
+            List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope) prior_scopes) scopes
+          then Some prior.node.Plan.id else None) earlier in
+        (leaf.node.id, predecessors) :: collect (leaf :: earlier) rest
+    in
+    Some (collect [] leaves)
+;;
+
 let for_node ~plan ~node ~input t =
   if not (plan == t.plan) then Error "prepared Inline Edit belongs to a different plan"
   else match List.find_opt (fun leaf -> leaf.node == node) t.leaves with

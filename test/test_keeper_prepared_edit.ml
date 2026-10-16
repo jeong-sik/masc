@@ -71,7 +71,7 @@ let failed result =
   | Tool_result.Completed () | Tool_result.Deferred () -> fail "changed prepared authority performed an Edit"
 ;;
 
-let dispatch ?(hooks = Agent_core.Hooks.empty) env tools calls =
+let execute ?(hooks = Agent_core.Hooks.empty) env tools calls =
   let agent = Agent_core.Agent.create ~tools ~net:env#net
       ~config:(Agent_core.Types.default_config ~model:"fixture") () in
   let options = Agent_core.Agent.options agent in
@@ -79,13 +79,17 @@ let dispatch ?(hooks = Agent_core.Hooks.empty) env tools calls =
       ~tools ~hooks ~event_bus:options.event_bus ~tracer:options.tracer
       ~agent_name:(Agent_core.Agent.state agent).config.name ~turn_count:2
       ~usage:(Agent_core.Agent.state agent).usage calls with
-  | Ok report ->
+  | Ok report -> report.completed_results
+  | Error _ -> fail "Edit batch failed outside its tool results"
+;;
+
+let dispatch ?hooks env tools calls =
+  let rows = execute ?hooks env tools calls in
     List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
       match row.outcome with
       | Agent_core.Types.Tool_succeeded -> ()
-      | Tool_failed _ -> fail row.content) report.completed_results;
-    report.completed_results
-  | Error _ -> fail "Edit batch failed outside its tool results"
+      | Tool_failed _ -> fail row.content) rows;
+  rows
 ;;
 
 let batch env config meta recovery inputs =
@@ -176,21 +180,27 @@ let public_calls inputs = List.mapi (fun index input -> Agent_core.Types.ToolUse
     {id = "public-edit-" ^ string_of_int index; name = "Edit"; input}) inputs
 ;;
 
-let publish_edit_skills ?(two_nodes = false) sw config =
+let publish_edit_skills ?(two_nodes = false) ?(ordered = false)
+    ?(third_node = false) ?(continue_independent = false) sw config =
   let source_config = "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"edit-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n" in
   let document name =
     let first = ["file_path", "file_path"; "old_string", "old_string"; "new_string", "new_string"] in
     let second = ["file_path", "other_path"; "old_string", "other_old"; "new_string", "other_new"] in
-    let params = List.map snd (first @ if two_nodes then second else []) in
-    let node id bindings =
-      Printf.sprintf "[[compositions.nodes]]\nid = %S\ntool = \"Edit\"\n[compositions.nodes.input]\nkind = \"object\"\n" id
+    let third = ["file_path", "later_path"; "old_string", "later_old"; "new_string", "later_new"] in
+    let params = List.map snd
+      (first @ (if two_nodes then second else []) @ if third_node then third else []) in
+    let node ?(after = []) id bindings =
+      Printf.sprintf "[[compositions.nodes]]\nid = %S\ntool = \"Edit\"\nafter = [%s]\n[compositions.nodes.input]\nkind = \"object\"\n"
+        id (String.concat ", " (List.map (Printf.sprintf "%S") after))
       ^ String.concat "" (List.map (fun (field, param) -> Printf.sprintf
           "[[compositions.nodes.input.fields]]\nname = %S\n[compositions.nodes.input.fields.value]\nkind = \"param\"\nname = %S\n" field param) bindings) in
     Printf.sprintf "---\nname: %s\ndescription: Apply the selected exact patch\n---\n```toml composition\n[[compositions]]\nname = %S\nexecution = \"inline\"\n" name name
+    ^ (if continue_independent then "branch_failure_policy = \"continue_independent\"\n" else "")
     ^ String.concat "" (List.map (fun name -> Printf.sprintf
         "[[compositions.params]]\nname = %S\ntype = \"string\"\ndescription = \"Original patch input\"\n" name) params)
     ^ node "patch" first
-    ^ (if two_nodes then node "other-patch" second else "")
+    ^ (if two_nodes then node ~after:(if ordered then ["patch"] else []) "other-patch" second else "")
+    ^ (if third_node then node "later-patch" third else "")
     ^ "```\n" in
   List.iter (fun name -> write (Filename.concat config.Workspace.base_path
       ("skills/" ^ name ^ "/SKILL.md")) (document name)) ["edit-left"; "edit-right"];
@@ -212,6 +222,127 @@ let inline_calls bundle inputs = List.mapi (fun index input ->
   check bool "published Inline tool is in the actual bundle" true
     (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) bundle.Keeper_tools_agent_core.tools);
   Agent_core.Types.ToolUse {id = "inline-edit-" ^ string_of_int index; name; input}) inputs
+;;
+
+let two_patch_args left before after right other_before other_after =
+  match public_args left before after with
+  | `Assoc fields -> `Assoc (fields @ ["other_path", `String right;
+      "other_old", `String other_before; "other_new", `String other_after])
+  | _ -> fail "public patch fixture did not construct an object"
+;;
+
+let physical_leaves meta =
+  Keeper_tool_call_log.read_recent ~keeper_name:meta.Keeper_meta_contract.name ()
+  |> (function Ok rows -> rows | Error (Index_unavailable detail) -> fail detail)
+  |> List.filter (fun row -> Yojson.Safe.Util.member "composition_node_id" row <> `Null)
+;;
+
+let test_one_inline_overlaps_its_disjoint_edits () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~two_nodes:true sw config in
+  public_bundle ~snapshot env sw config meta recovery @@ fun meta task_id _cell causal bundle ->
+  let left = Filename.concat root "one-left/file" and right = Filename.concat root "one-right/file" in
+  write left "left-before"; write right "right-before";
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered; if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> dispatch env bundle.tools (inline_calls bundle
+      [two_patch_args left "left-before" "left-after" right "right-before" "right-after"])) in
+  check int "one outer Skill result" 1 (List.length rows);
+  check int "both inner authorization boundaries overlapped" 2 !entered;
+  check string "left actual bytes" "left-after" (read left);
+  check string "right actual bytes" "right-after" (read right);
+  let leaves = physical_leaves meta in
+  check int "both inner handlers committed physical rows" 2 (List.length leaves);
+  List.iter (fun row ->
+    check string "original Task survives inner overlap" task_id
+      Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "original parent invocation survives inner overlap" "inline-edit-0"
+      Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
+  check int "both inner results join the original Gate aggregate" 2
+    Yojson.Safe.Util.(member "completed_tool_calls"
+      (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length)
+;;
+
+let test_one_inline_preserves_physical_conflicts () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~two_nodes:true sw config in
+  public_bundle ~snapshot env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let directory = Filename.concat root "inner-original" in
+  let path = Filename.concat directory "file" and alias = Filename.concat root "inner-alias" in
+  write path "first"; Unix.symlink directory alias;
+  ignore (dispatch env bundle.tools (inline_calls bundle [two_patch_args path "first" "second"
+    (Filename.concat alias "file") "second" "third"]));
+  check string "alias conflict consumes real predecessor bytes" "third" (read path)
+;;
+
+let test_one_inline_preserves_explicit_dependency () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~two_nodes:true ~ordered:true sw config in
+  public_bundle ~snapshot env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let left = Filename.concat root "dependent-left/file" and right = Filename.concat root "dependent-right/file" in
+  write left "first"; write right "first";
+  let entered = ref 0 in
+  ignore (FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered;
+      if !entered = 2 then check string "explicit successor sees committed predecessor"
+        "second" (read left))
+    (fun () -> dispatch env bundle.tools (inline_calls bundle
+      [two_patch_args left "first" "second" right "first" "second"])));
+  check int "both explicitly ordered real handlers entered" 2 !entered;
+  check string "dependent right actual bytes" "second" (read right)
+;;
+
+let test_one_inline_failure_blocks_conflict_only () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~two_nodes:true ~third_node:true
+    ~continue_independent:true sw config in
+  public_bundle ~snapshot env sw config meta recovery @@ fun meta _task _cell _causal bundle ->
+  let left = Filename.concat root "failed-left/file" and right = Filename.concat root "surviving-right/file" in
+  write left "first"; write right "first";
+  let input = match two_patch_args left "missing" "failed" right "first" "second" with
+    | `Assoc fields -> `Assoc (fields @ ["later_path", `String left;
+        "later_old", `String "first"; "later_new", `String "must-not-land"])
+    | _ -> fail "public patch fixture did not construct an object" in
+  let rows = execute env bundle.tools (inline_calls bundle [input]) in
+  (match rows with
+   | [row] -> (match row.Agent_core.Agent_tools.outcome with
+     | Agent_core.Types.Tool_failed _ -> ()
+     | Tool_succeeded -> fail "failed inner patch became a successful outer Skill")
+   | _ -> fail "one failed outer Skill was not settled");
+  check string "failed predecessor and its resource successor wrote nothing" "first" (read left);
+  check string "disjoint sibling still committed" "second" (read right);
+  check int "failed and successful handlers retained, conflicted successor absent" 2
+    (List.length (physical_leaves meta))
+;;
+
+let test_cancelled_inner_edits_release_for_next_invocation () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~two_nodes:true sw config in
+  public_bundle ~snapshot env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let left = Filename.concat root "cancel-inner-left/file" and right = Filename.concat root "cancel-inner-right/file" in
+  write left "first"; write right "first";
+  let input = two_patch_args left "first" "second" right "first" "second" in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  (match Eio.Switch.run (fun child ->
+    FS.For_testing.with_before_write_authorization (fun () ->
+        incr entered; if !entered = 2 then Eio.Promise.resolve resolve_both ();
+        Eio.Fiber.await_cancel ()) (fun () ->
+      Eio.Fiber.fork ~sw:child (fun () ->
+        ignore (dispatch env bundle.tools (inline_calls bundle [input])));
+      Eio.Promise.await both;
+      Eio.Switch.fail child Exit)) with
+   | () -> fail "inner caller cancellation did not propagate"
+   | exception Exit -> ());
+  check string "cancelled left authorization wrote nothing" "first" (read left);
+  check string "cancelled right authorization wrote nothing" "first" (read right);
+  ignore (dispatch env bundle.tools [Agent_core.Types.ToolUse
+    {id = "inline-after-cancel"; name = "keeper_compose_edit-left"; input}]);
+  check string "new invocation can acquire left resource" "second" (read left);
+  check string "new invocation can acquire right resource" "second" (read right)
 ;;
 
 let test_published_inline_edits_overlap_and_retain_receipts () =
@@ -538,6 +669,16 @@ let () = run "prepared actual Edit resources"
       test_case "public conflicting patches consume predecessor bytes" `Quick test_public_conflicting_edits_keep_current_bytes;
       test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial];
     "published Inline Skills and actual Edit", [
+      test_case "one published Skill overlaps its independent real Edits" `Quick
+        test_one_inline_overlaps_its_disjoint_edits;
+      test_case "one published Skill orders physical aliases" `Quick
+        test_one_inline_preserves_physical_conflicts;
+      test_case "one published Skill retains explicit dependencies" `Quick
+        test_one_inline_preserves_explicit_dependency;
+      test_case "failed inner Edit blocks its conflict while a sibling commits" `Quick
+        test_one_inline_failure_blocks_conflict_only;
+      test_case "cancelled inner Edits release for a new invocation" `Quick
+        test_cancelled_inner_edits_release_for_next_invocation;
       test_case "published Skills overlap and retain activation run and leaf receipts" `Quick
         test_published_inline_edits_overlap_and_retain_receipts;
       test_case "published conflicts consume predecessor bytes" `Quick test_published_inline_conflicts_keep_predecessor_bytes;

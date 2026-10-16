@@ -229,6 +229,10 @@ pin-depends: [
     "git+https://github.com/anyang-keepers/ocaml-cohttp.git#9963da4c028b5681ff96eeeaa9b276d6be60c507"
   ]
   [
+    "eio_posix.1.3"
+    "git+https://github.com/jeong-sik/eio.git#3a8ab387d748bcc8d8ae682cfb0ec7da2c9544b7"
+  ]
+  [
   "grpc-direct.0.2.6"
   "git+https://github.com/jeong-sik/grpc-direct.git#d7269ebebf9e4688486cc6591c66e794607e7b0f"
 ]

@@ -19,6 +19,11 @@ val verify_container :
 val verify_owner :
   Lane_addon_types.runtime -> instance_id:string -> name:string option -> id:string ->
   string -> (unit, string) result
+val info_arguments : Lane_addon_types.runtime -> string list
+(** The engine identity command. Its exit status alone decides reachability. *)
+val engine_of_info :
+  Lane_addon_types.runtime -> string ->
+  (Lane_addon_lifecycle.engine, Lane_addon_lifecycle.engine_fault) result
 val image_arguments : Lane_addon_types.runtime -> string -> string list
 val image_digest : Lane_addon_types.runtime -> string -> (string, string) result
 val volume_list_arguments : Lane_addon_types.runtime -> string -> string list

@@ -35,6 +35,15 @@ if argv[:1] == ["volume"]:
         print(json.dumps([json.loads((root / (args[-1] + ".volume")).read_text())]))
     else: raise SystemExit(2)
     raise SystemExit(0)
+if argv[:1] == ["info"]:
+    if (root / "daemon-unavailable").exists() or (root / "info-unavailable").exists():
+        print("fixture daemon unavailable", file=sys.stderr)
+        raise SystemExit(7)
+    if argv != ["info", "--format", "{{.ID}}"]:
+        raise SystemExit(2)
+    identity = root / "engine-id"
+    print(identity.read_text().strip() if identity.exists() else "fixture-engine-a")
+    raise SystemExit(0)
 if not argv or argv[0] != "container":
     raise SystemExit(2)
 action, args = argv[1], argv[2:]
@@ -200,6 +209,11 @@ if (root / 'daemon-unavailable').exists(): raise SystemExit(7)
 if argv[:2] == ['image', 'inspect']:
     assert argv == ['image', 'inspect', 'fixture/image'], argv
     emit([{'configuration': {'descriptor': {'digest': digest}}}])
+elif argv[:2] == ['system', 'status']:
+    assert argv == ['system', 'status', '--format', 'json'], argv
+    if (root / 'info-unavailable').exists(): raise SystemExit(7)
+    identity = root / 'engine-id'
+    emit({'status': 'running', 'appRoot': identity.read_text().strip() if identity.exists() else '/fixture/app-root-a'})
 elif argv[:1] == ['volume']:
     action = argv[1]
     if action == 'list':
@@ -594,6 +608,69 @@ let test_failed_create_receipt_cleans_only_owned_container () = with_fixture (fu
       if Filename.check_suffix name ".json" then count + 1 else count) 0 (Sys.readdir dir));
   ignore (unwrap (observe other "good"));
   unwrap (Worker.stop other))
+
+
+let docker_engine_a = Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine-a"
+
+let test_engine_identity_comes_from_the_info_command () = with_fixture (fun env _sw dir docker ->
+  let read () = Worker.read_engine ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Docker ~docker_command:docker () in
+  check bool "default fixture engine is read" true (read () = Ok docker_engine_a);
+  write (Filename.concat dir "engine-id") "fixture-engine-b\n";
+  check bool "a different engine answers with its own identity" true
+    (read () = Ok (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine-b"));
+  let marker = Filename.concat dir "daemon-unavailable" in
+  write marker "down";
+  (match read () with
+   | Error (Worker.Engine_fault {runtime = Types.Docker; fault = Masc.Lane_addon_lifecycle.Unreachable _}) -> ()
+   | Ok _ | Error _ -> fail "a daemon that exits non-zero must be Unreachable, not an identity");
+  Sys.remove marker)
+
+let test_apple_engine_identity_is_the_service_app_root () = with_apple_fixture (fun env _sw dir command ->
+  let read () = Worker.read_engine ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Apple_container ~container_command:command () in
+  check bool "service root identifies the Apple engine" true
+    (read () = Ok (Masc.Lane_addon_lifecycle.Apple_app_root "/fixture/app-root-a"));
+  write (Filename.concat dir "info-unavailable") "down";
+  (match read () with
+   | Error (Worker.Engine_fault {runtime = Types.Apple_container; fault = Masc.Lane_addon_lifecycle.Unreachable _}) -> ()
+   | Ok _ | Error _ -> fail "an Apple service that exits non-zero must be Unreachable"))
+
+let test_engine_identity_parsing_has_no_default () =
+  let module Engine = Masc.Lane_addon_engine in
+  let module Lifecycle = Masc.Lane_addon_lifecycle in
+  let unreadable = function Error (Lifecycle.Identity_unreadable _) -> true | Ok _ | Error (Lifecycle.Unreachable _) -> false in
+  let unreachable = function Error (Lifecycle.Unreachable _) -> true | Ok _ | Error (Lifecycle.Identity_unreadable _) -> false in
+  check bool "blank Docker ID is unreadable" true (unreadable (Engine.engine_of_info Types.Docker "  \n"));
+  check bool "Docker ID with embedded whitespace is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Docker "two words"));
+  check bool "oversized Docker ID is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Docker (String.make 300 'a')));
+  check bool "Docker ID is trimmed" true
+    (Engine.engine_of_info Types.Docker "abc-123\n" = Ok (Lifecycle.Docker_engine "abc-123"));
+  check bool "Apple malformed status is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Apple_container "not json"));
+  check bool "Apple status without a root is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running"}|}));
+  check bool "Apple relative root is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"relative"}|}));
+  check bool "Apple stopped service is unreachable" true
+    (unreachable (Engine.engine_of_info Types.Apple_container {|{"status":"stopped","appRoot":"/root"}|}));
+  check bool "Apple running service is its root" true
+    (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"/root"}|}
+     = Ok (Lifecycle.Apple_app_root "/root"))
+
+let test_start_is_refused_before_create_when_the_engine_is_unreachable () =
+  with_fixture (fun env sw dir docker ->
+    (* Only the identity command fails. Every other control command would
+       succeed, so a create that is attempted anyway would leave a container. *)
+    write (Filename.concat dir "info-unavailable") "down";
+    (match start env sw dir docker "good" with
+     | Error (Worker.Engine_fault {fault = Masc.Lane_addon_lifecycle.Unreachable _; _}) -> ()
+     | Ok _ | Error _ -> fail "start must report the typed engine fault");
+    check int "no container was created" 0
+      (Array.fold_left (fun count name ->
+        if Filename.check_suffix name ".json" then count + 1 else count) 0 (Sys.readdir dir)))
 
 exception Owner_detached
 
@@ -2013,4 +2090,9 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "recovery bounds an unresponsive Docker control command" `Quick test_recovery_control_command_times_out;
   test_case "lost create response preserves unrelated containers" `Quick test_failed_create_receipt_cleans_only_owned_container;
   test_case "created identity precedes blocked inspect" `Quick test_created_identity_precedes_blocked_inspection;
+  test_case "engine identity comes from the info command" `Quick test_engine_identity_comes_from_the_info_command;
+  test_case "Apple engine identity is the service root" `Quick test_apple_engine_identity_is_the_service_app_root;
+  test_case "engine identity parsing has no default" `Quick test_engine_identity_parsing_has_no_default;
+  test_case "start is refused before create when the engine is unreachable" `Quick
+    test_start_is_refused_before_create_when_the_engine_is_unreachable;
 ]]

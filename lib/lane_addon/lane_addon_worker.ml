@@ -5,6 +5,7 @@ type error =
   | Invalid_package of string
   | Docker_failed of { operation : string; detail : string }
   | Engine_failed of { runtime : runtime; operation : string; detail : string }
+  | Engine_fault of { runtime : runtime; fault : Lane_addon_lifecycle.engine_fault }
   | Protocol_failed of string
   | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string
@@ -35,6 +36,10 @@ let error_to_string = function
       Printf.sprintf "Add-on Docker %s failed: %s" operation detail
   | Engine_failed { runtime; operation; detail } ->
       Printf.sprintf "Add-on %s %s failed: %s" (runtime_to_string runtime) operation detail
+  | Engine_fault { runtime; fault = Lane_addon_lifecycle.Unreachable detail } ->
+      Printf.sprintf "Add-on %s engine is unreachable: %s" (runtime_to_string runtime) detail
+  | Engine_fault { runtime; fault = Lane_addon_lifecycle.Identity_unreadable detail } ->
+      Printf.sprintf "Add-on %s engine identity is unreadable: %s" (runtime_to_string runtime) detail
   | Host_refusal (Lane_addon_call_context.Rejected detail | Unavailable detail | Activity_disabled detail | Activity_unobserved detail) -> detail
   | Protocol_failed detail -> "Add-on MCP failure: " ^ detail
   | Invalid_observation detail -> "invalid Add-on observation: " ^ detail
@@ -106,6 +111,23 @@ let run_control ~clock ~timeout_sec ~mgr ~runtime ~command ~operation args =
   | Ok result -> result
   | Error `Timeout ->
       error (Printf.sprintf "timed out after %.3g seconds" timeout_sec)
+
+(* The engine answers [info] or it does not. The exit status decides, so a
+   daemon that is down is [Unreachable] without reading its error text. *)
+let read_engine_with ~run runtime =
+  match run ~operation:"engine identity" (Engine.info_arguments runtime) with
+  | Error error -> Error (Lane_addon_lifecycle.Unreachable (error_to_string error))
+  | Ok raw -> Engine.engine_of_info runtime raw
+
+let read_engine ~clock ~control_timeout_sec ~mgr ~runtime
+    ?(docker_command="docker") ?(container_command="container") () =
+  if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
+    Error (Invalid_package "control_timeout_sec must be finite and positive")
+  else
+    let command = command_for runtime ~docker_command ~container_command in
+    let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
+    read_engine_with ~run runtime
+    |> Result.map_error (fun fault -> Engine_fault { runtime; fault })
 
 let inspect_image ~clock ~control_timeout_sec ~mgr ~(package : package)
     ?(docker_command="docker") ?(container_command="container") () =
@@ -239,6 +261,9 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
             | None -> Engine.owned_name runtime instance_id
             | Some owner -> Lane_addon_worker_state.container_name ~runtime owner in
   let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
+  (* No create is attempted against an engine that cannot name itself. *)
+  let* (_ : Lane_addon_lifecycle.engine) = read_engine_with ~run runtime
+    |> Result.map_error (fun fault -> Engine_fault { runtime; fault }) in
   (* Apple resolves local tags during create. Record the descriptor first and
      verify the created configuration before starting any package process. *)
   let* image_digest = match runtime with

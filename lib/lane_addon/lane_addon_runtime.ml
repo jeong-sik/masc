@@ -778,7 +778,7 @@ let backend ~store () = match !override with
             Lane_addon_worker.call_exported_tool ~on_result ?authorize ~principal worker ~name ~arguments
             |> Result.map_error (function
               | Lane_addon_worker.Host_refusal refusal -> Lane_addon_call_context.Host_refusal refusal
-              | (Lane_addon_worker.Stopped | Lane_addon_worker.Invalid_package _ | Lane_addon_worker.Docker_failed _ | Lane_addon_worker.Engine_failed _ | Lane_addon_worker.Protocol_failed _ | Lane_addon_worker.Invalid_observation _) as error -> Lane_addon_call_context.Transport_error (Lane_addon_worker.error_to_string error)));
+              | (Lane_addon_worker.Stopped | Lane_addon_worker.Invalid_package _ | Lane_addon_worker.Docker_failed _ | Lane_addon_worker.Engine_failed _ | Lane_addon_worker.Engine_fault _ | Lane_addon_worker.Protocol_failed _ | Lane_addon_worker.Invalid_observation _) as error -> Lane_addon_call_context.Transport_error (Lane_addon_worker.error_to_string error)));
           action_schema = (fun () -> Lane_addon_worker.action_schema worker);
           act = (fun ~arguments -> Lane_addon_worker.act worker ~arguments
             |> Result.map_error Lane_addon_worker.error_to_string);

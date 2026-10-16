@@ -16,6 +16,10 @@ val record_validation_error_metric :
 
 val resolve_connector_status_name : ?name:string -> unit -> string option
 
+(** Dispatch a Keeper list/status read and prepare its projected response on
+    the shared read-only executor when available. Authentication belongs to
+    the calling route; the HTTP response is written on the caller's domain.
+    This helper is not for mutating Keeper tools. *)
 val respond_keeper_tool_json :
   ?config:Workspace.config ->
   ?project:(Yojson.Safe.t -> Yojson.Safe.t) ->

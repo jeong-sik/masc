@@ -530,10 +530,14 @@ let test_keeper_status_http_200_valid_keeper () =
     Eio_main.run (fun env ->
       let clock = Eio.Stdenv.clock env in
       Eio.Switch.run (fun sw ->
-        let response = dispatch_gate_route ~sw ~clock state token "/api/v1/gate/keeper-status?name=valid_keeper" in
-        let status, json = parse_http_response response in
-        check int "http status 200" 200 status;
-        check string "keeper name in response" "valid_keeper" (json |> U.member "name" |> U.to_string))))
+        let pool =
+          Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+        in
+        Executor_pool_ref.For_testing.with_pool pool (fun () ->
+          let response = dispatch_gate_route ~sw ~clock state token "/api/v1/gate/keeper-status?name=valid_keeper" in
+          let status, json = parse_http_response response in
+          check int "http status 200" 200 status;
+          check string "keeper name in response" "valid_keeper" (json |> U.member "name" |> U.to_string)))))
 
 let test_keeper_status_http_502_dispatch_failure () =
   with_temp_base_path (fun dir state token ->

@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # CI test observer. Commands run exactly once. Callers may set a finite
-# CI_TEST_TIMEOUT_SEC; expiry captures the active process tree, terminates it,
-# and fails closed with exit 124. No retry path exists.
+# CI_TEST_TIMEOUT_SEC; expiry reports diagnostics, cancels the owned session,
+# and exits 124. Cleanup uncertainty is explicit; setsid escapes are outside
+# this boundary. No retry path exists.
 
 mktemp_ci_log() {
   local tmp_dir="${TMPDIR:-/tmp}"
@@ -15,7 +16,9 @@ mktemp_ci_log() {
   fi
 }
 
-if [[ -n "${1:-}" ]]; then
+if [[ "${1:-}" = "--ci-run-diagnostics" ]]; then
+  TEST_CMD="${CI_DIAG_TEST_CMD:?missing observed command}"
+elif [[ -n "${1:-}" ]]; then
   TEST_CMD="$1"
 elif [[ "${GITHUB_ACTIONS:-}" != "true" && -x "scripts/dune-local.sh" ]]; then
   TEST_CMD="scripts/dune-local.sh test"
@@ -31,7 +34,7 @@ now_epoch() {
   date +%s
 }
 
-START_EPOCH="$(now_epoch)"
+START_EPOCH="${CI_TEST_START_EPOCH:-$(now_epoch)}"
 TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp_ci_log)}"
 DUNE_SOURCEROOT="${DUNE_SOURCEROOT:-$(pwd -P)}"
 export DUNE_SOURCEROOT
@@ -40,10 +43,8 @@ CI_TEST_DISK_CHECK_SEC="${CI_TEST_DISK_CHECK_SEC:-10}"
 CI_CONTRACT_HARNESS_ENABLED="${CI_CONTRACT_HARNESS_ENABLED:-0}"
 CI_CONTRACT_HARNESS_CMD="${CI_CONTRACT_HARNESS_CMD:-scripts/harness/contract/run_all.sh}"
 ACTIVE_TEST_BUILD_DIR="${DUNE_BUILD_DIR:-_build}"
-ACTIVE_CMD_PID=""
-ACTIVE_CMD_PGID=""
-ACTIVE_LOG_TAIL_PID=""
-DISK_PRESSURE_REPORTED=0
+ACTIVE_CMD_PID="${CI_DIAG_ACTIVE_PID:-}"
+ACTIVE_CMD_PGID="${CI_DIAG_ACTIVE_PID:-}"
 
 if [[ -z "${HEARTBEAT_SEC}" || "${HEARTBEAT_SEC}" -le 0 ]]; then
   HEARTBEAT_SEC=30
@@ -70,39 +71,10 @@ elapsed_sec() {
   echo $((now - START_EPOCH))
 }
 
-log_line() {
-  printf '%s\n' "$1" | tee -a "${TEST_LOG_FILE}"
-}
-
 tmpdir_disk_usage() {
   local tmp_dir="${TMPDIR:-/tmp}"
   df -h "${tmp_dir}" 2>/dev/null \
     | awk 'NR == 2 { print "size=" $2 " used=" $3 " avail=" $4 " capacity=" $5; found=1 } END { if (!found) print "unknown" }'
-}
-
-disk_available_mb() {
-  df -Pm "${1:-${DUNE_SOURCEROOT}}" 2>/dev/null \
-    | awk 'NR == 2 { print $4; found=1 } END { if (!found) print "" }'
-}
-
-disk_pressure_detected() {
-  [[ "${CI_TEST_DISK_MIN_AVAILABLE_MB}" -gt 0 ]] || return 1
-  local avail_mb=""
-  avail_mb="$(disk_available_mb "${DUNE_SOURCEROOT}")"
-  [[ "${avail_mb}" =~ ^[0-9]+$ ]] || return 1
-  [[ "${avail_mb}" -le "${CI_TEST_DISK_MIN_AVAILABLE_MB}" ]]
-}
-
-disk_pressure_detail() {
-  local avail_mb=""
-  avail_mb="$(disk_available_mb "${DUNE_SOURCEROOT}")"
-  if [[ "${avail_mb}" =~ ^[0-9]+$ ]]; then
-    printf 'path=%s available_mb=%s min_available_mb=%s' \
-      "${DUNE_SOURCEROOT}" "${avail_mb}" "${CI_TEST_DISK_MIN_AVAILABLE_MB}"
-  else
-    printf 'path=%s available_mb=unknown min_available_mb=%s' \
-      "${DUNE_SOURCEROOT}" "${CI_TEST_DISK_MIN_AVAILABLE_MB}"
-  fi
 }
 
 active_cmd_tree_pids() {
@@ -186,195 +158,15 @@ diag_dump() {
   fi
 }
 
-heartbeat() {
-  while true; do
-    echo "[ci-heartbeat] $(iso_now) elapsed_sec=$(elapsed_sec) command still running"
-    sleep "${HEARTBEAT_SEC}"
-  done
-}
-
-effective_test_cmd() {
-  if ([[ "${TEST_CMD}" == *"dune "* ]] || [[ "${TEST_CMD}" == *"dune-local.sh"* ]]) \
-    && [[ "${TEST_CMD}" != *"unset DUNE_RPC"* ]]; then
-    printf 'unset DUNE_RPC; %s' "${TEST_CMD}"
-  else
-    printf '%s' "${TEST_CMD}"
-  fi
-}
-
-kill_active_cmd_tree() {
-  local signal="${1:-TERM}"
-  local tree_pids=()
-  local pid=""
-  while IFS= read -r pid; do
-    [[ -n "${pid}" ]] && tree_pids+=("${pid}")
-  done < <(active_cmd_tree_pids)
-  signal_pid_snapshot "${signal}" "${tree_pids[@]}"
-  signal_active_cmd_group "${signal}"
-}
-
-signal_pid_snapshot() {
-  local signal="$1"
-  shift
-  local tree_pids=("$@")
-  local idx=0
-  for (( idx=${#tree_pids[@]}-1; idx>=0; idx-- )); do
-    kill "-${signal}" "${tree_pids[idx]}" >/dev/null 2>&1 || true
-  done
-}
-
-pid_snapshot_has_survivor() {
-  local pid=""
-  for pid in "$@"; do
-    if kill -0 "${pid}" >/dev/null 2>&1; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-signal_active_cmd_group() {
-  local signal="$1"
-  if [[ "${ACTIVE_CMD_PGID:-}" =~ ^[0-9]+$ ]]; then
-    kill "-${signal}" -- "-${ACTIVE_CMD_PGID}" >/dev/null 2>&1 || true
-  fi
-}
-
-active_cmd_group_has_survivor() {
-  [[ "${ACTIVE_CMD_PGID:-}" =~ ^[0-9]+$ ]] \
-    && kill -0 -- "-${ACTIVE_CMD_PGID}" >/dev/null 2>&1
-}
-
-active_snapshot_or_group_has_survivor() {
-  pid_snapshot_has_survivor "$@" || active_cmd_group_has_survivor
-}
-
-terminate_active_cmd_tree() {
-  local tree_pids=()
-  local pid=""
-  while IFS= read -r pid; do
-    [[ -n "${pid}" ]] && tree_pids+=("${pid}")
-  done < <(active_cmd_tree_pids)
-  local deadline=$(( $(now_epoch) + TEST_TIMEOUT_GRACE_SEC ))
-  signal_pid_snapshot TERM "${tree_pids[@]}"
-  signal_active_cmd_group TERM
-  while active_snapshot_or_group_has_survivor "${tree_pids[@]}" \
-        && [[ "$(now_epoch)" -lt "${deadline}" ]]; do
-    sleep 1
-  done
-  # Descendants can be reparented when the root shell handles TERM and exits.
-  # Recheck the saved tree, not only the root PID, before escalating.
-  signal_pid_snapshot KILL "${tree_pids[@]}"
-  signal_active_cmd_group KILL
-  local kill_deadline=$(( $(now_epoch) + 2 ))
-  while active_snapshot_or_group_has_survivor "${tree_pids[@]}" \
-        && [[ "$(now_epoch)" -lt "${kill_deadline}" ]]; do
-    sleep 0.1
-  done
-}
-
-hb_pid=""
-cleanup() {
-  if [[ -n "${ACTIVE_CMD_PID}" ]] && kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; then
-    kill_active_cmd_tree TERM
-    wait "${ACTIVE_CMD_PID}" >/dev/null 2>&1 || true
-  fi
-  [[ -z "${hb_pid}" ]] || kill "${hb_pid}" >/dev/null 2>&1 || true
-  [[ -z "${ACTIVE_LOG_TAIL_PID}" ]] || kill "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
-
-run_observed() {
-  local cmd="$1"
-  local status=0
-  local command_start_epoch
-  command_start_epoch="$(now_epoch)"
-  local timed_out=0
-  local next_disk_check=$(( $(now_epoch) + CI_TEST_DISK_CHECK_SEC ))
-
-  tail -n 0 -f "${TEST_LOG_FILE}" &
-  ACTIVE_LOG_TAIL_PID=$!
-  # A dedicated process group lets timeout cleanup reach descendants even if
-  # the root shell exits and reparents them, or process-tree inspection fails.
-  set -m
-  bash -l -s <<< "${cmd}" >> "${TEST_LOG_FILE}" 2>&1 &
-  ACTIVE_CMD_PID=$!
-  ACTIVE_CMD_PGID="${ACTIVE_CMD_PID}"
-  set +m
-
-  while kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; do
-    local now_val
-    now_val="$(now_epoch)"
-    if [[ "${now_val}" -ge "${next_disk_check}" ]]; then
-      next_disk_check=$((now_val + CI_TEST_DISK_CHECK_SEC))
-      if [[ "${DISK_PRESSURE_REPORTED}" -eq 0 ]] && disk_pressure_detected; then
-        DISK_PRESSURE_REPORTED=1
-        log_line "[ci-observe] disk_pressure $(disk_pressure_detail)"
-        diag_dump "disk_pressure_observed"
-      fi
-    fi
-    if [[ "${TEST_TIMEOUT_SEC}" -gt 0 ]] \
-       && [[ $((now_val - command_start_epoch)) -ge "${TEST_TIMEOUT_SEC}" ]]; then
-      log_line "[ci-observe] timeout timeout_sec=${TEST_TIMEOUT_SEC}"
-      diag_dump "timeout_${TEST_TIMEOUT_SEC}s"
-      terminate_active_cmd_tree
-      timed_out=1
-      break
-    fi
-    sleep 1
-  done
-
-  if [[ "${timed_out}" -eq 1 ]]; then
-    wait "${ACTIVE_CMD_PID}" >/dev/null 2>&1 || true
-    status=124
-  else
-    wait "${ACTIVE_CMD_PID}" || status=$?
-  fi
-  kill "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
-  wait "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
-  ACTIVE_CMD_PID=""
-  ACTIVE_CMD_PGID=""
-  ACTIVE_LOG_TAIL_PID=""
-  return "${status}"
-}
-
-log_line "[ci-run] command: ${TEST_CMD}"
-log_line "[ci-run] heartbeat_sec=${HEARTBEAT_SEC}"
-log_line "[ci-run] timeout_sec=${TEST_TIMEOUT_SEC}"
-log_line "[ci-run] disk_min_available_mb=${CI_TEST_DISK_MIN_AVAILABLE_MB} disk_check_sec=${CI_TEST_DISK_CHECK_SEC}"
-log_line "[ci-run] started_at=$(iso_now)"
-log_line "[ci-run] log_file=${TEST_LOG_FILE}"
-log_line "[ci-run] source_root=${DUNE_SOURCEROOT}"
-
-heartbeat &
-hb_pid=$!
-
-status=0
-run_observed "$(effective_test_cmd)" || status=$?
-if [[ "${status}" -ne 0 ]]; then
-  if [[ "${status}" -eq 124 ]]; then
-    log_line "[ci-run] ERROR: test command timed out after ${TEST_TIMEOUT_SEC}s"
-  else
-    diag_dump "nonzero_exit_${status}"
-    log_line "[ci-run] ERROR: test command failed with exit=${status}"
-  fi
-  exit "${status}"
+# Diagnostics are read-only. No discovered PID can become signal authority.
+if [[ "${1:-}" = "--ci-run-diagnostics" ]]; then
+  diag_dump "${2:-unknown}"
+  exit 0
 fi
 
-if [[ "${CI_CONTRACT_HARNESS_ENABLED}" = "1" ]]; then
-  log_line "[ci-run] contract_harness_command: ${CI_CONTRACT_HARNESS_CMD}"
-  contract_status=0
-  run_observed "${CI_CONTRACT_HARNESS_CMD}" || contract_status=$?
-  if [[ "${contract_status}" -ne 0 ]]; then
-    diag_dump "contract_harness_exit_${contract_status}"
-    log_line "[ci-run] ERROR: contract harness failed with exit=${contract_status}"
-    exit "${contract_status}"
-  fi
-  log_line "[ci-run] contract harness completed successfully"
-else
-  log_line "[ci-run] contract harness skipped (CI_CONTRACT_HARNESS_ENABLED=${CI_CONTRACT_HARNESS_ENABLED})"
-fi
-
-log_line "[ci-run] tests completed successfully (elapsed_sec=$(elapsed_sec))"
+export CI_TEST_LOG_FILE="${TEST_LOG_FILE}" CI_TEST_START_EPOCH="${START_EPOCH}"
+export CI_TEST_HEARTBEAT_SEC="${HEARTBEAT_SEC}" CI_TEST_TIMEOUT_SEC="${TEST_TIMEOUT_SEC}"
+export CI_TEST_TIMEOUT_GRACE_SEC="${TEST_TIMEOUT_GRACE_SEC}"
+export CI_TEST_DISK_MIN_AVAILABLE_MB CI_TEST_DISK_CHECK_SEC CI_CONTRACT_HARNESS_ENABLED
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+exec python3 "${SCRIPT_DIR}/ci/command_observer.py" "${TEST_CMD}" "${CI_CONTRACT_HARNESS_CMD}"

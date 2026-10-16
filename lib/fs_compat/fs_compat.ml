@@ -2069,14 +2069,25 @@ let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
 
 let with_cached_writer_for_testing path f = Fd_cache.with_writer path f
 
-let rec read_fd_chunks fd buffer =
+(* The rest of [fd], from its current position to its end. The buffer starts
+   at the length the file reports and one chunk serves every read, so a file
+   that does not change while it is read is copied once into the buffer and
+   once out of it. A file that grows meanwhile is still read to its end: the
+   buffer grows with it. *)
+let read_fd_chunks fd =
+  let position = Unix.lseek fd 0 Unix.SEEK_CUR in
+  let buffer = Buffer.create (Int.max 1 ((Unix.fstat fd).Unix.st_size - position)) in
   let chunk = Bytes.create 65536 in
-  match Unix.read fd chunk 0 (Bytes.length chunk) with
-  | 0 -> Buffer.contents buffer
-  | count ->
-    Buffer.add_subbytes buffer chunk 0 count;
-    read_fd_chunks fd buffer
-  | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd_chunks fd buffer
+  let rec read () =
+    match Unix.read fd chunk 0 (Bytes.length chunk) with
+    | 0 -> Buffer.contents buffer
+    | count ->
+      Buffer.add_subbytes buffer chunk 0 count;
+      read ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> read ()
+  in
+  read ()
+;;
 
 type durable_append_operation =
   | Incomplete_tail_read
@@ -4002,7 +4013,7 @@ let read_private_jsonl_locked_with_io ~io ~missing path read =
 let read_private_jsonl_rows_locked_with_io ~io path =
   let open Private_jsonl_rows in
   read_private_jsonl_locked_with_io ~io ~missing:Rows_missing path (fun fd ->
-    let bytes = read_fd_chunks fd (Buffer.create 65536) in
+    let bytes = read_fd_chunks fd in
     let end_offset = String.length bytes in
     let rows_end =
       match String.rindex_opt bytes '\n' with
@@ -4164,7 +4175,7 @@ let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?
              || Char.equal (private_jsonl_read_byte fd (Bytes.create 1) (from - 1)) '\n'
            in
            ignore (Unix.lseek fd from Unix.SEEK_SET : int);
-           let existing = read_fd_chunks fd (Buffer.create 4096) in
+           let existing = read_fd_chunks fd in
            let existing =
              if starts_at_row then existing
              else match String.index_opt existing '\n' with
@@ -4287,7 +4298,7 @@ let update_existing_private_file_durable_locked_with_io ~io path decide =
                   let* existing =
                     private_jsonl_capture Read_transaction_data (fun () ->
                       ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-                      read_fd_chunks fd (Buffer.create 4096))
+                      read_fd_chunks fd)
                     |> Result.map_error (fun failure ->
                       Private_jsonl_operation_failed failure)
                   in
@@ -4379,7 +4390,7 @@ let truncate_incomplete_jsonl_tail ~path ~fd ~end_offset =
     match
       (* See Unix.lseek: only the file-position side effect is required. *)
       ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-      read_fd_chunks fd (Buffer.create end_offset)
+      read_fd_chunks fd
     with
     | bytes ->
       Ok

@@ -290,7 +290,7 @@ let test_upstream_inline_arguments_and_whole_child_failure () =
     | Inline {argument_node=None;_} | Async _ -> fail "upstream inline input lost its validation node") (Nested.calls compiled);
   let id source = Plan.Node_id.make (Yojson.Safe.to_string (`List [`String source])) |> require "parent ID" in
   let queries = ref [] and downstream = ref false in
-  let dispatch ~tool_use_id:_ ~(node : Plan.node) ~descriptor:_ ~schedule:_ ~input =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~(node : Plan.node) ~descriptor:_ ~schedule:_ ~input () =
     if Plan.Node_id.equal node.id (id "downstream") then downstream := true;
     if node.tool_name = "keeper_memory_search" then (
       queries := Yojson.Safe.Util.(input |> member "query" |> to_string) :: !queries;

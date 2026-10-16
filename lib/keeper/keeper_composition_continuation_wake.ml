@@ -42,6 +42,11 @@ let current_snapshot ~base_path =
 
 let resume ?on_recovery_held ~context continuation =
   let source = Journal.continuation_source continuation in
+  let hold_original error =
+    Option.iter (fun observe ->
+      observe ~request_id:(Journal.continuation_request_id continuation)
+        ~reason:(error_to_string error)) on_recovery_held;
+    error in
   let config = context.Keeper_types_profile.config in
   let profiles = Keeper_types_profile.read_keeper_profile_snapshot ~base_path:config.base_path in
   let* defaults = Keeper_types_profile.snapshot_profile_defaults profiles source.keeper_name
@@ -53,14 +58,56 @@ let resume ?on_recovery_held ~context continuation =
   let* persisted = Keeper_meta_store.read_meta_file_path_read_only
       ~ownership_root:config.base_path metadata_path
     |> Result.map_error (fun error -> Metadata_unavailable error) in
-  let* persisted = match persisted with Some meta -> Ok meta | None -> Error Metadata_missing in
-  let* () = if persisted.name = source.keeper_name then Ok () else Error Metadata_owner_mismatch in
-  let* meta = Keeper_meta_contract.effective_meta_of_profile_defaults defaults persisted
-    |> Result.map_error (fun detail -> Profile_rejected detail) in
+  let* meta, owner_metadata_refusal =
+    match persisted with
+    | Some persisted when persisted.name = source.keeper_name ->
+      let* meta = Keeper_meta_contract.effective_meta_of_profile_defaults defaults persisted
+        |> Result.map_error (fun detail -> Profile_rejected detail) in
+      Ok (meta, None)
+    | None | Some _ ->
+      let refusal = match persisted with
+        | None -> Keeper_tool_composition_surface.Owner_metadata_missing
+        | Some _ -> Keeper_tool_composition_surface.Owner_metadata_mismatch in
+      let* trace_id =
+        match source.producer with
+        | Journal.Named {activation=Some bound;_} ->
+          Ok (Keeper_skill_activation_recorder.bound_trace_id bound)
+        | Journal.Prepared | Journal.Named {activation=None;_} ->
+          Keeper_id.Trace_id.of_string ("refusal-" ^ source.keeper_name)
+          |> Result.map_error (fun detail -> Runtime_failed ("refusal trace identity rejected: " ^ detail)) in
+      let placeholder : Keeper_meta_contract.keeper_meta =
+        { id = None; name = source.keeper_name; instructions = ""
+        ; sandbox_profile = Keeper_types_profile.Docker; sandbox_image = None
+        ; network_mode = Keeper_types_profile.Network_none; microvm_backend = None
+        ; microvm_memory = None; microvm_cpus = None; mention_targets = []
+        ; board_interests = []; created_at = ""; updated_at = ""
+        ; max_context_override = None; paused = false; latched_reason = None
+        ; input_policy = Keeper_input_policy.default
+        ; activation_mode = Keeper_activation_mode.default; current_task_id = None
+        ; telemetry_feedback_enabled = None; telemetry_feedback_window_hours = None
+        ; always_allow = None; voice_always_allow = None
+        ; runtime =
+            { usage =
+                { total_turns = 0; total_input_tokens = 0; total_output_tokens = 0
+                ; total_tokens = 0; total_cost_usd = 0.0; last_turn_ts = 0.0
+                ; last_input_tokens = 0; last_output_tokens = 0; last_total_tokens = 0
+                ; last_usage_reported_at = None; last_latency_ms = 0 }
+            ; usage_cursor = None; last_usage_resolution = None
+            ; proactive_rt =
+                { count_total = 0; last_ts = 0.0; visible_count_total = 0
+                ; last_visible_ts = 0.0
+                ; last_outcome = Keeper_meta_contract.Proactive_never_started
+                ; last_reason = ""; last_preview = "" }
+            ; trace_id; last_runtime_attempt = None; message_scope_ack_id = None }
+        ; keeper_id = None; agent_core_env = [] } in
+      let* meta = Keeper_meta_contract.effective_meta_of_profile_defaults defaults placeholder
+        |> Result.map_error (fun detail -> Profile_rejected detail) in
+      Ok (meta, Some refusal)
+  in
   let* () = if meta.paused then Error Keeper_paused else Ok () in
   let* snapshot = current_snapshot ~base_path:config.base_path in
   let* nested_activation = Keeper_composition_draft.load_nested_activation ~base_path:config.base_path source
-    |> Result.map_error (fun error -> Original_activation_unavailable error) in
+    |> Result.map_error (fun error -> hold_original (Original_activation_unavailable error)) in
   let addons = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:source.keeper_name in
   let descriptors = Keeper_tool_descriptor.all_descriptors ()
     @ List.map Keeper_lane_addon_descriptor.create addons.exports in
@@ -75,9 +122,9 @@ let resume ?on_recovery_held ~context continuation =
     | None -> Ok Keeper_task_skill_turn.empty
     | Some bound -> Keeper_task_skill_turn.resolve ~snapshot
         (Keeper_skill_activation_recorder.bound_task_references bound)
-        |> Result.map_error (fun error -> Original_task_skills_unavailable error) in
+        |> Result.map_error (fun error -> hold_original (Original_task_skills_unavailable error)) in
   let* task_selection = Keeper_task_skill_turn.with_descriptors ~descriptors ~snapshot task_selection
-    |> Result.map_error (fun error -> Original_task_skills_unavailable error) in
+    |> Result.map_error (fun error -> hold_original (Original_task_skills_unavailable error)) in
   let capability_surface = Keeper_capability_surface.create_with_descriptors
       ~tool_descriptors:descriptors ~tool_deny:defaults.tool_deny ~sandbox_profile:meta.sandbox_profile
       ~skill_names:defaults.skill_names ~global_skill_catalog:catalog
@@ -93,7 +140,7 @@ let resume ?on_recovery_held ~context continuation =
       ~completion:Agent_core.Tool_contract.Continue_after_success in
   let publication_recovery : Keeper_publication_recovery_availability.turn_context =
     {provider=context.publication_recovery_provider;keeper_name=source.keeper_name} in
-  Ok (Keeper_tool_composition_surface.resume_continuation ?on_recovery_held ~capability_surface ~continuation
+  Ok (Keeper_tool_composition_surface.resume_continuation ?on_recovery_held ?owner_metadata_refusal ~capability_surface ~continuation
       ~config ~meta ~publication_recovery
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:true ~system_prompt:meta.instructions)
       ~turn_context ~invocation
@@ -116,69 +163,6 @@ type 'a t =
   ; mutable active : Run_set.t
   ; mutable held : string Run_map.t }
 
-(** A refusal that cannot heal by retrying: the sealed run's tool contract was
-    rejected by current authority ([Policy_rejection], e.g. the capability
-    surface changed) or the run's durable ownership no longer admits it
-    ([Workflow_rejection], e.g. source conflict or ownership change), or the
-    original Keeper's metadata is gone or belongs to another Keeper.
-    Transient outcomes — paused Keeper, missing snapshot, unavailable
-    profile/metadata, runtime faults — stay retryable and are never listed
-    here. *)
-type permanent_refusal =
-  | Owner_metadata_missing
-  | Owner_metadata_mismatch
-  | Sealed_run_refused of Tool_result.failure_payload
-
-let permanent_refusal_of_outcome (outcome : (Tool_result.result, error) result) =
-  match outcome with
-  | Error error ->
-    (match error with
-     | Metadata_missing -> Some Owner_metadata_missing
-     | Metadata_owner_mismatch -> Some Owner_metadata_mismatch
-     | Profile_unavailable _ | Metadata_unavailable _ | Profile_rejected _
-     | Keeper_paused | Snapshot_lookup_failed _ | Snapshot_missing
-     | Snapshot_rejected _ | Runtime_failed _ -> None)
-  | Ok result ->
-    match result with
-    | Tool_result.Failed failure ->
-      (match failure.class_ with
-       | Tool_result.Policy_rejection | Tool_result.Workflow_rejection ->
-         Some (Sealed_run_refused failure)
-       | Tool_result.Dependency_unavailable | Tool_result.Runtime_failure
-       | Tool_result.Operator_cancelled -> None)
-    | Tool_result.Completed _ | Tool_result.Deferred _ -> None
-
-let refusal_message = function
-  | Owner_metadata_missing -> error_to_string Metadata_missing
-  | Owner_metadata_mismatch -> error_to_string Metadata_owner_mismatch
-  | Sealed_run_refused failure -> failure.message
-
-let refusal_data = function
-  | Owner_metadata_missing -> `Assoc ["kind", `String "owner_metadata_missing"]
-  | Owner_metadata_mismatch -> `Assoc ["kind", `String "owner_metadata_mismatch"]
-  | Sealed_run_refused failure -> Tool_result.data (Tool_result.Failed failure)
-
-let settle_permanent_refusal supervisor candidate refusal =
-  let source = Journal.continuation_source candidate in
-  let base_path = supervisor.context.config.base_path in
-  let request_id = Journal.continuation_request_id candidate in
-  let run_id = Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id in
-  match
-    Keeper_msg_async.settle_waiting_request_as_failed ~base_path ~caller:source.keeper_name
-      ~request_id ~body:(refusal_message refusal) ~data:(refusal_data refusal)
-      ~before_persist:(fun proof ->
-        Keeper_composition_completion_outbox.prepare_terminal ~proof
-        |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
-      ()
-  with
-  | Error error ->
-    Log.Keeper.warn ~keeper_name:source.keeper_name
-      "prepared continuation refusal settlement retained run=%s request=%s error=%s"
-      run_id request_id (Keeper_msg_async.waiting_settlement_rejection_to_string error)
-  | Ok () ->
-    Log.Keeper.info ~keeper_name:source.keeper_name
-      "prepared continuation refused permanently run=%s request=%s; failure terminal settled and delivery obligated"
-      run_id request_id
 
 let log_result candidate outcome =
   let source = Journal.continuation_source candidate in
@@ -221,13 +205,7 @@ let pulse_with_resume ~resume ~sw supervisor =
               try resume ~on_recovery_held ~context:supervisor.context candidate with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Error (Runtime_failed (Printexc.to_string exn))) in
-        (match (if Run_map.mem key supervisor.held then None
-                else permanent_refusal_of_outcome outcome) with
-         | Some refusal ->
-           (try settle_permanent_refusal supervisor candidate refusal with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Log.Server.warn "prepared continuation refusal settle failed: %s" (Printexc.to_string exn))
-         | None -> ());
+
         (try supervisor.on_result candidate outcome with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn -> Log.Server.warn "prepared continuation observer failed: %s" (Printexc.to_string exn)))

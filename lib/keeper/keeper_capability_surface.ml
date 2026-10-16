@@ -37,7 +37,8 @@ type candidate =
   | Skill of skill_capability
 
 type t =
-  { descriptors : Keeper_tool_descriptor.t list
+  { skill_inventory : Keeper_skill_inventory.t
+  ; descriptors : Keeper_tool_descriptor.t list
   ; skill_projection : Keeper_skill_catalog.turn_projection
   ; tool_capabilities : tool_capability list
   ; skill_capabilities : skill_capability list
@@ -334,7 +335,8 @@ let create_with_descriptors
         ~skill_names
         ~skill_inventory
   in
-  { descriptors
+  { skill_inventory
+  ; descriptors
   ; skill_projection
   ; tool_capabilities
   ; skill_capabilities
@@ -375,6 +377,10 @@ let tool_row_availability_for_name surface name =
 ;;
 let skill_projection surface = surface.skill_projection
 let skill_catalog surface = surface.skill_projection.catalog
+let exact_skill_absence_proven surface reference =
+  Keeper_skill_inventory.exact_absence_proven surface.skill_inventory reference
+let changed_skill_proven surface reference =
+  Keeper_skill_inventory.changed_reference_proven surface.skill_inventory reference
 let tool_capabilities surface = surface.tool_capabilities
 
 let ordinary_tool_reference capability =

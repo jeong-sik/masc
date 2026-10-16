@@ -171,11 +171,25 @@ val continuation_source : continuation -> source
 val continuation_request_id : continuation -> string
 val continuation_dependencies : continuation -> Keeper_composition_dependency.t list
 
+type completion_disposition =
+  | Canonical_completion
+  | Recovery_pending
+  | Unadmitted_attempt
+
+val completion_disposition :
+  base_path:string -> Keeper_msg_async.entry -> (completion_disposition, error) result
+(** Requests carrying draft/run references must prove their immutable source and
+    actual current/prior journal membership before any logical completion.
+    [Unadmitted_attempt] is an exact-source request whose acceptance never bound
+    this run, including a losing continuation CAS. It has no logical terminal to
+    announce. Missing, corrupt or inconsistent authority remains [Error].
+    [Recovery_pending] also suppresses a recoverable Lost physical attempt.
+    Named requests without either journal artifact field retain their canonical
+    terminal semantics; a partial journal envelope never falls back to that boundary. *)
+
 val completion_pending : base_path:string -> Keeper_msg_async.entry -> (bool, error) result
-(** A Lost physical request is not a logical completion when its exact owned
-    journal proves original continuation or a successor. Missing or inconsistent
-    owned authority is an error, not permission to announce completion. Ordinary
-    requests without a run identity retain their canonical terminal semantics. *)
+(** Common outward guard: true for [Recovery_pending] or [Unadmitted_attempt].
+    It applies to every status, including Done and Persistence_failed. *)
 
 type child_admission_history = Untouched_child | Admitted_child | Admission_unconfirmed
 val continuation_child_admission : continuation ->
@@ -247,6 +261,10 @@ val bind_request : t -> request_id:string -> (worker, error) result
 val validate_plan : worker -> plan:Keeper_tool_plan.t -> (unit, error) result
 (** Integrity-read the original manifest and compare the exact frozen plan
     (including edges and exports), then check current durable ownership. *)
+
+val validate_refusal_completion : worker -> plan:Keeper_tool_plan.t -> (unit, error) result
+(** Before a refusal successor finishes, reread exact original artifacts,
+    producer/child authorities and worker ownership. No new replay authority. *)
 
 val child_origin : attempt -> plan:Keeper_tool_plan.t ->
   activation:Keeper_skill_activation_ledger.activation ->

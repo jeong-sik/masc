@@ -212,7 +212,7 @@ type fixture =
   ; make_bundle : unit -> Masc.Keeper_tools_agent_core.tool_bundle
   }
 
-let frozen_surface_with ~tool_deny ~tool_descriptors ~base_path ~sandbox_profile =
+let frozen_surface_with_observation ~observation ~tool_deny ~tool_descriptors ~base_path ~sandbox_profile =
   let config = Skill_source_config.parse_text
       "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n"
       |> require "skill source configuration" in
@@ -222,7 +222,7 @@ let frozen_surface_with ~tool_deny ~tool_descriptors ~base_path ~sandbox_profile
         | Resolved path -> path
         | Anchor_unavailable _ | Anchor_invalid _ | Path_rejected _ -> fail "source resolution" in
       { Skill_catalog_snapshot.source
-      ; observation = Skill_catalog_snapshot.Source_ready {resolved_path; candidates=0}
+      ; observation = observation resolved_path
       ; candidates=[] }) config.sources in
   let snapshot = Skill_catalog_snapshot.configured ~config scans |> require "frozen empty skills" in
   let global_skill_catalog, diagnostics = Masc.Keeper_skill_catalog.of_snapshot ~descriptors:tool_descriptors snapshot in
@@ -231,9 +231,33 @@ let frozen_surface_with ~tool_deny ~tool_descriptors ~base_path ~sandbox_profile
     ~sandbox_profile ~skill_names:None ~global_skill_catalog
     ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors:tool_descriptors snapshot) ~task_skills:[]
 
+let frozen_surface_with ~tool_deny ~tool_descriptors ~base_path ~sandbox_profile =
+  frozen_surface_with_observation
+    ~observation:(fun resolved_path -> Skill_catalog_snapshot.Source_ready {resolved_path;candidates=0})
+    ~tool_deny ~tool_descriptors ~base_path ~sandbox_profile
+
 let frozen_surface ~base_path ~sandbox_profile =
   frozen_surface_with ~tool_deny:[] ~tool_descriptors:(Descriptor.all_descriptors ())
     ~base_path ~sandbox_profile
+
+(* The surface a restarted owner sees: the snapshot published from the Skill
+   files on disk now, not the empty frozen one. *)
+let published_surface fixture =
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+    |> require "published surface workspace" in
+  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
+   | Published _ | Unchanged _ -> ()
+   | Workspace_retired -> fail "published surface workspace retired");
+  let snapshot = match Skill_catalog_snapshot_service.current ~workspace with
+    | Some value -> value | None -> fail "published surface snapshot missing" in
+  let descriptors = Descriptor.all_descriptors () in
+  let catalog,diagnostics = Masc.Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
+  check int "published skill catalog has no diagnostics" 0 (List.length diagnostics);
+  Masc.Keeper_capability_surface.create_with_descriptors ~tool_descriptors:descriptors ~tool_deny:[]
+    ~sandbox_profile:fixture.meta.sandbox_profile ~skill_names:None ~global_skill_catalog:catalog
+    ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot) ~task_skills:[]
 
 let with_environment values f =
   let rec loop = function
@@ -1434,7 +1458,7 @@ pointer = "/artifacts/0/_blob/sha256"
   let child_continuation = Journal.waiting_continuation child_journal |> require "suspended named producer"
     |> function Some value -> value | None -> fail "named producer wait missing" in
   (match (Journal.source child_journal).producer with
-   | Journal.Named {activation=Some original;tool_name;skill_reference} ->
+   | Journal.Named {activation=Some original;tool_name;skill_reference;_} ->
      check string "named journal retains the original tool" binding.composition_tool tool_name;
      check bool "named journal retains the exact reference" true (Skill_reference.equal reference skill_reference);
      check bool "named journal retains original Task Skill selection" true
@@ -1460,18 +1484,48 @@ let test_named_producer_skill_loss_settles_run_and_ends_parent () =
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   with_parked_named_producer env fixture @@ fun parked ->
   let module Async = Masc.Keeper_msg_async in
+  (* Readiness and original authority precede even a proven producer absence. *)
+  control fixture (`Assoc ["state",`String "exited"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-before-producer-removal"
+      ~turn:52 "keeper_job_status" (argument parked.job_id)));
   let skill_dir = Filename.concat fixture.base_path ".agents/skills/named-result-child" in
   Unix.unlink (Filename.concat skill_dir "SKILL.md");
   Unix.rmdir skill_dir;
   let empty_surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
   let before_calls = List.length (calls fixture) in
+  let ledger_path = Filename.concat (Masc.Keeper_fs.keeper_session_dir parked.config
+      (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id)) "skill-activation-events.jsonl" in
+  let original_ledger = read ledger_path in
+  Fun.protect ~finally:(fun () -> write ledger_path original_ledger) (fun () ->
+    write ledger_path "corrupt-original-activation\n";
+    let unavailable = resume_parked_continuation env fixture empty_surface parked.child_continuation in
+    check bool "producer absence cannot bypass corrupt original activation" true (Tool_result.is_failed unavailable);
+    let original_entry = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+        ~caller:keeper parked.binding.request_id |> require "corrupt activation preserves original terminal"
+        |> Async.durable_terminal_entry in
+    (match original_entry.status with
+     | Async.Waiting_for_dependencies _ -> ()
+     | _ -> fail "corrupt original activation closed the waiting named producer"));
+  let unreadable_surface = frozen_surface_with_observation
+      ~observation:(fun resolved_path -> Skill_catalog_snapshot.Source_unavailable
+        {resolved_path;operation=Read_source_directory;detail="isolated source read unavailable"})
+      ~tool_deny:[] ~tool_descriptors:(Descriptor.all_descriptors ())
+      ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
+  let unconfirmed = resume_parked_continuation env fixture unreadable_surface parked.child_continuation in
+  check bool "unavailable source scan is not producer absence" true (Tool_result.is_failed unconfirmed);
+  let unconfirmed_owner = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+      ~composition_run_id:parked.binding.composition_run_id |> require "unavailable source original owner"
+      |> Journal.waiting_continuation |> require "unavailable source retains original wait"
+      |> function Some continuation -> continuation | None -> fail "unavailable source became permanent" in
+  check string "unavailable source scan preserves canonical owner" parked.binding.request_id
+    (Journal.continuation_request_id unconfirmed_owner);
   let settled = resume_parked_continuation env fixture empty_surface parked.child_continuation in
   check bool "permanent refusal keeps an accepted successor transport" true (Tool_result.is_success settled);
   check int "permanent refusal dispatches no producer work" before_calls (List.length (calls fixture));
   let refused_ok,refusal_data,refusal_entry = await_composition env fixture (Tool_result.data settled) in
   check bool "refused producer settles as a durable terminal failure" false refused_ok;
-  check_json "terminal failure carries the typed source-conflict cause"
-    (`Assoc ["kind",`String "source_conflict"]) refusal_data;
+  check_json "terminal failure carries proven original producer absence"
+    (`String "original_producer_absent") (refusal_data |> member "kind");
   (match refusal_entry.status with
    | Async.Done {ok=false;_} -> ()
    | _ -> fail "refusal successor is not a canonical terminal failure");
@@ -1502,6 +1556,71 @@ let test_named_producer_skill_loss_settles_run_and_ends_parent () =
     (Async.entry_to_json refusal_entry) (failure |> member "data" |> member "request");
   check bool "refused child supplies no successful downstream export" true
     (completed |> member "exports" |> member "child_result" |> member "available" = `Bool false)
+
+let test_named_producer_switched_to_inline_settles_run_and_ends_parent () =
+  with_fixture @@ fun env _initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  with_parked_named_producer env fixture @@ fun parked ->
+  let module Async = Masc.Keeper_msg_async in
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  control fixture (`Assoc ["state",`String "exited"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-before-producer-switch"
+      ~turn:52 "keeper_job_status" (argument parked.job_id)));
+  let skill_md = Filename.concat fixture.base_path ".agents/skills/named-result-child/SKILL.md" in
+  let inline_md = String.concat {|execution = "inline"|}
+      (Astring.String.cuts ~sep:{|execution = "async"|} (read skill_md)) in
+  write skill_md inline_md;
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+      |> require "refusal fixture workspace" in
+  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
+  let inline_surface = published_surface fixture in
+  check bool "a new producer revision does not prove producer absence" false
+    (Masc.Keeper_capability_surface.exact_skill_absence_proven inline_surface parked.reference);
+  check bool "changed producer revision is proven from the published identity" true
+    (Masc.Keeper_capability_surface.changed_skill_proven inline_surface parked.reference);
+  let settled = resume_parked_continuation env fixture inline_surface parked.child_continuation in
+  check bool "present-but-changed producer accepts a refusal successor" true (Tool_result.is_success settled);
+  let refused_ok,refusal_data,refusal_entry = await_composition env fixture (Tool_result.data settled) in
+  check bool "switched-to-inline producer settles as a durable terminal failure" false refused_ok;
+  check_json "terminal failure carries proven original producer change"
+    (`String "original_producer_changed") (refusal_data |> member "kind");
+  check bool "refusal settles under a new physical request" true
+    (refusal_entry.request_id <> parked.binding.request_id);
+  let discovery = Journal.pending_continuations
+      ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+      ~base_path:fixture.base_path |> require "post-change-refusal discovery" in
+  check int "changed producer markers retire after settlement" 2 discovery.retired;
+  check int "parent dependency becomes the only ready candidate" 1 (List.length discovery.ready);
+  (* Also verify deleted Keeper metadata settles the parent via Wake.resume *)
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  write declaration {|[keeper]
+activation_mode = "manual"
+sandbox_profile = "docker"
+sandbox_image = "base"
+network_mode = "inherit"
+instructions = "Refusal fixture"
+|};
+  ignore (Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}));
+  let metadata_path = Masc.Keeper_types_profile.keeper_meta_path parked.config keeper in
+  if Sys.file_exists metadata_path then Unix.unlink metadata_path;
+  let context : _ Masc.Keeper_types_profile.context =
+    {config=parked.config;agent_name="continuation-refusal-fixture";
+     sw=Async.server_background_switch () |> require "continuation refusal switch";
+     clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let meta_refused = Wake.resume ~context parked.parent_continuation |> require "deleted metadata settles parent" in
+  check bool "deleted keeper metadata accepts a refusal successor" true (Tool_result.is_success meta_refused);
+  let parent_ok,parent_data,_ = await_composition env fixture (Tool_result.data meta_refused) in
+  check bool "parent ends as terminal failure when keeper metadata is missing" false parent_ok;
+  check_json "parent refusal records owner_metadata_missing"
+    (`String "owner_metadata_missing") (parent_data |> member "kind");
+  let after_parent = Journal.pending_continuations
+      ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+      ~base_path:fixture.base_path |> require "post-metadata-refusal discovery" in
+  check int "all ready candidates are retired after metadata refusal" 0 (List.length after_parent.ready)
 
 let test_temporary_keeper_refusal_keeps_named_run_open () =
   with_fixture @@ fun env _initialize fixture ->
@@ -1788,9 +1907,11 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (match Draft.load_continuation ~base_path:other_base ~capability_surface:changed_surface discovered with
    | Error (Draft.Malformed_draft _) -> ()
    | Ok _ | Error _ -> fail "sealed continuation was loaded in a different workspace");
-  let denied = resume_candidate (current_surface ~tool_deny:["keeper_job_result"] ()) discovered in
-  check bool "current denial refuses before async acceptance" true (Tool_result.is_failed denied);
-  check string "current denial keeps original owner" (Journal.continuation_request_id discovered)
+  (match Draft.load_continuation ~base_path:fixture.base_path
+      ~capability_surface:(current_surface ~tool_deny:["keeper_job_result"] ()) discovered with
+   | Error _ -> ()
+   | Ok _ -> fail "ordinary continuation admission executed a currently denied Tool");
+  check string "validation-only denial keeps original owner" (Journal.continuation_request_id discovered)
     (Journal.continuation_request_id (continuation ()));
   let lost_worker_calls = ref 0 in
   let lose_after_binding candidate =
@@ -2053,11 +2174,9 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   check int "retirement leaves no pending marker work" 0 stable.inspected;
   check int "composition never recreates original program" 1 (effect_count fixture "create");
   check int "composition never restarts original program" 1 (effect_count fixture "start");
-  (* A second prepared run proves a permanent intake refusal ends the run
-     instead of re-forking it on every pulse: once the node contract changes,
-     the sealed continuation is refused exactly once, the failure terminal is
-     settled on the run's last async request and delivered through the
-     composition completion outbox, and discovery drops the marker. *)
+  (* A current explicit denial ends a second logical run through an ordinary
+     failure successor and one durable notification, without rewriting its
+     original Waiting attempt or retrying the refused run on later pulses. *)
   let second_daemon_state = daemon fixture |> to_assoc in
   write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
     (List.map (fun (name,value) -> name,(if name="container" then `Null else value))
@@ -2087,91 +2206,261 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let second_ready = pending () in
   check int "completed second job is discovered without another event" 1 (List.length second_ready.ready);
   check int "second ready wait has readable original authority" 0 (List.length second_ready.failures);
-  (* An outbox flush racing after an early obligation write while the record is
-     still Waiting_for_owned_jobs retires that pre-settlement obligation, yet
-     settle_waiting_request_as_failed re-establishes the obligation inside the
-     store transition lock before overwriting the terminal record. *)
-  let waiting_proof = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
-      ~caller:keeper second_entry.request_id |> require "canonical pre-settlement waiting proof" in
-  Keeper_composition_completion_outbox.prepare_terminal ~proof:waiting_proof
-    |> Result.map_error Keeper_composition_completion_outbox.error_to_string
-    |> require "pre-settlement obligation write while waiting";
-  (* Suspend the real acknowledgement between its canonical Waiting read and
-     removal. A concurrent maintenance refusal must wait for that same lock;
-     it then creates its obligation after the old one has been retired. *)
+  (* An explicit current TOML denial ends the logical run through a standard
+     CAS-bound failure successor, preserving the original Waiting record. *)
   write_profile true;
   let before_refusal_calls = List.length (calls fixture) in
-  let raced_outcome = Eio.Switch.run (fun race_sw ->
-    let waiting_read,notify_waiting_read = Eio.Promise.create () in
-    let allow_delete,release_delete = Eio.Promise.create () in
-    let acknowledged,notify_acknowledged = Eio.Promise.create () in
-    Eio.Fiber.fork ~sw:race_sw (fun () ->
-      let result = Keeper_composition_completion_outbox.For_testing.acknowledge_waiting
-          ~after_waiting_read:(fun () ->
-            Eio.Promise.resolve notify_waiting_read ();
-            Eio.Promise.await allow_delete)
-          ~base_path:fixture.base_path ~keeper_name:keeper
-          ~request_id:second_entry.request_id ~composition_tool:"keeper_composition_run" in
-      Eio.Promise.resolve notify_acknowledged result);
-    Eio.Promise.await waiting_read;
-    let refused,notify_refused = Eio.Promise.create () in
-    let intake_completed = ref false in
-    let denied_wake = Wake.create ~context ~on_result:(fun _ outcome ->
-        intake_completed := true; Eio.Promise.resolve notify_refused outcome) () in
-    let intake_started,notify_intake_started = Eio.Promise.create () in
-    Eio.Fiber.fork ~sw:race_sw (fun () ->
-      Eio.Promise.resolve notify_intake_started ();
-      Wake.pulse ~sw:race_sw denied_wake
-        |> require "maintenance refusal races the locked waiting acknowledgement");
-    let blocked = Fun.protect
-        ~finally:(fun () -> Eio.Promise.resolve release_delete ())
-        (fun () ->
-          Eio.Promise.await intake_started;
-          Eio.Fiber.yield ();
-          not !intake_completed) in
-    check bool "refusal cannot pass the locked waiting read/delete interval" true blocked;
-    Eio.Promise.await acknowledged
-      |> Result.map_error Keeper_composition_completion_outbox.error_to_string
-      |> require "racing waiting acknowledgement retires only its old obligation";
-    Eio.Promise.await refused) in
-  (match raced_outcome with
-   | Ok result -> check bool "maintenance honors current TOML tool denial" true (Tool_result.is_failed result)
-   | Error error -> fail (Wake.error_to_string error));
+  let second_candidate = List.hd second_ready.ready in
+  let draft_path = Filename.concat (Filename.concat
+      (Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:fixture.base_path))
+      (String.sub second_draft.sha256 0 2)) second_draft.sha256 in
+  let detached_draft = draft_path ^ ".fixture-detached" in
+  let pre_admission_intakes = ref 0 and pre_admission_hold = ref None in
+  let held_outcome,notify_held_outcome = Eio.Promise.create () in
+  let unavailable_wake = Wake.create ~context ~on_result:(fun _ outcome ->
+      incr pre_admission_intakes; Eio.Promise.resolve notify_held_outcome outcome) () in
+  let before_unavailable = active_requests () in
+  (* Discover the real canonical ready owner first, then detach only its
+     original draft at intake. Discovery itself refuses a missing artifact, so
+     removing it before pulse would never exercise this admission boundary. *)
+  let resume_without_original ~on_recovery_held ~context candidate =
+    Unix.rename draft_path detached_draft;
+    Wake.resume ~on_recovery_held:(fun ~request_id ~reason ->
+      pre_admission_hold := Some request_id; on_recovery_held ~request_id ~reason)
+      ~context candidate in
+  Fun.protect
+      ~finally:(fun () -> if Sys.file_exists detached_draft then Unix.rename detached_draft draft_path)
+      (fun () ->
+        Wake.For_testing.pulse ~resume:resume_without_original ~sw:context.sw unavailable_wake
+          |> require "canonical discovery followed by actual missing-original intake";
+        (match Eio.Promise.await held_outcome with
+         | Ok result -> check bool "missing draft remains an unaccepted intake refusal" true (Tool_result.is_failed result)
+         | Error error -> fail (Wake.error_to_string error));
+        check (option string) "pre-admission refusal holds the sealed original owner"
+          (Some second_entry.request_id) !pre_admission_hold;
+        let unchanged = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+            ~caller:keeper second_entry.request_id |> require "missing original draft keeps canonical Waiting" in
+        check_json "missing draft never overwrites original Waiting" (Async.entry_to_json second_entry)
+          (Async.entry_to_json (Async.durable_terminal_entry unchanged)));
+  (* Restoring readable evidence makes discovery ready again. The production
+     controller must keep this same owner held until explicit resume, rather
+     than accepting another worker on each ordinary maintenance pulse. *)
+  Wake.pulse ~sw:context.sw unavailable_wake |> require "first ordinary pulse after original draft repair";
+  Wake.pulse ~sw:context.sw unavailable_wake |> require "second ordinary pulse after original draft repair";
+  Eio.Fiber.yield ();
+  check int "repaired unchanged owner does not repeat automatic intake" 1 !pre_admission_intakes;
+  check (list string) "pre-admission hold never starts a physical worker" before_unavailable (active_requests ());
+  check int "pre-admission hold never calls the backend" before_refusal_calls (List.length (calls fixture));
+  let denied_surface = frozen_surface_with ~tool_deny:["keeper_job_result"]
+      ~tool_descriptors:(Descriptor.all_descriptors ()) ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
+  let job_owner = Filename.concat (Store.paths ~base_path:fixture.base_path
+      (Store.Job_id.of_string second_id |> require "refusal original job identity")).job_dir "owner.jsonl" in
+  let original_job_owner = read job_owner in
+  set_source fixture ~task_id:"task-D" ~turn:72;
+  let fault_settled,notify_fault_settled = Eio.Promise.create () in
+  let fault_request = ref None and fault_callbacks = ref 0 in
+  let fault_entry = Fun.protect
+      ~finally:(fun () -> if Sys.file_exists detached_draft then Unix.rename detached_draft draft_path)
+      (fun () ->
+        let invocation = Agent_core.Tool_contract.Invocation.create
+            ~tool_use_id:"physical-refusal-authority-fault" ~turn:72
+            ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+            ~completion:Agent_core.Tool_contract.Continue_after_success in
+        let accepted = Masc.Keeper_tool_composition_surface.For_testing.resume_continuation
+            ~after_refusal_binding:(fun ~request_id ->
+              check bool "refusal authority fault injects once after actual CAS" true (Option.is_none !fault_request);
+              let queued = Async.load_canonical_durable_queued ~base_path:fixture.base_path
+                  ~caller:keeper request_id |> require "actual refusal Queued before authority fault"
+                  |> Async.durable_queued_entry in
+              let accepted_journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+                  ~composition_run_id:(Journal.continuation_source second_candidate).composition_run_id
+                |> require "actual refusal journal before authority fault" in
+              Journal.validate_request accepted_journal queued |> require "refusal successor has actual journal membership";
+              fault_request := Some request_id;
+              Unix.rename draft_path detached_draft)
+            ~after_refusal_settled:(fun () ->
+              incr fault_callbacks; Eio.Promise.resolve notify_fault_settled ())
+            ~capability_surface:denied_surface ~continuation:second_candidate ~config ~meta:fixture.meta
+            ~publication_recovery:{provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper}
+            ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"actual refusal authority fault")
+            ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+            ~invocation ~clock:(Eio.Stdenv.clock env) () in
+        check bool "authority fault follows actual accepted refusal transport" true (Tool_result.is_success accepted);
+        let request_id = match !fault_request with Some request_id -> request_id
+          | None -> fail "refusal hook ran without a real bound successor" in
+        check_json "accepted transport identifies the actual faulted request" (`String request_id)
+          (Tool_result.data accepted |> member "request_id");
+        Eio.Promise.await fault_settled;
+        check int "actual refusal production settlement callback finishes once" 1 !fault_callbacks;
+        let rec lost () = match Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+            ~caller:keeper request_id with
+          | Ok proof -> let entry = Async.durable_terminal_entry proof in
+            (match entry.status with Async.Lost _ -> entry
+             | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
+             | Waiting_for_dependencies _ | Done _ ->
+               fail "post-CAS refusal authority failure became a logical terminal")
+          | Error (Async.Canonical_terminal_runtime_active _) -> Eio.Fiber.yield (); lost ()
+          | Error error -> fail (Async.canonical_terminal_error_to_string error) in
+        let entry = lost () in
+        (match Journal.completion_disposition ~base_path:fixture.base_path entry with
+         | Error _ -> ()
+         | Ok _ -> fail "unavailable frozen draft authorized a logical completion projection");
+        let reconciliation = Masc.Keeper_composition_completion_wake.reconcile ~base_path:fixture.base_path
+            |> require "actual refusal outbox while original authority is unavailable" in
+        check int "faulted refusal callback/outbox announces no logical failure" 0 reconciliation.delivered;
+        check bool "unavailable authority remains an explicit outbox error" true (reconciliation.failures <> []);
+        let completions = Queue.pending_selections_result ~base_path:fixture.base_path keeper
+            |> require "actual refusal fault pending completion sources" in
+        check bool "faulted refusal enqueues no completion source" false
+          (List.exists (fun (selection : Keeper_event_queue_state.pending_selection) ->
+            match selection.source.payload with
+            | Keeper_event_queue.Composition_completed completion -> String.equal completion.cc_request_id request_id
+            | _ -> false) completions);
+        let original = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+            ~caller:keeper second_entry.request_id |> require "original Waiting survives post-CAS authority failure"
+            |> Async.durable_terminal_entry in
+        check_json "post-CAS refusal fault never overwrites original Waiting"
+          (Async.entry_to_json second_entry) (Async.entry_to_json original);
+        check string "original child job remains byte-identical during refusal interruption"
+          original_job_owner (read job_owner);
+        check int "post-CAS refusal interruption has zero backend calls" before_refusal_calls (List.length (calls fixture));
+        entry) in
+  let restored_journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+      ~composition_run_id:(Journal.continuation_source second_candidate).composition_run_id
+    |> require "restore original refusal journal" in
+  let restored = Journal.waiting_continuation restored_journal |> require "recover original refusal wait"
+      |> function Some candidate -> candidate | None -> fail "restored authority cannot recover faulted refusal owner" in
+  check string "restored continuation retains exact Lost successor owner" fault_entry.request_id
+    (Journal.continuation_request_id restored);
+  check (option string) "restored continuation keeps original Task despite current Task D" (Some "task-C")
+    (Journal.continuation_source restored).source_task_id;
+  check_json "interruption retains original dependency and result authority"
+    (`List (List.map Dependency.to_json (Journal.continuation_dependencies second_candidate)))
+    (`List (List.map Dependency.to_json (Journal.continuation_dependencies restored)));
+  (match Journal.completion_disposition ~base_path:fixture.base_path fault_entry with
+   | Ok Journal.Recovery_pending -> ()
+   | Ok (Journal.Canonical_completion | Journal.Unadmitted_attempt) | Error _ ->
+     fail "restored original authority promoted recoverable refusal Lost to logical failure");
+  let retirements () =
+    let identities = ref [] in
+    let report = Journal.For_testing.pending_continuations
+        ~before_retire:(fun path -> identities := (Yojson.Safe.from_string (read path)
+          |> member "request_id" |> to_string) :: !identities)
+        ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness ~base_path:fixture.base_path
+      |> require "identity-bound continuation marker discovery" in
+    report,List.sort String.compare !identities in
+  let restored_discovery,restored_retirements = retirements () in
+  check int "restored discovery sees original and current Lost markers" 2 restored_discovery.inspected;
+  check int "restored discovery retires only the original predecessor marker" 1 restored_discovery.retired;
+  check (list string) "restored discovery retirement is bound to exact original request"
+    [second_entry.request_id] restored_retirements;
+  check int "restored discovery finds exactly one recoverable refusal owner" 1 (List.length restored_discovery.ready);
+  check int "restored original authority has no discovery error" 0 (List.length restored_discovery.failures);
+  let second_candidate = List.hd restored_discovery.ready in
+  check string "public recovery intake uses the current Lost owner" fault_entry.request_id
+    (Journal.continuation_request_id second_candidate);
+  let refused,notify_refused = Eio.Promise.create () in
+  let denied_wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
+  Wake.pulse ~sw:context.sw denied_wake |> require "actual maintenance pulse under current Tool denial";
+  let accepted_refusal = match Eio.Promise.await refused with
+    | Ok result when Tool_result.is_success result -> Tool_result.data result
+    | Ok _ -> fail "current Tool denial did not accept a failure successor"
+    | Error error -> fail (Wake.error_to_string error) in
+  let refused_ok,refusal_data,refusal_entry = await_composition env fixture accepted_refusal in
+  let losing_worker_calls = ref 0 in
+  (* The public maintenance intake completes the winner before a second broker
+     admission uses the same stale candidate. A Keeper submission lock covers
+     on_accepted, so that callback must not wait for another same-Keeper submit.
+     The loser still durably records Queued/outbox before its real Journal CAS
+     fails, preserving the exact physical failure and notification boundary. *)
+  let losing = Async.submit_worker_with_request_id ?request_context:second_entry.request_context
+      ~background_sw:(Async.server_background_switch () |> require "competing intake switch")
+      ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~on_accepted:(fun request_id ->
+        Masc.Keeper_composition_completion_outbox.prepare ~base_path:fixture.base_path
+          ~keeper_name:keeper ~request_id ~composition_tool:Masc.Keeper_tool_composition_catalog.run_tool_name
+        |> Result.map_error Masc.Keeper_composition_completion_outbox.error_to_string
+        |> fun prepared -> Result.bind prepared (fun () ->
+          Journal.bind_continuation second_candidate ~request_id
+          |> Result.map (fun _ -> ()) |> Result.map_error Journal.error_to_string))
+      ~f:(fun ~request_id:_ _ ->
+        incr losing_worker_calls;
+        Async.worker_finished (Tool_result.make_ok ~tool_name:"unadmitted-intake"
+          ~start_time:(Tool_timing.start ()) ())) () in
+  let losing_request = match losing with
+    | Error (Async.Acceptance_persistence_failed {request_id;_}) -> request_id
+    | Error _ | Ok _ -> fail "competing stale intake was not rejected by the actual Journal CAS" in
+  check int "CAS loser never starts a worker" 0 !losing_worker_calls;
+  let losing_entry = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+      ~caller:keeper losing_request |> require "CAS loser canonical acceptance failure"
+      |> Async.durable_terminal_entry in
+  (match losing_entry.status with
+   | Async.Persistence_failed {attempted_status=Async.Acceptance_callback;_} -> ()
+   | _ -> fail "losing intake lost its physical acceptance failure evidence");
+  (match Journal.completion_disposition ~base_path:fixture.base_path losing_entry with
+   | Ok Journal.Unadmitted_attempt -> ()
+   | Ok (Journal.Canonical_completion | Journal.Recovery_pending) | Error _ ->
+     fail "exact-source CAS loser was promoted to logical completion");
+  check bool "current Tool denial settles the successor as a terminal failure" false refused_ok;
+  check bool "refusal successor has a distinct physical request" true
+    (refusal_entry.request_id <> second_entry.request_id);
+  check_json "failure carries exact current Tool denial" (`String "current_tool_denied")
+    (refusal_data |> member "kind");
+  check_json "failure preserves the refused original node" (`String "await-second")
+    (refusal_data |> member "node_id");
+  let old_wait = Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper second_entry.request_id
+    |> require "original Waiting remains immutable after failure successor" |> Async.durable_terminal_entry in
+  check_json "failure successor never rewrites old Waiting" (Async.entry_to_json second_entry) (Async.entry_to_json old_wait);
+  let stale = resume_parked_continuation env fixture denied_surface second_candidate in
+  check bool "stale denied candidate cannot settle the newer owner" true (Tool_result.is_failed stale);
+  let stable_failure = Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper refusal_entry.request_id
+    |> require "failure successor after stale intake" |> Async.durable_terminal_entry in
+  check_json "stale candidate leaves winning owner unchanged" (Async.entry_to_json refusal_entry) (Async.entry_to_json stable_failure);
   check int "permanent refusal performs no backend operation" before_refusal_calls (List.length (calls fixture));
-  let settled = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
-      ~caller:keeper second_entry.request_id |> require "permanent refusal settles the run terminal" in
-  (match (Async.durable_terminal_entry settled).status with
-   | Async.Done {ok=false; data=Some data; _} ->
-     check_json "refusal settles the changed node contract"
-       (`String "plan_rejected") (data |> member "kind");
-     check_json "refusal names the node whose contract changed"
-       (`String "unknown_tool") (data |> member "error" |> member "kind");
-     check_json "refusal preserves the changed node identity"
-       (`String "await-second") (data |> member "error" |> member "node_id")
-   | status -> failf "permanent refusal did not settle a failure terminal: %s"
-       (Async.status_to_string status));
   let reconcile = Masc.Keeper_composition_completion_wake.reconcile
       ~base_path:fixture.base_path |> require "permanent refusal completion outbox reconcile" in
-  check int "exactly one refusal completion is delivered" 1 reconcile.delivered;
+  check int "refusal completion has no unavailable delivery authority" 0 (List.length reconcile.failures);
+  check int "reconcile never announces the CAS loser's physical failure" 0 reconcile.delivered;
   let sources = Queue.pending_selections_result ~base_path:fixture.base_path keeper
     |> require "permanent refusal completion queue" in
   let failure_completions = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
       match selection.source.payload with
       | Keeper_event_queue.Composition_completed completion
-        when String.equal completion.cc_request_id second_entry.request_id ->
+        when String.equal completion.cc_request_id refusal_entry.request_id ->
         (match completion.cc_terminal with
          | Keeper_event_queue.Composition_failed _ -> true
          | Keeper_event_queue.Composition_succeeded
          | Keeper_event_queue.Composition_cancelled _ -> false)
       | _ -> false) sources in
   check int "exactly one failure completion reaches the original Keeper" 1 (List.length failure_completions);
+  let losing_completions = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+    match selection.source.payload with
+    | Keeper_event_queue.Composition_completed completion -> String.equal completion.cc_request_id losing_request
+    | _ -> false) sources in
+  check int "CAS loser has zero logical completion notifications" 0 (List.length losing_completions);
+  check bool "restored refusal Lost never becomes a stale logical notification" false
+    (List.exists (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      match selection.source.payload with
+      | Keeper_event_queue.Composition_completed completion -> String.equal completion.cc_request_id fault_entry.request_id
+      | _ -> false) sources);
+  check_json "final refusal successor retains original Task C" (`String "task-C")
+    (Async.entry_to_json refusal_entry |> member "request_context" |> member "source_task_id");
+  check_json "final refusal successor retains original run identity"
+    (`String (Masc.Keeper_tool_plan.Composition_run_id.to_string (Journal.continuation_source restored).composition_run_id))
+    (Async.entry_to_json refusal_entry |> member "request_context" |> member "composition_run_id");
+  check string "original child job remains byte-identical after refusal recovery" original_job_owner (read job_owner);
   let again = Masc.Keeper_composition_completion_wake.reconcile
       ~base_path:fixture.base_path |> require "permanent refusal completion outbox re-reconcile" in
   check int "a settled refusal delivers exactly once" 0 again.delivered;
   (* Discovery retires the marker, so the next pulse has 0 ready candidates. *)
-  let after_refusal = pending () in
+  let after_refusal,final_retirements = retirements () in
   check int "next discovery has no ready continuation" 0 (List.length after_refusal.ready);
-  check int "permanently refused marker is retired" 1 after_refusal.retired;
+  check int "final discovery inspects Lost, winner and CAS loser markers" 3 after_refusal.inspected;
+  check int "Lost, winner and CAS loser markers all retire" 3 after_refusal.retired;
+  check (list string) "final marker retirement preserves the three exact physical identities"
+    (List.sort String.compare [fault_entry.request_id;refusal_entry.request_id;losing_request]) final_retirements;
+  check int "both discoveries retire all four original physical request markers" 4
+    (restored_discovery.retired + after_refusal.retired);
   let quiet_wake = Wake.create ~context () in
   Wake.pulse ~sw:context.sw quiet_wake |> require "pulse after permanent refusal";
   check int "next pulse has 0 ready candidates" 0 (List.length (pending ()).ready);
@@ -2179,7 +2468,7 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let restored_wake = Wake.create ~context () in
   Wake.pulse ~sw:context.sw restored_wake |> require "pulse after restoring the profile";
   check int "restored contract cannot resurrect a settled run" 0 (List.length (pending ()).ready);
-  check (list string) "permanent refusal never starts an async worker" [] (active_requests ())
+  check (list string) "failure successor leaves no active async worker" [] (active_requests ())
 
 let test_historical_output_contract_refuses_current_resume () = with_fixture @@ fun env _initialize fixture ->
   let module Draft = Masc.Keeper_composition_draft in
@@ -3306,14 +3595,15 @@ pointer = "/content"
   operation ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
     ~publication_recovery ~physical_turn_ref ~delivery ~recorder ~snapshot
 
-let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=false) ?(launch_in_child=false) () =
+let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=false) ?(launch_in_child=false) ?(parent_tool_denied=false) () =
   with_nested_job_skill ~wait_only:(not launch_in_child) ~parameterized:dynamic_arguments ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
-      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot:_ ->
+      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot ->
   let module Async = Masc.Keeper_msg_async in
   let module Ledger = Masc.Keeper_skill_activation_ledger in
   let module Tools = Masc.Keeper_tool_composition_surface in
   let module Plan = Masc.Keeper_tool_plan in
+  let module Surface = Masc.Keeper_capability_surface in
   let original_args,independent_bytes = if dynamic_arguments then
       let id = read (Filename.concat fixture.base_path "physical-original-job") in
       argument id,id
@@ -3324,10 +3614,13 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
     else "input",`Assoc ["kind",`String "object";"fields",`List
       [`Assoc ["name",`String "job_id";"value",`Assoc
         ["kind",`String "output";"node",`String "sibling";"pointer",`String "/content"]]]] in
-  let recipe = `Assoc ["execution",`String "async";"nodes",`List
+  let denial_probe = if parent_tool_denied then
+      [`Assoc ["id",`String "denial-probe";"tool",`String "keeper_lane_status";
+        "input",`Assoc ["kind",`String "literal";"value",`Assoc []]]] else [] in
+  let recipe = `Assoc ["execution",`String "async";"nodes",`List (
       [`Assoc ["id",`String "sibling";"tool",`String "keeper_artifact_read";
           "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String sibling.sha256]]];
-       `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;child_arguments]];
+       `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;child_arguments]] @ denial_probe);
       "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
   let started = Mtime_clock.counter () in
   let backend_calls () = if Sys.file_exists fixture.daemon_path then List.length (calls fixture) else 0 in
@@ -3389,11 +3682,11 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-fixed-child-job"
     ~turn:52 "keeper_job_status" (argument id)));
   let backend_after_result = List.length (calls fixture) in
-  let resume continuation tool_use_id =
+  let resume ?(capability_surface=surface) continuation tool_use_id =
     let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:52
         ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
         ~completion:Agent_core.Tool_contract.Continue_after_success in
-    Tools.resume_continuation ~capability_surface:surface ~continuation ~config ~meta:fixture.meta
+    Tools.resume_continuation ~capability_surface ~continuation ~config ~meta:fixture.meta
       ~publication_recovery ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"fresh fixed child supervisor")
       ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
       ~invocation ~clock:(Eio.Stdenv.clock env) () in
@@ -3426,10 +3719,58 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
   List.iter (fun field -> check_json ("original child job occurrence " ^ field)
       (composition_node "await" previous_child_nodes |> member field)
       (composition_node "await" child_nodes |> member field)) ["execution_id";"tool_use_id"];
-  let resumed_parent = resume parent_continuation "resume-original-fixed-parent" in
+  let parent_surface = if not parent_tool_denied then surface else (
+      let descriptors = Descriptor.all_descriptors () in
+      let selection = Masc.Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:"task-A" [reference]
+          |> require "denied parent original Task selection" in
+      let denied = Surface.create_with_descriptors ~tool_descriptors:descriptors
+          ~tool_deny:["keeper_lane_status"] ~sandbox_profile:fixture.meta.sandbox_profile
+          ~skill_names:None ~global_skill_catalog:(Surface.skill_catalog surface)
+          ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
+          ~task_skills:(Masc.Keeper_task_skill_turn.skills selection) in
+      let ledger_path = Filename.concat (Masc.Keeper_fs.keeper_session_dir config
+          (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id)) "skill-activation-events.jsonl" in
+      let original_ledger = read ledger_path in
+      Fun.protect ~finally:(fun () -> write ledger_path original_ledger) (fun () ->
+        write ledger_path "unreadable original Nested activation\n";
+        let refused = resume ~capability_surface:denied parent_continuation "refuse-unreadable-denied-parent" in
+        check bool "proven Tool denial cannot bypass unavailable original child authority" true
+          (Tool_result.is_failed refused));
+      let retained = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+          ~composition_run_id:parent_run |> require "denied parent original journal"
+          |> Journal.waiting_continuation |> require "unreadable child authority retains parent"
+          |> function Some value -> value | None -> fail "unreadable original child authority closed the parent" in
+      check string "temporary authority refusal keeps the original bound parent request"
+        parent_entry.request_id (Journal.continuation_request_id retained);
+      denied) in
+  let resumed_parent = resume ~capability_surface:parent_surface parent_continuation "resume-original-fixed-parent" in
   check bool "whole canonical child result makes original parent ready" true (Tool_result.is_success resumed_parent);
   let parent_ok,completed,parent_completed = await_composition env fixture (Tool_result.data resumed_parent) in
-  check bool "native result barrier preserves actual whole-child failure" (not child_failure) parent_ok;
+  check bool "native result barrier preserves actual whole-child failure"
+    (not child_failure && not parent_tool_denied) parent_ok;
+  if parent_tool_denied then (
+    check_json "denied parent settles a typed permanent refusal" (`String "current_tool_denied")
+      (completed |> member "kind");
+    check_json "permanent refusal names the exact denied ordinary Tool" (`String "keeper_lane_status")
+      (completed |> member "tool_name");
+    (match parent_completed.status with
+     | Async.Done {ok=false;_} -> ()
+     | _ -> fail "denied nested parent did not reach canonical terminal failure");
+    check bool "permanent refusal has a new physical successor" true
+      (parent_completed.request_id <> parent_entry.request_id);
+    let predecessor = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+        ~caller:keeper parent_entry.request_id |> require "immutable nested parent predecessor"
+        |> Async.durable_terminal_entry in
+    (match predecessor.status with
+     | Async.Waiting_for_dependencies _ -> ()
+     | _ -> fail "permanent refusal rewrote the original waiting predecessor");
+    let discovery = Journal.pending_continuations
+        ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+        ~base_path:fixture.base_path |> require "terminal denied parent discovery" in
+    check bool "permanent refusal never re-readies the original parent" false
+      (List.exists (fun continuation ->
+        (Journal.continuation_source continuation).composition_run_id = parent_run) discovery.ready))
+  else (
   if child_failure then
     check_json "failed canonical child provides no successful parent export" (`Bool false)
       (completed |> member "exports" |> member "stdout" |> member "available")
@@ -3443,7 +3784,7 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
       (composition_node submission_id nodes |> member field)
       (composition_node submission_id completed_nodes |> member field)) ["execution_id";"tool_use_id"];
   check_json "accepted child submission is retained rather than resubmitted" (`String "retained_completion")
-    (composition_node submission_id completed_nodes |> member "execution_origin");
+    (composition_node submission_id completed_nodes |> member "execution_origin"));
   check int "fresh child and parent use no backend after canonical output" backend_after_result (List.length (calls fixture));
   check int "fixed child creates one job" 1 (effect_count fixture "create");
   check int "fixed child starts one job" 1 (effect_count fixture "start");
@@ -4719,6 +5060,8 @@ let () = match Array.to_list Sys.argv with
           (test_named_async_result_parent ~child_fails:true)
       ; test_case "permanent producer skill loss settles the run and ends its parent" `Quick
           test_named_producer_skill_loss_settles_run_and_ends_parent
+      ; test_case "producer switched to inline and deleted keeper metadata settle as terminal failures" `Quick
+          test_named_producer_switched_to_inline_settles_run_and_ends_parent
       ; test_case "temporary keeper refusal keeps the named run resumable" `Quick
           test_temporary_keeper_refusal_keeps_named_run_open
       ; test_case "historical output contract refuses current canonical resume" `Quick test_historical_output_contract_refuses_current_resume
@@ -4735,6 +5078,8 @@ let () = match Array.to_list Sys.argv with
       ; test_case "fixed async Skill child submits once and resumes its canonical whole result" `Quick (test_fixed_async_skill_child ~child_failure:false)
       ; test_case "fixed async Skill child preserves an actual canonical whole-child failure" `Quick (test_fixed_async_skill_child ~child_failure:true)
       ; test_case "typed recovery terminates proven refusal and holds uncertain effects" `Quick test_typed_continuation_recovery
+      ; test_case "nested parent distinguishes a denied Tool from unavailable original child authority" `Quick
+          (test_fixed_async_skill_child ~parent_tool_denied:true)
       ; test_case "upstream async Skill arguments survive fresh child and parent continuation" `Quick (test_fixed_async_skill_child ~dynamic_arguments:true)
       ; test_case "async Skill child launches its own isolated job once and resumes the whole result" `Quick (test_fixed_async_skill_child ~launch_in_child:true)
       ; test_case "upstream enum, type and extra-field rejection creates no child activation" `Quick test_upstream_arguments_reject_before_child_activation

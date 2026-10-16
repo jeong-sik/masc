@@ -113,6 +113,24 @@ cannot create replacement acceptance. These are source guarantees until an
 exact-head execution receipt proves the selected scenario; installed runtime,
 visible UI and whole-task speedup remain separate evidence.
 
+Continuation refusal does not by itself establish a terminal run failure.
+Missing or unreadable source, ledger, profile or Task-selection authority stays
+recoverable. A stale intake cannot change the winning owner or an immutable
+Waiting predecessor. An explicit current Tool denial can become a failure only
+after the exact frozen plan, including its ordinary and nested contracts, has
+been revalidated. A removed ordinary producer also requires a complete,
+readable scan of its original Skill source; catalog projection or selection
+absence alone is insufficient. Nested withholding remains recoverable.
+
+These proven refusals use a new broker successor with the original source and
+Journal owner CAS. The worker rechecks the original authority before publishing;
+unavailable evidence leaves recoverable Lost work. Completion callbacks, summaries,
+result readers and the outbox require actual current/prior Journal membership for
+journal-owned requests, including Done and persistence-failed physical attempts.
+A losing CAS attempt retains its physical rejection without announcing a logical
+run failure. The outbox is prepared before acceptance, and membership validation
+prevents a rejected intake from delivering a false terminal notification.
+
 An owned worker retains `Lost` when its execution journal rejects
 plan admission or a node attempt, or when settlement/observation cannot commit.
 Those infrastructure failures do not establish a whole-child failure. The
@@ -430,3 +448,10 @@ new controller can also retry through all original admission checks. This hold
 is a scheduling hint, not durable effect or completion authority: the physical
 request may remain Lost, and unknown effects never become a logical failure
 merely to stop automatic retries.
+
+Original authority can also become unavailable between canonical discovery and
+worker admission. The same held-owner notification applies when the original
+draft, activation receipt or original task Skill selection cannot be read.
+Repairing the evidence preserves the original Waiting request; it does not
+silently remove a controller hold or admit a new worker on the next tick.
+Explicit original-run resume still performs every current authority check.

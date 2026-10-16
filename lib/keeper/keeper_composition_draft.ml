@@ -145,8 +145,8 @@ let prepare_schema : Masc_domain.tool_schema =
 let run_schema = Tool_schemas_composition_control.run_schema
 ;;
 
-let validate_plan ~execution ~capability_surface json =
-  Nested.compile ~execution ~capability_surface json |> Result.map_error (function
+let map_nested_error result =
+  result |> Result.map_error (function
     | Nested.Request_rejected error -> Plan_rejected error
     | Nested.Unsupported_leaf { node_id; tool_name } -> Unsupported_node { node_id; tool_name }
     | Nested.Inputs_rejected (node_id, error) -> Inputs_rejected (node_id, error)
@@ -157,6 +157,10 @@ let validate_plan ~execution ~capability_surface json =
       | Nested.Duplicate_alias _ | Nested.Unknown_alias _
       | Nested.Child_output_requires_export _ | Nested.Unknown_child_export _
       | Nested.Expanded_plan_rejected _ ) as error -> Nested_rejected error)
+;;
+
+let validate_plan ~execution ~capability_surface json =
+  map_nested_error (Nested.compile ~execution ~capability_surface json)
 ;;
 
 let encoding_error (Keeper_tool_plan_request.Unsubstituted_param {name}) =
@@ -279,7 +283,7 @@ let required_string fields name =
 
 type admission_check = Exact_surface | Sealed_continuation
 
-let load_with ~admission_check ~base_path ~capability_surface ~keeper_name ~sha256 =
+let load_with ~compile_plan ~admission_check ~base_path ~capability_surface ~keeper_name ~sha256 =
   let* bytes = Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256
       |> Result.map_error (fun error -> Draft_read_failed error) in
   let* bytes = match bytes with Some bytes -> Ok bytes | None -> Error Draft_not_found in
@@ -309,7 +313,7 @@ let load_with ~admission_check ~base_path ~capability_surface ~keeper_name ~sha2
           && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) recorded_surface
       then Ok () else Error Capability_changed in
   let* compiled = match List.assoc_opt "recipe" fields with
-    | Some json -> validate_plan ~execution ~capability_surface json
+    | Some json -> compile_plan ~execution ~capability_surface json
     | None -> Error (Malformed_draft "missing recipe") in
   let plan = Nested.plan compiled in
   let* canonical = encode_plan plan in
@@ -341,10 +345,10 @@ let load_with ~admission_check ~base_path ~capability_surface ~keeper_name ~sha2
 ;;
 
 let load ~base_path ~capability_surface ~keeper_name ~sha256 =
-  load_with ~admission_check:Exact_surface ~base_path ~capability_surface ~keeper_name ~sha256
+  load_with ~compile_plan:validate_plan ~admission_check:Exact_surface ~base_path ~capability_surface ~keeper_name ~sha256
 ;;
 
-let load_continuation ~base_path ~capability_surface continuation =
+let load_continuation_with ~compile_plan ~base_path ~capability_surface continuation =
   let* canonical_base =
     try Ok (Fs_compat.realpath base_path) with
     | Sys_error detail -> Error (Storage_failed detail)
@@ -353,11 +357,42 @@ let load_continuation ~base_path ~capability_surface continuation =
   let* () = if String.equal canonical_base (Keeper_tool_execution_journal.continuation_base_path continuation)
     then Ok () else Error (Malformed_draft "continuation belongs to another workspace") in
   let source = Keeper_tool_execution_journal.continuation_source continuation in
-  let* draft = load_with ~admission_check:Sealed_continuation ~base_path ~capability_surface
+  let* draft = load_with ~compile_plan ~admission_check:Sealed_continuation ~base_path ~capability_surface
       ~keeper_name:source.keeper_name ~sha256:source.draft_reference.sha256 in
   match draft.execution with
   | Catalog.Async -> Ok draft
   | Catalog.Inline -> Error (Malformed_draft "owned continuation requires an original async draft")
+;;
+
+let load_continuation ~base_path ~capability_surface continuation =
+  load_continuation_with ~compile_plan:validate_plan ~base_path ~capability_surface continuation
+;;
+
+type continuation_refusal = Current_tool_denied of { node_id : Plan.Node_id.t; tool_name : string }
+type continuation_admission = Admitted of t | Refused of t * continuation_refusal
+
+let continuation_refusal_to_json = function
+  | Current_tool_denied {node_id;tool_name} -> `Assoc
+      ["kind",`String "current_tool_denied";"node_id",`String (Plan.Node_id.to_string node_id);
+       "tool_name",`String tool_name]
+;;
+
+let load_continuation_admission ~base_path ~capability_surface continuation =
+  match load_continuation ~base_path ~capability_surface continuation with
+  | Ok draft -> Ok (Admitted draft)
+  | Error original_error ->
+    let compile_plan ~execution ~capability_surface json =
+      map_nested_error (Nested.compile_for_refusal ~execution ~capability_surface json) in
+    let* draft = load_continuation_with ~compile_plan ~base_path ~capability_surface continuation in
+    let denied = Plan.nodes draft.plan |> List.find_map (fun (node : Plan.node) ->
+      match Plan.descriptor draft.plan node.id with
+      | None -> None
+      | Some descriptor ->
+        match Keeper_capability_surface.tool_row_availability capability_surface descriptor with
+        | Some Denied_by_profile -> Some (Current_tool_denied {node_id=node.id;tool_name=node.tool_name})
+        | None | Some (Active | Outside_skill_surface | Not_model_invocable | Refused_by_sandbox _
+            | Node_tools_outside_surface _ | Invalid_definition | Missing_configured_skill) -> None) in
+    (match denied with Some refusal -> Ok (Refused (draft,refusal)) | None -> Error original_error)
 ;;
 
 let load_authored ~base_path ~capability_surface ~keeper_name ~package_id ~sha256 =

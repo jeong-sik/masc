@@ -1354,30 +1354,57 @@ let waiting_continuation journal = filesystem (fun () ->
 type read_composition_result =
   base_path:string -> keeper_name:string -> Dependency.composition -> (Dependency.readiness,string) result
 
-let completion_pending ~base_path (entry : Async.entry) = filesystem (fun () ->
-  match entry.status with
-  | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
-  | Waiting_for_dependencies _ | Done _ -> Ok false
-  | Lost _ ->
-    match Option.bind entry.request_context (List.assoc_opt "composition_run_id") with
-    | None -> Ok false
-    | Some (`String identity) ->
-      let* composition_run_id = Plan.Composition_run_id.of_string identity
-        |> Result.map_error (fun _ -> Invalid_source "completion has an invalid run identity") in
-      let* journal = load ~base_path ~keeper_name:entry.keeper_name ~composition_run_id in
-      let rec observe () =
-        let* () = validate_request journal entry in
-        let* before = strict_read ~root:journal.root journal.path in
-        let* () = check_source journal before in
-        let* pending = match before.owner with
-          | Some owner when not (String.equal owner.request_id entry.request_id) -> Ok true
-          | Some _ -> waiting_continuation journal |> Result.map Option.is_some
+type completion_disposition =
+  | Canonical_completion
+  | Recovery_pending
+  | Unadmitted_attempt
+
+let completion_disposition ~base_path (entry : Async.entry) = filesystem (fun () ->
+  let fields = Option.value ~default:[] entry.request_context in
+  let values name = List.filter_map (fun (key,value) ->
+    if String.equal key name then Some value else None) fields in
+  match values "draft_reference", values "run_artifact" with
+  | [],[] ->
+    if values "composition_tool" = [`String Keeper_tool_composition_catalog.run_tool_name]
+    then Error (Invalid_source "prepared completion lacks its journal artifact envelope")
+    else Ok Canonical_completion
+  | [_],[_] ->
+    let* composition_run_id = match values "composition_run_id" with
+      | [`String identity] -> Plan.Composition_run_id.of_string identity
+          |> Result.map_error (fun _ -> Invalid_source "completion has an invalid run identity")
+      | [] | _::_ -> Error (Invalid_source "completion lacks its exact run identity") in
+    let* journal = load ~base_path ~keeper_name:entry.keeper_name ~composition_run_id in
+    let* () = if String.equal (Fs_compat.realpath entry.base_path) journal.base_path
+      then Ok () else Error Source_conflict in
+    let* () = entry_matches_source journal.immutable_source entry
+      |> Result.map_error (fun detail -> Invalid_source detail) in
+    let rec observe () =
+      let* before = strict_read ~root:journal.root journal.path in
+      let* () = check_source journal before in
+      let belongs (binding : binding) = String.equal binding.request_id entry.request_id in
+      let member = Option.exists belongs before.owner
+        || List.exists (fun (binding,_) -> belongs binding) before.prior_owners in
+      let* disposition = if not member then Ok Unadmitted_attempt else
+        match entry.status with
+        | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
+        | Waiting_for_dependencies _ | Done _ -> Ok Canonical_completion
+        | Lost _ ->
+          match before.owner with
+          | Some owner when not (belongs owner) -> Ok Recovery_pending
+          | Some _ -> waiting_continuation journal |> Result.map (function
+              | Some _ -> Recovery_pending | None -> Canonical_completion)
           | None -> Error Ownership_changed in
-        let* after = strict_read ~root:journal.root journal.path in
-        let* () = check_source journal after in
-        if same_owner before.owner after.owner then Ok pending else observe () in
-      observe ()
-    | Some _ -> Error (Invalid_source "completion has a malformed run identity"))
+      let* after = strict_read ~root:journal.root journal.path in
+      let* () = check_source journal after in
+      if same_owner before.owner after.owner then Ok disposition else observe () in
+    observe ()
+  | ([],_::_) | (_::_,[]) | (_::_,_::_) ->
+    Error (Invalid_source "completion has a partial or duplicate journal artifact envelope"))
+
+let completion_pending ~base_path entry =
+  completion_disposition ~base_path entry |> Result.map (function
+    | Canonical_completion -> false
+    | Recovery_pending | Unadmitted_attempt -> true)
 
 let continuation_readiness ~read_composition_result (continuation : continuation) = filesystem (fun () ->
   let journal = continuation.journal in
@@ -1610,6 +1637,16 @@ let validate_source_plan journal ~plan =
 let validate_plan (worker : worker) ~plan =
   let* () = validate_source_plan worker.journal ~plan in
   update_existing worker.journal (fun state -> None, check_worker worker state)
+
+let validate_refusal_completion (worker : worker) ~plan =
+  let journal = worker.journal in
+  let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
+  let* () = validate_nested_producer journal in
+  let* () = validate_plan worker ~plan in
+  let* children,nodes = update_existing journal (fun state -> None,
+    let* () = check_worker worker state in Ok (state.children,state.nodes)) in
+  let* () = validate_child_links journal children nodes in
+  update_existing journal (fun state -> None, check_worker worker state)
 
 let checked_node (worker : worker) state ~node_id ~tool_name ~input =
   let* () = check_worker worker state in

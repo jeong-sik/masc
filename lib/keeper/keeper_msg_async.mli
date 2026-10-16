@@ -490,46 +490,6 @@ val load_canonical_durable_queued :
 val recover_lost_disk_records :
   base_path:string -> unit -> recovery_report
 
-type waiting_settlement_rejection =
-  | Settle_access_rejected of access_rejection
-  | Settle_invalid_request_id
-  | Settle_request_absent
-  | Settle_request_unreadable of string
-  | Settle_publication_ambiguous of request_status
-      (** A terminal value is visible in process memory but its canonical
-          publication is unconfirmed; the durable row cannot be superseded
-          against an in-memory overlay. *)
-  | Settle_runtime_active of request_status
-      (** The exact request still has process-local nonterminal ownership, so
-          a live worker may own it. Only the exclusive recovery boundary may
-          settle active statuses. *)
-  | Settle_nonterminal of request_status
-  | Settle_noncanonical_location of request_status
-  | Settle_already_settled of request_status
-      (** Any settled terminal other than [Waiting_for_owned_jobs] is
-          immutable truth and is never rewritten. *)
-  | Settle_persistence_failed of string
-
-val waiting_settlement_rejection_to_string : waiting_settlement_rejection -> string
-
-val settle_waiting_request_as_failed :
-  base_path:string ->
-  caller:string ->
-  request_id:string ->
-  body:string ->
-  ?data:Yojson.Safe.t ->
-  ?before_persist:(durable_terminal_proof -> (unit, string) result) ->
-  unit ->
-  (unit, waiting_settlement_rejection) result
-(** Supersede exactly one canonical [Waiting_for_owned_jobs] terminal record
-    owned by [caller] with [Done {ok=false; body; data}]. This is the run
-    terminal for a permanently refused sealed prepared continuation (the
-    capability surface or owner metadata changed, so the prepared run can
-    never proceed): its submitter must observe a typed failure through the
-    ordinary result record. The overwrite happens under the exact request's
-    store transition lock at the record's own terminal path, so a concurrent
-    canonical read sees either the waiting attempt or the failure, never a
-    torn record. *)
 
 (** [cancel ~base_path ~caller request_id] validates exact request ownership,
     durably commits a non-terminal [Cancelling] intent, publishes it, and only

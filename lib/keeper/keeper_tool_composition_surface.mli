@@ -76,8 +76,13 @@ val instruction_skill_schema_tool :
 (** Handler-free [keeper_skill] schema with the same exact Available
     description used by the executable tool. *)
 
+type owner_metadata_refusal =
+  | Owner_metadata_missing
+  | Owner_metadata_mismatch
+
 val resume_continuation
   :  ?on_recovery_held:(request_id:string -> reason:string -> unit)
+  -> ?owner_metadata_refusal:owner_metadata_refusal
   -> capability_surface:Keeper_capability_surface.t
   -> continuation:Keeper_tool_execution_journal.continuation
   -> config:Workspace.config
@@ -96,7 +101,8 @@ val resume_continuation
     source Task/turn/parent and completed sibling results stay original while
     physical execution observability uses the supplied context and schedule.
     [on_recovery_held] tells the automatic controller to hold this exact
-    physical owner until explicit recovery advances it. It grants no effect
+    physical owner until explicit recovery advances it, including unavailable
+    original draft/activation evidence before worker admission. It grants no effect
     authority and does not convert an unknown outcome into failure.
     This entrypoint does not discover candidates or install a controller. *)
 
@@ -231,6 +237,21 @@ module For_testing : sig
     effect_disposition:Tool_result.failure_effect_disposition option ->
     Tool_result.result -> recovery_decision
   val combine_recovery : recovery_decision -> recovery_decision -> recovery_decision
+  val resume_continuation :
+    ?owner_metadata_refusal:owner_metadata_refusal ->
+    after_refusal_binding:(request_id:string -> unit) ->
+    after_refusal_settled:(unit -> unit) ->
+    capability_surface:Keeper_capability_surface.t ->
+    continuation:Keeper_tool_execution_journal.continuation ->
+    config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+    publication_recovery:Keeper_publication_recovery_availability.turn_context ->
+    ctx_snapshot:Keeper_types.working_context ->
+    turn_context:Keeper_tool_call_log_context.turn_context ->
+    invocation:Agent_core.Tool_contract.Invocation.t ->
+    ?clock:float Eio.Time.clock_ty Eio.Resource.t -> unit -> Tool_result.result
+  (** The production resume and refusal worker. Inject only after an actual
+      refusal successor binds, before its worker starts, and observe only after
+      the production settlement callbacks finish. Ordinary resume is unchanged. *)
 
   val async_worker_result :
     composition_execution:Keeper_tool_composition_catalog.execution_mode ->

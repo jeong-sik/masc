@@ -68,6 +68,13 @@ val compile :
     characters in IDs cannot collide. Async children require an async parent;
     their submission and whole-result barrier remain distinct typed targets. *)
 
+val compile_for_refusal :
+  execution:Keeper_tool_composition_catalog.execution_mode ->
+  capability_surface:Keeper_capability_surface.t -> Yojson.Safe.t -> (t, error) result
+(** Revalidate frozen contracts for refusal only, retaining exact descriptors
+    whose current row is [Denied_by_profile]. It grants no dispatch admission;
+    nested Skill visibility and every other admission check remain strict. *)
+
 val plan : t -> Keeper_tool_plan.t
 val calls : t -> call list
 val call_to_json : call -> Yojson.Safe.t

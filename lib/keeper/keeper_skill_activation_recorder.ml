@@ -298,6 +298,24 @@ let record_composition ~config context ~invocation ~tool_name reference =
     reference
 ;;
 
+let find_bound_composition ~config bound ~tool_use_id ~source_turn ~tool_name reference =
+  let* ledger = Ledger.load_existing ~config ~trace_id:bound.context.trace_id
+    |> Result.map_error (fun error -> Store_failed error) in
+  let existing = Option.bind ledger (fun ledger -> Ledger.activations ledger |> List.find_opt
+      (fun (activation : Ledger.activation) -> String.equal activation.skill_tool_use_id tool_use_id)) in
+  match existing with
+  | None -> Ok None
+  | Some existing ->
+    let* expected = Ledger.make_activation
+        ~identity:reference.Skill_reference.identity ~content_revision:reference.content_revision
+        ~snapshot_revision:bound.context.snapshot_revision ~turn_ref:bound.context.turn_ref ~runtime_id:bound.runtime
+        ~skill_tool_use_id:tool_use_id ~agent_core_turn:source_turn
+        ~invocation:(Ledger.Composition_invocation {origin=composition_origin bound.context reference;tool_name})
+        ~activated_at:existing.activated_at |> Result.map_error (fun error -> Activation_rejected error) in
+    if String.equal (Ledger.activation_frame_sha256 expected) (Ledger.activation_frame_sha256 existing)
+    then Ok (Some existing) else Error (Invalid_bound_context "original composition differs from its sealed recorder")
+;;
+
 let record_bound_composition ~config bound ~invocation ~tool_name reference =
   let context = {bound.context with runtime_id=(fun () -> Some bound.runtime)} in
   record_composition ~config context ~invocation ~tool_name reference

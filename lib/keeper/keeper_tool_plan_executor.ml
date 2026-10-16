@@ -426,7 +426,8 @@ let execute_one
              | Keeper_tool_plan.Descriptor_target descriptor ->
                Keeper_tool_descriptor.prepared_leaf_admission descriptor
                = Keeper_tool_descriptor.Owned_job_launch_leaf
-             | Keeper_tool_plan.Child_submission _ | Keeper_tool_plan.Child_result _ -> false in
+             | Keeper_tool_plan.Child_arguments _ | Keeper_tool_plan.Child_submission _
+             | Keeper_tool_plan.Child_result _ -> false in
            let launch_invocation, launch_replay = match replay with
              | Keeper_tool_execution_journal.Recheck_launch stored ->
                  Some stored.invocation, Some stored

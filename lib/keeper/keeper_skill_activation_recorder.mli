@@ -86,6 +86,12 @@ val record_composition :
   Skill_reference.t ->
   (Keeper_skill_activation_ledger.record_outcome, error) result
 
+val find_bound_composition : config:Workspace.config -> bound_context ->
+  tool_use_id:string -> source_turn:int -> tool_name:string -> Skill_reference.t ->
+  (Keeper_skill_activation_ledger.activation option, error) result
+(** Strict original standalone composition lookup; never records a replacement.
+    Preserve the original activation clock and compare the complete bound frame. *)
+
 val record_bound_composition :
   config:Workspace.config -> bound_context ->
   invocation:Agent_core.Tool_contract.Invocation.t -> tool_name:string ->

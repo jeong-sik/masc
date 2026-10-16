@@ -151,30 +151,7 @@ module For_testing = struct
   let acknowledge_waiting = acknowledge_waiting_with
 end
 
-let prepare_terminal ~proof =
-  protect_io @@ fun () ->
-  let entry = Async.durable_terminal_entry proof in
-  let request_id = entry.request_id and keeper_name = entry.keeper_name in
-  match entry.status with
-  | Async.Waiting_for_dependencies _ | Async.Done { ok = false; _ } ->
-    let base_path = entry.base_path in
-    (match read ~base_path (filename request_id) with
-     | Ok (Some obligation)
-       when String.equal obligation.request_id request_id
-         && String.equal obligation.keeper_name keeper_name -> Ok ()
-     | Ok (Some _) ->
-       Error (Invalid_obligation "completion obligation changed request/recipient identity")
-     | Ok None ->
-       Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
-         ~temp_dir:(Filename.concat (directory ~base_path) ".atomic-staging") ~pretty:false
-         (path ~base_path request_id) (to_json { request_id; keeper_name })
-       |> Result.map_error (fun error ->
-            Storage_failed (Keeper_fs.durable_write_error_to_string error))
-     | Error error -> Error error)
-  | Queued | Running | Cancelling _ | Lost _ | Cancelled _
-  | Persistence_failed _ | Done _ ->
-    Error (Request_unavailable (Async.Found entry))
-;;
+
 
 let flush ~base_path ~deliver =
   protect_io @@ fun () ->

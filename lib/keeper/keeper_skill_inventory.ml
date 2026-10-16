@@ -33,7 +33,8 @@ type skill_inventory_item =
   | Invalid of invalid_skill
 
 type t =
-  { snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+  { snapshot : Skill_catalog_snapshot.t
+  ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; items : skill_inventory_item list
   }
 
@@ -97,13 +98,72 @@ let of_snapshot ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) snaps
   let rejected =
     Skill_catalog_snapshot.rejections snapshot |> List.map item_of_rejection
   in
-  { snapshot_revision = Skill_catalog_snapshot.snapshot_revision snapshot
+  { snapshot
+  ; snapshot_revision = Skill_catalog_snapshot.snapshot_revision snapshot
   ; items = projected @ rejected
   }
 ;;
 
 let snapshot_revision inventory = inventory.snapshot_revision
 let items inventory = inventory.items
+
+let exact_absence_proven inventory (reference : Skill_reference.t) =
+  let snapshot = inventory.snapshot in
+  let source_id = reference.identity.source_id in
+  let same_source id = id = source_id in
+  match Skill_catalog_snapshot.config_state snapshot with
+  | Config_rejected _ | Config_unreadable _ -> false
+  | Configured _ ->
+    let complete = List.exists (fun (scan : Skill_catalog_snapshot.source_scan) ->
+      same_source scan.source.source.id &&
+      match scan.observation with
+      | Source_ready _ -> List.for_all (function
+          | Skill_catalog_snapshot.Candidate_document _ -> true
+          | Candidate_unreadable _ -> false) scan.candidates
+      | Source_missing _ | Source_not_directory _ | Source_unavailable _ | Source_unresolved _ -> false)
+        (Skill_catalog_snapshot.sources snapshot) in
+    complete
+    && not (List.exists (fun (rejection : Skill_catalog_snapshot.rejection) ->
+      same_source rejection.source_id) (Skill_catalog_snapshot.rejections snapshot))
+    && not (List.exists (function
+      | Valid valid -> same_source valid.reference.identity.source_id
+          && (valid.diagnostics <> [] || Skill_reference.equal_identity reference.identity valid.reference.identity)
+      | Invalid invalid -> same_source invalid.source_id) inventory.items)
+;;
+
+(* The source scan is complete and clean, so [found] over the valid items sees
+   everything this source publishes. *)
+let reference_proven inventory (reference : Skill_reference.t) ~found =
+  let snapshot = inventory.snapshot in
+  match Skill_catalog_snapshot.config_state snapshot with
+  | Config_rejected _ | Config_unreadable _ -> false
+  | Configured _ ->
+    let same_source source_id =
+      source_id = reference.identity.source_id in
+    let complete = List.exists (fun (scan : Skill_catalog_snapshot.source_scan) ->
+      same_source scan.source.source.id &&
+      match scan.observation with
+      | Source_ready _ -> List.for_all (function
+          | Skill_catalog_snapshot.Candidate_document _ -> true
+          | Candidate_unreadable _ -> false) scan.candidates
+      | Source_missing _ | Source_not_directory _ | Source_unavailable _ | Source_unresolved _ -> false)
+        (Skill_catalog_snapshot.sources snapshot) in
+    complete
+    && not (List.exists (fun (rejection : Skill_catalog_snapshot.rejection) ->
+      same_source rejection.source_id) (Skill_catalog_snapshot.rejections snapshot))
+    && not (List.exists (function
+      | Valid valid -> same_source valid.reference.identity.source_id && valid.diagnostics <> []
+      | Invalid invalid -> same_source invalid.source_id) inventory.items)
+    && List.exists (function
+      | Valid valid -> valid.diagnostics = [] && found valid.reference
+      | Invalid _ -> false) inventory.items
+;;
+
+let changed_reference_proven inventory (reference : Skill_reference.t) =
+  reference_proven inventory reference ~found:(fun (published : Skill_reference.t) ->
+    Skill_reference.equal_identity reference.identity published.identity
+    && not (Skill_reference.equal reference published))
+;;
 
 let snapshot_rejection_to_yojson = function
   | Skill_catalog_snapshot.Document_rejected diagnostics ->

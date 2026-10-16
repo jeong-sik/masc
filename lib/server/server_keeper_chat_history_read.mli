@@ -5,6 +5,8 @@
 type error = Unknown_keeper | History_unavailable of string
 
 val error_to_string : error -> string
+(** Static public refusal text. Internal diagnostic detail is retained only
+    in [History_unavailable], never interpolated into the HTTP body. *)
 
 val read_json :
   config:Workspace.config -> keeper_name:string ->

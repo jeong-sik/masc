@@ -2,7 +2,7 @@ type error = Unknown_keeper | History_unavailable of string
 
 let error_to_string = function
   | Unknown_keeper -> "No registered Keeper or retained history exists for this name."
-  | History_unavailable detail -> "Keeper history is unavailable: " ^ detail
+  | History_unavailable _ -> "Keeper history is temporarily unavailable; retry the request."
 
 module Physical = Keeper_chat_history_page
 module Autonomous = Keeper_autonomous_turn_source
@@ -11,6 +11,21 @@ type source =
   { fingerprint : string
   ; autonomous : Autonomous.snapshot
   }
+
+type metadata = Metadata_absent | Metadata_current | Metadata_unavailable of string
+
+let metadata_evidence ~config path =
+  match Keeper_meta_store.read_meta_file_path_read_only
+      ~ownership_root:config.Workspace.base_path path with
+  | Ok None -> Metadata_absent
+  | Ok (Some _) -> Metadata_current
+  | Error (Keeper_meta_store.Unreadable detail | Keeper_meta_store.Not_current detail) ->
+    Metadata_unavailable detail
+
+let metadata_stamp = function
+  | Metadata_absent -> "absent"
+  | Metadata_current -> "current"
+  | Metadata_unavailable _ -> "unavailable"
 
 let directory_stamp path =
   try
@@ -36,18 +51,24 @@ let inspect ~config ~keeper_name =
      owner even when that Keeper is offline or its declaration was removed. *)
   let meta_path = Filename.concat (Workspace.keepers_runtime_dir config)
       (Keeper_runtime_root_entry.keeper_basename ~keeper_name Keeper_runtime_root_entry.Metadata) in
-  let* meta = physical meta_path in
+  let meta = metadata_evidence ~config meta_path in
   let* autonomous = Autonomous.read_snapshot_result ~config ~keeper_name ()
       |> Result.map_error (fun detail -> History_unavailable detail) in
-  if not (Keeper_registry.is_registered ~base_path:config.Workspace.base_path keeper_name
-          || Physical.source_is_present chat || Physical.source_is_present meta
-          || Autonomous.snapshot_has_records autonomous)
-  then Error Unknown_keeper
-  else
+  let retained_elsewhere =
+    Keeper_registry.is_registered ~base_path:config.Workspace.base_path keeper_name
+    || Physical.source_is_present chat || Autonomous.snapshot_has_records autonomous in
+  let* () = match retained_elsewhere, meta with
+    | true, (Metadata_absent | Metadata_current | Metadata_unavailable _)
+    | false, Metadata_current -> Ok ()
+    | false, Metadata_absent -> Error Unknown_keeper
+    | false, Metadata_unavailable detail -> Error (History_unavailable detail) in
     let* trace = directory_stamp (Keeper_types_support.keeper_raw_trace_dir config keeper_name) in
     let fingerprint = String.concat "\000"
         [ Physical.source_fingerprint chat
-        ; Physical.source_fingerprint meta
+        (* Metadata supplies read authority and optional trace-id enrichment.
+           Counter-only writes do not change transcript membership; enrichment
+           retains its existing TTL rather than invalidating on each heartbeat. *)
+        ; metadata_stamp meta
         ; Autonomous.snapshot_fingerprint autonomous
         ; trace
         ; string_of_int (Keeper_tool_call_log.committed_revision ~keeper_name)

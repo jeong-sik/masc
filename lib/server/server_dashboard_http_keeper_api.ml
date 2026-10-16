@@ -832,7 +832,9 @@ let handle_keeper_get_subroutes state req request reqd =
        | Error error ->
          let status = match error with
            | Server_keeper_chat_history_read.Unknown_keeper -> `Not_found
-           | Server_keeper_chat_history_read.History_unavailable _ -> `Service_unavailable
+           | Server_keeper_chat_history_read.History_unavailable detail ->
+             Log.Keeper.warn "dashboard keeper chat history unavailable for %s: %s" name detail;
+             `Service_unavailable
          in
          Server_auth.respond_json_value_with_cors ~status request reqd
            (error_json (Server_keeper_chat_history_read.error_to_string error)))

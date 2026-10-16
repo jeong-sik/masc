@@ -279,10 +279,12 @@ let cache_entries () =
   | _ -> Alcotest.fail "cache stats have no entries count"
 ;;
 
-let write_offline_meta config name =
+let write_offline_meta ?(total_turns = 0) config name =
   let meta = Masc_test_deps.meta_of_json_fixture
       (`Assoc [ "name", `String name; "trace_id", `String ("test-" ^ name) ])
       |> Result.get_ok in
+  let meta = { meta with runtime =
+      { meta.runtime with usage = { meta.runtime.usage with total_turns } } } in
   let path = Filename.concat (Workspace.keepers_runtime_dir config)
       (Keeper_runtime_root_entry.keeper_basename ~keeper_name:name Keeper_runtime_root_entry.Metadata) in
   mkdir_p (Filename.dirname path);
@@ -325,6 +327,42 @@ let test_known_empty_history_observes_later_chat_creation () =
     let status, body = get_history state name in
     Alcotest.(check int) "created history is successful" 200 status;
     Alcotest.(check (list string)) "absent fingerprint did not pin empty history" [ "created" ]
+      (match body with `List rows -> List.map content_of rows | _ -> Alcotest.fail "not history"))
+;;
+
+let test_counter_only_metadata_does_not_recompute_history () =
+  with_history_state (fun _state config ->
+    let name = "metadata-counter-history" in
+    let computes = ref 0 in
+    let read () = Server_keeper_chat_history_read.cached_json ~config ~keeper_name:name ~ttl:60.
+        ~render:(fun _ _ -> incr computes; `List []) |> Result.get_ok in
+    write_offline_meta ~total_turns:1 config name;
+    ignore (read ());
+    write_offline_meta ~total_turns:2 config name;
+    ignore (read ());
+    Alcotest.(check int) "counter write preserves successful transcript cache" 1 !computes)
+;;
+
+let test_broken_metadata_alone_cannot_authorize_empty_history () =
+  with_history_state (fun state config ->
+    let name = "broken-metadata-history" in
+    let path = Filename.concat (Workspace.keepers_runtime_dir config)
+        (Keeper_runtime_root_entry.keeper_basename ~keeper_name:name Keeper_runtime_root_entry.Metadata) in
+    mkdir_p (Filename.dirname path);
+    let oc = open_out path in
+    output_string oc "{private-meta-sentinel}\n";
+    close_out oc;
+    let status, body = get_history state name in
+    Alcotest.(check int) "broken metadata alone is unavailable" 503 status;
+    Alcotest.(check (option string)) "public error contains no metadata/path detail"
+      (Some "Keeper history is temporarily unavailable; retry the request.")
+      (match field "error" body with Some (`String text) -> Some text | _ -> None);
+    Alcotest.(check int) "invalid authority does not cache empty history" 0 (cache_entries ());
+    write_lane ~base_dir:config.Workspace.base_path ~keeper_name:name
+      [ row ~content:"retained archive" (`At 1.) ];
+    let status, body = get_history state name in
+    Alcotest.(check int) "retained chat remains authoritative despite obsolete metadata" 200 status;
+    Alcotest.(check (list string)) "archive rows preserved" [ "retained archive" ]
       (match body with `List rows -> List.map content_of rows | _ -> Alcotest.fail "not history"))
 ;;
 
@@ -383,11 +421,14 @@ let test_failed_autonomous_store_never_becomes_empty_history () =
     mkdir_p month;
     let path = Filename.concat month "16.jsonl" in
     let oc = open_out path in
-    output_string oc "{malformed turn record}\n";
+    output_string oc "{private-provider-response-sentinel}\n";
     close_out oc;
     let status, body = get_history state name in
     Alcotest.(check int) "failed TurnRecord read is unavailable" 503 status;
     Alcotest.(check bool) "TurnRecord error is explicit" true (Option.is_some (field "error" body));
+    Alcotest.(check (option string)) "public error contains no provider response or host path"
+      (Some "Keeper history is temporarily unavailable; retry the request.")
+      (match field "error" body with Some (`String text) -> Some text | _ -> None);
     Alcotest.(check int) "failed TurnRecord read not cached" 0 (cache_entries ()))
 ;;
 
@@ -444,6 +485,8 @@ let () =
     ; "legacy history truth boundary",
       [ Alcotest.test_case "unknown names never register or cache empty success" `Quick test_unknown_names_never_register_or_cache_empty_history
       ; Alcotest.test_case "offline empty history observes later file creation" `Quick test_known_empty_history_observes_later_chat_creation
+      ; Alcotest.test_case "counter-only metadata keeps transcript cache" `Quick test_counter_only_metadata_does_not_recompute_history
+      ; Alcotest.test_case "broken metadata alone cannot authorize empty history" `Quick test_broken_metadata_alone_cannot_authorize_empty_history
       ; Alcotest.test_case "read failure never becomes cached empty success" `Quick test_unreadable_history_never_becomes_cached_empty_success
       ; Alcotest.test_case "same-size/mtime replacement changes identity" `Quick test_same_stat_atomic_replacement_invalidates_history
       ; Alcotest.test_case "failed autonomous storage never becomes empty history" `Quick test_failed_autonomous_store_never_becomes_empty_history

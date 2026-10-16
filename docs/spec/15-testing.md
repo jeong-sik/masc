@@ -308,7 +308,7 @@ bisect-ppx-report html --coverage-path _coverage
 
 `GET /api/v1/keepers/:name/chat/history` distinguishes an unknown name (404),
 known empty retained history (200 with `[]`), and unavailable history (503).
-Live registration is sufficient history authority, but retained metadata,
+Live registration is sufficient history authority, but current typed metadata,
 conversation files, or current TurnRecords also preserve offline/archive reads.
 History authority does not grant mutation rights.
 
@@ -316,7 +316,11 @@ History authority does not grant mutation rights.
 for unknown-name cache/registry stability, offline empty history followed by
 file creation, unreadable/incomplete files, same-size/mtime atomic replacement,
 and malformed autonomous storage. It also covers compute-time source drift and
-equivalence with the existing 100-primary/300-secondary transcript window.
+equivalence with the existing 100-primary/300-secondary transcript window,
+counter-only metadata writes retaining the cache, and broken metadata being
+insufficient to authorize empty history without revoking retained chat rows.
+Public 503 bodies use static refusal text; parser/provider fragments and host
+paths remain internal diagnostics.
 `test_keeper_autonomous_turn_source` covers a failed exact-run read, rejection
 of cache publication, and recovery after repair; the best-effort activity
 reader keeps its separate skip behavior.

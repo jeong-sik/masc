@@ -3434,7 +3434,8 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
         ~deliver:(fun ~composition_tool:_ _ -> incr delivered; Ok ()) |> require "actual pending outbox" in
     check int (label ^ " emits no outbox notification") 0 !delivered;
     check int (label ^ " delivers no terminal") 0 report.delivered;
-    check int (label ^ " keeps readable guarded outbox authority") 0 (List.length report.failures);
+    check (list (pair string string)) (label ^ " keeps readable guarded outbox authority") []
+      (List.map (fun (identity,error) -> identity,Outbox.error_to_string error) report.failures);
     let pending = pending_completions fixture in
     check int (label ^ " adds no queue completion") queued (List.length pending);
     let original_request_notifications = pending |> List.filter

@@ -436,7 +436,8 @@ val click :
   (observation * ran, error) result
 (** Sets the mouse and runs. The mouse is state, not a queue: the cursor and
     buttons stay where they are put until the next call moves them. A click
-    ([buttons] 1 left or 2 right) is button down, run, button up, run, in one
+    ([buttons] a mask of 1 left, 2 right and 4 middle, so 3 presses left and
+    right together) is button down, run, button up, run, in one
     call — the up half always runs so the button is never left held. A move
     ([buttons = 0]) sets the position and runs once. Coordinates are frame
     pixels and must land inside the frame; [steps] is the shared ceiling of

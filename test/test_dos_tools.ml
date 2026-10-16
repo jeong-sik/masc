@@ -633,6 +633,37 @@ let test_press_reaches_the_guest_and_the_ledger () =
    are what prove both halves reached the guest. The step total is not asked to
    prove that -- how many steps the poll loop burns belongs to ocaml-dos -- it
    only has to stay inside the one ceiling. *)
+(* Polls INT 33h AX=3 until any button is down, prints the digit of BX, exits.
+   org 0x100: poll: mov ax,3 / int 33h / or bx,bx / jz poll
+              mov dl,bl / add dl,'0' / mov ah,2 / int 21h / int 20h *)
+let mouse_mask_com =
+  "\xb8\x03\x00\xcd\x33\x09\xdb\x74\xf7\x88\xda\x80\xc2\x30\xb4\x02\xcd\x21\xcd\x20"
+;;
+
+(* [buttons] is a mask, and 3 is both buttons. It was refused above 2. *)
+let test_click_takes_the_whole_button_mask () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "mask.com" mouse_mask_com;
+    List.iter
+      (fun buttons ->
+        boot ~base_path "mask.com";
+        let result =
+          dispatch ~base_path "masc_dos_click"
+            [ ("x", `Int 1); ("y", `Int 1); ("buttons", `Int buttons); ("steps", `Int 1_000) ]
+        in
+        check bool (Printf.sprintf "buttons %d clicks" buttons) true (is_completed result);
+        check bool (Printf.sprintf "and the guest reads %d in BX" buttons) true
+          (contains (string_of_int buttons) (string_field "screen_text" result)))
+      [ 1; 2; 3; 4; 7 ];
+    boot ~base_path "mask.com";
+    List.iter
+      (fun buttons ->
+        refused_before_any_effect (Printf.sprintf "buttons %d" buttons)
+          (dispatch ~base_path "masc_dos_click"
+             [ ("x", `Int 1); ("y", `Int 1); ("buttons", `Int buttons) ]))
+      [ 8; -1; 15 ])
+;;
+
 let test_click_reaches_the_guest_and_the_ledger () =
   with_workspace (fun base_path ->
     install_program ~base_path "mouse.com" mouse_click_com;
@@ -2489,6 +2520,8 @@ let () =
             test_a_holder_departs_with_its_credential
         ; test_case "a pass is refused when the credentials do not list" `Quick
             test_a_pass_is_refused_when_the_credentials_do_not_list
+        ; test_case "click takes the whole button mask" `Quick
+            test_click_takes_the_whole_button_mask
         ; test_case "only an absent recipient frees the controller" `Quick
             test_only_an_absent_recipient_frees_the_controller
         ; test_case "a fault while booting is a load" `Quick

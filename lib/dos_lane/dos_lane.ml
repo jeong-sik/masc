@@ -1235,6 +1235,10 @@ let press_into ~saves_name ~who ~keys ~steps ~until_ready =
    reacts and blocks costs no more than it needs; the up half always runs,
    whatever the down half saw, or the button would stay held for the next
    caller. A move ([buttons = 0]) sets the position and runs once. *)
+(* The core's own mask for the mouse: bit 0 left, bit 1 right, bit 2 middle
+   (Dos_machine.set_mouse). *)
+let mouse_button_mask = 0b111
+
 let click ~who ~x ~y ~buttons ~steps =
   with_control ~who (fun st ->
     let width, height = Dos_machine.frame_dims st.m in
@@ -1243,8 +1247,12 @@ let click ~who ~x ~y ~buttons ~steps =
         (Invalid_request
            (Printf.sprintf "click must land inside the %dx%d frame, got (%d,%d)"
               width height x y))
-    else if buttons < 0 || buttons > 2 then
-      Error (Invalid_request "buttons is a bitmask: 0 move, 1 left, 2 right")
+    else if buttons land lnot mouse_button_mask <> 0 then
+      Error
+        (Invalid_request
+           (Printf.sprintf
+              "buttons is a bitmask of 1 left, 2 right and 4 middle (0 only moves), got %d"
+              buttons))
     else
       match clamp_steps steps with
       | Error e -> Error e

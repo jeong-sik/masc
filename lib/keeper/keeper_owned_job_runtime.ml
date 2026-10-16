@@ -228,7 +228,8 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
                        else match record.phase with
                          | Store.Prepared when not record.cancel_requested -> launch record
                          | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
-                         | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _ -> reconcile record in
+                         | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _
+                         | Store.Cancelled_unconfirmed_launch -> reconcile record in
                      finish ~tool_name:name ~start_time ~job_id result)))
   | Some {action=(Tool_schemas_owned_job.Status | Tool_schemas_owned_job.Cancel) as action;_} ->
       (match job_argument args with

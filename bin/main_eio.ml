@@ -729,7 +729,11 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
      of the one the OCaml manual reports as having no visible effect.
      GET /api/v1/diagnostics/memprof reads the tables. *)
   Alloc_profile.start ~sampling_rate:Alloc_profile.default_sampling_rate;
-  Eio_main.run @@ fun env ->
+  (* Hoisted above [Eio_main.run]: the scheduler-EINTR fatal handler reads
+     the pending signal after the scheduler has escaped (#43225), so the cell
+     must outlive the run. The watcher fiber inside still owns consumption. *)
+  let pending_shutdown_signal = Atomic.make None in
+  let run_inside_scheduler env =
   Crypto_rng.ensure_default ();
 
   (* Enable Eio-aware locking globally (single call replaces per-module enable_eio) *)
@@ -756,8 +760,9 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
      watcher fiber wakes up can still classify itself as a graceful drop
      ([Keeper_registry_types_failure.fiber_drop_cause]: [Graceful_shutdown]),
      then enqueue the signal name for the Eio watcher fiber to consume.
-     [Atomic.set]/[Atomic.get] are lock-free and signal-safe. *)
-  let pending_shutdown_signal = Atomic.make None in
+     [Atomic.set]/[Atomic.get] are lock-free and signal-safe.
+     [pending_shutdown_signal] itself is bound above [Eio_main.run] so the
+     scheduler-EINTR fatal handler can read it after an escape. *)
   let shutdown_watchdog : Masc.Shutdown.watchdog option Atomic.t = Atomic.make None in
   let request_shutdown signal =
     Masc.Shutdown.mark_shutting_down ();
@@ -971,6 +976,41 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
         | Masc.Shutdown.Already_fired ->
             Masc.Shutdown.await_deadline_watchdog watchdog));
   Log.Server.info "MASC MCP: Shutdown complete."
+  in
+  (* [Eio_posix.Sched.clear_event_fd] in the locked eio 1.3 lets EINTR escape
+     the scheduler loop, killing the server (#43225). The loop state is
+     unrecoverable from the outside, so record the signal and process state,
+     then exit. Only EINTR is caught here; anything else keeps its existing
+     path to the toplevel. Every sampled field is scheduler-independent
+     (atomics, a try-lock counter, module-init constants). *)
+  (match Eio_main.run run_inside_scheduler with
+   | () -> ()
+   | exception Unix.Unix_error (Unix.EINTR, func, _) ->
+     let pending =
+       match Atomic.get pending_shutdown_signal with
+       | None -> None
+       | Some Sigterm -> Some Server_scheduler_eintr.Sigterm
+       | Some Sigint -> Some Server_scheduler_eintr.Sigint
+     in
+     let ctx : Server_scheduler_eintr.context =
+       {
+         Server_scheduler_eintr.pending_shutdown = pending;
+         uptime_s = Server_startup_state.elapsed_since_start ();
+         mcp_sessions = Server_mcp_transport_http_conn.active_session_count ();
+         ws_sessions = Server_mcp_transport_ws.try_session_count ();
+         ocaml_version = Sys.ocaml_version;
+         masc_version = Runtime_build_version.current;
+         git_commit = Build_identity.embedded_commit;
+         pid = Unix.getpid ();
+       }
+     in
+     Log.Server.error
+       "%s"
+       (Server_scheduler_eintr.describe
+          ctx
+          ~syscall:func
+          ~backtrace:(Printexc.get_backtrace ()));
+     exit 1)
 
 let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default =
   let identity = Build_identity.current () in

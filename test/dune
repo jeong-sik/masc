@@ -3007,6 +3007,7 @@
 (include stanzas/test_runtime_claude_input_attribution.inc)
 (include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_runtime_cli_spawn_gate.inc)
+(include stanzas/test_server_scheduler_eintr.inc)
 (include stanzas/test_runtime_binding_auth_available.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)

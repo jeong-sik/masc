@@ -240,11 +240,11 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
                 Tool_result.Policy_rejection (Store.error_to_string error)
             | Ok record ->
                 match record.phase, record.outputs with
-                | Store.Exited _, Some _ | Store.Cancelled_before_start _, None ->
+                | Store.Exited _, Some _ | (Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), None ->
                     finish ~tool_name:name ~start_time ~job_id (Ok record)
                 | (Store.Prepared | Store.Create_requested | Store.Created _
                   | Store.Start_requested _ | Store.Running _), _
-                | Store.Exited _, None | Store.Cancelled_before_start _, Some _ ->
+                | Store.Exited _, None | (Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), Some _ ->
                     Keeper_tool_execution.deferred_owned_job_result ~job_id (Store.result_json record)))
   | Some {action=(Tool_schemas_owned_job.Status | Tool_schemas_owned_job.Cancel) as action;_} ->
       (match job_argument args with

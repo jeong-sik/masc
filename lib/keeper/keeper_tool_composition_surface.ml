@@ -1782,7 +1782,9 @@ and async_submission_result
                 | Keeper_composition_nested_run.Original_authority_held rejection ->
                     Error rejection.detail) in
              (match authority with
-              | Error reason -> Keeper_msg_async.worker_interrupted ~reason
+              | Error reason ->
+                Option.iter (fun observe -> observe ~request_id ~reason) on_recovery_held;
+                Keeper_msg_async.worker_interrupted ~reason
               | Ok () ->
                 let data = continuation_refusal_to_json refusal in
                 Keeper_msg_async.worker_finished
@@ -2176,7 +2178,7 @@ let resume_continuation_with ?on_recovery_held ?owner_metadata_refusal ?on_refus
              Tool_result.make_err ~tool_name ~start_time
              ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
              ~data:rejection.data rejection.detail
-         | Ok () ->
+         | Keeper_composition_nested_run.Original_admitted ->
            let refusal = match owner_metadata_refusal,refusal,skill_reference with
              | Some metadata_refusal,_,_ when Draft.nested_calls draft = [] ->
                Some (Original_owner_metadata_refused metadata_refusal)
@@ -2191,7 +2193,9 @@ let resume_continuation_with ?on_recovery_held ?owner_metadata_refusal ?on_refus
            if (Option.is_some owner_metadata_refusal || not producer_admitted) && Option.is_none refusal then
              refuse_journal Journal.Source_conflict
            else match (match refusal with None -> Ok () | Some _ -> validate_original_producer_activation ~config source) with
-           | Error detail -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+           | Error detail ->
+               hold detail;
+               Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
                ~effect_disposition:Tool_result.Proven_pre_effect detail
            | Ok () ->
            let on_producer_accepted,observe_settlement = match refusal with

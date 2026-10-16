@@ -153,8 +153,13 @@ let read ~path ~owner ?cursor ~max_rows () =
             Ok (Some { owner; device = opened.st_dev; inode = opened.st_ino; offset; anchor_id })
         in
         let current = Unix.fstat fd in
-        let named = Unix.stat path in
-        if not (same_file opened current && same_file opened named)
+        let named =
+          match Unix.stat path with
+          | named -> Some named
+          | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
+        in
+        if not (same_file opened current
+                && Option.exists (same_file opened) named)
            || current.st_size < opened.st_size
         then Error Stale_cursor
         else Ok { rows; next_cursor })

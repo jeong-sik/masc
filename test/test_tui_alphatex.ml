@@ -115,6 +115,112 @@ let test_the_tuning_names_the_lines () =
   Alcotest.(check (list string)) "the names as written, highest first"
     [ "E"; "B"; "G"; "D"; "A"; "D" ] (tuning "\\tuning E4 B3 G3 D3 A2 D2 :4 0.6")
 
+let documented_bass_score =
+  {|\title "베이스 스케치 11/8"
+\artist "Example Artist"
+\track "Bass" { instrument "Electric Bass Finger" }
+\staff { tabs }
+\tuning (G2 D2 A1 E1)
+\ks C#minor
+\tempo 116 // estimated tempo
+\ts 11 8
+\section "Intro 4+4+3"
+:8 4.3 4.3 4.3 4.3 0.3 0.3 0.3 0.3 4.3 7.3 4.3 |
+|}
+
+let test_documented_bass_score () =
+  let expected_beats =
+    List.mapi
+      (fun index fret -> index * 48, 48, (false, [ fret ^ "@3" ]))
+      [ "4"; "4"; "4"; "4"; "0"; "0"; "0"; "0"; "4"; "7"; "4" ]
+  in
+  check_music "eleven eighth notes retain their frets and positions"
+    documented_bass_score [ 528, expected_beats ];
+  match Score.read documented_bass_score with
+  | Error failure -> Alcotest.fail (Score.failure_text failure)
+  | Ok score ->
+      Alcotest.(check (list string)) "four bass strings, highest first"
+        [ "G"; "D"; "A"; "E" ] score.tuning;
+      Alcotest.(check (option string)) "the title is retained"
+        (Some "베이스 스케치 11/8") score.title;
+      Alcotest.(check (option int)) "tempo is retained" (Some 116) score.tempo;
+      Alcotest.(check (option (pair int int))) "meter is retained"
+        (Some (11, 8)) score.time_signature
+
+let test_parenthesized_tuning_members_are_checked () =
+  check_music "whitespace and comments inside the tuning list"
+    "\\tuning (G2\nD2 /* middle */ A1\tE1) :8 4.3"
+    [ 48, [ 0, 48, (false, [ "4@3" ]) ] ];
+  List.iter
+    (fun inner ->
+      check_failure "every grouped tuning member must be a note name"
+        ("\\tuning (" ^ inner ^ ") :8 4.3") (Invalid_tuning_group inner))
+    [ "G2 D2 4.3 E1"; "G2 D2 | E1"; "G2 D2 {tabs} E1"; "\"G2\" D2 A1 E1" ];
+  check_failure "a tuning list cannot carry a beat duration"
+    "\\tuning (G2 D2 A1 E1).8 :8 4.3" (Invalid_tuning_group "G2 D2 A1 E1");
+  check_failure "an empty tuning list has no strings"
+    "\\tuning () :8 4.3" (Missing_argument Tuning_notes);
+  check_failure "the explicit bass tuning rejects a fifth string"
+    "\\tuning (G2 D2 A1 E1) :8 0.5" (String_past_tuning { string = 5; strings = 4 })
+
+let test_single_part_metadata_keeps_music () =
+  check_music "track names and staff properties do not consume the first beat"
+    "\\track \"Guitar\" \"gtr\" \\staff {score tabs} :4 0.6"
+    [ 96, [ 0, 96, (false, [ "0@6" ]) ] ];
+  check_music "numeric bass program uses the explicit tuning"
+    "\\track {instrument 33} \\staff \\tuning (G2 D2 A1 E1) :8 0.4"
+    [ 48, [ 0, 48, (false, [ "0@4" ]) ] ];
+  check_music "a key and section after a bar line keep both measures"
+    "\\ks C#minor \\section \"Intro\" :8 4.3 | \\ks Emajor \\section \"S\" \"Solo\" 7.3"
+    [ 48, [ 0, 48, (false, [ "4@3" ]) ]; 48, [ 0, 48, (false, [ "7@3" ]) ] ]
+
+let test_multiple_parts_are_not_flattened () =
+  List.iter
+    (fun source -> check_failure "an additional track is a separate timeline" source Additional_track)
+    [ "\\track \"A\" \\track \"B\" :4 0.6"
+    ; "\\staff {tabs} \\track \"B\" :4 0.6"
+    ; ":4 0.6 \\track \"B\" 3.6"
+    ; "\\track \"A\" :4 0.6 | \\track \"B\" 3.6" ];
+  List.iter
+    (fun source -> check_failure "an additional staff is a separate timeline" source Additional_staff)
+    [ "\\staff {tabs} \\staff {tabs} :4 0.6"
+    ; ":4 0.6 \\staff {tabs} 3.6"
+    ; "\\track \"A\" \\staff {tabs} :4 0.6 | \\staff {tabs} 3.6" ]
+
+let test_instrument_and_staff_do_not_guess () =
+  check_failure "a bass instrument alone does not inherit guitar strings"
+    "\\track \"Bass\" {instrument \"Electric Bass Finger\"} :8 0.3"
+    Instrument_without_tuning;
+  check_failure "a later tuning cannot correct notes already read"
+    "\\track {instrument 33} :8 0.3 \\tuning (G2 D2 A1 E1)"
+    Instrument_without_tuning;
+  check_failure "percussion is not fret-and-string music"
+    "\\track {instrument percussion} \\tuning (G2 D2 A1 E1) :8 0.3"
+    (Unsupported_instrument "percussion");
+  check_failure "an unknown instrument is not silently accepted"
+    "\\track {instrument \"Imaginary Bass\"} \\tuning (G2 D2 A1 E1) :8 0.3"
+    (Unsupported_instrument "Imaginary Bass");
+  check_failure "track properties require the supported argument shape"
+    "\\track {instrument 33 mute} \\tuning (G2 D2 A1 E1) :8 0.3"
+    (Unsupported_track_properties "instrument 33 mute");
+  List.iter
+    (fun properties ->
+      check_failure "a non-tab staff is not turned into tablature"
+        ("\\staff {" ^ properties ^ "} :8 0.3") (Unsupported_staff_properties properties))
+    [ "score"; "percussion"; "numbered"; "tabs slash" ]
+
+let test_metadata_arguments_and_bar_boundaries () =
+  check_failure "artist needs text" "\\artist :8 0.3" (Missing_argument Artist_text);
+  check_failure "section needs text" "\\section :8 0.3" (Missing_argument Section_text);
+  check_failure "key signature needs a name" "\\ks \\ts 4 4 :8 0.3"
+    (Missing_argument Key_signature_name);
+  check_failure "unknown key signatures are not skipped" "\\ks Hminor :8 0.3"
+    (Invalid_key_signature "Hminor");
+  check_failure "a section cannot silently erase an implicit bar boundary"
+    ":8 4.3 \\section \"Solo\" 7.3" Section_after_note;
+  check_failure "a key change cannot silently erase an implicit bar boundary"
+    ":8 4.3 \\ks Emajor 7.3" Key_signature_after_note
+
 (* {1 Repeats}
 
    The signs each bar carried: whether an [\ro] opened it, the [\rc] count
@@ -415,7 +521,7 @@ let test_directives_outside_the_subset () =
   check_failure "a time signature with one number" "\\ts 4 :4 0.6"
     (Missing_argument Time_signature_numbers);
   check_failure "a tuning with no notes" "\\tuning :4 0.6" (Missing_argument Tuning_notes);
-  check_failure "a quoted string that is no title" ":4 \"x\" 0.6" Quoted_without_title;
+  check_failure "a quoted string with no metadata directive" ":4 \"x\" 0.6" Quoted_without_metadata;
   check_failure "a second tuning"
     "\\tuning E4 B3 G3 D3 A2 E2 \\tuning D4 B3 G3 D3 A2 D2 :4 0.6" Second_tuning;
   check_failure "a tuning after the first note" ":4 0.6 \\tuning D4 A3" Tuning_after_music;
@@ -560,6 +666,17 @@ let () =
             test_what_is_read_and_not_played
         ; Alcotest.test_case "the tuning names the lines" `Quick
             test_the_tuning_names_the_lines
+        ; Alcotest.test_case "the documented bass score" `Quick test_documented_bass_score
+        ; Alcotest.test_case "parenthesized tuning members are checked" `Quick
+            test_parenthesized_tuning_members_are_checked
+        ; Alcotest.test_case "single-part metadata keeps music" `Quick
+            test_single_part_metadata_keeps_music
+        ; Alcotest.test_case "multiple parts are not flattened" `Quick
+            test_multiple_parts_are_not_flattened
+        ; Alcotest.test_case "instrument and staff do not guess" `Quick
+            test_instrument_and_staff_do_not_guess
+        ; Alcotest.test_case "metadata arguments and bar boundaries" `Quick
+            test_metadata_arguments_and_bar_boundaries
         ] )
     ; ( "repeats"
       , [ Alcotest.test_case "a repeat opens and closes" `Quick

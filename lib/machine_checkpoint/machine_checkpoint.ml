@@ -26,6 +26,15 @@ let slot_of_string s =
 
 let slot_to_string s = s
 
+let slot_of_arguments ~default = function
+  | `Assoc fields when List.for_all (fun (name, _) -> String.equal name "slot") fields -> (
+    match fields with
+    | [] -> slot_of_string default
+    | [ (_, `String value) ] -> slot_of_string value
+    | _ :: _ -> Error "slot must be one string")
+  | _ -> Error "checkpoint arguments must be an object"
+;;
+
 type header = { machine : machine; format : int; core : string }
 
 type error =

@@ -325,21 +325,8 @@ let checkpoint_receipt_path (config : Workspace.config) =
 
 (* Slot validation the receipt binds on: pure, no machine. *)
 let checkpoint_slot args =
-  let slot = match args with
-    | `Assoc fields when List.for_all (fun (name, _) -> name = "slot") fields -> (
-      match List.filter (fun (name, _) -> name = "slot") fields with
-      | [] -> Ok "quick"
-      | [(_, `String value)] -> Ok value
-      | _ -> Error "slot must be one string")
-    | _ -> Error "checkpoint arguments must be an object" in
-  match slot with
-  | Error _ as e -> e
-  | Ok slot ->
-    if String.length slot < 1 || String.length slot > 64
-       || not (String.for_all (function
-          | 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-' -> true | _ -> false) slot)
-    then Error "slot must be 1..64 letters, digits, underscores or hyphens"
-    else Ok slot
+  Result.map Machine_checkpoint.slot_to_string
+    (Machine_checkpoint.slot_of_arguments ~default:Msx_tool.default_checkpoint_slot args)
 
 let checkpoint_binding ~restore args =
   match args with

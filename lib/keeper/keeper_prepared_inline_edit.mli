@@ -1,5 +1,5 @@
 (** Producer-owned resource binding for an exact instantiated Edit-only plan.
-    These directory claims authorize neither effects nor replay. *)
+    These entry claims authorize neither effects nor replay. *)
 type t
 
 val eligible : Keeper_tool_plan.t -> bool

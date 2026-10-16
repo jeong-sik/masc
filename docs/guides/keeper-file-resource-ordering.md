@@ -6,26 +6,37 @@ use the same producer and resource ordering when their original source context
 and validated inputs are available.
 
 The producer pins the existing parent directories and identifies them by their
-physical device/inode and complete ancestry. It declares each directory's
-access from the operation that will consume it:
+physical device/inode and complete ancestry. Its entry claims identify each
+file entry by that physical parent and its leaf name:
 
 | Resource | Access | Scheduling |
 |---|---|---|
-| Parent of the lexical replacement target | Write | Wait for an earlier overlapping read or write. |
-| Parent of the resolved source file | Read | May overlap another read; wait for an earlier overlapping write. |
+| Lexical replacement entry | Write | Wait for an earlier overlapping read or write. |
+| Resolved source entry | Read | May overlap another read; wait for an earlier overlapping write. |
 
-Overlapping directories are the same physical directory, or an ancestor and
-descendant. A shared ancestor alone permits independent siblings. Directory
-aliases retain the same physical identity. When the target and source have the
-same parent, its write claim still orders the Edit against other overlapping
-accesses. Claims cover directories, so different files in the same directory
-can still conflict.
+Distinct entries may overlap in the same directory or nested directories. Their
+shared directory is ancestry, not an occupied write resource. Each entry retains
+its parent and complete physical ancestry, so a producer that explicitly claims
+a whole directory still conflicts with its entries. Directory aliases of the
+same entry have the same physical identity.
+
+Each call also declares the lexical target object as Write and the source
+object as Read, identified by physical device/inode. These additional claims
+preserve the backend's existing mutation lease for hard links and unify spelling
+aliases on filesystems that resolve them to one object. They do not guess case
+or Unicode normalization rules.
+
+Patch opens the current source and atomically replaces the lexical target
+entry. Its resource identity therefore uses the parent and leaf, rather than
+the file inode: an earlier replacement must still order a later patch to the
+same entry. Hard-link aliases retain backend mutation ordering even though
+replacing one entry leaves the original inode reachable through the other entry.
 
 An Edit through a file symlink reads the resolved source and atomically replaces
-the lexical target entry. Two such entries in separate target directories can
-read one shared original concurrently: each target receives its own replacement,
-and the original remains unchanged. If an earlier Edit replaces that original,
-the later read waits and opens its current bytes after the replacement.
+the lexical target entry. Two such entries can read one shared original
+concurrently: each target receives its own replacement, and the original remains
+unchanged. If an earlier Edit replaces that original, the later read waits and
+opens its current bytes after the replacement.
 
 Resource claims describe access to individual resources. A call carrying a Read
 claim can also carry Write claims and retains its effectful permission contract.
@@ -41,5 +52,6 @@ Edit-only Inline Skills; other tools require their own concrete resource and
 continuation contracts.
 
 Measure task preparation and completion under the same task/provider/tool
-conditions before reporting a speedup. Sharing reads removes an unnecessary
-ordering edge; it does not establish a fixed latency improvement.
+conditions before reporting a speedup. Independent entries and shared reads
+remove unnecessary ordering edges; they do not establish a fixed latency
+improvement.

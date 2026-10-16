@@ -1218,9 +1218,11 @@ end
 (** Part of a private JSONL store under the lock and framing of
     {!read_private_jsonl_rows_locked_result}: where the complete rows end,
     the row before [from], and at most [max_rows] complete rows from [from].
-    It reads those rows and scans back from the end and from [from], so its
-    cost is the rows it returns, not the store. [previous_row_wanted] runs in
-    the blocking worker under the lock: it must not raise or use Eio effects.
+    It reads the rows it returns, the rows before [from] back to the one
+    [previous_row_wanted] accepts, and the bytes from the end of the store
+    back to its last ['\n'], not the whole store. [previous_row_wanted] runs
+    in the blocking worker under the lock: it must not raise or use Eio
+    effects.
     Raises [Invalid_argument] for a negative [from] or a [max_rows] below one. *)
 val read_private_jsonl_window_locked_result :
   string ->

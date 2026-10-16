@@ -1030,17 +1030,6 @@ let log_settlement_failure ~path cleanup_failure =
     (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
 ;;
 
-(* Serving readers (stream replay, the v2 events endpoint) and the
-   consistency audit read through the writer's lock and framing
-   ([Fs_compat.read_private_jsonl_rows_locked_result]): the shared lock waits
-   out an append in progress, so the bytes are never a write in flight, and a
-   fragment after the last '\n' — the rows an append left when the process
-   died between its write and its rollback — is not a row. Such a fragment
-   is logged and the complete rows are served; the next append cuts it before
-   writing, so any later row follows exactly those rows. The three
-   failure shapes stay apart: a missing journal is the normal state of a
-   queued operation, an unreadable one is an operator problem, a corrupt one
-   is a codec problem. *)
 let log_torn_tail ~path ~rows_end ~end_offset =
   if rows_end < end_offset
   then
@@ -1051,6 +1040,19 @@ let log_torn_tail ~path ~rows_end ~end_offset =
       end_offset
 ;;
 
+(* Serving readers (stream replay, and an events page that starts from a held
+   seq without an offset) and the consistency audit read the whole journal
+   through the writer's lock and framing
+   ([Fs_compat.read_private_jsonl_rows_locked_result]); other events pages
+   read windows under the same lock and framing ([read_page_path]): the
+   shared lock waits out an append in progress, so the bytes are never a write
+   in flight, and a fragment after the last '\n' — the rows an append left
+   when the process died between its write and its rollback — is not a row.
+   Such a fragment is logged and the complete rows are served; the next
+   append cuts it before writing, so any later row follows exactly those
+   rows. The three failure shapes stay apart: a missing journal is the normal
+   state of a queued operation, an unreadable one is an operator problem, a
+   corrupt one is a codec problem. *)
 let read_complete_rows ~allow_torn_tail path =
   let of_rows = function
     | Fs_compat.Private_jsonl_rows.Rows_missing -> Error Journal_missing
@@ -1725,11 +1727,14 @@ let read_row_window ~path ~from ~max_rows =
    [since_seq] used part of that window. The checks, their order and the rows
    decoded are those of [page_of_rows]; only the bytes read differ, so paging
    through a journal reads it once instead of once a page. A window read
-   after the first sees the journal as it is then, which has only gained rows
-   at its end. *)
+   after the first sees the journal as it is then: its complete rows never
+   change, though it may have gained rows at its end, or been pruned, which
+   fails that page as a read failure where a whole read taken earlier would
+   have served it. The window holds one row more than the page serves, which
+   saturates rather than wraps for the largest [limit]. *)
 let page_of_windows ~path ~since_seq ~start ~limit =
   let offset = page_start_offset start in
-  let window_rows = Int.max 1 limit + 1 in
+  let window_rows = Int.max 1 (Int.min limit (max_int - 1)) + 1 in
   let read ~from = read_row_window ~path ~from ~max_rows:window_rows in
   match read ~from:offset with
   | Error _ as error -> error

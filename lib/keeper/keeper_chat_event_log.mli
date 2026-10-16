@@ -333,9 +333,11 @@ val read_page_path :
     {!read_journal_rows_path}, read from the file without the whole journal.
     From a held offset, or from the first row without a held seq, it reads
     the nearest non-blank row before the offset and [limit + 1] rows from it,
-    and more only when blank rows used part of them; paging through a
-    journal reads it about once. A page from the first row with a held seq
-    reads the whole journal, which {!page_of_rows} bisects to find where the
-    page starts. Reads take the journal's lock in a systhread when called
-    from an Eio fiber, so a caller may run it on a pool domain. Never raises
-    except [Eio.Cancel.Cancelled]. *)
+    and more only when blank rows or rows at or before [since_seq] used part
+    of them; paging through a journal reads it about once. A page from the
+    first row with a held seq reads the whole journal, which {!page_of_rows}
+    bisects to find where the page starts. Each window is read under the
+    journal's lock on its own, so a journal pruned between two windows of one
+    page fails that page with [Journal_missing]. Reads take the lock in a
+    systhread when called from an Eio fiber, so a caller may run it on a pool
+    domain. Never raises except [Eio.Cancel.Cancelled]. *)

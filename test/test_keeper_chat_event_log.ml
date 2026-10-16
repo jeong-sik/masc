@@ -494,7 +494,10 @@ let test_journal_torn_tail_reads_complete_rows () =
    The journals carry blank rows, rows long enough to cross the reader's
    chunk, a bad complete row, and torn tails. *)
 let window_journals = 12
-let window_limits = [ 1; 2; 7; L.page_max_limit ]
+
+(* Zero and the largest int are limits no request can send; both functions
+   must still answer them, and the same way. *)
+let window_limits = [ 0; 1; 2; 7; L.page_max_limit; max_int ]
 
 let test_read_page_path_matches_page_of_rows () =
   let base_dir = temp_base_path "keeper-chat-event-log-window" in

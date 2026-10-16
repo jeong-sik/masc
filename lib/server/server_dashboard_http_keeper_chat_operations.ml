@@ -348,7 +348,8 @@ let events_page_of_page ~redact_text query page =
   |> Result.map_error page_failure_error
 ;;
 
-(* The same over rows already read. Pure: the caller runs it in a pool job. *)
+(* The same over rows already read: the empty rows of a journal nothing has
+   been written to yet, and the test hook. Pure. *)
 let events_page_of_rows ~path ~redact_text query rows =
   Keeper_chat_event_log.page_of_rows
     ~path

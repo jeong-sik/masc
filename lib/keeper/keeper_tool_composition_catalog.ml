@@ -53,6 +53,9 @@ type error =
       ; mode : string
       }
   | Invalid_branch_failure_policy of { path : string list; policy : string }
+  | Conflicting_plan_field of { path : string list; field : string }
+  | Plan_json_syntax of { name : string; detail : string }
+  | Plan_json_rejected of { name : string; error : Keeper_tool_plan_request.error }
   | Async_tool_not_statically_read_only of
       { name : string
       ; node_id : Plan.Node_id.t
@@ -674,112 +677,77 @@ let plan_of_fields ~descriptors ~path ~name fields nodes =
   | Error error -> Error (Plan_rejected { name; error })
 ;;
 
+let plan_json_of_fields ~path fields =
+  let ( let* ) = Result.bind in
+  let* encoded = optional_string ~path "plan_json" fields in
+  match encoded with
+  | Some _ ->
+    let* () = List.fold_left (fun acc field ->
+      let* () = acc in
+      if List.mem_assoc field fields then Error (Conflicting_plan_field { path; field })
+      else Ok ()) (Ok ()) [ "nodes"; "params"; "exports"; "branch_failure_policy" ] in
+    Ok encoded
+  | None -> Ok None
+;;
+
+let parse_plan ~descriptors ~path ~name ~encoded fields =
+  let ( let* ) = Result.bind in
+  match encoded with
+  | Some source ->
+    let* json = match Yojson.Safe.from_string source with
+      | json -> Ok json
+      | exception Yojson.Json_error detail -> Error (Plan_json_syntax { name; detail }) in
+    Keeper_tool_plan_request.plan_of_json ~descriptors json
+    |> Result.map_error (fun error -> Plan_json_rejected { name; error })
+  | None ->
+    let* raw_nodes = required_field ~path "nodes" fields in
+    let* values = table_array ~path ~field:"nodes" raw_nodes in
+    let* nodes = List.fold_left (fun acc (index, value) ->
+      let* nodes = acc in
+      let* node = parse_node ~path:(path @ [ "nodes"; string_of_int index ]) value in
+      Ok (node :: nodes)) (Ok []) (List.mapi (fun i value -> i, value) values) in
+    plan_of_fields ~descriptors ~path ~name fields (List.rev nodes)
+;;
+
 let parse_composition ~descriptors ~index value =
+  let ( let* ) = Result.bind in
   let path = [ "compositions"; string_of_int index ] in
-  match table_fields ~path ~field:"composition" value with
-  | Error _ as error -> error
-  | Ok fields ->
-    (match
-       validate_fields
-         ~path
-         ~allowed:[ "name"; "description"; "execution"; "params"; "nodes"; "defer_loading"; "exports"; "branch_failure_policy" ]
-         fields
-     with
-     | Error _ as error -> error
-     | Ok () ->
-       (match required_nonempty_string ~path "name" fields with
-       | Error _ as error -> error
-       | Ok name ->
-         if String.length name > maximum_composition_name_bytes
-         then
-           Error
-             (Composition_name_too_long
-                { name; maximum_bytes = maximum_composition_name_bytes })
-         else
-           (match
-              String.to_seq name
-              |> Seq.find (function
-                | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> false
-                | _ -> true)
-            with
-            | Some character ->
-              Error (Invalid_composition_name_character { name; character })
-            | None ->
-           (match optional_string ~path "description" fields with
-           | Error _ as error -> error
-           | Ok description ->
-             (* The same declaration a tool file makes: held back from the
-                request until [keeper_tool_search] names it. *)
-             (match optional_bool ~path "defer_loading" fields with
-              | Error _ as error -> error
-              | Ok defer_loading ->
-             let loading =
-               match defer_loading with
-               | Some true -> Tool_definition_toml.Deferrable
-               | Some false | None -> Tool_definition_toml.Always_loaded
-             in
-             (match required_string ~path "execution" fields with
-              | Error _ as error -> error
-              | Ok raw_execution ->
-                (match raw_execution with
-                 | "inline" -> Ok Inline
-                 | "async" -> Ok Async
-                 | mode -> Error (Invalid_execution_mode { path; mode }))
-                |> (function
-                 | Error _ as error -> error
-                 | Ok execution ->
-             (match parse_params ~path fields with
-              | Error _ as error -> error
-              | Ok params ->
-             (match required_field ~path "nodes" fields with
-              | Error _ as error -> error
-              | Ok raw_nodes ->
-                (match table_array ~path ~field:"nodes" raw_nodes with
-                 | Error _ as error -> error
-                 | Ok raw_nodes ->
-                   let rec parse_nodes index parsed = function
-                     | [] -> Ok (List.rev parsed)
-                     | node :: rest ->
-                       (match parse_node ~path:(path @ [ "nodes"; string_of_int index ]) node with
-                        | Error _ as error -> error
-                        | Ok node -> parse_nodes (index + 1) (node :: parsed) rest)
-                   in
-                   (match parse_nodes 0 [] raw_nodes with
-                    | Error _ as error -> error
-                    | Ok nodes ->
-                      (match
-                         plan_of_fields ~descriptors ~path ~name fields nodes
-                       with
-                       | Error _ as error -> error
-                       | Ok plan ->
-                         (match validate_declared_params ~name ~params plan with
-                          | Error _ as error -> error
-                          | Ok () ->
-                         (match execution with
-                          | Inline ->
-                            Ok { name; description; execution; params; plan; loading }
-                          | Async ->
-                            (
-                            (match
-                               Plan.nodes plan
-                               |> List.find_map (fun (node : Plan.node) ->
-                                 match Plan.descriptor plan node.id with
-                                 | Some descriptor
-                                   when Keeper_tool_descriptor.readonly_static_hint
-                                          descriptor
-                                        = Some true ->
-                                   None
-                                 | Some _ | None -> Some node)
-                             with
-                             | None ->
-                               Ok { name; description; execution; params; plan; loading }
-                             | Some node ->
-                               Error
-                                 (Async_tool_not_statically_read_only
-                                    { name
-                                    ; node_id = node.id
-                                    ; tool_name = node.tool_name
-                                    })))))))))))))))))
+  let* fields = table_fields ~path ~field:"composition" value in
+  let* () = validate_fields ~path
+      ~allowed:[ "name"; "description"; "execution"; "params"; "nodes";
+                 "defer_loading"; "exports"; "branch_failure_policy"; "plan_json" ] fields in
+  let* name = required_nonempty_string ~path "name" fields in
+  let* () = if String.length name > maximum_composition_name_bytes then
+      Error (Composition_name_too_long { name; maximum_bytes = maximum_composition_name_bytes })
+    else Ok () in
+  let* () = match String.to_seq name |> Seq.find (function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> false | _ -> true) with
+    | Some character -> Error (Invalid_composition_name_character { name; character })
+    | None -> Ok () in
+  let* description = optional_string ~path "description" fields in
+  let* defer_loading = optional_bool ~path "defer_loading" fields in
+  let loading = match defer_loading with
+    | Some true -> Tool_definition_toml.Deferrable
+    | Some false | None -> Tool_definition_toml.Always_loaded in
+  let* raw_execution = required_string ~path "execution" fields in
+  let* execution = match raw_execution with
+    | "inline" -> Ok Inline | "async" -> Ok Async
+    | mode -> Error (Invalid_execution_mode { path; mode }) in
+  let* encoded = plan_json_of_fields ~path fields in
+  let* params = parse_params ~path fields in
+  let* plan = parse_plan ~descriptors ~path ~name ~encoded fields in
+  let* () = validate_declared_params ~name ~params plan in
+  let* () = match execution with
+    | Inline -> Ok ()
+    | Async ->
+      (match Plan.nodes plan |> List.find_map (fun (node : Plan.node) ->
+         match Plan.descriptor plan node.id with
+         | Some descriptor when Keeper_tool_descriptor.readonly_static_hint descriptor = Some true -> None
+         | Some _ | None -> Some node) with
+       | None -> Ok ()
+       | Some node -> Error (Async_tool_not_statically_read_only
+           { name; node_id = node.id; tool_name = node.tool_name })) in
+  Ok { name; description; execution; params; plan; loading }
 ;;
 
 let parse ?(descriptors = Keeper_tool_descriptor.all_descriptors ()) content =
@@ -839,6 +807,12 @@ let error_to_string = function
   | Invalid_branch_failure_policy { path; policy } ->
     Printf.sprintf "invalid branch failure policy %S at %s (expected fail_fast or continue_independent)"
       policy (String.concat "." path)
+  | Conflicting_plan_field { path; field } ->
+    Printf.sprintf "plan_json cannot be mixed with %S at %s" field (String.concat "." path)
+  | Plan_json_syntax { name; detail } ->
+    Printf.sprintf "composition %S has invalid plan_json: %s" name detail
+  | Plan_json_rejected { name; error } ->
+    Printf.sprintf "composition %S plan_json rejected: %s" name (Keeper_tool_plan_request.error_message error)
   | Async_tool_not_statically_read_only { name; node_id; tool_name } ->
     Printf.sprintf
       "async composition %S node %S tool %S is not statically read-only"

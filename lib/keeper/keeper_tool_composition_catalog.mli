@@ -64,6 +64,9 @@ type error =
       ; mode : string
       }
   | Invalid_branch_failure_policy of { path : string list; policy : string }
+  | Conflicting_plan_field of { path : string list; field : string }
+  | Plan_json_syntax of { name : string; detail : string }
+  | Plan_json_rejected of { name : string; error : Keeper_tool_plan_request.error }
   | Async_tool_not_statically_read_only of
       { name : string
       ; node_id : Keeper_tool_plan.Node_id.t
@@ -172,6 +175,11 @@ val parse : ?descriptors:Keeper_tool_descriptor.t list -> string -> (t, error) r
     tagged templates fail closed. [exports] is a table array of [name], [node]
     and RFC 6901 [pointer]. Optional [branch_failure_policy] is [fail_fast] or
     [continue_independent], and is retained when parameters are bound. *)
+(* [plan_json] carries a parameter-free canonical structured plan instead of
+   [nodes]/[params]/[exports]/[branch_failure_policy]. The two forms cannot be
+   mixed; a string [plan_json] rejects the presence of any of those fields
+   before their values are parsed. The ordinary TOML form retains its parameter
+   validation before plan validation. Both forms use the same Plan authority. *)
 
 val entries : t -> entry list
 val find : t -> string -> entry option

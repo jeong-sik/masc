@@ -913,7 +913,15 @@ let test_draft_rejects_effects_and_bad_fixed_inputs () =
   let invalid_read = `Assoc [ "nodes", `List [ `Assoc [ "id", `String "read"; "tool", `String "Read"
       ; "input", `Assoc [ "kind", `String "literal"; "value", `Assoc [ "file_path", `Int 3 ] ] ] ] ] in
   match prepare invalid_read with
-  | Error (Draft.Inputs_rejected _) -> ()
+  | Error (Draft.Inputs_rejected _ as error) ->
+    let open Yojson.Safe.Util in
+    let projected = Draft.error_to_json error in
+    check string "fixed input rejection keeps its public error kind" "inputs_rejected"
+      (projected |> member "kind" |> to_string);
+    check string "fixed input rejection identifies its node" "read"
+      (projected |> member "node_id" |> to_string);
+    check string "fixed input rejection keeps canonical validation detail" "input_validation_failed"
+      (projected |> member "error" |> member "kind" |> to_string)
   | Error _ | Ok _ -> fail "invalid fixed input survived prepare"
 ;;
 
@@ -984,6 +992,20 @@ let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () 
        | `Assoc fields -> `Assoc (("execution", `String "inline") :: fields)
        | _ -> fail "fixture plan is not an object") in
   let open Yojson.Safe.Util in
+  let preview_node = match prepared |> member "schedule_preview" |> to_list with
+    | [ `List [ node ] ] -> node
+    | _ -> fail "public prepare lost its single-node schedule preview" in
+  check string "public preview keeps the admitted node" "lane"
+    (preview_node |> member "node_id" |> to_string);
+  let preview_schedule = preview_node |> member "schedule" in
+  check int "public preview keeps the canonical planned index" 0
+    (preview_schedule |> member "planned_index" |> to_int);
+  check int "public preview keeps the canonical batch index" 0
+    (preview_schedule |> member "batch_index" |> to_int);
+  check int "public preview keeps the descriptor batch size" 1
+    (preview_schedule |> member "batch_size" |> to_int);
+  check string "public preview keeps concurrent descriptor execution" "concurrent"
+    (preview_schedule |> member "execution_mode" |> to_string);
   let draft_reference = prepared |> member "draft" |> decode_reference in
   let run_parent = "public-draft-run" in
   let result = invoke run_parent Draft.run_tool_name
@@ -1232,11 +1254,48 @@ let test_prepare_schema_has_no_recursive_references () =
      | _ -> None)
 ;;
 
+let test_frozen_plan_json_preserves_values_and_rejects_mixed_forms () =
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  (* Compile fidelity, not an assertion that these fixture values are valid
+     inputs for a runtime call. Input preflight remains a separate boundary. *)
+  let request = `Assoc
+    [ "nodes", `List [ `Assoc [ "id", `String "lane"; "tool", `String "keeper_lane_status"
+        ; "input", `Assoc [ "kind", `String "literal"; "value", `Assoc
+            [ "nullable", `Null; "mixed", `List [ `String "검사\n\"quoted\""; `Int 2; `Bool true ] ] ] ] ]
+    ; "exports", `List [ `Assoc [ "name", `String "profile"; "node", `String "lane"; "pointer", `String "/profile" ] ]
+    ; "branch_failure_policy", `String "continue_independent" ] in
+  let plan = Masc.Keeper_tool_plan_request.plan_of_json ~descriptors request |> Result.get_ok in
+  let canonical = Masc.Keeper_tool_plan_request.to_yojson plan |> Result.get_ok in
+  let header = "[[compositions]]\nname = \"frozen\"\nexecution = \"inline\"\n" in
+  let document = header ^ "plan_json = " ^ Yojson.Safe.to_string (`String (Yojson.Safe.to_string canonical)) ^ "\n" in
+  let catalog = Catalog.parse ~descriptors document |> Result.get_ok in
+  let restored = match Catalog.entries catalog with [ entry ] -> entry.plan | _ -> fail "one entry" in
+  check bool "null, mixed arrays and escaped UTF-8 preserve exact JSON" true
+    (Yojson.Safe.equal canonical (Masc.Keeper_tool_plan_request.to_yojson restored |> Result.get_ok));
+  List.iter (fun (field, extra) -> match Catalog.parse ~descriptors (document ^ extra) with
+    | Error (Catalog.Conflicting_plan_field { field = found; path }) ->
+      check string "mixed form identifies its forbidden field" field found;
+      check (list string) "mixed form identifies its composition" [ "compositions"; "0" ] path
+    | Error error -> fail (Catalog.error_to_string error)
+    | Ok _ -> fail "mixed plan accepted")
+    [ "nodes", "nodes = []\n"; "params", "params = []\n"; "params", "params = \"invalid\"\n"
+    ; "exports", "exports = []\n"; "branch_failure_policy", "branch_failure_policy = \"fail_fast\"\n" ];
+  (match Catalog.parse ~descriptors (header ^ "params = []\n") with
+   | Error (Catalog.Wrong_value_kind { field = "params"; expected = Catalog.Table_array_value; _ }) -> ()
+   | Error error -> fail (Catalog.error_to_string error)
+   | Ok _ -> fail "ordinary TOML parameter validation was bypassed");
+  (match Catalog.parse ~descriptors (header ^ "plan_json = \"invalid\"\n") with
+   | Error (Catalog.Plan_json_syntax _) -> () | _ -> fail "invalid encoded JSON accepted");
+  (match Catalog.parse ~descriptors (header ^ "plan_json = \"{}\"\n") with
+   | Error (Catalog.Plan_json_rejected _) -> () | _ -> fail "invalid structured plan accepted")
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
     [ ( "catalog"
-      , [ test_case "draft prepare and exact run binding" `Quick test_draft_prepare_and_exact_run_binding
+      , [ test_case "frozen JSON preserves values and rejects mixed forms" `Quick test_frozen_plan_json_preserves_values_and_rejects_mixed_forms
+        ; test_case "draft prepare and exact run binding" `Quick test_draft_prepare_and_exact_run_binding
         ; test_case "read-only outer invocations overlap without identity mixing" `Quick
             test_read_only_outer_invocations_overlap_without_identity_mixing
         ; test_case "causal forks keep invocation-owned history" `Quick

@@ -1,6 +1,9 @@
 (** Keeper-authored Skill publication (RFC keeper-self-authored-skills).
 
-    Parses [package_id], [source_text] and a non-empty [evidence] list, then
+    Parses [package_id], exactly one of [source_text]/[draft_sha256] and a
+    non-empty [evidence] list. Draft mode requires [capability_surface], the
+    exact preparing owner/package and its frozen Tool/Skill contracts; it
+    publishes the frozen source bytes. Then it
     validates against the caller-authorized [descriptors] before it
     asks {!Workspace_hooks.keeper_skill_publish_fn} to create the package in
     the [project-agents] source. The Keeper cannot pick the source. The
@@ -11,6 +14,7 @@
     reason, and a refusal its [error] code and message. *)
 val handle :
   descriptors:Keeper_tool_descriptor.t list ->
+  capability_surface:Keeper_capability_surface.t option ->
   config:Workspace.config ->
   keeper_name:string ->
   args:Yojson.Safe.t ->

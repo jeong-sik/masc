@@ -317,14 +317,15 @@ let handle_in_process ctx descriptor args =
        | Frozen_surface surface ->
            Keeper_skill_validate.handle
              ~descriptors:(Keeper_capability_surface.descriptors surface)
-             ~config:ctx.config ~args
+             ~draft_context:(Some (surface, ctx.meta.name)) ~config:ctx.config ~args
        | Compatibility_meta ->
            Keeper_skill_validate.handle
              ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
-             ~config:ctx.config ~args)
+             ~draft_context:None ~config:ctx.config ~args)
   | Tool_skill_publish ->
     Some
       (Keeper_skill_publish.handle
+         ~capability_surface:(match ctx.capability_authority with Frozen_surface surface -> Some surface | Compatibility_meta -> None)
          ~descriptors:(match ctx.capability_authority with
            | Frozen_surface surface -> Keeper_capability_surface.descriptors surface
            | Compatibility_meta -> Keeper_tool_descriptor.all_descriptors ())

@@ -197,6 +197,9 @@ let endpoint_of_json json =
     ; enabled = (match enabled with Some value -> value | None -> true)
     ; timeout_seconds
     ; default_voice
+    (* Endpoint mappings are configured in the file, like command paths. The
+       setup editor preserves them rather than accepting an unvalidated map. *)
+    ; agent_voices = []
     (* Not taken from the request. A command kind knows the name it is
        installed under, and an override is a path this route cannot check;
        someone who needs one edits the file. *)
@@ -223,6 +226,9 @@ let endpoint_json (endpoint : Voice_config.endpoint) =
      @ text "health_url" endpoint.Voice_config.health_url
      @ text "api_key_env" endpoint.Voice_config.api_key_env
      @ text "default_voice" endpoint.Voice_config.default_voice
+     @ [ "agent_voices",
+         `Assoc (List.map (fun (agent, voice) -> agent, `String voice)
+                   endpoint.Voice_config.agent_voices) ]
      @ text "model" endpoint.Voice_config.model
      (* Which program a command kind actually runs. Omitted, the observation
         described an endpoint by a default it may have overridden. The request
@@ -538,6 +544,7 @@ let catalogue_endpoint_of_json json =
     ; enabled = true
     ; timeout_seconds = None
     ; default_voice = None
+    ; agent_voices = []
     ; command = None
     ; model = None
     }

@@ -261,8 +261,8 @@ masc voice-verify --base-path ~/work --agent alpha  →  119044 bytes of audio i
 masc voice-verify --base-path ~/work --agent beta   →   85908 bytes of audio in "Yuna"
 ```
 
-A `default_voice` on the **endpoint** outranks both, for every keeper at that
-endpoint. With `default_voice = "Yuna"` added under `[[voice.tts.endpoints]]`,
+A `default_voice` on the **endpoint** outranks both unless that endpoint has
+an `agent_voices` entry for the keeper. With `default_voice = "Yuna"` added under `[[voice.tts.endpoints]]`,
 `--agent alpha` answers `85908 bytes of audio in "Yuna"`, and nothing is
 logged.
 
@@ -274,8 +274,25 @@ When every endpoint in the section is `say`, the command writes the section
 default and leaves the endpoint without a voice — on every run, removing one
 an endpoint already carries.
 
-On a section shared by two providers, `agent_voices` therefore does not reach
-the `say` endpoint. There is no per-provider keeper mapping.
+On a section shared by two providers, give each endpoint its own keeper mapping:
+
+```toml
+[[voice.tts.endpoints]]
+id = "say"
+kind = "macos_say"
+default_voice = "Yuna"
+
+[voice.tts.endpoints.agent_voices]
+alpha = "Eddy (한국어(한국))"
+```
+
+Selection uses the endpoint's keeper mapping, then its default, then the
+section's keeper mapping and default. The fallback endpoint resolves the same
+keeper against its own mapping, so an ElevenLabs id is not reused for an OpenAI
+voice when both endpoints declare their voice vocabulary.
+
+Endpoint keeper mappings are edited in the file. The setup pane preserves
+them when updating an endpoint and shows them in its configuration response.
 
 `--agent` is the check for a mapping. `say` answers a name it does not have by
 speaking in another voice and exiting 0, so the audio cannot show that a
@@ -1262,8 +1279,8 @@ provider vocabulary -- `say` takes `Yuna`, ElevenLabs a 20-character id -- so it
 becomes `[voice.tts] default_voice` only when every endpoint already there
 shares this one's kind. Beside another kind it goes on the endpoint instead,
 which leaves the existing default readable by the endpoints that fall back to
-it and, as the trade, puts this one out of reach of `agent_voices` (see
-"a `default_voice` on the endpoint outranks both" above).
+it. An endpoint keeper mapping under `voice.tts.endpoints.agent_voices`
+overrides that endpoint default (see "Which voice a keeper speaks in" above).
 
 On success the pane reloads, and for speech out every configured endpoint is
 asked to say one sentence. Each answer is shown, **including the refusals** —

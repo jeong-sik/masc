@@ -31,6 +31,7 @@ let endpoint =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; agent_voices = []
   ; command = None
   ; model = None
   }
@@ -139,6 +140,7 @@ let espeak_endpoint =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; agent_voices = []
   ; command = None
   ; model = None
   }

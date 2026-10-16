@@ -1018,13 +1018,24 @@ let upsert_table_array_entry content ~path ~id_key ~id ~fields =
        disagree with the entry this call just addressed. *)
     let fields = List.filter (fun (key, _) -> not (String.equal key id_key)) fields in
     let set_fields body =
-      List.fold_left
+      (* Nested tables belong to this entry for removal and insertion, but
+         their keys do not belong to the entry's direct fields. Inserting a
+         missing endpoint model after its agent_voices header changes the
+         agent map; removing model there deletes a keeper named model. *)
+      let direct, nested =
+        match find_structural_index is_table_header body with
+        | None -> body, []
+        | Some first_header -> split_at first_header body
+      in
+      let updated = List.fold_left
         (fun body (key, value) ->
           match value with
           | Some value -> replace_or_append_value body ~key ~value
           | None -> remove_key body ~key)
-        body
+        direct
         fields
+      in
+      updated @ nested
     in
     let rec edit acc found state = function
       | [] -> List.rev acc, found

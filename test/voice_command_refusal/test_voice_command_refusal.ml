@@ -20,6 +20,7 @@ let endpoint command =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; agent_voices = []
   ; command = Some command
   ; model = None
   }

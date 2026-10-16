@@ -114,6 +114,7 @@ let transcriber_in dir =
     ; enabled = true
     ; timeout_seconds = None
     ; default_voice = None
+    ; agent_voices = []
     ; command = Some script
     ; model = None
     }

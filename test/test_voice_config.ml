@@ -382,6 +382,41 @@ let test_endpoint_voice_outranks_a_per_agent_mapping () =
       (Vc.voice_for_agent_at_endpoint tts openai "voice-mapping-fixture")
 ;;
 
+let test_endpoint_agent_voices_survive_provider_fallback () =
+  let fixture = {|{
+    "tts": {
+      "default_model": "model", "default_voice": "workspace-default",
+      "default_voice_settings": {},
+      "agent_voices": { "voice-mapping-fixture": "workspace-agent" },
+      "endpoints": [
+        { "id": "eleven", "kind": "elevenlabs_direct",
+          "agent_voices": { "voice-mapping-fixture": "native-eleven-agent" } },
+        { "id": "openai", "kind": "openai_compat",
+          "base_url": "https://api.openai.com/v1", "default_voice": "alloy",
+          "agent_voices": { "voice-mapping-fixture": "nova" } }
+      ]
+    },
+    "session": { "endpoints": [] }
+  }|} in
+  match parse fixture with
+  | Error _ -> fail "endpoint agent mappings must parse"
+  | Ok config ->
+    let tts = tts_of config in
+    let eleven = endpoint_named tts "eleven" in
+    let openai = endpoint_named tts "openai" in
+    check string "first provider preserves the agent identity" "native-eleven-agent"
+      (Vc.voice_for_agent_at_endpoint tts eleven "voice-mapping-fixture");
+    check string "fallback provider preserves its own agent identity" "nova"
+      (Vc.voice_for_agent_at_endpoint tts openai "voice-mapping-fixture");
+    check string "unmapped agent uses endpoint default" "alloy"
+      (Vc.voice_for_agent_at_endpoint tts openai "unmapped");
+    check string "unmapped endpoint uses workspace default" "workspace-default"
+      (Vc.voice_for_agent_at_endpoint tts eleven "unmapped");
+    check (list string) "public inventory includes endpoint voices"
+      [ "workspace-default"; "workspace-agent"; "native-eleven-agent"; "alloy"; "nova" ]
+      (Vc.available_voices tts)
+;;
+
 let test_endpoint_voice_is_absent_when_not_declared () =
   (* The shared fixture declares no per-endpoint voice, so every endpoint has
      to keep resolving to the workspace default -- the field is additive. *)
@@ -1173,6 +1208,10 @@ let () =
             "endpoint voice outranks a per-agent mapping"
             `Quick
             test_endpoint_voice_outranks_a_per_agent_mapping
+        ; test_case
+            "provider fallback preserves endpoint agent voices"
+            `Quick
+            test_endpoint_agent_voices_survive_provider_fallback
         ; test_case
             "absent endpoint voice keeps the workspace default"
             `Quick

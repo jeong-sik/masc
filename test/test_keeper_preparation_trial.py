@@ -504,6 +504,13 @@ def main():
         bodies = sorted(directory.glob("provider-request-*.json"))
         require(len(bodies) == receipt["provider_requests"] and len(bodies) > 1,
                 "actual streaming provider loop was not crossed")
+        first_tools = {tool["function"]["name"] for tool in read(bodies[0]).get("tools", [])}
+        require("keeper_job_result" in first_tools,
+                "the current Task's exact declared result Tool was absent from the first actual POST")
+        redundant_loads = [row for row in calls if row["tool"] == "keeper_tool_search" and
+                           "keeper_job_result" in row["input"].get("names", [])]
+        require(not redundant_loads,
+                "the actual model loop still needed a loader call for its exact Task plan's result Tool")
         peer = read(directory / "provider-events.json")
         check_http_observation(directory, receipt,
                                [row for row in peer if row["kind"] == "synthetic_provider_received"])

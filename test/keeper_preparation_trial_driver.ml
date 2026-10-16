@@ -34,6 +34,45 @@ let string name value = field name value |> to_string
 let integer name value = field name value |> to_int
 let clock epoch counter = `Assoc ["epoch",`Float epoch;"monotonic_ns",`Float counter]
 let now counter = clock (Unix.gettimeofday ()) (Mtime.Span.to_float_ns (Mtime_clock.count counter))
+type preparation_stage =
+  | Initialize_workspace | Publish_snapshot | Install_owner | Create_keeper
+  | Register_keeper | Claim_task | Build_bundle | Start_job of int | Collect_job of int
+  | Deliver_setup_results | Initialize_runtime | Admit_source | Run_cycle
+
+type stage_state = Entered | Returned | Failed
+
+let stage_fields = function
+  | Initialize_workspace -> "initialize_workspace", []
+  | Publish_snapshot -> "publish_snapshot", []
+  | Install_owner -> "install_owner", []
+  | Create_keeper -> "create_keeper", []
+  | Register_keeper -> "register_keeper", []
+  | Claim_task -> "claim_task", []
+  | Build_bundle -> "build_bundle", []
+  | Start_job index -> "start_job", ["job_index", `Int index]
+  | Collect_job index -> "collect_job", ["job_index", `Int index]
+  | Deliver_setup_results -> "deliver_setup_results", []
+  | Initialize_runtime -> "initialize_runtime", []
+  | Admit_source -> "admit_source", []
+  | Run_cycle -> "run_cycle", []
+
+let observe_stage ~counter ~receipt stage operation =
+  let name, fields = stage_fields stage in
+  let record state =
+    let state = match state with Entered -> "entered" | Returned -> "returned" | Failed -> "failed" in
+    let event = `Assoc (["schema_version", `Int 1; "stage", `String name;
+      "state", `String state; "observed", now counter] @ fields) in
+    append_event (receipt ^ ".stages.jsonl") event;
+    Printf.eprintf "PREPARATION_STAGE %s\n%!" (Yojson.Safe.to_string event) in
+  record Entered;
+  match operation () with
+  | value -> record Returned; value
+  | exception (Eio.Cancel.Cancelled _ as error) -> raise error
+  | exception error ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    record Failed;
+    Printexc.raise_with_backtrace error backtrace
+
 let store_error = Jobs.error_to_string
 let index_error = function Calls.Index_unavailable detail -> detail
 let fixture_path base = Filename.concat base "preparation-fixture.json"
@@ -252,13 +291,15 @@ let configure_keeper ~base ~instructions =
     "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nnetwork_mode = \"none\"\nactivation_mode = \"autonomous\"\ninstructions = %S\n" instructions)
 
 let setup ~base ~experiment ~counter ~receipt ~sw ~env =
+  let stage phase = observe_stage ~counter ~receipt phase in
   let config = Workspace.default_config base in
-  ignore (Workspace.init config ~agent_name:(Some "preparation-operator") : string);
+  ignore (stage Initialize_workspace (fun () ->
+    Workspace.init config ~agent_name:(Some "preparation-operator")) : string);
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base ["base","masc-sandbox-base:fixture-owned-job"];
   write (config_path base) skills_config;
   let skill_path = Filename.concat base ".agents/skills/preparation-stdout/SKILL.md" in
   write skill_path source_document;
-  let workspace,snapshot,reference = publish_snapshot ~base in
+  let workspace,snapshot,reference = stage Publish_snapshot (fun () -> publish_snapshot ~base) in
   Eio.Switch.on_release sw (fun () -> Skill_catalog_snapshot_service.retire ~workspace);
   let descriptors = Keeper_tool_descriptor.all_descriptors () in
   let catalog,diagnostics = Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
@@ -274,40 +315,44 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
       ~description:"Read the immutable selection input and return the selected original job's complete stdout SHA-256."
     |> get Workspace.add_task_error_to_string in
   configure_keeper ~base ~instructions:"Follow the addressed task and report independently verified original output.";
-  install_owner ~sw config;
+  stage Install_owner (fun () -> install_owner ~sw config);
   let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String keeper]) |> get Fun.id in
   let meta = {meta with current_task_id=Some (Keeper_id.Task_id.of_string task.task_id |> get Fun.id);
       sandbox_profile=Keeper_types_profile.Docker;sandbox_image=Some "base"} in
-  ignore (Keeper_owner_registry.create_meta ~base_path:base meta |> get Keeper_owner_registry.command_error_to_string);
+  ignore (stage Create_keeper (fun () -> Keeper_owner_registry.create_meta ~base_path:base meta
+    |> get Keeper_owner_registry.command_error_to_string));
   let meta = match Keeper_meta_store.read_effective_meta config keeper |> get Fun.id with
     | Some value -> value | None -> failwith "effective setup Keeper missing" in
-  let entry = Keeper_registry.register_offline ~base_path:base keeper meta in
+  let entry = stage Register_keeper (fun () -> Keeper_registry.register_offline ~base_path:base keeper meta) in
   Eio.Switch.on_release sw (fun () -> ignore (Keeper_registry.unregister_exact entry));
-  ignore (Workspace.claim_task_r config ~agent_name:keeper ~task_id:task.task_id ()
-    |> get Masc_domain.masc_error_to_string);
+  ignore (stage Claim_task (fun () -> Workspace.claim_task_r config ~agent_name:keeper ~task_id:task.task_id ()
+    |> get Masc_domain.masc_error_to_string));
   let cell = Calls.create_turn_ctx_cell () in
   Calls.set_turn_context ~cell ~agent_name:keeper ~task_id:task.task_id ~turn:0 ~keeper_turn_id:0
     ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ();
   let surface = empty_surface ~base ~meta in
   let publication_recovery : Keeper_publication_recovery_availability.turn_context =
     {provider=Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
-  let bundle = Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface ~config ~meta
+  let bundle = stage Build_bundle (fun () ->
+    Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface ~config ~meta
       ~publication_recovery ~capability_surface:surface ~turn_ctx_cell:cell
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"fixture input preparation")
-      ~clock:env#clock () in
+      ~clock:env#clock ()) in
   Eio.Switch.on_release sw bundle.cleanup;
   let create index large =
     write (Filename.concat base "control.json") "{}";
-    let started = invoke bundle ~id:("fixture-launch-" ^ string_of_int index) ~turn:0
-        "keeper_job_start" (`Assoc ["argv",`List [`String "fixture-program";`String (string_of_int index)]]) in
+    let started = stage (Start_job index) (fun () ->
+      invoke bundle ~id:("fixture-launch-" ^ string_of_int index) ~turn:0
+        "keeper_job_start" (`Assoc ["argv",`List [`String "fixture-program";`String (string_of_int index)]])) in
     let start = document ~base started.content in
     require (string "phase" start = "running") "setup job did not enter canonical Running";
     let id = string "job_id" start in
     let control = ["state",`String "exited";"exit_code",`Int 0] @
       if large then ["large_logs",`Assoc ["head",`Int (String.length "alpha");"tail",`Int (String.length "omega")]] else [] in
     json (Filename.concat base "control.json") (`Assoc control);
-    ignore (invoke bundle ~id:("fixture-collect-" ^ string_of_int index) ~turn:0
-      "keeper_job_status" (`Assoc ["job_id",`String id]));
+    ignore (stage (Collect_job index) (fun () ->
+      invoke bundle ~id:("fixture-collect-" ^ string_of_int index) ~turn:0
+        "keeper_job_status" (`Assoc ["job_id",`String id])));
     let record = Jobs.load ~base_path:base ~keeper_name:keeper (Jobs.Job_id.of_string id |> get Fun.id)
       |> get store_error in
     let stdout,stderr = match record.outputs with
@@ -332,7 +377,8 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
      outputs. Deliver and acknowledge only those exact setup notifications
      through supported producer/queue APIs before freezing the common input.
      No turn completion or reaction timestamp is invented for this setup ACK. *)
-  let delivered = Keeper_owned_job_completion_wake.reconcile ~config |> get store_error in
+  let delivered = stage Deliver_setup_results (fun () ->
+    Keeper_owned_job_completion_wake.reconcile ~config |> get store_error) in
   require (delivered.waiting=0 && delivered.failures=[]) "fixture completion delivery is unavailable";
   let acknowledgements = pending base |> List.map (fun (pending : Keeper_event_queue_state.pending_selection) ->
     let completion = match pending.source.Keeper_event_queue.payload with
@@ -848,6 +894,7 @@ let initialize_runtime ~base ~endpoint runtime =
   | Error error -> failwith (Runtime.strict_init_error_to_string error)
 
 let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~env =
+  let stage phase = observe_stage ~counter ~receipt phase in
   let fixture = load (fixture_path base) in
   require (string "base_path" fixture = base && string "keeper" fixture = keeper)
     "fixture does not own this canonical base";
@@ -860,8 +907,8 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     | Synthetic_streaming -> start_provider ~sw ~env ~base ~attempt_dir ~counter
         ~experiment ~fixture ~strategy events
     | Configured_http _ -> "configured_http", ref None, ref [] in
-  initialize_runtime ~base ~endpoint (settings experiment);
-  let workspace,_,reference = publish_snapshot ~base in
+  stage Initialize_runtime (fun () -> initialize_runtime ~base ~endpoint (settings experiment));
+  let workspace,_,reference = stage Publish_snapshot (fun () -> publish_snapshot ~base) in
   Eio.Switch.on_release sw (fun () -> Skill_catalog_snapshot_service.retire ~workspace);
   require (Yojson.Safe.equal (Skill_reference.to_yojson reference) (field "skill_reference" fixture))
     "exact published inventory changed after restoration";
@@ -877,13 +924,14 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir prompt_root;
   Prompt_defaults.init ();
-  install_owner ~sw config;
+  stage Install_owner (fun () -> install_owner ~sw config);
   let meta = match Keeper_meta_store.read_effective_meta config keeper |> get Fun.id with
     | Some meta -> meta | None -> failwith "original Keeper metadata is absent" in
   require (Keeper_id.Trace_id.to_string meta.runtime.trace_id = string "trace_id" fixture) "original trace changed";
   require (Option.map Keeper_id.Task_id.to_string meta.current_task_id = Some (string "task_id" fixture))
     "original Task changed";
-  let registry_entry = Keeper_registry.register_offline ~base_path:base keeper meta in
+  let registry_entry = stage Register_keeper (fun () ->
+    Keeper_registry.register_offline ~base_path:base keeper meta) in
   Eio.Switch.on_release sw (fun () -> ignore (Keeper_registry.unregister_exact registry_entry));
   require (pending base = []) "setup stimulus would steal measured intake";
   Masc_test_deps.with_publication_recovery_registry ~sw ~fs:env#fs
@@ -902,8 +950,8 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     "@%s Read selection artifact sha256=%s. It contains the exact original job ID as UTF-8 text. Common exact Inline Skill reference=%s. Return that job's complete stdout digest."
     keeper (string "selection_sha256" fixture) (Yojson.Safe.to_string (field "skill_reference" fixture)) in
   let admission_entered = now counter in
-  let post = Board_dispatch.create_post ~author:"synthetic-user" ~content
-      ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error in
+  let post = stage Admit_source (fun () -> Board_dispatch.create_post ~author:"synthetic-user" ~content
+      ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error) in
   let admission_returned = now counter in
   let selection = match pending base with
     | [selection] -> selection
@@ -940,13 +988,14 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   let http_observation = Keeper_preparation_http_observation.create
       ~path:(Filename.concat attempt_dir "http-events.jsonl") ~now:(fun () -> now counter) in
   let cycle_entered = now counter in
-  let outcome = Keeper_preparation_http_observation.within http_observation @@ fun () ->
+  let outcome = stage Run_cycle (fun () ->
+    Keeper_preparation_http_observation.within http_observation @@ fun () ->
     Keeper_heartbeat_loop.run_keepalive_unified_turn
       ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry ~meta_after_triage:meta
       ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true ~reactive_wake:true
       ~shared_context:(Agent_core.Context.create ()) ~deferred_runtime_lane:None
       ~on_deferred_runtime_consumed:(fun () -> ())
-      ~settle_deferred_runtime_lane:(function None -> () | Some _ -> failwith "unexpected runtime failover") in
+      ~settle_deferred_runtime_lane:(function None -> () | Some _ -> failwith "unexpected runtime failover")) in
   let cycle_returned = now counter in
   let http_metrics = Keeper_preparation_http_observation.snapshot http_observation in
   let first_offered_tools_sha256 = match field "first_dispatched_tools" http_metrics with

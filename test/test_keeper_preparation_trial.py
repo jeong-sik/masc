@@ -263,10 +263,15 @@ def named_skill_reuse(args, root, head):
             require(len(parents) == 1 and parents[0]["input"] == {"job_id": fixture["selected_job_id"]},
                     "named reuse lost its original SDK invocation or selected job")
             execution = read(directory / "actual-composition-execution.json")
+            summaries = [row for row in calls if row["tool"] == "keeper_composition_run_summary" and
+                         row.get("parent_tool_use_id") == parents[0]["tool_use_id"] and
+                         row["tool_use_id"] == parents[0]["tool_use_id"]]
+            require(len(summaries) == 1, "named reuse lost its original durable run summary")
             require(all(row["parent_tool_use_id"] == parents[0]["tool_use_id"] and
-                    row["composition_run_id"] == execution["source_result"]["composition_run_id"] and
+                    row["composition_run_id"] == summaries[0]["composition_run_id"] and
                     any(node["node_id"] == row["composition_node_id"] and
                         node["execution_id"] == row["execution_id"] and
+                        node["tool_use_id"] == row["tool_use_id"] and
                         node["tool_name"] == row["tool"] and node["input"] == row["input"]
                         for node in execution["nodes"]) for row in stdout_rows) and
                     not any(row["tool"] in ("keeper_composition_prepare", "keeper_composition_run")

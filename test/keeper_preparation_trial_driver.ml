@@ -467,6 +467,28 @@ let execution_nodes ~base run =
     field "actions" run |> to_list
   | artifact -> document ~base (blob_bytes base (reference artifact)) |> field "nodes" |> to_list
 
+let execution_run_id ~fixture ~turn ~parent ~reply rows =
+  let value = match field "composition_run_id" reply,field "composition_tool" reply with
+    | `String id,`Null -> id
+    | `Null,`String name when field "tool" parent=`String name ->
+      (* Named Tools expose their canonical node artifact, while the original
+         run identity belongs to the durable summary of this same SDK call. *)
+      let summaries = List.filter (fun row -> original_turn_source ~fixture ~turn row &&
+        field "tool" row=`String Keeper_tool_composition_surface.composition_run_summary_tool_name &&
+        field "tool_use_id" row=field "tool_use_id" parent &&
+        field "parent_tool_use_id" row=field "tool_use_id" parent) rows in
+      (match summaries with
+       | [summary] ->
+         (match Tool_result.recorded_call_outcome summary with
+          | Recorded_succeeded -> string "composition_run_id" summary
+          | Recorded_deferred | Recorded_failed | Recorded_unsettled | Recorded_malformed ->
+            failwith "named composition summary did not succeed")
+       | [] | _ :: _ -> failwith "no unique original named composition summary")
+    | _ -> failwith "composition reply did not identify its original execution" in
+  let id = Keeper_tool_plan.Composition_run_id.of_string value
+      |> get (fun _ -> "invalid original composition run identity") in
+  `String (Keeper_tool_plan.Composition_run_id.to_string id)
+
 let stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row =
   if field "composition_node_id" row=`Null then
     sdk_member ~fixture ~turn row && field "parent_tool_use_id" row=`Null
@@ -476,11 +498,12 @@ let stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row =
     match parents with
     | [parent] -> decode_evidence (fun () ->
       let reply = exact_sdk_reply ~base ~raw_records parent in
-      require (field "composition_run_id" reply=field "composition_run_id" row)
+      require (execution_run_id ~fixture ~turn ~parent ~reply rows=field "composition_run_id" row)
         "physical stdout belongs to a different composition";
       List.exists (fun node ->
         field "node_id" node=field "composition_node_id" row &&
         field "execution_id" node=field "execution_id" row &&
+        field "tool_use_id" node=field "tool_use_id" row &&
         field "tool_name" node=field "tool" row &&
         Yojson.Safe.equal (field "input" node) (field "input" row)) (execution_nodes ~base reply)) = Some true
     | [] | _ :: _ -> false
@@ -506,10 +529,12 @@ let named_execution_proven ~base ~fixture ~turn ~raw_records rows stdout_rows
   | [parent] -> decode_evidence (fun () ->
     let run = exact_sdk_reply ~base ~raw_records parent in
     let nodes = execution_nodes ~base run in
+    let run_id = execution_run_id ~fixture ~turn ~parent ~reply:run rows in
     List.exists (fun row ->
       field "parent_tool_use_id" row=field "tool_use_id" parent &&
-      field "composition_run_id" row=field "composition_run_id" run &&
+      field "composition_run_id" row=run_id &&
       List.exists (fun node -> field "execution_id" node=field "execution_id" row &&
+        field "tool_use_id" node=field "tool_use_id" row &&
         field "node_id" node=field "composition_node_id" row &&
         field "tool_name" node=field "tool" row &&
         Yojson.Safe.equal (field "input" node) (field "input" row)) nodes) stdout_rows) = Some true

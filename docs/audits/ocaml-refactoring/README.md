@@ -69,7 +69,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 ## Current queue
 
-The first semantic pass produced **24 concrete candidates**. `S1` is implemented in [#43367](https://github.com/jeong-sik/masc/pull/43367) and has passed independent source review. It was selected because complete/sparse acceptance and observer delivery form a bounded, heavily consumed runtime contract with existing lifecycle scenarios. `K1` follows in [#43370](https://github.com/jeong-sik/masc/pull/43370), preserving distinct failure-policy axes in a single pure classification. Both remain Draft work. Other `next` items remain queued; this ordering does not waive their coverage.
+The first semantic pass produced **24 concrete candidates**. Three are implemented as Draft PRs with independent source review: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result. Other `next` items remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -81,7 +81,7 @@ The first semantic pass produced **24 concrete candidates**. `S1` is implemented
 | [K6](#k6) | investigate | candidate | Make Agent Core committed-batch scanning an explicit returned state |
 | [K7](#k7) | later | candidate | Separate Memory receipt reconciliation selection from its durable plan |
 | [D1](#d1) | next | candidate | Return an explicit task commit receipt instead of a cross-scope notification ref |
-| [D2](#d2) | next | candidate | Make Goal upsert a typed immutable transaction decision |
+| [D2](#d2) | next | in review | Make Goal upsert a typed immutable transaction decision |
 | [D3](#d3) | later | candidate | Isolate the Goal document codec and schema rejection contract |
 | [D4](#d4) | investigate | candidate | Audit and retain typed Goal publication outcomes across the backend adapter |
 | [D5](#d5) | later | candidate | Extract the Board vote decision from post/comment mutation shells |
@@ -328,6 +328,8 @@ Consumers: [lib/workspace_goals.ml](../../../lib/workspace_goals.ml), [lib/goal/
 Scenarios: [test/test_goal_store.ml](../../../test/test_goal_store.ml), [test/test_goal_upsert_fsm_bypass_10247.ml](../../../test/test_goal_upsert_fsm_bypass_10247.ml), [test/test_goal_suspension.ml](../../../test/test_goal_suspension.ml), [test/test_goal_tools.ml](../../../test/test_goal_tools.ml). **Not executed in this audit.**
 
 Ordering rationale: This removes implicit control encoded by object identity and three mutable side channels. Existing tests explicitly cover refused first write, previous-row return, revision witnesses, criterion edits, and durable audit outbox behavior.
+
+Implementation: [#43374](https://github.com/jeong-sik/masc/pull/43374) replaces the three refs and physical-identity signal with a private typed commit result, keeping pure row transformations apart from identity, clock and persistence effects. The unused public `update_state` helper is removed after repository caller/alias inspection; the three upsert interfaces remain unchanged. External package consumers were not verified. Added actual-store scenarios for audited refusal and accepted identical-field writes. Four changed OCaml files passed syntax parsing; scenarios are unexecuted.
 
 ### D3
 
@@ -745,4 +747,5 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 - Previous work: Memory OS codecs/successor core published as three Draft PRs; current open heads were refreshed before this round. That is source progress, not merged/runtime completion.
 - Round 1: all tracked `.ml`/`.mli` files classified at the pinned baseline; clean-checkout counts independently matched the committed-blob reader; 24 source-backed candidates recorded with boundaries, invariants, callers and suites. S1 implemented with a private immutable observation core, retained lock/observer effects and two additional public-store scenarios; published as [#43367](https://github.com/jeong-sik/masc/pull/43367). OCaml syntax checks passed; behavior suites remain unexecuted.
 - Round 2: K1 implemented as a private failure-evidence classifier in [#43370](https://github.com/jeong-sik/masc/pull/43370). Historical range sizing, named input refusal, invalid-output veto, size-independent failure and current CLI capacity remain separate facts. Syntax parsing passed; existing callback/admission scenarios were extended but not executed.
+- Round 3: D2 implemented in [#43374](https://github.com/jeong-sik/masc/pull/43374). Focused source review corrected the initial no-op proposal: every accepted existing upsert commits even when fields are unchanged. Rejection and commit results are explicit; current RFC implementation references were updated. Syntax parsing passed and two public-store scenarios were added but not executed.
 - No local Dune build, CI polling, behavior execution, formal GitHub approval, merge or runtime proof is supplied by this inventory.

@@ -733,19 +733,20 @@ let find_latest_entry_in_file_result path f =
            Error (Io_error { operation = Read_file; path; detail }))
 ;;
 
-let prune_bound_directory ~days directory =
+let prune_bound_directory ~location ~days directory =
   if days <= 0 then 0
   else
     (* NDT-OK: the operator/store retention declaration owns this wall-clock cutoff. *)
     let cutoff = Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day) in
-    let year, month, day = Jsonl_writer.utc_calendar_day ~ts:cutoff in
+    (* The writer owns the calendar spelling (#27143). *)
+    let cutoff_path = Store.dated_path location ~ts:cutoff in
     Dated_jsonl_retention.prune
-      ~cutoff_month:(Printf.sprintf "%04d-%02d" year month)
-      ~cutoff_day:(Printf.sprintf "%02d" day) directory
+      ~cutoff_month:cutoff_path.Store.month_dir
+      ~cutoff_day:(Filename.remove_extension cutoff_path.Store.day_file) directory
 
 let prune_unlocked t ~days =
   if days <= 0 then 0
-  else Store.with_retention_location t.location (prune_bound_directory ~days)
+  else Store.with_retention_location t.location (prune_bound_directory ~location:t.location ~days)
 
 let prune_to_max_bytes_unlocked t ~max_bytes ~keep_path =
   if max_bytes <= 0 then 0
@@ -1891,7 +1892,7 @@ let prune_listed_stores_bound root held ~operator_window_days =
            ~f:(fun location directory ->
              let t = open_store location in
              Eio.Mutex.use_ro (Atomic.get t.mutex) (fun () ->
-               prune_bound_directory ~days directory)))
+               prune_bound_directory ~location ~days directory)))
     0 Store.all
 
 let prune_listed_stores root ~operator_window_days =

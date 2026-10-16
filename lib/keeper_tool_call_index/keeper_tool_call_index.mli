@@ -121,4 +121,9 @@ module For_testing : sig
       [None] unless a line ends exactly at [until]. Continuity records on disk
       hold these values, so a change to either changes what every saved
       record matches. *)
+
+  val blocking : (unit -> 'a) -> 'a
+  (** Where the index does its file and SQLite work: from an Eio fiber, a
+      system thread started from a CPU pool domain when a pool is installed,
+      so the work never holds the calling domain's runtime lock. *)
 end

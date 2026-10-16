@@ -48,12 +48,20 @@ let stores : (string, store) Hashtbl.t = Hashtbl.create 4
 
 (* A system thread has no Eio effect handler: Fs_compat's filesystem helpers
    take their synchronous fallback even when the server installed global_fs.
-   Acquire the mutex inside that thread, never on the scheduler thread. *)
+   Acquire the mutex inside that thread, never on the scheduler thread.
+
+   The thread is started from a CPU pool domain, not from the caller's. A
+   system thread shares its domain's runtime lock, and verifying a changed
+   ledger hashes its whole prefix, so a thread of the main domain would hold
+   that lock for most of the hash and keep the main scheduler, and every
+   request it serves, waiting for its turn. Without an installed pool, or
+   from a pool job already, the thread starts where the caller runs. *)
 let blocking f =
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> f ()
   | Fs_compat.Eio_fiber ->
-    Eio_unix.run_in_systhread ~label:"keeper tool-call read index" f
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Eio_unix.run_in_systhread ~label:"keeper tool-call read index" f)
 ;;
 
 (* [generation] names one continuous append run of a file. A rewrite or
@@ -950,4 +958,5 @@ module For_testing = struct
   let empty_digest = empty_digest
   let extend_digest = extend_digest
   let digest_prefix = digest_prefix
+  let blocking = blocking
 end

@@ -1394,6 +1394,24 @@ let test_stderr_chunk_boundaries_preserve_redaction_context () =
                "\n"; marker; "\n-----END PRIVATE KEY-----\nordinary diagnostic" ])
 ;;
 
+(* #43259: tool phases must bound their CLI spawn slot. Silence there is
+   the protocol, so the bound is a 2h backstop far above any plausible
+   healthy tool — but it must exist, or a wedged tool holds a slot
+   forever. *)
+let test_tool_step_phase_carries_idle_backstop () =
+  let config = Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture" in
+  check
+    (float 0.001)
+    "backstop value"
+    7200.0
+    Runtime_antigravity.tool_step_idle_timeout_s;
+  check
+    (option (float 0.001))
+    "tool phase maps to the backstop"
+    (Some Runtime_antigravity.tool_step_idle_timeout_s)
+    (Runtime_antigravity.For_testing.tool_step_timeout_s config)
+;;
+
 let test_duplicate_keys_fail_closed () =
   let duplicate =
     {|{"event":"init","event":"init","conversation_id":"conversation-1","init":{"model":"gemini-fixture","cwd":"/tmp","permission_mode":"always-proceed"}}|}
@@ -1933,6 +1951,10 @@ let () =
             "stderr read chunks preserve the masking boundary"
             `Quick
             test_stderr_chunk_boundaries_preserve_redaction_context
+        ; test_case
+            "tool steps carry the 2h idle backstop, not no bound"
+            `Quick
+            test_tool_step_phase_carries_idle_backstop
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

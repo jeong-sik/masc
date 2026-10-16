@@ -63,6 +63,13 @@ val default_config : cwd:string -> model:string -> config
 val default_timeout_s : float
 (** Native default for official-client admission and idle liveness. *)
 
+val tool_step_idle_timeout_s : float
+(** Backstop idle bound for CLI event silence inside a tool step (2h).
+    Silence there is the protocol, so this must stay far above any
+    plausible healthy tool: it exists only so a wedged tool cannot hold
+    its CLI spawn slot forever (#43259). Expiry fails the turn with
+    typed [Timeout]. *)
+
 type conversation_mode =
   | Start
   | Resume of { conversation_id : string }
@@ -162,6 +169,16 @@ type error =
           leaves it: a host-side failure, not something the CLI sent. The
           string is the exception. That catch-all re-raises
           [Out_of_memory], [Stack_overflow] and [Sys.Break] instead. *)
+  | Child_fd_ceiling_exceeded of
+      { count : int option
+      ; ceiling : int
+      }
+      (** The CLI child was failed for file-table safety, not for anything
+          it answered. [Some count] past [ceiling] is a sick workspace
+          (deterministic: refiring the same turn re-kills it, so the
+          workspace needs operator action, not retries). [None] means the
+          sample itself hit EMFILE/ENFILE on a live child: system pressure,
+          refused closed rather than risk ENFILE. *)
   | Timeout of float
 
 val error_to_string : error -> string
@@ -198,3 +215,9 @@ val run_turn :
 
     [home_dir], when present, replaces inherited [HOME] and removes inherited
     XDG directory overrides before spawning the official client. *)
+
+module For_testing : sig
+  val tool_step_timeout_s : config -> float option
+  (** Phase mapping for tool steps: pins that the phase carries the
+      [tool_step_idle_timeout_s] backstop instead of no bound. *)
+end

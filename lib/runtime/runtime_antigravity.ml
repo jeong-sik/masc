@@ -106,18 +106,22 @@ let default_config ~cwd ~model =
    said last. agy narrates a trajectory one step at a time and writes nothing
    while a tool step runs: the step's output arrives in its DONE (or ERROR)
    update. Silence inside a tool step is the protocol, not a client that has
-   gone away, and an idle deadline there would measure how long the tool took,
-   which [timeout_s] must not cap. The owner retains cancellation authority
-   while this phase has no idle timer. *)
+   gone away, so the model-turn bound ([timeout_s], 300s) must not cap it —
+   but the phase still needs a backstop, or a wedged tool holds its CLI
+   spawn slot forever (#43259): 2h of total event silence is past any
+   plausible healthy tool, and the kill is a typed, visible Timeout rather
+   than a hang. The owner retains cancellation authority throughout. *)
 type read_phase =
   | Awaiting_admission
   | Model_turn
   | Tool_step_running
 
+let tool_step_idle_timeout_s = 7200.0
+
 let timeout_s_for_phase config = function
   | Awaiting_admission -> Some config.admission_timeout_s
   | Model_turn -> config.timeout_s
-  | Tool_step_running -> None
+  | Tool_step_running -> Some tool_step_idle_timeout_s
 ;;
 
 type conversation_mode =
@@ -203,6 +207,10 @@ type error =
   | Turn_failed of string
   | Process_exited of string
   | Unhandled_exception of string
+  | Child_fd_ceiling_exceeded of
+      { count : int option
+      ; ceiling : int
+      }
   | Timeout of float
 
 exception Runtime_error of error
@@ -216,6 +224,15 @@ let error_to_string = function
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
   | Unhandled_exception detail -> "Antigravity runtime raised: " ^ detail
+  | Child_fd_ceiling_exceeded { count = Some count; ceiling } ->
+    Printf.sprintf
+      "Antigravity CLI held %d open files past the %d ceiling; the turn was failed to protect the system file table (#43259)"
+      count
+      ceiling
+  | Child_fd_ceiling_exceeded { count = None; ceiling } ->
+    Printf.sprintf
+      "Antigravity CLI file usage was unobservable under system fd pressure; the turn was failed at the %d-file ceiling rather than risk ENFILE (#43259)"
+      ceiling
   | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
 ;;
 
@@ -991,6 +1008,55 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
       settle_failed_process ();
       raise (Runtime_error error)
     in
+    (* The CLI opens most of its files at startup — workspace scans plus
+       project preload — before its first protocol event (~7.5k healthy,
+       26k+ sick, #43259), but a mid-turn tool step can grow the count
+       further. Sample at the first event and at the result event; any
+       sample past the ceiling fails the turn, even a completed one — a
+       hot turn is the workspace-sick signal, not a result to keep. *)
+    let sampled_at_first_event = ref false in
+    let enforce_child_fd_ceiling () =
+      let pid = Eio.Process.pid proc in
+      let ceiling = Runtime_cli_spawn_gate.child_fd_ceiling in
+      let sample =
+        match
+          Eio.Time.with_timeout
+            clock
+            Runtime_cli_spawn_gate.child_fd_probe_timeout_s
+            (fun () ->
+              Ok (Runtime_cli_spawn_gate.sample_child_fds ~mgr ~cwd ~pid))
+        with
+        | Ok sample -> sample
+        | Error `Timeout ->
+          Log.Runtime_agent.debug
+            "Antigravity child fd probe timed out after %.1fs; allowing the turn (#43259)"
+            Runtime_cli_spawn_gate.child_fd_probe_timeout_s;
+          Runtime_cli_spawn_gate.Fds_unobservable
+      in
+      (match sample with
+       | Runtime_cli_spawn_gate.Fd_count count ->
+         Log.Runtime_agent.debug
+           "Antigravity child %d holds %d open files (ceiling %d)"
+           pid
+           count
+           ceiling;
+         if count > ceiling
+         then
+           abort_with_runtime_error
+             (Child_fd_ceiling_exceeded { count = Some count; ceiling })
+       | Runtime_cli_spawn_gate.Fds_unobservable -> ()
+       | Runtime_cli_spawn_gate.Fds_pressured ->
+         if Runtime_cli_spawn_gate.child_is_alive ~pid
+         then
+           abort_with_runtime_error
+             (Child_fd_ceiling_exceeded { count = None; ceiling }))
+    in
+    let enforce_child_fd_ceiling_once () =
+      if not !sampled_at_first_event
+      then (
+        sampled_at_first_event := true;
+        enforce_child_fd_ceiling ())
+    in
     (* This handler runs before Eio's process release handler (LIFO). It must
        only signal: awaiting here would race the release handler's reap and
        deadlock timeout cancellation. Typed non-cancellation failures reap in
@@ -1026,6 +1092,9 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
          match parse_wire_line line with
          | Error error -> abort_with_runtime_error error
          | Ok event ->
+           (* Sample before the callbacks: a killed turn must not mutate
+              session state first. *)
+           enforce_child_fd_ceiling_once ();
            (match
               with_optional_idle_timeout clock callback_timeout_s (fun () ->
                 apply_event
@@ -1038,7 +1107,10 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
             with
             | Error error -> abort_with_runtime_error error
             | Ok next -> state := next)
-       done
+       done;
+       (* The result event is in: catch growth the first sample missed.
+          An already-exited child samples unobservable and passes. *)
+       enforce_child_fd_ceiling ()
      with
      | End_of_file -> ()
      | exn when Keeper_operator_interrupt.is_operator_interrupt exn ->
@@ -1089,20 +1161,33 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
   let run_result =
     try
       Ok
-        (run_spawned
-           ?home_dir
-           ?on_spawned
-           ?on_prompt_sent
-           ~mgr
-           ~clock
-           ~cwd
-           config
-           ~conversation_mode
-           ~prompt
-           ~on_conversation_ready
-           ~on_stream_event)
+        (Runtime_cli_spawn_gate.with_cli_spawn_slot ~clock (fun () ->
+           run_spawned
+             ?home_dir
+             ?on_spawned
+             ?on_prompt_sent
+             ~mgr
+             ~clock
+             ~cwd
+             config
+             ~conversation_mode
+             ~prompt
+             ~on_conversation_ready
+             ~on_stream_event))
     with
     | Idle_timeout seconds -> Error (Timeout seconds)
+    | Runtime_cli_spawn_gate.Slot_timeout { waited_s; limit_s } ->
+      (* Retryable pressure, not a broken turn: the gate was full for the
+         whole budget. Spawn_failed keeps its Transient keeper mapping,
+         which is exactly right for "try again shortly". *)
+      Error
+        (Spawn_failed
+           (Printf.sprintf
+              "CLI capacity busy: no Antigravity spawn slot within %.1fs (limit %.1fs, %d active, %d waiting); retry shortly"
+              waited_s
+              limit_s
+              (Runtime_cli_spawn_gate.active_cli_spawns ())
+              (Runtime_cli_spawn_gate.waiting_cli_spawns ())))
     | Eio.Time.Timeout as exn -> raise exn
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1191,3 +1276,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
     let stderr = redact_stderr_tail stderr in
     Error (Process_exited (if stderr = "" then exit else exit ^ ": " ^ stderr))
 ;;
+
+module For_testing = struct
+  let tool_step_timeout_s config = timeout_s_for_phase config Tool_step_running
+end

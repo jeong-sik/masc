@@ -40,6 +40,9 @@ advisory until convention adoption: `merge-guard.sh` prints
 `ADVISORY #N: merge-compile ...` and merges proceed on operator judgment
 (`MASC_MERGE_COMPILE_ENFORCE=1` opts one invocation into fail-close); the
 refusal itself lands with the convention procedure, not this mechanism.
+A dispatch from any branch other than main is a proof run: it exercises the
+whole pipeline but writes no commit status, so only the workflow file on main
+can mint a record the guard reads.
 
 For an explicitly selected
 approved combination, use [the selection commands](../scripts/review/APPROVED-CI-SELECTION.md)

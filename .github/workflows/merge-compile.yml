@@ -1,6 +1,6 @@
 name: Merge compile
 
-run-name: Merge compile on ${{ inputs.sha }} for PR #${{ inputs.pr }} by ${{ github.actor }}
+run-name: Merge compile on ${{ inputs.sha }} for PR #${{ inputs.pr }} [${{ github.ref_name }}] by ${{ github.actor }}
 
 # Third-party actions float on major tags house-wide (every workflow does);
 # pinning four of them here while the rest of the repo floats would attest
@@ -35,12 +35,15 @@ jobs:
     # Cold compiler/dependency installation can take much longer than a warm
     # build. This is a stalled-job backstop, not the expected build duration.
     timeout-minutes: 90
+    outputs:
+      proof_only: ${{ steps.validate.outputs.proof_only }}
     env:
       DUNE_JOBS: '4'
       # Keep user-written rules (including generated build identity) live.
       DUNE_CACHE: enabled-except-user-rules
     steps:
       - name: Validate dispatch and pin pending status
+        id: validate
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -50,13 +53,21 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, re, urllib.request
-          if os.environ['GITHUB_REF'] != 'refs/heads/main':
-              raise SystemExit('Dispatch merge-compile on main')
+          # Only the workflow file on main may write merge-compile statuses:
+          # a branch-ref run proves the mechanics (checkout, toolchain
+          # identity, build) and reports in-run, but writes no status, so a
+          # forged workflow file can never mint a record the guard reads.
+          proof_only = os.environ['GITHUB_REF'] != 'refs/heads/main'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'proof_only={str(proof_only).lower()}\n')
           sha = os.environ['SHA']
           if not re.fullmatch(r'[0-9a-f]{40}', sha):
               raise SystemExit('sha must be an exact 40-hex head')
           if not re.fullmatch(r'(0|[1-9][0-9]*)', os.environ['PR']):
               raise SystemExit('pr must be a PR number or 0 for a bare-SHA proof')
+          if proof_only:
+              print(f"proof run from {os.environ['GITHUB_REF']}: no status will be written")
+              raise SystemExit(0)
           # Pin pending BEFORE building, so a failing build still leaves the
           # guard holding until the always()-settle resolves it. An invalid
           # dispatch never pins: no status is written for a bogus SHA.
@@ -253,6 +264,7 @@ jobs:
           PR: ${{ inputs.pr }}
           COMPILE_RESULT: ${{ needs.compile.result }}
           TOOLCHAIN_OVERRIDE: ${{ inputs.trust-head-toolchain }}
+          PROOF_ONLY: ${{ needs.compile.outputs.proof_only }}
         run: |
           python3 - <<'PY'
           import json, os, re, urllib.request
@@ -264,17 +276,24 @@ jobs:
           # including cancellation and infra failure. Re-dispatch replaces it.
           passed = os.environ['COMPILE_RESULT'] == 'success'
           override = os.environ['TOOLCHAIN_OVERRIDE'] == 'true'
+          proof_only = os.environ['PROOF_ONLY'] == 'true'
           receipt = {'schema_version': 1, 'sha': sha, 'pr': os.environ['PR'],
                      'actor': os.environ['GITHUB_ACTOR'], 'compile': os.environ['COMPILE_RESULT'],
                      'checks_passed': passed, 'run_id': os.environ['GITHUB_RUN_ID'],
                      'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
-                     'toolchain_override': override}
+                     'toolchain_override': override, 'proof_only': proof_only,
+                     'workflow_ref': os.environ['GITHUB_REF']}
           Path('merge-compile-results.json').write_text(json.dumps(receipt, indent=2) + '\n')
           state = 'success' if passed else 'failure'
           if passed and override:
               description = 'Four executables built (head toolchain override)'
           else:
               description = 'Four executables built' if passed else 'Merge compile failed'
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(f'merge-compile {sha[:12]} (PR #{os.environ["PR"]}): {state}\n')
+          if proof_only:
+              print(f'proof run from {os.environ["GITHUB_REF"]}: verdict {state}, no status written')
+              raise SystemExit(0)
           body = json.dumps({
               'state': state, 'context': 'merge-compile',
               'description': description,
@@ -289,8 +308,6 @@ jobs:
               if response.status != 201:
                   raise SystemExit(f'status settle failed for {sha}: {response.status}')
               print(f'settled merge-compile on {sha[:12]} -> {state}')
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
-              out.write(f'merge-compile {sha[:12]} (PR #{os.environ["PR"]}): {state}\n')
           PY
       - uses: actions/upload-artifact@v7
         with:

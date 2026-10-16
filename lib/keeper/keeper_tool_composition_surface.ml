@@ -744,6 +744,10 @@ let result_from_json ~tool_name ~start_time ~class_ ~ok data =
       (Yojson.Safe.to_string data)
 ;;
 
+type async_submission_error =
+  | Submission_result of Tool_result.result
+  | Broker_error of Keeper_msg_async.submit_error
+
 let async_submission_result
       ?skill_reference
       ?nested_calls
@@ -754,6 +758,8 @@ let async_submission_result
       ?journal
       ?continuation
       ?refusal
+      ?before_submit
+      ?observe_submission
       ~plan
       ~tool_name
       ~tool_kind
@@ -810,8 +816,7 @@ let async_submission_result
       ~ok:false
       data
   | Ok background_sw ->
-    (match
-       Keeper_msg_async.submit_worker_with_request_id
+    let submit () = Keeper_msg_async.submit_worker_with_request_id
          ?request_context
          ~on_accepted:(fun request_id ->
            Result.bind
@@ -905,9 +910,27 @@ let async_submission_result
              ~turn_context
              ?clock
              ())
-         ()
-     with
-     | Error error ->
+         () in
+    let submitted =
+      match Option.fold ~none:(Ok ()) ~some:(fun before -> before ()) before_submit with
+      | Error result -> Error (Submission_result result)
+      | Ok () ->
+        let outcome = submit () in
+        let observed = Option.fold ~none:(Ok ()) ~some:(fun observe -> observe outcome) observe_submission in
+        (match observed with
+         | Ok () -> Result.map_error (fun error -> Broker_error error) outcome
+         | Error detail ->
+           let original = match outcome with
+             | Ok accepted -> Keeper_msg_async.submit_outcome_to_json accepted
+             | Error error -> Keeper_msg_async.submit_error_to_json error in
+           Error (Submission_result
+             (Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+               ~effect_disposition:Tool_result.Effect_outcome_unknown
+               ~data:(`Assoc ["submission_outcome_json",`String (Yojson.Safe.to_string original)])
+               ("named submission observation failed: " ^ detail)))) in
+    (match submitted with
+     | Error (Submission_result result) -> result
+     | Error (Broker_error error) ->
        let data =
          with_tool_kind_field
            tool_kind
@@ -1677,6 +1700,7 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
     ~capability_authority ~publication_recovery ~ctx_snapshot ~turn_context
     ?activation_context ?clock () =
   let module Draft = Keeper_composition_draft in
+  let module Submission = Keeper_composition_named_submission in
   let start_time = Tool_timing.start () in
   match capability_authority with
   | Keeper_tool_runtime.Compatibility_meta ->
@@ -1684,40 +1708,124 @@ let named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
       ~effect_disposition:Tool_result.Proven_pre_effect
       "named async execution requires its frozen turn capability surface"
   | Keeper_tool_runtime.Frozen_surface capability_surface ->
-    let prepared =
-      let* activation = match activation_context with
-        | None -> Ok None
+    let source_task_id = Option.bind turn_context (fun context ->
+      context.Keeper_tool_call_log_context.task_id) in
+    let original_activation = match activation_context with
+        | None -> Error (Submission.Invalid_request "named async submission requires its frozen activation context")
         | Some context -> Keeper_skill_activation_recorder.bind_async context
-            |> Result.map Option.some |> Result.map_error Keeper_skill_activation_recorder.error_to_string in
+            |> Result.map_error (fun error -> Submission.Invalid_request
+              (Keeper_skill_activation_recorder.error_to_string error)) in
+    let make_source () =
+      let* activation = original_activation in
+      let* recorded = Keeper_skill_activation_recorder.record_bound_composition
+          ~config activation ~invocation:parent_invocation ~tool_name skill_reference
+        |> Result.map_error (fun error -> Submission.Invalid_request
+          (Keeper_skill_activation_recorder.error_to_string error)) in
+      let* () = match recorded with
+        | Activation_ledger.Recorded _ -> Ok ()
+        | Activation_ledger.Already_recorded _ -> Error Submission.Missing_intent in
       let* recipe = Keeper_tool_plan_request.to_yojson plan
         |> Result.map_error (fun (Keeper_tool_plan_request.Unsubstituted_param {name}) ->
-          "named async plan retains unbound parameter " ^ name) in
+          Submission.Invalid_request ("named async plan retains unbound parameter " ^ name)) in
       let* draft = Draft.prepare ~base_path:config.base_path ~capability_surface
           ~keeper_name:meta.name ~execution:Catalog.Async recipe
-        |> Result.map_error (fun error -> Yojson.Safe.to_string (Draft.error_to_json error)) in
+        |> Result.map_error (fun error -> Submission.Persistence_failed
+          (Yojson.Safe.to_string (Draft.error_to_json error))) in
       let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
       let* run_reference = Draft.record_invocation ~base_path:config.base_path ~composition_run_id
           ~invocation:parent_invocation draft
-        |> Result.map_error (fun error -> Yojson.Safe.to_string (Draft.error_to_json error)) in
+        |> Result.map_error (fun error -> Submission.Persistence_failed
+          (Yojson.Safe.to_string (Draft.error_to_json error))) in
       let source : Journal.source =
         {keeper_name=meta.name;composition_run_id;draft_reference=Draft.reference draft;run_reference;
          parent_tool_use_id=Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation;
          source_turn=Agent_core.Tool_contract.Invocation.turn parent_invocation;
-         source_task_id=Option.bind turn_context (fun context -> context.Keeper_tool_call_log_context.task_id);
-         producer=Journal.Named {tool_name;skill_reference;activation}} in
-      let* journal = Journal.prepare ~base_path:config.base_path source
-        |> Result.map_error Journal.error_to_string in
-      Ok (draft,source,journal) in
+         source_task_id;
+         producer=Journal.Named {tool_name;skill_reference;activation=Some activation}} in
+      Journal.prepare ~base_path:config.base_path source
+      |> Result.map_error (fun error -> Submission.Journal_rejected error) in
+    let prepared =
+      let* physical_turn_ref = match activation_context with
+        | Some context -> Ok (Keeper_skill_activation_recorder.physical_turn_ref context)
+        | None -> Error (Submission.Invalid_request "original named submission physical frame is unavailable") in
+      let* request = Submission.request ~keeper_name:meta.name ~trace_id:meta.runtime.trace_id
+          ~physical_turn_ref
+          ~invocation:parent_invocation ~source_task_id ~skill_reference ~tool_name ~plan in
+      Submission.prepare ~base_path:config.base_path request ~make_source in
     match prepared with
-    | Error detail -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
-        ~effect_disposition:Tool_result.Proven_pre_effect detail
-    | Ok (draft,source,journal) ->
-      let result = async_submission_result ~skill_reference ~journal ~plan:(Draft.plan draft)
-        ~draft_reference:source.draft_reference ~run_reference:source.run_reference
-        ~composition_run_id:source.composition_run_id ~tool_name ~tool_kind ~parent_invocation
-        ~config ~meta ~capability_authority ~publication_recovery ~ctx_snapshot ~turn_context ?clock ()
-      |> bind_prepared_result ~composition_run_id:source.composition_run_id
-          ~run_reference:source.run_reference ~draft_reference:source.draft_reference in
+    | Error error -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Effect_outcome_unknown (Submission.error_to_string error)
+    | Ok intent ->
+      let source = Submission.source intent in
+      let journal = Submission.journal intent in
+      let unresolved error =
+        let data = match Submission.unconfirmed_request_id intent with
+          | Ok None -> `Assoc []
+          | Ok (Some request_id) -> `Assoc ["request_id",`String request_id]
+          | Error detail -> `Assoc ["observation_error",`String (Submission.error_to_string detail)] in
+        Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
+          ~effect_disposition:Tool_result.Effect_outcome_unknown ~data (Submission.error_to_string error) in
+      let recover () =
+        let* binding = Submission.accepted intent in
+        match binding with
+        | None -> Ok None
+        | Some binding ->
+          let* owner = Journal.named_result_owner journal binding
+            |> Result.map_error (fun error -> Submission.Journal_rejected error) in
+          Ok (Some (Tool_result.make_ok ~tool_name ~start_time
+            ~data:(`Assoc (["composition_tool",`String tool_name;
+              "execution",`String "async";"request_id",`String binding.request_id;
+              "result_wait",Keeper_composition_dependency.composition_to_json binding;
+              "current_request",Keeper_msg_async.entry_to_json owner] @ [tool_kind_field tool_kind])) ())) in
+      let permit = Atomic.make None in
+      let before_submit () =
+        match recover () with
+        | Error error -> Error (unresolved error)
+        | Ok (Some result) -> Error result
+        | Ok None ->
+          (match Draft.load ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name
+              ~sha256:source.draft_reference.sha256 with
+           | Error error -> Error (Tool_result.make_err ~tool_name ~start_time
+               ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
+               (Yojson.Safe.to_string (Draft.error_to_json error)))
+           | Ok _ ->
+             match Submission.begin_submit intent with
+             | Ok ticket -> Atomic.set permit (Some ticket); Ok ()
+             | Error error ->
+               match recover () with
+               | Ok (Some result) -> Error result
+               | Ok None ->
+                 (match error with
+                  | Submission.Submission_in_progress ->
+                    Log.Keeper.warn
+                      "named submission %s: broker-entry phase is durable but admission is absent and its in-memory permit died with the original process; this occurrence stays fail-closed (Submission_in_progress) until the operator resets the intent record (docs/guides/keeper-owned-jobs.md)"
+                      (Submission.path intent)
+                  | Submission.Invalid_request _ | Submission.Identity_conflict
+                  | Submission.Missing_intent | Submission.Unreadable_intent _
+                  | Submission.Corrupt_intent _ | Submission.Source_conflict
+                  | Submission.Journal_rejected _ | Submission.Stale_permit
+                  | Submission.Persistence_failed _ -> ());
+                 Error (unresolved error)
+               | Error detail -> Error (unresolved detail)) in
+      let observe_submission outcome =
+        match Atomic.get permit with
+        | None -> Error "named submission has no original broker-entry permit"
+        | Some permit ->
+          (match outcome with
+           | Ok outcome -> Submission.observe_submit_outcome permit outcome
+           | Error error -> Submission.observe_submit_error permit error)
+          |> Result.map_error Submission.error_to_string in
+      let result = match recover () with
+        | Error error -> unresolved error
+        | Ok (Some result) -> result
+        | Ok None ->
+          async_submission_result ~skill_reference ~journal ~plan
+            ~draft_reference:source.draft_reference ~run_reference:source.run_reference
+            ~composition_run_id:source.composition_run_id ~tool_name ~tool_kind ~parent_invocation
+            ~before_submit ~observe_submission ~config ~meta ~capability_authority
+            ~publication_recovery ~ctx_snapshot ~turn_context ?clock () in
+      let result = bind_prepared_result ~composition_run_id:source.composition_run_id
+          ~run_reference:source.run_reference ~draft_reference:source.draft_reference result in
       (match Tool_bridge.attach_artifact_manifest
           ~projection:Tool_output.Inline_with_structured_diagnostic ~base_path:config.base_path result with
        | Ok result -> result
@@ -2033,50 +2141,12 @@ let make_tools_with_authority
                      ~metadata:data
                      message
                  | Ok plan ->
-                   (match record_composition_activation with
-                    | Some record ->
-                      (match
-                         record
-                           ~invocation:parent_invocation
-                           ~tool_name
-                           ~reference:skill.reference
-                       with
-                       | Error error ->
-                         activation_failure ~tool_name ~start_time error
-                       | Ok
-                           ( Activation_ledger.Recorded _
-                           | Activation_ledger.Already_recorded _ ) ->
-                         named_async_submission_result
-                           ?activation_context:nested_activation_context
-                           ~skill_reference:skill.reference
-                           ~plan
-                           ~tool_name
-                           ~tool_kind:(Catalog.tool_kind entry)
-                           ~parent_invocation
-                           ~config
-                           ~meta
-                           ~capability_authority
-                           ~publication_recovery
-                           ~ctx_snapshot
-                           ~turn_context
-                           ?clock
-                           ())
-                    | None ->
-                      named_async_submission_result
-                        ?activation_context:nested_activation_context
-                           ~skill_reference:skill.reference
-                        ~plan
-                        ~tool_name
-                        ~tool_kind:(Catalog.tool_kind entry)
-                        ~parent_invocation
-                        ~config
-                        ~meta
-                        ~capability_authority
-                        ~publication_recovery
-                        ~ctx_snapshot
-                        ~turn_context
-                        ?clock
-                        ()))
+                   named_async_submission_result
+                     ?activation_context:nested_activation_context
+                     ~skill_reference:skill.reference ~plan ~tool_name
+                     ~tool_kind:(Catalog.tool_kind entry) ~parent_invocation
+                     ~config ~meta ~capability_authority ~publication_recovery
+                     ~ctx_snapshot ~turn_context ?clock ())
               | Catalog.Inline ->
                 (match
                    Catalog.instantiate

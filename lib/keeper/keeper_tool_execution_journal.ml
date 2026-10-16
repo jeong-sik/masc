@@ -195,11 +195,11 @@ let validate_source source =
   Option.iter (fun task -> require (exact_name task) "invalid source task identity") source.source_task_id;
   (match source.producer with
    | Prepared -> ()
-   | Named {tool_name;skill_reference=_;activation} ->
-     require (exact_name tool_name) "invalid named producer tool";
-     Option.iter (fun bound -> require
-       (Ids.Turn_ref.absolute_turn (Keeper_skill_activation_recorder.bound_turn_ref bound) = source.source_turn)
-       "named activation belongs to another original turn") activation);
+   | Named {tool_name;skill_reference=_;activation=_} ->
+     (* The SDK provider/client ordinal is not the admitted Keeper cycle.
+        Both original coordinates are sealed in the source; request ownership
+        checks the SDK ordinal and the recorder retains its physical frame. *)
+     require (exact_name tool_name) "invalid named producer tool");
   match Plan.Composition_run_id.of_string (Plan.Composition_run_id.to_string source.composition_run_id) with
   | Ok _ -> ()
   | Error _ -> refuse "invalid UUIDv7 composition run identity"
@@ -216,6 +216,11 @@ let source_of_json json =
     source_task_id = optional string (field "source_task_id" fields);
     producer=producer_of_json (field "producer" fields)} in
   validate_source source; source
+
+let source_to_yojson = source_json
+let source_of_yojson json =
+  decode (fun () -> source_of_json json)
+  |> Result.map_error (fun detail -> Invalid_source detail)
 
 (* Checkpoint's strict codec owns content variants and failure provenance. Its
    wire codec deliberately omits ToolResult.json, so this typed sidecar retains
@@ -1089,10 +1094,21 @@ let original_named_binding journal state =
     |> Result.map_error (fun detail -> Invalid_source detail) in
   Ok binding
 
-let named_binding journal = filesystem (fun () ->
+let named_admission journal = filesystem (fun () ->
   let* state = strict_read ~root:journal.root journal.path in
   let* () = check_source journal state in
-  original_named_binding journal state)
+  match state.source.producer with
+  | Prepared -> Error (Invalid_source "prepared run has no named admission")
+  | Named _ ->
+    match state.owner,state.prior_owners with
+    | None,[] -> Ok None
+    | (Some _ | None),_ -> original_named_binding journal state |> Result.map Option.some)
+
+let named_binding journal =
+  let* admission = named_admission journal in
+  match admission with
+  | Some binding -> Ok binding
+  | None -> Error (Invalid_source "named run has no admitted original owner")
 
 let named_result_owner journal binding = filesystem (fun () ->
   let* state = strict_read ~root:journal.root journal.path in
@@ -1278,12 +1294,16 @@ let worker_child_admission (worker : worker) ~node_ids =
     let* () = check_worker worker state in
     Ok (nodes_child_admission state.nodes ~node_ids))
 
-let validate_plan (worker : worker) ~plan =
-  let* recorded = frozen_plan ~base_path:worker.journal.base_path worker.journal.immutable_source in
+let validate_source_plan journal ~plan =
+  let* recorded = frozen_plan ~base_path:journal.base_path journal.immutable_source in
   let* actual = Keeper_tool_plan_request.to_yojson plan
     |> Result.map_error (fun _ -> Plan_identity_conflict) in
   if not (canonical_equal recorded actual) then Error Plan_identity_conflict
-  else update_existing worker.journal (fun state -> None, check_worker worker state)
+  else Ok ()
+
+let validate_plan (worker : worker) ~plan =
+  let* () = validate_source_plan worker.journal ~plan in
+  update_existing worker.journal (fun state -> None, check_worker worker state)
 
 let checked_node (worker : worker) state ~node_id ~tool_name ~input =
   let* () = check_worker worker state in

@@ -247,6 +247,54 @@ recorder facts, never from the current Task. The internal descriptor-only
 compatibility adapter cannot execute a named async run without a frozen turn
 surface; production Keeper bundles supply that surface.
 
+Named submission also retains one source for the original physical Keeper
+TurnRef and the SDK's original trace, turn and Tool invocation ID. Replaying an
+acknowledgement lost by the caller within that original frame returns the
+same first request, run and `result_wait`; it never invokes a second worker.
+Exact Skill, bound arguments and original Task must still match. A fresh named
+submission uses its frozen activation recorder, and a recorded invocation whose
+original intent is missing cannot create a replacement. This does not recover an
+old invocation by assigning it a new Tool ID.
+
+The SDK's original invocation turn is a provider/client ordinal. The activation
+recorder's physical Keeper TurnRef identifies the admitted Keeper run. A fresh
+native SDK can invoke a Tool at ordinal zero during Keeper run one, and an
+official client session can reset its own ordinal. These coordinates are
+retained independently; resumption replaces neither with the current turn.
+A new physical Keeper frame cannot borrow an older acknowledgement by reusing
+the same SDK Tool ID and ordinal.
+
+The intent is durable before broker entry. A typed pre-acceptance rejection may
+release that same source for another attempt. Partial acceptance, reconciliation
+or fork uncertainty retains the reservation and the actual request ID when
+known. Canonical named membership and journal ownership decide acceptance;
+an incomplete phase-log tail cannot conceal an intact, accepted original source.
+Missing or corrupt source authority stays unresolved. These producer receipts
+precede compiler support for async child Skill nodes; they do not enable that
+syntax or change named Skills' static read-only admission.
+
+Broker entry is fail-closed by decision. `begin_submit` writes the durable
+`Submitting {request_id = None}` phase before the broker records admission, and
+the entry permit itself lives only in process memory. If the process dies in
+that window, every replay of the same occurrence returns
+`Submission_in_progress`: replay cannot prove the request never reached the
+broker, so it issues no replacement permit and cannot return the phase to
+`Prepared` (only the lost permit could). The Keeper logs one warning naming the
+intent record whenever it holds this state, and the tool result stays
+`Effect_outcome_unknown`. Operator resolution is deliberate and offline: stop
+the Keeper, confirm the journal has no admitted request for the original run,
+then restore the intent record at
+`.masc/keeper_msg_requests/named_submissions/<sha256>.json` to a `prepared`
+header with no phase-event tail (keep the source header line intact). The next
+replay of the exact original invocation re-enters the broker with a fresh
+permit. Deleting the record is not a reset: the sealed activation ledger still
+proves the invocation was recorded, so a fresh prepare fails with
+`Missing_intent` and the occurrence stays closed the same way. The sibling
+window — a crash after the activity record but before the intent write — has no
+intent record at all and replays to the same refusal; it likewise has no
+automatic repair and stays closed until an operator restores the record from
+retained evidence or retires the occurrence.
+
 Pending reads return a typed dependency. An enclosing prepared async DAG releases
 its worker, retains completed independent nodes, and rechecks the same occurrences
 after canonical completion. The result includes the full original structured
@@ -279,3 +327,12 @@ instead of publishing stale Lost failure. An actual broker cancellation retains 
 no child continuation. Authored scenarios are not execution evidence until
 the selected head's run completes, and their component intervals do not measure
 whole-task preparation improvement or installed runtime/UI behavior.
+
+`test_keeper_tool_dispatch_runtime` exercises the actual public SDK bundle and
+canonical broker records: acknowledgement replay preserves original IDs without
+new requests; an interrupted phase append still recovers accepted work; changed
+arguments and a missing original intent refuse replacement. The fixture uses
+Keeper run one and SDK ordinal zero; named parent/child continuation scenarios
+also keep different physical Keeper and original SDK turns. Its one-shot SDK
+intervals end before response decoding and verification. Authored assertions and
+interval capture are not execution evidence until the selected run completes.

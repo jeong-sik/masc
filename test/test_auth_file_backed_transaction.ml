@@ -297,9 +297,14 @@ let test_fifo_authority_refuses_without_blocking () =
   match Unix.fork () with
   | 0 ->
       Sys.set_signal Sys.sigalrm Sys.Signal_default;
-      let _previous_alarm_seconds = Unix.alarm 5 in
+      (* One attempt owns one 5 s alarm. A single alarm over both attempts also
+         covered workspace setup and Ensure for the second one, so a slow runner
+         died by SIGALRM without any FIFO open having blocked. *)
+      let attempt_alarm_seconds = 5 in
       (try
-         List.iter (fun raw_fifo -> with_workspace @@ fun base_path ->
+         List.iter (fun raw_fifo ->
+           let _previous_alarm_seconds = Unix.alarm attempt_alarm_seconds in
+           with_workspace @@ fun base_path ->
            let _old = seed_keeper base_path in
            let named = Auth.credential_file base_path "keeper" in
            let raw_path = Auth.raw_token_file base_path "keeper" in
@@ -314,7 +319,8 @@ let test_fifo_authority_refuses_without_blocking () =
            check bool "occupied FIFO is preserved" true ((Unix.lstat occupied).Unix.st_kind = Unix.S_FIFO);
            Unix.unlink occupied;
            let _issued_pair = auth_ok (ensure base_path) in
-           check_pair base_path "keeper") [ false; true ];
+           check_pair base_path "keeper";
+           let _disarmed_alarm_seconds = Unix.alarm 0 in ()) [ false; true ];
          exit 0
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn

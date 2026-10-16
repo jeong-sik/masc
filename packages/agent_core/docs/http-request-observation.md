@@ -21,6 +21,22 @@ Each observed call has one owner-local identity and distinct facts:
 | `Response_headers_received` | Actual HTTP status and response headers have arrived |
 | `Client_finished` | The client returned a typed result, raised, or was cancelled |
 
+Native completion serialization also binds optional Tool inventory metadata to
+the exact body digest. The HTTP entry retains it only when that digest matches
+its actual body, so a nested request with different bytes cannot inherit the
+outer request's Tools. Unbound clients neither parse Tools nor invoke the lazy
+inventory producer. A producer's ordinary exception leaves the inventory
+unavailable without rewriting the HTTP result; reserved exceptions propagate.
+
+The metadata distinguishes an absent `tools` member, a present array (including
+an empty one), unavailable metadata and an unobserved producer. For a present
+array it records top-level wire-entry count and the size/SHA256 of its compact
+Yojson re-encoding, preserving array and object order. This is a defined wire
+representation, not semantic JSON canonicalization. A Gemini wrapper is one
+wire entry even when it contains several function declarations. Schema content
+never crosses the observer API. Both sync and streaming completion paths bind
+their final serialized body; transport-only calls make no Tool inventory claim.
+
 The interface contains no URL, headers, credentials, prompt, Tool arguments or
 response content. A submitted body is not a count of peer-acknowledged network
 bytes. A returned `Ok` is a client result, not a provider/parser/business-success
@@ -44,5 +60,7 @@ The preparation driver binds one observer around its actual owned cycle. Its
 separate metadata journal and receipt retain submitted sizes, dispatch entries,
 header receipts and client returns, including HTTP refusals. Actual peer-body
 size/hash comparison and concurrent/nested ownership scenarios require executed
-verification at the candidate head. The API alone establishes no timing savings,
-first offered Tool inventory, response-reported model identity or installation.
+verification at the candidate head. The driver's first inventory comes from the
+first actual dispatch, never the last-turn snapshot. Missing or incomplete
+evidence remains unknown. The API alone establishes no timing savings,
+response-reported model identity or installation.

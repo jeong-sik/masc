@@ -802,10 +802,14 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
       ~settle_deferred_runtime_lane:(function None -> () | Some _ -> failwith "unexpected runtime failover") in
   let cycle_returned = now counter in
   let http_metrics = Keeper_preparation_http_observation.snapshot http_observation in
+  let first_offered_tools_sha256 = match field "first_dispatched_tools" http_metrics with
+    | `Assoc fields -> (match List.assoc_opt "json_sha256" fields with Some (`String _ as hash) -> hash | _ -> `Null)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Null in
   let previous = load receipt |> to_assoc |> List.remove_assoc "timing" in
   json receipt (`Assoc (("timing",`Assoc ["admission",admission;
     "cycle_entered",cycle_entered;"cycle_returned",cycle_returned])::
     ("http_metrics",http_metrics)::
+    ("first_offered_tools_sha256",first_offered_tools_sha256)::
     ("common_instruction_sha256",`String (sha common_instruction))::previous));
   let batch = Calls.read_after ~keeper_name:keeper ~after:frontier ~project:Option.some |> get index_error in
   let rows = List.map (fun (row : Yojson.Safe.t Keeper_tool_call_index.positioned) -> row.value) batch.rows in
@@ -979,9 +983,8 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
          "output_tokens";"usage_scope"]);
       "request_count_scope",`String (if synthetic then "synthetic peer received requests" else "unobserved");
       "total_serialized_input_bytes",`Null;"response_reported_model",`Null];
-    "first_offered_tools_sha256",(match List.rev !requests with
-      | first :: _ -> `String (sha (Yojson.Safe.to_string (field "tools" first)))
-       | [] -> `Null);"backend_calls_after_ready",(match backend_calls with Some count -> `Int count | None -> `Null);
+    "first_offered_tools_sha256",first_offered_tools_sha256;
+    "backend_calls_after_ready",(match backend_calls with Some count -> `Int count | None -> `Null);
     "timing",`Assoc timing;"objective",(match final with None -> `Null | Some value -> value);
     "objective_validation",objective_validation_json objective_validation;
     "source_ack",`Bool evidence.event_queue_ack_seen;
@@ -989,9 +992,9 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     "remaining_queue",`Int (List.length (pending base));
     "claims",`List (List.map (fun value -> `String value)
       ((if synthetic then ["synthetic provider protocol only"]
-        else ["configured HTTP transport is not proof of real-model identity";
-          "complete provider request count/input bytes and first offered inventory are unobserved"])
+        else ["configured HTTP transport is not proof of response-reported model identity"])
        @ ["synthetic Docker CLI only";"no speedup or fleet scheduling latency claim";
+          "HTTP counts/input bytes and first Tool inventory retain their explicit native observation coverage";
           "Request_wire_observer is not a complete body recorder"]))] in
   (* Preserve measured evidence before any independent boundary check can
      reject the attempt. The outer failure path retains these fields. *)

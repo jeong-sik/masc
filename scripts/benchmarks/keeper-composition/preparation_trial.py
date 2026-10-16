@@ -243,7 +243,7 @@ def run(args) -> None:
          "attempts": results, "synthetic_only": synthetic, "latency_percentiles": None,
          "speedup": None, "matching": matching,
          "reason": ("functional protocol samples, no real model performance evidence" if synthetic else
-                    "configured HTTP identity, first offered inventory and complete request metrics need independent evidence"),
+                    "native HTTP metadata retains explicit coverage; response-reported model identity and adequate matched samples remain required"),
          "fixture_hashes": fixtures})
 
 

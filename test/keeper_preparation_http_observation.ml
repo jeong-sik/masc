@@ -13,11 +13,23 @@ let completion_name = function
   | Cancelled -> "cancelled"
   | Raised -> "raised"
 
+let tools_json = function
+  | None -> `Null
+  | Some Observe.Tools_unavailable -> `Assoc ["state",`String "unavailable"]
+  | Some No_tools_member ->
+    let json = "[]" in
+    `Assoc ["state",`String "absent";"wire_entries",`Int 0;
+      "json_bytes",`Int (String.length json);"json_sha256",`String Digestif.SHA256.(digest_string json |> to_hex)]
+  | Some (Tools_member {wire_entries;json_bytes;json_sha256}) ->
+    `Assoc ["state",`String "present";"wire_entries",`Int wire_entries;
+      "json_bytes",`Int json_bytes;"json_sha256",`String json_sha256]
+
 let phase_json = function
-  | Observe.Client_entered {mode;body_bytes;body_sha256} ->
+  | Observe.Client_entered {mode;body_bytes;body_sha256;tool_inventory} ->
     [ "phase",`String "client_entered"
     ; "mode",`String (match mode with Synchronous -> "synchronous" | Streaming -> "streaming")
-    ; "body_bytes",`Int body_bytes; "body_sha256",`String body_sha256 ]
+    ; "body_bytes",`Int body_bytes; "body_sha256",`String body_sha256
+    ; "tool_inventory",tools_json tool_inventory ]
   | Dispatch_entered -> ["phase",`String "dispatch_entered"]
   | Response_headers_received {status} -> ["phase",`String "response_headers_received";"status",`Int status]
   | Client_finished completion -> ["phase",`String "client_finished";"completion",`String (completion_name completion)]
@@ -57,6 +69,17 @@ let snapshot observation =
       Some Digestif.SHA256.(In_channel.with_open_bin observation.path In_channel.input_all |> digest_string |> to_hex)
     with Sys_error _ | Unix.Unix_error _ -> None in
   let complete = failures=0 && List.for_all Option.is_some facts && Option.is_some sha_file in
+  let first_dispatched_tools = if not complete then `Null else
+    let dispatched = List.find_map (fun (event : Observe.event) -> match event.phase with
+      | Dispatch_entered -> Some event.call_id
+      | Client_entered _ | Response_headers_received _ | Client_finished _ -> None) events in
+    match dispatched with
+    | None -> `Null
+    | Some id ->
+      List.find_map (fun (event : Observe.event) -> match event.phase with
+        | Client_entered {tool_inventory;_} when event.call_id=id -> Some (tools_json tool_inventory)
+        | Client_entered _ | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) events
+      |> function Some tools -> tools | None -> `Null in
   let total project = if complete then `Int (List.fold_left (fun sum -> function
     | Some facts -> sum + project facts | None -> sum) 0 facts) else `Null in
   `Assoc
@@ -72,8 +95,10 @@ let snapshot observation =
     ; "client_returned_error",total (fun (_,_,_,completion) -> match completion with Observe.Returned_error -> 1 | Returned_ok | Cancelled | Raised -> 0)
     ; "client_cancelled",total (fun (_,_,_,completion) -> match completion with Observe.Cancelled -> 1 | Returned_ok | Returned_error | Raised -> 0)
     ; "client_raised",total (fun (_,_,_,completion) -> match completion with Observe.Raised -> 1 | Returned_ok | Returned_error | Cancelled -> 0)
+    ; "first_dispatched_tools",first_dispatched_tools
     ; "events_sha256",(match sha_file with None -> `Null | Some value -> `String value)
     ; "claims",`List (List.map (fun text -> `String text)
       ["body bytes are serialized/submitted payload, not peer-acknowledged network bytes";
        "response headers and client return are not a provider/parser/business-success verdict";
-       "no response-reported model or first offered Tool inventory is inferred"]) ]
+       "first Tool inventory is bound to the actual dispatched body; missing metadata remains unknown";
+       "no response-reported model is inferred"]) ]

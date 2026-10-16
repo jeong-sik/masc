@@ -660,6 +660,7 @@ let complete_stream_http
       let* auth_headers = Provider_config.resolve_auth_headers config
         |> Result.map_error (fun reason -> Http_client.AcceptRejected { reason }) in
       match
+        with_request_tools ~body:body_with_stream (fun () ->
         Http_client.with_post_stream
           ?cache:connection_cache
           ?clock
@@ -1190,7 +1191,7 @@ let complete_stream_http
                 result
             in
             body_logic ())
-          ()
+          ())
       with
       | (Error (Http_client.HttpError _) as e) | (Error (Http_client.NetworkError _) as e)
       | (Error (Http_client.TimeoutError _) as e) | (Error (Http_client.AcceptRejected _) as e)

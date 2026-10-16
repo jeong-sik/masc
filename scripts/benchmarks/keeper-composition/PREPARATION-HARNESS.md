@@ -105,9 +105,9 @@ Skill bytes/reference, and model settings are identical. The strategy instructio
 is the intentional prompt difference. Board IDs, clocks and loopback ports are
 physical trial metadata, so full provider prompts are not claimed byte-identical.
 Where observed, the first offered tool-schema hash must also agree across a
-successful pair. Configured HTTP runs currently leave that hash unobserved;
-`summary.matching` records this limit instead of treating two nulls as proof of
-matched tool inventory.
+successful pair. Both native configured HTTP and synthetic runs take this
+metadata from the first actual dispatch. `summary.matching` records whether it
+was observed instead of treating two nulls as proof of matched inventory.
 
 Each arm actually creates an addressed Board post, verifies one exact durable
 queue selection, classifies lifecycle admission, and calls the explicit heartbeat
@@ -199,8 +199,16 @@ serialized/submitted bytes remain null if observation delivery failed, the file
 is unavailable or a call's phase sequence is incomplete/contradictory. A client
 return is not provider/parser success, and submitted bytes are not a claim that
 the peer acknowledged every network byte. There is no full-body capture or new
-runtime gate. First offered Tool inventory and response-reported model remain
-unobserved. Do not substitute zero for missing evidence. The same failure/unfinished
+runtime gate. The serializer separately binds the final body's Tool inventory
+to that exact body digest. `first_dispatched_tools` records absent/present/
+unavailable metadata from the first dispatch; an unobserved producer stays
+null. A present array records top-level wire entries and compact Yojson byte
+count/SHA256 with object and array order preserved. Gemini's function wrapper
+is one wire entry; this is not a universal function count or semantic JSON
+canonicalization. No schema content is exposed. The receipt's first offered
+hash comes from this native evidence, including configured HTTP refusals, and
+never from the last input snapshot. Response-reported model remains unobserved.
+Do not substitute zero for missing evidence. The same failure/unfinished
 denominator applies to configured HTTP trials, including noncompliant arms.
 
 The explicit targeted CI entry is `test_keeper_preparation_trial`, declared as
@@ -213,7 +221,8 @@ It also crosses an independently hosted loopback HTTP refusal through the
 configured Runtime branch for both arms, checks the fixture environment
 credential binding, and retains both refusals as explicit failures. That server
 is synthetic and does not exercise a paid provider. Native HTTP size/hash and
-dispatch/header counts are compared with independently received peer bytes for
+dispatch/header counts and Tool metadata are compared with independently
+received peer bytes and Tool arrays for
 both normal and refused requests. A malformed-final pair
 uses a valid no-outer-exports Skill run and verifies that already completed
 physical work, source ACKs, clocks and usage

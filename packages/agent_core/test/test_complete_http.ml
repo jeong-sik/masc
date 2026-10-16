@@ -5,6 +5,21 @@
 open Alcotest
 open Llm_provider
 
+let check_observed_tools ~body events =
+  let entered = List.filter_map (fun (event : Http_request_observer.event) -> match event.phase with
+    | Client_entered {tool_inventory;_} -> Some tool_inventory
+    | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) !events in
+  let actual = match entered with [Some tools] -> tools | _ -> fail "one observed native request inventory required" in
+  match Yojson.Safe.Util.member "tools" (Yojson.Safe.from_string body),actual with
+  | `Null, No_tools_member -> ()
+  | (`List entries as tools), Tools_member {wire_entries;json_bytes;json_sha256} ->
+    let json = Yojson.Safe.to_string tools in
+    check int "actual wire entries, including provider wrappers" (List.length entries) wire_entries;
+    check int "actual peer tool encoding bytes" (String.length json) json_bytes;
+    check string "actual peer tool encoding digest" Digestif.SHA256.(digest_string json |> to_hex) json_sha256
+  | _ -> fail "observed inventory did not describe the actual received tools"
+;;
+
 (* ── Mock server ─────────────────────────────────────── *)
 
 let anthropic_response ?(id = "msg-1") ?(model = "mock") ?(stop_reason = "end_turn") text =
@@ -394,6 +409,8 @@ let test_complete_request_wire_observer_sees_exact_sync_body () =
     @@ fun sw ->
     let captured_body = ref None in
     let observed = ref [] in
+    let http_events = ref [] in
+    let http_observer = Http_request_observer.create (fun event -> http_events := event :: !http_events; Ok ()) in
     let base_url =
       start_mock_server
         ~sw
@@ -406,19 +423,20 @@ let test_complete_request_wire_observer_sees_exact_sync_body () =
       Ok ()
     in
     (match
-       Complete.complete
+       Http_request_observer.with_observer http_observer (fun () -> Complete.complete
          ~sw
          ~net:env#net
          ~capture_id:"sync-request-1"
          ~request_wire_observer
          ~config:(make_openai_config base_url)
          ~messages
-         ()
+         ())
      with
      | Error _ -> fail "request observation changed the provider result"
      | Ok _ -> ());
     (match !captured_body, !observed with
      | Some body, [ observation ] ->
+       check_observed_tools ~body http_events;
        check
          (option string)
          "capture id"
@@ -1937,6 +1955,8 @@ let test_complete_request_wire_observer_sees_exact_stream_body () =
     @@ fun sw ->
     let captured_body = ref None in
     let observed = ref [] in
+    let http_events = ref [] in
+    let http_observer = Http_request_observer.create (fun event -> http_events := event :: !http_events; Ok ()) in
     let url =
       start_sse_server
         ~sw
@@ -1949,7 +1969,7 @@ let test_complete_request_wire_observer_sees_exact_stream_body () =
       Ok ()
     in
     (match
-       Complete.complete_stream
+       Http_request_observer.with_observer http_observer (fun () -> Complete.complete_stream
          ~sw
          ~net:env#net
          ~capture_id:"stream-request-1"
@@ -1957,12 +1977,13 @@ let test_complete_request_wire_observer_sees_exact_stream_body () =
          ~config:(make_kimi_config url)
          ~messages
          ~on_event:(fun _ -> ())
-         ()
+         ())
      with
      | Ok resp -> check string "stream response" "observed stream" (text_of_response resp)
      | Error _ -> fail "request observation changed the streaming provider result");
     (match !captured_body, !observed with
      | Some body, [ observation ] ->
+       check_observed_tools ~body http_events;
        check
          (option string)
          "capture id"
@@ -4398,9 +4419,12 @@ let test_vertex_native_transport () =
         let cache : Cache.t = {
           get=(fun ~key:_ -> fail "refreshable account must not read a static response cache");
           set=(fun ~key:_ ~ttl_sec:_ _ -> fail "refreshable account must not populate a static response cache") } in
-        let result = if stream then Complete.complete_stream ~sw ~net:env#net ~config
+        let http_events = ref [] in
+        let http_observer = Http_request_observer.create (fun event -> http_events := event :: !http_events; Ok ()) in
+        let result = Http_request_observer.with_observer http_observer (fun () ->
+          if stream then Complete.complete_stream ~sw ~net:env#net ~config
             ~messages ~tools ~on_event:(fun _ -> ()) ()
-          else Complete.complete ~sw ~net:env#net ~config ~messages ~tools ~cache () in
+          else Complete.complete ~sw ~net:env#net ~config ~messages ~tools ~cache ()) in
         (match result with
          | Error _ -> fail "native Vertex-shaped transport failed"
          | Ok response -> check bool "native function call survives transport" true
@@ -4414,6 +4438,7 @@ let test_vertex_native_transport () =
         check (option string) "native publisher method path"
           (Some ("/v1/projects/fixture/locations/global/publishers/google/models/fixture-gemini:"
             ^ if stream then "streamGenerateContent" else "generateContent")) !seen_path;
+        check_observed_tools ~body:(Option.get !seen_body) http_events;
         let body = Option.get !seen_body |> Yojson.Safe.from_string in
         check bool "native contents, not chat-completions messages" true
           (Yojson.Safe.Util.member "contents" body <> `Null

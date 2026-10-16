@@ -1157,7 +1157,7 @@ let test_post_observation_matches_actual_native_calls () =
        | Error _ -> Alcotest.fail "observed stream failed"));
     let events = List.rev !events in
     let entered = List.filter_map (fun (event : Observe.event) -> match event.phase with
-      | Client_entered {body_bytes;body_sha256;mode=_} -> Some (event.call_id,body_bytes,body_sha256)
+      | Client_entered {body_bytes;body_sha256;_} -> Some (event.call_id,body_bytes,body_sha256)
       | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) events in
     Alcotest.(check int) "each actual server request has one native call" (List.length !bodies) (List.length entered);
     List.iter2 (fun (_,bytes,digest) body ->
@@ -1182,16 +1182,21 @@ let test_post_observation_matches_actual_native_calls () =
     (match List.rev_map (fun (event : Observe.event) -> event.phase) !refusal_events with
      | [Client_entered _;Dispatch_entered;Response_headers_received {status=400};Client_finished Returned_error] -> ()
      | _ -> Alcotest.fail "refusal was not retained as actual headers plus failed client return");
+    let rejected_inventory = ref None in
     let failing = Observe.create (fun (event : Observe.event) -> match event.phase with
-      | Client_entered _ -> Error ()
+      | Client_entered {tool_inventory;_} -> rejected_inventory := Some tool_inventory; Error ()
       | Response_headers_received _ -> failwith "synthetic observer store unavailable"
       | Dispatch_entered | Client_finished _ -> Ok ()) in
     (match Observe.with_observer failing (fun () ->
+        Observe.with_request_tools ~body:"observer-failure"
+          ~inventory:(fun () -> failwith "synthetic Tool metadata unavailable") (fun () ->
         Http_client.with_post_stream ~net:env#net ~url ~headers:[] ~body:"observer-failure"
-          ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader) ()) with
+          ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader) ())) with
      | Ok response -> Alcotest.(check string) "observer failure did not rewrite response" "complete" response
      | Error _ -> Alcotest.fail "diagnostic observer failure blocked HTTP");
     Alcotest.(check int) "both unavailable deliveries are explicit" 2 (Observe.delivery_failure_count failing);
+    (match !rejected_inventory with Some (Some Tools_unavailable) -> ()
+     | _ -> Alcotest.fail "failed Tool metadata was converted to an empty inventory");
     Eio.Switch.fail sw Exit
   with Exit -> ()
 ;;
@@ -1208,9 +1213,12 @@ let test_post_observers_are_owned_across_concurrent_fibers () =
         ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader) () with
       | Ok _ -> () | Error _ -> Alcotest.fail "concurrent observed POST failed" in
     Observe.with_observer outer (fun () ->
+      Observe.with_request_tools ~body:"outer-first" ~inventory:(fun () -> No_tools_member) (fun () ->
       Eio.Fiber.both (fun () -> post "outer-first")
-        (fun () -> Observe.with_observer inner (fun () -> post "inner"));
+        (fun () -> Observe.with_observer inner (fun () -> post "inner")));
       post "outer-second");
+    Observe.with_request_tools ~body:"unbound"
+      ~inventory:(fun () -> Alcotest.fail "unbound HTTP evaluated Tool metadata") (fun () -> post "unbound");
     let hashes events = List.filter_map (fun (event : Observe.event) -> match event.phase with
       | Client_entered {body_sha256;_} -> Some body_sha256
       | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) (List.rev !events) in
@@ -1218,6 +1226,12 @@ let test_post_observers_are_owned_across_concurrent_fibers () =
     Alcotest.(check (list string)) "outer ownership survives concurrent nested binding"
       (List.map sha ["outer-first";"outer-second"]) (hashes outer_events);
     Alcotest.(check (list string)) "nested owner receives only its request" [sha "inner"] (hashes inner_events);
+    let inventories events = List.filter_map (fun (event : Observe.event) -> match event.phase with
+      | Client_entered {tool_inventory;_} -> Some tool_inventory
+      | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) (List.rev !events) in
+    (match inventories outer_events,inventories inner_events with
+     | [Some No_tools_member;None],[None] -> ()
+     | _ -> Alcotest.fail "Tool metadata escaped its exact body or request scope");
     Eio.Switch.fail sw Exit
   with Exit -> ()
 ;;

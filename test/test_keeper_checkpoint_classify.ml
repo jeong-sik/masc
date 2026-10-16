@@ -101,6 +101,16 @@ let test_serialization_json_routes_parse_error () =
   Alcotest.(check bool) "JsonParseError routes to Parse_error" true
     (is_parse_error (Store.classify_core_error e))
 
+let test_structured_failure_routes_without_private_evidence () =
+  let raw = "private-model-output-api-key-value" in
+  let error = Agent_core.Error.structured_output_parse_error
+      ~reason:Agent_core.Error.Invalid_json ~detail:raw ~raw in
+  match Store.classify_core_error error with
+  | Store.Parse_error message ->
+    Alcotest.(check string) "only public error text reaches checkpoint diagnostics"
+      (Agent_core.Error.to_string error) message
+  | other -> Alcotest.failf "wrong class: %s" (Store.checkpoint_load_error_to_string other)
+
 (* The two directions of a version mismatch need opposite answers, so they are
    not one classification. An earlier canonical is replaceable: the load already
    refused it and the keeper started fresh. A later one is not: an older binary
@@ -180,6 +190,8 @@ let () =
             test_io_validation_failed_routes_store_error;
           Alcotest.test_case "JsonParseError -> Parse_error" `Quick
             test_serialization_json_routes_parse_error;
+          Alcotest.test_case "structured failure keeps evidence private" `Quick
+            test_structured_failure_routes_without_private_evidence;
           Alcotest.test_case
             "VersionMismatch routes by direction: earlier is superseded, later              is a parse failure"
             `Quick

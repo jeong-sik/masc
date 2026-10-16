@@ -106,8 +106,26 @@ type config_error =
       }
   | SensitiveValueInConfig of { detail : string }
 
+type structured_failure =
+  | Empty_response
+  | Invalid_json
+  | Expected_object
+  | Schema_rejected
+  | Schema_type_mismatch
+(** Closed failure class safe for public diagnostics. Model and parser strings
+    remain private evidence in [StructuredOutputParseError]. *)
+
 type serialization_error =
   | JsonParseError of { detail : string }
+  | StructuredOutputParseError of
+      { reason : structured_failure
+      ; detail : string
+      ; raw_preview : string
+      ; raw_len : int
+      }
+      (** Private model-output evidence. Both strings are bounded to 4 KiB by
+          {!structured_output_parse_error}; [raw_len] counts original bytes.
+          Neither string belongs in public error messages or event JSON. *)
   | VersionMismatch of
       { expected : int
       ; got : int
@@ -184,6 +202,14 @@ val category_label : category -> string
 
 (** Human-readable error message. *)
 val to_string : t -> string
+
+(** Public non-identifying label of a structured failure class. *)
+val structured_failure_label : structured_failure -> string
+
+(** Preserve bounded private evidence after a structured response fails parsing.
+    Public {!to_string} exposes only the closed class and original byte count.
+    This does not apply to refusals before a provider response exists. *)
+val structured_output_parse_error : reason:structured_failure -> detail:string -> raw:string -> t
 
 (** Whether the error is transient and the operation can be retried. *)
 val is_retryable : t -> bool

@@ -106,9 +106,22 @@ type config_error =
       }
   | SensitiveValueInConfig of { detail : string }
 
+type structured_failure =
+  | Empty_response
+  | Invalid_json
+  | Expected_object
+  | Schema_rejected
+  | Schema_type_mismatch
+
 (** Serialization / deserialization errors. *)
 type serialization_error =
   | JsonParseError of { detail : string }
+  | StructuredOutputParseError of
+      { reason : structured_failure
+      ; detail : string
+      ; raw_preview : string
+      ; raw_len : int
+      }
   | VersionMismatch of
       { expected : int
       ; got : int
@@ -282,8 +295,19 @@ let config_error_to_string = function
   | SensitiveValueInConfig r -> Printf.sprintf "Sensitive value in config: %s" r.detail
 ;;
 
+let structured_failure_label = function
+  | Empty_response -> "empty_response"
+  | Invalid_json -> "invalid_json"
+  | Expected_object -> "expected_object"
+  | Schema_rejected -> "schema_rejected"
+  | Schema_type_mismatch -> "schema_type_mismatch"
+;;
+
 let serialization_error_to_string = function
   | JsonParseError r -> Printf.sprintf "JSON parse error: %s" r.detail
+  | StructuredOutputParseError r ->
+    Printf.sprintf "Structured output parse error: %s (response bytes: %d)"
+      (structured_failure_label r.reason) r.raw_len
   | VersionMismatch r ->
     Printf.sprintf "Version mismatch: expected %d, got %d" r.expected r.got
   | UnknownVariant r -> Printf.sprintf "Unknown %s variant: %s" r.type_name r.value
@@ -311,6 +335,34 @@ let to_string = function
   | Orchestration err -> orchestration_error_to_string err
   | Internal msg | Internal_carried { message = msg; _ } ->
     Printf.sprintf "Internal error: %s" msg
+;;
+
+(* Resource boundary for diagnostic evidence, not a limit on model output or
+   Keeper execution. Keep the original response length even when retaining only
+   a prefix. Stop before a UTF-8 character crossing the byte boundary. *)
+let structured_evidence_max_bytes = 4096
+
+let bounded_structured_evidence text =
+  if String.length text <= structured_evidence_max_bytes then text
+  else
+    let rec prefix_end offset =
+      let decoded = String.get_utf_8_uchar text offset in
+      let next = offset + Uchar.utf_decode_length decoded in
+      if next > structured_evidence_max_bytes then offset
+      else if next = structured_evidence_max_bytes then next
+      else prefix_end next
+    in
+    String.sub text 0 (prefix_end 0)
+;;
+
+let structured_output_parse_error ~reason ~detail ~raw =
+  Serialization
+    (StructuredOutputParseError
+       { reason
+       ; detail = bounded_structured_evidence detail
+       ; raw_preview = bounded_structured_evidence raw
+       ; raw_len = String.length raw
+       })
 ;;
 
 (* ── Retryability ─────────────────────────────────────────────────── *)

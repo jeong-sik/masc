@@ -331,10 +331,127 @@ let test_schema_extractor_parser_json_error () =
 
 (* --- Runner --- *)
 
+let check_private_evidence ~reason ~raw = function
+  | Error (Error.Serialization (StructuredOutputParseError evidence) as error) ->
+    Alcotest.(check bool) "closed failure class" true (evidence.reason = reason);
+    Alcotest.(check int) "original response byte count" (String.length raw) evidence.raw_len;
+    Alcotest.(check bool) "preview is bounded" true (String.length evidence.raw_preview <= 4096);
+    Alcotest.(check string) "preview preserves the original prefix"
+      (String.sub raw 0 (String.length evidence.raw_preview)) evidence.raw_preview;
+    Alcotest.(check string) "public message contains no private fragments"
+      (Printf.sprintf "Structured output parse error: %s (response bytes: %d)"
+         (Error.structured_failure_label reason) (String.length raw))
+      (Error.to_string error);
+    Alcotest.(check bool) "parse failure remains nonretryable" false (Error.is_retryable error)
+  | Error ((Api _ | Provider _ | Agent _ | Mcp _ | Config _
+           | Serialization (JsonParseError _ | VersionMismatch _ | UnknownVariant _)
+           | Io _ | Orchestration _ | Internal _ | Internal_carried _) as error) ->
+    Alcotest.failf "expected structured evidence, got %s" (Error.to_string error)
+  | Ok _ -> Alcotest.fail "invalid response was accepted"
+;;
+
+let test_malformed_response_retains_original_evidence () =
+  let raw = " \n```json\n{\"secret\":\"private-model-output\"}\n``` \n" in
+  Structured.extract_response_json (make_response [Text raw])
+  |> check_private_evidence ~reason:Error.Invalid_json ~raw
+;;
+
+let test_empty_response_has_public_failure_class () =
+  let raw = " \n\t " in
+  Structured.extract_response_json (make_response [Text raw])
+  |> check_private_evidence ~reason:Error.Empty_response ~raw
+;;
+
+let test_schema_refusal_retains_response_without_public_detail () =
+  let raw = " {\"name\":123,\"secret\":\"private-model-output\"} " in
+  let schema : unit Structured.schema =
+    { params = []; parse = (fun _ -> Error ("private-schema-detail:" ^ raw)) }
+  in
+  Structured.extract_response ~schema (make_response [Text raw])
+  |> check_private_evidence ~reason:Error.Schema_rejected ~raw
+;;
+
+let test_schema_type_exception_retains_response () =
+  let raw = {|{"name":123}|} in
+  let schema : string Structured.schema =
+    { params = []; parse = (fun json -> Ok Yojson.Safe.Util.(json |> member "name" |> to_string)) }
+  in
+  Structured.extract_response ~schema (make_response [Text raw])
+  |> check_private_evidence ~reason:Error.Schema_type_mismatch ~raw
+;;
+
+let test_schema_json_exception_has_distinct_schema_class () =
+  let raw = {|{"nested":"private-schema-fragment"}|} in
+  let schema : Yojson.Safe.t Structured.schema =
+    { params = []
+    ; parse = (fun json -> Ok (Yojson.Safe.from_string Yojson.Safe.Util.(json |> member "nested" |> to_string)))
+    }
+  in
+  Structured.extract_response ~schema (make_response [Text raw])
+  |> check_private_evidence ~reason:Error.Schema_rejected ~raw
+;;
+
+let test_response_shape_failure_retains_response () =
+  let raw = " [1,2,3] \n" in
+  Structured.extract_response_json ~shape:Structured.Object_json (make_response [Text raw])
+  |> check_private_evidence ~reason:Error.Expected_object ~raw
+;;
+
+let test_long_response_evidence_keeps_utf8_boundary () =
+  let raw = String.make 4095 'x' ^ "한글-private-model-output" ^ String.make 10000 'y' in
+  let error = Error.structured_output_parse_error ~reason:Error.Invalid_json ~detail:raw ~raw in
+  check_private_evidence ~reason:Error.Invalid_json ~raw (Error error);
+  match error with
+  | Error.Serialization (StructuredOutputParseError evidence) ->
+    Alcotest.(check int) "no split UTF-8 character" 4095 (String.length evidence.raw_preview);
+    Alcotest.(check bool) "valid UTF-8 preview" true (String.is_valid_utf_8 evidence.raw_preview);
+    Alcotest.(check bool) "private diagnostic is also bounded" true (String.length evidence.detail <= 4096)
+  | Api _ | Provider _ | Agent _ | Mcp _ | Config _
+  | Serialization (JsonParseError _ | VersionMismatch _ | UnknownVariant _)
+  | Io _ | Orchestration _ | Internal _ | Internal_carried _ ->
+    Alcotest.fail "wrong evidence constructor"
+;;
+
+let test_public_extractors_keep_safe_failure_class () =
+  let check_public label raw = function
+    | Error message ->
+      Alcotest.(check string) "public class without model/parser fragments"
+        (Printf.sprintf "Structured output parse error: %s (response bytes: %d)"
+           label (String.length raw)) message
+    | Ok _ -> Alcotest.fail "invalid response was accepted"
+  in
+  let check_json ?shape label raw =
+    Structured.response_json_extractor ?shape () (make_response [Text raw])
+    |> check_public label raw
+  in
+  check_json "empty_response" " \n ";
+  check_json "invalid_json" "private-model-output";
+  check_json ~shape:Structured.Object_json "expected_object" "[]";
+  let raw = {|{"name":123}|} in
+  let refused : unit Structured.schema =
+    {params=[]; parse=(fun _ -> Error "private-schema-fragment")} in
+  Structured.schema_extractor refused (make_response [Text raw])
+  |> check_public "schema_rejected" raw;
+  let typed : string Structured.schema =
+    {params=[]; parse=(fun json -> Ok Yojson.Safe.Util.(json |> member "name" |> to_string))} in
+  Structured.schema_extractor typed (make_response [Text raw])
+  |> check_public "schema_type_mismatch" raw
+;;
+
 let () =
   Alcotest.run
     "structured"
-    [ ( "schema_to_json_schema"
+    [ ( "private failure evidence"
+      , [ Alcotest.test_case "malformed response" `Quick test_malformed_response_retains_original_evidence
+        ; Alcotest.test_case "empty response failure class" `Quick test_empty_response_has_public_failure_class
+        ; Alcotest.test_case "schema refusal" `Quick test_schema_refusal_retains_response_without_public_detail
+        ; Alcotest.test_case "schema type exception" `Quick test_schema_type_exception_retains_response
+        ; Alcotest.test_case "schema JSON exception" `Quick test_schema_json_exception_has_distinct_schema_class
+        ; Alcotest.test_case "object shape" `Quick test_response_shape_failure_retains_response
+        ; Alcotest.test_case "bounded UTF-8 evidence" `Quick test_long_response_evidence_keeps_utf8_boundary
+        ; Alcotest.test_case "public extractors keep safe failure class" `Quick test_public_extractors_keep_safe_failure_class
+        ] )
+    ; ( "schema_to_json_schema"
       , [ Alcotest.test_case "structure" `Quick test_schema_to_json_structure
         ; Alcotest.test_case "optional params" `Quick test_schema_optional_params
         ; Alcotest.test_case

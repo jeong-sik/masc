@@ -534,7 +534,7 @@ type async_msg =
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
   | Keeper_schedules_loaded of detail_read_request * (schedule_snapshot, string) result
-  | System_logs_loaded of (system_log_snapshot, string) result
+  | System_logs_loaded of Surface_read_order.request * (system_log_snapshot, string) result
   | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
   | Verification_verdict_done of (string * bool, string) result

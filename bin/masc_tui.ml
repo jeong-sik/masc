@@ -11349,8 +11349,14 @@ let launch_system_logs_load state ~mailbox =
     Option.map Masc.Tui_decode.system_log_level_query
       state.system_logs_min_level
   in
+  let reads, request = Surface_read_order.dispatch ~kind:Surface_read_order.Independent
+    ~needs:(surface_needs_of_surface System_logs) ~started_ns:(Mtime_clock.elapsed_ns ())
+    state.http_surface_reads in
+  state.http_surface_reads <- reads;
+  Log.Transport.info "tui_system_logs_read_started request=%d started_ns=%Ld"
+    (Surface_read_order.request_id request) (Surface_read_order.started_ns request);
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> System_logs_loaded result)
+    ~deliver:(fun result -> System_logs_loaded (request, result))
     (fun () -> load_system_logs ~host ~port ?level ~limit:system_log_page ())
   end
 
@@ -16433,7 +16439,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       (* Dataset admission and collector completion have different lifetimes.
          A duplicate cannot reapply an identity observation or free another read. *)
       let active = match Surface_read_order.request_kind request with
-        | Surface_read_order.Full -> true
+        | Surface_read_order.Full | Surface_read_order.Independent -> true
         | Surface_read_order.Navigation ->
             Surface_read_order.navigation_active state.http_surface_reads request in
       if active then begin
@@ -17901,7 +17907,15 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       Masc_tui_github_ui.token_saved state ~keeper_name
         ~report:(fun level detail -> report_action state level detail)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
-  | System_logs_loaded result -> apply_system_logs_load state result
+  | System_logs_loaded (request, result) ->
+      let reads, sources = Surface_read_order.take state.http_surface_reads request in
+      state.http_surface_reads <- reads;
+      if List.mem Surface_read_order.System_logs sources then begin
+        apply_system_logs_load state result;
+        Log.Transport.info "tui_system_logs_read_applied request=%d started_ns=%Ld applied_ns=%Ld received=%b"
+          (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
+          (Mtime_clock.elapsed_ns ()) (Result.is_ok result)
+      end
   | Schedules_loaded (request, result) -> (
       match Snapshot_read.settle state.schedules_read request with
       | None -> ()

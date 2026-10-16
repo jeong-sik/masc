@@ -380,6 +380,36 @@ let test_asks_and_approvals_collectors_have_independent_lifetimes () =
   check bool "its completion cannot clear another collection" true
     (Order.navigation_active reads board)
 
+let test_log_filter_read_supersedes_old_collectors_without_releasing_them () =
+  let module Order = Types.Surface_read_order in
+  let full_reads, full = Order.dispatch ~kind:Order.Full ~needs:(needs Types.System_logs)
+    ~started_ns:1L Order.initial in
+  let full_reads, current_filter = Order.dispatch ~kind:Order.Independent
+    ~needs:(needs Types.System_logs) ~started_ns:2L full_reads in
+  let full_reads, old_full_sources = Order.take full_reads full in
+  check bool "a late full page cannot replace the filtered page" true (old_full_sources = []);
+  let _, current_filter_sources = Order.take full_reads current_filter in
+  check bool "the filter retains its source against full completion" true
+    (List.mem Order.System_logs current_filter_sources);
+  let reads, navigation = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.System_logs)
+    ~started_ns:1L Order.initial in
+  let reads, filter = Order.dispatch ~kind:Order.Independent ~needs:(needs Types.System_logs)
+    ~started_ns:2L reads in
+  let reads, old_sources = Order.take reads navigation in
+  check bool "the old collector cannot replace the filtered page" true (old_sources = []);
+  check bool "the actual navigation collector still needs its own completion" true
+    (Order.navigation_active reads navigation);
+  let reads, newer_filter = Order.dispatch ~kind:Order.Independent ~needs:(needs Types.System_logs)
+    ~started_ns:3L reads in
+  let reads, old_filter_sources = Order.take reads filter in
+  check bool "an older filter result owns no current log data" true (old_filter_sources = []);
+  let reads = Order.finish reads navigation in
+  check bool "independent filters add no navigation collector" false
+    (Order.navigation_in_flight reads);
+  let _, current_sources = Order.take reads newer_filter in
+  check bool "the newest filter keeps the log data owner" true
+    (List.mem Order.System_logs current_sources)
+
 let () =
   run "tui_surface_needs"
     [ ( "refresh scope"
@@ -417,6 +447,8 @@ let () =
             test_withdrawal_retires_authority_without_losing_live_collectors
         ; test_case "Ask and approval collectors keep independent lifetimes" `Quick
             test_asks_and_approvals_collectors_have_independent_lifetimes
+        ; test_case "log filter supersedes old collectors without releasing them" `Quick
+            test_log_filter_read_supersedes_old_collectors_without_releasing_them
         ] )
     ]
 ;;

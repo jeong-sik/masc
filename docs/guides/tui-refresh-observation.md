@@ -118,6 +118,13 @@ and latest-navigation authority while actual collectors remain tracked until
 their own completion. Ask/approval-only collectors are tracked even when they
 have no generic dataset claims.
 
+The independent log-level/verbose refetch also takes the shared Logs dataset
+owner. A late full/navigation page or older filter response cannot replace the
+current filtered page. Its existing workspace-scoped request retains its authority
+checks, and this independent request creates no navigation collector or identity
+authority. `tui_system_logs_read_started` and `tui_system_logs_read_applied`
+record its own source clocks and received/failed UI application separately.
+
 `tui_surface_read_started` identifies navigation request id, monotonic start,
 whether a full pass was running and the admitted navigation collector count.
 `tui_surface_read_applied` records the same
@@ -154,12 +161,18 @@ performance result has been measured for either change. For a matched Before/Aft
    after the newer read and confirm it neither replaces newer identity nor
    releases another collector. Keep a full revalidation requested during both
    and distinguish its retained intent from its actual dispatch.
+6. For Logs, retain an older full/navigation page, change the level or verbose
+   selection and finish the selected filter's request first. Release the old
+   page and an older filter reply afterwards. Keep the actual query parameters,
+   source application ids and manually inspected frame; older replies must not
+   replace the selected filter's result.
 
 The initial three authored source scenarios cover overlapping owners, independent
-completion, duplicate completion and withdrawal. Four additional scenarios cover
+completion, duplicate completion and withdrawal. Five additional scenarios cover
 concurrent collector settlement and one retained revalidation, latest identity
 authority after newer completion, withdrawal with live collectors, and collectors
-whose Ask/approval data have independent owners. They have not been executed for
+whose Ask/approval data have independent owners, plus log filter supersession of
+full/navigation or older filter results. They have not been executed for
 these heads. Per-reader admission within one collector, exact-input reuse when
 returning to an already pending dataset, preserving prior successful snapshots
 after failed reads, actual native responsiveness and the rest of the preparation

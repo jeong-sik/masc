@@ -3566,7 +3566,7 @@ let surface_needs_any needs = needs <> nothing
    producer, so a late full bundle cannot overwrite a newer navigation read.
    Questions, approvals and roster already have independent source owners. *)
 module Surface_read_order : sig
-  type kind = Full | Navigation
+  type kind = Full | Navigation | Independent
   type source = Transport | Board | Planning | System_logs | Fleet_safety
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type t
@@ -3586,7 +3586,7 @@ module Surface_read_order : sig
   val navigation_active : t -> request -> bool
   val latest_navigation : t -> request -> bool
 end = struct
-  type kind = Full | Navigation
+  type kind = Full | Navigation | Independent
   type source = Transport | Board | Planning | System_logs | Fleet_safety
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type request = { id: int; kind: kind; started_ns: int64; sources: source list; owner: unit ref }
@@ -3608,7 +3608,7 @@ end = struct
     let request = {id=current.next; kind; started_ns; sources=sources needs; owner=ref ()} in
     let retained = List.filter (fun (source, _) -> not (List.mem source request.sources)) current.owners in
     let active_navigation, latest_navigation = match kind with
-      | Full -> current.active_navigation, current.latest_navigation
+      | Full | Independent -> current.active_navigation, current.latest_navigation
       | Navigation -> request :: current.active_navigation, Some request in
     {next=current.next+1; owners=List.map (fun source -> source,request) request.sources @ retained;
      active_navigation; latest_navigation}, request

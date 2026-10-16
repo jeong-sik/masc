@@ -3014,6 +3014,7 @@ reasoning_streaming_format = "delta:reasoning_content"
 id_prefix = "glm-5.3"
 provider_name = "glm-coding"
 base = "glm"
+thinking_control_format = "none"
 max_context_tokens = 1048576
 max_output_tokens = 131072
 supports_tools = true
@@ -3043,6 +3044,7 @@ supports_native_streaming = true
 id_prefix = "glm-5.2"
 provider_name = "glm-coding"
 base = "glm"
+thinking_control_format = "thinking_object_only"
 max_context_tokens = 1000000
 max_output_tokens = 131072
 supports_tools = true
@@ -3056,6 +3058,7 @@ supports_native_streaming = true
 id_prefix = "glm-5.1"
 provider_name = "glm-coding"
 base = "glm"
+thinking_control_format = "thinking_object_only"
 max_context_tokens = 200000
 max_output_tokens = 131072
 input_per_million = 1.4
@@ -3090,6 +3093,7 @@ supports_native_streaming = true
 id_prefix = "glm-5"
 provider_name = "glm-coding"
 base = "glm"
+thinking_control_format = "thinking_object_only"
 max_context_tokens = 200000
 max_output_tokens = 131072
 input_per_million = 1.0
@@ -3107,6 +3111,7 @@ supports_native_streaming = true
 id_prefix = "glm-4.7"
 provider_name = "glm-coding"
 base = "glm"
+thinking_control_format = "thinking_object_only"
 max_context_tokens = 200000
 max_output_tokens = 131072
 input_per_million = 0.6
@@ -3124,6 +3129,7 @@ supports_native_streaming = true
 id_prefix = "glm-4.6"
 provider_name = "glm-coding"
 base = "glm"
+thinking_control_format = "thinking_object_only"
 max_context_tokens = 200000
 max_output_tokens = 131072
 input_per_million = 0.6
@@ -3799,6 +3805,7 @@ supports_image_input = false
 id_prefix = "glm-5.3-flash"
 provider_name = "glm-coding"
 base = "glm"
+thinking_control_format = "none"
 max_context_tokens = 1000000
 max_output_tokens = 131072
 supports_tools = true
@@ -4143,3 +4150,129 @@ supports_image_input = false
 supports_response_format_json = false
 supports_structured_output = false
 supports_native_streaming = true
+
+# Z.AI Chat endpoint thinking contracts, verified 2026-10-17 against
+# https://docs.z.ai/guides/capabilities/thinking-mode and the Chat API reference.
+# Exact runtime bindings need scoped rows: they never fall back to bare rows.
+# These documented hybrid models accept thinking.type; 5.3 and 5.3-flash use
+# forced thinking. Preserve-history clear_thinking is an independent axis and
+# cannot make a forced or undeclared model accept a thinking disable.
+[[models]]
+id_prefix = "glm-4.6"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+id_prefix = "glm-4.7"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+
+[[models]]
+id_prefix = "glm-5"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+
+[[models]]
+id_prefix = "glm-5.1"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_native_streaming = true
+input_per_million = 1.4
+output_per_million = 4.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18571428571428572
+
+[[models]]
+id_prefix = "glm-5.2"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "thinking_object_only"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_response_format_json = true
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5.3"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "none"
+max_context_tokens = 1048576
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5.3-flash"
+provider_name = "glm"
+base = "glm"
+thinking_control_format = "none"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_response_format_json = true
+supports_native_streaming = true
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "latest_user_turn_tool_calls"

@@ -489,6 +489,12 @@ let request_control_fields
            let fields =
              if control.keep_all then fields @ [ "keep", `String "all" ] else fields
            in
+           let fields =
+             match control.enabled, clear_thinking_object with
+             | Some true, Some clear_thinking ->
+               fields @ [ "clear_thinking", `Bool clear_thinking ]
+             | (Some false | None), _ | Some true, None -> fields
+           in
            ( (match fields with
               | [] -> []
               | fields -> [ "thinking", `Assoc fields ])
@@ -503,9 +509,7 @@ let request_control_fields
                       ] )
                 ]
               , explicit_field_encoding )
-            | Some _, Some false ->
-              [ "thinking", `Assoc [ "type", `String "disabled" ] ], None
-            | Some _, None | None, _ -> [], None)
+            | Some _, (Some false | None) | None, _ -> [], None)
          | Chat_completions, (Anthropic_thinking | Gemini_thinking_config) -> [], None
        in
        let output_fields =
@@ -939,7 +943,7 @@ let%test "request_control_fields emits thinking object with explicitly supported
       }
 ;;
 
-let%test "request_control_fields keeps zai glm no-toggle exception explicit" =
+let%test "request_control_fields preserves inherent reasoning without granting a disable" =
   request_control_fields
     Chat_completions
     default

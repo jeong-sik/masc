@@ -380,8 +380,8 @@ let validate_request_path (config : Provider_config.t) =
    together, never as independent guesses:
    - [supports_reasoning = true] + [No_thinking_control] is the existing
      declared inherent/default-on contract. Explicit enable is already
-     satisfied, while explicit disable is impossible (except the typed GLM
-     serializer, which has its own control field).
+     satisfied, while explicit disable is impossible. A preserve-history
+     field does not establish that this endpoint/model can disable thinking.
    - [supports_reasoning = false] + [No_thinking_control] has neither an
      encodable toggle nor a declared inherent-thinking contract. Explicit
      enable must therefore be rejected instead of disappearing from the wire.
@@ -486,17 +486,8 @@ let thinking_control_request_rejection
       | Provider_config.Ollama
       | Provider_config.Gemini
       | Provider_config.Glm ->
-        let preserve_wire_encodes_toggle =
-          (* backend_openai_request still encodes an explicit thinking toggle
-             for rows whose preserve wire is a provider [thinking] object, even
-             under [No_thinking_control]. Read from the typed capability, not
-             from a provider identity (Agent Core contract S1.1). *)
-          Capability_vocab.preserve_wire_owns_thinking_object
-            caps.preserve_thinking_control_format
-        in
         caps.supports_reasoning
         && caps.thinking_control_format = Capabilities.No_thinking_control
-        && not preserve_wire_encodes_toggle
     in
     if disable_not_encodable
     then Some Disable_not_encodable

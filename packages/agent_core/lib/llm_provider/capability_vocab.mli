@@ -145,7 +145,6 @@ val thinking_control_format_codec_error_to_string
   :  thinking_control_format_codec_error
   -> string
 
-val preserve_wire_owns_thinking_object : preserve_thinking_control_format -> bool
 val preserve_thinking_control_format_values : string list
 
 val preserve_thinking_control_format_of_string

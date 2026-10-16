@@ -22,6 +22,20 @@ type phase =
   | Cancelled_before_start of string option
   | Cancelled_unconfirmed_launch
 
+type reconciliation_hold =
+  | Backend_absent
+  | Backend_unconfirmed
+  | Backend_mismatch
+  | Cancelled_job_orphan
+  | Backend_error
+
+type reconciliation =
+  | Phase_not_observed
+  | Phase_confirmed
+  | Phase_held of reconciliation_hold
+(** Evidence from this action's reconciliation, separate from the durable phase.
+    These projections are not persisted in the owner journal. *)
+
 type input = { path : string; artifact : Tool_output.artifact_ref }
 type cleanup = Keeper_owned_job_cleanup_state.t =
   | Resources_retained
@@ -87,7 +101,11 @@ val transition :
 val phase_to_string : phase -> string
 val source_to_json : source -> Yojson.Safe.t
 val source_of_json : Yojson.Safe.t -> (source, error) result
-val result_json : record -> Yojson.Safe.t
+val result_json : ?reconciliation:reconciliation -> record -> Yojson.Safe.t
+(** Always reports [result_ready]. Without supplied reconciliation evidence the
+    observation is [Phase_not_observed]. A held non-ready job reports status
+    [unconfirmed] while retaining its original phase and handle; a confirmed
+    terminal result retains its outcome even when a later orphan is observed. *)
 
 val result_ready : record -> bool
 (** True for a confirmed exit with complete outputs, a confirmed running or

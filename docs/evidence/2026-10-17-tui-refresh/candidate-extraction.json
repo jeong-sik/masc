@@ -1,0 +1,44 @@
+{
+  "scope": "Selected ZIP members; full archive digest not verified here",
+  "artifact": {
+    "id": 12054406530,
+    "name": "macos-arm64-probe-f7632e71601da3ce6c7b5a5e8a6b528bcf42fa4c-attempt-1",
+    "size_in_bytes": 165015884,
+    "expired": false,
+    "digest": "sha256:7eb8b7049915697322b72c3e7a73275b04a7c96611c72b9b8e7c1e4a3562017c"
+  },
+  "run": 38918375925,
+  "source": "f7632e71601da3ce6c7b5a5e8a6b528bcf42fa4c",
+  "files": {
+    "masc-tui-macos-arm64": {
+      "bytes": 91344608,
+      "sha256": "a45f76b90db249a19a76976fcbc7e827fe8f660242dc84f419820fcad4076183"
+    },
+    "tui-build-commit.txt": {
+      "bytes": 41,
+      "sha256": "2c99d3be37cfb415bac1fe8a0c2c62eb2b45aeeb81092d98a0dc42a01c248afa"
+    },
+    "tui-version.txt": {
+      "bytes": 7,
+      "sha256": "732a28434aa873bdb52464b39e12ee5f81781dc1c81eb4eb8867f660842a40ab"
+    },
+    "probe.json": {
+      "bytes": 319,
+      "sha256": "77e4b948369c0657dbcfc1ffbe7f95858ade74fc6516473383a03098113c9ba4"
+    },
+    "runtime-provenance.json": {
+      "bytes": 1224,
+      "sha256": "c18365fda1697927b1d911fa779c18ad69ef1736d025fa12f01a6699e344b2c6"
+    },
+    "SHA256SUMS": {
+      "bytes": 1121,
+      "sha256": "57e8dff85f2a48f2775205f0087396e051617a363c9e907740ee9ddf3238a861"
+    },
+    "dependencies.txt": {
+      "bytes": 17629,
+      "sha256": "29d4b3f93f75764143f525f43e1f8f2d3262d77e6aa615d9d04794f95a417751"
+    }
+  },
+  "producer_checksums_verified": true,
+  "binary_executed": false
+}

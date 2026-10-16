@@ -1,0 +1,36 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System                                                             
+                                                                                                                        
+   MASC Keepers (3)                                                                                   HTTP [connected]  
+                                                                                                                        
+    fleet ok   running 0/0   turn capacity 0/0                                                                          
+     KEEPER                           HEALTH     Mode S   TURN TASK                                                     
+     imp                              - unread   - -      — not observed                                                
+     probe-one                        ! failing  M D      — —                                                           
+     probe-two                        ! failing  M D      — —                                                           
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+  TUI f7632e7 ≠ server 683c795 (server is older — redeploy)  j/k:move  p:boot  w:wake  s:shutdown  x:delete  q:quit  …? 
+ › to imp   (i to write)                                                                                                

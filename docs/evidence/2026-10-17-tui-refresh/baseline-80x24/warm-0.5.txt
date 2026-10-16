@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System                     
+                                                                                
+   MASC Keepers (3)                                           HTTP [connected]  
+                                                                                
+    fleet ok   running 0/0   turn capacity 0/0                                  
+     KEEPER                           HEALTH       TURN TASK                    
+     imp                              - unread        — not observed            
+     probe-one                        × offline       — —                       
+     probe-two                        × offline       — —                       
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+ ────────────────────────────────────────────────────────────────────────────── 
+  j/k:move  p:boot  w:wake  s:shutdown  x:delete  e:settings  a:new  q:quit  …? 
+ › to imp   (i to write)                                                        

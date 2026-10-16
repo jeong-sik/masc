@@ -432,20 +432,37 @@ let test_failed_autonomous_store_never_becomes_empty_history () =
     Alcotest.(check int) "failed TurnRecord read not cached" 0 (cache_entries ()))
 ;;
 
-let test_compute_drift_refuses_cache_publication () =
-  with_history_state (fun _state config ->
+let test_compute_commit_returns_body_without_retaining_stale_cache () =
+  with_history_state (fun state config ->
     let name = "racing-history" in
     write_offline_meta config name;
-    let result = Server_keeper_chat_history_read.cached_json ~config ~keeper_name:name ~ttl:60.
-        ~render:(fun _ _ ->
-          write_lane ~base_dir:config.Workspace.base_path ~keeper_name:name
-            [ row ~content:"racing append" (`At 1.) ];
-          `List []) in
-    (match result with
-     | Error (Server_keeper_chat_history_read.History_unavailable _) -> ()
-     | Error Server_keeper_chat_history_read.Unknown_keeper | Ok _ ->
-       Alcotest.fail "a changed descriptor/source observation published a body");
-    Alcotest.(check int) "failed compute did not publish cache" 0 (cache_entries ()))
+    write_lane ~base_dir:config.Workspace.base_path ~keeper_name:name
+      [ row ~content:"already read" (`At 1.) ];
+    let committed = Atomic.make false in
+    let status, body = Server_keeper_chat_history_read.For_testing.with_after_read_hook
+        (fun () ->
+          if Atomic.compare_and_set committed false true then
+            let request_id = Keeper_chat_delivery_identity.Request_id.of_string
+                "history-compute-commit" |> Result.get_ok in
+            match Keeper_chat_store.append_user_message_once
+                ~base_dir:config.Workspace.base_path ~keeper_name:name
+                ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
+                ~content:"committed during read" () with
+            | Ok (Keeper_chat_store.Appended _) -> ()
+            | Ok (Keeper_chat_store.Already_present _) -> Alcotest.fail "writer did not append its new delivery"
+            | Error detail -> Alcotest.fail detail)
+        (fun () -> get_history state name) in
+    Alcotest.(check bool) "writer committed during the actual history computation" true (Atomic.get committed);
+    Alcotest.(check int) "strictly read body remains HTTP 200" 200 status;
+    Alcotest.(check (list string)) "current request keeps its observed body" [ "already read" ]
+      (match body with `List rows -> List.map content_of rows | _ -> Alcotest.fail "not history");
+    Alcotest.(check int) "changed compute lost cache ownership before publication" 0 (cache_entries ());
+    let status, body = get_history state name in
+    Alcotest.(check int) "next request succeeds without a retry budget" 200 status;
+    Alcotest.(check (list string)) "next request reads the newly committed row"
+      [ "already read"; "committed during read" ]
+      (match body with `List rows -> List.map content_of rows | _ -> Alcotest.fail "not history");
+    Alcotest.(check int) "stable recompute can retain its cache" 1 (cache_entries ()))
 ;;
 
 let test_strict_transcript_preserves_existing_role_window () =
@@ -454,6 +471,7 @@ let test_strict_transcript_preserves_existing_role_window () =
     :: List.init 5 (fun j ->
       `Assoc [ "id", `String (Printf.sprintf "tool-%d-%d" i j)
              ; "role", `String "tool"; "content", `String "tool"
+             ; "tool_call_name", `String "fixture-tool"
              ; "ts", `Float (float_of_int i) ])) |> List.concat in
   with_lane "chat-strict-window" rows (fun config name ->
     let base_dir = config.Workspace.base_path in
@@ -490,6 +508,6 @@ let () =
       ; Alcotest.test_case "read failure never becomes cached empty success" `Quick test_unreadable_history_never_becomes_cached_empty_success
       ; Alcotest.test_case "same-size/mtime replacement changes identity" `Quick test_same_stat_atomic_replacement_invalidates_history
       ; Alcotest.test_case "failed autonomous storage never becomes empty history" `Quick test_failed_autonomous_store_never_becomes_empty_history
-      ; Alcotest.test_case "compute drift refuses publication" `Quick test_compute_drift_refuses_cache_publication
+      ; Alcotest.test_case "compute commit returns history without retaining stale cache" `Quick test_compute_commit_returns_body_without_retaining_stale_cache
       ; Alcotest.test_case "strict reads preserve role-based transcript selection" `Quick test_strict_transcript_preserves_existing_role_window
       ] ]

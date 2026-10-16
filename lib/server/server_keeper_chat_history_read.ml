@@ -35,9 +35,8 @@ let directory_stamp path =
     | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
       Error (History_unavailable ("trace root is not a directory: " ^ path))
   with Unix.Unix_error (cause, operation, argument) ->
-    match cause with
-    | Unix.ENOENT -> Ok "absent"
-    | _ -> Error (History_unavailable
+    if cause = Unix.ENOENT then Ok "absent"
+    else Error (History_unavailable
         (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message cause)))
 
 let inspect ~config ~keeper_name =
@@ -75,7 +74,7 @@ let inspect ~config ~keeper_name =
         ] in
     Ok { fingerprint; autonomous }
 
-let changed = History_unavailable "history sources changed during the read; retry the request."
+let after_read_hook : (unit -> unit) option Atomic.t = Atomic.make None
 
 let read_source_json ~config ~keeper_name ~render source =
   let ( let* ) = Result.bind in
@@ -83,9 +82,8 @@ let read_source_json ~config ~keeper_name ~render source =
       |> Result.map_error (fun error -> History_unavailable (Physical.error_to_string error)) in
   let* turns = Autonomous.project_snapshot_result ~config ~keeper_name source.autonomous
       |> Result.map_error (fun detail -> History_unavailable detail) in
-  let body = render messages turns in
-  let* after = inspect ~config ~keeper_name in
-  if String.equal source.fingerprint after.fingerprint then Ok body else Error changed
+  Option.iter (fun hook -> hook ()) (Atomic.get after_read_hook);
+  Ok (render messages turns)
 
 let read_json ~config ~keeper_name ~render =
   Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -101,6 +99,16 @@ exception Read_failed of error
 let cached_json ~config ~keeper_name ~ttl ~render =
   let key = Printf.sprintf "keeper:chat-history:%s:%s" (Workspace.masc_dir config) keeper_name in
   let refuse error = Dashboard_cache.invalidate key; Error error in
+  (* A body that was strictly read remains a valid observation when a writer
+     commits afterwards. Retire its cache ownership before publication, then
+     let the next request read that newer source instead of rejecting this one.
+     A failed later inspection also prevents retention; it cannot retroactively
+     make the already-read body an unreadable or empty successful transcript. *)
+  let retire_if_changed fingerprint =
+    match Domain_pool_ref.submit_io_or_inline (fun () -> inspect ~config ~keeper_name) with
+    | Ok after when String.equal fingerprint after.fingerprint -> ()
+    | Ok _ | Error (Unknown_keeper | History_unavailable _) -> Dashboard_cache.invalidate key
+  in
   match Domain_pool_ref.submit_io_or_inline (fun () -> inspect ~config ~keeper_name) with
   | Error error -> refuse error
   | Ok source ->
@@ -115,7 +123,9 @@ let cached_json ~config ~keeper_name ~ttl ~render =
        let cached = Dashboard_cache.get_or_compute key ~ttl (fun () ->
          match Domain_pool_ref.submit_io_or_inline (fun () ->
              read_source_json ~config ~keeper_name ~render source) with
-         | Ok body -> `Assoc [ "freshness", `String source.fingerprint; "body", body ]
+         | Ok body ->
+           retire_if_changed source.fingerprint;
+           `Assoc [ "freshness", `String source.fingerprint; "body", body ]
          | Error error ->
            (* Also retire a stale slot before the cache's background-refresh
               exception handler can restore it as an apparent success. *)
@@ -127,12 +137,16 @@ let cached_json ~config ~keeper_name ~ttl ~render =
          | `Assoc fields ->
            (match List.assoc_opt "freshness" fields, List.assoc_opt "body" fields with
             | Some (`String stamp), Some body ->
-              (match Domain_pool_ref.submit_io_or_inline (fun () -> inspect ~config ~keeper_name) with
-               | Ok after when String.equal stamp after.fingerprint -> Ok body
-               | Ok _ -> refuse changed
-               | Error error -> refuse error)
+              retire_if_changed stamp;
+              Ok body
             | Some _, Some _ | Some _, None | None, _ ->
               refuse (History_unavailable "invalid cached history response"))
          | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
            refuse (History_unavailable "invalid cached history response")
      with Read_failed error -> refuse error)
+
+module For_testing = struct
+  let with_after_read_hook hook f =
+    let previous = Atomic.exchange after_read_hook (Some hook) in
+    Fun.protect ~finally:(fun () -> Atomic.set after_read_hook previous) f
+end

@@ -315,7 +315,9 @@ History authority does not grant mutation rights.
 `test_server_dashboard_http_keeper_chat_page` exercises the actual GET handler
 for unknown-name cache/registry stability, offline empty history followed by
 file creation, unreadable/incomplete files, same-size/mtime atomic replacement,
-and malformed autonomous storage. It also covers compute-time source drift and
+and malformed autonomous storage. A real append-once writer committing after
+the strict source read preserves HTTP 200 for that observed body, retires its
+cache ownership, and becomes visible on the next request. The suite also covers
 equivalence with the existing 100-primary/300-secondary transcript window,
 counter-only metadata writes retaining the cache, and broken metadata being
 insufficient to authorize empty history without revoking retained chat rows.
@@ -328,7 +330,8 @@ reader keeps its separate skip behavior.
 The strict transcript reader reuses the existing descriptor-bound 4 MiB physical
 reader; TurnRecord selection retains the existing retention window. Freshness
 observations include file absence and device/inode/size/mtime/ctime. Detected
-source drift refuses publication; observations across stores do not establish
+source drift retires cache ownership without rejecting an already-read body;
+initial authority/read failures still refuse success. Observations across stores do not establish
 an atomic snapshot. Intentionally absent/retired raw traces remain optional
 evidence, and trace-only enrichment retains the existing TTL policy.
 

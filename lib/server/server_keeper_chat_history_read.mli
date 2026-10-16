@@ -21,5 +21,12 @@ val cached_json :
   (Yojson.Safe.t, error) result
 (** Unknown names and failed reads never publish successful cache values.
     Freshness is observed before lookup and around a compute, including absent
-    files and device/inode identity. These observations refuse detected drift;
-    they do not make multiple stores an atomic snapshot. *)
+    files and device/inode identity. A later change retires cache ownership but
+    still returns the already-read body; the next request reads the newer source.
+    These observations do not make multiple stores an atomic snapshot. *)
+
+module For_testing : sig
+  val with_after_read_hook : (unit -> unit) -> (unit -> 'a) -> 'a
+  (** Run after strict source reads and before rendering. The process-wide hook
+      is restored on return or exception; tests must not overlap other reads. *)
+end

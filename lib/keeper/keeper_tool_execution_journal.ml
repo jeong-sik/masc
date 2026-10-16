@@ -316,7 +316,12 @@ let replay_for binding node_id = function
   | Some (Settled (_, ({result = Tool_result.Completed _; _} as completed), _)) -> Ok (Reuse_completed completed)
   | Some (Settled (_, {result = Tool_result.Failed _; _}, Some Tool_result.Proven_pre_effect)) -> Ok Dispatch
   | Some (Attempting occurrence) when occurrence.readonly && not (same_binding occurrence.owner binding) -> Ok Dispatch
-  | Some (Attempting _ | Settled _) -> Error (Replay_not_proven node_id)
+  | Some (Settled (_, {result = Tool_result.Failed _; _},
+      (None | Some (Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown))))
+  | Some (Settled (_, {result = Tool_result.Deferred _; _},
+      (None | Some (Tool_result.Proven_pre_effect | Tool_result.Proven_post_effect
+        | Tool_result.Effect_outcome_unknown))))
+  | Some (Attempting _) -> Error (Replay_not_proven node_id)
 
 let decode_state bytes = decode (fun () ->
   require (bytes <> "" && bytes.[String.length bytes - 1] = '\n') "missing or incomplete journal identity";
@@ -360,7 +365,7 @@ let decode_state bytes = decode (fun () ->
         require (match replay_for occurrence.owner occurrence.node_id prior with Ok Dispatch -> true | Ok (Reuse_completed _) | Error _ -> false) "unproven replay event";
         Attempting occurrence)
       else (
-        require (match prior with Some (Attempting current) -> same_occurrence current occurrence | _ -> false) "settlement without exact attempt";
+        require (match prior with Some (Attempting current) -> same_occurrence current occurrence | None | Some (Settled _) -> false) "settlement without exact attempt";
         let completed = completed_of_json (field "completed" fields) in
         require (Ids.Execution_id.equal completed.execution_id occurrence.execution_id && completed.tool_use_id = occurrence.tool_use_id
           && String.equal (Tool_result.tool_name completed.result) occurrence.tool_name) "settlement identity mismatch";
@@ -489,7 +494,11 @@ let prepare ~base_path immutable_source = filesystem (fun () ->
   let existing = strict_read ~root path in
   let* absent = match existing with
     | Error Missing_journal -> Ok true
-    | Error error -> Error error
+    | Error ((Invalid_source _ | Unreadable_journal _ | Corrupt_journal _ | Source_conflict
+        | Queued_request_rejected _ | Prior_owner_not_terminal _ | Ownership_changed
+        | Node_identity_conflict _ | Replay_not_proven _ | Attempt_conflict _
+        | Plan_identity_conflict | Draft_unavailable _ | Invalid_result _
+        | Persistence_failed _) as error) -> Error error
     | Ok state -> let* () = check_source journal state in Ok false in
   let callback bytes =
     match validate_owned_path ~root ~path ~create:false with

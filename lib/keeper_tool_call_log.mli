@@ -241,6 +241,7 @@ val log_call :
   ?thinking_enabled:bool ->
   ?prompt_fingerprint:string ->
   ?execution_id:Ids.Execution_id.t ->
+  ?tool_observation:Tool_observation.t ->
   ?tool_use_id:string ->
   ?planned_index:int ->
   ?batch_index:int ->
@@ -292,6 +293,10 @@ val log_call :
     [skill_reference], when present, is the exact published Skill revision
     that produced the run; clients must not infer it from the mutable
     composition tool name.
+    [tool_observation] freezes producer-owned attribution, physical turn and
+    progress declaration in this same authoritative row. It forces a synchronous
+    append, independently of any observational sink or bounded queue. Its absence
+    means this producer supplied no immutable attribution; readers cannot infer it.
     [execution_id] is the RFC-0233 canonical join key minted once at the
     dispatch boundary; the trajectory row for the same execution carries
     the identical value. [tool_use_id] is the provider call id for the
@@ -357,6 +362,13 @@ val read_after :
 val current_frontier :
   keeper_name:string -> (Keeper_tool_call_index.frontier, index_error) result
 (** Capture committed append positions. This does not flush queued rows. *)
+
+val read_addressed :
+  base_path:string -> codebase:string -> ?keeper_name:string ->
+  limit:int -> offset:int -> unit -> (Yojson.Safe.t list, index_error) result
+(** Read canonical addressed tool facts for the explicit workspace. Facts with
+    producer observations committed synchronously; no IDE sink is consulted.
+    Source/index corruption is an error, not an empty activity page. *)
 
 val read_recent :
   ?keeper_name:string ->

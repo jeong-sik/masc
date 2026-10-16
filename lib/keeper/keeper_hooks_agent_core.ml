@@ -281,12 +281,14 @@ let make_hooks
         response_id:string -> ordinal:int -> model:string ->
         Agent_core.Types.api_usage option -> unit =
         fun ~response_id:_ ~ordinal:_ ~model:_ _ -> ())
+    ?attribute_tool_input
     ?(on_tool_executed :
         tool_name:string -> input:Yojson.Safe.t -> output_text:string ->
         execution_evidence:Yojson.Safe.t option ->
+        observation:Tool_observation.t option ->
         success:bool -> duration_ms:float -> provider:string ->
         typed_outcome:Keeper_tool_outcome.t option -> unit =
-        fun ~tool_name:_ ~input:_ ~output_text:_ ~execution_evidence:_ ~success:_
+        fun ~tool_name:_ ~input:_ ~output_text:_ ~execution_evidence:_ ~observation:_ ~success:_
           ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
     ?tool_result_commit_required
     ?on_tool_result_ready
@@ -779,6 +781,21 @@ let make_hooks
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
         let execution_id = Ids.Execution_id.generate () in
+        let tool_observation =
+          Option.map
+            (fun attribute ->
+               Tool_observation.
+                 { attribution = attribute input
+                 ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:keeper_turn_id
+                 ; declared_progress = Option.map
+                     (function
+                       | Keeper_tool_outcome.Progress -> Progress
+                       | No_progress _ -> No_progress
+                       | Error _ -> Failed)
+                     typed_outcome
+                 })
+            attribute_tool_input
+        in
         let schedule = Agent_core.Tool_contract.Invocation.schedule invocation in
         (* RFC-0233 PR-2: register the provider-call ↔ execution pair now,
            strictly before AGENT_CORE publishes ToolCompleted for this call, so the
@@ -841,6 +858,7 @@ let make_hooks
              ?thinking_enabled:tctx.thinking_enabled
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
+             ?tool_observation
              ~tool_use_id
              ~planned_index:schedule.planned_index
              ~batch_index:schedule.batch_index
@@ -887,7 +905,8 @@ let make_hooks
              Log.Keeper.warn ~keeper_name:(!meta_ref).name
                "tool=%s log_call write failed: %s"
                tool_name (Printexc.to_string exn);
-             if tool_result_commit_required () || retained_artifacts <> [] then raise exn);
+             if tool_result_commit_required () || Option.is_some tool_observation
+                || retained_artifacts <> [] then raise exn);
         (match trajectory_acc with
          | None -> ()
          | Some acc ->
@@ -959,6 +978,7 @@ let make_hooks
              ~input
              ~output_text
              ~execution_evidence
+             ~observation:tool_observation
              ~success:(outcome = Tool_result.Ok)
              ~duration_ms:summary.duration_ms
              ~provider:summary.provider

@@ -720,6 +720,7 @@ let log_call
       ?thinking_enabled
       ?prompt_fingerprint
       ?execution_id
+      ?tool_observation
       ?tool_use_id
       ?planned_index
       ?batch_index
@@ -755,7 +756,7 @@ let log_call
       ()
   =
   let requires_commit =
-    Option.is_some on_committed || artifact_refs <> []
+    Option.is_some on_committed || Option.is_some tool_observation || artifact_refs <> []
     || Option.exists (fun result -> Tool_result.retained_artifacts result <> []) typed_result
   in
   match (Atomic.get store_state).store with
@@ -1111,6 +1112,10 @@ let log_call
            @ thinking_enabled_field
            @ prompt_fingerprint_field
            @ execution_id_field
+           @ (match tool_observation with
+              | None -> []
+              | Some observation ->
+                [ "tool_observation", Tool_observation.to_yojson observation ])
            @ tool_use_id_field
            @ planned_index_field
            @ batch_index_field
@@ -1220,6 +1225,18 @@ let current_frontier ~keeper_name =
     |> Result.map_error (fun detail -> Index_unavailable detail)
 
 let read_recent_rows ~n () = index_rows ~n ()
+
+let read_addressed ~base_path ~codebase ?keeper_name ~limit ~offset () =
+  try
+    let store = Dated_jsonl.open_store
+        (location (Common.masc_dir_from_base_path ~base_path)) in
+    Keeper_tool_call_index.addressed_rows ~store ~codebase ?keeper_name ~limit ~offset ()
+    |> Result.map_error (fun detail -> Index_unavailable detail)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error detail -> Error (Index_unavailable detail)
+  | Unix.Unix_error (error, operation, _) ->
+    Error (Index_unavailable (operation ^ ": " ^ Unix.error_message error))
 
 let filter_rows_for_keeper ~keeper_name ~n rows : Yojson.Safe.t list =
   ring_keep_last ~n ~keep:(keeper_matches keeper_name) rows

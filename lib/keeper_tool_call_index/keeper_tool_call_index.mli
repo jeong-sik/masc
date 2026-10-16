@@ -97,6 +97,14 @@ val by_execution_ids :
     keeper, timestamp, and execution ID against its indexed identity. Uses the
     same rebuild and read-failure handling as {!recent_rows}. *)
 
+val addressed_rows :
+  store:Dated_jsonl.t -> codebase:string -> ?keeper_name:string ->
+  limit:int -> offset:int -> unit -> (Yojson.Safe.t list, string) result
+(** Exact newest-first page of producer-addressed canonical tool rows. Filtering
+    precedes pagination and uses immutable journal metadata, never current Git.
+    Invalid observation metadata or ambiguous execution identity is an error.
+    The disposable index rebuilds these filters from canonical rows. *)
+
 val forget_for_ledger : ledger_dir:string -> unit
 (** Drop the open handle for this ledger. The file stays; the next read
     reopens it. For a caller that has just removed or replaced the ledger

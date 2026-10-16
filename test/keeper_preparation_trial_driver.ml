@@ -928,7 +928,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
       let observed = now counter in
       append_event (Filename.concat attempt_dir "events.jsonl") (`Assoc
         ["kind",`String "actual_tool_observed";"tool",`String event.tool_name;
-         "observed",observed;"task_id",`String event.turn_id;
+         "observed",observed;"turn_ref",`String event.turn_id;
          "input_sha256",`String (sha (Yojson.Safe.to_string event.input))]);
       observations := (event,observed) :: !observations);
   Eio.Switch.on_release sw Agent_observation.reset_for_testing;
@@ -1008,7 +1008,9 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     | [] | _ :: _ -> unknown "no unique exact-turn entry manifest" in
   let useful =
     let candidates = List.filter (fun ((event : Agent_observation.tool_event),_) ->
-      event.tool_name="keeper_artifact_read" && event.turn_id=string "task_id" fixture &&
+      event.tool_name="keeper_artifact_read" &&
+      event.turn_id=Ids.Turn_ref.to_string (Ids.Turn_ref.make
+        ~trace_id:(string "trace_id" fixture) ~absolute_turn:(integer "absolute_turn" turn_json)) &&
       field "sha256" event.input=field "selection_sha256" fixture)
       !observations in
     match candidates with

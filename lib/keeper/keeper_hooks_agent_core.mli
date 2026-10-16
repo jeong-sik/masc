@@ -253,10 +253,12 @@ val make_hooks :
   ?on_after_turn_response:(response:Agent_core.Types.api_response -> unit) ->
   ?on_agent_core_response_usage:(response_id:string -> ordinal:int -> model:string ->
                                  Agent_core.Types.api_usage option -> unit) ->
+  ?attribute_tool_input:(Yojson.Safe.t -> Agent_observation.attribution) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->
                      output_text:string ->
                      execution_evidence:Yojson.Safe.t option ->
+                     observation:Tool_observation.t option ->
                      success:bool ->
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->
@@ -269,6 +271,10 @@ val make_hooks :
     trajectory hooks wired together. [on_tool_stream_observation] reports an
     exact Agent Core admission mapping or an unavailable-sidecar turn close
     without conflating those states.
+    [attribute_tool_input] captures attribution once before the canonical tool
+    row commits. Its presence makes that commit required; failure is propagated.
+    The later observer receives the identical immutable observation. Omission
+    means this factory caller has no attribution producer, not a pathless fact.
     [on_after_turn_response] observes each provider turn's assistant
     response right after the turn ordinal is recorded. [on_tool_result_ready]
     runs only after the exact tool-call log

@@ -13,6 +13,7 @@
   jsonl_writer
   masc_core
   masc_process
+  masc.agent_observation
   sqlite3
   threads
   unix

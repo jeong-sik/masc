@@ -1670,7 +1670,7 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
            ~on_after_turn_ordinal:ignore
            ~on_tool_executed:
              (fun
-               ~tool_name:_ ~input:_ ~output_text:_ ~execution_evidence:_ ~success:_
+               ~tool_name:_ ~input:_ ~output_text:_ ~execution_evidence:_ ~observation:_ ~success:_
                ~duration_ms:_ ~provider:_ ~typed_outcome:_ ->
                serialize (fun () ->
                  incr observation_count;

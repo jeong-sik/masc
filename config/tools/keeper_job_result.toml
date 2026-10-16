@@ -1,8 +1,11 @@
 name = "keeper_job_result"
 description = """
 Read the original isolated job's durable result without contacting its backend or launching \
-a command. Returns Deferred until a confirmed exit and complete stdout/stderr artifacts \
-have been committed, or cancellation before start has been committed. A nonzero exit remains \
+a command. Returns Deferred until a settled result is committed. result_ready includes \
+cancellation and explicitly unavailable outputs; inspect status, phase and artifacts before \
+continuing. Replies include reconciliation state/reason from stored evidence; this read does \
+not refresh backend state. Use keeper_job_status with the same handle when reconciliation \
+is needed. A nonzero exit remains \
 an observed result with its exact exit_code. This read-only tool can be a prepared Composition \
 leaf. For an accepted async plan's recorded producer wait, server maintenance continues \
 the original ready run under current admission without a new Keeper model turn; use its \

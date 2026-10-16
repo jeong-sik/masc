@@ -44,6 +44,44 @@ dependency while allowing the model to submit one recipe. The successful
 upstream scenario exercises this path; its expected IDs/digests validate actual
 model-visible exports and never supply the answer.
 
+## Share composition node field definitions
+
+The public composition grammar still offers the same four node shapes:
+ordinary Tool with optional `input`, ordinary Tool with fixed `args`, exact
+Skill with `args`, and exact Skill with an upstream `input` template. Their
+field schemas are now declared once on the enclosing closed object. Each
+`oneOf` alternative retains its original required fields and explicitly forbids
+the fields that its original closed object did not accept. A field can be shared
+only when its definitions agree in every alternative.
+
+| Schema component | As-Is | To-Be source representation |
+|---|---|---|
+| Node property definitions across four alternatives | 16 | 6 shared definitions |
+| Full pinned Skill-reference definition in one node schema | 2 copies | 1 copy |
+| Tagged input-template projection in one node schema | 2 copies | 1 copy |
+| Recipe/prepare grammar and declared capabilities | Four original shapes | Same four shapes; canonical compiler and activation path retained |
+
+This affects both prepare and the recipe embedded in run. The nonrecursive
+provider projection remains in place. There is no new discovery call, reduced
+Tool selection, skipped Skill read, fabricated activation or plan reuse here.
+It reduces repeated schema structure; serialized request bytes and real-model
+latency still require an actual matched request comparison.
+
+The shared input contract also distinguishes the standard exclusion forms:
+`not: {required: [a, b]}` forbids both keys together; `not: {anyOf:
+[{required: [a]}, {required: [b]}]}` forbids either key. Previously the first
+was flattened and the second was ignored by the top-level presence checker.
+The public run schema can therefore reject `recipe` combined with `sha256` or
+`resume_run_id` before dispatch while permitting prepared `sha256` plus its
+original `resume_run_id`. Canonical plan/effect checks remain authoritative.
+This is the presence checker's existing subset of JSON Schema; it does not
+claim to validate every possible third-party predicate.
+
+Feature scenarios cover the public run selector combinations, negated conjunction
+semantics, node-shape refusals and actual compilation of Tool and exact Skill
+arguments. Their `composition_schema` record reports the actual node/prepare/run
+schema byte counts when executed; it is not a byte threshold or latency verdict.
+
 The first useful action uses the `durable_tool_call_commit` boundary. The scoped
 observer retains original physical execution, Task/trace/turn, native node and
 parent identities after the durable append. Keeper owner handoffs explicitly

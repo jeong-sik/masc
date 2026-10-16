@@ -61,6 +61,43 @@ let plan compiled = compiled.plan
 let calls compiled = compiled.calls
 let id_json id = `String (Plan.Node_id.to_string id)
 
+(* A node chooses one closed shape, but each field's definition is shared.
+   Moving property checks to the enclosing object is equivalent only when
+   every occurrence of a field has the same schema. Required fields stay in
+   their own alternative; fields absent from that alternative are explicitly
+   forbidden, so sharing definitions never admits mixed Tool/Skill nodes or
+   both args and input. This is schema representation, not plan admission. *)
+let shared_node_schema alternatives =
+  let rows = List.map (function
+    | `Assoc fields ->
+      (match List.assoc_opt "type" fields, List.assoc_opt "properties" fields,
+             List.assoc_opt "required" fields, List.assoc_opt "additionalProperties" fields with
+       | Some (`String "object"), Some (`Assoc properties), Some (`List required), Some (`Bool false)
+         when List.length fields = 4 -> properties, required
+       | _ -> invalid_arg "composition node alternatives must be closed objects")
+    | _ -> invalid_arg "composition node alternative must be an object") alternatives in
+  let properties = List.fold_left (fun merged (fields, _) ->
+    List.fold_left (fun merged (name, schema) ->
+      match List.assoc_opt name merged with
+      | None -> merged @ [name, schema]
+      | Some existing when Yojson.Safe.equal existing schema -> merged
+      | Some _ -> invalid_arg "composition node alternatives disagree on a field schema")
+      merged fields) [] rows in
+  let alternatives = List.map (fun (fields, required) ->
+    let forbidden = List.filter_map (fun (name, _) ->
+      if List.mem_assoc name fields then None
+      else Some (`Assoc ["required", `List [`String name]])) properties in
+    let exclusions = match forbidden with
+      | [] -> []
+      | [one] -> ["not", one]
+      | _ :: _ :: _ -> ["not", `Assoc ["anyOf", `List forbidden]] in
+    `Assoc (("required", `List required) :: exclusions)) rows in
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc properties
+    ; "additionalProperties", `Bool false
+    ; "oneOf", `List alternatives ]
+
 let input_schema =
   let string_schema = `Assoc [ "type", `String "string"; "minLength", `Int 1 ] in
   let object_ properties required = `Assoc
@@ -87,7 +124,7 @@ let input_schema =
       | _ -> invalid_arg "ordinary plan node alternatives" in
     let alternatives = ordinary @ [nested "args" (`Assoc ["type",`String "object"]);
         nested "input" (`Assoc ["$ref",`String "#/$defs/template"])] in
-    let nodes = `Assoc (("items", `Assoc ["oneOf",`List alternatives])
+    let nodes = `Assoc (("items", shared_node_schema alternatives)
         :: List.remove_assoc "items" nodes) in
     `Assoc (("properties", `Assoc (("nodes", nodes) :: List.remove_assoc "nodes" properties))
       :: List.remove_assoc "properties" fields)

@@ -2536,6 +2536,47 @@ let test_oneof_empty_array_presence () =
       (Yojson.Safe.to_string (Tool_result.data result)) "exactly one of"
 ;;
 
+let test_composition_run_exclusive_inputs () =
+  let schema = Keeper_composition_draft.run_schema.input_schema in
+  let recipe = `Assoc ["execution", `String "inline"; "nodes", `List
+      [`Assoc ["id", `String "lane"; "tool", `String "keeper_lane_status"; "args", `Assoc []]]] in
+  let sha = "sha256", `String (String.make 64 'a') in
+  let resume = "resume_run_id", `String "00000000-0000-4000-8000-000000000001" in
+  let recipe = "recipe", recipe in
+  let check label expected fields =
+    let args = `Assoc fields in
+    match Tool_input_validation.check_arguments ~schema:(Some schema)
+        ~name:Keeper_composition_draft.run_tool_name ~args with
+    | Ok (forwarded, _) ->
+        Alcotest.(check bool) label true expected;
+        Alcotest.(check bool) "valid original payload is unchanged" true
+          (Yojson.Safe.equal args forwarded)
+    | Error _ -> Alcotest.(check bool) label false expected in
+  check "fresh recipe" true [recipe];
+  check "prepared draft" true [sha];
+  check "explicit prepared continuation" true [sha; resume];
+  check "recipe cannot also select a prepared draft" false [recipe; sha];
+  check "recipe cannot resume another invocation" false [recipe; resume];
+  check "all selectors remain exclusive" false [recipe; sha; resume];
+  check "continuation needs a prepared draft" false [resume]
+;;
+
+let test_negated_required_group_is_a_conjunction () =
+  let schema = `Assoc ["type", `String "object";
+      "properties", `Assoc (List.map (fun name -> name, `Assoc ["type", `String "string"])
+        ["mode"; "a"; "b"]);
+      "oneOf", `List [`Assoc ["required", `List [`String "mode"];
+        "not", `Assoc ["required", `List [`String "a"; `String "b"]]]]] in
+  List.iter (fun (names, expected) ->
+    let args = `Assoc (List.map (fun name -> name, `String "present") names) in
+    let result = Tool_input_validation.check_arguments ~schema:(Some schema)
+        ~name:"negated-field-group" ~args in
+    Alcotest.(check bool) "not(required a,b) forbids their conjunction"
+      expected (Result.is_ok result))
+    [["mode"], true; ["mode";"a"], true; ["mode";"b"], true;
+      ["mode";"a";"b"], false]
+;;
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -2543,6 +2584,10 @@ let test_oneof_empty_array_presence () =
 let () =
   Alcotest.run "Tool_input_validation (AGENT_CORE delegation)" [
     ("required", [
+      Alcotest.test_case "composition run selectors stay mutually exclusive" `Quick
+        test_composition_run_exclusive_inputs;
+      Alcotest.test_case "negated required group means all fields" `Quick
+        test_negated_required_group_is_a_conjunction;
       Alcotest.test_case "schema faults differ from invalid arguments" `Quick
         test_schema_fault_is_distinct_from_argument_range_error;
       Alcotest.test_case "oneOf distinguishes empty collections from absent fields" `Quick

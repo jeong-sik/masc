@@ -50,7 +50,10 @@ type error =
   | Expanded_plan_rejected of Keeper_tool_plan.error
 
 val input_schema : Yojson.Safe.t
-(** Ordinary request nodes or [{id; skill_reference; args|input; after?}].
+(** Node alternatives share field definitions while preserving their own
+    required and forbidden fields. The canonical compiler still validates
+    references, templates, dependencies, capability and execution authority.
+    Ordinary request nodes or [{id; skill_reference; args|input; after?}].
     [skill_reference] is the strict pinned identity JSON from Skill inventory;
     Exactly one of literal [args] or an explicit [input] template is required.
     [input] is supported for inline and async children. Child outputs are named exports,

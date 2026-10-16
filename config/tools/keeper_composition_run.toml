@@ -3,6 +3,10 @@ description = """
 Execute a composition from recipe or an exact prepared sha256. Use recipe with \
 the same execution/nodes/exports grammar as keeper_composition_prepare to validate, \
 freeze and run in one call. Use prepare first when you need to inspect the plan. \
+Ordinary Tool nodes use tool and tagged input, for example \
+{"id":"lane","tool":"keeper_lane_status","input":{"kind":"literal","value":{}}}; \
+args belongs only to Skill children. \
+Omit optional after or pass an array such as []; never null. \
 The server records the frozen draft and original invocation before effects; \
 prepared sha256 rechecks its Keeper and contracts. Inline drafts return \
 execution results, including child scope/admission/disposition/exports in nested_scopes; \

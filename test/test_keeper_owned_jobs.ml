@@ -1248,6 +1248,42 @@ let test_finished_without_outputs_absent_inventory_notified_once () = with_fixtu
   check int "closed job never relaunches" 1 (effect_count fixture "create");
   check int "closed job never restarts" 1 (effect_count fixture "start")
 
+let test_running_absent_inventory_notified_once () = with_fixture @@ fun _env initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
+  let id = job_id started in
+  let initial = load fixture id in
+  let container_id = match initial.phase with
+    | Store.Running cid -> cid
+    | _ -> fail "expected confirmed Running phase after start" in
+  (* The exact owned container is removed externally while in Running phase (e.g. daemon reset). *)
+  let state = daemon fixture |> to_assoc in
+  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
+      (List.map (fun (name, value) -> name, (if name = "container" then `Null else value)) state)));
+  let delivered = recover_completions fixture in
+  check int "absent inventory closes the running job exactly once" 1 delivered.delivered;
+  check int "closed running job leaves the waiting set" 0 delivered.waiting;
+  let record = load fixture id in
+  check bool "closed running job is a ready result" true (Store.result_ready record);
+  (match record.outputs with
+   | Some (Store.Outputs_unavailable {evidence}) ->
+       check bool "closure evidence names the absent container" true
+         (String.length evidence > 0 && Astring.String.is_infix ~affix:container_id evidence)
+   | _ -> fail "running job with absent inventory was not closed as unavailable");
+  check bool "canonical owner acknowledged the one delivery" true record.completion_delivered;
+  let discovery = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "retired discovery" in
+  check int "delivery marker is retired by the one notification" 0 (List.length discovery.entries);
+  let result_doc = with_bundle fixture (fun bundle ->
+      invoke fixture bundle ~tool_use_id:"read-closed-running" ~turn:42 "keeper_job_result" (argument id)) in
+  check string "keeper_job_result returns unavailable status" "unavailable"
+    (result_doc |> member "status" |> to_string);
+  Process_eio.reset_for_testing (); initialize ();
+  let again = recover_completions fixture in
+  check int "retired running job is not reinspected" 0 again.inspected;
+  check int "completion is not duplicated" 1 (List.length (pending_completions fixture));
+  check int "closed running job never relaunches" 1 (effect_count fixture "create");
+  check int "closed running job never restarts" 1 (effect_count fixture "start")
+
 
 let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
@@ -1355,5 +1391,6 @@ let () =
       ; test_case "consumed notification survives missing producer ACK" `Quick test_completion_consumed_before_producer_ack
       ; test_case "completion recovery retains unknown launch and corrupt owner" `Quick test_completion_retains_unknown_launch_and_owner
       ; test_case "finished without outputs and absent inventory is notified once and leaves waiting" `Quick test_finished_without_outputs_absent_inventory_notified_once
+      ; test_case "running with absent inventory is notified once and leaves waiting" `Quick test_running_absent_inventory_notified_once
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

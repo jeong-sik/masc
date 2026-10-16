@@ -20,8 +20,11 @@ let observe (record : Store.record) observation =
   let preserve detail = Result.map (fun record -> Unconfirmed record) (note record detail) in
   let settle phase = save record ~phase ~cancel_requested:record.cancel_requested
       ~outputs:record.outputs ~detail:None |> Result.map (fun record -> Confirmed record) in
-  let absent_outputs_evidence =
-    "exact owned container absent after confirmed exit; original outputs unrecoverable" in
+  let absent_outputs_evidence container_id =
+    Printf.sprintf
+      "exact owned container %s absent after confirmed launch; original outputs unrecoverable"
+      container_id
+  in
   match record.phase, observation with
   | Store.Create_requested, Backend.Created id -> settle (Store.Created id)
   | Store.Start_requested expected, Backend.Running id when id = expected ->
@@ -38,18 +41,20 @@ let observe (record : Store.record) observation =
   | Store.Cancelled_unconfirmed_launch, Backend.Absent -> Ok (Confirmed record)
   | Store.Cancelled_unconfirmed_launch, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
       preserve "same-label container after a cancelled launch is an orphan; cancellation evidence is retained"
-  | Store.Exited _, Backend.Absent ->
+  | (Store.Running container_id | Store.Exited {container_id; _}), Backend.Absent ->
       (match record.outputs with
        | Some _ ->
            preserve "saved backend job is absent; launch intent is retained, no relaunch"
        | None ->
-           (* Exact inventory absence after a confirmed exit: the original
-              container is gone, so its outputs can never be collected.
-              Close the result as unavailable instead of Waiting forever. *)
+           (* Exact inventory absence after a confirmed Running or Exited phase:
+              the original container is gone, so its outputs (and, for Running,
+              its final exit code) can never be observed. Close the result as
+              Outputs_unavailable instead of Waiting forever. *)
+           let evidence = absent_outputs_evidence container_id in
            Result.map (fun record -> Confirmed record)
              (save record ~phase:record.phase ~cancel_requested:record.cancel_requested
-                ~outputs:(Some (Store.Outputs_unavailable {evidence=absent_outputs_evidence}))
-                ~detail:(Some absent_outputs_evidence)))
+                ~outputs:(Some (Store.Outputs_unavailable {evidence}))
+                ~detail:(Some evidence)))
   | _, Backend.Unconfirmed detail -> preserve detail
   | _, Backend.Absent -> preserve "saved backend job is absent; launch intent is retained, no relaunch"
   | _, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
@@ -256,13 +261,10 @@ let handle ~config ~meta ~source_context ~continuation_channel ~tool_use_id ~tur
             | Error error -> failure ~job_id ~effect_disposition:Tool_result.Proven_pre_effect
                 Tool_result.Policy_rejection (Store.error_to_string error)
             | Ok record ->
-                match record.phase, record.outputs with
-                | Store.Exited _, Some _ | (Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), None ->
-                    finish ~tool_name:name ~start_time ~job_id (Ok record)
-                | (Store.Prepared | Store.Create_requested | Store.Created _
-                  | Store.Start_requested _ | Store.Running _), _
-                | Store.Exited _, None | (Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), Some _ ->
-                    Keeper_tool_execution.deferred_owned_job_result ~job_id (Store.result_json record)))
+                if Store.result_ready record then
+                  finish ~tool_name:name ~start_time ~job_id (Ok record)
+                else
+                  Keeper_tool_execution.deferred_owned_job_result ~job_id (Store.result_json record)))
   | Some {action=(Tool_schemas_owned_job.Status | Tool_schemas_owned_job.Cancel) as action;_} ->
       (match job_argument args with
        | Error detail -> invalid detail

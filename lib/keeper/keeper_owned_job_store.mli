@@ -81,8 +81,9 @@ val source_of_json : Yojson.Safe.t -> (source, error) result
 val result_json : record -> Yojson.Safe.t
 
 val result_ready : record -> bool
-(** True for a confirmed exit with complete outputs or closed
-    outputs-unavailable evidence, and for before-start cancellation. *)
+(** True for a confirmed exit with complete outputs, a confirmed running or
+    exited job closed with [Outputs_unavailable] evidence after exact inventory
+    absence, and cancellation confirmed before start or after an absent unconfirmed launch. *)
 val acknowledge_completion : record -> (record, error) result
 (** CAS the canonical owner only after a durable completion enqueue. *)
 type pending_delivery = { job_id : Job_id.t; keeper_name : string }

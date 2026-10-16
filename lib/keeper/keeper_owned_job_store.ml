@@ -202,17 +202,19 @@ let validate_record (record : record) =
         |> Result.map_error (fun detail -> Corrupt detail) in
     let* () = if not record.completion_delivered then Ok () else
       match record.phase, record.outputs with
-      | Exited _, Some _ | Cancelled_before_start _, None -> Ok ()
-      | (Prepared | Create_requested | Created _ | Start_requested _ | Running _), _
-      | Exited _, None | Cancelled_before_start _, Some _ ->
+      | Exited _, Some _ | Running _, Some (Outputs_unavailable _)
+      | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), None -> Ok ()
+      | (Prepared | Create_requested | Created _ | Start_requested _), _
+      | Running _, (None | Some (Outputs_complete _))
+      | Exited _, None | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), Some _ ->
           Error (Corrupt "completion acknowledgement precedes a complete terminal result") in
     match record.phase, record.outputs with
-    | Exited _, _ -> Ok ()
+    | Exited _, _ | Running _, Some (Outputs_unavailable _) -> Ok ()
     | (Prepared | Create_requested | Created _ | Start_requested _ | Running _
       | Cancelled_before_start _ | Cancelled_unconfirmed_launch), None -> Ok ()
-    | (Prepared | Create_requested | Created _ | Start_requested _ | Running _
-      | Cancelled_before_start _ | Cancelled_unconfirmed_launch), Some _ ->
-        Error (Corrupt "outputs precede confirmed exit")
+    | (Prepared | Create_requested | Created _ | Start_requested _
+      | Cancelled_before_start _ | Cancelled_unconfirmed_launch), Some _
+    | Running _, Some (Outputs_complete _) -> Error (Corrupt "outputs precede confirmed exit")
 
 let record_of_json value =
   let* fields = exact_object
@@ -508,9 +510,11 @@ let transition record ~phase ~cancel_requested ~outputs ~detail =
   append_next record {record with phase;cancel_requested;outputs;detail;sequence=record.sequence+1}
 
 let result_ready (record : record) = match record.phase, record.outputs with
-  | Exited _, Some _ | Cancelled_before_start _, None -> true
-  | (Prepared | Create_requested | Created _ | Start_requested _ | Running _), _
-  | Exited _, None | Cancelled_before_start _, Some _ -> false
+  | Exited _, Some _ | Running _, Some (Outputs_unavailable _)
+  | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), None -> true
+  | (Prepared | Create_requested | Created _ | Start_requested _), _
+  | Running _, (None | Some (Outputs_complete _))
+  | Exited _, None | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), Some _ -> false
 
 let acknowledge_completion (record : record) =
   if not (result_ready record) then Error (Invalid_authority "completion result is not ready")
@@ -554,13 +558,14 @@ let prepare_workspace ~base_path job_id inputs =
     in copy inputs)
 
 let result_json record =
-  let status, exit_code = match record.phase with
-    | Prepared -> "waiting", None
-    | Create_requested | Start_requested _ -> "unconfirmed", None
-    | Created _ -> "ready", None
-    | Running _ -> "running", None
-    | Exited {exit_code;_} -> "exited", Some exit_code
-    | Cancelled_before_start _ | Cancelled_unconfirmed_launch -> "cancelled", None in
+  let status, exit_code = match record.phase, record.outputs with
+    | Prepared, _ -> "waiting", None
+    | (Create_requested | Start_requested _), _ -> "unconfirmed", None
+    | Created _, _ -> "ready", None
+    | Running _, Some (Outputs_unavailable _) -> "unavailable", None
+    | Running _, (None | Some (Outputs_complete _)) -> "running", None
+    | Exited {exit_code;_}, _ -> "exited", Some exit_code
+    | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), _ -> "cancelled", None in
   let artifacts = match record.outputs with
     | Some (Outputs_complete (stdout, stderr)) -> [stdout; stderr]
     | Some (Outputs_unavailable _) | None -> [] in

@@ -194,6 +194,14 @@ readonly COHTTP_EIO_SHA="9963da4c028b5681ff96eeeaa9b276d6be60c507"
 # Remove the pin when a release carries the fix
 # (andersfugmann/ocaml-protoc-plugin#60).
 readonly OCAML_PROTOC_PLUGIN_SHA="4ffa25b5174e811951e7b5192195214afe776ce9"
+# eio_posix 1.3 + one commit: the scheduler retries its wake-up pipe on EINTR.
+# Eio 1.3 reads that pipe with a bare Unix.read, so a signal that lands on the
+# read raises Unix_error(EINTR) out of Eio_main.run and ends the process. The
+# masc server exited that way on 2026-10-13 and 2026-10-15 (#43225), and the
+# second time it stayed down for 18 hours. Pinned as version 1.3 so the lock
+# constraint and every other eio package stay 1.3's. Remove the pin when an
+# Eio release carries the fix (ocaml-multicore/eio#957).
+readonly EIO_POSIX_SHA="3a8ab387d748bcc8d8ae682cfb0ec7da2c9544b7"
 
 include_bisect=false
 include_compact_protocol=false
@@ -370,6 +378,8 @@ opam_pin_add cohttp-eio.6.2.1 "https://github.com/anyang-keepers/ocaml-cohttp.gi
 pinned_pkgs+=("cohttp-eio")
 opam_pin_add ocaml-protoc-plugin.6.2.0 "https://github.com/jeong-sik/ocaml-protoc-plugin.git#${OCAML_PROTOC_PLUGIN_SHA}" -n -y
 pinned_pkgs+=("ocaml-protoc-plugin")
+opam_pin_add eio_posix.1.3 "https://github.com/jeong-sik/eio.git#${EIO_POSIX_SHA}" -n -y
+pinned_pkgs+=("eio_posix")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.

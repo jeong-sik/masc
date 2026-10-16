@@ -1627,7 +1627,7 @@ let test_a_dead_predecessor_holding_the_slot_does_not_block_a_new_instance () =
     let manifest, path, first, slot = released_writer_slot env config directory packages state in
     check bool "the released record carries its evidence" true
       (member "release" (lifecycle (instance config first)) <> `Null);
-    ignore (Fake.add state.home ~run_state:Fake.Exited ~id:"dead-writer-container" ~name:slot.name
+    ignore (Fake.add state.home ~id:"dead-writer-container" ~name:slot.name
       ~labels:(other_instance slot "dead-writer") ());
     write path (declaration ~id:"observer" ~manifest ());
     ignore (reconcile config directory);
@@ -1742,7 +1742,7 @@ let test_a_dead_servers_containers_are_swept_once_the_engine_answers () =
     let manifest = package packages "ready" in
     write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
     let dead_name = Lane_addon_engine.owned_name Types.Docker "dead-server-instance" in
-    ignore (Fake.add state.home ~run_state:Fake.Exited ~id:"dead-server-container" ~name:dead_name
+    ignore (Fake.add state.home ~id:"dead-server-container" ~name:dead_name
       ~labels:["masc.lane.instance", "dead-server-instance"; Lane_addon_engine.scope_label, Fake.scope_of_world] ());
     ignore (Fake.add state.home ~id:"other-servers-container" ~name:"masc-lane-elsewhere"
       ~labels:["masc.lane.instance", "elsewhere"; Lane_addon_engine.scope_label, "another base path"] ());

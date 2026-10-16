@@ -6,8 +6,6 @@ val instance_label : string
 val state_owner_label : string
 val scope_label : string
 
-type run_state = Created | Running | Paused | Restarting | Removing | Exited | Dead
-
 (** A container as its inspection reports it. [name] is the bare name. The
     labels are read as given; a missing label is [None], never a default. *)
 type held = {
@@ -15,7 +13,6 @@ type held = {
   name : string;
   instance : string option;
   state_owner : string option;
-  run_state : run_state;
 }
 
 val owned_name : Lane_addon_types.runtime -> string -> string
@@ -37,7 +34,6 @@ val held_of_inspect : Lane_addon_types.runtime -> string -> (held, string) resul
 val scoped_list_arguments : Lane_addon_types.runtime -> string -> string list
 val listed_scoped_ids : Lane_addon_types.runtime -> scope:string -> string -> (string list, string) result
 (** The containers that carry this scope label, from a listing. *)
-(** Refuses a container whose state word is not documented. *)
 val info_arguments : Lane_addon_types.runtime -> string list
 (** The engine identity command. Its exit status alone decides reachability. *)
 val engine_of_info :

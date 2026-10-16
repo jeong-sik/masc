@@ -42,7 +42,7 @@ val proven :
 (** Who holds a slot, relative to the worker asking. *)
 type holder_class =
   | Mine
-  | Predecessor of { instance_id : string; run_state : Lane_addon_engine.run_state }
+  | Predecessor of { instance_id : string }
       (** The same persistent installation's container, made by an
           incarnation that is not live in this process. *)
   | Foreign of Lane_addon_lifecycle.holder

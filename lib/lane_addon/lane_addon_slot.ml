@@ -30,7 +30,7 @@ let proven port ~expected ~lift work =
 
 type holder_class =
   | Mine
-  | Predecessor of { instance_id : string; run_state : Engine.run_state }
+  | Predecessor of { instance_id : string }
   | Foreign of Lifecycle.holder
 
 let holder_of (held : Engine.held) : Lifecycle.holder =
@@ -49,7 +49,7 @@ let classify ~instance_id ~mine ~is_live_instance (held : Engine.held) =
     | Some instance, Some owner, Some expected when String.equal owner expected ->
         (* Same installation, another incarnation. Only a dead one is removable. *)
         if is_live_instance instance then Foreign (holder_of held)
-        else Predecessor { instance_id = instance; run_state = held.run_state }
+        else Predecessor { instance_id = instance }
     (* Every other pairing is another owner's container, an ephemeral name
        collision, or a container with no instance label. None is removable. *)
     | Some _, Some _, Some _ | Some _, Some _, None | Some _, None, Some _ | Some _, None, None
@@ -72,7 +72,7 @@ let claim port ~name ~instance_id ~mine ~is_live_instance =
        | Foreign holder -> Error (Lifecycle.Slot_foreign holder)
        | Mine ->
            port.remove id |> Result.map_error (fun detail -> Lifecycle.Cleanup_unconfirmed detail)
-       | Predecessor { instance_id = predecessor; _ } ->
+       | Predecessor { instance_id = predecessor } ->
            port.remove id |> Result.map_error (fun detail ->
              Lifecycle.Slot_predecessor_unremovable { instance_id = predecessor; detail }))
 

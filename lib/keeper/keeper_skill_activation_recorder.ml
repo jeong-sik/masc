@@ -27,6 +27,15 @@ type bound_context = { context : t; runtime : string }
 let physical_turn_ref (context : t) = context.turn_ref
 let current_runtime_id (context : t) = context.runtime_id ()
 
+let task_references ~task_id (context : t) =
+  List.filter_map (fun provenance ->
+    match provenance.task_ids with
+    | None -> None
+    | Some task_ids ->
+      if List.exists (Keeper_id.Task_id.equal task_id) (Ledger.task_id_set_to_list task_ids)
+      then Some provenance.reference else None) context.task_provenance
+;;
+
 type result_child =
   { alias : string
   ; skill_reference : Skill_reference.t

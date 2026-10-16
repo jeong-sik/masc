@@ -285,18 +285,18 @@ let load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requeste
         loaded
 ;;
 
-(* Same tool, and it also says it ran. The wrapper keeps the descriptor so
-   the schedule this tool is admitted under does not change. *)
+(* Observe actual ordinary or producer-prepared dispatch through the same
+   wrapper. A preparation refusal never enters either handler and therefore
+   does not consume its outstanding load receipt. *)
 let observed usage receipts (tool : Agent_core.Tool.t) =
-  { tool with
-    Agent_core.Tool.handler =
-      (fun env input ->
+  Agent_core.Tool.map_handler
+      (fun handler env input ->
         Keeper_tool_load_receipts.dispatched
           receipts
           ~name:tool.Agent_core.Tool.schema.name;
         note usage.used tool.Agent_core.Tool.schema.name;
-        tool.Agent_core.Tool.handler env input)
-  }
+        handler env input)
+      tool
 ;;
 
 let observe_turn ~keeper_name ~usage () =

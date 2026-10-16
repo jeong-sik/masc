@@ -22,6 +22,32 @@ def require(value, detail):
         raise AssertionError(detail)
 
 
+def check_http_observation(directory, receipt, received, *, refused=False):
+    metrics = receipt["http_metrics"]
+    path = directory / "http-events.jsonl"
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    require(metrics["coverage"] == "complete" and metrics["delivery_failures"] == 0 and
+            metrics["events_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest(),
+            "HTTP facts were incomplete or not durably retained")
+    calls = {}
+    for event in events:
+        calls.setdefault(event["call_id"], []).append(event)
+    entered = [rows[0] for rows in calls.values()]
+    require(all([event["phase"] for event in rows] == ["client_entered", "dispatch_entered",
+                "response_headers_received", "client_finished"] and
+                rows[2]["status"] == (400 if refused else 200) and
+                rows[-1]["completion"] == ("returned_error" if refused else "returned_ok")
+                for rows in calls.values()), "HTTP dispatch/header/return ownership differs")
+    require(sorted((row["body_bytes"], row["body_sha256"]) for row in entered) ==
+            sorted((row["body_bytes"], row["body_sha256"]) for row in received),
+            "native submitted body metadata differs from actual independently received bytes")
+    require(all(metrics[key] == len(received) for key in
+                ("calls_entered", "dispatch_entries", "response_headers_received")) and
+            metrics["serialized_body_bytes"] == sum(row["body_bytes"] for row in received) and
+            metrics["dispatched_body_bytes"] == metrics["serialized_body_bytes"],
+            "complete native request/input counts disagree with the independent peer")
+
+
 def configured_http_refusal(args, root, head):
     """A separate HTTP peer exercises operator Runtime binding, without a model."""
     output = root / "configured-http-refusal"
@@ -32,7 +58,8 @@ def configured_http_refusal(args, root, head):
             pass
 
         def do_POST(self):
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            body = json.loads(raw)
             active = []
             for strategy in ("direct", "exact_skill"):
                 directory = output / "pair-0000" / strategy
@@ -42,6 +69,7 @@ def configured_http_refusal(args, root, head):
                     if value.get("mode") == "run":
                         active.append(strategy)
             requests.append({"model": body.get("model"), "stream": body.get("stream"),
+                             "body_bytes": len(raw), "body_sha256": hashlib.sha256(raw).hexdigest(),
                              "messages_present": bool(body.get("messages")), "active": active,
                              "auth_matches_fixture": self.headers.get("Authorization") == "Bearer isolated-http-fixture"})
             response = b'{"error":{"type":"invalid_request_error","message":"Declared external fixture refusal"}}'
@@ -91,8 +119,11 @@ max-output-tokens = 4096
                     request["messages_present"] and request["auth_matches_fixture"] for request in requests),
                 "Runtime did not bind the explicit model/streaming/environment credential")
         for attempt in manifest["expected_attempts"]:
-            require(read((output / attempt["path"]).parent / "process.json")["returncode"] != 0,
+            directory = (output / attempt["path"]).parent
+            require(read(directory / "process.json")["returncode"] != 0,
                     "HTTP refusal was converted to success")
+            received = [request for request in requests if request["active"] == [attempt["strategy"]]]
+            check_http_observation(directory, read(output / attempt["path"]), received, refused=True)
         print("PREPARATION_CONFIGURED_HTTP_REFUSAL_PASS " + json.dumps({
             "expected": 2, "explicit_failure": 2, "unfinished": 0,
             "external_fixture_requests": requests, "real_model": False, "speedup": None}))
@@ -138,6 +169,9 @@ def malformed_final_evidence(args, root, head):
                     "cache_creation_input_tokens", "cache_read_input_tokens", "usage_scope")),
                 "failed attempt lost observed provider metrics or relabelled their scope")
         instructions.append(receipt["common_instruction_sha256"])
+        peer = read((output / entry["path"]).parent / "provider-events.json")
+        check_http_observation((output / entry["path"]).parent, receipt,
+                               [row for row in peer if row["kind"] == "synthetic_provider_received"])
     require(instructions[0] == instructions[1], "failed pair used different common instructions")
     print("PREPARATION_MALFORMED_FINAL_PASS " + json.dumps({
         "expected": 2, "explicit_failure": 2, "unfinished": 0, "retained_measurements": True,
@@ -273,6 +307,9 @@ def main():
         bodies = sorted(directory.glob("provider-request-*.json"))
         require(len(bodies) == receipt["provider_requests"] and len(bodies) > 1,
                 "actual streaming provider loop was not crossed")
+        peer = read(directory / "provider-events.json")
+        check_http_observation(directory, receipt,
+                               [row for row in peer if row["kind"] == "synthetic_provider_received"])
         require(all(read(path)["stream"] is True and read(path)["model"] == args.model_id for path in bodies),
                 "model/streaming settings differ from explicit fixture")
         receipts.append(receipt)

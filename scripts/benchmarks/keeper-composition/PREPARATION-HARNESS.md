@@ -181,9 +181,20 @@ are measurement overhead included in these instrumented samples.
 Configured HTTP receipts retain the exact TurnRecord's selected model and
 provider-reported token usage with its original usage scope. Missing counts stay
 null. The selected alias is not response-reported model identity. Complete
-provider request count, total serialized input bytes, first offered inventory and
-response-reported model are currently unobserved. Do not infer them from the last
-request's wire metadata or substitute zero. The same failure/unfinished
+provider request count, first offered inventory and response-reported model are
+not inferred from that last report. The separate `http_metrics` journal now
+observes each actual native HTTP POST client entry, submitted body size/hash,
+concrete dispatch entry, response headers and client return within the owned
+cycle. It includes synchronous and streaming POST paths. The observation
+context crosses the existing Owner handoff with an explicitly captured
+closure; a binding on the submitting fiber alone cannot observe the already
+running Owner. The same real-cycle peer comparison checks this boundary. Counts and total
+serialized/submitted bytes remain null if observation delivery failed, the file
+is unavailable or a call's phase sequence is incomplete/contradictory. A client
+return is not provider/parser success, and submitted bytes are not a claim that
+the peer acknowledged every network byte. There is no full-body capture or new
+runtime gate. First offered Tool inventory and response-reported model remain
+unobserved. Do not substitute zero for missing evidence. The same failure/unfinished
 denominator applies to configured HTTP trials, including noncompliant arms.
 
 The explicit targeted CI entry is `test_keeper_preparation_trial`, declared as
@@ -195,7 +206,9 @@ Skill activation, resolved child argument, persisted final digest and backend0.
 It also crosses an independently hosted loopback HTTP refusal through the
 configured Runtime branch for both arms, checks the fixture environment
 credential binding, and retains both refusals as explicit failures. That server
-is synthetic and does not exercise a paid provider. A malformed-final pair
+is synthetic and does not exercise a paid provider. Native HTTP size/hash and
+dispatch/header counts are compared with independently received peer bytes for
+both normal and refused requests. A malformed-final pair
 verifies that already completed physical work, source ACKs, clocks and usage
 remain available when the final response violates the JSON contract; both
 attempts remain explicit failures in the denominator.

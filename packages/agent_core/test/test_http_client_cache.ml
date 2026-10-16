@@ -26,14 +26,14 @@ let fresh_port () =
   port
 ;;
 
-let start_mock_server ~sw ~net ?(status = `OK) ?capture_headers response_body =
+let start_mock_server ~sw ~net ?(status = `OK) ?capture_headers ?capture_bodies response_body =
   let port = fresh_port () in
   let handler _conn req body =
     let request_body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
     (match capture_headers with
      | Some seen -> seen := Cohttp.Request.headers req
      | None -> ());
-    ignore request_body;
+    Option.iter (fun seen -> seen := request_body :: !seen) capture_bodies;
     Cohttp_eio.Server.respond_string ~status ~body:response_body ()
   in
   let socket =
@@ -1065,6 +1065,9 @@ let test_one_dispatch_body_timeout_covers_response_headers () =
 
 let test_one_dispatch_caller_cancellation_identity_and_cache () =
   let exception Caller_cancelled in
+  let observation_events = ref [] in
+  let observation = Http_request_observer.create (fun event ->
+    observation_events := event :: !observation_events; Ok ()) in
   let request_seen, notify_request_seen = Eio.Promise.create () in
   let (outcome, after_cancel, fresh, after_fresh), posts =
     with_raw_one_dispatch_server
@@ -1093,7 +1096,7 @@ let test_one_dispatch_caller_cancellation_identity_and_cache () =
             (Eio.Cancel.sub
              @@ fun context ->
              Eio.Promise.resolve notify_cancel_context context;
-             post ())
+             Http_request_observer.with_observer observation post)
         with
         | Eio.Cancel.Cancelled Caller_cancelled -> `Cancelled
         | _ -> `Wrong_exception
@@ -1113,6 +1116,9 @@ let test_one_dispatch_caller_cancellation_identity_and_cache () =
    | `Returned (Error _) ->
      Alcotest.fail "caller cancellation was reclassified as transport/timeout error"
    | `Wrong_exception -> Alcotest.fail "caller cancellation lost exception identity");
+  (match List.rev_map (fun (event : Http_request_observer.event) -> event.phase) !observation_events with
+   | [Client_entered _;Dispatch_entered;Client_finished Cancelled] -> ()
+   | _ -> Alcotest.fail "observed cancellation lost its actual call or became a returned result");
   Alcotest.(check int)
     "caller cancellation creates once"
     1
@@ -1131,10 +1137,100 @@ let test_one_dispatch_caller_cancellation_identity_and_cache () =
     after_fresh.reuse_count_total
 ;;
 
+let test_post_observation_matches_actual_native_calls () =
+  let module Observe = Http_request_observer in
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    let bodies = ref [] and events = ref [] in
+    let url = start_mock_server ~sw ~net:env#net ~capture_bodies:bodies "complete" in
+    let observer = Observe.create (fun event -> events := event :: !events; Ok ()) in
+    Observe.with_observer observer (fun () ->
+      (match Http_client.post_sync ~sw ~net:env#net ~url ~headers:[] ~body:"sync" () with
+       | Ok response -> Alcotest.(check string) "sync body retained" "complete" response.body
+       | Error _ -> Alcotest.fail "observed sync failed");
+      (match Http_client.post_sync_once ~net:env#net ~url ~headers:[] ~body:"once" () with
+       | Ok response -> Alcotest.(check string) "one dispatch body retained" "complete" response.body
+       | Error _ -> Alcotest.fail "observed one-dispatch sync failed");
+      (match Http_client.with_post_stream ~net:env#net ~url ~headers:[] ~body:"stream"
+          ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader) () with
+       | Ok response -> Alcotest.(check string) "stream body retained" "complete" response
+       | Error _ -> Alcotest.fail "observed stream failed"));
+    let events = List.rev !events in
+    let entered = List.filter_map (fun (event : Observe.event) -> match event.phase with
+      | Client_entered {body_bytes;body_sha256;mode=_} -> Some (event.call_id,body_bytes,body_sha256)
+      | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) events in
+    Alcotest.(check int) "each actual server request has one native call" (List.length !bodies) (List.length entered);
+    List.iter2 (fun (_,bytes,digest) body ->
+      Alcotest.(check int) "metadata measures the received body" (String.length body) bytes;
+      Alcotest.(check string) "metadata hashes the received body"
+        Digestif.SHA256.(digest_string body |> to_hex) digest) entered (List.rev !bodies);
+    List.iter (fun (id,_,_) ->
+      let phases = List.filter_map (fun (event : Observe.event) ->
+        if event.call_id=id then Some event.phase else None) events in
+      match phases with
+      | [Client_entered _;Dispatch_entered;Response_headers_received {status=200};Client_finished Returned_ok] -> ()
+      | _ -> Alcotest.fail "native request lost its dispatch/header/return identity") entered;
+    Alcotest.(check int) "complete observer coverage" 0 (Observe.delivery_failure_count observer);
+    let refused = start_mock_server ~sw ~net:env#net ~status:`Bad_request "refused" in
+    let refusal_events = ref [] in
+    let refusal_observer = Observe.create (fun event -> refusal_events := event :: !refusal_events; Ok ()) in
+    (match Observe.with_observer refusal_observer (fun () ->
+        Http_client.with_post_stream ~net:env#net ~url:refused ~headers:[] ~body:"refusal"
+          ~f:(fun ~pre_header_elapsed_s:_ _ -> Alcotest.fail "refusal entered the stream body") ()) with
+     | Error (Http_client.HttpError {code=400;_}) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "observation changed the HTTP refusal");
+    (match List.rev_map (fun (event : Observe.event) -> event.phase) !refusal_events with
+     | [Client_entered _;Dispatch_entered;Response_headers_received {status=400};Client_finished Returned_error] -> ()
+     | _ -> Alcotest.fail "refusal was not retained as actual headers plus failed client return");
+    let failing = Observe.create (fun (event : Observe.event) -> match event.phase with
+      | Client_entered _ -> Error ()
+      | Response_headers_received _ -> failwith "synthetic observer store unavailable"
+      | Dispatch_entered | Client_finished _ -> Ok ()) in
+    (match Observe.with_observer failing (fun () ->
+        Http_client.with_post_stream ~net:env#net ~url ~headers:[] ~body:"observer-failure"
+          ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader) ()) with
+     | Ok response -> Alcotest.(check string) "observer failure did not rewrite response" "complete" response
+     | Error _ -> Alcotest.fail "diagnostic observer failure blocked HTTP");
+    Alcotest.(check int) "both unavailable deliveries are explicit" 2 (Observe.delivery_failure_count failing);
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
+let test_post_observers_are_owned_across_concurrent_fibers () =
+  let module Observe = Http_request_observer in
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net "observed" in
+    let outer_events = ref [] and inner_events = ref [] in
+    let make events = Observe.create (fun event -> events := event :: !events; Ok ()) in
+    let outer = make outer_events and inner = make inner_events in
+    let post body = match Http_client.with_post_stream ~net:env#net ~url ~headers:[] ~body
+        ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader) () with
+      | Ok _ -> () | Error _ -> Alcotest.fail "concurrent observed POST failed" in
+    Observe.with_observer outer (fun () ->
+      Eio.Fiber.both (fun () -> post "outer-first")
+        (fun () -> Observe.with_observer inner (fun () -> post "inner"));
+      post "outer-second");
+    let hashes events = List.filter_map (fun (event : Observe.event) -> match event.phase with
+      | Client_entered {body_sha256;_} -> Some body_sha256
+      | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) (List.rev !events) in
+    let sha body = Digestif.SHA256.(digest_string body |> to_hex) in
+    Alcotest.(check (list string)) "outer ownership survives concurrent nested binding"
+      (List.map sha ["outer-first";"outer-second"]) (hashes outer_events);
+    Alcotest.(check (list string)) "nested owner receives only its request" [sha "inner"] (hashes inner_events);
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
 let () =
   Alcotest.run
     "HTTP Client Connection Cache"
-    [ ( "reuse"
+    [ ( "request observation"
+      , [ Alcotest.test_case "actual POST metadata, refusal and observer failure" `Quick
+            test_post_observation_matches_actual_native_calls
+        ; Alcotest.test_case "concurrent and nested observer ownership" `Quick
+            test_post_observers_are_owned_across_concurrent_fibers ] )
+    ; ( "reuse"
       , [ Alcotest.test_case
             "sync connection reused"
             `Quick

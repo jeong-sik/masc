@@ -1,0 +1,24 @@
+ Dashboard  ▸Work  Keepers  Usage  Board  Workspace  System                     
+                                                                                
+   MASC Approvals (1 question)  04:10:57  HTTP [connected]                      
+    [w] Workspace: Let Auto Judge decide  |  [e] Outside services: Ask me for…  
+    Always-allow rules: none                                                    
+ ────────────────────────────────────────────────────────────────────────────── 
+    (no pending approvals)                                                      
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+ ────────────────────────────────────────────────────────────────────────────── 
+    [?] Questions waiting on you (1) · a:open answers                           
+   >probe-one         기존 작업을 이어갈까요, 새 작업으로 전환할까요?           
+        ( ) continue  기존 작업 계속                                            
+            지금까지 만든 결과에서 이어갑니다.                                  
+        ( ) new  새 작업 시작                                                   
+            현재 결과를 남겨 두고 다음 일을 시작합니다.                         
+        Other: write your own answer                                            
+        다른 방향도 적을 수 있습니다.                                           
+      why: 진행 중인 결과를 보존했습니다. 다음 방향을 골라 주세요.              
+  j/k:move  y / n:decide  w:Workspace mode  e:Outside mode  [ / ]:ask  …?       
+ › to imp   (i to write)                                                        

@@ -12,8 +12,14 @@ on:
           - linux-x64
           - macos-arm64
           - stagehand-model-macos-arm64
+          - preparation-driver-macos-arm64
           - rc-pptx-trace
           - lane-fusion-container
+
+      candidate_sha:
+        description: Exact candidate source SHA (required for preparation-driver target)
+        type: string
+        default: ""
 
       capture_item_http:
         description: Exercise Item TUI and isolated HTTP routes with the compiled binaries and production dashboard
@@ -324,6 +330,106 @@ jobs:
         with:
           name: macos-arm64-probe-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/masc-macos-arm64-probe/
+          if-no-files-found: error
+          retention-days: 7
+
+  preparation-driver-probe:
+    if: inputs.target == 'preparation-driver-macos-arm64'
+    name: Build exact-source macOS preparation driver
+    runs-on: macos-14
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Validate explicit candidate identity
+        id: candidate
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          python3 - <<'PYCODE'
+          import os, re
+          candidate = os.environ['CANDIDATE_SHA']
+          if re.fullmatch(r'[0-9a-f]{40}', candidate) is None:
+              raise SystemExit('Preparation driver requires an explicit 40-character candidate SHA')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('sha=' + candidate + '\n')
+          PYCODE
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.candidate.outputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Install native build dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd
+          openssl_prefix="$(brew --prefix openssl@3)"
+          libpq_prefix="$(brew --prefix libpq)"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+      - name: Pin and install candidate dependencies
+        run: |
+          set -euo pipefail
+          scripts/opam-pin-external-deps.sh --with-bisect
+          opam install ./masc.opam --deps-only --locked --with-test --yes
+      - name: Build only the preparation driver
+        env:
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code HEAD --
+          opam exec -- dune build --profile release test/keeper_preparation_trial_driver.exe
+          git diff --exit-code HEAD --
+      - name: Package candidate and dependency evidence
+        env:
+          PROBE_OUT: ${{ runner.temp }}/preparation-driver-probe
+          CANDIDATE_SHA: ${{ steps.candidate.outputs.sha }}
+          WORKFLOW_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$PROBE_OUT/prompts"
+          cp _build/default/test/keeper_preparation_trial_driver.exe "$PROBE_OUT/"
+          cp scripts/benchmarks/keeper-composition/preparation_trial.py "$PROBE_OUT/"
+          cp scripts/benchmarks/keeper-composition/PREPARATION-HARNESS.md "$PROBE_OUT/"
+          cp config/prompts/*.md "$PROBE_OUT/prompts/"
+          {
+            uname -a
+            opam exec -- ocamlc -version
+            opam list --installed --columns=name,version
+            brew list --versions
+            otool -L "$PROBE_OUT/keeper_preparation_trial_driver.exe"
+          } > "$PROBE_OUT/dependencies.txt"
+          python3 - <<'PYCODE'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          directory = Path(os.environ['PROBE_OUT'])
+          source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if source != os.environ['CANDIDATE_SHA']:
+              raise SystemExit('Built source identity changed')
+          files = {str(path.relative_to(directory)): {
+              'bytes': path.stat().st_size,
+              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+              for path in sorted(directory.rglob('*')) if path.is_file()}
+          receipt = dict(schema_version=1, source_commit=source,
+              source_tree=subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+              workflow_head=os.environ['WORKFLOW_HEAD'],
+              run_id=os.environ['GITHUB_RUN_ID'], run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
+              platform='macos-arm64', target='test/keeper_preparation_trial_driver.exe',
+              files=files, provider_execution_requested=False, behavior_executed=False, installed=False,
+              release_verified=False, relocatable_runtime_verified=False)
+          (directory / 'build-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PYCODE
+      - uses: actions/upload-artifact@v7
+        with:
+          name: preparation-driver-macos-arm64-${{ steps.candidate.outputs.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preparation-driver-probe/
           if-no-files-found: error
           retention-days: 7
 

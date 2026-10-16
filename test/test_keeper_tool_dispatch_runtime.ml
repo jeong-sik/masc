@@ -8320,6 +8320,55 @@ let test_write_then_unchanged_read_completes () =
               (Option.is_none result.abort_turn)))
 ;;
 
+module Plan = Masc.Keeper_tool_plan
+
+(* Shared with the composable-output probes below: the same schema
+   validation, reachable from a scenario that has to build its own state. *)
+let schema_value_error_to_string = function
+  | Plan.Unsupported_schema_type json ->
+    "unsupported schema type " ^ Yojson.Safe.to_string json
+  | Plan.Missing_required_field { path; field } ->
+    Printf.sprintf "missing required field %S under /%s" field (String.concat "/" path)
+  | Plan.Unexpected_field { path; field } ->
+    Printf.sprintf "undeclared field %S under /%s" field (String.concat "/" path)
+  | Plan.Duplicate_value_field { path; field } ->
+    Printf.sprintf "duplicate field %S under /%s" field (String.concat "/" path)
+  | Plan.Type_mismatch { path; _ } ->
+    Printf.sprintf "type mismatch under /%s" (String.concat "/" path)
+
+let validate_probe_output ~tool_name ~data =
+  let node_id =
+    match Plan.Node_id.make "probe" with
+    | Ok id -> id
+    | Error Plan.Node_id.Empty -> fail "probe node id was empty"
+  in
+  let node =
+    Plan.node
+      ~id:node_id
+      ~tool_name
+      ~input:(Plan.Json_template.literal (`Assoc []))
+      ()
+  in
+  match Plan.create ~descriptors:(KTD.all_descriptors ()) [ node ] with
+  | Error error ->
+    failf
+      "%s could not be a composition node at all: %s"
+      tool_name
+      (Plan.error_to_string error)
+  | Ok plan ->
+    (match
+       Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id data
+     with
+     | Ok _ -> ()
+     | Error (Plan.Output_validation_failed { error; _ }) ->
+       failf
+         "%s produced a value its own declared output schema rejects (%s): %s"
+         tool_name
+         (schema_value_error_to_string error)
+         (Yojson.Safe.to_string data)
+     | Error _ ->
+       failf "%s output validation failed before reaching the schema" tool_name)
+
 let test_async_composition_binds_params_into_durable_status () =
   (* A fresh native SDK starts at provider round zero while its admitted
      Keeper run has physical TurnRef one. These are independent axes. *)
@@ -8448,6 +8497,11 @@ let test_async_composition_binds_params_into_durable_status () =
           let read = structured_tool_output_exn ~base_path:config.base_path output.content in
           check bool "canonical result preserves exact original named binding" true
             (Yojson.Safe.equal (Yojson.Safe.Util.member "binding" read) result_wait);
+          (* The reader's answer for a completed original run, checked against
+             the composable output it declares. A generic probe cannot reach
+             this: the answer exists only for a binding the original named
+             submission returned, so this scenario is its probe. *)
+          validate_probe_output ~tool_name:"keeper_composition_result" ~data:read;
           check string "public reader consumes the original named Tool result"
             "keeper_compose_memory-background"
             Yojson.Safe.Util.(member "result" read |> member "composition_tool" |> to_string));
@@ -9060,7 +9114,6 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
    validates the exact value the executor validates, through a plan built the
    way the executor builds one. *)
 
-module Plan = Masc.Keeper_tool_plan
 
 (* The masc_* tools route through the RFC-0182 3.1 workspace dispatch ref,
    which Mcp_server_eio_execute fills from its own module initializer. Nothing
@@ -9255,10 +9308,19 @@ let composable_output_probes =
          ])
   ]
 
+(* Producers whose answer exists only inside a scenario that builds the state
+   it reads, so a one-call probe cannot reach it. Each name here is validated
+   against its declared output by the scenario named beside it. *)
+let scenario_output_probes =
+  [ "keeper_composition_result"
+    (* test_async_composition_binds_params_into_durable_status *)
+  ]
+
 let test_every_composable_tool_has_an_output_probe () =
   let declared = composable_model_names () in
   let probed =
     List.map (fun probe -> probe.tool_name) composable_output_probes
+    @ scenario_output_probes
     |> List.sort_uniq String.compare
   in
   let only_in left right =
@@ -9277,51 +9339,6 @@ let test_every_composable_tool_has_an_output_probe () =
     failf
       "these probes name tools that no longer declare a composable output: %s"
       (String.concat ", " stale)
-
-let schema_value_error_to_string = function
-  | Plan.Unsupported_schema_type json ->
-    "unsupported schema type " ^ Yojson.Safe.to_string json
-  | Plan.Missing_required_field { path; field } ->
-    Printf.sprintf "missing required field %S under /%s" field (String.concat "/" path)
-  | Plan.Unexpected_field { path; field } ->
-    Printf.sprintf "undeclared field %S under /%s" field (String.concat "/" path)
-  | Plan.Duplicate_value_field { path; field } ->
-    Printf.sprintf "duplicate field %S under /%s" field (String.concat "/" path)
-  | Plan.Type_mismatch { path; _ } ->
-    Printf.sprintf "type mismatch under /%s" (String.concat "/" path)
-
-let validate_probe_output ~tool_name ~data =
-  let node_id =
-    match Plan.Node_id.make "probe" with
-    | Ok id -> id
-    | Error Plan.Node_id.Empty -> fail "probe node id was empty"
-  in
-  let node =
-    Plan.node
-      ~id:node_id
-      ~tool_name
-      ~input:(Plan.Json_template.literal (`Assoc []))
-      ()
-  in
-  match Plan.create ~descriptors:(KTD.all_descriptors ()) [ node ] with
-  | Error error ->
-    failf
-      "%s could not be a composition node at all: %s"
-      tool_name
-      (Plan.error_to_string error)
-  | Ok plan ->
-    (match
-       Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id data
-     with
-     | Ok _ -> ()
-     | Error (Plan.Output_validation_failed { error; _ }) ->
-       failf
-         "%s produced a value its own declared output schema rejects (%s): %s"
-         tool_name
-         (schema_value_error_to_string error)
-         (Yojson.Safe.to_string data)
-     | Error _ ->
-       failf "%s output validation failed before reaching the schema" tool_name)
 
 let test_lane_status_observations_remain_composable () =
   let module Profile = Masc.Keeper_types_profile in

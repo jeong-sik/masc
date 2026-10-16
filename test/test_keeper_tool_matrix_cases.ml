@@ -529,6 +529,40 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       (* [pwd] exits immediately, so the case leaves no process behind. This
          mirrors the [tool_execute] case above, which runs the same command. *)
       `Assoc [ ("argv", `List [ `String "pwd" ]) ]
+  | "keeper_composition_result" ->
+      (* A well-formed binding for a request this workspace never accepted.
+         The reader has to look the request up and refuse it; a malformed
+         binding would be rejected by argument parsing and say nothing about
+         the lookup. The run id is fresh so no stored run can match it. *)
+      `Assoc
+        [
+          ( "binding",
+            `Assoc
+              [
+                ("request_id", `String "matrix-no-such-request");
+                ( "composition_run_id",
+                  `String
+                    (Masc.Keeper_tool_plan.Composition_run_id.to_string
+                       (Masc.Keeper_tool_plan.Composition_run_id.fresh ())) );
+                ("composition_tool", `String "keeper_compose_matrix-no-such-skill");
+                ("parent_tool_use_id", `String "matrix-no-such-call");
+                ("source_turn", `Int 0);
+                ( "skill_reference",
+                  `Assoc
+                    [
+                      (* Sixty-four hex digits: the shape of a content
+                         revision, naming no Skill that exists. *)
+                      ("content_revision", `String (String.make 64 'a'));
+                      ( "identity",
+                        `Assoc
+                          [
+                            ("source_id", `String "matrix-source");
+                            ("package_id", `String "matrix-package");
+                            ("name", `String "matrix-no-such-skill");
+                          ] );
+                    ] );
+              ] );
+        ]
   | "keeper_spawn_read" ->
       `Assoc [ ("handle", `String "matrix-no-such-handle") ]
   | "keeper_spawn_stop" ->

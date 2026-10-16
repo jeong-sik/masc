@@ -14,9 +14,10 @@ the refresh faster or certify that received data was admitted to the workspace.
 | Authority | Request tickets and workspace identity guard admission | Diagnostic observations use the same request and authority identities | These observations never grant data or action authority |
 | Keeper execution | Existing Task/Skill preparation and owned job recovery | No model or Tool execution change in this unit | Request byte attribution, redundant roundtrips, recipe concurrency and held-job reactivation |
 
-The source baseline for this work unit is
-`965328db5ea6087fa01ff595614877280cb880b0`. It is a frozen source reference;
-native baseline frames and timings have not yet been collected. A parsed file,
+The source baseline for this comparison is
+`683c7950682b45a2591002e09f654515ccf02155`, the stack's integration base when the
+comparison was prepared. It is a frozen source reference; native baseline frames
+and timings have not yet been collected. A parsed file,
 an authored state scenario and an observed native frame are different evidence.
 
 ## Read the observations

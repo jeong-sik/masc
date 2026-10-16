@@ -361,13 +361,102 @@ let on_io_domain send =
   | Some domain -> Masc_tui_io_domain.run domain send
   | None -> Error io_domain_not_started
 
-(* The library's request/response calls, sent from the request domain. The
-   module keeps the library's name so that every call in this file goes
-   there, the next one written included: no call site here can reach the
-   drawing domain's pool by naming the library. Streams are the library's
-   own, for the reason [Masc_tui_io_domain] gives. *)
-module Masc_http_client = struct
-  include Masc_http_client
+(* What this file uses of the library, and where each call runs. The module
+   keeps the library's name, so a call site here names this list: the six
+   request/response calls go to the request domain, and the two streams stay
+   on the caller's, for the reason [Masc_tui_io_domain] gives. A request
+   function the library gains later is not reachable here until it has a
+   line, and writing that line is choosing where it runs. *)
+module Masc_http_client : sig
+  type response = Masc_http_client.response = {
+    status : int;
+    headers : (string * string) list;
+    body : string;
+  }
+
+  module Pool = Masc_http_client.Pool
+
+  val get_sync :
+    ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    ?timeout_sec:float ->
+    ?max_body_bytes:int ->
+    url:string ->
+    headers:(string * string) list ->
+    unit ->
+    (int * string, string) result
+
+  val get_response_sync :
+    ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    ?timeout_sec:float ->
+    ?max_body_bytes:int ->
+    url:string ->
+    headers:(string * string) list ->
+    unit ->
+    (response, string) result
+
+  val post_sync :
+    ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    ?timeout_sec:float ->
+    url:string ->
+    headers:(string * string) list ->
+    body:string ->
+    unit ->
+    (int * string, string) result
+
+  val post_response_sync :
+    ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    ?timeout_sec:float ->
+    url:string ->
+    headers:(string * string) list ->
+    body:string ->
+    unit ->
+    (response, string) result
+
+  val patch_sync :
+    ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    ?timeout_sec:float ->
+    url:string ->
+    headers:(string * string) list ->
+    body:string ->
+    unit ->
+    (int * string, string) result
+
+  val delete_sync :
+    ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    ?timeout_sec:float ->
+    url:string ->
+    headers:(string * string) list ->
+    unit ->
+    (int * string, string) result
+
+  val post_stream :
+    retention:'body Pool.body_retention ->
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    idle_timeout_sec:float ->
+    url:string ->
+    headers:(string * string) list ->
+    body:string ->
+    on_chunk:(string -> unit) ->
+    unit ->
+    ('body Pool.stream_outcome, string) result
+
+  val get_stream :
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    idle_timeout_sec:float ->
+    url:string ->
+    headers:(string * string) list ->
+    ?on_response:(status:int -> headers:(string * string) list -> unit) ->
+    on_chunk:(string -> unit) ->
+    unit ->
+    (unit Pool.stream_outcome, string) result
+end = struct
+  type response = Masc_http_client.response = {
+    status : int;
+    headers : (string * string) list;
+    body : string;
+  }
+
+  module Pool = Masc_http_client.Pool
 
   let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
     on_io_domain (fun () ->
@@ -395,6 +484,9 @@ module Masc_http_client = struct
   let delete_sync ?clock ?timeout_sec ~url ~headers () =
     on_io_domain (fun () ->
       Masc_http_client.delete_sync ?clock ?timeout_sec ~url ~headers ())
+
+  let post_stream = Masc_http_client.post_stream
+  let get_stream = Masc_http_client.get_stream
 end
 
 (** Send an HTTP GET request and return the structured status/body pair. *)

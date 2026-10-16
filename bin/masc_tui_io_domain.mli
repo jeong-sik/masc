@@ -18,9 +18,11 @@
     Here a request never waits for a pass: it runs on a scheduler that does
     nothing else, and its caller resumes at the main loop's next one.
 
-    Streamed responses stay on the caller's domain. Their chunk consumer is
-    TUI state, and every stream the TUI opens is paced by people or by a
-    model: an observer feed, a login, a keeper's reply. *)
+    Streamed responses stay on the caller's domain, because their chunk
+    consumer is TUI state. Once a stream is live, people or a model set its
+    pace: an observer feed, a login, a keeper's reply. A stream that resumes
+    from a cursor first replays what it missed, and that replay still
+    advances one step per pass while frames are due. *)
 
 type t
 
@@ -32,7 +34,12 @@ val start : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> t
 val run : t -> (unit -> 'a) -> 'a
 (** [run t work] runs [work] on [t]'s domain and returns its result on the
     calling fiber. An exception from [work] is raised here, with its
-    backtrace. Cancelling the calling fiber cancels [work].
+    backtrace. Cancelling the calling fiber cancels [work], and a caller that
+    leaves while its job is still queued leaves [work] unstarted.
 
     [work] must not touch state the caller's domain owns: a switch, an
-    [Eio.Mutex] it holds, a value it mutates. Pass it what it needs. *)
+    [Eio.Mutex] it holds, a value it mutates. Pass it what it needs.
+
+    The domain stops when [start]'s [sw] finishes, so call [run] only from
+    fibers that [sw] outlives. A job added after that is never run, and its
+    caller waits until it is cancelled itself. *)

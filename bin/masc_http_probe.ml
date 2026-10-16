@@ -38,7 +38,8 @@
     reaches the ten-second timeout RFC-0429 §1.2 recorded against the live
     TUI.
 
-    What decides that is not the domain they share but where the loop waits.
+    On an idle screen, what decides that is not the domain they share but
+    where the loop waits.
     [--eio-wait] and [--eio-stdin] wait the same sixteen milliseconds inside
     Eio rather than inside the kernel, and the same 1.78 MB with the same
     10 ms of work per iteration reads:

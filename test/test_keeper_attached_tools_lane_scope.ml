@@ -514,6 +514,11 @@ tool = "keeper_capability_search"
 [compositions.nodes.input]
 kind = "object"
 [[compositions.nodes.input.fields]]
+name = "syntax"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = "fts5"
+[[compositions.nodes.input.fields]]
 name = "query"
 [compositions.nodes.input.fields.value]
 kind = "param"

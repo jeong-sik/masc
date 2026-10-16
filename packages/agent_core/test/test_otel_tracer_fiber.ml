@@ -144,6 +144,103 @@ let test_global_with_span_is_fiber_safe () =
         child_ids))
 ;;
 
+(* Unlike a callback that returns immediately, yielding keeps sibling spans
+   alive together. A fiber-local binding must not share a mutable stack cell
+   inherited from its parent. *)
+module type Span_scope = sig
+  val with_span : Agent_core.Tracing.span_attrs -> (unit -> 'a) -> 'a
+end
+
+let check_yielding_siblings (module T : Span_scope) current_span () =
+  let attrs name : Agent_core.Tracing.span_attrs =
+    { kind = Tool_exec; name; agent_name = "yielding-proof"; turn = 1
+    ; extra = []; links = [] }
+  in
+  T.with_span (attrs "parent") (fun () ->
+    let parent = Option.get (current_span ()) in
+    let siblings = Eio.Fiber.List.map (fun i ->
+      T.with_span (attrs (Printf.sprintf "sibling_%d" i)) (fun () ->
+        let before = Option.get (current_span ()) in
+        Eio.Fiber.yield ();
+        let after = Option.get (current_span ()) in
+        Alcotest.(check string) "yield preserves this fiber's span"
+          before.Agent_core.Otel_tracer.span_id after.Agent_core.Otel_tracer.span_id;
+        before.Agent_core.Otel_tracer.parent_span_id)) [0; 1; 2]
+    in
+    List.iter (check "every overlapping sibling has original parent"
+      (Some parent.Agent_core.Otel_tracer.span_id)) siblings;
+    check "parent remains active after siblings"
+      (Some parent.Agent_core.Otel_tracer.span_id)
+      (Option.map (fun (span : Agent_core.Otel_tracer.span) -> span.span_id)
+        (current_span ())))
+;;
+
+let test_yielding_instance_siblings () =
+  Eio_main.run (fun _ ->
+    let inst = Agent_core.Otel_tracer.create_instance_eio () in
+    let module T = (val Agent_core.Otel_tracer.tracer_of_instance inst) in
+    check_yielding_siblings
+      (module T : Span_scope)
+      (fun () -> Agent_core.Otel_tracer.inst_current_span inst) ();
+    Alcotest.(check int) "four completed spans" 4
+      (Agent_core.Otel_tracer.inst_completed_count inst);
+    check "instance scope has no leaked active span" None
+      (Option.map (fun (span : Agent_core.Otel_tracer.span) -> span.span_id)
+        (Agent_core.Otel_tracer.inst_current_span inst)))
+;;
+
+let test_yielding_global_siblings () =
+  Eio_main.run (fun _ ->
+    Agent_core.Otel_tracer.reset ();
+    (* The global public scope and current-span API must share the same
+       isolation contract as an explicitly created Eio instance. *)
+    let tracer : (module Span_scope) =
+      (module struct
+        let with_span = Agent_core.Otel_tracer.with_span
+      end)
+    in
+    check_yielding_siblings tracer Agent_core.Otel_tracer.current_span ();
+    Alcotest.(check int) "four global completed spans" 4
+      (Agent_core.Otel_tracer.completed_count ());
+    check "global scope has no leaked active span" None
+      (Option.map (fun (span : Agent_core.Otel_tracer.span) -> span.span_id)
+        (Agent_core.Otel_tracer.current_span ())))
+;;
+
+let test_nested_scope_preserves_explicit_parent_updates () =
+  Eio_main.run (fun _ ->
+    let inst = Agent_core.Otel_tracer.create_instance_eio () in
+    let module T = (val Agent_core.Otel_tracer.tracer_of_instance inst) in
+    let attrs name : Agent_core.Tracing.span_attrs =
+      { kind = Tool_exec; name; agent_name = "parent-updates"; turn = 1
+      ; extra = []; links = [] }
+    in
+    T.with_span (attrs "root") (fun () ->
+      let parent = T.start_span (attrs "parent") in
+      Eio.Fiber.List.iter (fun i ->
+        T.with_span (attrs (string_of_int i)) (fun () ->
+          T.add_attrs parent ["child", string_of_int i];
+          T.add_event parent ("child-" ^ string_of_int i);
+          T.add_link parent ~trace_id:(string_of_int i) ~span_id:(string_of_int i);
+          Eio.Fiber.yield ())) [0; 1; 2];
+      let updated = Option.get (Agent_core.Otel_tracer.inst_current_span inst) in
+      List.iter (fun i ->
+        Alcotest.(check bool) "ancestor attributes survive child scope" true
+          (List.mem ("child", string_of_int i) updated.attributes);
+        Alcotest.(check bool) "ancestor events survive child scope" true
+          (List.exists (fun (event : Agent_core.Otel_tracer.otel_event) ->
+             event.event_name = "child-" ^ string_of_int i) updated.events);
+        Alcotest.(check bool) "ancestor links survive child scope" true
+          (List.exists (fun (link : Agent_core.Otel_tracer.otel_link) ->
+             link.span_id = string_of_int i) updated.links)) [0; 1; 2];
+      T.end_span parent ~ok:true);
+    let completed = Agent_core.Otel_tracer.inst_flush inst in
+    let parent = List.find (fun (span : Agent_core.Otel_tracer.span) ->
+      span.name = "tool_exec/parent") completed in
+    Alcotest.(check int) "completed parent retains all child events" 3
+      (List.length parent.events))
+;;
+
 let () =
   Alcotest.run
     "otel_tracer_fiber"
@@ -160,6 +257,12 @@ let () =
             "global with_span is fiber-safe"
             `Quick
             test_global_with_span_is_fiber_safe
+        ; Alcotest.test_case "yielding instance siblings retain ownership"
+            `Quick test_yielding_instance_siblings
+        ; Alcotest.test_case "yielding global siblings retain ownership"
+            `Quick test_yielding_global_siblings
+        ; Alcotest.test_case "nested scopes preserve explicit parent updates"
+            `Quick test_nested_scope_preserves_explicit_parent_updates
         ] )
     ]
 ;;

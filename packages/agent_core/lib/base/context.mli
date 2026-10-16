@@ -37,7 +37,11 @@ val create : unit -> t
 (** Create a new context using {!Stdlib.Mutex}.
 
     Use this for synchronous tests, serialization, or any code that runs
-    outside of an Eio fiber. *)
+    outside of an Eio fiber. [Agent.create ~context] also accepts this context
+    unchanged. Context operations keep their private critical sections free
+    of I/O, fiber suspension and caller callbacks; a contending domain can
+    still wait for that finite synchronous work. Prefer {!create} for contexts
+    shared by fibers. This is not a scheduler latency guarantee. *)
 val create_sync : unit -> t
 
 val get : t -> string -> Yojson.Safe.t option

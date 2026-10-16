@@ -524,7 +524,8 @@ let make_tool_bundle_for_descriptors_with_policy
                             Ok (Some (Agent_core.Tool.scoped_call ~scope ~additional_scopes handler))
                           | [] -> invalid_arg "prepared Edit producer returned no directory footprint")
                  in
-                 Some (Agent_core.Tool.ordinary_descriptor_scoped ~prepare)
+                 Some (Agent_core.Tool.ordinary_descriptor_scoped
+                   ~call_effect:(Agent_core.Tool.call_effect ordinary) ~prepare)
                else agent_core_descriptor
              in
              ( Agent_core.Tool.of_schema ?descriptor:agent_core_descriptor

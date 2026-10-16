@@ -9,8 +9,8 @@ let identity key =
   Tool_contract.Resource_scope.identity ~namespace:"fixture-producer" ~key |> Result.get_ok
 ;;
 
-let scope ?(ancestors = []) key =
-  Tool_contract.Resource_scope.create ~occupied:(identity key)
+let scope ?(access = Tool_contract.Resource_scope.Write) ?(ancestors = []) key =
+  Tool_contract.Resource_scope.create ~access ~occupied:(identity key)
     ~ancestors:(List.map identity ancestors)
 ;;
 
@@ -36,8 +36,8 @@ let results = function
 
 let contents rows = List.map (fun (row : Agent_tools.tool_execution_result) -> row.content) rows
 
-let prepared_tool ?(parameters = []) ~name prepare fallback =
-  Tool.create ~descriptor:(Tool.ordinary_descriptor_scoped ~prepare)
+let prepared_tool ?(parameters = []) ?(call_effect = fun _ -> Tool.Effect_possible) ~name prepare fallback =
+  Tool.create ~descriptor:(Tool.ordinary_descriptor_scoped ~call_effect ~prepare)
     ~name ~description:"fixture owned resource effect" ~parameters fallback
 ;;
 
@@ -555,10 +555,122 @@ let test_unattempted_sibling_preserves_original_wave () =
     | Error error -> fail (Writer.scope_failure_to_string error)) [true; false]
 ;;
 
+let test_shared_reads_and_private_writes_keep_writer_order () =
+  Eio_main.run @@ fun env ->
+  let module Access = Tool_contract.Resource_scope in
+  let left_started, start_left = Eio.Promise.create () in
+  let right_started, start_right = Eio.Promise.create () in
+  let sibling_started, start_sibling = Eio.Promise.create () in
+  let shared = ref "before" and observations = ref [] in
+  let make name occupied ?(additional_scopes = []) perform =
+    prepared_tool ~name (fun ~sw:_ _ ->
+      Ok (Some (Tool.scoped_call ~scope:occupied ~additional_scopes
+        (fun _ _ -> perform (); output name))))
+      (fun _ -> fail "unprepared resource access dispatched") in
+  let read name signal other occupied =
+    make name occupied ~additional_scopes:[scope ("private-" ^ name)] (fun () ->
+      Eio.Promise.resolve signal ();
+      Eio.Promise.await other;
+      Eio.Promise.await sibling_started;
+      observations := (name, !shared) :: !observations) in
+  let left = read "left" start_left right_started (scope ~access:Access.Read "shared") in
+  let right = read "right" start_right left_started
+      (scope ~access:Access.Read ~ancestors:["shared"] "child") in
+  let writer = make "writer" (scope "shared") (fun () ->
+    check (list (pair string string)) "both overlapping reads finish before write"
+      ["left", "before"; "right", "before"]
+      (List.sort (fun (left, _) (right, _) -> String.compare left right) !observations);
+    shared := "after") in
+  let later = make "later" (scope ~access:Access.Read ~ancestors:["shared"] "child")
+      (fun () -> check string "later reader cannot overtake the writer" "after" !shared) in
+  let sibling = make "sibling" (scope "unrelated") (fun () ->
+    Eio.Promise.resolve start_sibling ();
+    Eio.Promise.await left_started;
+    Eio.Promise.await right_started) in
+  check bool "read claims do not make a mixed call readonly" true
+    (Tool.call_effect left (`Assoc []) = Tool.Effect_possible);
+  let rows = execute env [left; right; writer; later; sibling]
+      (List.map call ["left"; "right"; "writer"; "later"; "sibling"]) |> results in
+  check (list string) "actual results retain original call order"
+    ["left"; "right"; "writer"; "later"; "sibling"] (contents rows);
+  check (list int) "shared reads overlap and writes retain both directions of ordering"
+    [0; 0; 1; 2; 0]
+    (List.map (fun (row : Agent_tools.tool_execution_result) ->
+      (Tool_contract.Invocation.schedule row.invocation).batch_index) rows)
+;;
+
+let test_scoped_effect_contracts_follow_defaulted_execution_input () =
+  Eio_main.run @@ fun env ->
+  let reads_only = function
+    | `Assoc fields ->
+      (match List.assoc_opt "write" fields with
+       | None | Some (`Bool false) -> true
+       | Some (`Bool true | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) -> false)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false in
+  let call_effect input = if reads_only input then Tool.Read_only else Tool.Effect_possible in
+  let parameters = [{name="write"; description="Mutate the observed source"; param_type=Boolean; required=false}] in
+  let source = ref "before" and observed = ref [] in
+  let left_started, start_left = Eio.Promise.create () in
+  let right_started, start_right = Eio.Promise.create () in
+  let make name ~write_default ~on_read =
+    let run input =
+      let readonly = reads_only input in
+      observed := (name, readonly) :: !observed;
+      if readonly then on_read () else source := "after";
+      output name in
+    prepared_tool ~parameters ~call_effect ~name (fun ~sw:_ input ->
+      let access = if reads_only input then Tool_contract.Resource_scope.Read
+        else Tool_contract.Resource_scope.Write in
+      Ok (Some (Tool.scoped_call ~scope:(scope ~access "defaulted-source")
+        (fun _ input -> run input)))) run
+    |> Tool.with_defaults ["write", `Bool write_default] in
+  let left = make "left" ~write_default:false ~on_read:(fun () ->
+    Eio.Promise.resolve start_left (); Eio.Promise.await right_started;
+    check string "left observes the original bytes before writer" "before" !source) in
+  let right = make "right" ~write_default:false ~on_read:(fun () ->
+    Eio.Promise.resolve start_right (); Eio.Promise.await left_started;
+    check string "right observes the original bytes before writer" "before" !source) in
+  let writer = make "writer" ~write_default:true ~on_read:(fun () -> ()) in
+  let later = make "later" ~write_default:false ~on_read:(fun () ->
+    check string "later read observes the defaulted writer" "after" !source) in
+  List.iter (fun (tool, expected) ->
+    check bool (tool.Tool.schema.name ^ " effect uses effective defaulted input") true
+      (Tool.call_effect tool (`Assoc []) = expected))
+    [left, Tool.Read_only; right, Tool.Read_only; writer, Tool.Effect_possible; later, Tool.Read_only];
+  let rows = execute env [left; right; writer; later]
+      (List.map call ["left"; "right"; "writer"; "later"]) |> results in
+  check (list int) "defaulted reads overlap without overtaking the writer" [0; 0; 1; 2]
+    (List.map (fun (row : Agent_tools.tool_execution_result) ->
+      (Tool_contract.Invocation.schedule row.invocation).batch_index) rows);
+  check (list (pair string bool)) "executed modes match the producer effect declarations"
+    ["later", true; "left", true; "right", true; "writer", false]
+    (List.sort (fun (left, _) (right, _) -> String.compare left right) !observed);
+  let replacement = {left with Tool.handler = (fun _ _ -> source := "replacement"; output "replacement")} in
+  check bool "replaced handler cannot retain stale read-only authority" true
+    (Tool.call_effect replacement (`Assoc []) = Tool.Effect_possible);
+  List.iter (fun (name, descriptor) ->
+    let tool = Tool.create ~descriptor ~name ~description:"Defaulted mutation fixture" ~parameters
+        (fun input ->
+          check bool "actual fallback handler receives the mutating default" false (reads_only input);
+          source := name;
+          output name)
+      |> Tool.with_defaults ["write", `Bool true] in
+    check bool "defaulted mutation is not classified as readonly" true
+      (Tool.call_effect tool (`Assoc []) = Tool.Effect_possible);
+    check bool "defaulted mutation never gains conditional concurrency" true
+      (Tool.execution_mode tool ~input:(`Assoc []) = Tool_contract.Serial);
+    ignore (execute env [tool] [call name] |> results);
+    check string "the declared mutating path actually executes" name !source)
+    ["static", Tool.ordinary_descriptor ~call_effect Tool_contract.Serial;
+     "conditional", Tool.ordinary_descriptor_concurrent_when reads_only]
+;;
+
 let () =
   run "resource-scoped execution"
     [ "actual batch execution",
       [ test_case "disjoint effects consume exact prepared calls" `Quick test_disjoint_effects_consume_frozen_calls
+      ; test_case "shared reads and private writes preserve writer order" `Quick test_shared_reads_and_private_writes_keep_writer_order
+      ; test_case "scoped effects and scheduling use executed defaults" `Quick test_scoped_effect_contracts_follow_defaulted_execution_input
       ; test_case "conflicts preserve transitive planned order" `Quick test_conflicting_predecessors_keep_transitive_order
       ; test_case "fallback unavailable validation and permission" `Quick test_fallback_unavailable_validation_and_permission
       ; test_case "barriers and ordinary versus hook failure" `Quick test_barriers_and_failure_semantics

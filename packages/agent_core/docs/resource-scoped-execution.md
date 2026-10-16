@@ -2,14 +2,19 @@
 
 `Tool.ordinary_descriptor_scoped` lets an ordinary producer prepare an exact
 input, an opaque resource claim, and the handler that consumes that claim.
-The normal descriptor remains Serial and Effect_possible. The SDK neither
-resolves filesystem paths nor grants permission or safe replay from a claim.
+The producer also passes `~call_effect`, which declares for each input whether
+the whole call, prepared or fallback, is `Read_only` or `Effect_possible`. A
+`Read` claim does not make a call read-only. The normal descriptor remains
+Serial. The SDK neither resolves filesystem paths nor grants permission or safe
+replay from a claim.
 
 `Resource_scope.identity` namespaces exact producer-owned identities. A claim
-occupies one identity and lists its complete ancestry. Two claims conflict
-when they occupy the same identity or one occupies an ancestor of the other.
-Sharing an ancestor alone permits disjoint siblings to run together. Producers
-must canonicalize aliases and validate their resource authority themselves.
+carries an access, `Read` or `Write`, occupies one identity and lists its
+complete ancestry. Two claims overlap when they occupy the same identity or one
+occupies an ancestor of the other. Overlapping claims conflict when either is a
+`Write`; two `Read` claims may overlap. Sharing an ancestor alone permits
+disjoint siblings to run together. Producers must canonicalize aliases and
+validate their resource authority themselves.
 
 The SDK validates public inputs before preparation, then retains prepared
 resources on a caller-cancellable switch through dispatch and its observers.

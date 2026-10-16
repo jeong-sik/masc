@@ -10,16 +10,19 @@
 module Resource_scope : sig
   type identity
   type identity_error = Empty_namespace | Empty_key
+  type access = Read | Write
   type t
 
   val identity : namespace:string -> key:string -> (identity, identity_error) result
-  val create : occupied:identity -> ancestors:identity list -> t
+  val create : access:access -> occupied:identity -> ancestors:identity list -> t
   val conflicts : t -> t -> bool
-  (** Two claims conflict when their occupied identities agree, or one
-      occupied identity occurs in the other's ancestry. Sharing only an
-      ancestor does not make disjoint siblings conflict. The producer owns
-      identity resolution and the complete ancestry; the SDK assigns no
-      filesystem, authorization, or replay meaning to these identities. *)
+  (** Overlapping claims conflict when either carries [Write]. Two [Read]
+      claims may overlap, including an ancestor and its descendant. Overlap
+      means equal occupied identities, or one occupied identity in the other's
+      ancestry; a shared ancestor alone does not make disjoint siblings overlap.
+      The producer owns access classification, identity resolution and complete
+      ancestry. [Read] describes this resource only, not the whole call's effect,
+      permission or replay contract. A call may carry several read/write claims. *)
 end
 
 type execution_mode =

@@ -531,6 +531,13 @@ val handle_keeper_asks_list :
     it belongs to; with [name] it narrows to one and returns [`Not_found] when
     that Keeper is not registered. Defaults to open questions only.
 
+    [expected_base_path] and [expected_masc_root], when provided, must each
+    occur once and match the receiving config's canonical roots before any
+    questions are read. Invalid pairs return 400; another workspace returns
+    409. Every successful named/fleet response carries those actual roots in
+    [workspace] and the actual [state_ready] observation, allowing the TUI to
+    verify this response without a health read. Booting responses remain unread.
+
     A surface renders these rows and answers through
     {!handle_keeper_ask_answer}, sending back choice ids taken from the rows it
     was given. No surface matches on label text, so rewording a choice cannot

@@ -11590,15 +11590,15 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
        else Option.map (fun asks_request ->
          observe_http_reader ~on_progress Http_refresh_progress.Questions
            ~received:(fun observation -> Result.is_ok observation.asks_result) (fun () ->
-         let asks_result = Masc_tui_http.fetch_keeper_asks ~host ~port () in
+         let asks_result = match expected_workspace with
+           | None -> Error "Server workspace identity is unavailable"
+           | Some expected_workspace -> Masc_tui_http.fetch_keeper_asks ~expected_workspace ~host ~port () in
          let observation = { asks_request; asks_result } in
          (match on_asks with
           | None -> ()
           | Some publish ->
-              let identity = load_server_identity ~host ~port in
-              if Masc_tui_types.server_workspace_matches ~expected:expected_workspace identity then
-                Option.iter (fun identity -> publish identity observation)
-                  (Result.to_option identity));
+              if Result.is_ok asks_result then
+                Option.iter (fun identity -> publish identity observation) expected_workspace);
          observation)) ask_request)
     (fun () ->
        if not needs.needs_keeper_roster then None
@@ -14351,10 +14351,10 @@ let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbo
     let asks =
       try
         let ( let* ) = Result.bind in
-        let* () = check () in
-        let* asks = Masc_tui_http.fetch_keeper_asks ~host ~port () in
-        let* () = check () in
-        Ok asks
+        let* expected_workspace = match identity with
+          | Some identity -> Ok identity
+          | None -> Error "Server workspace identity is unavailable" in
+        Masc_tui_http.fetch_keeper_asks ~expected_workspace ~host ~port ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)

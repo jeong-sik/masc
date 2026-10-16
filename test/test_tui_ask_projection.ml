@@ -345,9 +345,11 @@ let test_wire_question_reaches_the_answer_draft () =
     ~continuation:(Keeper_continuation_channel.unrouted "wire projection test") ~asked_at:42. ()) in
   let row = Masc.Keeper_ask_operator_projection.ask_row_json ~keeper_name:"reader"
     (ask.ask_id, (ask, Domain.Open)) in
-  let snapshot = `Assoc [ "keeper", `String "reader"; "open_count", `Int 1;
+  let snapshot = `Assoc [ "workspace", `Assoc ["base_path",`String "/wire";"masc_root",`String "/wire/.masc"];
+    "state_ready",`Bool true; "keeper", `String "reader"; "open_count", `Int 1;
     "asks", `List [row] ] in
-  match Masc.Tui_decode_asks.decode_asks_snapshot snapshot with
+  match Masc.Tui_decode_asks.decode_asks_snapshot
+      ~expected_base_path:"/wire" ~expected_masc_root:"/wire/.masc" snapshot with
   | Error error -> Alcotest.fail error
   | Ok snapshot ->
       (match Ask.open_rows snapshot with
@@ -372,14 +374,41 @@ let test_wire_question_reaches_the_answer_draft () =
 
 let test_unknown_wire_resolution_is_rejected () =
   let snapshot = Yojson.Safe.from_string {|{
+    "workspace":{"base_path":"/wire","masc_root":"/wire/.masc"},
+    "state_ready":true,
     "keeper":"reader", "open_count":0, "asks":[{
       "keeper":"reader", "ask_id":"wire-ask", "asked_at":42,
       "context":null, "questions":[], "resolution":{"state":"future"}
     }]
   }|} in
-  match Masc.Tui_decode_asks.decode_asks_snapshot snapshot with
+  match Masc.Tui_decode_asks.decode_asks_snapshot
+      ~expected_base_path:"/wire" ~expected_masc_root:"/wire/.masc" snapshot with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "unknown resolution must not create an answerable ask"
+
+let test_foreign_or_ambiguous_workspace_never_clears_questions () =
+  let base = "base_path",`String "/wire" and root = "masc_root",`String "/wire/.masc" in
+  let rows = ["state_ready",`Bool true;"keeper",`Null;"open_count",`Int 0;"asks",`List []] in
+  let workspace = `Assoc [base;root] in
+  let decode fields = Masc.Tui_decode_asks.decode_asks_snapshot
+      ~expected_base_path:"/wire" ~expected_masc_root:"/wire/.masc" (`Assoc (fields @ rows)) in
+  (match decode ["workspace",workspace] with
+   | Ok snapshot -> Alcotest.(check int) "matching empty fleet is authoritative" 0 snapshot.asn_open_count
+   | Error detail -> Alcotest.fail detail);
+  List.iter (fun fields -> Alcotest.(check bool) "foreign or ambiguous empty fleet is refused" true
+    (Result.is_error (decode fields)))
+    [ []; ["workspace",`Null]; ["workspace",workspace;"workspace",workspace];
+      ["workspace",`Assoc [base]]; ["workspace",`Assoc [root]];
+      ["workspace",`Assoc [base;base;root]];
+      ["workspace",`Assoc ["base_path",`String "/other";root]];
+      ["workspace",`Assoc [base;"masc_root",`String "/other-root"]];
+      ["workspace",workspace;"state_ready",`Bool false] ];
+  List.iter (fun readiness ->
+    Alcotest.(check bool) "booting or missing readiness cannot clear questions" true
+      (Result.is_error (Masc.Tui_decode_asks.decode_asks_snapshot
+        ~expected_base_path:"/wire" ~expected_masc_root:"/wire/.masc"
+        (`Assoc (["workspace",workspace] @ readiness @ List.remove_assoc "state_ready" rows)))))
+    [ []; ["state_ready",`Bool false]; ["state_ready",`String "true"] ]
 
 let decode_answer_receipt ~status_code body =
   Masc.Tui_decode_asks.decode_ask_answer_receipt
@@ -482,6 +511,8 @@ let () =
             test_wire_question_reaches_the_answer_draft
         ; Alcotest.test_case "unknown resolution rejected" `Quick
             test_unknown_wire_resolution_is_rejected
+        ; Alcotest.test_case "foreign or ambiguous workspace cannot clear questions" `Quick
+            test_foreign_or_ambiguous_workspace_never_clears_questions
         ] );
       ( "draft",
         [

@@ -1032,6 +1032,8 @@ let launch_success (node : Plan.node) =
              ; "keeper_turn_id", `Int 41 ]
          ; "phase", `String "running"
          ; "cancel_requested", `Bool false
+         ; "cleanup", `String
+             (Masc.Keeper_owned_job_cleanup_state.to_string Resources_retained)
          ; "artifacts", `List []
          ; "detail", `Null
          ; "container_id", `Null

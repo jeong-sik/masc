@@ -8,6 +8,7 @@ type result_child =
   { alias : string
   ; skill_reference : Skill_reference.t
   ; skill_tool_use_id : string
+  ; activation_frame_sha256 : string
   }
 val bound_trace_id : bound_context -> Keeper_id.Trace_id.t
 val bound_turn_ref : bound_context -> Ids.Turn_ref.t
@@ -33,7 +34,9 @@ val find_bound_result_children : config:Workspace.config -> bound_context ->
   result_child list -> (Keeper_skill_activation_ledger.activation list, error) result
 (** One strict ledger read for all admitted original children. Compare every
     original Task/reference/runtime/snapshot/turn against the sealed recorder;
-    missing or changed admitted children do not create replacement activations. *)
+    missing or changed admitted children do not create replacement activations.
+    Each result's retained immutable activation frame must match the original
+    ledger, including its first activation clock. *)
 
 val bind_async : t -> (bound_context, error) result
 (** Resolve the selected runtime once, keeping the original trace, turn,

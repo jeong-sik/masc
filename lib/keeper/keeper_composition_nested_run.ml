@@ -18,7 +18,7 @@ type record_activation =
 
 type admission =
   | Not_attempted
-  | Admitted of string
+  | Admitted of Ledger.activation
   | Rejected of Executor.admission_rejection
 
 type child =
@@ -76,28 +76,45 @@ let child_invocation run child =
   Ok (tool_use_id, invocation, scope)
 ;;
 
+let retain_activation run child ~invocation ~scope (activation : Ledger.activation) =
+  let matches =
+    String.equal activation.skill_tool_use_id (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+    && activation.agent_core_turn = Agent_core.Tool_contract.Invocation.turn invocation
+    && Skill_reference.equal_identity activation.identity child.call.reference.identity
+    && activation.content_revision = child.call.reference.content_revision
+    && match activation.invocation with
+       | Ledger.Nested_composition_invocation {tool_name;scope=original;origin=_} ->
+         String.equal tool_name run.tool_name && original = scope
+       | Ledger.Instruction_invocation _ | Ledger.Composition_invocation _ -> false in
+  if matches then Admitted activation
+  else Rejected (rejection ~kind:"nested_activation_receipt_mismatch"
+      ~detail:"The returned activation does not belong to this exact original child invocation."
+      (Ledger.activation_to_yojson activation))
+;;
+
 let record_child run child =
-  let record record_activation = Result.bind (child_invocation run child) (fun (identity,invocation,scope) ->
-    Result.map (fun outcome -> identity,outcome)
+  let record record_activation = Result.bind (child_invocation run child) (fun (_,invocation,scope) ->
+    Result.map (fun outcome -> invocation,scope,outcome)
       (record_activation ~invocation ~tool_name:run.tool_name ~scope ~reference:child.call.reference)) in
   match run.record_activation with
   | None -> Rejected (rejection ~kind:"nested_activation_context_unavailable"
       ~detail:"Nested dispatch requires the active turn's canonical Skill activation recorder." `Null)
   | Some record_activation ->
     match record record_activation with
-    | Ok (identity,(Ledger.Recorded _ | Ledger.Already_recorded _)) -> Admitted identity
+    | Ok (invocation,scope,(Ledger.Recorded activation | Ledger.Already_recorded activation)) ->
+      retain_activation run child ~invocation ~scope activation
     | Error error -> Rejected (rejection ~kind:"nested_activation_rejected"
         ~detail:(Recorder.error_to_string error) (Recorder.error_to_yojson error))
 ;;
 
 let restore_admissions run ~find_activation =
   List.iter (fun child ->
-    let found = Result.bind (child_invocation run child) (fun (identity,invocation,scope) ->
-      Result.map (fun activation -> identity,activation)
+    let found = Result.bind (child_invocation run child) (fun (_,invocation,scope) ->
+      Result.map (fun activation -> invocation,scope,activation)
         (find_activation ~invocation ~tool_name:run.tool_name ~scope ~reference:child.call.reference)) in
     child.admission <- match found with
-      | Ok (_,None) -> Not_attempted
-      | Ok (identity,Some _) -> Admitted identity
+      | Ok (_,_,None) -> Not_attempted
+      | Ok (invocation,scope,Some activation) -> retain_activation run child ~invocation ~scope activation
       | Error error -> Rejected (rejection ~kind:"nested_original_activation_unavailable"
           ~detail:(Recorder.error_to_string error) (Recorder.error_to_yojson error))) run.children
 ;;
@@ -136,6 +153,18 @@ let admit_node run ~(node : Plan.node) =
       | Admitted _ -> Ok ()
       | Rejected rejection -> Error rejection
       | Not_attempted -> invalid_arg "child admission was not settled")
+;;
+
+let admitted_activation run ~alias =
+  match List.find_opt (fun child -> Plan.Node_id.equal child.call.alias alias) run.children with
+  | None -> Error (rejection ~kind:"nested_child_unknown"
+      ~detail:"The requested child is absent from this frozen run." (`String (Plan.Node_id.to_string alias)))
+  | Some child -> Eio.Mutex.use_ro child.mutex (fun () ->
+      match child.admission with
+      | Admitted activation -> Ok activation
+      | Rejected rejection -> Error rejection
+      | Not_attempted -> Error (rejection ~kind:"nested_child_not_admitted"
+          ~detail:"The child has no admitted original activation." (Nested.call_to_json child.call)))
 ;;
 
 let settled = function Ok nodes -> nodes | Error (failure : Executor.failure) -> failure.settled
@@ -212,7 +241,10 @@ let evidence_to_json run ~plan ~execution =
         | Tool_result.Completed _, Some _ | Tool_result.Failed _, _ | Tool_result.Deferred _, _ -> None in
     let admission = match child.admission with
       | Not_attempted -> `Null
-      | Admitted id -> `Assoc [ "skill_tool_use_id", `String id ]
+      | Admitted activation -> `Assoc
+          [ "skill_tool_use_id", `String activation.skill_tool_use_id
+          ; "activation", Ledger.activation_to_yojson activation
+          ; "activation_frame_sha256", `String (Ledger.activation_frame_sha256 activation) ]
       | Rejected rejection -> `Assoc [ "rejection", rejection.data ] in
     let node_states = List.map (fun (source, id) ->
         let fields = [ "source", `String (Plan.Node_id.to_string source); "node_id", `String (Plan.Node_id.to_string id) ] in

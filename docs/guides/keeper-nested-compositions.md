@@ -87,6 +87,15 @@ was absent. If a waiting successor stops before dispatch, the original wait
 remains recoverable only through unchanged journal nodes, matching canonical
 job IDs and exact predecessor terminal evidence.
 
+An admitted child retains the actual activation receipt returned by its original
+recorder or exact ledger lookup. Result evidence includes that receipt and its
+immutable frame digest. Result delivery compares it with the original ledger,
+including the first activation clock; a matching invocation ID alone is
+insufficient. Later delivery and action observations do not change that frame.
+The native receipt lookup neither records a new activation nor grants broker
+admission. Original parent-to-child submission recovery still requires the
+producer-owned intent and parent journal transition described below.
+
 Losing the first worker before it records any result wait does not prove that
 its effects were absent. An unfinished effectful attempt, an unknown or
 post-effect failure, or a defer without a valid producer-owned result wait

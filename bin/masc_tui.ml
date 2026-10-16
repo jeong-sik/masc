@@ -11577,39 +11577,39 @@ let load_http_scoped_surfaces ~ask_request ~refresh_ticket ~server_identity ~hos
   (* Metrics draws the transport and the Overview reads its queue pressure,
      so a refresh on another surface does not spend a request on it. [None]
      leaves whatever the last read observed. *)
-  let http_transport =
+  let read_transport () =
     when_needed needs.needs_transport (fun () ->
         load_transport_health ~host ~port)
   in
-  let http_approvals =
+  let read_approvals () =
     Option.map
       (fun ao_ticket ->
          { ao_ticket; ao_result = load_approvals ~host ~port })
       approval_ticket
   in
-  let http_board =
+  let read_board () =
     when_needed needs.needs_board (fun () ->
         load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
           ~hearth:board_hearth)
   in
-  let http_board_hearths =
+  let read_board_hearths () =
     when_needed needs.needs_board (fun () -> load_board_hearths ~host ~port)
   in
-  let http_planning =
+  let read_planning () =
     when_needed needs.needs_planning (fun () -> load_planning ~host ~port)
   in
-  let http_system_logs =
+  let read_system_logs () =
     when_needed needs.needs_system_logs (fun () ->
         load_system_logs ~host ~port ?level:system_log_level
           ~limit:system_log_page ())
   in
-  let http_fleet_safety =
+  let read_fleet_safety () =
     when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
-  let http_asks, http_keeper_roster =
+  let read_keeper_surfaces () =
     load_http_keeper_surfaces ~on_asks:None ~ask_request ~server_identity ~host ~port ~needs
   in
-  let http_runtime_quota =
+  let read_runtime_quota () =
     when_needed needs.needs_runtime_quota (fun () ->
         (* A raise here would fail the whole scoped refresh and drop the
            transport and ask readings it carries; the picker's loader maps
@@ -11621,14 +11621,14 @@ let load_http_scoped_surfaces ~ask_request ~refresh_ticket ~server_identity ~hos
             let reason = Printexc.to_string exn in
             (Error reason, Error reason))
   in
-  let http_keeper_usage =
+  let read_keeper_usage () =
     when_needed needs.needs_keeper_usage (fun () ->
       match Masc_tui_loader.load_keeper_usage ~host ~port with
       | result -> result
       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
       | exception exn -> Error (Printexc.to_string exn))
   in
-  let http_provider_history =
+  let read_provider_history () =
     when_needed needs.needs_provider_history (fun () ->
       match Masc_tui_loader.load_provider_usage_history ~host ~port
               ~days:provider_history_days with
@@ -11637,19 +11637,47 @@ let load_http_scoped_surfaces ~ask_request ~refresh_ticket ~server_identity ~hos
       | exception exn ->
           provider_history_days, Error (Printexc.to_string exn))
   in
-  let http_overview_goals =
+  let read_overview_goals () =
     when_needed needs.needs_overview_goals (fun () ->
         match Masc_tui_loader.load_overview_goals ~host ~port with
         | result -> result
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
-  let http_account_emails =
+  let read_account_emails () =
     when_needed needs.needs_account_emails (fun () ->
         match Masc_tui_loader.load_account_emails ~host ~port with
         | result -> result
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
+  in
+  (* These reads consume the same dispatch snapshot and none needs a sibling's
+     result. Join them before the existing trailing identity probe: a refused
+     interval still discards the whole bundle. With no Eio switch, [read_pair]
+     runs the same readers synchronously. *)
+  let ((http_transport, http_fleet_safety),
+       ((http_approvals, (http_board, http_board_hearths)),
+        (http_planning, http_system_logs))),
+      (((http_asks, http_keeper_roster), http_overview_goals),
+       ((http_runtime_quota, http_keeper_usage),
+        (http_provider_history, http_account_emails))) =
+    Masc_tui_loader.read_pair
+      (fun () ->
+        Masc_tui_loader.read_pair
+          (fun () -> Masc_tui_loader.read_pair read_transport read_fleet_safety)
+          (fun () ->
+            Masc_tui_loader.read_pair
+              (fun () ->
+                Masc_tui_loader.read_pair read_approvals
+                  (fun () -> Masc_tui_loader.read_pair read_board read_board_hearths))
+              (fun () -> Masc_tui_loader.read_pair read_planning read_system_logs)))
+      (fun () ->
+        Masc_tui_loader.read_pair
+          (fun () -> Masc_tui_loader.read_pair read_keeper_surfaces read_overview_goals)
+          (fun () ->
+            Masc_tui_loader.read_pair
+              (fun () -> Masc_tui_loader.read_pair read_runtime_quota read_keeper_usage)
+              (fun () -> Masc_tui_loader.read_pair read_provider_history read_account_emails)))
   in
   let confirmed_identity =
     match server_identity, load_server_identity ~host ~port with

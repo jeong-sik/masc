@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Put open-source MSX cartridges into <base-path>/.masc/msx/carts/, the
-# inventory the MSX machine (RFC-0439) lists as carts_available and the TUI
+# inventory the MSX machine (RFC-0439) lists through masc_msx_meta and the TUI
 # load menu shows.
 #
 # Every entry is a release asset published by the game's author under a

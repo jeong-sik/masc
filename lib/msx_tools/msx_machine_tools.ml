@@ -155,11 +155,6 @@ let roms_dir_of_source = function
   | None_available -> None
 ;;
 
-let bios_of_source = function
-  | Argument _ | Env _ | Inventory _ -> true
-  | None_available -> false
-;;
-
 (* A cart is a name in carts/, with or without .rom/.dsk. It is never a path:
    the worker's filesystem holds more than game media, and a name that cannot
    leave carts/ leaves no traversal to reason about. Only a regular file is a
@@ -274,20 +269,12 @@ let handle_load ?(after_load = fun () -> ()) ~relay ~tool_name
          (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
             ~cart_path:(Some path) ~disk_path:None))
   | None ->
-    (* BIOS only, and the inventory so the next call can name a game. *)
-    (match carts_available ~base_path with
-     | Error message ->
-       refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
-         ("cartridge inventory cannot be listed: " ^ message)
-     | Ok carts ->
-       of_lane ~tool_name ~start_time
-         ~extra:
-           [ ("carts_available", `List (List.map (fun n -> `String n) carts))
-           ; ("bios", `Bool (bios_of_source bios_source))
-           ]
-         (relayed
-            (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-               ~cart_path:None ~disk_path:None)))
+    (* A load replaces the running machine and truncates its input ledger, so
+       it never runs without something to load. The inventory is read through
+       masc_msx_meta, which changes nothing. *)
+    reject ~tool_name ~start_time
+      "cart is required: loading replaces the running machine. List the inventory with \
+       masc_msx_meta include_inventory=true and pass one of those names."
 ;;
 
 let handle_eject ~relay ~tool_name ~start_time ~agent_name _args =

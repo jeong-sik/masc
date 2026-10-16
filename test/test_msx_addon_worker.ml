@@ -87,8 +87,12 @@ let test_stdio_machine_lifecycle () =
                 (absent_export.is_error = Some true);
               check bool "refused export creates no file" false
                 (Sys.file_exists (Filename.concat carts "new-data.dsk"));
-              let loaded = call "masc_msx_load" (`Assoc ["roms_dir", `String ""]) in
-              check bool "load succeeds without external media" false (loaded.is_error = Some true);
+              let refused = call "masc_msx_load" (`Assoc ["roms_dir", `String ""]) in
+              check bool "a load that names no image is refused" true (refused.is_error = Some true);
+              check bool "and loads no machine" true
+                (Yojson.Safe.Util.(live_observation (observe ()) |> member "state") = `String "no_machine");
+              let loaded = call "masc_msx_load" (`Assoc ["roms_dir", `String ""; "cart", `String "fixture"]) in
+              check bool "load succeeds with an inventory image" false (loaded.is_error = Some true);
               let before = frame loaded in
               let overflow = call "masc_msx_peek" (`Assoc ["address", `String "3fffffffffffffff";
                 "length", `Int 16]) in

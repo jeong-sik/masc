@@ -725,6 +725,19 @@ let await_machine_publication clock config =
     | Ok (Some reading) -> not reading.refreshing
     | Ok None | Error _ -> false)
 
+(* The load route boots an image, so these tests stock the attached worker's
+   inventory with one blank cartridge. *)
+let stage_fixture_cart config =
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      Sys.mkdir dir 0o755
+    end in
+  let carts = Filename.concat (Filename.concat (Workspace.masc_dir config) "msx") "carts" in
+  mkdir_p carts;
+  Out_channel.with_open_bin (Filename.concat carts "fixture.rom") (fun channel ->
+    output_string channel (String.make 0x4000 '\000'))
+
 let test_human_press_wakes_machine_watchers_once () =
   with_held_machine_observation (fun env _sw config dir _state ~entered ~hold_next ~release ->
     let clock = Eio.Stdenv.clock env in
@@ -733,9 +746,10 @@ let test_human_press_wakes_machine_watchers_once () =
       Msx_lane.install_activity_observer None;
       ignore (Msx_lane.eject ())) (fun () ->
       Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+      stage_fixture_cart config;
       check bool "attached worker loads the fixture machine" true
         (fst (Server_routes_http_routes_msx.load_response ~config
-          ~agent_name:"operator" ~body:{|{"roms_dir":""}|}) = `OK);
+          ~agent_name:"operator" ~body:{|{"roms_dir":"","cart":"fixture.rom"}|}) = `OK);
       await_machine_publication clock config;
       let id = attach_machine_watcher config dir in
       let sequence () = int "observation_seq" (instance config id) in
@@ -789,8 +803,9 @@ let test_human_load_wakes_machine_watchers_once () =
       await_machine_publication clock config;
       let baseline = sequence () in
       hold_next ();
-      check bool "a human BIOS-only load is accepted" true
-        (load {|{"roms_dir":""}|} = `OK);
+      stage_fixture_cart config;
+      check bool "a human load is accepted" true
+        (load {|{"roms_dir":"","cart":"fixture.rom"}|} = `OK);
       Eio.Promise.await entered;
       check_no_extra_machine_wake config id;
       release ();

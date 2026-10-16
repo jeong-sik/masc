@@ -1139,7 +1139,7 @@ let test_launch_replay_mode_survives_pre_effect_refusal () =
       check bool "only the original unknown effect requires Existing-only replay" unknown (Option.is_some launch_replay);
       launch_success node in
     let denied = submit ~launch_invocation_of:(fun () -> Some recorded)
-        ~admit_node:(fun ~node:_ -> Error Executor.{detail="explicit admission refusal";data=`Assoc []})
+        ~admit_node:(fun ~node:_ -> Error Executor.{detail="explicit admission refusal";data=`Assoc [];permanence=Journal.Not_proven_permanent})
         base_path sw prepared resume |> accepted in
     ignore (await base_path denied);
     check int "supported admission API refuses before producer dispatch" 0 !calls;

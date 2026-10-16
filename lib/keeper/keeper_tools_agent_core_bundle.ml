@@ -90,6 +90,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?(identity_surface : Keeper_tools_agent_core.attached_surface option)
       ?composition_plan_index
       ?skill_activation_context
+      ?composition_result_delivery
       ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
       ?capability_surface
@@ -535,6 +536,7 @@ let make_tool_bundle_for_descriptors_with_policy
           ?nested_activation_context:skill_activation_context
     in
     make_composition_tools
+        ?result_delivery:composition_result_delivery
         ~instruction_skills
         ~skill_compositions:composition_skills
         ?composition_plan_index
@@ -853,6 +855,7 @@ let make_tool_bundle_for_capability_surface
       ?identity_surface
       ?composition_plan_index
       ?skill_activation_context
+      ?composition_result_delivery
       ?turn_ctx_cell
       ?checkpoint_owner
       ?tool_result_inline_ceiling_bytes
@@ -873,6 +876,7 @@ let make_tool_bundle_for_capability_surface
     ?identity_surface
     ?composition_plan_index
     ?skill_activation_context
+    ?composition_result_delivery
     ~allow_unrecorded_skill_surface:false
     ?turn_ctx_cell
     ?checkpoint_owner

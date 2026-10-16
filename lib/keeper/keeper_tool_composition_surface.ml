@@ -948,10 +948,19 @@ let async_submission_result
          data)
 ;;
 
-let status_result
+let discard_status_binding ~delivery_registry ~invocation =
+  match delivery_registry,invocation with
+  | Some registry,Some invocation -> Keeper_composition_result_delivery.discard_status registry ~invocation
+  | None,Some _ | Some _,None | None,None -> ()
+;;
+
+let status_result_for_invocation
+      ?delivery_registry
+      ?invocation
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~request_id
+      ()
   =
   let tool_name = Catalog.status_tool_name in
   let start_time = Tool_timing.start () in
@@ -969,18 +978,29 @@ let status_result
         ~start_time
         ~class_:Tool_result.Runtime_failure
         ~ok:true
-        (with_kind (Keeper_msg_async.entry_to_json entry))
+        (Keeper_composition_result_delivery.status_payload ?invocation entry)
     in
     (match Tool_bridge.attach_artifact_manifest
              ~projection:Tool_output.Inline_with_reference ~base_path:config.base_path result with
-     | Ok result -> result
+     | Ok result ->
+       (match delivery_registry,invocation with
+        | Some registry,Some invocation ->
+          (match Keeper_composition_result_delivery.record_status registry ~entry ~invocation ~result with
+           | Ok () -> ()
+           | Error error -> Log.Keeper.warn
+               "Prepared composition status binding failed keeper=%s request_id=%s detail=%s"
+               meta.name request_id (Keeper_composition_result_delivery.error_to_string error))
+        | None,Some _ | Some _,None | None,None -> ());
+       result
      | Error { message; _ } ->
+       discard_status_binding ~delivery_registry ~invocation;
        Tool_result.make_err
          ~tool_name
          ~class_:Tool_result.Runtime_failure
          ~start_time
          ("async composition status manifest persistence failed: " ^ message))
   | Keeper_msg_async.Absent ->
+    discard_status_binding ~delivery_registry ~invocation;
     result_from_json
       ~tool_name
       ~start_time
@@ -992,6 +1012,7 @@ let status_result
              ; "request_id", `String request_id
              ]))
   | Keeper_msg_async.Unreadable reason ->
+    discard_status_binding ~delivery_registry ~invocation;
     result_from_json
       ~tool_name
       ~start_time
@@ -1004,6 +1025,7 @@ let status_result
              ; "reason", `String reason
              ]))
   | Keeper_msg_async.Rejected rejection ->
+    discard_status_binding ~delivery_registry ~invocation;
     result_from_json
       ~tool_name
       ~start_time
@@ -1015,6 +1037,10 @@ let status_result
              ; "request_id", `String request_id
              ; "reason", Keeper_msg_async.access_rejection_to_json rejection
              ]))
+;;
+
+let status_result ~config ~meta ~request_id =
+  status_result_for_invocation ~config ~meta ~request_id ()
 ;;
 
 let cancel_result
@@ -1077,6 +1103,7 @@ let make_request_control_tool
       ~description
       ~input_schema
       ~descriptor
+      ~on_rejected
       ~handle
   =
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
@@ -1085,7 +1112,7 @@ let make_request_control_tool
     ~name
     ~description
     ~input_schema
-    (fun _execution_env input ->
+    (fun execution_env input ->
       let start_time = Tool_timing.start () in
       match
         Tool_input_validation.validate_args
@@ -1094,11 +1121,12 @@ let make_request_control_tool
           ~args:input
           ()
       with
-      | Error rejection -> rejection
+      | Error rejection -> on_rejected execution_env; rejection
       | Ok _ ->
         (match request_id_of_validated_input input with
-         | Some request_id -> handle request_id
+         | Some request_id -> handle execution_env request_id
          | None ->
+           on_rejected execution_env;
            Tool_result.runtime_err
              ~tool_name:name
              ~start_time
@@ -1678,6 +1706,7 @@ let make_tools_with_authority
       ?record_composition_activation
       ?record_nested_composition_activation
       ?nested_activation_context
+      ?result_delivery
       ~(config : Workspace.config)
       ~meta
       ~capability_authority
@@ -2390,7 +2419,12 @@ let make_tools_with_authority
         ~input_schema:Tool_schemas_composition_control.status_schema.input_schema
         ~descriptor:
           (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
-        ~handle:(fun request_id -> status_result ~config ~meta ~request_id)
+        ~on_rejected:(fun execution_env -> discard_status_binding ~delivery_registry:result_delivery
+          ~invocation:(Agent_core.Tool.Execution_env.invocation execution_env))
+        ~handle:(fun execution_env request_id ->
+          status_result_for_invocation ?delivery_registry:result_delivery
+            ?invocation:(Agent_core.Tool.Execution_env.invocation execution_env)
+            ~config ~meta ~request_id ())
   in
   let cancel_tool =
       make_request_control_tool
@@ -2399,7 +2433,8 @@ let make_tools_with_authority
         ~description:Tool_schemas_composition_control.cancel_schema.description
         ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
-        ~handle:(fun request_id -> cancel_result ~config ~meta ~request_id)
+        ~on_rejected:(fun _execution_env -> ())
+        ~handle:(fun _execution_env request_id -> cancel_result ~config ~meta ~request_id)
   in
   (* The Skill reader and the two request controls are not Skill
      compositions; each is declared in its own [config/tools/<name>.toml]. *)

@@ -18,6 +18,7 @@ val make_tool_bundle_for_capability_surface
   -> ?identity_surface:Keeper_tools_agent_core.attached_surface
   -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
   -> ?skill_activation_context:Keeper_skill_activation_recorder.t
+  -> ?composition_result_delivery:Keeper_composition_result_delivery.t
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> ?checkpoint_owner:(unit -> Runtime_execution.checkpoint_owner option)
   -> ?tool_result_inline_ceiling_bytes:(unit -> int)

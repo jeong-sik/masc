@@ -88,6 +88,11 @@ val load
 
 val source : t -> source
 
+val validate_request : t -> Keeper_msg_async.entry -> (unit, error) result
+(** Read-only proof of actual durable current/prior request ownership and every
+    immutable source coordinate, including Task, invocation and both artifacts.
+    A copied context cannot create membership. No worker or continuation binds. *)
+
 val waiting_continuation : t -> (continuation option, error) result
 (** Read only canonical current-owner terminal proof and exact journal state.
     [None] means no bound request, an active worker, or a settled worker that

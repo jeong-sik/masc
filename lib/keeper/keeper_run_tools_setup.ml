@@ -663,14 +663,16 @@ let prepare_agent_setup
       ~projection:turn_skill_projection
       task_skill_selection
   in
+  let skill_turn_ref = Ids.Turn_ref.make
+    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    ~absolute_turn:keeper_turn_id in
+  let composition_result_delivery = Keeper_composition_result_delivery.create
+    ~base_path:config.base_path ~physical_turn_ref:skill_turn_ref in
   let* skill_activation_context =
     Keeper_skill_activation_recorder.make
       ~trace_id:meta.runtime.trace_id
       ~runtime_id:(fun () -> Atomic.get active_runtime_id)
-      ~turn_ref:
-        (Ids.Turn_ref.make
-           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-           ~absolute_turn:keeper_turn_id)
+      ~turn_ref:skill_turn_ref
       ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision skill_snapshot)
       ~task_selection:executable_task_skill_selection
     |> Result.map_error (fun error ->
@@ -827,6 +829,7 @@ let prepare_agent_setup
         }
       ?composition_plan_index
       ~skill_activation_context
+      ~composition_result_delivery
       ~turn_ctx_cell
       ~checkpoint_owner:(fun () -> !active_checkpoint_owner)
       ~tool_result_inline_ceiling_bytes:(fun () -> !active_tool_result_inline_ceiling_bytes)
@@ -1140,6 +1143,7 @@ let prepare_agent_setup
     ; tool_result_commit_required
     ; on_tool_stream_observation
     ; skill_activation_context
+    ; composition_result_delivery
     ; on_tool_result_ready
     ; tools
     ; agent_core_tools

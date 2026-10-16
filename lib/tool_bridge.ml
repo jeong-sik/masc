@@ -100,6 +100,18 @@ let artifact_manifest_from_metadata metadata =
   | None -> Error "typed artifact result is missing its durable manifest"
 ;;
 
+let artifact_manifest_reference result =
+  artifact_manifest_from_metadata (Tool_result.metadata result)
+;;
+
+let artifact_result_envelope ~reference ~structured_content ?content () =
+  Yojson.Safe.to_string
+    (`Assoc
+      ([ "structured_content", structured_content
+       ; "artifact_manifest", Tool_output.normalized_artifact_ref_to_json reference ]
+       @ Option.to_list (Option.map (fun value -> "content", `String value) content)))
+;;
+
 let attach_artifact_manifest ?(projection = Tool_output.Reference_only) ~base_path (result : Tool_result.result) =
   match
     Tool_output.normalized_artifact_refs_in_json_strict
@@ -363,15 +375,8 @@ let project_result
                     | Tool_output.Inline_with_reference -> inline_message
                     | Tool_output.Inline_with_structured_diagnostic -> inline_diagnostic
                   in
-                  let envelope =
-                    Yojson.Safe.to_string
-                      (`Assoc
-                        ([ "structured_content", structured_content
-                         ; "artifact_manifest", Tool_output.normalized_artifact_ref_to_json reference ]
-                         @ (match inline_content with
-                            | None -> []
-                            | Some message -> [ "content", `String message ])))
-                  in
+                  let envelope = artifact_result_envelope
+                    ~reference ~structured_content ?content:inline_content () in
                   let ceiling = Tool_output.inline_ceiling_bytes model_projection in
                   if String.length envelope <= ceiling
                   then Ok envelope

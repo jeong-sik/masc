@@ -650,6 +650,19 @@ let entry_matches_source source (entry : Async.entry) = decode (fun () ->
   let task_fields = List.filter_map (fun (name, value) -> if name = "source_task_id" then Some value else None) fields in
   require (task_fields = (match source.source_task_id with None -> [] | Some task -> [`String task])) "source task identity mismatch")
 
+let validate_request journal (entry : Async.entry) = filesystem (fun () ->
+  if not (String.equal (Fs_compat.realpath entry.base_path) journal.base_path)
+  then Error Source_conflict
+  else
+    let* () = entry_matches_source journal.immutable_source entry
+      |> Result.map_error (fun detail -> Invalid_source detail) in
+    let* state = strict_read ~root:journal.root journal.path in
+    let* () = check_source journal state in
+    let belongs (binding : binding) = String.equal binding.request_id entry.request_id in
+    if Option.exists belongs state.owner
+       || List.exists (fun (binding,_) -> belongs binding) state.prior_owners
+    then Ok () else Error (Invalid_source "canonical request was not admitted to this prepared run"))
+
 let canonical_queued journal request_id =
   let* proof = Async.load_canonical_durable_queued ~base_path:journal.base_path
       ~caller:journal.immutable_source.keeper_name request_id

@@ -4,6 +4,17 @@
 
 ## [0.57.0] - 2026-10-16
 
+### Upgrade notes
+
+- `/health`: the scheduler lag percentiles and threshold counts moved under `.scheduler.lag` (#43176). Scripts that read them at the `.scheduler` top level must read `.scheduler.lag`. The repository comparison script was updated in #43199. This changes a response field location for any external reader, so it is a Breaking candidate pending the operator's call; the fragments carry no Breaking marker.
+- Wiki search (`masc_wiki_search`, `keeper_wiki_search`) orders results by BM25 and searches only the title, summary, tags and body of pages whose header reads. The matching rule is unchanged, but a query no longer matches the `author` or `source` line (#43178). No configuration change.
+- Local developer switches: run `scripts/opam-pin-external-deps.sh --install` once to pin `eio_posix` (#43255).
+- Board MIDI playback needs `midi_soundfont` under `[tui]` in runtime.toml (#43166).
+
+### Experimental
+
+The user-facing features under Added below have no recorded execution evidence in their fragments, so they are Experimental until a dated run log naming the head promotes them. Guide status: `/features`, attachment opening and the MIDI soundfont setting have a guide in `docs/TUI-GUIDE.md`. Guide: none found for `/listen`, the MIDI metadata reader, Candle pricing, exact-lane admission and the shared workspace memory log.
+
 ### Added
 
 - The alphaTex tab renderer keeps `\title`, `\tempo` and `\ts` and draws a header line ahead of the tab (`♩=96 · 4/4 · "Riff"`, only what exists) plus a physical measure-number row above each system (#43163).
@@ -70,6 +81,12 @@
   longer raises `Unix_error(EINTR)` out of `Eio_main.run` and ends the server
   (#43225, #43255). Run `scripts/opam-pin-external-deps.sh --install` once to
   update a local switch.
+
+### Known issues
+
+- Full regression run 38850227393 (head 9b6212a69409, TARGET_SUITES empty) failed. The release lead attributed it, from a quoted log reading, to an environment candidate: `Unix.ENOMEM` from `io_uring_queue_init` in `test_tui_chat_search_projection` under the parallel full run. It is a candidate, not a confirmed cause.
+- Full run 38855354535 (9b6212a69409) and full run 38859872654 (ff7738ca82, the cut base) completed successfully.
+- Commits merged to main after ff7738ca82 belong to v0.58 unless they fix a release-blocking defect.
 
 ## [0.56.0] - 2026-10-14
 

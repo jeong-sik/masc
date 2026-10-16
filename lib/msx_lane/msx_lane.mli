@@ -477,8 +477,10 @@ type disk_export = {
 
 val export_disk : catalog_dir:string -> filename:string -> (disk_export, error) result
 (** Export the currently mounted floppy, including guest writes, to a new .dsk
-    in an existing catalog. The name is a simple ASCII stem (letters, digits,
-    underscore, hyphen; 1..64 characters) plus lowercase [.dsk].
+    in the catalog. A catalog directory that does not exist yet, as on a fresh
+    volume, is created by the export that needs it. The name is a simple ASCII
+    stem (letters, digits, underscore, hyphen; 1..64 characters) plus lowercase
+    [.dsk].
     Existing destinations, including symlinks, are refused. Machine state,
     input ledger and original media files remain unchanged; no time advances.
     The absolute [catalog_dir] and its ancestors must be real directories,

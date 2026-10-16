@@ -1292,6 +1292,10 @@ let export_disk ~catalog_dir ~filename =
            claim that the operation left no effect. *)
         let prepared =
           try
+            (* A fresh volume has no carts/ yet, and this export is what fills
+               it. The directory is made here, before the ancestor check, so
+               that check still sees every component as a real directory. *)
+            if not (Sys.file_exists catalog_dir) then mkdir_checkpoint_directory catalog_dir;
             match real_directories catalog_dir with
             | Error _ as e -> e
             | Ok () -> Ok (Filename.open_temp_file ~temp_dir:catalog_dir ".msx-export-" ".tmp")

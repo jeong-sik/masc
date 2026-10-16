@@ -69,11 +69,11 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 ## Current queue
 
-The first semantic pass produced **24 concrete candidates**. `S1` is implemented in [#43367](https://github.com/jeong-sik/masc/pull/43367) and has passed independent source review. It was selected because complete/sparse acceptance and observer delivery form a bounded, heavily consumed runtime contract with existing lifecycle scenarios. Other `next` items remain queued; this ordering does not waive their coverage.
+The first semantic pass produced **24 concrete candidates**. `S1` is implemented in [#43367](https://github.com/jeong-sik/masc/pull/43367) and has passed independent source review. It was selected because complete/sparse acceptance and observer delivery form a bounded, heavily consumed runtime contract with existing lifecycle scenarios. `K1` follows in [#43370](https://github.com/jeong-sik/masc/pull/43370), preserving distinct failure-policy axes in a single pure classification. Both remain Draft work. Other `next` items remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
-| [K1](#k1) | next | candidate | Compute librarian failure evidence once with explicit independent policy axes |
+| [K1](#k1) | next | in review | Compute librarian failure evidence once with explicit independent policy axes |
 | [K2](#k2) | next | candidate | Give canonical child export selection a typed pure boundary |
 | [K3](#k3) | next | candidate | Represent Board contention rearm tickets with one explicit phase |
 | [K4](#k4) | later | candidate | Make request-evidence reset and projection ownership explicit per attempt |
@@ -126,6 +126,8 @@ Consumers: [lib/keeper/keeper_librarian_runtime.ml](../../../lib/keeper/keeper_l
 Scenarios: [test/test_keeper_librarian_capacity_callback.ml](../../../test/test_keeper_librarian_capacity_callback.ml), [test/test_keeper_librarian_cli_lane.ml](../../../test/test_keeper_librarian_cli_lane.ml), [test/test_keeper_librarian_range.ml](../../../test/test_keeper_librarian_range.ml). **Not executed in this audit.**
 
 Ordering rationale: Bounded pure policy work with existing end-to-end callback and admission-worker scenarios, including slot-order independence and invalid-output veto. It reduces constructor drift without changing dispatch/storage or duplicating the in-review Memory OS codecs.
+
+Implementation: [#43370](https://github.com/jeong-sik/masc/pull/43370) adds a private immutable failure-evidence module. Runtime computes one summary for terminal callbacks; the public interface, dispatch evidence and callback order remain unchanged. Added equal-capacity slot-order cases and strengthened the admission-worker scenario to distinguish native input refusal from measured range-size evidence. Five changed OCaml files passed syntax parsing; scenarios are unexecuted. Review details and exact heads are recorded on the PR.
 
 ### K2
 
@@ -742,4 +744,5 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 
 - Previous work: Memory OS codecs/successor core published as three Draft PRs; current open heads were refreshed before this round. That is source progress, not merged/runtime completion.
 - Round 1: all tracked `.ml`/`.mli` files classified at the pinned baseline; clean-checkout counts independently matched the committed-blob reader; 24 source-backed candidates recorded with boundaries, invariants, callers and suites. S1 implemented with a private immutable observation core, retained lock/observer effects and two additional public-store scenarios; published as [#43367](https://github.com/jeong-sik/masc/pull/43367). OCaml syntax checks passed; behavior suites remain unexecuted.
+- Round 2: K1 implemented as a private failure-evidence classifier in [#43370](https://github.com/jeong-sik/masc/pull/43370). Historical range sizing, named input refusal, invalid-output veto, size-independent failure and current CLI capacity remain separate facts. Syntax parsing passed; existing callback/admission scenarios were extended but not executed.
 - No local Dune build, CI polling, behavior execution, formal GitHub approval, merge or runtime proof is supplied by this inventory.

@@ -162,6 +162,16 @@ record actual requests, question state admission, full-refresh completion and
 manually inspected native frames. Keep foreign-workspace, booting, failed and
 unfinished attempts alongside valid reads.
 
+`tui_asks_early` records the original question request ID, the full refresh's
+monotonic `refresh_started_ns` and `admitted_ms` after the successful question
+snapshot has entered UI state. It is emitted only when the existing early read
+receipt is accepted and consumed. Stale, foreign, cold-start or replayed messages
+do not produce an admission. Question text, answers and workspace paths are not
+copied into this record. Join the same refresh clock to `tui_http_refresh` to
+compare question state usability with terminal refresh completion. A painted or
+actionable native frame remains separate evidence; the log grants no authority
+and does not establish that a Keeper acted on an answer.
+
 ## Collect comparable before/after evidence
 
 Build or obtain binaries identified by their exact source SHAs. Use the same

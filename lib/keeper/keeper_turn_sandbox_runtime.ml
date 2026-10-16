@@ -293,6 +293,30 @@ let microvm_replacement_reason_to_string reason =
     Printf.sprintf "policy proxy port %s -> %s" (port booted_port) (port bound_port)
 ;;
 
+(* The nameserver a guest is booted with: the one the workspace named, else the
+   host's. Only the default network hands one, on a backend that spells
+   [--dns]. [Network_none] has nothing to resolve on, [Network_policy] boots
+   with [--no-dns] so the egress proxy is the only resolver, and Microsandbox
+   spells its own [--dns-nameserver] and refuses the default network in
+   [network_args_for]: asking there would refuse boots that never use one, or
+   put an unrelated refusal in front of msb's own.
+
+   The start reads it once it has decided to boot, and before anything is
+   stopped or deleted for that boot. A refusal after the running guest was
+   deleted and its work volume trimmed would cost the keeper a guest for
+   nothing. A start that adopts never reads it, so a host that joins another
+   network does not refuse a guest that resolves. *)
+let microvm_boot_nameserver ~backend ~network_mode =
+  match (network_mode : Keeper_types_profile_sandbox.network_mode) with
+  | Keeper_types_profile_sandbox.Network_none
+  | Keeper_types_profile_sandbox.Network_policy -> Ok None
+  | Keeper_types_profile_sandbox.Network_inherit ->
+    (match (backend : Keeper_microvm_backend.t) with
+     | Keeper_microvm_backend.Microsandbox -> Ok None
+     | Keeper_microvm_backend.Apple_container | Keeper_microvm_backend.Nerdctl_kata ->
+       Result.map Option.some (Env_config_sandbox.Runtime.microvm_dns ()))
+;;
+
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
@@ -441,6 +465,7 @@ module For_testing = struct
     | Error error -> invalid_arg (image_unresolved_message error)
   let policy_route_holds = policy_route_holds
   let microvm_adoption = microvm_adoption
+  let microvm_boot_nameserver = microvm_boot_nameserver
 end
 
 
@@ -1454,6 +1479,20 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                stale
                detail))
       Keeper_types_profile_sandbox.all_network_modes;
+    (* The guest is stopped and deleted only after the nameserver it will be
+       booted with is known: see {!microvm_boot_nameserver}. *)
+    let boot_after remove_guest =
+      match
+        Result.map_error
+          (fun detail -> "microvm_guest_dns_unusable: " ^ detail)
+          (microvm_boot_nameserver ~backend ~network_mode:t.network_mode)
+      with
+      | Error detail -> `Error (Network_unexpressible detail)
+      | Ok nameserver ->
+        (match remove_guest () with
+         | Ok () -> `Boot nameserver
+         | Error detail -> `Error (Unadoptable_guest_not_removed detail))
+    in
     let start_state =
       match
         probe_microvm_container_state
@@ -1479,35 +1518,27 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
                  points at a port this process no longer holds, or it runs
                  another image or size. Adopting it keeps the keeper on the
                  old one with nothing said. Replace it. *)
-              Log.Keeper.info
-                "microvm guest replaced instead of adopted keeper=%s name=%s: %s"
-                t.meta.name
-                container_name
-                (String.concat
-                   "; "
-                   (List.map microvm_replacement_reason_to_string reasons));
-              (match
-                 stop_and_delete_microvm_container ?timeout_sec ~backend container_name
-               with
-               | Ok () -> `Boot
-               | Error detail -> `Error (Unadoptable_guest_not_removed detail)))
+              boot_after (fun () ->
+                Log.Keeper.info
+                  "microvm guest replaced instead of adopted keeper=%s name=%s: %s"
+                  t.meta.name
+                  container_name
+                  (String.concat
+                     "; "
+                     (List.map microvm_replacement_reason_to_string reasons));
+                stop_and_delete_microvm_container ?timeout_sec ~backend container_name))
          | None ->
            (* A guest from an older server process can still be running, but
               its temp snapshot capability died with that process. It is not
               safe to guess the mount or use credentials we cannot redact.
               Replace the guest with one whose snapshot this process owns. *)
-           (match
-              stop_and_delete_microvm_container
-                ?timeout_sec
-                ~backend
-                container_name
-            with
-            | Ok () -> `Boot
-            | Error detail -> `Error (Unadoptable_guest_not_removed detail)))
+           boot_after (fun () ->
+             stop_and_delete_microvm_container ?timeout_sec ~backend container_name))
       | Error probe_error ->
         `Error (Guest_state_unreadable probe_error)
       | Ok Keeper_sandbox_runtime.Docker_container_stopped
-      | Ok Keeper_sandbox_runtime.Docker_container_absent -> `Boot
+      | Ok Keeper_sandbox_runtime.Docker_container_absent ->
+        boot_after (fun () -> Ok ())
     in
     match start_state with
     | `Adopt snapshot ->
@@ -1526,7 +1557,7 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
        | Ok () -> adopt snapshot
        | Error detail -> Error (Adopted_guest_volume_unverified detail))
     | `Error error -> Error error
-    | `Boot ->
+    | `Boot nameserver ->
       (* A stopped guest survived [--rm] (host reboot mid-life); clear the
          name before booting. Absent makes this a no-op. *)
       let (_ : Unix.process_status * string) =
@@ -1560,11 +1591,6 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
        with
        | Error detail -> Error (Guest_provisions_unavailable detail)
        | Ok provisions ->
-         let dns =
-           match Env_config_sandbox.Runtime.microvm_dns () with
-           | "" -> None
-           | server -> Some server
-         in
          (* Reuse the snapshot a previous turn left mounted: the guest is
             keeper-lifetime, so its mounts must keep pointing at the same
             directory. Only a fresh boot builds a new one. *)
@@ -1636,7 +1662,11 @@ let start_microvm_container_unlocked ?timeout_sec (t : t) =
            | Some _, None | None, _ -> None
          in
          (match
-            Keeper_sandbox_microvm.network_args_for backend ~dns ~keeper_name:t.meta.name ~policy_proxy
+            Keeper_sandbox_microvm.network_args_for
+              backend
+              ~dns:(Option.map Ipaddr.to_string nameserver)
+              ~keeper_name:t.meta.name
+              ~policy_proxy
               t.network_mode
           with
           | Error detail ->

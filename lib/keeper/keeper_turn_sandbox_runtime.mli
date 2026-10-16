@@ -187,6 +187,16 @@ module For_testing : sig
       for now. No record, another image, another memory or CPU count, or a
       policy route {!policy_route_holds} rejects each means replace, and every
       one that applies is named. *)
+
+  val microvm_boot_nameserver
+    :  backend:Keeper_microvm_backend.t
+    -> network_mode:Keeper_types_profile_sandbox.network_mode
+    -> (Ipaddr.t option, string) result
+  (** The nameserver a guest is booted with: the one the workspace named, else
+      the host's resolver. [Error] when there is none a guest can use. [Ok
+      None] where no [--dns] is spelled: the other network modes and
+      Microsandbox. The start reads it after deciding to boot and before it
+      stops or deletes anything for that boot. *)
 end
 
 module For_testing_microvm : sig

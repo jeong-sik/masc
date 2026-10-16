@@ -2541,7 +2541,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ${rd.sandbox_profile === 'microvm' ? html`
         <${Callout}
           title="microvm 이미지는 따로 넣어야 합니다"
-          body="microvm 은 container 저장소의 이미지를 씁니다. docker 에 빌드한 것으로는 실행되지 않고 실행 직전에 거절됩니다. network_mode = inherit 은 container 의 NAT 를 쓰며 외부로 나갑니다 — 다만 게스트 기본 DNS 가 응답하지 않아 nameserver 를 함께 넘깁니다(MASC_KEEPER_MICROVM_DNS, 기본 1.1.1.1). host 네트워크 자체는 container 에 없습니다."
+          body="microvm 은 container 저장소의 이미지를 씁니다. docker 에 빌드한 것으로는 실행되지 않고 실행 직전에 거절됩니다. network_mode = inherit 은 container 의 NAT 를 쓰며 외부로 나갑니다 — 다만 게스트 기본 DNS 가 응답하지 않아 nameserver 를 함께 넘깁니다. runtime.toml 의 sandbox.microvm_dns 로 정하고(서버를 다시 띄워야 반영됩니다), 비워 두면 호스트의 첫 리졸버를 복사합니다. 호스트 리졸버가 게스트에서 쓸 수 없는 주소(fe80:: 같은 link-local, 127.x 같은 loopback)면 부팅을 거절합니다. host 네트워크 자체는 container 에 없습니다."
           tone="warn"
         />
       ` : null}

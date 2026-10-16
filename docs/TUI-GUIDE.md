@@ -2485,6 +2485,19 @@ Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter
 
 In Approvals, `a` opens the selected Ask in a dedicated answer reader. The header shows Ask and Question position plus answered count. Left/Right (or j/k) changes the question; PgUp/PgDn and the wheel scroll long prompts and choices. `[`/`]` changes the Ask, and Esc returns to Approvals. Choice digits apply only to the active question.
 
+While the current workspace remains verified, background refreshes can deliver
+questions before slower Dashboard or roster reads finish. The question read
+checks the server workspace again before delivery. First connection and recovery
+from an unconfirmed workspace still wait for the complete verified refresh.
+Question updates keep the existing answer reader and notification behavior;
+they do not finish the other loading indicators or change workspace authority.
+
+A refresh delivers its question listing once. Starting an answer retires older
+question reads, so a delayed background response cannot restore the question
+after the answer's own reload removed it. New question listings resume when
+answer submission finishes. A failed question read retains the previous snapshot
+and draft; submission waits for a successful read.
+
 `w` opens Workspace Gate modes; `e` opens Outside services modes. Choose from “Ask me for each decision”, “Let Auto Judge decide”, and “Allow every call without review”. Opening the chooser makes no change. Enter applies the selected mode through the existing authenticated API; Esc cancels. The status row reflects the next server reading.
 
 ### Board navigation and Planning changes

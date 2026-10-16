@@ -913,6 +913,111 @@ let report_shape = function
   | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read -> Sparse_update
 
+(* [used] reached its limit. Count windows are decoded as [used / limit]
+   ([fraction_of_counts]), which is exactly 1.0 when the two are equal. *)
+let window_is_spent (window : window) =
+  match window.utilization with
+  | Fraction used -> Float.compare used 1.0 >= 0
+  | Percent used -> used >= 100
+  | Usd { used; limit = Some limit } -> used >= limit
+  | Usd { limit = None; _ } -> false
+;;
+
+(* Only a window that gates model calls can explain a refused model call. *)
+let gates_model_calls (window : window) =
+  match window.role with
+  | Gates_model_calls -> true
+  | Counts_other_use | Unclassified_limit -> false
+;;
+
+type scope_room =
+  | No_gating_window
+  | Room_left
+  | Spent_until of float
+  | Spent_without_reset
+
+type gate_coverage =
+  | One_spent_window_refuses
+  | Every_window_must_be_spent
+
+(* Whether a complete report of this source lets a scope be called refused. A
+   sparse source holds only the windows it has stated so far, so a window it
+   never stated is no evidence of room, and a spent one cannot say it covers
+   every model; those sources have typed refusals of their own. *)
+let gate_coverage = function
+  | Antigravity_usage_read -> Some Every_window_must_be_spent
+  | Openrouter_key_read | Zai_quota_limit_read | Kimi_coding_usages_read
+  | Ollama_balance_read | Muse_subscription_usage -> Some One_spent_window_refuses
+  | Claude_code_rate_limit_event | Codex_account_rate_limits_updated
+  | Codex_account_rate_limits_read -> None
+
+(* One gating window as the table holds it, read at [now]. *)
+type gating_reading =
+  | Window_has_room
+  | Window_spent_until of float
+  | Window_spent_open
+
+let gating_reading ~now (held : recorded) =
+  if not (window_is_spent held.window)
+  then Window_has_room
+  else (
+    match held.window.resets_at with
+    | None -> Window_spent_open
+    | Some resets_at ->
+      let resets_at = Float.of_int resets_at in
+      if Float.compare resets_at now > 0
+      then Window_spent_until resets_at
+      else if Float.compare held.observed_at resets_at < 0
+      then Window_has_room (* spent when seen, and its stated reset has passed *)
+      else Window_spent_open (* seen spent after its own reset: no end to trust *))
+;;
+
+let scope_room ~coverage ~now (held : recorded list) =
+  match List.filter (fun (r : recorded) -> gates_model_calls r.window) held with
+  | [] -> No_gating_window
+  | gating ->
+    let readings = List.map (gating_reading ~now) gating in
+    let spent =
+      List.filter
+        (function Window_has_room -> false | Window_spent_until _ | Window_spent_open -> true)
+        readings
+    in
+    let refused =
+      match coverage with
+      | One_spent_window_refuses -> not (List.is_empty spent)
+      | Every_window_must_be_spent -> List.length spent = List.length readings
+    in
+    if not refused
+    then Room_left
+    else if List.exists (function Window_spent_open -> true | Window_has_room | Window_spent_until _ -> false) spent
+    then Spent_without_reset
+    else (
+      (* Calls are refused until the last spent window resets when any one of
+         them refuses, and only until the first when all of them must. *)
+      let pick, start =
+        match coverage with
+        | One_spent_window_refuses -> Float.max, Float.neg_infinity
+        | Every_window_must_be_spent -> Float.min, Float.infinity
+      in
+      Spent_until
+        (List.fold_left
+           (fun held_end -> function
+              | Window_spent_until resets_at -> pick held_end resets_at
+              | Window_has_room | Window_spent_open -> held_end)
+           start
+           spent))
+;;
+
+(* A report is not a refusal, so it can say a scope has no room but never that
+   it has some: a stated window the table already holds stands until its own
+   reset, and only a success clears an observation. *)
+let rest_scope ~scope ~coverage ~now held =
+  match scope_room ~coverage ~now held with
+  | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+  | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
+  | No_gating_window | Room_left -> ()
+;;
+
 let record ~scope ~observed_at (report : report) =
   let shape = report_shape report.source in
   match shape, report.windows with
@@ -952,9 +1057,17 @@ let record ~scope ~observed_at (report : report) =
         windows in
       match shape, accepted_windows with
       | Sparse_update, [] -> None
-      | (Complete_snapshot | Sparse_update), windows -> Some { report with windows })
+      | (Complete_snapshot | Sparse_update), windows ->
+        Some
+          ( { report with windows }
+          , Hashtbl.fold (fun _ held rest -> held :: rest) by_window [] ))
     in
-    Option.iter (fun accepted ->
+    Option.iter (fun (accepted, held) ->
+      Option.iter
+        (fun coverage ->
+           rest_scope ~scope ~coverage ~now:observed_at
+             (List.filter (fun (r : recorded) -> r.source = report.source) held))
+        (gate_coverage report.source);
       try (Atomic.get record_observer) ~scope ~observed_at accepted
        with Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->

@@ -26,7 +26,9 @@ val create_server :
 
 (** Start the gRPC workspace server in a forked fiber.
 
-    Does nothing if gRPC is not enabled.
+    Publishes [Disabled] when gRPC is not enabled. Otherwise the listener owns
+    a separate switch and publishes [Listening] only after the actual loopback
+    socket bind succeeds. Its typed failure does not cancel sibling transports.
 
     @param sw Eio switch for structured concurrency.
     @param env Eio environment.

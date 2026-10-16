@@ -98,8 +98,11 @@ val websocket_discovery_json : http_context -> Yojson.Safe.t
 
 val transport_status_json : http_context -> Yojson.Safe.t
 (** [transport_status_json ctx] returns the full transport
-    status JSON (HTTP + WebSocket + protocol set), used by
+    status JSON (HTTP + gRPC + WebSocket + protocol set), used by
     [masc_status] / dashboard / [transport_status] tool.
+
+    gRPC [listening], [reachable], [listen_status] and [listen_failure] come
+    from one typed lifecycle observation, shared with transport health.
 
     Includes [configured: <bool>] sub-fields when
     [ctx.include_configured] is [true] — this is the operator-

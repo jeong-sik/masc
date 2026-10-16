@@ -253,38 +253,36 @@ val inc_ws_delta_payload_serialization : unit -> unit
 
 (** {1 Transport listen state} *)
 
-(** Explanatory status for why gRPC is or is not listening.
-    Valid values: ["not_started"], ["disabled"], ["listening"],
-    ["bind_failed"], ["stopped"].  Pinned literal set —
-    operators read this Atomic directly for status display.
-    Drift would break dashboard tooltips. *)
-val grpc_listen_status : string Atomic.t
+type grpc_listener_failure =
+  | Initialization_failed
+  | Address_in_use
+  | Bind_failed
+  | Serve_failed
 
+type grpc_listener_state =
+  | Not_started
+  | Disabled
+  | Binding
+  | Listening
+  | Failed of grpc_listener_failure
+  | Stopped
 
-(** [set_grpc_runtime_listening listening] flips the gRPC
-    listen-state Atomic.  Combined with
-    {!Env_config.Transport.grpc_enabled} via {!grpc_listening}. *)
-val set_grpc_runtime_listening : bool -> unit
+val set_grpc_listener_state : grpc_listener_state -> unit
+val grpc_listener_snapshot : unit -> grpc_listener_state
+(** One atomic lifecycle observation. Only the socket owner publishes
+    [Listening], after [Eio.Net.listen] returns a bound resource. *)
 
+val grpc_listener_is_listening : grpc_listener_state -> bool
+val grpc_listener_fields : grpc_listener_state -> (string * Yojson.Safe.t) list
+(** Public [listening], [listen_status] and nullable [listen_failure] fields
+    derived from the same observation. Failure labels never contain raw errors. *)
 
-(** [set_ws_same_origin_runtime_ready ready] flips the same-origin [/ws]
-    upgrade readiness Atomic.  This is separate from the HTTP listener being
-    open: early bootstrap can accept HTTP requests before the WebSocket MCP
-    dispatcher is installed. *)
-val set_ws_same_origin_runtime_ready : bool -> unit
-
-(** [set_grpc_listen_status s] writes [s] into
-    {!grpc_listen_status}.  Caller is responsible for using a
-    pinned status literal — drift to free-form strings would
-    break dashboard parsing. *)
-val set_grpc_listen_status : string -> unit
-
-
-(** [grpc_listening ()] is
-    [grpc_enabled () && Atomic.get grpc_runtime_listening] —
-    the AND of the env-config flag and the runtime listen
-    state. *)
 val grpc_listening : unit -> bool
+(** Actual bound-listener readiness, independent of the configured enable flag.
+    Changing an environment flag does not close an already bound socket. *)
+
+(** Same-origin [/ws] readiness is independent of HTTP socket readiness. *)
+val set_ws_same_origin_runtime_ready : bool -> unit
 
 (** [ws_enabled ()] is [Env_config.Transport.ws_enabled ()].
     Read every call — env mutation between calls takes effect. *)

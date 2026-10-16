@@ -170,7 +170,8 @@ let transport_status_json (ctx : http_context) =
   let registrations = Atomic.get runtime_registrations in
   let grpc_enabled = Env_config.Transport.grpc_enabled () in
   let grpc_port = Env_config.Transport.grpc_port in
-  let grpc_reachable = Transport_metrics.grpc_listening () in
+  let grpc_state = Transport_metrics.grpc_listener_snapshot () in
+  let grpc_reachable = Transport_metrics.grpc_listener_is_listening grpc_state in
   let streamable_auth_policy_present =
     Env_config.Transport.http_auth_strict_env_enabled ()
   in
@@ -192,9 +193,8 @@ let transport_status_json (ctx : http_context) =
            @ maybe_configured_fields
                ~include_configured:ctx.include_configured
                grpc_enabled
-           @ [ "listening", `Bool (Transport_metrics.grpc_listening ())
-             ; "reachable", `Bool grpc_reachable
-             ; "listen_status", `String (Atomic.get Transport_metrics.grpc_listen_status)
+           @ Transport_metrics.grpc_listener_fields grpc_state
+           @ [ "reachable", `Bool grpc_reachable
              ; "port", `Int grpc_port
              ; "service", `String registrations.grpc_service_name
              ; "health_service", `String registrations.grpc_health_service_name

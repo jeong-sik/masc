@@ -45,6 +45,7 @@
   (re_export fmt)
   (re_export fs_compat)
   (re_export grpc-direct)
+  (re_export grpc-direct-core)
   (re_export httpun)
   (re_export masc_backend)
   (re_export masc_compression)

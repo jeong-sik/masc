@@ -465,42 +465,27 @@ let start
   =
   if not (is_enabled ())
   then (
-    Transport_metrics.set_grpc_runtime_listening false;
-    Transport_metrics.set_grpc_listen_status "disabled";
+    Transport_metrics.set_grpc_listener_state Disabled;
     Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=1 to enable)")
   else (
     let port = configured_port () in
     Eio.Fiber.fork ~sw (fun () ->
       try
-        let server =
-          create_server ~port ~workspace_config ~tool_dispatcher
-        in
+        Transport_metrics.set_grpc_listener_state Binding;
+        let server = create_server ~port ~workspace_config ~tool_dispatcher in
         Log.Server.info
-          "gRPC workspace server starting on port %d (health + reflection enabled)"
+          "gRPC workspace server binding loopback port %d (health + reflection enabled)"
           port;
-        Log.Server.info "  service: %s" Masc_grpc_service.service_name;
-        Log.Server.info "  health: %s/Check" health_service_name;
-        Log.Server.info
-          "  methods: Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
-        Transport_metrics.set_grpc_runtime_listening true;
-        Transport_metrics.set_grpc_listen_status "listening";
-        (* Safe: finally is Atomic.set — no I/O, no exception risk *)
-        Eio_guard.protect
-          ~finally:(fun () ->
-            Transport_metrics.set_grpc_runtime_listening false;
-            Transport_metrics.set_grpc_listen_status "stopped")
-          (fun () -> Grpc_eio.Server.serve ~sw ~env server)
+        match Server_grpc_listener.serve ~env ~port server with
+        | Ok () -> ()
+        | Error failure ->
+            Log.Server.error "gRPC workspace transport unavailable on loopback:%d: %s"
+              port (Printexc.to_string failure.cause)
       with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
-        Transport_metrics.set_grpc_runtime_listening false;
-        Transport_metrics.set_grpc_listen_status "bind_failed";
-        Log.Server.error
-          "gRPC workspace transport unavailable on %s:%d: port already in use"
-          Masc_network_defaults.masc_http_default_host
-          port
+      | Eio.Cancel.Cancelled _ as exn ->
+          Transport_metrics.set_grpc_listener_state Stopped;
+          raise exn
       | exn ->
-        Transport_metrics.set_grpc_runtime_listening false;
-        Transport_metrics.set_grpc_listen_status "stopped";
-        Log.Server.error "gRPC server failed: %s" (Printexc.to_string exn)))
+          Transport_metrics.set_grpc_listener_state (Failed Initialization_failed);
+          Log.Server.error "gRPC server initialization failed: %s" (Printexc.to_string exn)))
 ;;

@@ -312,6 +312,23 @@ let test_normalize_advertised_host_preserves_noncanonical_127_alias () =
   check string "127.0.1.1 stays explicit" "127.0.1.1"
     (TRM.normalize_advertised_host "127.0.1.1")
 
+let test_grpc_discovery_uses_one_lifecycle_observation () =
+  let previous = TM.grpc_listener_snapshot () in
+  Fun.protect ~finally:(fun () -> TM.set_grpc_listener_state previous)
+  @@ fun () ->
+  List.iter (fun state ->
+    TM.set_grpc_listener_state state;
+    let json = TRM.transport_status_json (make_context ()) in
+    let grpc = Yojson.Safe.Util.member "grpc" json in
+    List.iter (fun (key, expected) ->
+      check bool ("same lifecycle field: " ^ key) true
+        (Yojson.Safe.Util.member key grpc = expected))
+      (TM.grpc_listener_fields state);
+    check bool "reachability agrees with bound state" (TM.grpc_listener_is_listening state)
+      Yojson.Safe.Util.(grpc |> member "reachable" |> to_bool))
+    [TM.Not_started; Disabled; Binding; Listening; Failed Address_in_use;
+     Failed Bind_failed; Failed Initialization_failed; Failed Serve_failed; Stopped]
+
 let () =
   run "Transport_read_model"
     [
@@ -319,6 +336,8 @@ let () =
         [
            test_case "websocket discovery parity" `Quick
              test_websocket_discovery_http_shape_extends_tool_shape;
+           test_case "gRPC lifecycle observation" `Quick
+             test_grpc_discovery_uses_one_lifecycle_observation;
            test_case "transport status parity" `Quick
              test_transport_status_http_shape_extends_tool_shape;
            test_case "transport status includes json-rpc protocol" `Quick

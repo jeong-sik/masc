@@ -58,11 +58,11 @@ let print_startup_banner
   Printf.printf "   GET  /api/v1/activity/events → Activity replay API\n%!";
   Printf.printf "   GET  /api/v1/activity/graph → Activity graph snapshot\n%!";
   Printf.printf "   GET  /health → Health check\n%!";
-  if Masc_grpc_server.is_enabled ()
+  if Env_config.Transport.grpc_enabled ()
   then
     Printf.printf
       "   gRPC :%d → Workspace + grpc.health.v1.Health + reflection\n%!"
-      (Masc_grpc_server.configured_port ());
+      Env_config.Transport.grpc_port;
   if Transport_metrics.ws_enabled ()
   then
     Printf.printf "   GET  /ws → same-origin WebSocket upgrade or discovery\n%!"

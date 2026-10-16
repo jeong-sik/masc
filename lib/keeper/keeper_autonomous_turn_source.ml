@@ -41,6 +41,7 @@ type trace_file_check =
   | Current_regular_file
   | Outside_keeper_store
   | Missing_or_non_regular
+  | Trace_unavailable of string
 
 let check_trace_file ~dir path =
   if
@@ -55,7 +56,10 @@ let check_trace_file ~dir path =
           ( Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK )
       ; _
       } -> Missing_or_non_regular
-    | exception Unix.Unix_error _ -> Missing_or_non_regular
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Missing_or_non_regular
+    | exception Unix.Unix_error (cause, operation, argument) ->
+      Trace_unavailable
+        (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message cause))
 ;;
 
 type raw_trace_identity_mismatch =
@@ -369,9 +373,10 @@ let run_key (run_ref : Turn_record.raw_trace_run_ref) =
 
 let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
     (record : Turn_record.t) =
+  let ( let* ) = Result.bind in
   match record.turn_kind, record.raw_trace_run_ref with
-  | Turn_record.Direct, _ -> None
-  | Turn_record.Autonomous, None -> None
+  | Turn_record.Direct, _ -> Ok None
+  | Turn_record.Autonomous, None -> Ok None
   | Turn_record.Autonomous, Some run_ref ->
     let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
     let cache_key = run_ref.path ^ "\000" ^ run_ref.worker_run_id in
@@ -381,14 +386,17 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
         "autonomous turn source: record %s belongs to keeper %s"
         (Ids.Turn_ref.to_string record.turn_ref)
         record.keeper;
-      None)
+      Ok None)
     else
       match check_trace_file ~dir run_ref.path with
       | Outside_keeper_store ->
         Log.Keeper.warn ~keeper_name
           "autonomous turn source: rejected raw-trace path outside keeper store: %s"
           run_ref.path;
-        None
+        Ok None
+      | Trace_unavailable detail ->
+        Log.Keeper.warn ~keeper_name "autonomous trace inspection unavailable: %s" detail;
+        Error detail
       | Missing_or_non_regular ->
         let first_miss =
           with_run_tables (fun () ->
@@ -403,13 +411,13 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
           Log.Keeper.warn ~keeper_name
             "autonomous turn source: exact raw-trace file is missing or non-regular: %s"
             run_ref.path;
-        None
+        Ok None
       | Current_regular_file ->
         if
           with_run_tables (fun () ->
             Hashtbl.mem version_rejected_runs cache_key
             || Hashtbl.mem missing_trace_runs cache_key)
-        then None
+        then Ok None
         else (
           let key = run_key run_ref in
           let before = file_identity run_ref.path in
@@ -422,11 +430,11 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                | Some _ | None -> None)
             | Some _, None | None, (Some _ | None) -> None
           in
-          let reading =
+          let* reading =
             match remembered with
             | Some remembered ->
               Hashtbl.replace used key remembered;
-              Some remembered.reading
+              Ok (Some remembered.reading)
             | None ->
               (match Agent_core.Raw_trace_query.read_run (agent_core_run_ref run_ref) with
                | Error (Agent_core.Error.Serialization
@@ -437,7 +445,7 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                    "autonomous turn source: cannot read exact run %s: %s"
                    run_ref.worker_run_id
                    (Agent_core.Error.to_string err);
-                 None
+                 Ok None
                | Error
                    ((Agent_core.Error.Api _
                     | Agent_core.Error.Provider _
@@ -455,7 +463,7 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                    "autonomous turn source: cannot read exact run %s: %s"
                    run_ref.worker_run_id
                    (Agent_core.Error.to_string err);
-                 None
+                 Error (Agent_core.Error.to_string err)
                | Ok records ->
                  let reading = reading_of_records ~keeper_name run_ref records in
                  (* Remembered only when the file statted before the read is
@@ -466,46 +474,23 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                     when file_identity_equal identity identity_after ->
                     Hashtbl.replace used key { identity; reading }
                   | Some _, Some _ | Some _, None | None, (Some _ | None) -> ());
-                 Some reading)
+                 Ok (Some reading))
           in
           match reading with
           | Some (Run_projected { run_started_at; run_final_text; steps }) ->
             let executions = executions_for_turn record execution_rows in
-            Some
+            Ok (Some
               { turn_id = Ids.Turn_ref.to_string record.turn_ref
               ; started_at = run_started_at
               ; final_text = run_final_text
               ; trace = List.map (trace_step_of_run_step ~executions) steps
-              }
-          | Some (Run_has_no_records | Run_identity_mismatch _) | None -> None)
+              })
+          | Some (Run_has_no_records | Run_identity_mismatch _) | None -> Ok None)
 ;;
 
-let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =
-  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
-  match Dated_jsonl.read_recent_result store (max 1 limit) with
-  | Error error ->
-    Log.Keeper.warn ~keeper_name
-      "autonomous turn source: cannot read current turn-record store: %s"
-      (Dated_jsonl.read_error_to_string error);
-    []
-  | Ok entries ->
-    let records = entries |> List.filter_map (function
-      | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-        Log.Keeper.warn ~keeper_name
-          "autonomous turn source: malformed current turn record path=%s line=%s: %s"
-          path
-          (Option.fold ~none:"unknown" ~some:string_of_int line_number)
-          detail;
-        None
-      | Dated_jsonl.Parsed json ->
-        (match Turn_record.of_json json with
-         | Ok record -> Some record
-         | Error error ->
-           Log.Keeper.warn ~keeper_name
-             "autonomous turn source: incompatible current turn record skipped: %s"
-             error;
-           None))
-    in
+type projection = { turns : turn list; unavailable : string option }
+
+let project_records ~config ~keeper_name ?since records =
     let execution_ids = records
       |> List.filter (fun (record : Turn_record.t) ->
         String.equal record.keeper keeper_name && record.turn_kind = Turn_record.Autonomous)
@@ -540,15 +525,86 @@ let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =
     let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
     let previous = with_run_tables (fun () -> Hashtbl.find_opt run_readings dir) in
     let used = Hashtbl.create (List.length records) in
-    let turns =
-      List.filter_map (turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used)
-        records
+    let turns_rev, unavailable =
+      List.fold_left (fun (turns, unavailable) record ->
+        match turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used record with
+        | Ok (Some turn) -> turn :: turns, unavailable
+        | Ok None -> turns, unavailable
+        | Error detail ->
+          turns, (match unavailable with Some _ -> unavailable | None -> Some detail))
+        ([], None) records
     in
     with_run_tables (fun () -> Hashtbl.replace run_readings dir used);
-    turns
-    |> List.filter (fun turn ->
+    let turns = List.rev turns_rev |> List.filter (fun turn ->
       match since with
       | Some cutoff -> Float.compare turn.started_at cutoff > 0
       | None -> true)
-    |> List.stable_sort (fun left right -> Float.compare left.started_at right.started_at)
+      |> List.stable_sort (fun left right -> Float.compare left.started_at right.started_at) in
+    { turns; unavailable }
+;;
+
+let read_store config keeper_name =
+  (* A read must neither mkdir the keeper root nor register a process-global
+     append mutex for every syntactically valid name a client guesses. *)
+  let location = Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
+      ~keeper:keeper_name Dated_jsonl.Store.Keeper.Turn_records in
+  Dated_jsonl.open_store ~mutex:(Eio.Mutex.create ()) location
+;;
+
+type snapshot = { records : Turn_record.t list; fingerprint : string }
+
+let snapshot_has_records snapshot = match snapshot.records with [] -> false | _ :: _ -> true
+let snapshot_fingerprint snapshot = snapshot.fingerprint
+
+let read_snapshot_result ~config ~keeper_name ?(limit = default_limit) () =
+  let ( let* ) = Result.bind in
+  let* entries = Dated_jsonl.read_recent_result (read_store config keeper_name) (max 1 limit)
+    |> Result.map_error Dated_jsonl.read_error_to_string in
+  let* records_rev, json_rev = List.fold_left (fun state entry ->
+    let* records, rows = state in
+    match entry with
+    | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+      Error (Printf.sprintf "unreadable TurnRecord at %s:%s: %s" path
+        (Option.fold ~none:"unknown" ~some:string_of_int line_number) detail)
+    | Dated_jsonl.Parsed json ->
+      let* record = Turn_record.of_json json in
+      if not (String.equal record.keeper keeper_name)
+      then Error (Printf.sprintf "TurnRecord belongs to %s instead of %s" record.keeper keeper_name)
+      else Ok (record :: records, json :: rows))
+    (Ok ([], [])) entries in
+  let fingerprint = `List (List.rev json_rev) |> Yojson.Safe.to_string
+    |> Digest.string |> Digest.to_hex in
+  Ok { records = List.rev records_rev; fingerprint }
+;;
+
+let project_snapshot_result ~config ~keeper_name snapshot =
+  let projection = project_records ~config ~keeper_name snapshot.records in
+  match projection.unavailable with
+  | None -> Ok projection.turns
+  | Some detail -> Error detail
+;;
+
+let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =
+  match Dated_jsonl.read_recent_result (read_store config keeper_name) (max 1 limit) with
+  | Error error ->
+    Log.Keeper.warn ~keeper_name
+      "autonomous turn source: cannot read current turn-record store: %s"
+      (Dated_jsonl.read_error_to_string error);
+    []
+  | Ok entries ->
+    let records = entries |> List.filter_map (function
+      | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+        Log.Keeper.warn ~keeper_name
+          "autonomous turn source: malformed current turn record path=%s line=%s: %s"
+          path
+          (Option.fold ~none:"unknown" ~some:string_of_int line_number) detail;
+        None
+      | Dated_jsonl.Parsed json ->
+        (match Turn_record.of_json json with
+         | Ok record -> Some record
+         | Error error ->
+           Log.Keeper.warn ~keeper_name
+             "autonomous turn source: incompatible current turn record skipped: %s" error;
+           None)) in
+    (project_records ~config ~keeper_name ?since records).turns
 ;;

@@ -2131,6 +2131,51 @@ type window_row =
   ; mutable in_window : bool
   }
 
+(* Both permissive runtime reads and strict HTTP reads use this exact window
+   selection. Each queue drops marked rows lazily, preserving linear work even
+   when one turn has many tool rows. *)
+let history_window ~window_history ~window_secondary =
+  let rows : window_row Queue.t = Queue.create () in
+  let secondaries : window_row Queue.t = Queue.create () in
+  let primary_count = ref 0 in
+  let secondary_count = ref 0 in
+  let evicted = ref false in
+  let rec take_first_kept queue =
+    let row = Queue.pop queue in
+    if row.in_window then row else take_first_kept queue
+  in
+  let pop_front () =
+    evicted := true;
+    let row = take_first_kept rows in
+    row.in_window <- false;
+    if is_history_primary row.message then decr primary_count else decr secondary_count
+  in
+  let drop_oldest_secondary () =
+    evicted := true;
+    let row = take_first_kept secondaries in
+    row.in_window <- false;
+    decr secondary_count
+  in
+  let push msg =
+    let row = { message = msg; in_window = true } in
+    Queue.push row rows;
+    if is_history_primary msg then incr primary_count
+    else (incr secondary_count; Queue.push row secondaries);
+    while !primary_count > window_history do pop_front () done;
+    while !secondary_count > window_secondary do drop_oldest_secondary () done
+  in
+  let finish () =
+    let messages =
+      Queue.fold
+        (fun acc row -> if row.in_window then row.message :: acc else acc)
+        [] rows
+      |> List.rev
+      |> drop_leading_orphan_tool_messages
+    in
+    messages, !evicted
+  in
+  push, finish
+
 (* Lines of the byte slice [[from, upto)). When [from > 0] the first
    element is a (potentially partial) line fragment — dropped, same
    rationale as the RFC-0226 P2 tail read. A final element without a
@@ -2204,73 +2249,19 @@ let load_page ~base_dir ~keeper_name ?before ?(max_total = max_total_lines) () :
           (find_cut ~path ~size ~before:b, fun (m : chat_message) -> m.ts < b)
     in
     let from = if upto > tail_read_bytes then upto - tail_read_bytes else 0 in
-    (* Single pass: keep a running window of the last [max_history]
-       user/assistant messages plus the newest [window_secondary] of
-       their tool lines and receipts. A primary over the bound takes the
-       whole front of the window with it, down to and including the oldest
-       primary; a secondary over its bound takes only the oldest secondary,
-       wherever it sits, so the conversation around it stays.
-
-       A row leaves the window by being marked, not by rebuilding it. [rows]
-       holds every row pushed, in file order, and [secondaries] the secondary
-       ones; each queue drops a marked row when it reaches the front. Taking
-       the oldest secondary used to copy the whole window, once for every
-       tool row past the bound, and a tail of tool rows made each load
-       quadratic: 20 GB of a live server's allocation in four hours
-       (2026-09-16). *)
-    let rows : window_row Queue.t = Queue.create () in
-    let secondaries : window_row Queue.t = Queue.create () in
-    let primary_count = ref 0 in
-    let secondary_count = ref 0 in
-    let evicted = ref false in
-    let rec take_first_kept queue =
-      let row = Queue.pop queue in
-      if row.in_window then row else take_first_kept queue
-    in
-    let pop_front () =
-      evicted := true;
-      let row = take_first_kept rows in
-      row.in_window <- false;
-      if is_history_primary row.message then decr primary_count else decr secondary_count
-    in
-    let drop_oldest_secondary () =
-      evicted := true;
-      let row = take_first_kept secondaries in
-      row.in_window <- false;
-      decr secondary_count
-    in
+    let push, finish = history_window ~window_history ~window_secondary in
     List.iter
       (fun line ->
         let trimmed = String.trim line in
         if trimmed <> "" then
           match parse_line ~file_path:path trimmed with
-          | Some msg when keep msg ->
-              let row = { message = msg; in_window = true } in
-              Queue.push row rows;
-              if is_history_primary msg
-              then incr primary_count
-              else (
-                incr secondary_count;
-                Queue.push row secondaries);
-              while !primary_count > window_history do
-                pop_front ()
-              done;
-              while !secondary_count > window_secondary do
-                drop_oldest_secondary ()
-              done
+          | Some msg when keep msg -> push msg
           | Some _ | None -> ())
       (slice_lines ~path ~from ~upto);
-    let messages =
-      let redaction = redaction_for ~base_dir ~keeper_name in
-      Queue.fold
-        (fun acc row -> if row.in_window then row.message :: acc else acc)
-        []
-        rows
-      |> List.rev
-      |> drop_leading_orphan_tool_messages
-      |> List.map (redact_message redaction)
-    in
-    { messages; has_more = from > 0 || !evicted }
+    let messages, evicted = finish () in
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    { messages = List.map (redact_message redaction) messages
+    ; has_more = from > 0 || evicted }
   with
   | Sys_error detail ->
       report_persistence_read_drop
@@ -2505,6 +2496,29 @@ type history_page =
   { history_messages : chat_message list
   ; next_cursor : Keeper_chat_history_page.cursor option
   }
+
+let load_result ~base_dir ~keeper_name =
+  let ( let* ) = Result.bind in
+  let path = chat_path ~base_dir ~keeper_name in
+  (* All complete rows inside the existing byte window participate in the
+     role-based selection. Taking only 400 physical rows would let a tool-heavy
+     tail erase the conversation again. The reader still reads at most 4 MiB. *)
+  let* page = Keeper_chat_history_page.read ~path ~owner:keeper_name
+      ~max_rows:max_int () in
+  let redaction = redaction_for ~base_dir ~keeper_name in
+  let push, finish = history_window ~window_history:max_history
+      ~window_secondary:(max_total_lines - max_history) in
+  let* () =
+    List.fold_left (fun state (row : Keeper_chat_history_page.row) ->
+      let* () = state in
+      match parse_transcript_row_strict ~path ~redaction ~line_no:1 row.line with
+      | `Blank -> Ok ()
+      | `Message message -> push message; Ok ()
+      | `Unreadable detail ->
+        Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail }))
+      (Ok ()) page.rows
+  in
+  Ok (fst (finish ()))
 
 let load_history_page_result ~base_dir ~keeper_name ?cursor
       ?(max_total = max_total_lines) () =

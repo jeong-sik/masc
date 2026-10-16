@@ -2497,6 +2497,225 @@ let test_interrupted_prepared_launch_resumes_the_same_job () = with_fixture @@ f
   Printf.printf "OWNED_INTERRUPTED_LAUNCH_RESUME job=%s phase=%s\n%!" id
     (match job.phase with Store.Running _ -> "running" | _ -> "other")
 
+let test_nested_skill_job_continuation () = with_fixture @@ fun env _initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  let module Async = Masc.Keeper_msg_async in
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  let module Ledger = Masc.Keeper_skill_activation_ledger in
+  let module Recorder = Masc.Keeper_skill_activation_recorder in
+  let module Surface = Masc.Keeper_capability_surface in
+  let config = Workspace.default_config fixture.base_path in
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
+  let skill_dir = Filename.concat fixture.base_path ".agents/skills/nested-owned-job" in
+  Fs_compat.mkdir_p skill_dir;
+  write (Filename.concat skill_dir "SKILL.md") {|---
+name: nested-owned-job
+description: Launch one owned job and consume its original complete stdout.
+---
+
+```toml composition
+[[compositions]]
+name = "nested-owned-job"
+execution = "inline"
+[[compositions.nodes]]
+id = "launch"
+tool = "keeper_job_start"
+[compositions.nodes.input]
+kind = "literal"
+value = { argv = ["fixture-program"] }
+[[compositions.nodes]]
+id = "await"
+tool = "keeper_job_result"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "job_id"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "launch"
+pointer = "/job_id"
+[[compositions.nodes]]
+id = "consume"
+tool = "keeper_artifact_read"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "sha256"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "await"
+pointer = "/artifacts/0/_blob/sha256"
+[[compositions.exports]]
+name = "stdout"
+node = "consume"
+pointer = "/content"
+```
+|};
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  write declaration "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original nested owned-job continuation fixture\"\n";
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  write runtime_path "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n";
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+    |> require "nested Skill workspace authority" in
+  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
+  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
+   | Published _ | Unchanged _ -> () | Workspace_retired -> fail "nested Skill workspace retired early");
+  let snapshot = Skill_catalog_snapshot_service.current ~workspace
+    |> function Some value -> value | None -> fail "published nested Skill snapshot missing" in
+  let reference = match Skill_catalog_snapshot.entries snapshot with
+    | [entry] -> Skill_catalog_snapshot.entry_reference entry | _ -> fail "one exact nested job Skill required" in
+  let descriptors = Descriptor.all_descriptors () in
+  let selection = Masc.Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:"task-A" [reference]
+    |> require "original Task nested Skill selection" in
+  let catalog,diagnostics = Masc.Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
+  check int "actual published nested job Skill has no projection error" 0 (List.length diagnostics);
+  let surface = Surface.create_with_descriptors ~tool_descriptors:descriptors ~tool_deny:[]
+      ~sandbox_profile:fixture.meta.sandbox_profile ~skill_names:None ~global_skill_catalog:catalog
+      ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
+      ~task_skills:(Masc.Keeper_task_skill_turn.skills selection) in
+  let runtime = ref "original.runtime" and runtime_reads = ref 0 in
+  let recorder = Recorder.make ~trace_id:fixture.meta.runtime.trace_id
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ~absolute_turn:41)
+      ~runtime_id:(fun () -> incr runtime_reads; Some !runtime)
+      ~snapshot_revision:(Surface.skill_snapshot_revision surface) ~task_selection:selection
+    |> require "original nested job activation recorder" in
+  let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+    {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+  let make_bundle () = Bundle.make_tool_bundle_for_capability_surface ~config ~meta:fixture.meta
+      ~publication_recovery ~capability_surface:surface ~skill_activation_context:recorder
+      ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"nested owned-job fixture")
+      ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
+  let fixture = {fixture with make_bundle} in
+  let recipe = `Assoc ["execution",`String "async";"nodes",`List
+      [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"args",`Assoc []]];
+      "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
+  let prepare_started = Mtime_clock.counter () in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-nested-job" ~turn:41 "keeper_composition_prepare" recipe) in
+  check bool "nested prepare never launches a program" false (Sys.file_exists fixture.daemon_path);
+  let before_activation = Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
+    |> require "preparation activation authority" in
+  check int "nested preparation activates no child" 0
+    (Option.fold ~none:0 ~some:(fun ledger -> List.length (Ledger.activations ledger)) before_activation);
+  let draft = prepared |> member "draft" |> composition_reference "nested owned-job draft" in
+  let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"run-nested-job" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
+  let ok,waiting,waiting_entry = await_composition env fixture accepted in
+  let prepare_to_wait_ms = Mtime.Span.to_float_ns (Mtime_clock.count prepare_started) /. 1_000_000. in
+  check bool "nested owned job suspends its original parent" false ok;
+  let id = match waiting_entry.status with
+    | Async.Waiting_for_owned_jobs {job_ids=[id];_} -> Store.Job_id.to_string id
+    | _ -> fail "nested child did not produce one exact owned-job wait" in
+  let run_id = accepted |> member "composition_run_id" |> to_string in
+  let journal = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+      ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.of_string run_id |> require "nested original run")
+    |> require "nested original journal" in
+  let candidate () = match Journal.waiting_continuation journal with
+    | Ok (Some candidate) -> candidate | Ok None | Error _ -> fail "nested original wait lost authority" in
+  let original_activation = match Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
+      |> require "nested child actual activation" with
+    | Some ledger -> (match Ledger.activations ledger with [activation] -> activation | _ -> fail "one actual child activation required")
+    | None -> fail "nested dispatch recorded no activation" in
+  check string "child activation binds original selected runtime" "original.runtime" original_activation.runtime_id;
+  check bool "child activation binds exact published Skill" true
+    (Skill_reference.equal_identity reference.identity original_activation.identity
+     && reference.content_revision = original_activation.content_revision);
+  (match original_activation.invocation with
+   | Ledger.Nested_composition_invocation {scope;origin=Ledger.Task_composition {task_ids};_} ->
+     check string "child activation belongs to original run" run_id scope.composition_run_id;
+     check (list string) "child activation belongs to original Task" ["task-A"]
+       (Ledger.task_id_set_to_list task_ids |> List.map Keeper_id.Task_id.to_string)
+   | _ -> fail "nested job activation lost its exact Task scope");
+  check int "original runtime bound once" 1 !runtime_reads;
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  runtime := "later.runtime";
+  let context : _ Masc.Keeper_types_profile.context =
+    {config;agent_name="nested-job-continuation-fixture";
+     sw=Async.server_background_switch () |> require "nested continuation switch";
+     clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let refused,notify_refused = Eio.Promise.create () in
+  let refusals = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
+  let backend_at_ready = ref None in
+  let jobs = Completion_wake.create ~config ~on_result_ready:(fun (record : Store.record) ->
+      check bool "nested completion hint follows actual durable output" true (Store.result_ready record);
+      backend_at_ready := Some (List.length (calls fixture));
+      Wake.pulse ~sw:context.sw refusals |> require "nested original completion hint intake") () in
+  let events = Filename.concat
+      (Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id))
+      "skill-activation-events.jsonl" in
+  let original_events = read events in
+  let backend_before_completion = List.length (calls fixture) in
+  Fun.protect ~finally:(fun () -> write events original_events) (fun () ->
+    write events "invalid-original-child-activation\n";
+    control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+    Completion_wake.pulse ~sw:context.sw jobs |> store_value "nested full result completion pulse";
+    (match Eio.Promise.await refused with
+     | Ok (Tool_result.Failed failure) -> check bool "refused original child has no new exports" true
+         (Tool_result.data (Tool_result.Failed failure) |> member "exports" = `Null)
+     | Ok _ | Error _ -> fail "corrupt original activation reached successor acceptance");
+    check string "activation refusal keeps original wait owner" waiting_entry.request_id
+      (Journal.continuation_request_id (candidate ())));
+  let ready_backend = match !backend_at_ready with Some count -> count | None -> fail "nested result hint never fired" in
+  let detached = Filename.concat fixture.base_path "detached-original-child-activation.jsonl" in
+  Unix.rename events detached;
+  Fun.protect ~finally:(fun () -> Unix.rename detached events) (fun () ->
+    let refused,notify = Eio.Promise.create () in
+    let wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify outcome) () in
+    Wake.pulse ~sw:context.sw wake |> require "fresh nested intake with absent original activation";
+    (match Eio.Promise.await refused with
+     | Ok (Tool_result.Failed _) -> () | Ok _ | Error _ -> fail "missing original activation was invented");
+    check string "missing activation keeps exact original owner" waiting_entry.request_id
+      (Journal.continuation_request_id (candidate ())));
+  let resumed,notify = Eio.Promise.create () in
+  let fresh = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify outcome) () in
+  let recovery_started = Mtime_clock.counter () in
+  Wake.pulse ~sw:context.sw fresh |> require "fresh nested original authority recovery pulse";
+  let resumed = match Eio.Promise.await resumed with
+    | Ok (Tool_result.Completed _ as result) -> Tool_result.data result
+    | Ok _ | Error _ -> fail "restored nested activation could not resume original work" in
+  let ok,completed,entry = await_composition env fixture resumed in
+  let recovery_ms = Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000. in
+  check bool "fresh supervisor finishes original nested DAG" true ok;
+  (match Journal.waiting_continuation journal with
+   | Ok None -> () | Ok (Some _) | Error _ -> fail "completed nested parent left a waiting continuation");
+  check int "nested recovery has zero backend calls after full result" ready_backend (List.length (calls fixture));
+  check_json "parent exports original complete stdout" (`String stdout_bytes)
+    (completed |> member "exports" |> member "stdout" |> member "value");
+  let mappings = prepared |> member "nested_calls" |> to_list |> List.hd |> member "node_mapping" |> to_list in
+  let expanded name = mappings |> List.find (fun row -> row |> member "source" |> to_string = name)
+    |> member "expanded" |> to_string in
+  let waiting_nodes = composition_nodes fixture waiting and completed_nodes = composition_nodes fixture completed in
+  List.iter (fun name -> List.iter (fun field -> check_json ("nested original occurrence " ^ name ^ "/" ^ field)
+      (composition_node (expanded name) waiting_nodes |> member field)
+      (composition_node (expanded name) completed_nodes |> member field)) ["execution_id";"tool_use_id"]) ["launch";"await"];
+  check_json "nested launch result is retained without dispatch" (`String "retained_completion")
+    (composition_node (expanded "launch") completed_nodes |> member "execution_origin");
+  let scopes = completed |> member "nested_scopes" |> to_list in
+  check int "final result retains one original child scope" 1 (List.length scopes);
+  check_json "original child completed" (`String "completed") (List.hd scopes |> member "disposition");
+  let final_activation = match Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
+      |> require "same nested activation after fresh recovery" with
+    | Some ledger -> (match Ledger.activations ledger with [activation] -> activation | _ -> fail "nested recovery created a second activation")
+    | None -> fail "nested recovery lost original activation" in
+  check bool "nested recovery retains exact activation, time, Task and runtime" true (original_activation = final_activation);
+  let request_context = match entry.request_context with Some fields -> `Assoc fields | None -> fail "nested original request context missing" in
+  check_json "fresh nested completion belongs to original Task" (`String "task-A") (member "source_task_id" request_context);
+  check (option string) "nested producer keeps original Task" (Some "task-A") (load fixture id).source.task_id;
+  check int "later runtime callback is never selected for original work" 1 !runtime_reads;
+  check int "nested program creates once" 1 (effect_count fixture "create");
+  check int "nested program starts once" 1 (effect_count fixture "start");
+  Printf.printf "OWNED_NESTED_SKILL_CONTINUATION %s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["scope",`String "synthetic CLI public nested async parent and fresh original child authority recovery";
+     "prepare_to_saved_wait_ms",`Float prepare_to_wait_ms;"fresh_pulse_to_original_dag_ms",`Float recovery_ms;
+     "backend_calls_to_complete_original_job",`Int (ready_backend-backend_before_completion);
+     "backend_calls_after_result_ready",`Int (List.length (calls fixture)-ready_backend);
+     "original_activation_count",`Int 1;"activation_fault_refusals",`Int 2;
+     "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
+
 exception Fixture_result_observer_failed
 
 let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun env _initialize fixture ->
@@ -2618,5 +2837,6 @@ let () =
       ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag
       ; test_case "prepared DAG launches an owned job and resumes its original result" `Quick test_prepared_job_launch_and_continuation
       ; test_case "interrupted prepared launch resumes the same job without recreating it" `Quick test_interrupted_prepared_launch_resumes_the_same_job
+      ; test_case "fresh supervisor retains nested child authority through owned-job waits" `Quick test_nested_skill_job_continuation
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

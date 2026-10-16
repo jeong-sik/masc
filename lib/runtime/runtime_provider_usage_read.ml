@@ -475,24 +475,6 @@ type account_refusal_read =
   | Spent_in_several_limits of string option list
   | No_window_spent
 
-(* [used] reached [limit]. Count windows are decoded as [used / limit]
-   ([fraction_of_counts]), which is exactly 1.0 when the two are equal. *)
-let window_spent (window : Runtime_provider_usage_window.window) =
-  match window.utilization with
-  | Runtime_provider_usage_window.Fraction used -> Float.compare used 1.0 >= 0
-  | Runtime_provider_usage_window.Percent used -> used >= 100
-  | Runtime_provider_usage_window.Usd { used; limit = Some limit } -> used >= limit
-  | Runtime_provider_usage_window.Usd { limit = None; _ } -> false
-;;
-
-(* Only a window that gates model calls can explain a refused model call. *)
-let gates_model_calls (window : Runtime_provider_usage_window.window) =
-  match window.role with
-  | Runtime_provider_usage_window.Gates_model_calls -> true
-  | Runtime_provider_usage_window.Counts_other_use
-  | Runtime_provider_usage_window.Unclassified_limit -> false
-;;
-
 (* The latest stated reset among the spent gating windows: every one of them
    refuses calls until it resets. A spent gating window that states no reset
    keeps the scope resting until its next success, whatever the others say. *)
@@ -506,7 +488,8 @@ let account_refusal_read_of_report (report : Runtime_provider_usage_window.repor
   let spent =
     List.filter
       (fun (window : Runtime_provider_usage_window.window) ->
-         gates_model_calls window && window_spent window)
+         Runtime_provider_usage_window.gates_model_calls window
+         && Runtime_provider_usage_window.window_is_spent window)
       report.windows
   in
   match

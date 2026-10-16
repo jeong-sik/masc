@@ -23,7 +23,9 @@ val order :
     window -- behind the slots that are not, keeping
     declaration (or operator preference) order inside each group. A slot id
     that names no runtime carries no evidence and stays in place. CLI slots
-    are untouched. Read at the wall clock of the call. *)
+    are not reordered here: [Keeper_lane_cli_oneshot.walk] orders them by the
+    same {!Runtime_quota_window} before each dispatch. Read at the wall clock
+    of the call. *)
 
 val order_at :
   now:float ->

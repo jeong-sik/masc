@@ -66,7 +66,9 @@ type window_role =
           windows, OpenRouter's API key credit limit, Z.AI's TOKENS_LIMIT, both Kimi
           counts, Ollama's session and weekly allowance while its purchased
           balance is zero, Antigravity's 5-hour and weekly buckets, Muse
-          Code's rolling and weekly windows. *)
+          Code's rolling and weekly windows. Antigravity's buckets belong to a
+          model group each (Gemini; Claude and GPT), so there a spent bucket
+          refuses only the calls of its own group: {!gate_coverage}. *)
   | Counts_other_use
       (** It counts something a model call does not need: Z.AI's
           TIME_LIMIT (MCP and tool calls), OpenRouter's free-model daily
@@ -228,13 +230,68 @@ val report_shape : source -> report_shape
 (** Whether absent windows revoke earlier observations from this source.
     Durable readers use the same contract as the live table. *)
 
+val window_is_spent : window -> bool
+(** The window's use reached its limit: a fraction at 1.0 or more, a
+    percentage at 100 or more, USD at the key limit. A USD window with no
+    limit is never spent. *)
+
+val gates_model_calls : window -> bool
+(** [true] when the window's role is {!Gates_model_calls}. *)
+
+(** What the windows a scope holds say about calling it at a moment. *)
+type scope_room =
+  | No_gating_window  (** No held window gates model calls: nothing is said. *)
+  | Room_left  (** The spent windows, if any, do not refuse calls. *)
+  | Spent_until of float
+      (** Calls are refused, every spent window states a reset still ahead,
+          and the float is when the refusal ends. *)
+  | Spent_without_reset
+      (** Calls are refused and at least one spent window states no reset that
+          can be trusted: none, or one that had already passed when the
+          window was seen spent. *)
+
+(** When a spent window refuses the scope's calls. Provider limits are either
+    one pool or split by the models they cover, and the window list does not
+    say which. *)
+type gate_coverage =
+  | One_spent_window_refuses
+      (** Every gating window limits the same calls, so one spent window
+          refuses all of them until it resets: the scope is refused until the
+          {e last} spent window resets. *)
+  | Every_window_must_be_spent
+      (** The windows cover different models (Antigravity states a Gemini
+          bucket and a Claude/GPT bucket), so a spent window refuses only its
+          own models: the scope is refused only while {e every} gating window
+          is spent, until the {e first} of them resets. *)
+
+val gate_coverage : source -> gate_coverage option
+(** [None] for a sparse source (Claude Code events, Codex): it holds only the
+    windows it has stated, so a window it never stated is no evidence of room,
+    and the spent buckets it reports cannot be attributed to the models a
+    refused call used. Their refusals reach the quota table through the typed
+    paths of {!Runtime_provider_usage_read} and the Keeper runtimes. *)
+
+val scope_room : coverage:gate_coverage -> now:float -> recorded list -> scope_room
+(** Read the windows of one complete report under [coverage]. A spent window
+    whose stated reset has passed since it was seen has reset, and counts as
+    having room. Windows whose role is not {!Gates_model_calls} are not read. *)
+
 val record : scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit
 (** HTTP and Antigravity reads are complete snapshots: windows omitted by a
     newer report from the same source are removed. Claude/Codex events and
     Codex reads allow absent windows, so they merge only stated values.
     An older or equal observation cannot replace a window or restore one
     removed by a newer complete report. Empty complete reports retain their
-    observation time; empty sparse updates change nothing. *)
+    observation time; empty sparse updates change nothing.
+
+    An accepted report from a source with a {!gate_coverage} also rests the
+    scope in {!Runtime_quota_window} when {!scope_room} over that source's
+    windows says calls are refused: [Spent_until] as a window ending at the
+    reset, [Spent_without_reset] as an observation no success has cleared.
+    This is how a provider that never reports a typed refusal (Antigravity
+    answers a spent quota as turn text) still orders behind its siblings once
+    its usage read says the quota is gone. A report never says a scope has
+    room: a window the table already holds stands until its own reset. *)
 
 val set_record_observer :
   (scope:Runtime_quota_window.scope -> observed_at:float -> report -> unit) -> unit

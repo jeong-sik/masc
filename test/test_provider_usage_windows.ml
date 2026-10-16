@@ -1356,6 +1356,243 @@ let test_muse_observe_records_and_rests_by_one_rule () =
       (Runtime_quota_window.is_exhausted ~scope:refused ~now:1791262199.))
 ;;
 
+(* A complete usage read can say a scope refuses calls, and the quota table
+   then orders it behind its siblings. Antigravity answers a spent quota as
+   turn text, so its usage read is the only typed word that the account has no
+   room. *)
+let room_now = 1790000000.0
+let in_one_hour = 1790000000 + 3600
+let in_two_hours = 1790000000 + 7200
+
+let gating
+    ?(limit_id = None)
+    ?(role = Usage.Gates_model_calls)
+    ?resets_at
+    utilization
+  : Usage.window
+  =
+  { Usage.limit_id; kind = Usage.Seven_day; role; utilization; resets_at }
+;;
+
+let held ?(observed_at = room_now -. 3600.0) window : Usage.recorded =
+  { Usage.window; source = Usage.Antigravity_usage_read; observed_at }
+;;
+
+let room_testable =
+  testable
+    (fun formatter -> function
+       | Usage.No_gating_window -> Format.pp_print_string formatter "no gating window"
+       | Usage.Room_left -> Format.pp_print_string formatter "room left"
+       | Usage.Spent_until at -> Format.fprintf formatter "spent until %.0f" at
+       | Usage.Spent_without_reset -> Format.pp_print_string formatter "spent without reset")
+    ( = )
+;;
+
+let spent = Usage.Fraction 1.0
+let open_ = Usage.Fraction 0.4
+let hour = Float.of_int in_one_hour
+let two_hours = Float.of_int in_two_hours
+
+let read ~coverage label expected windows =
+  check room_testable label expected
+    (Usage.scope_room ~coverage ~now:room_now (List.map (fun window -> held window) windows))
+;;
+
+let test_gate_coverage_by_source () =
+  let coverage_testable =
+    testable
+      (fun formatter -> function
+         | None -> Format.pp_print_string formatter "none"
+         | Some Usage.One_spent_window_refuses ->
+           Format.pp_print_string formatter "one spent window refuses"
+         | Some Usage.Every_window_must_be_spent ->
+           Format.pp_print_string formatter "every window must be spent")
+      ( = )
+  in
+  List.iter
+    (fun (source, expected) ->
+       check coverage_testable (Usage.source_to_string source) expected
+         (Usage.gate_coverage source))
+    [ Usage.Antigravity_usage_read, Some Usage.Every_window_must_be_spent
+    ; Usage.Openrouter_key_read, Some Usage.One_spent_window_refuses
+    ; Usage.Zai_quota_limit_read, Some Usage.One_spent_window_refuses
+    ; Usage.Kimi_coding_usages_read, Some Usage.One_spent_window_refuses
+    ; Usage.Ollama_balance_read, Some Usage.One_spent_window_refuses
+    ; Usage.Muse_subscription_usage, Some Usage.One_spent_window_refuses
+    ; Usage.Claude_code_rate_limit_event, None
+    ; Usage.Codex_account_rate_limits_updated, None
+    ; Usage.Codex_account_rate_limits_read, None
+    ]
+;;
+
+let test_scope_room_when_every_window_must_be_spent () =
+  let read = read ~coverage:Usage.Every_window_must_be_spent in
+  read "nothing held says nothing" Usage.No_gating_window [];
+  read "windows that count other use say nothing" Usage.No_gating_window
+    [ gating ~role:Usage.Counts_other_use spent
+    ; gating ~role:Usage.Unclassified_limit spent
+    ];
+  read "one spent window with its reset ahead" (Usage.Spent_until hour)
+    [ gating ~resets_at:in_one_hour spent ];
+  read "the first reset is when some window has room again" (Usage.Spent_until hour)
+    [ gating ~limit_id:(Some "gemini-weekly") ~resets_at:in_two_hours spent
+    ; gating ~limit_id:(Some "3p-weekly") ~resets_at:in_one_hour spent
+    ];
+  read "one window with room means the scope may still answer" Usage.Room_left
+    [ gating ~limit_id:(Some "gemini-weekly") ~resets_at:in_one_hour spent
+    ; gating ~limit_id:(Some "3p-weekly") open_
+    ];
+  read "a window that counts other use is not read" (Usage.Spent_until hour)
+    [ gating ~resets_at:in_one_hour spent; gating ~role:Usage.Counts_other_use open_ ];
+  read "a spent window that counts other use does not refuse the scope" Usage.Room_left
+    [ gating open_; gating ~role:Usage.Counts_other_use spent ];
+  read "a spent window that states no reset" Usage.Spent_without_reset [ gating spent ];
+  read "one open end makes the whole answer open" Usage.Spent_without_reset
+    [ gating ~limit_id:(Some "a") ~resets_at:in_one_hour spent
+    ; gating ~limit_id:(Some "b") spent
+    ];
+  (* The reset passed after the window was seen spent: it has reset since. *)
+  check room_testable "a window seen spent before a reset that has passed has room"
+    Usage.Room_left
+    (Usage.scope_room ~coverage:Usage.Every_window_must_be_spent ~now:room_now
+       [ held ~observed_at:(room_now -. 3600.0)
+           (gating ~resets_at:(Float.to_int room_now - 60) spent) ]);
+  (* Seen spent after its own stated reset: the stated end cannot be trusted. *)
+  check room_testable "a window seen spent after its own reset names no end"
+    Usage.Spent_without_reset
+    (Usage.scope_room ~coverage:Usage.Every_window_must_be_spent ~now:room_now
+       [ held ~observed_at:(room_now -. 10.0)
+           (gating ~resets_at:(Float.to_int room_now - 60) spent) ]);
+  read "a percentage at 100 is spent" Usage.Spent_without_reset
+    [ gating (Usage.Percent 100) ];
+  read "a percentage at 99 is not" Usage.Room_left [ gating (Usage.Percent 99) ];
+  read "USD at the key limit is spent" Usage.Spent_without_reset
+    [ gating (Usage.Usd { used = 10.0; limit = Some 10.0 }) ];
+  read "USD without a limit is never spent" Usage.Room_left
+    [ gating (Usage.Usd { used = 10.0; limit = None }) ]
+;;
+
+let test_scope_room_when_one_spent_window_refuses () =
+  let read = read ~coverage:Usage.One_spent_window_refuses in
+  read "nothing held says nothing" Usage.No_gating_window [];
+  read "no spent window leaves room" Usage.Room_left [ gating open_; gating open_ ];
+  (* Ollama: the session allowance has room, the weekly one is spent. *)
+  read "one spent window refuses even beside a window with room"
+    (Usage.Spent_until two_hours)
+    [ gating ~limit_id:(Some "session") open_
+    ; gating ~limit_id:(Some "weekly") ~resets_at:in_two_hours spent
+    ];
+  read "refused until the last spent window resets" (Usage.Spent_until two_hours)
+    [ gating ~limit_id:(Some "a") ~resets_at:in_one_hour spent
+    ; gating ~limit_id:(Some "b") ~resets_at:in_two_hours spent
+    ];
+  read "a spent window with no reset leaves the end open" Usage.Spent_without_reset
+    [ gating ~limit_id:(Some "a") ~resets_at:in_one_hour spent
+    ; gating ~limit_id:(Some "b") spent
+    ];
+  read "a spent window that counts other use refuses nothing" Usage.Room_left
+    [ gating open_; gating ~role:Usage.Counts_other_use spent ]
+;;
+
+let report_of source windows : Usage.report = { Usage.source; windows }
+
+let fresh_scope provider_id =
+  Runtime_quota_window.scope_of_credential ~provider_id None
+;;
+
+let test_record_rests_a_scope_by_its_source () =
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+    let scope = fresh_scope "scope-room-antigravity" in
+    Usage.record ~scope ~observed_at:room_now
+      (report_of Usage.Antigravity_usage_read
+         [ gating ~limit_id:(Some "gemini-weekly") ~resets_at:in_one_hour spent
+         ; gating ~limit_id:(Some "3p-weekly") ~resets_at:in_two_hours spent
+         ]);
+    check bool "every Antigravity window spent rests the scope" true
+      (Runtime_quota_window.is_exhausted ~scope ~now:room_now);
+    check (option (float 0.0)) "until the first reset" (Some hour)
+      (Runtime_quota_window.active_until ~scope ~now:room_now);
+    check bool "and not past it" false
+      (Runtime_quota_window.is_exhausted ~scope ~now:hour);
+    let partly = fresh_scope "scope-room-antigravity-one-open" in
+    Usage.record ~scope:partly ~observed_at:room_now
+      (report_of Usage.Antigravity_usage_read
+         [ gating ~limit_id:(Some "gemini-weekly") ~resets_at:in_one_hour spent
+         ; gating ~limit_id:(Some "3p-weekly") (Usage.Fraction 0.2)
+         ]);
+    check bool "one Antigravity window with room leaves the scope in place" false
+      (Runtime_quota_window.is_exhausted ~scope:partly ~now:room_now);
+    let ollama = fresh_scope "scope-room-ollama" in
+    Usage.record ~scope:ollama ~observed_at:room_now
+      (report_of Usage.Ollama_balance_read
+         [ gating ~limit_id:(Some "session") open_
+         ; gating ~limit_id:(Some "weekly") ~resets_at:in_two_hours spent
+         ]);
+    check bool "one spent Ollama window rests the scope beside one with room" true
+      (Runtime_quota_window.is_exhausted ~scope:ollama ~now:room_now);
+    check (option (float 0.0)) "until the spent window resets" (Some two_hours)
+      (Runtime_quota_window.active_until ~scope:ollama ~now:room_now);
+    let other_use = fresh_scope "scope-room-other-use" in
+    Usage.record ~scope:other_use ~observed_at:room_now
+      (report_of Usage.Zai_quota_limit_read
+         [ gating ~role:Usage.Counts_other_use ~resets_at:in_one_hour spent ]);
+    check bool "a window that counts other use rests nothing" false
+      (Runtime_quota_window.is_exhausted ~scope:other_use ~now:room_now))
+;;
+
+let test_record_without_a_reset_rests_until_a_success () =
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+    let scope = fresh_scope "scope-room-no-reset" in
+    Usage.record ~scope ~observed_at:room_now
+      (report_of Usage.Ollama_balance_read [ gating spent ]);
+    check bool "a spent window with no reset rests the scope" true
+      (Runtime_quota_window.is_exhausted ~scope ~now:room_now);
+    check (option (float 0.0)) "and names no end" None
+      (Runtime_quota_window.active_until ~scope ~now:room_now);
+    Runtime_quota_window.note_succeeded ~scope;
+    check bool "an answer on the scope clears it" false
+      (Runtime_quota_window.is_exhausted ~scope ~now:room_now))
+;;
+
+let test_record_leaves_sparse_sources_to_their_refusals () =
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+    List.iter
+      (fun (source, provider_id) ->
+         let scope = fresh_scope provider_id in
+         Usage.record ~scope ~observed_at:room_now
+           (report_of source
+              [ gating ~limit_id:(Some "codex") ~resets_at:in_two_hours (Usage.Percent 100) ]);
+         check bool
+           (Usage.source_to_string source ^ " states one limit and rests nothing")
+           false
+           (Runtime_quota_window.is_exhausted ~scope ~now:room_now))
+      [ Usage.Codex_account_rate_limits_updated, "scope-room-codex-update"
+      ; Usage.Codex_account_rate_limits_read, "scope-room-codex-read"
+      ; Usage.Claude_code_rate_limit_event, "scope-room-claude"
+      ])
+;;
+
+let test_record_never_says_a_scope_has_room () =
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+    let scope = fresh_scope "scope-room-later-read" in
+    Usage.record ~scope ~observed_at:room_now
+      (report_of Usage.Ollama_balance_read
+         [ gating ~limit_id:(Some "weekly") ~resets_at:in_two_hours spent ]);
+    check bool "a spent window rests the scope" true
+      (Runtime_quota_window.is_exhausted ~scope ~now:room_now);
+    Usage.record ~scope ~observed_at:(room_now +. 1.0)
+      (report_of Usage.Ollama_balance_read
+         [ gating ~limit_id:(Some "weekly") open_ ]);
+    check bool "a later read with room does not clear a stated window" true
+      (Runtime_quota_window.is_exhausted ~scope ~now:(room_now +. 2.0));
+    check bool "it ends at its own reset" false
+      (Runtime_quota_window.is_exhausted ~scope ~now:two_hours))
+;;
+
 let () =
   run
     "provider_usage_windows"
@@ -1395,6 +1632,21 @@ let () =
             test_muse_report_names_both_windows
         ; test_case "observe records and rests by one rule" `Quick
             test_muse_observe_records_and_rests_by_one_rule
+        ] )
+    ; ( "scope room"
+      , [ test_case "gate coverage by source" `Quick test_gate_coverage_by_source
+        ; test_case "every window must be spent" `Quick
+            test_scope_room_when_every_window_must_be_spent
+        ; test_case "one spent window refuses" `Quick
+            test_scope_room_when_one_spent_window_refuses
+        ; test_case "record rests a scope by its source" `Quick
+            test_record_rests_a_scope_by_its_source
+        ; test_case "a spent window with no reset rests until a success" `Quick
+            test_record_without_a_reset_rests_until_a_success
+        ; test_case "sparse sources are left to their refusals" `Quick
+            test_record_leaves_sparse_sources_to_their_refusals
+        ; test_case "a report never says a scope has room" `Quick
+            test_record_never_says_a_scope_has_room
         ] )
     ; ( "antigravity /usage"
       , [ test_case "antigravity-usage" `Quick test_antigravity_usage

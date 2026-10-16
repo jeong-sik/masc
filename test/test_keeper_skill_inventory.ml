@@ -168,12 +168,35 @@ let search_candidates surface query =
             Masc.Keeper_capability_surface.candidate_invocation_name candidate
         })
   in
-  match Masc.Keeper_capability_search.search ~query documents with
+  match Masc.Keeper_capability_search.search ~query:(Masc.Keeper_capability_search.Fts5 query) documents with
   | Ok hits -> hits
   | Error error ->
     fail
       (Yojson.Safe.to_string
          (Masc.Keeper_capability_search.error_to_yojson error))
+;;
+
+let test_literal_and_expression_search () =
+  let module Search = Masc.Keeper_capability_search in
+  let document name = Search.{payload=name;name;description="";invocation_name=None} in
+  let documents = List.map document ["preparation-stdout";"OR";"한글 \"인용\""] in
+  let found query = match Search.search ~query documents with
+    | Ok hits -> List.map (fun hit -> hit.Search.document.payload) hits |> List.sort String.compare
+    | Error error -> fail (Yojson.Safe.to_string (Search.error_to_yojson error)) in
+  List.iter (fun text -> check (list string) "literal names survive query punctuation and operators"
+      [text] (found (Search.Literal text))) ["preparation-stdout";"OR";"한글 \"인용\""];
+  check (list string) "literal text does not expand boolean operators" []
+    (found (Search.Literal "preparation-stdout OR 한글"));
+  check (list string) "explicit expressions retain boolean search"
+    ["OR";"preparation-stdout"] (found (Search.Fts5 "\"preparation-stdout\" OR \"OR\""));
+  (match Search.search ~query:(Search.Fts5 "preparation-stdout") documents with
+   | Error (Search.Invalid_query _) -> ()
+   | Ok _ | Error (Search.Empty_query | Search.Frozen_surface_required | Search.Index_unavailable _) ->
+     fail "invalid explicit FTS must not silently become literal search");
+  match Search.search ~query:(Search.Literal " \n\t") documents with
+  | Error Search.Empty_query -> ()
+  | Ok _ | Error (Search.Frozen_surface_required | Search.Invalid_query _ | Search.Index_unavailable _) ->
+    fail "empty literal query was not rejected"
 ;;
 
 let tool_capability_with_availability surface availability =
@@ -749,7 +772,7 @@ let test_search_returns_every_fts_hit_without_cutoff () =
         ; invocation_name = None
         })
   in
-  match Masc.Keeper_capability_search.search ~query:"sharedneedle" documents with
+  match Masc.Keeper_capability_search.search ~query:(Masc.Keeper_capability_search.Literal "sharedneedle") documents with
   | Ok hits -> check int "no top-N cutoff" 32 (List.length hits)
   | Error error ->
     fail
@@ -1270,6 +1293,8 @@ let () =
             test_shadowed_and_invalid_skills_keep_typed_availability
         ; test_case "duplicate-name search keeps exact refs" `Quick
             test_search_keeps_duplicate_exact_skill_references
+        ; test_case "literal names and explicit search expressions" `Quick
+            test_literal_and_expression_search
         ; test_case "outside Tool and Skill search" `Quick
             test_search_includes_outside_tool_and_skill
         ; test_case "invalid Skill search isolation" `Quick

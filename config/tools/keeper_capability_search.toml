@@ -19,7 +19,14 @@ name = "query"
 type = "string"
 required = true
 description = """
-Search terms from the task, capability name or description, using FTS5 syntax. \
-Use OR for alternatives (for example: browser OR screenshot). Put a name with \
-punctuation inside double quotes (for example: "browser-navigate-read"). This \
-is lexical search; if there are no matches, try other relevant terms."""
+Literal phrase from the task, capability name or description. Names such as \
+browser-navigate-read need no query-language quoting. SQLite tokenization and \
+ranking still apply; no match is not evidence that the capability is absent. \
+For boolean, prefix or column expressions, select syntax=fts5 explicitly."""
+
+[[params]]
+name = "syntax"
+type = "string"
+enum = ["literal", "fts5"]
+default = "literal"
+description = "literal (default) searches one phrase and treats punctuation/operators as text. fts5 uses the explicit FTS5 expression grammar; for alternatives use query='browser OR screenshot'."

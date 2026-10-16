@@ -68,7 +68,12 @@ let capability_search_failure error =
 let capability_search_query = function
   | `Assoc fields ->
     (match List.assoc_opt "query" fields with
-     | Some (`String query) -> Ok query
+     | Some (`String query) ->
+       (match List.assoc_opt "syntax" fields with
+        | None | Some (`String "literal") -> Ok (Keeper_capability_search.Literal query)
+        | Some (`String "fts5") -> Ok (Keeper_capability_search.Fts5 query)
+        | Some _ -> Error (`Assoc ["kind",`String "invalid_query_syntax";
+            "expected",`List [`String "literal";`String "fts5"]]))
      | Some other ->
        Error
          (`Assoc
@@ -89,7 +94,7 @@ let invalid_capability_search_arguments error =
   Keeper_tool_execution.failure_data
     ~class_:Tool_result.Policy_rejection
     ~metadata:data
-    ~message:"keeper_capability_search requires a string query."
+    ~message:"keeper_capability_search requires a string query and literal or fts5 syntax."
     data
 ;;
 

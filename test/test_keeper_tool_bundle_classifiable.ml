@@ -612,7 +612,24 @@ let test_tools_list_reads_the_supplied_capability_surface () =
                 |> member "capability"
                 |> member "availability"
                 |> to_string))
-         matches)
+         matches);
+    let search_names id input =
+      run_tool ~tool_use_id:id search_tool input
+      |> decode_tool_json ~base_path:config.base_path
+      |> Yojson.Safe.Util.member "matches"
+      |> Yojson.Safe.Util.to_list
+      |> List.map (fun row ->
+        Yojson.Safe.Util.(row |> member "matched_name" |> to_string),
+        Yojson.Safe.Util.(row |> member "invocation_name")) in
+    let literal = search_names "bundle-capability-literal-skill"
+        (`Assoc ["query",`String "gate-inline"]) in
+    check bool "a plain hyphenated Skill name returns its real callable name" true
+      (List.mem ("gate-inline",`String "keeper_compose_gate-inline") literal);
+    let expressions = search_names "bundle-capability-expression"
+        (`Assoc ["query",`String "\"gate-inline\" OR \"gate-async\"";"syntax",`String "fts5"]) in
+    check bool "explicit FTS preserves both matching Skill invocations" true
+      (List.mem ("gate-inline",`String "keeper_compose_gate-inline") expressions &&
+       List.mem ("gate-async",`String "keeper_compose_gate-async") expressions)
 ;;
 
 let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =

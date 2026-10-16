@@ -126,7 +126,7 @@ let test_empty_reports_distinguish_unseen_and_reported_scopes () =
       check bool "empty complete report keeps its observation time" true
         (Usage.state ~scope:complete_scope =
            Reported_no_windows { source = Openrouter_key_read; observed_at = 101. });
-      check bool "empty complete report is durable observation evidence" true
+      check bool "empty complete report reaches the observer" true
         (!observed = [complete_scope, 101., empty]))
 
 let test_quota_rest_uses_accepted_source_snapshot () =

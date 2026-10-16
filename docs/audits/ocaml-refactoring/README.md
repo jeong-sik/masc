@@ -69,7 +69,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 ## Current queue
 
-The first semantic pass produced **24 concrete candidates**. `S1` is selected because complete/sparse acceptance and observer delivery form a bounded, heavily consumed runtime contract with existing lifecycle scenarios. Other `next` items remain queued; this ordering does not waive their coverage.
+The first semantic pass produced **24 concrete candidates**. `S1` is implemented in [#43367](https://github.com/jeong-sik/masc/pull/43367) and has passed independent source review. It was selected because complete/sparse acceptance and observer delivery form a bounded, heavily consumed runtime contract with existing lifecycle scenarios. Other `next` items remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -87,7 +87,7 @@ The first semantic pass produced **24 concrete candidates**. `S1` is selected be
 | [D5](#d5) | later | candidate | Extract the Board vote decision from post/comment mutation shells |
 | [D6](#d6) | later | candidate | Represent Board snapshot flush work and retry obligations explicitly |
 | [D7](#d7) | next | candidate | Separate evidence persistence codec, judge transport and metadata projection from acquisition |
-| [S1](#s1) | next | selected | Extract the provider usage acceptance/revocation reducer from the shared observation store |
+| [S1](#s1) | next | in review | Extract the provider usage acceptance/revocation reducer from the shared observation store |
 | [S2](#s2) | next | candidate | Move lane edit decisions into a pure declared-configuration planner |
 | [S3](#s3) | later | candidate | Separate Antigravity protocol transitions from persistence and stream callbacks |
 | [S4](#s4) | investigate | candidate | Make provider-metrics cache refresh ownership explicit and cancellation-complete |
@@ -741,5 +741,5 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 ## Round log
 
 - Previous work: Memory OS codecs/successor core published as three Draft PRs; current open heads were refreshed before this round. That is source progress, not merged/runtime completion.
-- Round 1: all tracked `.ml`/`.mli` files classified at the pinned baseline; clean-checkout counts independently matched the committed-blob reader; 24 source-backed candidates recorded with boundaries, invariants, callers and suites. S1 selected for implementation.
+- Round 1: all tracked `.ml`/`.mli` files classified at the pinned baseline; clean-checkout counts independently matched the committed-blob reader; 24 source-backed candidates recorded with boundaries, invariants, callers and suites. S1 implemented with a private immutable observation core, retained lock/observer effects and two additional public-store scenarios; published as [#43367](https://github.com/jeong-sik/masc/pull/43367). OCaml syntax checks passed; behavior suites remain unexecuted.
 - No local Dune build, CI polling, behavior execution, formal GitHub approval, merge or runtime proof is supplied by this inventory.

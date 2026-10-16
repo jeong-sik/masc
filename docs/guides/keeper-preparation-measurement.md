@@ -62,29 +62,3 @@ failed, missing and unfinished samples in the denominator. This admission change
 does not establish those joins, an installed runtime result, or a preparation
 speedup by itself. Effectful job ownership/resume and fresh Ask Question TUI
 evidence remain separately tracked in #42799.
-
-## Select only the status inspection needed
-
-`masc_keeper_status` with `fast:true` skips repository checkout inspection by
-default. `execution_context.repository_checkouts` reports `not_inspected` and
-an empty `entries` list; this does not claim that the workspace has no repos.
-Use `include_repository_checkouts:true` when checkout identity or freshness is
-needed. `fast:false` keeps the full-inspection default, and an explicit false
-can disable this section independently. The resolved choice is included in
-`status_options`.
-
-The Dashboard detail request explicitly selects checkout inspection because
-its repository panel consumes that projection. Basic agent status reads can
-leave it disabled, avoiding directory discovery, sandbox entry and Git calls
-for that section. Other status sections retain their own controls.
-
-The [captured baseline](../evidence/keeper-status-selective-checkouts-20261016/baseline.json)
-records one existing live MCP response at 2026-10-16T08:02:38.820Z: 50,753 UTF-8
-bytes and 32 checkout entries. Its checkout subdocument contains 15,082 bytes.
-Replacing only that subdocument and recording the new section selection in the
-same compact JSON predicts a 15,007-byte reduction (50,747 to 35,740 bytes).
-That is a JSON projection estimate from a fixed captured document, not a
-candidate execution result. The observed 4,674 ms RPC round trip includes all
-status work and transport; it cannot be attributed to checkout inspection or
-used as a task-preparation speedup. No candidate runtime was installed for this
-observation.

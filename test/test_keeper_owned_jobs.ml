@@ -2680,6 +2680,8 @@ pointer = "/content"
   let ok,completed,entry = await_composition env fixture resumed in
   let recovery_ms = Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000. in
   check bool "fresh supervisor finishes original nested DAG" true ok;
+  (match Journal.waiting_continuation journal with
+   | Ok None -> () | Ok (Some _) | Error _ -> fail "completed nested parent left a waiting continuation");
   check int "nested recovery has zero backend calls after full result" ready_backend (List.length (calls fixture));
   check_json "parent exports original complete stdout" (`String stdout_bytes)
     (completed |> member "exports" |> member "stdout" |> member "value");

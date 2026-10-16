@@ -32,6 +32,8 @@ let observe ~base_path ~keeper_name binding =
       |> Result.map_error Async.canonical_terminal_error_to_string in
     let terminal = Async.durable_terminal_entry proof in
     let* () = original_matches binding terminal in
+    (* Re-read membership after the canonical terminal proof. The initial
+       membership read alone cannot validate the result observed afterward. *)
     let* () = Keeper_composition_named_run.validate ~base_path ~keeper_name binding in
     Ok (Terminal terminal)
 

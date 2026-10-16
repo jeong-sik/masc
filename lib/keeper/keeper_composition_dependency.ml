@@ -83,7 +83,14 @@ let of_json json =
   | _ -> Error "unknown result dependency kind"
 
 let identity dependency = Yojson.Safe.to_string (to_json dependency)
-let normalize = List.sort_uniq (fun left right -> String.compare (identity left) (identity right))
+let normalize dependencies =
+  match dependencies with
+  | [] | [_] -> dependencies
+  | _ :: _ :: _ ->
+    dependencies
+    |> List.map (fun dependency -> identity dependency, dependency)
+    |> List.sort_uniq (fun (left, _) (right, _) -> String.compare left right)
+    |> List.map snd
 
 let list_of_json = function
   | `List (_ :: _ as values) ->

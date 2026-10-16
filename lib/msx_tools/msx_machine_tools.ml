@@ -479,7 +479,6 @@ let handle_checkpoint_info ~tool_name ~start_time ~base_path args =
             ([ ("slot", `String slot)
              ; ("exists", `Bool info.exists)
              ; ("version", `Int info.version)
-             ; ("frame", match info.frame with Some f -> `Int f | None -> `Null)
              ; ( "saved_at_unix"
                , match info.saved_at_unix with Some t -> `Float t | None -> `Null )
              ; ( "mtime_utc"

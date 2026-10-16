@@ -410,10 +410,6 @@ type checkpoint_info = {
           answered by reaching this record at all. This field makes the
           answer explicit for a caller comparing surfaces. *)
   version : int;  (** the checkpoint format version, currently 1 *)
-  frame : int option;
-      (** the saved frame counter. Checkpoint version 1 does not record it —
-          reading it would mean decoding the machine — so [None] until a
-          format that carries it. *)
   saved_at_unix : float option;
       (** the checkpoint file's modification time: the moment the slot was
           written. Absent when the file cannot be stat'ed. *)

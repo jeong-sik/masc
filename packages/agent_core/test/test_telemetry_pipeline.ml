@@ -374,6 +374,61 @@ let test_checkpoint_sink_after_tool_feedback () =
        injection_snapshot.checkpoint.messages)
 ;;
 
+let test_checkpoint_after_context_depends_on_reported_updates () =
+  List.iter
+    (fun (label, injection, changed) ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let snapshots = ref [] and calls = ref 0 in
+      let tool =
+        Tool.create ~name:"get_time" ~description:"Get time"
+          ~parameters:
+            [ { name = "timezone"
+              ; param_type = Types.String
+              ; description = "tz"
+              ; required = true
+              }
+            ]
+          (fun _ ->
+            incr calls;
+            Ok { Types.content = "12:00 UTC"; content_blocks = None; _meta = None })
+      in
+      let context_injector ~tool_name:_ ~input:_ ~output:_ = injection in
+      let agent =
+        make_checkpoint_agent ~net:env#net
+          ~transport:(make_sequence_transport [ tool_use_response (); text_response "done" ])
+          ~context_injector
+          ~checkpoint_sink:(fun snapshot -> snapshots := snapshot :: !snapshots; Ok ())
+          ~tools:[tool] ()
+      in
+      (match Agent.run ~sw agent "read the time" with
+       | Ok _ -> ()
+       | Error error -> Alcotest.fail (Error.to_string error));
+      Alcotest.(check int) (label ^ " executes once") 1 !calls;
+      let snapshots = List.rev !snapshots in
+      let expected =
+        [ Agent.After_assistant_collected; Agent.After_tool_results_appended ]
+        @ (if changed then [ Agent.After_context_injection ] else [])
+        @ [ Agent.After_assistant_collected ]
+      in
+      Alcotest.(check bool) (label ^ " checkpoint stages") true
+        (List.map (fun (s : Agent.checkpoint_snapshot) -> s.stage) snapshots = expected);
+      let tool_snapshot = List.nth snapshots 1 in
+      Alcotest.(check bool) (label ^ " retains durable tool feedback") true
+        (messages_contain_tool_result ~tool_use_id:"call_1" ~content:"12:00 UTC"
+           tool_snapshot.Agent.checkpoint.messages);
+      if changed then
+        let injected = List.nth snapshots 2 in
+        Alcotest.(check bool) "context-only update reaches the checkpoint" true
+          (Context.get injected.Agent.checkpoint.context "context-only" = Some (`Int 42)))
+    [ "none", None, false
+    ; "empty", Some { Hooks.context_updates = []; extra_messages = [] }, false
+    ; ( "context-only"
+      , Some { Hooks.context_updates = [ "context-only", `Int 42 ]; extra_messages = [] }
+      , true )
+    ]
+;;
+
 let test_checkpoint_sink_failure_fails_turn () =
   Eio_main.run
   @@ fun env ->
@@ -740,6 +795,10 @@ let () =
             "checkpoint after tool feedback"
             `Quick
             test_checkpoint_sink_after_tool_feedback
+        ; Alcotest.test_case
+            "context checkpoints follow reported updates"
+            `Quick
+            test_checkpoint_after_context_depends_on_reported_updates
         ; Alcotest.test_case
             "checkpoint sink failure fails turn"
             `Quick

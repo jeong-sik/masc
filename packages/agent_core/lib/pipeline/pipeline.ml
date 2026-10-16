@@ -524,20 +524,18 @@ let stage_execute
                       | None -> "")
                      error.detail))
             in
-            let messages =
-              match injection with
-              | Agent_turn.No_injection -> agent.state.messages
-              | Agent_turn.Injected messages -> messages
-            in
-            let injected_state = { agent.state with messages } in
-            set_state agent injected_state;
-            let* () =
-              persist_turn_checkpoint_for_state
-                agent
-                After_context_injection
-                injected_state
-            in
-            finish After_context_injection))
+            (match injection with
+             | Agent_turn.No_injection -> finish After_tool_results_appended
+             | Agent_turn.Injected messages ->
+               let injected_state = { agent.state with messages } in
+               set_state agent injected_state;
+               let* () =
+                 persist_turn_checkpoint_for_state
+                   agent
+                   After_context_injection
+                   injected_state
+               in
+               finish After_context_injection)))
 ;;
 
 let replay_settled_before_checkpoint agent =

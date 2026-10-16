@@ -3601,6 +3601,10 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
            { Agent.default_options with
              transport = Some transport
            ; provider_config = Some (Provider_mock.to_provider_config ())
+           ; context_injector =
+               Some
+                 (fun ~tool_name:_ ~input:_ ~output:_ ->
+                    Some { Hooks.context_updates = []; extra_messages = [] })
            }
          in
          let effect_count = ref 0 in
@@ -3693,6 +3697,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
                     Ok { Types.content = "duplicate"; content_blocks = None; _meta = None })
              ]
          in
+         let resumed_stages = ref [] in
          let resumed_agent =
            Agent.resume
              ~net:(Eio.Stdenv.net env)
@@ -3700,6 +3705,9 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
              ~tools:resumed_tools
              ~options
              ~config
+             ~checkpoint_sink:(fun snapshot ->
+               resumed_stages := snapshot.Agent.stage :: !resumed_stages;
+               Ok ())
              ()
          in
          let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
@@ -3717,6 +3725,10 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
               true
               (response.stop_reason = Types.StopToolUse));
          Alcotest.(check int) (label ^ " total provider calls") 1 !provider_calls;
+         Alcotest.(check bool)
+           (label ^ " empty injection preserves the tool-result recovery boundary")
+           true
+           (List.rev !resumed_stages = [ Agent.After_tool_results_appended ]);
          Alcotest.(check int)
            (label ^ " current handler never runs")
            0

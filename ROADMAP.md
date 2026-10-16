@@ -2,7 +2,7 @@
 
 > Current package version: v0.57.0
 > Latest changelog entry: v0.57.0 (2026-10-16)
-> Latest published GitHub release: v0.56.0 (2026-10-14)
+> Latest published GitHub release: v0.57.0 (2026-10-16)
 > Updated: 2026-10-16
 
 A planning view, not a release promise. The operating model behind it
@@ -33,31 +33,30 @@ the release ledger posts. The cut date holds and scope varies.
 | v0.53.0 | 2026-10-13 10:32 | |
 | v0.54.0 | 2026-10-13 23:50 | |
 | v0.55.0 | 2026-10-14 06:18 | |
-| v0.56.0 | 2026-10-14 16:36 | latest |
-| v0.57.0 | not cut | 30 commits on `main` since the v0.56.0 tag |
+| v0.56.0 | 2026-10-14 16:36 | |
+| v0.57.0 | 2026-10-16 09:23 | latest |
+| v0.58.0 | not cut | |
 
-v0.57.0 has no `release/v0.57.0` branch yet. What stands between `main` and the
+v0.58.0 has no `release/v0.58.0` branch yet. What stands between `main` and the
 cut:
 
-- **`main` is not type-clean.** `dune build @check` fails on four test files
-  that build a failure record without `fenced_empty_turn_runtime`
-  (`test_server_runtime_bootstrap`, `test_runtime_blocker_classification`,
-  `test_keeper_terminal_reason_typed`, `test_keeper_registry_provenance`). The
-  lib-only `Main minimal build` does not see it. A small repair PR comes
-  first.
-- **A full regression green on the tip.** The last green full run is on a head
-  three shared-input commits behind the tip, so it does not stand for the
-  tip.
+- **`main` must build.** The `Main minimal build` run was failing on the
+  #43276 merge commit (`b43e5275f6`) when this was written; the repair PR
+  covered two of the files with non-exhaustive matches, not all seven. A
+  repair that lets the four executables build comes first.
+- **A full regression green on the tip.** The last green full regression
+  (run 38859872654) is on the v0.57.0 base, not on the current tip.
 - **The stacked-PR queue.** Stack #43146 (50 layers, with draft and
   changes-requested layers mixed in) is being split: the ready run at the
   bottom lands first, and the authors re-stack the rest.
-- **Carried in from the v0.56.0 cycle.** Promote `masc_wiki_lint` out of
+- **Carried in from earlier cycles.** Promote `masc_wiki_lint` out of
   Experimental; a conversion tool for binding files written by v0.48.0 and
   earlier (#42868); `merge-guard` and `approve-guard` support for
   release-candidate PRs whose base is `release/*`; the composition completion
-  and Ask-path delivery work.
+  and Ask-path delivery work; the #43175 shared-memory log questions listed
+  under Known issues in the v0.57.0 notes.
 
-The cut order is unchanged: freeze, `release/v0.57.0`, bump and notes, RC, an
+The cut order is unchanged: freeze, `release/v0.58.0`, bump and notes, RC, an
 independent release approval bound to the head and the RC run, tag, publish
 check.
 

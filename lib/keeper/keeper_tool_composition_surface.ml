@@ -1597,8 +1597,7 @@ let rec async_worker_result
         (match Journal.launch_recheck worker ~node_id:node.node_id
             ~tool_name:node.tool_name ~input:node.input ~execution_id:node.execution_id ~tool_use_id:node.tool_use_id with
          | Ok (Some _) -> Some (Tool_result.message node.result)
-         | Error error ->
-           unless_proven_permanent (Journal.permanence error) (Journal.error_to_string error)
+         | Error error -> Some (Journal.error_to_string error)
          | Ok None -> None)
     | (Tool_result.Completed _ | Tool_result.Deferred _ | Tool_result.Failed _),
       (None | Some {target=(Plan.Descriptor_target _ | Plan.Child_arguments _

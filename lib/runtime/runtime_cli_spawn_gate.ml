@@ -36,6 +36,20 @@ let track_waiter f =
     f
 ;;
 
+let active_cli_spawns () = Atomic.get active
+
+let waiting_cli_spawns () =
+  with_waiter_mutex (fun () -> List.length !waiter_starts)
+;;
+
+let oldest_cli_spawn_wait_s () =
+  let now = Unix.gettimeofday () in
+  with_waiter_mutex (fun () ->
+    match !waiter_starts with
+    | [] -> None
+    | starts -> Some (now -. List.fold_left Float.min Float.infinity starts))
+;;
+
 let with_cli_spawn_slot ~clock ?(wait_timeout_s = max_slot_wait_s) f =
   let started = Unix.gettimeofday () in
   let acquired =
@@ -64,20 +78,6 @@ let with_cli_spawn_slot ~clock ?(wait_timeout_s = max_slot_wait_s) f =
          Atomic.decr active;
          Eio.Semaphore.release slots)
        (fun () -> Fd_accountant.observe ~kind:Fd_accountant.Provider_cli f))
-;;
-
-let active_cli_spawns () = Atomic.get active
-
-let waiting_cli_spawns () =
-  with_waiter_mutex (fun () -> List.length !waiter_starts)
-;;
-
-let oldest_cli_spawn_wait_s () =
-  let now = Unix.gettimeofday () in
-  with_waiter_mutex (fun () ->
-    match !waiter_starts with
-    | [] -> None
-    | starts -> Some (now -. List.fold_left Float.min Float.infinity starts))
 ;;
 
 type child_fds =

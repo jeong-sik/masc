@@ -242,7 +242,7 @@ let test_one_inline_overlaps_its_disjoint_edits () =
   fixture @@ fun env sw config meta recovery root ->
   let snapshot = publish_edit_skills ~two_nodes:true sw config in
   public_bundle ~snapshot env sw config meta recovery @@ fun meta task_id _cell causal bundle ->
-  let left = Filename.concat root "one-left/file" and right = Filename.concat root "one-right/file" in
+  let left = Filename.concat root "one-parent/left" and right = Filename.concat root "one-parent/right" in
   write left "left-before"; write right "right-before";
   let both, resolve_both = Eio.Promise.create () in
   let entered = ref 0 in
@@ -412,7 +412,7 @@ let test_public_and_published_inline_share_conflict_order () =
   let calls = public_calls [public_args path "first" "second"]
       @ inline_calls bundle [public_args path "second" "third"] in
   let rows = dispatch env bundle.tools calls in
-  check string "Inline claim conflicts with the public producer's same directory" "third" (read path);
+  check string "Inline claim conflicts with the public producer's same entry" "third" (read path);
   List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
     check int "direct and Inline conflicting occurrences do not overlap" 1
       (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
@@ -444,7 +444,7 @@ let test_public_edits_overlap_through_handler_and_bridge () =
       ~turn_ctx_cell:cell ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~keeper_turn_id:13 ~on_after_turn_ordinal:(fun _ -> ())
       ~tool_result_commit_required:(fun () -> true) () in
-  let left = Filename.concat root "public-left/file" and right = Filename.concat root "public-right/file" in
+  let left = Filename.concat root "public-parent/left" and right = Filename.concat root "public-parent/right" in
   write left "left-before"; write right "right-before";
   let both, resolve_both = Eio.Promise.create () in
   let entered = ref 0 in
@@ -504,7 +504,7 @@ let test_public_edits_without_source_stay_serial () =
 
 let test_disjoint_actual_edits_overlap () =
   fixture @@ fun env _sw config meta recovery root ->
-  let left = Filename.concat root "left/file" and right = Filename.concat root "right/file" in
+  let left = Filename.concat root "same-parent/left" and right = Filename.concat root "same-parent/right" in
   write left "left-before"; write right "right-before";
   let both, resolve_both = Eio.Promise.create () in
   let entered = ref 0 in
@@ -522,6 +522,61 @@ let test_disjoint_actual_edits_overlap () =
     check int "actual disjoint wave contains both calls" 2 schedule.batch_size;
     check bool "effect stays Concurrent without claiming readonly" true
       (schedule.execution_mode = Agent_core.Tool_contract.Concurrent)) rows
+;;
+
+let test_shared_source_edits_overlap ~in_skill () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = if in_skill then Some (publish_edit_skills ~two_nodes:true sw config) else None in
+  public_bundle ?snapshot env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let source = Filename.concat root "shared-source/original" in
+  let left = Filename.concat root "target-left/file" and right = Filename.concat root "target-right/file" in
+  write source "shared-before";
+  List.iter (fun target ->
+    Fs_compat.mkdir_p (Filename.dirname target);
+    Unix.symlink "../shared-source/original" target) [left; right];
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let calls = if in_skill then inline_calls bundle
+      [two_patch_args left "shared-before" "left-after" right "shared-before" "right-after"]
+    else public_calls [public_args left "shared-before" "left-after";
+                       public_args right "shared-before" "right-after"] in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered;
+      if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> dispatch env bundle.Keeper_tools_agent_core.tools calls) in
+  check int "both actual edits share source reads while overlapping target writes" 2 !entered;
+  check int "original public calls complete" (if in_skill then 1 else 2) (List.length rows);
+  check string "left target receives its own replacement" "left-after" (read left);
+  check string "right target receives its own replacement" "right-after" (read right);
+  check string "shared original bytes are not modified" "shared-before" (read source);
+  List.iter (fun target ->
+    check bool "atomic replacement replaces the lexical symlink entry" true
+      ((Unix.lstat target).st_kind = Unix.S_REG)) [left; right];
+  if not in_skill then List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "public mixed-resource calls share one actual wave" 2
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
+;;
+
+let test_source_write_precedes_later_alias_read () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let source = Filename.concat root "ordered-source/original" in
+  let target = Filename.concat root "ordered-target/file" in
+  write source "first";
+  Fs_compat.mkdir_p (Filename.dirname target);
+  Unix.symlink "../ordered-source/original" target;
+  let rows = dispatch env bundle.Keeper_tools_agent_core.tools
+      (public_calls [public_args source "first" "second";
+                     public_args target "second" "third"]) in
+  check string "source write commits its original result" "second" (read source);
+  check string "later alias read consumes the newly replaced source" "third" (read target);
+  match rows with
+  | [first; second] ->
+    let wave row = (Agent_core.Tool_contract.Invocation.schedule
+        row.Agent_core.Agent_tools.invocation).batch_index in
+    check bool "write/read overlap keeps the original ordering edge" true (wave first < wave second)
+  | [] | [_] | _ :: _ :: _ :: _ -> fail "ordered write/read results changed"
 ;;
 
 let test_successive_patches_use_current_source () =
@@ -554,22 +609,53 @@ let test_directory_alias_keeps_patch_order () =
       (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
 ;;
 
-let test_ancestor_directories_retain_planned_order () =
+let test_distinct_entries_under_nested_parents_overlap () =
   fixture @@ fun env _sw config meta recovery root ->
   let parent = Filename.concat root "parent/file" in
   let child = Filename.concat root "parent/child/file" in
   write parent "parent-before"; write child "child-before";
-  let rows = batch env config meta recovery
-      [args parent "parent-before" "parent-after"; args child "child-before" "child-after"] in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered; if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> batch env config meta recovery
+      [args parent "parent-before" "parent-after"; args child "child-before" "child-after"]) in
+  check int "nested directories do not serialize independent actual entries" 2 !entered;
   check string "parent actual file" "parent-after" (read parent);
   check string "child actual file" "child-after" (read child);
-  match rows with
-  | [first; second] ->
-    let schedule row = Agent_core.Tool_contract.Invocation.schedule
-        row.Agent_core.Agent_tools.invocation in
-    check bool "ancestor footprint is an actual prior wave" true
-      ((schedule first).batch_index < (schedule second).batch_index)
-  | [] | [_] | _ :: _ :: _ :: _ -> fail "ancestor Edit results changed"
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "distinct entries in nested parents share one wave" 2
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
+;;
+
+let test_object_aliases_retain_backend_mutation_order ~spelling_alias () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let left = Filename.concat root "object-alias/Original" in
+  let right = Filename.concat root (if spelling_alias then "object-alias/original" else "object-alias/linked") in
+  write left "first";
+  (* Observe the real filesystem, without inventing a case-folding rule. On a
+     case-sensitive filesystem the alternate spelling becomes a hard link. *)
+  let same_entry = Sys.file_exists right in
+  if not same_entry then Unix.link left right;
+  check bool "fixture aliases share the original inode" true
+    ((Unix.stat left).st_ino = (Unix.stat right).st_ino);
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered;
+      if !entered = 2 then check string "prior replacement commits before alias admission"
+        "second" (read left))
+    (fun () -> dispatch env bundle.Keeper_tools_agent_core.tools
+      (public_calls [public_args left "first" "second";
+                     public_args right (if same_entry then "second" else "first") "third"])) in
+  check int "both original public calls complete" 2 !entered;
+  check string "left entry retains its actual replacement semantics"
+    (if same_entry then "third" else "second") (read left);
+  check string "alias reads its actual predecessor source" "third" (read right);
+  List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "object aliases retain separate mutation waves" 1
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
 ;;
 
 let test_parent_swap_and_input_or_owner_change_do_not_write () =
@@ -659,17 +745,27 @@ let () = run "prepared actual Edit resources"
     test_case "disjoint actual Edits overlap" `Quick test_disjoint_actual_edits_overlap;
     test_case "conflicting patches read current predecessor bytes" `Quick test_successive_patches_use_current_source;
     test_case "directory aliases retain planned order" `Quick test_directory_alias_keeps_patch_order;
-    test_case "ancestor directories retain planned order" `Quick test_ancestor_directories_retain_planned_order;
+    test_case "distinct entries in nested directories overlap" `Quick test_distinct_entries_under_nested_parents_overlap;
     test_case "changed owner input or parent cannot write" `Quick test_parent_swap_and_input_or_owner_change_do_not_write;
     test_case "Manual Gate retains the same containment and playground authority" `Quick test_preparation_preserves_containment_under_manual_gate;
     test_case "caller cancellation releases prepared Edit" `Quick test_cancelled_prepared_edit_releases_for_a_later_call;
     test_case "untransferred preparation releases without an effect" `Quick test_untransferred_preparation_releases_without_effect];
     "actual public bundle and SDK", [
+      test_case "hard-link entries retain backend mutation order" `Quick
+        (test_object_aliases_retain_backend_mutation_order ~spelling_alias:false);
+      test_case "filesystem spelling aliases retain backend mutation order" `Quick
+        (test_object_aliases_retain_backend_mutation_order ~spelling_alias:true);
+      test_case "public Edits overlap while sharing the resolved source" `Quick
+        (test_shared_source_edits_overlap ~in_skill:false);
+      test_case "source write precedes a later alias read" `Quick
+        test_source_write_precedes_later_alias_read;
       test_case "public Edit keeps handler observers bridge and source while overlapping" `Quick
         test_public_edits_overlap_through_handler_and_bridge;
       test_case "public conflicting patches consume predecessor bytes" `Quick test_public_conflicting_edits_keep_current_bytes;
       test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial];
     "published Inline Skills and actual Edit", [
+      test_case "one published Skill overlaps Edits sharing the resolved source" `Quick
+        (test_shared_source_edits_overlap ~in_skill:true);
       test_case "one published Skill overlaps its independent real Edits" `Quick
         test_one_inline_overlaps_its_disjoint_edits;
       test_case "one published Skill orders physical aliases" `Quick

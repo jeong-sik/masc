@@ -135,6 +135,8 @@ val prepare_edit :
     ordinary Serial path. This never writes, grants permission or proves replay. *)
 
 val prepared_edit_scopes : prepared_edit -> Agent_core.Tool_contract.Resource_scope.t list
+(** Producer-owned target writes and resolved source reads, with physical
+    directory identities and ancestry. This grants no permission or replay. *)
 val release_prepared_edit : prepared_edit -> unit
 (** Release an untransferred preparation; repeated release is harmless. *)
 

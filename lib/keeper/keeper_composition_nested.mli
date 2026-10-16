@@ -64,6 +64,9 @@ val compile :
     on a child waits for its complete expanded scope, so a successful exported
     branch cannot conceal a sibling failure. Final graph, descriptor authority,
     output pointers and fixed leaf inputs are revalidated before dispatch.
+    Inline drafts admit the canonical owned-file Edit producer, including
+    flattened inline children. Async scopes retain their durable read/launch
+    admission; an ordinary file Edit has no replayable launch identity.
 
     When there are children, every node ID is the canonical JSON encoding of
     a path ([parent-id] or [child-alias; child-node-id]); arbitrary delimiter

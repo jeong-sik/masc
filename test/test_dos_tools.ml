@@ -1452,6 +1452,27 @@ let test_peek_refuses_before_looking_for_a_machine () =
          (Tool_result.message (dispatch ~base_path "masc_dos_peek" [ ("address", `String "-1") ]))))
 ;;
 
+(* A data file named in the inventory is not a program. It used to boot as a
+   COM and run its bytes as instructions. *)
+let test_a_single_file_must_be_a_program () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "notes.txt" hello_com;
+    install_program ~base_path "plain" hello_com;
+    install_program ~base_path "real.com" hello_com;
+    install_program ~base_path "UPPER.EXE" hello_com;
+    List.iter
+      (fun name ->
+        refused_before_any_effect name (dispatch ~base_path "masc_dos_load"
+          [ ("program", `String name); ("replace_autosave", `Bool true) ]))
+      [ "notes.txt"; "plain" ];
+    check bool "no machine was installed by the refused names" true
+      (match Dos_lane.screen () with Error Dos_lane.No_machine -> true | Ok _ | Error _ -> false);
+    check bool "a .com loads" true (is_completed (load ~base_path "real.com"));
+    (* The name decides what is a program; the bytes decide how it boots. *)
+    check bool "an .EXE name is judged without case" true
+      (is_completed (load ~base_path "UPPER.EXE")))
+;;
+
 (* Ask the catalog, not the facade. The gate that decides whether a tool call
    counts as a read looks the flag up in Tool_catalog, and Tool_misc writes it
    there when it registers each name -- so a classification that never reaches
@@ -2457,6 +2478,7 @@ let () =
         ; test_case "peek takes hex digits only" `Quick test_peek_takes_hex_digits_only
         ; test_case "peek refuses before looking for a machine" `Quick
             test_peek_refuses_before_looking_for_a_machine
+        ; test_case "a single file must be a program" `Quick test_a_single_file_must_be_a_program
         ; test_case "a save cannot take the autosave slot" `Quick
             test_a_save_cannot_take_the_autosave_slot
         ; test_case "a save reports what it replaced" `Quick test_a_save_reports_what_it_replaced

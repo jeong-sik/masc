@@ -530,6 +530,13 @@ let resolve_program ?boot ~base_path name =
         Error
           (Printf.sprintf "%s is one file, not a directory: boot names a file inside a game directory"
              trimmed)
+       | Regular when not (is_program_name trimmed) ->
+        (* The image is chosen by its bytes, but only a .exe or .com is a
+           program: a data file named in the inventory would otherwise boot as
+           a COM and run its bytes as instructions. The same test picks the
+           executable inside a directory. *)
+        Error
+          (Printf.sprintf "%s is one file but not a .exe or .com, so it is not a program" trimmed)
        | Regular ->
         (* One file boots alone, and is mounted under its own name too — a
            program that opens itself (overlays, self-reading installers)

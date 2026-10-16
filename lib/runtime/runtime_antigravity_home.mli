@@ -150,6 +150,12 @@ val publish_mcp_config : t -> Yojson.Safe.t -> (unit, error) result
 val clear_mcp_config : t -> (unit, error) result
 (** Remove the turn capability after the listener has stopped. *)
 
+val forget_prepared_below : runtime_root:string -> unit
+(** Forget the first-preparation claims of the homes below [runtime_root]. A
+    caller that removes a root it prepared once (a disposable one) calls this
+    with the removal, or the process keeps one table entry per root for as
+    long as it runs. Homes below other roots keep their claims. *)
+
 module For_testing : sig
   val ensure_private_child_with_sync
     : sync_parent:(string -> unit) -> string -> string -> (string, error) result
@@ -176,6 +182,9 @@ module For_testing : sig
   val paths : t -> paths
   val settings_json : unit -> Yojson.Safe.t
   val native_settings_json : posture:Runtime_native_tools.posture -> workspaces:string list -> Yojson.Safe.t
+
+  val prepared_count_below : runtime_root:string -> int
+  (** How many homes below [runtime_root] hold a first-preparation claim. *)
 
   val replace_keychain : home_dir:string -> string -> keychain_state
   (** Discard the keychain at the given path and build a fresh one. This is

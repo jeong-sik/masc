@@ -1120,6 +1120,33 @@ let test_selected_model_zero_turn_context () =
     (Result.is_error (parse (payload model.label 1048576 1)))
 ;;
 
+(* Where the keychain tool is absent no preparation claims a home, so there is
+   nothing to forget and both counts are zero. *)
+let test_a_removed_root_leaves_no_preparation_claim_behind () =
+  let keychain_tool_present = Sys.file_exists "/usr/bin/security" in
+  with_temp_root
+  @@ fun disposable ->
+  with_temp_root
+  @@ fun other ->
+  let prepare runtime_root =
+    let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
+    write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "claim");
+    Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"panelist" ~oauth_source
+    |> require_ok
+    |> ignore
+  in
+  let count runtime_root =
+    Runtime_antigravity_home.For_testing.prepared_count_below ~runtime_root
+  in
+  prepare disposable;
+  prepare other;
+  let claimed = if keychain_tool_present then 1 else 0 in
+  check int "the first preparation claims the home" claimed (count disposable);
+  Runtime_antigravity_home.forget_prepared_below ~runtime_root:disposable;
+  check int "forgetting a root drops its claim" 0 (count disposable);
+  check int "another root keeps its claim" claimed (count other)
+;;
+
 let () =
   run
     "runtime_antigravity_home"
@@ -1208,6 +1235,10 @@ let () =
             "CLI-created Library directory"
             `Quick
             test_tolerates_a_cli_created_library_directory
+        ; test_case
+            "a removed root leaves no preparation claim behind"
+            `Quick
+            test_a_removed_root_leaves_no_preparation_claim_behind
         ] )
     ]
 ;;

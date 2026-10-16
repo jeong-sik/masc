@@ -480,6 +480,25 @@ let claim_first_preparation home_dir =
       true))
 ;;
 
+(* A disposable root is claimed once and never prepared again, so its claim
+   would stay in the table for the life of the process. *)
+let forget_prepared_below ~runtime_root =
+  let prefix = runtime_root ^ Filename.dir_sep in
+  Mutex.protect provisioned_lock (fun () ->
+    Hashtbl.filter_map_inplace
+      (fun home_dir () -> if String.starts_with ~prefix home_dir then None else Some ())
+      provisioned_this_process)
+;;
+
+let prepared_count_below ~runtime_root =
+  let prefix = runtime_root ^ Filename.dir_sep in
+  Mutex.protect provisioned_lock (fun () ->
+    Hashtbl.fold
+      (fun home_dir () count -> if String.starts_with ~prefix home_dir then count + 1 else count)
+      provisioned_this_process
+      0)
+;;
+
 let create_login_keychain ~home_dir path =
   let library = Filename.concat home_dir "Library" in
   let keychains = Filename.concat library "Keychains" in
@@ -1009,6 +1028,7 @@ let clear_mcp_config t =
 
 module For_testing = struct
   let ensure_private_child_with_sync = ensure_private_child_with_sync
+  let prepared_count_below = prepared_count_below
 
   let prepare_account_with_store_sync ~sync_store ?(read_keychain=Apple_keychain.read)
       ?sync_pointer_file ?(sync_pointer_parent=sync_directory) ~runtime_root

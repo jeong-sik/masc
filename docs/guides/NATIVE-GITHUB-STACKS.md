@@ -69,8 +69,19 @@ A closed but unmerged downstack PR still blocks the top PR. Only already
 merged members can be excluded from new approval checks; closing a prerequisite
 is not equivalent to merging it. See [closed middle PRs](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-stacked-pull-requests#you-closed-a-pull-request-in-the-middle-of-the-stack).
 
+After every included head is approved, dispatch the merge-compile build for
+the exact top head (fire-and-forget, never watch or poll):
+
+```bash
+gh workflow run merge-compile.yml --ref main -f sha=TOP_PR_CURRENT_HEAD -f pr=TOP_PR_NUMBER
+```
+
 Use `scripts/review/merge-guard.sh --check --repo OWNER/REPO --pr NUMBER --head SHA`
-to check the included scope. To inspect the read-only identity snapshot directly:
+to check the included scope. The guard also reports the top head's
+merge-compile verdict — freshness against `stack.base` plus the
+`merge-compile` success status — as `ADVISORY #N: ...` until convention
+adoption turns the refusal on, so merge only after the head is fresh with a
+success status. To inspect the read-only identity snapshot directly:
 
 ```bash
 python3 scripts/review/stack-scope.py OWNER/REPO TOP_PR_NUMBER TOP_PR_CURRENT_HEAD

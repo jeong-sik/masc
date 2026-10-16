@@ -26,6 +26,15 @@ read_current_pr() {
 # The status lives on the member PR head commit, so it moves with the head
 # and disappears from stale heads on its own. Missing status means no
 # leader-selected run is currently pinning this head.
+#
+# merge-compile reports more: a successful four-executable build record for
+# the exact merge head (top head for stacks, PR head for singles) plus
+# freshness of that head against the merge target. Reviews certify source,
+# not compilation, and restacked code predating a lint rule broke main
+# twice in two days (#43137, #43146). Refusal is pending convention
+# adoption; until then the guard reports the verdict and merges proceed on
+# operator judgment (MASC_MERGE_COMPILE_ENFORCE=1 opts a single invocation
+# into fail-close).
 check_leader_selected_ci() {
   local rows status context target_url
   rows=$(ci_gh_json "repos/$repo/commits/$head/status" '[.statuses[] | select(.context == "leader-selected-ci") | [.state, .target_url, .description] | @tsv] | last // empty') || return 1
@@ -44,6 +53,74 @@ check_leader_selected_ci() {
       echo "REFUSED #$pr: leader-selected CI has unknown state '$status'" >&2
       return 2;;
   esac
+}
+
+# Merge-compile verdict for the frozen scope: the record certifies the head
+# tree, and only a head containing the merge-target tip merges to that same
+# tree — so both the exact-head success record and behind_by == 0 against
+# the target are required. $target is the frozen merge target
+# (stack.base.ref for native stacks, base.ref for singles); its tip is read
+# live so a target that moved mid-admission refuses instead of certifying a
+# merge that no longer applies. Dispatch merge-compile.yml on the head
+# right after review (fire-and-forget, never watch). A new head
+# invalidates the record; docs-only heads settle instantly by input
+# identity. Advisory until convention adoption: prints the verdict and
+# returns 0 unless MASC_MERGE_COMPILE_ENFORCE=1, which fail-closes.
+check_merge_compile() {
+  local rows status target_url base_tip behind verdict
+  base_tip=$(ci_gh_json "repos/$repo/commits/$target" '.sha') || return 1
+  [[ "$base_tip" =~ ^[0-9a-f]{40}$ ]] || return 1
+  behind=$(ci_gh_json "repos/$repo/compare/${base_tip}...${selected_head}" '.behind_by') || return 1
+  [[ "$behind" =~ ^[0-9]+$ ]] || return 1
+  if [ "$behind" != 0 ]; then
+    verdict="head is $behind behind $target ($base_tip) — restack onto the current $target tip, dispatch merge-compile.yml on the new head, and merge after it succeeds"
+    merge_compile_verdict refused "$verdict"
+    return $?
+  fi
+  # Take the LAST merge-compile status: the API returns them oldest-first, so
+  # `last` is the current verdict. A head whose verdict was overwritten keeps
+  # the newest one, which is exactly what the merge decision must read.
+  rows=$(ci_gh_json "repos/$repo/commits/$selected_head/status" '[.statuses[] | select(.context == "merge-compile") | [.state, .target_url] | @tsv] | last // empty') || return 1
+  [ -n "$rows" ] || { merge_compile_verdict refused "no merge-compile record for exact head $selected_head — dispatch merge-compile.yml on this head (gh workflow run merge-compile.yml --ref main -f sha=$selected_head -f pr=$selected_pr) and merge after it succeeds"; return $?; }
+  IFS=$'\t' read -r status target_url <<<"$rows"
+  case "$status" in
+    success)
+      merge_compile_verdict pass "head $selected_head is fresh on $target with a merge-compile success record ($target_url)"
+      return $?
+      ;;
+    pending)
+      merge_compile_verdict hold "merge-compile is building $selected_head ($target_url) — merge after it succeeds"
+      return $?
+      ;;
+    failure|error)
+      merge_compile_verdict refused "merge-compile failed for $selected_head ($target_url) — repair the head and dispatch again"
+      return $?
+      ;;
+    *)
+      merge_compile_verdict refused "merge-compile has unknown state '$status'"
+      return $?
+      ;;
+  esac
+}
+
+# Single choke point for merge-compile enforcement. Advisory (default)
+# reports the would-be verdict on stderr and returns 0; enforcement
+# fail-closes with the keeper-lane REFUSED/HOLD vocabulary.
+merge_compile_verdict() {
+  local level="$1" message="$2"
+  if [ "${MASC_MERGE_COMPILE_ENFORCE:-0}" = 1 ]; then
+    case "$level" in
+      pass) return 0;;
+      hold) echo "MERGE ON HOLD #$selected_pr: $message" >&2; return 2;;
+      *) echo "REFUSED #$selected_pr: $message" >&2; return 2;;
+    esac
+  fi
+  case "$level" in
+    pass) echo "ADVISORY #$selected_pr: merge-compile PASS — $message" >&2;;
+    hold) echo "ADVISORY #$selected_pr: merge-compile would HOLD — $message" >&2;;
+    *) echo "ADVISORY #$selected_pr: merge-compile would REFUSE — $message" >&2;;
+  esac
+  return 0
 }
 
 check_current_ci() {

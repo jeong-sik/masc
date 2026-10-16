@@ -20,6 +20,30 @@ repeated work. Builds are serialized without cancelling the active build.
 Scheduling may be delayed; this does not guarantee a build within 30 minutes.
 This observation does not approve a PR or replace full Release/Tag checks.
 
+Every merge head should also carry a merge-compile record: `merge-compile.yml`,
+dispatched explicitly on main right after review with the exact head SHA
+(top head for stacks, PR head for singles), builds the same four
+executables in one Dune invocation and settles a `merge-compile` commit
+status on that SHA. The executing toolchain (`.github/actions`, the two
+scripts it invokes) must be byte-identical to main's, or the dispatch fails;
+toolchain PRs re-dispatch with `trust-head-toolchain=true`, which is recorded
+in the settled status and receipt. Non-documentation inputs identical to an
+already built SHA settle instantly by input identity (docs-only heads build
+nothing — no dune rule in the four-executable closure reads `docs/`,
+`docs-site/` or `changelog.d/`); anything else builds asynchronously —
+dispatch fire-and-forget and merge once the head is fresh on its merge target
+with a success status. The record certifies the head tree, so the guard also
+requires `behind_by == 0` against the merge target (`stack.base` for native
+stacks, `base` for singles): only a head containing the target tip merges to
+the certified tree. A new head invalidates the record. The verdict is
+advisory until convention adoption: `merge-guard.sh` prints
+`ADVISORY #N: merge-compile ...` and merges proceed on operator judgment
+(`MASC_MERGE_COMPILE_ENFORCE=1` opts one invocation into fail-close); the
+refusal itself lands with the convention procedure, not this mechanism.
+A dispatch from any branch other than main is a proof run: it exercises the
+whole pipeline but writes no commit status, so only the workflow file on main
+can mint a record the guard reads.
+
 For an explicitly selected
 approved combination, use [the selection commands](../scripts/review/APPROVED-CI-SELECTION.md)
 to prepare the candidate and receipt. Dispatch `leader-ci.yml` from main with the

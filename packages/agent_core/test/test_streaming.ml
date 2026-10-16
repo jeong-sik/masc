@@ -295,7 +295,7 @@ let parse_openai data =
 
 let test_missing_provider_message_does_not_promote_raw () =
   let module Backend = Agent_core.Llm_provider.Backend_openai_parse in
-  let expected_message = "The provider reported an error without a message." in
+  let expected_message = "Unknown API error" in
   let private_detail = "opaque-exact-secret-sentinel/" ^ String.make (64 * 1024) 'x' in
   let check_diagnostic message error_type provider_status report =
     Alcotest.(check string) "message is independent of raw payload"
@@ -308,7 +308,7 @@ let test_missing_provider_message_does_not_promote_raw () =
       (report = Provider_stated)
   in
   List.iter
-    (fun message_fields ->
+    (fun (message_fields, generic_should_parse) ->
        let error = `Assoc
          ([ "type", `String "provider_owned_kind"; "code", `Int 429
           ; "private_detail", `String private_detail ] @ message_fields) in
@@ -330,14 +330,15 @@ let test_missing_provider_message_does_not_promote_raw () =
          [ `Assoc [ "error", error ]; `Assoc [ "choices", `List [ choice ] ] ];
        let raw = Yojson.Safe.to_string (`Assoc [ "type", `String "error"; "error", error ]) in
        match Agent_core.Llm_provider.Streaming.parse_sse_event None raw with
-       | Some (SSEError { message; error_type; raw = evidence; _ }) ->
+       | Some (SSEError { message; error_type; raw = evidence; _ }) when generic_should_parse ->
          Alcotest.(check string) "generic SSE uses a payload-independent message"
            expected_message message;
          Alcotest.(check (option string)) "generic SSE keeps provider type"
            (Some "provider_owned_kind") error_type;
          Alcotest.(check string) "generic SSE keeps separate raw evidence" raw evidence
+       | Some (SSEParseFailed _) when not generic_should_parse -> ()
        | _ -> Alcotest.fail "generic SSE lost the error event")
-    [ []; [ "message", `Int 7 ] ]
+    [ [], true; [ "message", `Null ], true; [ "message", `Int 7 ], false ]
 ;;
 
 let require_provider_error label = function

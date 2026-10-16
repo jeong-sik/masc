@@ -57,7 +57,7 @@ let provider_status_of_object error =
     -> None
 ;;
 
-let missing_message = "The provider reported an error without a message."
+let missing_message = "Unknown API error"
 
 let of_error_value = function
   | `Assoc _ as error ->

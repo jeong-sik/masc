@@ -56,7 +56,7 @@ let test_exception_releases_the_slot () =
   let raised =
     match Gate.with_cli_spawn_slot (fun () -> raise (Failure "callback failure")) with
     | _ -> false
-    | exception Failure "callback failure" -> true
+    | exception Failure detail when detail = "callback failure" -> true
   in
   check bool "callback exception propagates" true raised;
   check int "slot released after exception" 0 (Gate.active_cli_spawns ())

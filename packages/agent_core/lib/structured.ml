@@ -95,20 +95,21 @@ let response_has_tool_calls (response : api_response) =
 ;;
 
 let inspect_terminal_json ?shape (response : api_response) =
+  let raw = Types.visible_text_of_response response in
   match List.filter_map text_block response.content with
   | [] | [ _ ] ->
-    (match parse_response_json ?shape ~raw:(Types.visible_text_of_response response) () with
-     | Ok json -> Ready json
+    (match parse_response_json ?shape ~raw () with
+     | Ok json -> Ready (json, raw)
      | Error error -> Invalid error)
   | _ :: _ :: _ ->
     Invalid
       (Error.structured_output_parse_error
          ~reason:Error.Multiple_text_blocks
          ~detail:"structured output requires exactly one text block"
-         ~raw:(Types.visible_text_of_response response))
+         ~raw)
 ;;
 
-let inspect_response_json ?shape (response : api_response) =
+let inspect_response_json_with_raw ?shape (response : api_response) =
   match response.stop_reason with
   | Refusal -> Refused Error.Policy_refusal
   | ContentFilter -> Refused Error.Content_filtered
@@ -127,6 +128,19 @@ let inspect_response_json ?shape (response : api_response) =
     if response_has_tool_calls response
     then Awaiting_tool_results
     else inspect_terminal_json ?shape response
+;;
+
+let map_response_outcome f = function
+  | Ready value -> Ready (f value)
+  | Awaiting_tool_results -> Awaiting_tool_results
+  | Refused reason -> Refused reason
+  | Truncated reason -> Truncated reason
+  | Interrupted reason -> Interrupted reason
+  | Invalid error -> Invalid error
+;;
+
+let inspect_response_json ?shape response =
+  inspect_response_json_with_raw ?shape response |> map_response_outcome fst
 ;;
 
 let result_of_response_outcome = function
@@ -150,8 +164,9 @@ let extract_response_json ?shape response =
 let extract_response ~(schema : _ schema) (response : api_response)
   : ('a, Error.t) result
   =
-  let raw = Types.visible_text_of_response response in
-  let* json = extract_response_json response in
+  let* json, raw =
+    inspect_response_json_with_raw response |> result_of_response_outcome
+  in
   parse_schema_text_json ~raw schema json
 ;;
 

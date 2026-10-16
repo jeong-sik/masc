@@ -267,7 +267,9 @@ let test_index_listed_inside_a_time_step_is_rebuilt_once_the_step_ends () =
 let test_time_step_never_outlasts_the_ttl () =
   let module Expiry = Auth.Credential_index_expiry_for_testing in
   let stamped_at = 1_000_000.0 in
-  let expires_at dir_changed_at = Expiry.expires_at ~stamped_at ~dir_changed_at in
+  let expires_at dir_changed_at =
+    Expiry.expires_at ~stamped_at ~dir_changed_at ~has_unreadable:false
+  in
   check (float 0.0) "listed after the step: the TTL"
     (stamped_at +. Expiry.ttl_sec)
     (expires_at (Some (stamped_at -. Expiry.time_step_sec -. 1.0)));
@@ -285,15 +287,47 @@ let test_time_step_never_outlasts_the_ttl () =
   check (float 0.0) "no agents directory: the TTL"
     (stamped_at +. Expiry.ttl_sec) (expires_at None)
 
+let test_unreadable_index_serves_only_the_retry_bound () =
+  let module Expiry = Auth.Credential_index_expiry_for_testing in
+  let stamped_at = 1_000_000.0 in
+  let expires_at dir_changed_at =
+    Expiry.expires_at ~stamped_at ~dir_changed_at ~has_unreadable:true
+  in
+  check (float 0.0) "listed after the step: the retry bound, not the TTL"
+    (stamped_at +. Expiry.unreadable_retry_sec)
+    (expires_at (Some (stamped_at -. Expiry.time_step_sec -. 1.0)));
+  check (float 0.0) "no agents directory: the retry bound"
+    (stamped_at +. Expiry.unreadable_retry_sec) (expires_at None);
+  check bool "the retry bound is shorter than the TTL" true
+    (Expiry.unreadable_retry_sec < Expiry.ttl_sec);
+  check (float 0.0) "listed inside the step: the step's end when it comes first"
+    (Float.min
+       (stamped_at -. 0.5 +. Expiry.time_step_sec)
+       (stamped_at +. Expiry.unreadable_retry_sec))
+    (expires_at (Some (stamped_at -. 0.5)))
+
 (* A credential file the server cannot read, for a moment or for good, says
-   nothing about whether that credential exists. The index must not record it
-   as absent: the lookup answers a read failure, the failed rebuild stores
-   nothing, and the next lookup finds the token as soon as the file reads
-   again, not a TTL later. A mode-0 file stands in for a failed open (ENFILE
-   in production), which changes neither the directory's times nor its
-   listing, so the stamp cannot save a cached index. *)
-let test_unreadable_credential_is_not_cached_as_absent () =
-  (* root opens a mode-0 file, so there is nothing to make unreadable *)
+   nothing about whether that credential exists, and it says nothing about any
+   other credential. A mode-0 file stands in for a failed open (ENFILE in
+   production), which changes neither the directory's times nor its listing,
+   so the stamp cannot save a cached index. *)
+let is_read_failure = function
+  | Error (Masc_domain.System (Masc_domain.System_error.IoError _)) -> true
+  | Ok _
+  | Error
+      (Masc_domain.System
+         (Masc_domain.System_error.NotInitialized
+         | Masc_domain.System_error.ValidationError _
+         | Masc_domain.System_error.LockContention _)
+      | Masc_domain.Task _
+      | Masc_domain.Agent _
+      | Masc_domain.Auth _) -> false
+
+let is_mismatch result = Result.is_error result && not (is_read_failure result)
+
+(* Mode-0 beta beside readable alpha. Root opens a mode-0 file, so there is
+   nothing to make unreadable. *)
+let with_unreadable_beta f =
   if Unix.geteuid () = 0 then skip ();
   let dir = setup_test_workspace () in
   let beta_file = Auth.credential_file dir "beta" in
@@ -305,31 +339,69 @@ let test_unreadable_credential_is_not_cached_as_absent () =
       with_eio_runtime (fun () ->
         let alpha = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
         let beta = create_token_for dir ~agent_name:"beta" ~role:Masc_domain.Worker in
-        let is_read_failure = function
-          | Error (Masc_domain.System (Masc_domain.System_error.IoError _)) -> true
-          | Ok _
-          | Error
-              (Masc_domain.System
-                 (Masc_domain.System_error.NotInitialized
-                 | Masc_domain.System_error.ValidationError _
-                 | Masc_domain.System_error.LockContention _)
-              | Masc_domain.Task _
-              | Masc_domain.Agent _
-              | Masc_domain.Auth _) -> false
-        in
         Unix.chmod beta_file 0o000;
-        check bool "the unreadable credential's token is a read failure, not a mismatch"
-          true (is_read_failure (Auth.find_credential_by_token dir ~token:beta));
-        check bool "no token is answered from an index that missed a credential"
-          true (is_read_failure (Auth.find_credential_by_token dir ~token:alpha));
-        Unix.chmod beta_file 0o600;
-        match Auth.find_credential_by_token dir ~token:beta with
-        | Ok cred ->
-          check string "beta resolves as soon as its file reads again" "beta"
-            cred.agent_name
-        | Error e ->
-          fail ("a token stayed refused after its file read again: "
-                ^ Masc_domain.masc_error_to_string e)))
+        f ~dir ~beta_file ~alpha ~beta))
+
+let test_unreadable_credential_harms_only_its_own_token () =
+  with_unreadable_beta (fun ~dir ~beta_file:_ ~alpha ~beta ->
+    (match Auth.find_credential_by_token dir ~token:alpha with
+     | Ok cred -> check string "the readable credential still resolves" "alpha" cred.agent_name
+     | Error e ->
+       fail ("a readable credential was refused for another file's sake: "
+             ^ Masc_domain.masc_error_to_string e));
+    check bool "the unreadable credential's token is a read failure, not a mismatch"
+      true (is_read_failure (Auth.find_credential_by_token dir ~token:beta));
+    check bool "a token the index does not hold is a read failure while a file is unreadable"
+      true (is_read_failure (Auth.find_credential_by_token dir ~token:"not-a-real-token")))
+
+(* A revoked token must not be accepted because another credential is
+   unreadable: the index holds only what this rebuild read. *)
+let test_revoked_token_is_not_accepted_beside_an_unreadable_credential () =
+  with_unreadable_beta (fun ~dir ~beta_file:_ ~alpha ~beta:_ ->
+    let gamma = create_token_for dir ~agent_name:"gamma" ~role:Masc_domain.Worker in
+    (match Auth.find_credential_by_token dir ~token:gamma with
+     | Ok _ -> ()
+     | Error e -> fail ("gamma warm: " ^ Masc_domain.masc_error_to_string e));
+    Auth.delete_credential dir "gamma";
+    (match Auth.find_credential_by_token dir ~token:gamma with
+     | Ok cred ->
+       fail (Printf.sprintf "a revoked token resolved to %s" cred.agent_name)
+     | Error _ -> ());
+    match Auth.find_credential_by_token dir ~token:alpha with
+    | Ok cred -> check string "alpha still resolves" "alpha" cred.agent_name
+    | Error e -> fail ("alpha: " ^ Masc_domain.masc_error_to_string e))
+
+let test_a_rebuild_that_reads_every_file_answers_mismatch_again () =
+  with_unreadable_beta (fun ~dir ~beta_file ~alpha:_ ~beta ->
+    check bool "unreadable: a read failure" true
+      (is_read_failure (Auth.find_credential_by_token dir ~token:beta));
+    Unix.chmod beta_file 0o600;
+    (* A write through this module drops the cached index, which stands in
+       for the retry bound ending. *)
+    let _ = create_token_for dir ~agent_name:"gamma" ~role:Masc_domain.Worker in
+    (match Auth.find_credential_by_token dir ~token:beta with
+     | Ok cred -> check string "beta resolves once its file reads again" "beta" cred.agent_name
+     | Error e ->
+       fail ("a token stayed refused after its file read again: "
+             ^ Masc_domain.masc_error_to_string e));
+    check bool "every file read: an unknown token is a mismatch, not a read failure" true
+      (is_mismatch (Auth.find_credential_by_token dir ~token:"not-a-real-token")))
+
+(* No write touches the directory, and the index is listed after its time
+   step, so only the retry bound can end the index that left beta out: the
+   TTL is 60 s. *)
+let test_unreadable_credential_recovers_after_the_retry_bound () =
+  with_unreadable_beta (fun ~dir ~beta_file ~alpha:_ ~beta ->
+    Unix.sleepf (Auth.Credential_index_expiry_for_testing.time_step_sec +. 0.1);
+    check bool "unreadable: a read failure" true
+      (is_read_failure (Auth.find_credential_by_token dir ~token:beta));
+    Unix.chmod beta_file 0o600;
+    Unix.sleepf (Auth.Credential_index_expiry_for_testing.unreadable_retry_sec +. 0.1);
+    match Auth.find_credential_by_token dir ~token:beta with
+    | Ok cred -> check string "beta resolves without a write" "beta" cred.agent_name
+    | Error e ->
+      fail ("a token stayed refused past the retry bound: "
+            ^ Masc_domain.masc_error_to_string e))
 
 let () =
   match Array.to_list Sys.argv with
@@ -361,7 +433,15 @@ let () =
           `Slow test_index_listed_inside_a_time_step_is_rebuilt_once_the_step_ends
         ; test_case "a time step never outlasts the TTL"
           `Quick test_time_step_never_outlasts_the_ttl
-        ; test_case "an unreadable credential is not cached as absent"
-          `Quick test_unreadable_credential_is_not_cached_as_absent
+        ; test_case "an unreadable index serves only the retry bound"
+          `Quick test_unreadable_index_serves_only_the_retry_bound
+        ; test_case "an unreadable credential harms only its own token"
+          `Quick test_unreadable_credential_harms_only_its_own_token
+        ; test_case "a revoked token is not accepted beside an unreadable credential"
+          `Quick test_revoked_token_is_not_accepted_beside_an_unreadable_credential
+        ; test_case "a rebuild that reads every file answers mismatch again"
+          `Quick test_a_rebuild_that_reads_every_file_answers_mismatch_again
+        ; test_case "an unreadable credential recovers after the retry bound"
+          `Slow test_unreadable_credential_recovers_after_the_retry_bound
         ] )
     ]

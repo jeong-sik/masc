@@ -761,36 +761,50 @@ let list_credentials config : agent_credential list =
   else []
 ;;
 
-(* [list_credentials] with a directory or a credential file that could not be
-   read kept apart from one that is not there. The token index builds from
-   this listing, and a credential it leaves out stays out of the index until
-   the next rebuild. [list_credentials] keeps answering [[]] for a failed read
-   because its other callers cannot act on the difference. *)
-let list_credentials_checked config : (agent_credential list, masc_error) result =
+(* What one pass over the credential directory read, and the files it could
+   not: each is a file stem with the error that stopped the read. The token
+   index builds from this. A file that could not be read is neither a
+   credential nor an absent one, so it is kept apart from both.
+   [list_credentials] keeps answering without those files because its other
+   callers cannot act on the difference. *)
+type credential_listing = {
+  listed_credentials : agent_credential list;
+  unreadable_files : (string * masc_error) list;
+}
+
+(* [Error] only when the directory itself could not be read: no file name is
+   known then, so there is nothing to keep apart. *)
+let scan_credentials config : (credential_listing, masc_error) result =
   let ( let* ) = Result.bind in
   let dir = agents_dir config in
   let* dir_exists = credential_path_exists dir in
   if not dir_exists
-  then Ok []
+  then Ok { listed_credentials = []; unreadable_files = [] }
   else
     let* entries = credential_read_result (fun () -> read_dir dir) in
-    let* listed =
+    let scanned =
       Array.to_list entries
       |> List.filter (fun f -> Filename.check_suffix f ".json")
       |> List.fold_left
            (fun acc f ->
-              let* acc = acc in
               let name = Filename.chop_suffix f ".json" in
-              let* loaded = load_credential_checked config name in
-              match loaded with
-              | Some credential
+              match load_credential_checked config name with
+              | Ok (Some credential)
                 when String.equal name (Common.safe_filename credential.agent_name)
-                     && not (List.exists (fun c -> c.agent_name = credential.agent_name) acc) ->
-                Ok (credential :: acc)
-              | Some _ | None -> Ok acc)
-           (Ok [])
+                     && not
+                          (List.exists
+                             (fun c -> c.agent_name = credential.agent_name)
+                             acc.listed_credentials) ->
+                { acc with listed_credentials = credential :: acc.listed_credentials }
+              | Ok (Some _) | Ok None -> acc
+              | Error error ->
+                { acc with unreadable_files = (name, error) :: acc.unreadable_files })
+           { listed_credentials = []; unreadable_files = [] }
     in
-    Ok (List.rev listed)
+    Ok
+      { listed_credentials = List.rev scanned.listed_credentials
+      ; unreadable_files = List.rev scanned.unreadable_files
+      }
 ;;
 
 
@@ -1414,13 +1428,30 @@ let equal_agents_dir_stamp a b =
   && Float.equal a.changed_at b.changed_at
 ;;
 
+(* What one rebuild read. [unreadable_credentials] holds the stems of the
+   files it could not read, with the error for each: names and never tokens,
+   because a file that cannot be read does not say which token it holds. A
+   bearer missing from [by_token] while this list is not empty may belong to
+   one of those files, so it is not a mismatch. *)
+type credential_index = {
+  by_token : (string, agent_credential list) Hashtbl.t;
+  unreadable_credentials : (string * masc_error) list;
+}
+
 type credential_index_cache_entry = {
   expires_at : float;
   stamp : agents_dir_stamp option;
-  by_token : (string, agent_credential list) Hashtbl.t;
+  index : credential_index;
 }
 
 let credential_index_cache_ttl_sec = 60.0
+
+(* How long an index that could not read some file serves. A file that reads
+   again, after a descriptor shortage or a chmod, changes neither the
+   directory's times nor its listing, so the stamp cannot end the index; this
+   bound does. The index answers every bearer it did read meanwhile, and a
+   bearer it did not find costs no re-read. *)
+let credential_unreadable_retry_sec = 5.0
 
 (* The coarsest step a file time moves in: FAT keeps 2 s, HFS+ and ext3's
    small inodes 1 s, Linux before 6.13 one clock tick. *)
@@ -1434,14 +1465,22 @@ let credential_dir_time_step_sec = 2.0
    system clock running ahead of this one keeps no index longer than before.
    The rule compares this host's clock with the file system's, so it holds
    where they agree: a file clock more than a step behind (a network share)
-   files every index as listed after its step, which is the 60 s bound. *)
-let credential_index_expires_at ~stamped_at ~dir_changed_at =
+   files every index as listed after its step, which is the 60 s bound.
+
+   An index that left out a file it could not read serves for the shorter
+   [credential_unreadable_retry_sec] whatever the rules above allow. *)
+let credential_index_expires_at ~stamped_at ~dir_changed_at ~has_unreadable =
   let ttl_end = stamped_at +. credential_index_cache_ttl_sec in
-  match dir_changed_at with
-  | None -> ttl_end
-  | Some changed_at ->
-    let step_end = changed_at +. credential_dir_time_step_sec in
-    if stamped_at < step_end then Float.min step_end ttl_end else ttl_end
+  let readable_end =
+    match dir_changed_at with
+    | None -> ttl_end
+    | Some changed_at ->
+      let step_end = changed_at +. credential_dir_time_step_sec in
+      if stamped_at < step_end then Float.min step_end ttl_end else ttl_end
+  in
+  if has_unreadable
+  then Float.min readable_end (stamped_at +. credential_unreadable_retry_sec)
+  else readable_end
 ;;
 
 let agents_dir_last_change stamp = Float.max stamp.modified_at stamp.changed_at
@@ -1449,6 +1488,7 @@ let agents_dir_last_change stamp = Float.max stamp.modified_at stamp.changed_at
 module Credential_index_expiry_for_testing = struct
   let time_step_sec = credential_dir_time_step_sec
   let ttl_sec = credential_index_cache_ttl_sec
+  let unreadable_retry_sec = credential_unreadable_retry_sec
   let expires_at = credential_index_expires_at
 end
 
@@ -1502,16 +1542,16 @@ let cached_credential_index ~key ~now ~stamp =
     | Some entry
       when now < entry.expires_at
            && Option.equal equal_agents_dir_stamp entry.stamp stamp ->
-      Some entry.by_token
+      Some entry.index
     | Some _ | None -> None)
 ;;
 
 (* HIGH-RISK-UNREVIEWED: decides which bearer tokens are accepted. A rebuild
-   that could not read a credential answers an error and stores nothing; it
-   never answers or caches a smaller index. *)
-let credential_token_index config
-  : ((string, agent_credential list) Hashtbl.t, masc_error) result
-  =
+   indexes the credentials it read and lists the files it could not. A bearer
+   found in the index was read by this rebuild, so it is current. A bearer not
+   found while any file was unreadable is not a mismatch: callers answer a read
+   failure for it ([unreadable_credentials_error]). *)
+let credential_token_index config : (credential_index, masc_error) result =
   let ( let* ) = Result.bind in
   let key = agents_dir config in
   let now = Time_compat.now () in
@@ -1525,9 +1565,9 @@ let credential_token_index config
      credential transaction, so it cannot restore an old index after a
      writer invalidated it. Cache hits keep the short in-memory path. *)
   match cached_credential_index ~key ~now ~stamp:current_stamp with
-  | Some by_token ->
+  | Some index ->
     count_hit ();
-    Ok by_token
+    Ok index
   | None ->
     with_credential_transaction config (fun _transaction ->
        (* Stamped before listing: a write that lands while the files are
@@ -1541,9 +1581,9 @@ let credential_token_index config
           first one rebuilds; the rest find its index here instead of
           re-reading every credential in turn. *)
        match cached_credential_index ~key ~now:stamped_at ~stamp with
-       | Some by_token ->
+       | Some index ->
          count_hit ();
-         Ok by_token
+         Ok index
        | None ->
          Auth_metric_store.inc_counter
            Auth_metric_store.metric_auth_credential_index_cache_misses
@@ -1552,42 +1592,82 @@ let credential_token_index config
             binding supplies the credential indexed for authentication. An old
             UUID payload must neither resurrect its bearer nor hide a replacement
             because it happened to be listed before the named file. *)
-         let creds =
-           let* listed = list_credentials_checked config in
-           listed
+         let* listing =
+           match scan_credentials config with
+           | Ok _ as scanned -> scanned
+           | Error error as failed ->
+             (* No file name is known, so there is no index to build. Nothing
+                is stored and the next lookup reads again. *)
+             Log.Auth.warn
+               "[credential_index] not rebuilt, the credential directory could not be \
+                read: %s"
+               (masc_error_to_string error);
+             failed
+         in
+         let credentials, unreadable =
+           listing.listed_credentials
            |> List.map (fun (credential : agent_credential) -> credential.agent_name)
            |> List.sort_uniq String.compare
            |> List.fold_left
-                (fun acc name ->
-                   let* acc = acc in
-                   let* loaded = load_credential_checked config name in
-                   match loaded with
-                   | Some credential when String.equal credential.agent_name name ->
-                     Ok (credential :: acc)
-                   | Some _ | None -> Ok acc)
-                (Ok [])
-           |> Result.map List.rev
+                (fun (credentials, unreadable) name ->
+                   match load_credential_checked config name with
+                   | Ok (Some credential) when String.equal credential.agent_name name ->
+                     credential :: credentials, unreadable
+                   | Ok (Some _) | Ok None -> credentials, unreadable
+                   | Error error -> credentials, (name, error) :: unreadable)
+                ([], listing.unreadable_files)
          in
-         (match creds with
-          | Error error ->
-            (* Nothing is stored. An index that left out a credential it could
-               not read would answer "Token mismatch" for that credential's
-               bearer until it expired, though the credential is fine. The
-               lookup fails instead, and the next one reads again. *)
-            Log.Auth.warn "[credential_index] not rebuilt, a credential could not be read: %s"
-              (masc_error_to_string error);
-            Error error
-          | Ok creds ->
-            let by_token = build_token_index creds in
-            with_credential_index_cache_lock (fun () ->
-              Hashtbl.replace credential_index_cache key
-                { expires_at =
-                    credential_index_expires_at ~stamped_at
-                      ~dir_changed_at:(Option.map agents_dir_last_change stamp)
-                ; stamp
-                ; by_token });
-            Ok by_token))
+         let unreadable_credentials =
+           List.sort_uniq
+             (fun (left, _) (right, _) -> String.compare left right)
+             unreadable
+         in
+         (match unreadable_credentials with
+          | [] -> ()
+          | _ :: _ ->
+            (* Their credentials are not in the index. A bearer it does not
+               hold answers a read failure until the next rebuild reads them. *)
+            Log.Auth.warn
+              "[credential_index] %d credential file(s) could not be read and are left \
+               out of the index: %s"
+              (List.length unreadable_credentials)
+              (String.concat
+                 "; "
+                 (List.map
+                    (fun (name, error) -> name ^ ": " ^ masc_error_to_string error)
+                    unreadable_credentials)));
+         let index =
+           { by_token = build_token_index (List.rev credentials); unreadable_credentials }
+         in
+         with_credential_index_cache_lock (fun () ->
+           Hashtbl.replace credential_index_cache key
+             { expires_at =
+                 credential_index_expires_at ~stamped_at
+                   ~dir_changed_at:(Option.map agents_dir_last_change stamp)
+                   ~has_unreadable:
+                     (match unreadable_credentials with
+                      | [] -> false
+                      | _ :: _ -> true)
+             ; stamp
+             ; index });
+         Ok index)
     |> Result.join
+;;
+
+(* The error for a bearer the index does not hold, when some credential file
+   could not be read: [None] when every file was read and the bearer is a
+   mismatch. The message reaches an unauthenticated client, so it carries a
+   count and no name or path; the log names the files. *)
+let unreadable_credentials_error (index : credential_index) : masc_error option =
+  match index.unreadable_credentials with
+  | [] -> None
+  | _ :: _ as unreadable ->
+    Some
+      (System
+         (System_error.IoError
+            (Printf.sprintf
+               "%d credential file(s) could not be read"
+               (List.length unreadable))))
 ;;
 
 (* Wire the forward-declared invalidator so [save_credential] and

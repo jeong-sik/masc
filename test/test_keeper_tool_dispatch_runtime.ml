@@ -8710,6 +8710,14 @@ module Plan = Masc.Keeper_tool_plan
 let _links_workspace_dispatch_registration =
   Masc.Mcp_server_eio_execute.resolve_bind_state
 
+let composable_model_names () =
+  KTD.all_descriptors ()
+  |> List.concat_map (fun descriptor ->
+    match descriptor.KTD.composable_output with
+    | KTD.Opaque_output -> []
+    | KTD.Json_output _ -> KTD.keeper_model_names descriptor)
+  |> List.sort_uniq String.compare
+
 (* Arguments a keeper would actually send, not the smallest shape that passes:
    the probe exists to observe what the producer emits, so it has to reach the
    producer. [prepare] returns the arguments so a tool that needs durable
@@ -8887,6 +8895,29 @@ let composable_output_probes =
          ; "new_string", `String "composable output probe (edited)"
          ])
   ]
+
+let test_every_composable_tool_has_an_output_probe () =
+  let declared = composable_model_names () in
+  let probed =
+    List.map (fun probe -> probe.tool_name) composable_output_probes
+    |> List.sort_uniq String.compare
+  in
+  let only_in left right =
+    List.filter (fun name -> not (List.mem name right)) left
+  in
+  (match only_in declared probed with
+   | [] -> ()
+   | missing ->
+     failf
+       "these tools declare a composable output and no probe runs their \
+        producer against it: %s"
+       (String.concat ", " missing));
+  match only_in probed declared with
+  | [] -> ()
+  | stale ->
+    failf
+      "these probes name tools that no longer declare a composable output: %s"
+      (String.concat ", " stale)
 
 let schema_value_error_to_string = function
   | Plan.Unsupported_schema_type json ->
@@ -10321,6 +10352,8 @@ let () =
     ("composable_output_contract", [
       test_case "lane observations remain composable without a guest" `Quick
         test_lane_status_observations_remain_composable;
+      test_case "every composable tool has an output probe" `Quick
+        test_every_composable_tool_has_an_output_probe;
       test_case "real producer output satisfies its declared schema" `Quick
         test_composable_outputs_satisfy_declared_schema;
     ]);

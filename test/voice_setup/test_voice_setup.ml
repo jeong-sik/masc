@@ -563,12 +563,24 @@ let test_an_endpoint_carries_its_own_model () =
               stt.Voice_config.default_model)))
 
 let test_endpoint_setup_preserves_native_agent_mapping () =
-  let mappings = "\n[voice.tts.endpoints.agent_voices]\nalpha = \"native-agent-voice\"\n" in
-  with_config (fixture ^ mappings) (fun path ->
+  let configured = runtime_base ^ {|
+[voice.tts]
+default_model = "eleven_multilingual_v2"
+default_voice = "section-voice"
+[[voice.tts.endpoints]]
+id = "elevenlabs-direct"
+kind = "elevenlabs_direct"
+timeout_seconds = 35.0
+[voice.tts.endpoints.agent_voices]
+alpha = "native-agent-voice"
+model = "keeper-named-model"
+|} in
+  with_config configured (fun path ->
     let updated =
       endpoint ~id:"elevenlabs-direct" ~kind:Voice_config.Elevenlabs_direct
         ~api_key_env:"ELEVENLABS_API_KEY" ~timeout_seconds:40.0 ()
     in
+    let updated = { updated with health_url = Some "https://voice.example/health" } in
     (match apply path [ Voice_setup.Put_endpoint (Voice_setup.Tts, updated) ] with
      | Ok _ -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
@@ -582,7 +594,12 @@ let test_endpoint_setup_preserves_native_agent_mapping () =
         let selected = List.hd tts.Voice_config.endpoints in
         Alcotest.(check string) "setup edit preserves provider-native keeper voice"
           "native-agent-voice"
-          (Voice_config.voice_for_agent_at_endpoint tts selected "alpha"))
+          (Voice_config.voice_for_agent_at_endpoint tts selected "alpha");
+        Alcotest.(check string) "managed model removal cannot remove a keeper named model"
+          "keeper-named-model"
+          (Voice_config.voice_for_agent_at_endpoint tts selected "model");
+        Alcotest.(check (option string)) "new managed field stays on the endpoint"
+          (Some "https://voice.example/health") selected.Voice_config.health_url)
 
 let () =
   Alcotest.run

@@ -317,6 +317,7 @@ let project_result
       ?stored_preview
       ?answer_fingerprint
       ?inline_message
+      ?inline_diagnostic
       ?on_externalization_error
       ~model_projection
       ~structured_content
@@ -355,13 +356,19 @@ let project_result
                in
                (match artifact_projection with
                 | Tool_output.Reference_only -> Ok (marker ())
-                | Tool_output.Inline_with_reference ->
+                | Tool_output.Inline_with_reference
+                | Tool_output.Inline_with_structured_diagnostic ->
+                  let inline_content = match artifact_projection with
+                    | Tool_output.Reference_only -> None
+                    | Tool_output.Inline_with_reference -> inline_message
+                    | Tool_output.Inline_with_structured_diagnostic -> inline_diagnostic
+                  in
                   let envelope =
                     Yojson.Safe.to_string
                       (`Assoc
                         ([ "structured_content", structured_content
                          ; "artifact_manifest", Tool_output.normalized_artifact_ref_to_json reference ]
-                         @ (match inline_message with
+                         @ (match inline_content with
                             | None -> []
                             | Some message -> [ "content", `String message ])))
                   in
@@ -478,6 +485,13 @@ let to_agent_core_typed_result
   | Tool_result.Failed { effect_disposition; class_; message; data_source; metadata; _ } ->
     let failure_class = Tool_result.tool_failure_class_to_string class_ in
     let next_move = failure_next_move class_ in
+    let inline_diagnostic =
+      Yojson.Safe.to_string
+        (`Assoc
+           ([ "masc.tool_disposition", `String "failed"
+            ; "failure_class", `String failure_class ]
+            @ match next_move with None -> [] | Some value -> [ "next_move", `String value ]))
+    in
     let data = Tool_result.data tr in
     (* Keep producer recovery details in model content. Data already carried
        verbatim by the message or metadata needs no second copy. *)
@@ -547,6 +561,7 @@ let to_agent_core_typed_result
     | ((Tool_result.Proven_pre_effect | Tool_result.Effect_outcome_unknown), _, _) -> project_result
       ~stored_preview
       ~inline_message:message
+      ~inline_diagnostic
       ?base_path
       ?on_externalization_error
       ~model_projection

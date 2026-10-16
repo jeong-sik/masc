@@ -50,7 +50,11 @@ val attach_artifact_manifest :
     [Inline_with_reference] retains the result's content and structured data,
     together with the exact durable manifest reference, while the complete
     envelope fits the descriptor's typed projection ceiling. Larger envelopes
-    use the existing manifest marker without further storage or re-execution. *)
+    use the existing manifest marker without further storage or re-execution.
+    [Inline_with_structured_diagnostic] is an explicit producer declaration
+    that the complete domain diagnostic is in structured data: failed inline
+    envelopes carry canonical class/next move without repeating that data as
+    message text. Opaque failure messages use [Inline_with_reference]. *)
 
 val maybe_externalize :
   ?base_path:string ->

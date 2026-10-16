@@ -135,6 +135,11 @@ type model_projection =
 type artifact_projection =
   | Reference_only
   | Inline_with_reference
+  | Inline_with_structured_diagnostic
+      (** The producer declares that [structured_content] carries its complete
+          domain diagnostic. A failed result adds only its canonical failure
+          class and next move beside that data and the durable reference.
+          The original message remains inside the full manifest. *)
 
 val artifact_projection_to_json : artifact_projection -> Yojson.Safe.t
 val artifact_projection_of_json :

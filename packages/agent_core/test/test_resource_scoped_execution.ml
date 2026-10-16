@@ -9,8 +9,8 @@ let identity key =
   Tool_contract.Resource_scope.identity ~namespace:"fixture-producer" ~key |> Result.get_ok
 ;;
 
-let scope ?(ancestors = []) key =
-  Tool_contract.Resource_scope.create ~occupied:(identity key)
+let scope ?(access = Tool_contract.Resource_scope.Write) ?(ancestors = []) key =
+  Tool_contract.Resource_scope.create ~access ~occupied:(identity key)
     ~ancestors:(List.map identity ancestors)
 ;;
 
@@ -555,10 +555,55 @@ let test_unattempted_sibling_preserves_original_wave () =
     | Error error -> fail (Writer.scope_failure_to_string error)) [true; false]
 ;;
 
+let test_shared_reads_and_private_writes_keep_writer_order () =
+  Eio_main.run @@ fun env ->
+  let module Access = Tool_contract.Resource_scope in
+  let left_started, start_left = Eio.Promise.create () in
+  let right_started, start_right = Eio.Promise.create () in
+  let sibling_started, start_sibling = Eio.Promise.create () in
+  let shared = ref "before" and observations = ref [] in
+  let make name occupied ?(additional_scopes = []) perform =
+    prepared_tool ~name (fun ~sw:_ _ ->
+      Ok (Some (Tool.scoped_call ~scope:occupied ~additional_scopes
+        (fun _ _ -> perform (); output name))))
+      (fun _ -> fail "unprepared resource access dispatched") in
+  let read name signal other occupied =
+    make name occupied ~additional_scopes:[scope ("private-" ^ name)] (fun () ->
+      Eio.Promise.resolve signal ();
+      Eio.Promise.await other;
+      Eio.Promise.await sibling_started;
+      observations := (name, !shared) :: !observations) in
+  let left = read "left" start_left right_started (scope ~access:Access.Read "shared") in
+  let right = read "right" start_right left_started
+      (scope ~access:Access.Read ~ancestors:["shared"] "child") in
+  let writer = make "writer" (scope "shared") (fun () ->
+    check (list (pair string string)) "both overlapping reads finish before write"
+      ["left", "before"; "right", "before"]
+      (List.sort (fun (left, _) (right, _) -> String.compare left right) !observations);
+    shared := "after") in
+  let later = make "later" (scope ~access:Access.Read ~ancestors:["shared"] "child")
+      (fun () -> check string "later reader cannot overtake the writer" "after" !shared) in
+  let sibling = make "sibling" (scope "unrelated") (fun () ->
+    Eio.Promise.resolve start_sibling ();
+    Eio.Promise.await left_started;
+    Eio.Promise.await right_started) in
+  check bool "read claims do not make a mixed call readonly" true
+    (Tool.call_effect left (`Assoc []) = Tool.Effect_possible);
+  let rows = execute env [left; right; writer; later; sibling]
+      (List.map call ["left"; "right"; "writer"; "later"; "sibling"]) |> results in
+  check (list string) "actual results retain original call order"
+    ["left"; "right"; "writer"; "later"; "sibling"] (contents rows);
+  check (list int) "shared reads overlap and writes retain both directions of ordering"
+    [0; 0; 1; 2; 0]
+    (List.map (fun (row : Agent_tools.tool_execution_result) ->
+      (Tool_contract.Invocation.schedule row.invocation).batch_index) rows)
+;;
+
 let () =
   run "resource-scoped execution"
     [ "actual batch execution",
       [ test_case "disjoint effects consume exact prepared calls" `Quick test_disjoint_effects_consume_frozen_calls
+      ; test_case "shared reads and private writes preserve writer order" `Quick test_shared_reads_and_private_writes_keep_writer_order
       ; test_case "conflicts preserve transitive planned order" `Quick test_conflicting_predecessors_keep_transitive_order
       ; test_case "fallback unavailable validation and permission" `Quick test_fallback_unavailable_validation_and_permission
       ; test_case "barriers and ordinary versus hook failure" `Quick test_barriers_and_failure_semantics

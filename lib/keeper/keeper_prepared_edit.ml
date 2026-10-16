@@ -116,7 +116,7 @@ let prepare ~sw ~config ~meta ~args ~confined =
                let* resource = scope_identity resource in
                Ok (resource :: tail)) rest (Ok []) in
              Ok (Some { capability; components; identity = actual; native_chain
-                      ; scope = Scope.create ~occupied ~ancestors:ancestry }))
+                      ; scope = Scope.create ~access:Scope.Write ~occupied ~ancestors:ancestry }))
     in
     let inspect () =
       let anchor = open_dir Eio.Path.(fs / Keeper_alerting_path.confined_anchor_root confined) in

@@ -1,0 +1,81 @@
+{
+  "candle": {
+    "status": "off"
+  },
+  "count": 2,
+  "keepers": [
+    {
+      "candle_account_revision": null,
+      "candle_balance_milli": null,
+      "portrait": {
+        "state": "ready",
+        "equipment": {
+          "face": "bare_face",
+          "neck": "bare_neck",
+          "head": "bare_head",
+          "hand": "empty_hand",
+          "base": "no_dish"
+        }
+      },
+      "runtime_class": "keeper",
+      "name": "probe-one",
+      "meta": {
+        "name": "probe-one",
+        "trace_id": "trace-native-probe-one",
+        "created_at": "1970-01-01T00:00:00Z",
+        "updated_at": "1970-01-01T00:00:00Z",
+        "sandbox_profile": "docker"
+      },
+      "status": "offline",
+      "phase": "offline",
+      "health": "offline",
+      "paused": false,
+      "next_action": "recover",
+      "runtime_blocker_summary": null,
+      "runtime_blocker_signature": null,
+      "keepalive_running": false,
+      "activation_mode": "manual",
+      "runtime_id": "ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "created_at": "1970-01-01T00:00:00Z",
+      "updated_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "candle_account_revision": null,
+      "candle_balance_milli": null,
+      "portrait": {
+        "state": "ready",
+        "equipment": {
+          "face": "bare_face",
+          "neck": "bare_neck",
+          "head": "crown",
+          "hand": "empty_hand",
+          "base": "no_dish"
+        }
+      },
+      "runtime_class": "keeper",
+      "name": "probe-two",
+      "meta": {
+        "name": "probe-two",
+        "trace_id": "trace-native-probe-two",
+        "created_at": "1970-01-01T00:00:00Z",
+        "updated_at": "1970-01-01T00:00:00Z",
+        "sandbox_profile": "docker"
+      },
+      "status": "offline",
+      "phase": "offline",
+      "health": "offline",
+      "paused": false,
+      "next_action": "recover",
+      "runtime_blocker_summary": null,
+      "runtime_blocker_signature": null,
+      "keepalive_running": false,
+      "activation_mode": "manual",
+      "runtime_id": "ollama_cloud.ollama-cloud-glm-5-3-flash",
+      "created_at": "1970-01-01T00:00:00Z",
+      "updated_at": "1970-01-01T00:00:00Z"
+    }
+  ],
+  "total": 2,
+  "limit": 200,
+  "truncated": false
+}

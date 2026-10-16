@@ -1,0 +1,42 @@
+{
+  "scope": "Private local Homebrew dependency cohort shared by both unmodified CI binaries; not producer-bundled runtime verification",
+  "dependencies": [
+    {
+      "name": "libssl.3.dylib",
+      "source": "/opt/homebrew/Cellar/openssl@3/3.6.4/lib/libssl.3.dylib",
+      "sha256": "c6ee373222087cf31bc2f3817537d268b3c23e56b7fadd44bbf5c2317caed349",
+      "links": [
+        "\t/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib (compatibility version 3.0.0, current version 3.0.0)",
+        "\t/opt/homebrew/Cellar/openssl@3/3.6.4/lib/libcrypto.3.dylib (compatibility version 3.0.0, current version 3.0.0)",
+        "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+      ]
+    },
+    {
+      "name": "libcrypto.3.dylib",
+      "source": "/opt/homebrew/Cellar/openssl@3/3.6.4/lib/libcrypto.3.dylib",
+      "sha256": "bae675614cd791d37ec35416ea9f87edcc85407d020810504cf458119b63522c",
+      "links": [
+        "\t/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib (compatibility version 3.0.0, current version 3.0.0)",
+        "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+      ]
+    },
+    {
+      "name": "libgmp.10.dylib",
+      "source": "/opt/homebrew/Cellar/gmp/6.3.0/lib/libgmp.10.dylib",
+      "sha256": "1bb9184824b82f40bd50279634290d6cbdf9c1a371c045c7b10815e7955cd696",
+      "links": [
+        "\t/opt/homebrew/opt/gmp/lib/libgmp.10.dylib (compatibility version 16.0.0, current version 16.0.0)",
+        "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1336.0.0)"
+      ]
+    },
+    {
+      "name": "libzstd.1.5.7.dylib",
+      "source": "/opt/homebrew/Cellar/zstd/1.5.7_1/lib/libzstd.1.5.7.dylib",
+      "sha256": "e2847c4613b386683c234913ae3b7b04299254096caf7616e3b3cd9bb97a39ab",
+      "links": [
+        "\t/opt/homebrew/opt/zstd/lib/libzstd.1.dylib (compatibility version 1.0.0, current version 1.5.7)",
+        "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+      ]
+    }
+  ]
+}

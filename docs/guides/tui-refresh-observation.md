@@ -1,24 +1,29 @@
 # TUI refresh observations and before/after comparisons
 
 The TUI records the logical readers of a full HTTP refresh and shows which reader
-it is waiting for. This explains a refresh that has not finished; it does not make
-the refresh faster or certify that received data was admitted to the workspace.
+it is waiting for. Diagnostic status explains a refresh that has not finished;
+independent roster delivery also removes the unrelated-reader wait for that
+dataset. Status alone does not certify workspace admission or faster completion.
 
 ## As-Is and To-Be
 
 | Aspect | Before | This change | Still to implement or measure |
 |---|---|---|---|
-| Refresh visibility | Connection badge and one full-refresh start clock | Pending reader, failed and interrupted reader counts | Native screen readability at normal and narrow widths |
-| Attribution | Existing endpoint and mailbox diagnostics | One terminal record with logical reader outcomes and elapsed time | Matched baseline/candidate latency distributions |
+| Refresh visibility | Connection badge and one full-refresh start clock | Pending reader, failed and interrupted reader counts; native captures at 120 x 36 and 80 x 24 | Broader live-use readability |
+| Attribution | Existing endpoint and mailbox diagnostics | One terminal record with logical reader outcomes and elapsed time; controlled native comparison | Production latency distributions |
 | Partial results | Verified Dashboard preview and questions can arrive early; roster waits for the full bundle | A matching workspace's roster can settle before unrelated reads, once per source request | Cold-start authority and other scoped datasets still use terminal admission |
 | Authority | Request tickets and workspace identity guard admission | Diagnostic observations use the same request and authority identities | These observations never grant data or action authority |
 | Keeper execution | Existing Task/Skill preparation and owned job recovery | No model or Tool execution change in this unit | Request byte attribution, redundant roundtrips, recipe concurrency and held-job reactivation |
 
 The source baseline for this comparison is
 `683c7950682b45a2591002e09f654515ccf02155`, the stack's integration base when the
-comparison was prepared. It is a frozen source reference; native baseline frames
-and timings have not yet been collected. A parsed file,
-an authored state scenario and an observed native frame are different evidence.
+comparison was prepared. A controlled native before/after at candidate
+`f7632e71601da3ce6c7b5a5e8a6b528bcf42fa4c`, including failed and non-demonstrating
+attempts, is retained in [the native observation report](../evidence/2026-10-17-tui-refresh/README.md).
+It uses a real private backend and a synthetic two-second sibling delay, with one
+changed-health sample per arm and viewport. It is not a production benchmark.
+A parsed file, an authored state scenario and an observed native frame are
+different evidence.
 
 ## Read the observations
 
@@ -92,8 +97,12 @@ frame measurement. Native frames must still establish what was visible.
 Before this delivery change, from the end of the common initial identity probe,
 the roster waited for the slowest independent reader and final identity probe.
 Afterwards its own successful workspace-bound read and UI mailbox application
-can settle it. This shortens that dependency path; the saved time remains
-unmeasured until both binaries run under the same delayed-reader conditions.
+can settle it. In the controlled native comparison, the candidate admitted its
+roster in 54.594 ms at 120 x 36 and 78.039 ms at 80 x 24, while its terminal refresh
+took 2046.113 ms and 2109.435 ms. Its scheduled 0.1s frames showed the new health;
+the baseline still showed the previous health at the scheduled 0.5s frames.
+The experiment demonstrates removal of the imposed sibling wait. It does not
+measure a general or production speedup, or the baseline's exact admission clock.
 
 ## Collect comparable before/after evidence
 

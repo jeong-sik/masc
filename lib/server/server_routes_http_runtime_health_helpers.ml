@@ -94,6 +94,33 @@ let quick_gc_json () =
       ("major_words", `Float s.major_words);
     ]
 
+let process_memory_json () =
+  let measurement =
+    Eio_guard.run_in_systhread ~label:"process-resident-memory"
+      Process_memory.resident_set
+  in
+  match measurement with
+  | Ok sample ->
+    let source, approximate =
+      match sample.Process_memory.source with
+      | Process_memory.Mach_task_info -> "mach_task_info", false
+      | Process_memory.Proc_statm -> "proc_statm", true
+    in
+    `Assoc
+      [ "status", `String "measured"
+      ; "pid", `Int (Unix.getpid ())
+      ; "resident_bytes", `Intlit (Int64.to_string sample.resident_bytes)
+      ; "source", `String source
+      ; "approximate", `Bool approximate
+      ]
+  | Error reason ->
+    `Assoc
+      [ "status", `String "unavailable"
+      ; "pid", `Int (Unix.getpid ())
+      ; "resident_bytes", `Null
+      ; "reason", `String reason
+      ]
+
 let scheduler_json () =
   (* The probe fiber runs on the main domain; its ring says how late a ready
      fiber there ran over the last minute. [pool_domains] is carried next to

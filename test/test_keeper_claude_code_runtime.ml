@@ -3658,9 +3658,9 @@ let test_child_journal_concurrent_exact_replay () =
       Eio_main.run (fun _ -> Child_journal.append publication))) in
     let outcomes=List.map Domain.join workers |> List.map (fun outcome ->
       match outcome.Child_journal.result with
-      | Error (Child_journal.Store_unavailable _) ->
-          (* Immediate SQLite busy refusal is explicit, then the test retries
-             the same publication once all concurrent workers have joined. *)
+      | Error (Child_journal.Store_unavailable _ | Child_journal.Commit_unconfirmed _) ->
+          (* Immediate SQLite busy refusal or unconfirmed commit is explicit, then
+             the test retries the same publication once all concurrent workers have joined. *)
           child_journal_ok (Child_journal.append publication)
       | Ok _ | Error _ -> child_journal_ok outcome) in
     check int "concurrent received duplicate commits exactly once" 1
@@ -4032,9 +4032,10 @@ let test_native_task_journal_atomicity_recovery_and_failure () =
       Eio_main.run (fun _ -> Task_journal.append first))) in
     let outcomes = List.map Domain.join workers |> List.map (fun outcome ->
       match outcome.Task_journal.result with
-      | Error (Task_journal.Store_unavailable _) ->
-          (* SQLITE_BUSY is an immediate explicit refusal. Reconcile after the
-             concurrent workers have completed, with the identical UUID. *)
+      | Error (Task_journal.Store_unavailable _ | Task_journal.Commit_unconfirmed _) ->
+          (* SQLITE_BUSY is an immediate explicit refusal; COMMIT failure is
+             unconfirmed. Reconcile after the concurrent workers have completed,
+             with the identical UUID. *)
           task_journal_ok (Task_journal.append first)
       | Ok _ | Error _ -> task_journal_ok outcome) in
     check int "concurrent duplicate writers commit exactly once" 1

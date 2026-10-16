@@ -1242,19 +1242,27 @@ let test_prepare_schema_has_no_recursive_references () =
     | `Assoc fields -> List.assoc_opt key fields
     | _ -> None
   in
-  let input_type =
+  let alternatives =
     Option.bind (member "properties" schema) (member "nodes")
     |> fun nodes -> Option.bind nodes (member "items")
-    |> fun items -> Option.bind items (member "properties")
-    |> fun properties -> Option.bind properties (member "input")
-    |> fun input -> Option.bind input (member "type")
+    |> fun items -> Option.bind items (member "oneOf")
+    |> function
+    | Some (`List (_ :: _ as alternatives)) -> alternatives
+    | _ -> Alcotest.fail "prepare schema has no node alternatives"
   in
-  Alcotest.(check (option string))
-    "a node input is still advertised as an object"
-    (Some "object")
-    (match input_type with
-     | Some (`String type_name) -> Some type_name
-     | _ -> None)
+  List.iteri (fun index alternative ->
+    let argument_schema = Option.bind (member "properties" alternative) (fun properties ->
+      match member "input" properties, member "args" properties with
+      | Some input, None | None, Some input -> Some input
+      | Some _, Some _ | None, None ->
+        Alcotest.failf "node alternative %d must advertise exactly one argument form" index) in
+    let argument_type = Option.bind argument_schema (member "type") in
+    Alcotest.(check (option string))
+      (Printf.sprintf "node alternative %d advertises an argument object" index)
+      (Some "object")
+      (match argument_type with
+       | Some (`String type_name) -> Some type_name
+       | _ -> None)) alternatives
 ;;
 
 let test_frozen_plan_json_preserves_values_and_rejects_mixed_forms () =

@@ -5,6 +5,81 @@ type compute_outcome =
   | Compute_denied of Fusion_types.deny_reason
   | Computed of Fusion_types.deliberation_evidence
 
+module type Panel_effect = sig
+  val run
+    :  base_dir:string
+    -> sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> groups:Fusion_policy.panel_group list
+    -> prompt:string
+    -> ?on_tool_trace:(Fusion_types.tool_trace -> unit)
+    -> ?on_seat_routes:(Fusion_types.seat_route list -> unit)
+    -> unit
+    -> Fusion_types.panel_outcome list
+end
+
+module type Judge_effect = sig
+  val run
+    :  base_dir:string
+    -> sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> ?max_tokens:int
+    -> ?timeout_s:float
+    -> judge_system_prompt:string
+    -> judge_model:string
+    -> question:string
+    -> panel:Fusion_types.panel_outcome list
+    -> web_tools:bool
+    -> ?tool_trace:
+         (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
+    -> ?seat_route:(Fusion_types.judge_role * (Fusion_types.seat_route -> unit))
+    -> unit
+    -> ( Fusion_types.judge_synthesis * Fusion_types.usage
+       , Fusion_types.judge_failure * Fusion_types.usage )
+       result
+
+  val run_refine
+    :  base_dir:string
+    -> sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> ?max_tokens:int
+    -> ?timeout_s:float
+    -> judge_system_prompt:string
+    -> judge_model:string
+    -> question:string
+    -> panel:Fusion_types.panel_outcome list
+    -> prior:Fusion_types.judge_synthesis
+    -> web_tools:bool
+    -> ?tool_trace:
+         (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
+    -> ?seat_route:(Fusion_types.judge_role * (Fusion_types.seat_route -> unit))
+    -> unit
+    -> ( Fusion_types.judge_synthesis * Fusion_types.usage
+       , Fusion_types.judge_failure * Fusion_types.usage )
+       result
+
+  val run_meta
+    :  base_dir:string
+    -> sw:Eio.Switch.t
+    -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+    -> ?max_tokens:int
+    -> ?timeout_s:float
+    -> judge_system_prompt:string
+    -> judge_model:string
+    -> question:string
+    -> panel:Fusion_types.panel_outcome list
+    -> priors:(string * Fusion_types.judge_synthesis) list
+    -> web_tools:bool
+    -> ?tool_trace:
+         (Fusion_types.tool_trace_actor * (Fusion_types.tool_trace -> unit))
+    -> ?seat_route:(Fusion_types.judge_role * (Fusion_types.seat_route -> unit))
+    -> unit
+    -> ( Fusion_types.judge_synthesis * Fusion_types.usage
+       , Fusion_types.judge_failure * Fusion_types.usage )
+       result
+end
+
+module Compute_with (Panel : Panel_effect) (Judge : Judge_effect) = struct
 let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
     compute_outcome =
   let publish progress = Option.iter (fun send -> send progress) on_progress in
@@ -67,7 +142,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
             (Fusion_run_registry.Progress_panel_running
                { expected = panel_expected });
           let panel =
-            Fusion_panel.run ~base_dir ~sw ~net
+            Panel.run ~base_dir ~sw ~net
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt
               ~on_tool_trace:record_tool_trace
               ~on_seat_routes:(fun routes -> panel_seat_routes := routes)
@@ -91,7 +166,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
               groups
           in
           let run_single_judge () =
-            Fusion_judge.run ~base_dir ~sw ~net
+            Judge.run ~base_dir ~sw ~net
               ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
               ?timeout_s:preset.Fusion_policy.judge_timeout_s
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -108,7 +183,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                 { Fusion_types.role = Single; synthesis = s1; usage = u1 }
             in
             match
-              Fusion_judge.run_refine ~base_dir ~sw ~net
+              Judge.run_refine ~base_dir ~sw ~net
                 ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                 ?timeout_s:preset.Fusion_policy.judge_timeout_s
                 ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -200,7 +275,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                  let firsts_usage = firsts_usage firsts in
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
                  (match
-                    Fusion_judge.run_meta ~base_dir ~sw ~net
+                    Judge.run_meta ~base_dir ~sw ~net
                       ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                       ?timeout_s:preset.Fusion_policy.judge_timeout_s
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -286,7 +361,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                   let firsts_usage = firsts_usage stage_firsts in
                   let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
                   (match
-                     Fusion_judge.run_meta ~base_dir ~sw ~net
+                     Judge.run_meta ~base_dir ~sw ~net
                        ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                        ?timeout_s:preset.Fusion_policy.judge_timeout_s
                        ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -347,7 +422,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                  let stage_usage = Fusion_types.sum_all_usage stage_results in
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_stages in
                  (match
-                    Fusion_judge.run_meta ~base_dir ~sw ~net
+                    Judge.run_meta ~base_dir ~sw ~net
                       ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                       ?timeout_s:preset.Fusion_policy.judge_timeout_s
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -492,6 +567,15 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
             ; tool_trace
             ; seat_routes
             })
+
+end
+
+module Production = Compute_with (Fusion_panel) (Fusion_judge)
+let compute = Production.compute
+
+module For_testing = struct
+  module Make = Compute_with
+end
 
 let project
     ?source_context

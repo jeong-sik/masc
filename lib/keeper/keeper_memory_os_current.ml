@@ -4,6 +4,7 @@ open Keeper_memory_os_types
 open Result.Syntax
 
 module Snapshot_codec = Keeper_memory_os_snapshot_codec
+module Journal_codec = Keeper_memory_os_journal_codec
 
 let suffix = ".memory-current.json"
 
@@ -812,19 +813,8 @@ let list_durable_range_receipt_keeper_ids ~keepers_dir =
     |> List.sort String.compare
 ;;
 
-let exact_object_fields required fields =
-  List.length required = List.length fields
-  && List.for_all
-       (fun required_name ->
-          match
-            List.filter
-              (fun (observed_name, _) ->
-                 String.equal required_name observed_name)
-              fields
-          with
-          | [ _ ] -> true
-          | [] | _ :: _ :: _ -> false)
-       required
+let exact_object_fields names fields =
+  Result.is_ok (exact_field_names_result names fields)
 ;;
 
 let source_kind_to_string = Snapshot_codec.source_kind_to_string
@@ -883,260 +873,7 @@ let read_classified ~keepers_dir ~keeper_id =
       }
 ;;
 
-let librarian_failure_kind_to_string = function
-  | Prompt_render_failure -> "prompt_render_failure"
-  | Execution_clock_unavailable -> "execution_clock_unavailable"
-  | Exact_setup_failure -> "exact_setup_failure"
-  | Exact_execution_failure -> "exact_execution_failure"
-  | Domain_output_invalid -> "domain_output_invalid"
-  | Absorb_judgment_failure -> "absorb_judgment_failure"
-  | Memory_snapshot_write_failure -> "memory_snapshot_write_failure"
-  | Runtime_context_unavailable -> "runtime_context_unavailable"
-  | Lane_cancelled -> "lane_cancelled"
-  | Unhandled_exception -> "unhandled_exception"
-;;
-
-let librarian_failure_kind_of_string = function
-  | "prompt_render_failure" -> Some Prompt_render_failure
-  | "execution_clock_unavailable" -> Some Execution_clock_unavailable
-  | "exact_setup_failure" -> Some Exact_setup_failure
-  | "exact_execution_failure" -> Some Exact_execution_failure
-  | "domain_output_invalid" -> Some Domain_output_invalid
-  | "absorb_judgment_failure" -> Some Absorb_judgment_failure
-  | "memory_snapshot_write_failure" -> Some Memory_snapshot_write_failure
-  | "runtime_context_unavailable" -> Some Runtime_context_unavailable
-  | "lane_cancelled" -> Some Lane_cancelled
-  | "unhandled_exception" -> Some Unhandled_exception
-  | _ -> None
-;;
-
-let committed_outcome = "committed"
-let failed_outcome = "failed"
-let quarantined_outcome = "quarantined"
-
-(* [dropped_statements = None] means the writer makes no drop-reason
-   statements (explicit keeper writes, upserts); [Some list] is the
-   librarian's own account of the drops this commit carried out, possibly
-   empty ([dropped_by_commit]). Statements live on the journal line and its
-   pending removal receipt; the snapshot's [change.removed] preserves the
-   originals until finalization. *)
-let revision_links_to_json links = `List (List.map (fun (link : revision) ->
-  `Assoc ["superseded", `String link.superseded; "superseded_by", `String link.superseded_by]) links)
-;;
-
-let revision_links_of_json = function
-  | `List rows ->
-    let rec decode seen = function
-      | [] -> Ok []
-      | `Assoc fields :: rest ->
-        let* () = exact_field_names_result ["superseded"; "superseded_by"] fields
-          |> Result.map_error wire_error_to_string in
-        let* superseded = wire_string_field "superseded" fields |> Result.map_error wire_error_to_string in
-        let* superseded_by = wire_string_field "superseded_by" fields |> Result.map_error wire_error_to_string in
-        if not (is_memory_id superseded && is_memory_id superseded_by)
-          || superseded = superseded_by || List.mem (superseded, superseded_by) seen
-        then Error "invalid or duplicate revision link identity"
-        else let+ rest = decode ((superseded, superseded_by) :: seen) rest in
-          {superseded; superseded_by} :: rest
-      | _ :: _ -> Error "revision link is not an object" in
-    decode [] rows
-  | _ -> Error "revision links are not an array"
-;;
-
-let journal_revision_links fields =
-  match List.assoc_opt "revision_links" fields with
-  | None -> Ok None
-  | Some json -> Result.map Option.some (revision_links_of_json json)
-;;
-
-let links_applied_to_snapshot (snapshot : t) links =
-  List.for_all (fun (link : revision) ->
-    List.exists (fun fact -> memory_id fact = link.superseded) snapshot.change.removed
-    && not (List.exists (fun fact -> memory_id fact = link.superseded) snapshot.facts)
-    && List.exists (fun fact -> memory_id fact = link.superseded_by) snapshot.facts) links
-;;
-
-let journal_entry_to_json ~commit_effect ~revision_links ~dropped_statements snapshot =
-  `Assoc
-    ([ "outcome", `String committed_outcome
-     ; "commit_effect", `String (match commit_effect with Rewritten -> "rewritten" | Unchanged -> "unchanged")
-     ; "recorded_at", `Float snapshot.updated_at
-     ; "revision", `Int snapshot.revision
-     ; "source", Snapshot_codec.source_to_json snapshot.source
-     ; "change", Snapshot_codec.change_to_json snapshot.change
-     ]
-     @ (match commit_effect with
-        | Rewritten -> ["revision_links", revision_links_to_json revision_links]
-        | Unchanged -> [])
-     @
-     match dropped_statements with
-     | None -> []
-     | Some statements ->
-       [ ( "dropped"
-         , `List (List.map dropped_statement_to_json statements) )
-       ])
-;;
-
-let journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present =
-  `Assoc
-    [ "outcome", `String failed_outcome
-    ; "recorded_at", `Float now
-    ; "trace_id", `String trace_id
-    ; "kind", `String (librarian_failure_kind_to_string kind)
-    ; "detail", `String detail
-    ; "snapshot_present", `Bool snapshot_present
-    ]
-;;
-
-let journal_commit_effect fields =
-  match List.assoc_opt "commit_effect" fields with
-  | None -> Ok None
-  | Some (`String "rewritten") -> Ok (Some Rewritten)
-  | Some (`String "unchanged") -> Ok (Some Unchanged)
-  | Some _ -> Error "committed line has an invalid commit_effect"
-;;
-
-let committed_entry_of_fields fields =
-  let* transition = journal_commit_effect fields in
-  let* links = journal_revision_links fields in
-  let* () = match links, transition with
-    | Some (_ :: _), Some Rewritten -> Ok ()
-    | Some (_ :: _), (Some Unchanged | None) -> Error "revision links lack a snapshot transition"
-    | (Some [] | None), _ -> Ok () in
-  let expected = ["outcome"; "recorded_at"; "revision"; "source"; "change"]
-    @ (if List.mem_assoc "dropped" fields then ["dropped"] else [])
-    @ (if List.mem_assoc "commit_effect" fields then ["commit_effect"] else [])
-    @ (if List.mem_assoc "revision_links" fields then ["revision_links"] else []) in
-  let fields_are_exact = exact_object_fields expected fields in
-  let dropped_of_json = function
-    | `List items ->
-      let rec loop index acc = function
-        | [] -> Ok (List.rev acc)
-        | item :: rest ->
-          (match Keeper_memory_os_types.dropped_statement_of_json item with
-           | Ok statement -> loop (index + 1) (statement :: acc) rest
-           | Error error ->
-             Error
-               (Printf.sprintf
-                  "[%d] %s"
-                  index
-                  (Keeper_memory_os_types.wire_error_to_string error)))
-      in
-      loop 0 [] items
-    | _ -> Error "is not an array"
-  in
-  if not fields_are_exact
-  then Error "committed line has unknown, duplicate, or missing fields"
-  else
-  match
-    ( List.assoc_opt "recorded_at" fields
-    , List.assoc_opt "revision" fields
-    , List.assoc_opt "source" fields
-    , List.assoc_opt "change" fields )
-  with
-  | Some (`Float recorded_at), Some (`Int revision), Some source, Some change ->
-    (match
-       Snapshot_codec.source_of_json source, Snapshot_codec.change_of_json change
-     with
-     | Error error, _ ->
-       Error
-         (Printf.sprintf
-            "committed line has an undecodable source: %s"
-            (Keeper_memory_os_types.wire_error_to_string error))
-     | Ok _, Error error ->
-       Error
-         (Printf.sprintf
-            "committed line has an undecodable change: %s"
-            (Keeper_memory_os_types.wire_error_to_string error))
-     | Ok _, Ok _ when revision < 0 -> Error "committed line has a negative revision"
-     | Ok source, Ok change ->
-       (match List.assoc_opt "dropped" fields with
-        | None ->
-          Ok (Journal_committed { recorded_at; revision; source; change; dropped = None })
-        | Some dropped ->
-          (match dropped_of_json dropped with
-           | Ok statements ->
-             Ok
-               (Journal_committed
-                  { recorded_at; revision; source; change; dropped = Some statements })
-           | Error detail ->
-             Error
-               (Printf.sprintf
-                  "committed line has an undecodable dropped list: %s"
-                  detail))))
-  | _ -> Error "committed line is missing recorded_at/revision/source/change"
-;;
-
-let failed_entry_of_fields fields =
-  if
-    not
-      (exact_object_fields
-         [ "outcome"
-         ; "recorded_at"
-         ; "trace_id"
-         ; "kind"
-         ; "detail"
-         ; "snapshot_present"
-         ]
-         fields)
-  then Error "failed line has unknown, duplicate, or missing fields"
-  else
-  match
-    ( List.assoc_opt "recorded_at" fields
-    , List.assoc_opt "trace_id" fields
-    , List.assoc_opt "kind" fields
-    , List.assoc_opt "detail" fields
-    , List.assoc_opt "snapshot_present" fields )
-  with
-  | ( Some (`Float recorded_at)
-    , Some (`String trace_id)
-    , Some (`String kind)
-    , Some (`String detail)
-    , Some (`Bool snapshot_present) ) ->
-    (match librarian_failure_kind_of_string kind with
-     | Some kind ->
-       Ok (Journal_failed { recorded_at; trace_id; kind; detail; snapshot_present })
-     | None -> Error (Printf.sprintf "failed line has an unknown kind %S" kind))
-  | _ ->
-    Error "failed line is missing recorded_at/trace_id/kind/detail/snapshot_present"
-;;
-
-let quarantined_entry_of_fields fields =
-  if
-    not
-      (exact_object_fields
-         [ "outcome"; "recorded_at"; "rejection"; "rejected_path" ]
-         fields)
-  then Error "quarantined line has unknown, duplicate, or missing fields"
-  else
-    match
-      ( List.assoc_opt "recorded_at" fields
-      , List.assoc_opt "rejection" fields
-      , List.assoc_opt "rejected_path" fields )
-    with
-    | ( Some (`Float recorded_at)
-      , Some (`String rejection)
-      , Some (`String rejected_path) ) ->
-      Ok (Journal_quarantined { recorded_at; rejection; rejected_path })
-    | _ ->
-      Error "quarantined line is missing recorded_at/rejection/rejected_path"
-;;
-
-let journal_entry_of_json = function
-  | `Assoc fields ->
-    (match List.assoc_opt "outcome" fields with
-     | Some (`String outcome) when String.equal outcome committed_outcome ->
-       committed_entry_of_fields fields
-     | Some (`String outcome) when String.equal outcome failed_outcome ->
-       failed_entry_of_fields fields
-     | Some (`String outcome) when String.equal outcome quarantined_outcome ->
-       quarantined_entry_of_fields fields
-     | Some (`String outcome) ->
-       Error (Printf.sprintf "journal line has an unknown outcome %S" outcome)
-     | Some _ -> Error "journal line has a non-string outcome"
-     | None -> Error "journal line has no outcome tag")
-  | _ -> Error "journal line is not a JSON object"
-;;
+let librarian_failure_kind_to_string = Journal_codec.librarian_failure_kind_to_string
 
 module Recall_revision_set = Set.Make (Int)
 
@@ -1166,30 +903,19 @@ let rec publish_recall_cache path value =
   if not (Atomic.compare_and_set recall_journal_cache before after) then
     publish_recall_cache path value
 
-(* Only a line that rewrote the snapshot covers its revision. An unchanged
-   observation repeats a revision another line wrote, and a line without a
-   commit effect proves neither. *)
-let journal_line_rewrote (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields ->
-    (match journal_commit_effect fields with
-     | Ok (Some Rewritten) -> true
-     | Ok (Some Unchanged | None) | Error _ -> false)
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
-
 (* Forward projection matches the previous reverse reader's stopping boundary.
    Only snapshot rewrites cover revisions; unchanged observations never fill a
    missing transition. No observation rows are retained in memory. *)
 let project_recall_entry ~oldest projection = function
   | Dated_jsonl.Malformed_json {detail;_} -> {projection with invalid=Some detail}
   | Dated_jsonl.Parsed json ->
-    match journal_entry_of_json json with
+    match Journal_codec.journal_entry_of_json json with
     | Error detail -> {projection with invalid=Some detail}
     | Ok (Journal_failed _ | Journal_quarantined _) -> projection
     | Ok (Journal_committed {revision;change;_}) ->
       if revision <= oldest then empty_recall_projection
       else
-        let rewrote = journal_line_rewrote json in
+        let rewrote = Journal_codec.journal_line_rewrote json in
         let revisions =
           if rewrote then Recall_revision_set.add revision projection.revisions
           else projection.revisions in
@@ -1262,7 +988,7 @@ let append_journal_entry ~keepers_dir ~keeper_id ~commit_effect ~revision_links 
   append_journal_line
     ~keepers_dir
     ~keeper_id
-    (journal_entry_to_json ~commit_effect ~revision_links ~dropped_statements snapshot)
+    (Journal_codec.journal_entry_to_json ~commit_effect ~revision_links ~dropped_statements snapshot)
 ;;
 
 (* A committed line's [dropped] lists what this commit removed: a memory the
@@ -1302,7 +1028,7 @@ let append_librarian_failure
   append_journal_line
     ~keepers_dir
     ~keeper_id
-    (journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present)
+    (Journal_codec.journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present)
 ;;
 
 (* A snapshot this build cannot decode is durable state no producer can leave:
@@ -1311,15 +1037,6 @@ let append_librarian_failure
    and this line says why, so a build that can read them again still has both.
    Recorded on its own outcome because it is neither a pass that committed nor
    a pass that failed. *)
-let journal_quarantine_to_json ~now ~rejection ~rejected_path =
-  `Assoc
-    [ "outcome", `String quarantined_outcome
-    ; "recorded_at", `Float now
-    ; "rejection", `String rejection
-    ; "rejected_path", `String rejected_path
-    ]
-;;
-
 (* [now] is the caller's own observation time and repeats: two writes in the
    same second share it, and a caller may pass a fixed value. [rename] replaces
    its destination, so a repeated name would delete the snapshot an earlier
@@ -1330,7 +1047,7 @@ let append_snapshot_quarantine ~keepers_dir ~keeper_id ~now ~rejection ~rejected
   append_journal_line
     ~keepers_dir
     ~keeper_id
-    (journal_quarantine_to_json ~now ~rejection ~rejected_path)
+    (Journal_codec.journal_quarantine_to_json ~now ~rejection ~rejected_path)
 ;;
 
 type retraction_plan_receipt =
@@ -1353,7 +1070,7 @@ let retraction_plan_receipt_to_json receipt =
     ; "prior_snapshot_sha256", `String receipt.prior_snapshot_sha256
     ; "target_revision", `Int receipt.target_revision
     ; "target_snapshot_sha256", `String receipt.target_snapshot_sha256
-    ; "revision_links", revision_links_to_json receipt.revision_links
+    ; "revision_links", Journal_codec.revision_links_to_json receipt.revision_links
     ; ( "dropped"
       , `List
           (List.map
@@ -1412,7 +1129,7 @@ let retraction_plan_receipt_of_json = function
             && String_util.is_lowercase_sha256_hex prior_snapshot_sha256
             && String_util.is_lowercase_sha256_hex target_snapshot_sha256 ->
        let* revision_links = match List.assoc_opt "revision_links" fields with
-         | Some json -> revision_links_of_json json
+         | Some json -> Journal_codec.revision_links_of_json json
          | None -> Ok [] in
        let* plan_id =
          match plan_id_json with
@@ -1516,13 +1233,13 @@ let remove_retraction_plan_receipt ~keepers_dir ~keeper_id =
 let append_removal_journal_and_clear_receipt
       ~keepers_dir ~keeper_id ~snapshot receipt
   =
-  let* () = if links_applied_to_snapshot snapshot receipt.revision_links then Ok ()
+  let* () = if Journal_codec.links_applied_to_snapshot snapshot receipt.revision_links then Ok ()
     else Error "prepared revision links do not match the committed snapshot" in
   let* () =
     append_journal_line_strict
       ~keepers_dir
       ~keeper_id
-      (journal_entry_to_json
+      (Journal_codec.journal_entry_to_json
          ~commit_effect:Rewritten
          ~revision_links:receipt.revision_links
          ~dropped_statements:(Some receipt.dropped_statements)
@@ -1536,7 +1253,7 @@ let append_removal_journal_and_clear_receipt
    [commit_effect] recorded neither key; their receipts decode with no links.
    Reading such a line as absent would append the same revision twice. *)
 let journal_line_records_rewrite fields ~revision_links =
-  match journal_commit_effect fields, journal_revision_links fields with
+  match Journal_codec.journal_commit_effect fields, Journal_codec.journal_revision_links fields with
   | Ok (Some Rewritten | None), Ok (Some links) -> links = revision_links
   | Ok (Some Rewritten | None), Ok None -> revision_links = []
   | Ok (Some Unchanged), _ | Error _, _ | Ok _, Error _ -> false
@@ -1558,7 +1275,7 @@ let journal_contains_entry ~keepers_dir ~keeper_id ~revision_links expected =
       | line :: rest ->
         (match Yojson.Safe.from_string line with
          | json ->
-           (match journal_entry_of_json json with
+           (match Journal_codec.journal_entry_of_json json with
             | Ok observed when observed = expected ->
               (match json with
                | `Assoc fields when journal_line_records_rewrite fields ~revision_links -> Ok true
@@ -1693,12 +1410,12 @@ let publication_of_json = function
      | `Int target_revision, `String target_sha256, (`Assoc journal_fields as journal)
        when target_revision = (match prior with None -> 1 | Some (revision, _) -> revision + 1)
             && String_util.is_lowercase_sha256_hex target_sha256 ->
-       let* entry = journal_entry_of_json journal in
-       let* links = journal_revision_links journal_fields in
-       (match entry, journal_commit_effect journal_fields, links with
+       let* entry = Journal_codec.journal_entry_of_json journal in
+       let* links = Journal_codec.journal_revision_links journal_fields in
+       (match entry, Journal_codec.journal_commit_effect journal_fields, links with
         | Journal_committed entry, Ok (Some Rewritten), Some links
           when entry.revision = target_revision ->
-          let canonical = journal_entry_to_json ~commit_effect:Rewritten ~revision_links:links
+          let canonical = Journal_codec.journal_entry_to_json ~commit_effect:Rewritten ~revision_links:links
               ~dropped_statements:entry.dropped
               {revision=entry.revision; updated_at=entry.recorded_at; source=entry.source;
                change=entry.change; facts=[]} in
@@ -1750,7 +1467,7 @@ let check_publication_companions ~keepers_dir ~keeper_id receipt =
   let* () = match removal with
     | None -> Ok ()
     | Some removal ->
-      let* entry = journal_entry_of_json receipt.journal in
+      let* entry = Journal_codec.journal_entry_of_json receipt.journal in
       (match entry with
        | Journal_committed entry when
            receipt.prior = Some (removal.prior_revision, removal.prior_snapshot_sha256)
@@ -1762,7 +1479,7 @@ let check_publication_companions ~keepers_dir ~keeper_id receipt =
                | Some plan_id, {kind=Explicit_retract; trace_id} -> plan_id = trace_id
                | Some _, { kind = Librarian | Explicit_write; _ } -> false)
            && (match receipt.journal with `Assoc fields ->
-                 journal_revision_links fields = Ok (Some removal.revision_links) | _ -> false) -> Ok ()
+                 Journal_codec.journal_revision_links fields = Ok (Some removal.revision_links) | _ -> false) -> Ok ()
        | Journal_failed _ | Journal_quarantined _ | Journal_committed _ -> Error "publication and removal receipts conflict; stores preserved") in
   let* ranges, skipped = read_durable_range_receipts ~keepers_dir ~keeper_id in
   (* Unreadable legacy rows are refused the same way validate_durable_range_
@@ -1798,7 +1515,7 @@ let finalize_publication_journal ~keepers_dir ~keeper_id receipt =
     | line :: rest ->
       (match Yojson.Safe.from_string line with
        | json ->
-         let* entry = journal_entry_of_json json in
+         let* entry = Journal_codec.journal_entry_of_json json in
          (* Revisions restart after a quarantine, so a pre-quarantine entry
             cannot finalize a publication from the current generation. *)
          (match entry with
@@ -1840,7 +1557,7 @@ let recover_publication_locked ~keepers_dir ~keeper_id =
     else match content with
       | Some text when String.equal receipt.target_sha256 (sha256 text) ->
         let* current = parse path text in
-        let* expected = journal_entry_of_json receipt.journal in
+        let* expected = Journal_codec.journal_entry_of_json receipt.journal in
         let* () = match expected with
           | Journal_committed entry when current.revision = receipt.target_revision
               && current.updated_at = entry.recorded_at && current.source = entry.source
@@ -1929,7 +1646,7 @@ let read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit =
     let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
     Dated_jsonl.map_tail_rows path ~max_lines:limit ~f:(fun { Dated_jsonl.offset; line } ->
       match Yojson.Safe.from_string line with
-      | json -> offset, journal_entry_of_json json
+      | json -> offset, Journal_codec.journal_entry_of_json json
       | exception Yojson.Json_error message ->
         offset, Error (Printf.sprintf "journal line is not valid JSON: %s" message)))
 ;;
@@ -1969,7 +1686,7 @@ let find_removal ~keepers_dir ~keeper_id target =
     | Dated_jsonl.Malformed_json { path; detail; line_number = _ } ->
       Some (Mention_unreadable (Printf.sprintf "memory journal %s: %s" path detail))
     | Dated_jsonl.Parsed json ->
-      (match journal_entry_of_json json with
+      (match Journal_codec.journal_entry_of_json json with
        | Ok (Journal_committed { recorded_at; revision; source; change; dropped }) ->
          if List.exists is_target change.added
          then Some Mentioned_as_current
@@ -2026,7 +1743,7 @@ let read_dropped ~keepers_dir ~keeper_id ~current_facts =
     let visit = function
       | Dated_jsonl.Malformed_json { detail; _ } -> Some detail
       | Dated_jsonl.Parsed json ->
-        match journal_entry_of_json json with
+        match Journal_codec.journal_entry_of_json json with
         | Error detail -> Some detail
         | Ok (Journal_failed _ | Journal_quarantined _) -> None
         | Ok (Journal_committed { recorded_at; revision; source; change; dropped }) ->
@@ -2120,7 +1837,7 @@ let targets_retired_since ~keepers_dir ~keeper_id ~revision ~held targets =
   let visit = function
     | Dated_jsonl.Malformed_json { detail; _ } -> Some (Error detail)
     | Dated_jsonl.Parsed json ->
-      match journal_entry_of_json json with
+      match Journal_codec.journal_entry_of_json json with
       | Error detail -> Some (Error detail)
       | Ok (Journal_failed _) -> None
       | Ok (Journal_quarantined _) ->
@@ -2134,7 +1851,7 @@ let targets_retired_since ~keepers_dir ~keeper_id ~revision ~held targets =
             "journal revision %d is ahead of the locked snapshot revision %d"
             line_revision held))
         else (
-          if line_revision > decided && journal_line_rewrote json then
+          if line_revision > decided && Journal_codec.journal_line_rewrote json then
             rewritten := Recall_revision_set.add line_revision !rewritten;
           let added = Set_util.StringSet.of_list (List.map memory_id change.added) in
           List.iter (fun fact ->
@@ -2293,7 +2010,7 @@ let update_locked_with_output
   let* () = validate_unique_explicit_candidates
     (List.map (fun binding -> binding.candidate_id) admission_recall_bindings)
     |> Result.map_error store_error in
-  let* () = revision_links_of_json (revision_links_to_json declared_revisions)
+  let* () = Journal_codec.revision_links_of_json (Journal_codec.revision_links_to_json declared_revisions)
     |> Result.map ignore |> Result.map_error store_error in
   let dropped_statements_are_valid =
     match dropped_statements with
@@ -2399,7 +2116,7 @@ let update_locked_with_output
          in
          let* next, output = build ~snapshot_content previous in
          let applied_revision_links = List.filter (fun link ->
-           links_applied_to_snapshot next [link]
+           Journal_codec.links_applied_to_snapshot next [link]
            && Option.fold ~none:false ~some:(fun (prior : t) ->
              List.exists (fun fact -> memory_id fact = link.superseded) prior.facts) previous)
            declared_revisions in
@@ -2646,7 +2363,7 @@ let update_locked_with_output
            ; prior=Option.map (fun (prior, bytes) -> prior.revision, sha256 bytes) snapshot
            ; target_revision=next.revision
            ; target_sha256=snapshot_sha256
-           ; journal=journal_entry_to_json ~commit_effect:Rewritten
+           ; journal=Journal_codec.journal_entry_to_json ~commit_effect:Rewritten
                ~revision_links:applied_revision_links ~dropped_statements:publication_dropped next } in
          let* () = write_publication ~keepers_dir ~keeper_id publication
            |> Result.map_error store_error in
@@ -2867,14 +2584,14 @@ let read_with_revision_evidence_for_keepers_dir ~keepers_dir ~keeper_id ~after_r
         let visit = function
           | Dated_jsonl.Malformed_json {detail; _} -> Some (Error detail)
           | Dated_jsonl.Parsed json ->
-            match journal_entry_of_json json with
+            match Journal_codec.journal_entry_of_json json with
             | Error detail -> Some (Error detail)
             | Ok (Journal_failed _ | Journal_quarantined _) -> None
             | Ok (Journal_committed {revision; recorded_at; source; change; _}) ->
               if revision <= after_revision then Some (Ok ())
               else match snapshot, json with
                 | Some current, `Assoc fields when revision <= current.revision ->
-                  (match journal_commit_effect fields, journal_revision_links fields with
+                  (match Journal_codec.journal_commit_effect fields, Journal_codec.journal_revision_links fields with
                    | Ok commit_effect, Ok revision_links ->
                      rows := {snapshot_revision=revision; recorded_at; source; commit_effect;
                        revision_links; removed_memory_ids=List.map memory_id change.removed;
@@ -3016,7 +2733,7 @@ let revision_evidence_to_json (row : revision_evidence) =
     "source", Snapshot_codec.source_to_json row.source;
     "commit_effect", (match row.commit_effect with None -> `Null
       | Some Rewritten -> `String "rewritten" | Some Unchanged -> `String "unchanged");
-    "revision_links", (match row.revision_links with None -> `Null | Some links -> revision_links_to_json links);
+    "revision_links", (match row.revision_links with None -> `Null | Some links -> Journal_codec.revision_links_to_json links);
     "removed_memory_ids", `List (List.map (fun id -> `String id) row.removed_memory_ids);
     "added_memory_ids", `List (List.map (fun id -> `String id) row.added_memory_ids)]
 ;;
@@ -3058,11 +2775,11 @@ let read_recall_transitions ~keepers_dir ~keeper_id ~after_revision ~through_rev
         let rec decode acc = function
           | [] -> Ok (List.rev acc)
           | json :: rest ->
-            let* entry = journal_entry_of_json json in
+            let* entry = Journal_codec.journal_entry_of_json json in
             match entry, json with
             | Journal_committed {revision;recorded_at;source;change;_}, `Assoc fields ->
-              let* commit_effect = journal_commit_effect fields in
-              let* revision_links = journal_revision_links fields in
+              let* commit_effect = Journal_codec.journal_commit_effect fields in
+              let* revision_links = Journal_codec.journal_revision_links fields in
               let row = {evidence={snapshot_revision=revision;recorded_at;source;commit_effect;
                 revision_links;removed_memory_ids=List.map memory_id change.removed;
                 added_memory_ids=List.map memory_id change.added};removed=change.removed} in
@@ -3751,45 +3468,6 @@ let retract_facts
              Retract_batch_persistence_failed detail))
 ;;
 
-(* Read-side projection of every closed journal shape. *)
-let decoded_journal_entry_to_json = function
-  | Journal_committed { recorded_at; revision; source; change; dropped } ->
-    `Assoc
-      ([ "outcome", `String committed_outcome
-       ; "recorded_at", `Float recorded_at
-       ; "revision", `Int revision
-       ; "source", Snapshot_codec.source_to_json source
-       ; "change", Snapshot_codec.change_to_json change
-       ]
-       @
-       match dropped with
-       | None -> []
-       | Some statements ->
-         [ "dropped", `List (List.map dropped_statement_to_json statements) ])
-  | Journal_failed { recorded_at; trace_id; kind; detail; snapshot_present } ->
-    `Assoc
-      [ "outcome", `String failed_outcome
-      ; "recorded_at", `Float recorded_at
-      ; "trace_id", `String trace_id
-      ; "kind", `String (librarian_failure_kind_to_string kind)
-      ; "detail", `String detail
-      ; "snapshot_present", `Bool snapshot_present
-      ]
-  | Journal_quarantined { recorded_at; rejection; rejected_path } ->
-    journal_quarantine_to_json ~now:recorded_at ~rejection ~rejected_path
-;;
-
-(* A line this build could not decode keeps its position and says why. Dropping
-   it would make a journal with a torn line read as a shorter one, and the
-   operator counting passes is the one who would be misled. *)
-let journal_line_to_json = function
-  | Ok entry ->
-    (match decoded_journal_entry_to_json entry with
-     | `Assoc fields -> `Assoc (("ok", `Bool true) :: fields)
-     | json -> json)
-  | Error reason -> `Assoc [ "ok", `Bool false; "error", `String reason ]
-;;
-
 let journal_projection_identity ~keeper_id line_offset =
   Printf.sprintf "memory:journal:%d:%s:%d" (String.length keeper_id) keeper_id
     line_offset
@@ -3798,7 +3476,7 @@ let journal_projection_identity ~keeper_id line_offset =
 let read_journal_tail_projection ~keepers_dir ~keeper_id ~limit =
   read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit
   |> List.map (fun (line_offset, result) ->
-       match journal_line_to_json result with
+       match Journal_codec.journal_line_to_json result with
        | `Assoc fields ->
          `Assoc
            (( "structural_id"

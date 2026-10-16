@@ -145,6 +145,38 @@ let verify_owner runtime ~instance_id ~name ~id raw =
   then Ok ()
   else Error "container identity and masc.lane.instance label must match the persisted binding"
 
+(* The identity command is the same structural probe for reachability: it
+   either exits 0 with an identity or it does not. Neither outcome is read out
+   of an error message. *)
+let info_arguments runtime = match runtime with
+  | Docker -> ["info"; "--format"; "{{.ID}}"]
+  | Apple_container -> ["system"; "status"; "--format"; "json"]
+
+let max_engine_identity_bytes = 256
+
+let engine_of_info runtime raw : (Lane_addon_lifecycle.engine, Lane_addon_lifecycle.engine_fault) result =
+  let unreadable detail = Error (Lane_addon_lifecycle.Identity_unreadable detail) in
+  match runtime with
+  | Docker ->
+      let id = String.trim raw in
+      if id = "" then unreadable "engine reported no ID"
+      else if String.length id > max_engine_identity_bytes then unreadable "engine ID is too long"
+      else if String.exists (fun c -> Char.code c <= 32 || Char.code c = 127) id then
+        unreadable "engine ID contains whitespace or control characters"
+      else Ok (Lane_addon_lifecycle.Docker_engine id)
+  | Apple_container ->
+      (match parse raw with
+       | Error detail -> unreadable detail
+       | Ok value ->
+           (match member "status" value, member "appRoot" value with
+            | Some (`String "running"), Some (`String root)
+              when String.trim root <> "" && not (Filename.is_relative root) ->
+                Ok (Lane_addon_lifecycle.Apple_app_root root)
+            | Some (`String "running"), _ -> unreadable "Apple container service reported no application root"
+            | Some (`String status), _ ->
+                Error (Lane_addon_lifecycle.Unreachable ("Apple container service status is " ^ status))
+            | _, _ -> unreadable "Apple container service reported no status"))
+
 let image_arguments runtime image = match runtime with
   | Docker -> ["image"; "inspect"; "--format"; "{{.Id}}"; image]
   | Apple_container -> ["image"; "inspect"; image]

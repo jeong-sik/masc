@@ -7,6 +7,7 @@ type error =
   | Invalid_package of string
   | Docker_failed of { operation : string; detail : string }
   | Engine_failed of { runtime : Lane_addon_types.runtime; operation : string; detail : string }
+  | Engine_fault of { runtime : Lane_addon_types.runtime; fault : Lane_addon_lifecycle.engine_fault }
   | Protocol_failed of string
   | Host_refusal of Lane_addon_call_context.host_refusal
   | Invalid_observation of string
@@ -79,6 +80,16 @@ val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, err
 val container_id : t -> string
 val container_name : t -> string
 val error_to_string : error -> string
+
+(** The identity of the engine the control command currently reaches. The exit
+    status of [docker info] (or [container system status]) alone separates
+    [Unreachable] from an identity; no error text is classified. Each query is
+    bounded by [control_timeout_sec]. *)
+val read_engine :
+  clock:_ Eio.Time.clock -> control_timeout_sec:float ->
+  mgr:_ Eio.Process.mgr -> runtime:Lane_addon_types.runtime ->
+  ?docker_command:string -> ?container_command:string -> unit ->
+  (Lane_addon_lifecycle.engine, error) result
 
 (** Read-only engine inspection. Failure does not imply that the image is
     absent. [control_timeout_sec] also bounds this engine query. *)

@@ -133,10 +133,10 @@ recovery, a later pre-effect refusal cannot turn it into a fresh launch. A genui
 pre-effect failure of the initial launch retains its ordinary retry behavior.
 A launch node without its complete recorded identity keeps refusing replay.
 
-These journal records use strict identity and replay-mode fields. Records from
-an older development candidate that lack those fields are rejected; the runtime
-does not infer missing original identity or rewrite them into fresh work.
-General effect resource admission remains work in issue #42799.
+These journal records require the exact original identity and replay-mode
+fields. Missing evidence is rejected rather than inferred or rewritten into
+fresh work. Task-specific drafts retain the ordinary admission described below;
+the named Inline file-resource producer has its own supported scope.
 
 Prepared plans admit static read-only ordinary nodes and the isolated owned-job
 launch action. The descriptor and canonical action classify admission; a job
@@ -203,15 +203,21 @@ node/parameter form and `source_text` or an exported artifact.
 Named inline Skill compositions whose leaves are all statically read-only,
 ordinary and concurrent may overlap with other such calls. Each invocation keeps
 its own run identity, observations, activation records and causal history. The
-turn still collects every completion for later judgments. A leaf that requires
-serial access keeps its enclosing composition serial. Transient run and async
-submission controls keep their serial admission contracts.
+turn still collects every completion for later judgments. Without producer-owned
+resource preparation, a serial leaf keeps its enclosing composition serial.
+Transient run and async submission controls keep their serial admission contracts.
 
-Existing-file Edit-only Inline Skills can also prepare producer-owned resource
-claims. Shared source reads may overlap while target writes and write/read
-conflicts keep their order. See [file resource ordering](keeper-file-resource-ordering.md)
-for the physical entry and ancestry contract and supported execution scope.
+Named Inline Skills with at least one Edit and only ordinary Read/Edit leaves
+can also prepare producer-owned file claims when every validated input and the
+original call source are available before execution. Read/Read sharing may
+overlap while target writes and Read/Write conflicts keep their order.
+Missing or unsupported preparation retains the ordinary schedule. This path
+does not add resource claims to task-specific drafts or `run.recipe`.
+See [file resource ordering](keeper-file-resource-ordering.md) for the physical
+entry, ancestry, owned-tree Read backend and supported execution scope.
 
-Nested composition references, effectful resource-aware
-jobs and fixed-condition latency measurements remain tracked in
+See [exact Skill children](keeper-nested-compositions.md) for nested inputs and
+exports, and [owned jobs](keeper-owned-jobs.md) for durable effect ownership and
+continuation. Resource claims alone do not authorize another effect or replay.
+Fixed-condition latency evidence and remaining integration work are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

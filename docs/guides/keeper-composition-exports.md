@@ -81,5 +81,7 @@ parallel execution. Completion wakes project selected exports and original
 task/run references from the canonical owned request, or an exact lookup when
 they do not fit inline. This preserves failed-branch availability, cause and
 unknown-effect evidence. It does not copy full intermediate bodies into the
-durable queue. Nested references and effectful jobs are tracked in
-[issue #42799](https://github.com/jeong-sik/masc/issues/42799).
+durable queue. See [exact Skill children](keeper-nested-compositions.md) for
+nested export/input mappings and [owned jobs](keeper-owned-jobs.md) for effect
+ownership and result continuation. Their execution evidence and remaining
+integration work are tracked in [issue #42799](https://github.com/jeong-sik/masc/issues/42799).

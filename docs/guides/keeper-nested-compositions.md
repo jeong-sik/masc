@@ -9,8 +9,10 @@ SDK errored and native started are distinct facts; native start carries no
 completion verdict. Original and receiving turns/runtimes remain visible.
 This display implementation needs installed runtime/UI verification separately.
 
-For an instantiated Edit-only Inline Skill's filesystem resource ordering and
-independent leaf execution, see [Existing-file Edit resources](PREPARED-EDIT-RESOURCES.md).
+For an instantiated named Inline Skill with at least one Edit and only Read/Edit
+leaves, see [Read/Edit resources](PREPARED-EDIT-RESOURCES.md) for file preparation
+and independent leaf execution. Its inputs must be available before execution;
+nested children and Async plans retain their own admission contracts.
 
 `Keeper_composition_nested.compile` expands an exact, turn-frozen inline Skill
 into the existing typed plan and lowers an async Skill into native submission

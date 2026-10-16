@@ -298,7 +298,9 @@ description = "scene: 보이는 내용, regions: 이후 범위 읽기에 쓸 영
 - 파라미터는 전부 required 다.
 - async 합성도 파라미터를 선언할 수 있다 — 인자는 제출 시점에 plan 에 바인딩되고,
   broker 는 crash 후 worker closure 를 재생하지 않으므로 바인딩된 plan 은 어떤 async
-  run 과도 정확히 같은 수명을 가진다. 정적 read-only 제약은 그대로다.
+  run 과도 정확히 같은 수명을 가진다. async leaf는 정적 읽기 전용 ordinary 도구 또는
+  durable owned-job launch 계약을 만족해야 한다. job launch는 기존 Serial 효과 계약을
+  유지하며, async 제출 자체가 임의의 쓰기나 파일 자원 병렬 실행을 허용하지 않는다.
 
 ## 5. 오류는 그 스킬만 격리한다
 

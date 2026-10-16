@@ -258,5 +258,30 @@ receipts, corrupt-ledger recovery and a real canonical lock around an in-flight
 attempt reset. It retains the original child activation and checks zero backend
 redispatch after the result. Record an actual run/head before calling these cases
 passed. Named async children, dynamic child input, general resource admission,
-Skill detail views, installed runtime/UI and matched whole-task timings remain
+installed runtime/UI and matched whole-task timings remain
 separate work.
+
+### Retained Skill detail
+
+`/api/v1/skills/evidence` uses `masc.skill-evidence/v6`. Each selected activation
+requires `async_result_deliveries` and `async_actions`, including explicit empty
+arrays when that validated activation has no such observations. Discovery reads
+them from the same canonical ledger as the original activation. Receiving-result
+and action clocks do not change latest-activation selection or timestamp ties.
+An unreadable or changed ledger remains a typed coverage gap.
+
+The selected view joins actions through stored delivery identities and keeps
+the original child's frame digest, turn, run and parent identity. A shared
+handoff retains sibling frame digests; the selected-detail decoder validates
+the requested child's frame and does not claim to authenticate absent sibling
+frames. Other children do not contribute their own handoffs or actions to this
+selection. Dashboard and TUI data readers require both arrays, reject changed
+original frames and contradictory or unbound action links, and retain SDK
+results and native starts as distinct facts. No new store or runtime gate is
+introduced; the canonical ledger remains write authority.
+
+The owned async scenario continues actual SDK follow-on callbacks through fresh
+retained discovery and the production detail projection. Its elapsed read and
+projection time is a separate measurement from prepare/run latency or an HTTP
+network request. Source and an actual run/head establish this data path; installed
+UI display and matched whole-task performance still require separate evidence.

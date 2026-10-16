@@ -42,6 +42,7 @@ type scope =
 type evidence =
   { trace_id : Keeper_id.Trace_id.t
   ; activation : Keeper_skill_activation_ledger.activation
+  ; async_evidence : Keeper_skill_activation_ledger.async_evidence
   }
 
 type latest =

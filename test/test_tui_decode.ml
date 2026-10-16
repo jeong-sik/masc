@@ -12255,7 +12255,7 @@ let test_verification_evidence_defective_bodies_are_named () =
 
 let skill_evidence_fixture () =
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v5"
+    [ "schema", `String "masc.skill-evidence/v6"
     ; "status", `String "not_observed_in_retained_coverage"
     ; ( "reference"
       , `Assoc
@@ -12284,7 +12284,7 @@ let skill_evidence_fixture () =
     ]
 ;;
 
-let test_decode_skill_evidence_reads_exact_v5_coverage () =
+let test_decode_skill_evidence_reads_exact_v6_coverage () =
   match Tui_decode_skill_evidence.decode_skill_evidence (skill_evidence_fixture ()) with
   | Error detail -> Alcotest.fail detail
   | Ok evidence ->
@@ -12482,6 +12482,8 @@ let skill_evidence_observed_fixture () =
                   ; "delivery", `Null
                   ; "actions", `List []
                   ] )
+            ; "async_result_deliveries", `List []
+            ; "async_actions", `List []
             ] )
       ]
   in
@@ -12494,6 +12496,53 @@ let skill_evidence_observed_fixture () =
        |> fun fields ->
        ("status", `String "observed") :: ("activation", activation) :: fields)
   | _ -> Alcotest.fail "Skill evidence fixture is not an object"
+;;
+
+let test_decode_skill_evidence_retains_async_results_and_actions () =
+  let open Yojson.Safe.Util in
+  let fixture = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in
+  let original = fixture |> member "activations" |> index 0 in
+  let replace field value = function
+    | `Assoc fields -> `Assoc ((field, value) :: List.remove_assoc field fields)
+    | _ -> Alcotest.fail "detail fixture must be an object" in
+  let evidence = `Assoc
+    [ "trace_id", member "session_id" fixture
+    ; "owner", `Assoc ["status", `String "not_claimed_in_retained_catalog"; "claims", `List []; "gaps", `List []]
+    ; "activation", original
+    ; "async_result_deliveries", member "async_result_deliveries" fixture
+    ; "async_actions", member "async_actions" fixture ] in
+  let envelope evidence = skill_evidence_fixture ()
+    |> replace "status" (`String "observed")
+    |> replace "reference" (`Assoc ["identity", member "identity" original; "content_revision", member "content_revision" original])
+    |> replace "activation" (`Assoc ["selection", `String "most_recent_observed"; "evidence", evidence]) in
+  let decode evidence = match Tui_decode_skill_evidence.decode_skill_evidence (envelope evidence) with
+    | Ok {se_activation = Some (Skill_evidence_most_recent_observed item); _} -> item
+    | Ok _ -> Alcotest.fail "selected original activation was dropped"
+    | Error detail -> Alcotest.fail detail in
+  let item = decode evidence in
+  Alcotest.(check bool) "immutable original frame" true (Yojson.Safe.equal original item.sea_activation);
+  Alcotest.(check int) "physical handoffs" 2 (List.length item.sea_async_evidence.result_deliveries);
+  Alcotest.(check int) "typed SDK result and native start links" 3 (List.length item.sea_async_evidence.action_observations);
+  let actions = member "async_actions" fixture |> to_list in
+  let first = List.hd actions in
+  let invalids =
+    [ replace "activation" (replace "runtime_id" (`String "changed-original") original) evidence
+    ; replace "async_actions" (`List (replace "delivery_sha256" (`String (String.make 64 '0')) first :: List.tl actions)) evidence
+    ; replace "async_actions" (`List (first :: actions)) evidence ] in
+  List.iter (fun invalid -> Alcotest.(check bool) "hostile causal evidence refused" true
+    (Tui_decode_skill_evidence.decode_skill_evidence (envelope invalid) |> Result.is_error)) invalids;
+  List.iter (fun field ->
+    let missing = match evidence with `Assoc fields -> `Assoc (List.remove_assoc field fields) | _ -> Alcotest.fail "detail fixture" in
+    Alcotest.(check bool) "missing array is not observed zero" true
+      (Tui_decode_skill_evidence.decode_skill_evidence (envelope missing) |> Result.is_error))
+    ["async_result_deliveries"; "async_actions"];
+  let delivery = fixture |> member "async_result_deliveries" |> index 0 in
+  let children = delivery |> member "child_activations" |> to_list in
+  let sibling = `Assoc ["skill_tool_use_id", `String "z-sibling"; "activation_sha256", `String (String.make 64 '1')] in
+  let shared = replace "child_activations" (`List (children @ [sibling])) delivery in
+  let selected = evidence |> replace "async_result_deliveries" (`List [shared]) |> replace "async_actions" (`List []) |> decode in
+  Alcotest.(check int) "shared sibling remains a digest reference" 2
+    (List.length (List.hd selected.sea_async_evidence.result_deliveries).child_activations)
 ;;
 
 let test_decode_skill_evidence_reads_typed_activation_owner () =
@@ -13789,8 +13838,8 @@ let () =
           test_blame_block_at_names_the_run_and_its_first_line
       ] );
     ( "skill_evidence",
-      [ Alcotest.test_case "reads exact v5 coverage" `Quick
-          test_decode_skill_evidence_reads_exact_v5_coverage
+      [ Alcotest.test_case "reads exact v6 coverage" `Quick
+          test_decode_skill_evidence_reads_exact_v6_coverage
       ; Alcotest.test_case "accepts declared composition scopes" `Quick
           test_decode_skill_evidence_accepts_declared_composition_scopes
       ; Alcotest.test_case "rejects v1 and status disagreement" `Quick
@@ -13799,6 +13848,8 @@ let () =
           test_decode_skill_evidence_requires_observation_fields
       ; Alcotest.test_case "requires every coverage field" `Quick
           test_decode_skill_evidence_requires_every_coverage_field
+      ; Alcotest.test_case "retained async detail preserves original and causal frames" `Quick
+          test_decode_skill_evidence_retains_async_results_and_actions
       ; Alcotest.test_case "reads typed activation owner" `Quick
           test_decode_skill_evidence_reads_typed_activation_owner
       ; Alcotest.test_case "rejects open gaps and unbacked activations" `Quick

@@ -269,6 +269,22 @@ val async_result_deliveries : t -> Keeper_skill_async_delivery.t list
 val async_actions : t -> Keeper_skill_async_action.t list
 (** Typed handler results and native start observations joined to those
     handoffs, without treating a native start as completion. *)
+type async_evidence = private
+  { result_deliveries : Keeper_skill_async_delivery.t list
+  ; action_observations : Keeper_skill_async_action.t list
+  }
+
+val async_evidence_for_activation : t -> activation -> async_evidence
+(** Select facts matching this exact immutable admission frame from the
+    already validated ledger. Other children remain digest references in a
+    shared handoff; their own deliveries and actions are not selected. *)
+
+val async_evidence_of_yojson :
+  expected_trace_id:Keeper_id.Trace_id.t -> activation:activation ->
+  Yojson.Safe.t -> (async_evidence, decode_error) result
+(** Strict selected-detail decoder. Both arrays are required. Validates the
+    selected child's original frame and every causal action link, retaining
+    sibling digests without claiming to authenticate absent sibling frames. *)
 val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
 val receipt_projection_revision : t -> skill_tool_use_id:string -> string

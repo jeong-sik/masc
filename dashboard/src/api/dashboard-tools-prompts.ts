@@ -1790,32 +1790,98 @@ function decodeAsyncAction(value: unknown, label: string): DashboardSkillAsyncAc
   }
 }
 
+export interface DashboardSkillAsyncEvidence {
+  async_result_deliveries: DashboardSkillAsyncResultDelivery[]
+  async_actions: DashboardSkillAsyncAction[]
+}
+
+export function decodeSkillActivationAsyncEvidence(
+  activationValue: unknown,
+  evidence: {trace_id: string; async_result_deliveries: unknown; async_actions: unknown},
+): DashboardSkillAsyncEvidence {
+  const decodedActivation = decodeSkillActivation(activationValue, 'detail.activation')
+  const activation = {...decodedActivation,
+    turn_ref: decodeSkillTurnRef(decodedActivation.turn_ref, 'detail.activation.turn_ref')}
+  if (activation.turn_ref.slice(0, activation.turn_ref.lastIndexOf('#')) !== evidence.trace_id) {
+    throw new Error('skill evidence original activation belongs to another trace')
+  }
+  if (!Array.isArray(evidence.async_result_deliveries) || !Array.isArray(evidence.async_actions)) {
+    throw new Error('skill evidence async arrays are required')
+  }
+  const asyncDeliveries = evidence.async_result_deliveries.map((value, index) =>
+    decodeAsyncResultDelivery(value, `detail.async_result_deliveries[${index}]`))
+  const asyncActions = evidence.async_actions.map((value, index) =>
+    decodeAsyncAction(value, `detail.async_actions[${index}]`))
+  validateAsyncOccurrenceFacts(asyncActions)
+  const frameDigest = asyncEvidenceHash({...activation, delivery: null, actions: []})
+  const deliveries = new Map<string, DashboardSkillAsyncResultDelivery>()
+  for (const delivery of asyncDeliveries) {
+    const child = delivery.child_activations.find(value => value.skill_tool_use_id === activation.skill_tool_use_id)
+    if (!child || child.activation_sha256 !== frameDigest
+      || delivery.original_turn_ref !== activation.turn_ref
+      || activation.invocation.kind !== 'nested_composition'
+      || activation.invocation.scope.composition_run_id !== delivery.composition_run_id
+      || activation.invocation.scope.parent_tool_use_id !== delivery.logical_parent_tool_use_id) {
+      throw new Error('skill evidence handoff does not belong to the selected original child frame')
+    }
+    const {observed_at: _clock, ...identity} = delivery
+    const digest = asyncEvidenceHash(identity)
+    if (deliveries.has(digest)) throw new Error('skill evidence repeats a physical handoff')
+    deliveries.set(digest, delivery)
+  }
+  for (const action of asyncActions) requireAsyncActionDelivery(action, deliveries)
+  return {async_result_deliveries: asyncDeliveries, async_actions: asyncActions}
+}
+
+function validateAsyncOccurrenceFacts(asyncActions: readonly DashboardSkillAsyncAction[]): void {
+  const actionIdentities = new Set<string>()
+  const occurrenceFacts = new Map<string, string>()
+  for (const action of asyncActions) {
+    const occurrence = action.occurrence.kind === 'sdk_result'
+      ? {kind: action.occurrence.kind, invocation: action.occurrence.invocation} : action.occurrence
+    const identity = JSON.stringify([action.delivery_sha256, action.physical_turn_ref, action.runtime_id, occurrence])
+    if (actionIdentities.has(identity)) throw new Error('skill_activations repeats a causal occurrence')
+    actionIdentities.add(identity)
+    const occurrenceIdentity = JSON.stringify([action.physical_turn_ref, action.runtime_id, occurrence])
+    const fact = JSON.stringify([action.tool_name, action.occurrence])
+    const known = occurrenceFacts.get(occurrenceIdentity)
+    if (known !== undefined && known !== fact) throw new Error('skill_activations physical occurrence differs across causal links')
+    occurrenceFacts.set(occurrenceIdentity, fact)
+  }
+}
+
+function asyncEvidenceHash(value: unknown): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(value).replaceAll('\u007f', '\\u007f'))
+  return bytesToHex(sha256(bytes))
+}
+
+function requireAsyncActionDelivery(action: DashboardSkillAsyncAction, deliveries: ReadonlyMap<string, DashboardSkillAsyncResultDelivery>): DashboardSkillAsyncResultDelivery {
+  const delivery = deliveries.get(action.delivery_sha256)
+  if (!delivery || delivery.presentation !== 'inline_result' || delivery.physical_turn_ref !== action.physical_turn_ref
+      || delivery.runtime_id !== action.runtime_id || (action.occurrence.kind === 'sdk_result'
+        && action.occurrence.invocation.turn < delivery.boundary.agent_core_turn)) {
+    throw new Error('skill_activations action has no matching inline causal delivery')
+  }
+  return delivery
+}
+
 function validateAsyncActionLinks(projection: DashboardSkillActivationProjection | null | undefined): void {
   if (projection?.status !== 'available' || projection.ledger.async_actions.length === 0) return
-  const hash = (value: unknown): string => {
-    const bytes = new TextEncoder().encode(JSON.stringify(value).replaceAll('\u007f', '\\u007f'))
-    return bytesToHex(sha256(bytes))
-  }
   const deliveries = new Map<string, DashboardSkillAsyncResultDelivery>()
   for (const delivery of projection.ledger.async_result_deliveries) {
     const {observed_at: _clock, ...identity} = delivery
-    deliveries.set(hash(identity), delivery)
+    deliveries.set(asyncEvidenceHash(identity), delivery)
   }
   const activations = new Map(projection.ledger.activations.map(value => [value.skill_tool_use_id, value]))
   const frameDigests = new Map<string, string>()
   for (const action of projection.ledger.async_actions) {
-    const delivery = deliveries.get(action.delivery_sha256)
-    if (!delivery || delivery.presentation !== 'inline_result' || delivery.physical_turn_ref !== action.physical_turn_ref
-      || delivery.runtime_id !== action.runtime_id || (action.occurrence.kind === 'sdk_result'
-        && action.occurrence.invocation.turn < delivery.boundary.agent_core_turn)) {
-      throw new Error('skill_activations action has no matching inline causal delivery')
-    }
+    const delivery = requireAsyncActionDelivery(action, deliveries)
     for (const child of delivery.child_activations) {
       let digest = frameDigests.get(child.skill_tool_use_id)
       if (digest === undefined) {
         const activation = activations.get(child.skill_tool_use_id)
         if (!activation) throw new Error('skill_activations action original frame is absent')
-        digest = hash({...activation, delivery: null, actions: []})
+        digest = asyncEvidenceHash({...activation, delivery: null, actions: []})
         frameDigests.set(child.skill_tool_use_id, digest)
       }
       if (digest !== child.activation_sha256) {
@@ -1885,20 +1951,7 @@ export function normalizeSkillActivationProjection(
   const asyncDeliveries = ledger.async_result_deliveries.map((delivery, index) =>
     decodeAsyncResultDelivery(delivery, `available.ledger.async_result_deliveries[${index}]`))
   const asyncActions = ledger.async_actions.map((action, index) => decodeAsyncAction(action, `available.ledger.async_actions[${index}]`))
-  const actionIdentities = new Set<string>()
-  const occurrenceFacts = new Map<string, string>()
-  for (const action of asyncActions) {
-    const occurrence = action.occurrence.kind === 'sdk_result'
-      ? {kind: action.occurrence.kind, invocation: action.occurrence.invocation} : action.occurrence
-    const identity = JSON.stringify([action.delivery_sha256, action.physical_turn_ref, action.runtime_id, occurrence])
-    if (actionIdentities.has(identity)) throw new Error('skill_activations repeats a causal occurrence')
-    actionIdentities.add(identity)
-    const occurrenceIdentity = JSON.stringify([action.physical_turn_ref, action.runtime_id, occurrence])
-    const fact = JSON.stringify([action.tool_name, action.occurrence])
-    const known = occurrenceFacts.get(occurrenceIdentity)
-    if (known !== undefined && known !== fact) throw new Error('skill_activations physical occurrence differs across causal links')
-    occurrenceFacts.set(occurrenceIdentity, fact)
-  }
+  validateAsyncOccurrenceFacts(asyncActions)
   const byId = new Map(activations.map(activation => [activation.skill_tool_use_id, activation]))
   if (byId.size !== activations.length) throw new Error('skill_activations repeats an original activation')
   const physicalHandoffs = new Set<string>()

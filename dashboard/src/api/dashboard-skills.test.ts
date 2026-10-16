@@ -7,12 +7,14 @@ import {
   decodeSkillEditorPreview,
   decodeSkillEditorSaveReceipt,
   decodeSkillEvidenceResponse,
+  fetchSkillEvidence,
   previewSkillSource,
   readSkillSource,
   saveSkillSource,
   SkillsContractError,
 } from './dashboard-skills'
 import { ApiRequestError } from './core'
+import sharedAsyncActionLedger from '../../../test/fixtures/skill-ledger-async-actions.json'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -315,9 +317,79 @@ const activationEvidence = {
     gaps: [],
   },
   activation: activationPayload,
+  async_result_deliveries: [],
+  async_actions: [],
+}
+
+function sharedAsyncSkillEvidence() {
+  const activation = sharedAsyncActionLedger.activations[0]!
+  return {
+    schema: 'masc.skill-evidence/v6', status: 'observed',
+    reference: {identity: activation.identity, content_revision: activation.content_revision},
+    activation: {selection: 'most_recent_observed', evidence: {
+      trace_id: sharedAsyncActionLedger.session_id,
+      owner: {status: 'not_claimed_in_retained_catalog', claims: [], gaps: []},
+      activation,
+      async_result_deliveries: sharedAsyncActionLedger.async_result_deliveries,
+      async_actions: sharedAsyncActionLedger.async_actions,
+    }},
+    composition: null,
+    coverage: {...coverage, activation_sessions_inspected: 1, activation_ledgers_loaded: 1},
+  }
 }
 
 describe('skill evidence contract', () => {
+  it('fetches retained SDK results and native starts with their original Task frame', async () => {
+    const response = sharedAsyncSkillEvidence()
+    vi.stubGlobal('crypto', {})
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(response), {
+      status: 200, headers: {'Content-Type': 'application/json'},
+    })))
+    const decoded = await fetchSkillEvidence(response.reference)
+    expect(decoded.activation?.selection).toBe('most_recent_observed')
+    if (decoded.activation?.selection !== 'most_recent_observed') throw new Error('missing selected activation')
+    const evidence = decoded.activation.evidence
+    expect(evidence.activation.turn_ref).toBe('trace-one#41')
+    expect(evidence.activation.invocation).toEqual(response.activation.evidence.activation.invocation)
+    expect(evidence.async_result_deliveries).toHaveLength(2)
+    expect(evidence.async_actions).toHaveLength(3)
+    expect(evidence.async_actions.map(action => action.occurrence.kind)).toEqual(['sdk_result', 'sdk_result', 'native_started'])
+    expect(evidence.async_actions.map(action => action.physical_turn_ref)).toEqual(
+      response.activation.evidence.async_actions.map(action => action.physical_turn_ref))
+    expect(evidence.async_actions.every(action => action.physical_turn_ref !== evidence.activation.turn_ref)).toBe(true)
+  })
+
+  it('rejects missing detail arrays, changed admission frames and hostile action links', () => {
+    const response = sharedAsyncSkillEvidence()
+    for (const omitted of ['async_result_deliveries', 'async_actions']) {
+      const evidence = Object.fromEntries(Object.entries(response.activation.evidence).filter(([key]) => key !== omitted))
+      expect(() => decodeSkillEvidenceResponse({...response, activation: {...response.activation, evidence}})).toThrow(SkillsContractError)
+    }
+    const changedFrame = structuredClone(response)
+    changedFrame.activation.evidence.activation.runtime_id = 'changed-original-runtime'
+    const unknownLink = structuredClone(response)
+    unknownLink.activation.evidence.async_actions[0]!.delivery_sha256 = '0'.repeat(64)
+    const duplicate = structuredClone(response)
+    duplicate.activation.evidence.async_actions.push(duplicate.activation.evidence.async_actions[0]!)
+    const wrongReceivingTurn = structuredClone(response)
+    wrongReceivingTurn.activation.evidence.async_actions[0]!.physical_turn_ref = 'trace-one#74'
+    for (const invalid of [changedFrame, unknownLink, duplicate, wrongReceivingTurn]) {
+      expect(() => decodeSkillEvidenceResponse(invalid)).toThrow(SkillsContractError)
+    }
+  })
+
+  it('retains a shared handoff sibling digest without inventing its absent activation', () => {
+    const response = structuredClone(sharedAsyncSkillEvidence())
+    const delivery = response.activation.evidence.async_result_deliveries[0]!
+    delivery.child_activations.push({skill_tool_use_id: 'z-sibling', activation_sha256: '1'.repeat(64)})
+    response.activation.evidence.async_result_deliveries = [delivery]
+    response.activation.evidence.async_actions = []
+    const decoded = decodeSkillEvidenceResponse(response)
+    if (decoded.activation?.selection !== 'most_recent_observed') throw new Error('missing selected activation')
+    expect(decoded.activation.evidence.async_result_deliveries[0]?.child_activations).toHaveLength(2)
+    expect(decoded.activation.evidence.async_actions).toEqual([])
+  })
+
   it('preserves nested activation scope in exact Skill evidence and rejects invalid correlation', () => {
     const scope = {
       parent_tool_use_id: 'outer-run',
@@ -329,7 +401,7 @@ describe('skill evidence contract', () => {
       tool_name: 'keeper_compose_review', scope,
     }
     const response = {
-      schema: 'masc.skill-evidence/v5', status: 'observed', reference,
+      schema: 'masc.skill-evidence/v6', status: 'observed', reference,
       activation: { selection: 'most_recent_observed', evidence: {
         ...activationEvidence, activation: { ...activationPayload, invocation },
       } },
@@ -364,7 +436,7 @@ describe('skill evidence contract', () => {
 
   it('keeps instruction activation and composition result in one exact envelope', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: {
@@ -381,7 +453,7 @@ describe('skill evidence contract', () => {
 
   it('rejects async evidence without its durable request identity', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: null,
@@ -396,7 +468,7 @@ describe('skill evidence contract', () => {
 
   it('rejects impossible node batch and truncation invariants', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: null,
@@ -414,7 +486,7 @@ describe('skill evidence contract', () => {
 
   it('rejects observed status without any observed evidence', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: null,
@@ -425,7 +497,7 @@ describe('skill evidence contract', () => {
 
   it('keeps partial ledger coverage visible when nothing was observed', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'not_observed_in_retained_coverage',
       reference,
       activation: null,
@@ -450,7 +522,7 @@ describe('skill evidence contract', () => {
     'unavailable',
   ] as const)('accepts the declared composition scope %s', (composition_scope) => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'not_observed_in_retained_coverage',
       reference,
       activation: null,
@@ -465,7 +537,7 @@ describe('skill evidence contract', () => {
 
   it('rejects a timestamp tie with duplicate traces or different times', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: {
@@ -485,7 +557,7 @@ describe('skill evidence contract', () => {
 
   it('rejects unknown activation gap codes', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'not_observed_in_retained_coverage',
       reference,
       activation: null,
@@ -500,7 +572,7 @@ describe('skill evidence contract', () => {
 
   it('rejects a known activation gap without its variant fields', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'not_observed_in_retained_coverage',
       reference,
       activation: null,
@@ -515,7 +587,7 @@ describe('skill evidence contract', () => {
 
   it('accepts a timestamp tie expressed with different RFC3339 offsets', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: {
@@ -541,7 +613,7 @@ describe('skill evidence contract', () => {
 
   it('accepts a leap-second tie with the next civil minute', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: {
@@ -573,7 +645,7 @@ describe('skill evidence contract', () => {
 
   it('rejects an invalid reference without an activation', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'not_observed_in_retained_coverage',
       reference: {
         identity: { ...reference.identity, source_id: '.' },
@@ -614,7 +686,7 @@ describe('skill evidence contract', () => {
     ]
     for (const activation of invalidActivations) {
       expect(() => decodeSkillEvidenceResponse({
-        schema: 'masc.skill-evidence/v5',
+        schema: 'masc.skill-evidence/v6',
         status: 'observed',
         reference,
         activation: {
@@ -633,7 +705,7 @@ describe('skill evidence contract', () => {
       identity: { source_id: '../workspace', package_id: '..', name: 'Bad--Name' },
     }
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference: invalidReference,
       activation: {
@@ -650,7 +722,7 @@ describe('skill evidence contract', () => {
 
   it('rejects an RFC3339 offset outside the canonical Ptime range', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: {
@@ -670,7 +742,7 @@ describe('skill evidence contract', () => {
 
   it('accepts the fractional Ptime maximum boundary', () => {
     const decoded = decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: {
@@ -691,7 +763,7 @@ describe('skill evidence contract', () => {
 
   it('rejects activation candidates not backed by loaded ledgers', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'observed',
       reference,
       activation: { selection: 'most_recent_observed', evidence: activationEvidence },
@@ -706,7 +778,7 @@ describe('skill evidence contract', () => {
 
   it('rejects trace-store-unavailable with observed sessions', () => {
     expect(() => decodeSkillEvidenceResponse({
-      schema: 'masc.skill-evidence/v5',
+      schema: 'masc.skill-evidence/v6',
       status: 'not_observed_in_retained_coverage',
       reference,
       activation: null,

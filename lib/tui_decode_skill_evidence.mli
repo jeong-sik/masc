@@ -31,6 +31,7 @@ type skill_evidence_activation_item =
   ; sea_owner_claims : skill_evidence_owner_claim list
   ; sea_owner_gap_count : int
   ; sea_activation : Yojson.Safe.t
+  ; sea_async_evidence : Keeper_skill_activation_ledger.async_evidence
   }
 
 type skill_evidence_activation =

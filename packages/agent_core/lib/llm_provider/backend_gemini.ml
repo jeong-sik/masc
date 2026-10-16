@@ -769,20 +769,16 @@ let build_request_artifact
    | Some thinking_config ->
      gen_config := ("thinkingConfig", thinking_config) :: !gen_config
    | None -> ());
-  let structured_schema =
+  let text_response_format =
     match config.response_format with
-    | Types.JsonSchema schema -> Some schema
-    | Types.JsonMode | Types.Off -> None
+    | Types.JsonSchema schema ->
+      Some (`Assoc [ "mimeType", `String "APPLICATION_JSON"; "schema", schema ])
+    | Types.JsonMode -> Some (`Assoc [ "mimeType", `String "APPLICATION_JSON" ])
+    | Types.Off -> None
   in
-  (* JSON mode / native structured output *)
-  (match structured_schema with
-   | Some schema ->
-     gen_config
-     := ("responseJsonSchema", schema)
-        :: ("responseMimeType", `String "application/json")
-        :: !gen_config
-   | None when config.response_format = Types.JsonMode ->
-     gen_config := ("responseMimeType", `String "application/json") :: !gen_config
+  (match text_response_format with
+   | Some text ->
+     gen_config := ("responseFormat", `Assoc [ "text", text ]) :: !gen_config
    | None -> ());
   let body = ("generationConfig", `Assoc !gen_config) :: body in
   (* Tools *)

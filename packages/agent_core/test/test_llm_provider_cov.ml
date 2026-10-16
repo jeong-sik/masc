@@ -839,9 +839,9 @@ let test_build_request_json_mode () =
   let open Yojson.Safe.Util in
   let gc = json |> member "generationConfig" in
   Alcotest.(check string)
-    "responseMimeType"
-    "application/json"
-    (gc |> member "responseMimeType" |> to_string)
+    "responseFormat.text.mimeType"
+    "APPLICATION_JSON"
+    (gc |> member "responseFormat" |> member "text" |> member "mimeType" |> to_string)
 ;;
 
 let test_build_request_with_tools () =

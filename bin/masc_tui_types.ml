@@ -3586,6 +3586,20 @@ type early_asks_observation = {
   ea_observation: asks_observation;
 }
 
+type keeper_roster_observation = {
+  roster_request: Snapshot_read.request;
+  roster_result:
+    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result,
+     Masc_tui_keeper_control.roster_failure) result;
+}
+
+type early_keeper_roster_observation = {
+  er_ticket: Http_refresh_order.ticket;
+  er_authority: workspace_authority;
+  er_identity: Tui_decode.server_identity;
+  er_observation: keeper_roster_observation;
+}
+
 type http_progress_observation = {
   hp_ticket: Http_refresh_order.ticket;
   hp_authority: workspace_authority;
@@ -7065,6 +7079,7 @@ type state = {
      lifecycle actions. *)
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
+  mutable keeper_roster_read: Snapshot_read.t;
   mutable candle_observation: (Candle_observation.t, string) result option;
   mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
@@ -8127,6 +8142,33 @@ let take_early_asks_observation (state : state) early =
   then take_asks_observation state early.ea_observation
   else None
 
+let begin_keeper_roster_read (state : state) =
+  let reading, request = Snapshot_read.start ~intent:Snapshot_read.Refresh state.keeper_roster_read in
+  state.keeper_roster_read <- reading;
+  request
+
+let take_keeper_roster_observation (state : state) observation =
+  match Snapshot_read.settle state.keeper_roster_read observation.roster_request with
+  | None -> None
+  | Some reading ->
+      state.keeper_roster_read <- reading;
+      Some observation.roster_result
+
+let take_early_keeper_roster_observation (state : state) early =
+  if Option.is_some state.http_refresh_started_ns
+     && Http_refresh_order.is_current state.http_refresh_order early.er_ticket
+     && early.er_authority = state.workspace_authority
+     && state.workspace_identity = Workspace_identity_match
+     && server_workspace_matches ~expected:state.server_identity (Ok early.er_identity)
+     && workspace_identity_of_refresh ~local_base_path:state.local_base_path
+          (Ok early.er_identity) = Workspace_identity_match then
+    (* Only a decoded response from the workspace-bound endpoint can arrive
+       early. A refusal/error retains its owner for the terminal bundle. *)
+    match early.er_observation.roster_result with
+    | Ok _ -> take_keeper_roster_observation state early.er_observation
+    | Error _ -> None
+  else None
+
 (* Pending reads and post-action offers belong to the workspace that admitted
    them. A successful health response with missing paths is still unread;
    only comparable paths can confirm that an origin has been replaced. *)
@@ -8356,6 +8398,7 @@ let suspend_workspace_readings state =
   state.lane_addons_cached <- suspend_application state.lane_addons_cached;
   state.keeper_tool_approvals_read <- Snapshot_read.invalidate state.keeper_tool_approvals_read;
   retire_asks_read state;
+  state.keeper_roster_read <- Snapshot_read.invalidate state.keeper_roster_read;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
   state.keeper_sandbox_logs_inflight <- None;
@@ -11289,6 +11332,7 @@ let create_state
   keeper_creation_awaiting_roster = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
   keeper_roster_error = None;
+  keeper_roster_read = Snapshot_read.idle;
   candle_observation = None;
   candle_authority_generation = 0;
   keeper_action_inflight = None;

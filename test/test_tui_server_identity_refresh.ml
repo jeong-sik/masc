@@ -1139,10 +1139,83 @@ let test_refresh_progress_rejects_old_request_and_workspace () =
   Alcotest.(check bool) "neither retired nor replacement authority can spend the old read" true
     (state.http_refresh_progress = untouched)
 
+let early_roster_fixture () =
+  let open Masc_tui_types in
+  let base = "/workspace/early-roster" in
+  let state = create_state ~workspace:"early-roster" ~local_base_path:base
+      ~port:0 ~refresh_interval:0. () in
+  let server = identity base in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some server;
+  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
+  begin_http_refresh_state state ~ticket ~started_ns:0L;
+  let request = match begin_keeper_roster_read state with
+    | Some request -> request | None -> Alcotest.fail "roster read did not start" in
+  state,
+  { er_ticket=ticket; er_authority=state.workspace_authority; er_identity=server;
+    er_observation={roster_request=request;
+      roster_result=Ok (Masc_tui_keeper_control.Roster_complete [],Error "Candle unavailable")} }
+
+let test_early_roster_settles_before_slow_siblings_once () =
+  let open Masc_tui_types in
+  let state,early = early_roster_fixture () in
+  let authority=state.workspace_authority and server=state.server_identity in
+  accept_http_progress state {hp_ticket=early.er_ticket;hp_authority=authority;
+    hp_event=Http_refresh_progress.Started (Surface_data,1L)};
+  Alcotest.(check bool) "verified roster is usable while another reader is pending" true
+    (take_early_keeper_roster_observation state early = Some early.er_observation.roster_result);
+  Alcotest.(check bool) "early delivery neither ends refresh nor confirms new authority" true
+    (state.http_refresh_started_ns=Some 0L && state.workspace_authority=authority
+     && state.server_identity=server);
+  Alcotest.(check bool) "terminal copy cannot replay roster or dependent refresh" true
+    (take_keeper_roster_observation state early.er_observation=None);
+  let state,early = early_roster_fixture () in
+  state.workspace_identity <- Workspace_identity_unread;
+  state.server_identity <- None;
+  Alcotest.(check bool) "cold start retains final identity admission" true
+    (take_early_keeper_roster_observation state early=None);
+  finish_http_refresh_state state;
+  Alcotest.(check bool) "cold start's terminal bundle still owns its read" true
+    (take_keeper_roster_observation state early.er_observation=Some early.er_observation.roster_result)
+
+let test_early_roster_preserves_read_ownership () =
+  let open Masc_tui_types in
+  let state,early = early_roster_fixture () in
+  let foreign={early.er_identity with sid_masc_root="/workspace/foreign/.masc"} in
+  Alcotest.(check bool) "foreign endpoint cannot admit roster" true
+    (take_early_keeper_roster_observation state {early with er_identity=foreign}=None);
+  let failure={early.er_observation with
+    roster_result=Error (Masc_tui_keeper_control.Roster_unreachable "unreachable")} in
+  Alcotest.(check bool) "failed early read retains terminal ownership" true
+    (take_early_keeper_roster_observation state {early with er_observation=failure}=None
+     && Snapshot_read.in_flight state.keeper_roster_read);
+  let successor=match begin_keeper_roster_read state with
+    | Some request -> request | None -> Alcotest.fail "successor roster did not start" in
+  Alcotest.(check bool) "newer scoped roster supersedes the old full copy" true
+    (take_early_keeper_roster_observation state early=None
+     && take_keeper_roster_observation state early.er_observation=None);
+  let newer={early.er_observation with roster_request=successor} in
+  suspend_workspace_readings state;
+  Alcotest.(check bool) "workspace suspension retires the successor too" true
+    (take_keeper_roster_observation state newer=None);
+  let state,early = early_roster_fixture () in
+  state.http_refresh_order <- Http_refresh_order.dispatch state.http_refresh_order;
+  Alcotest.(check bool) "superseded full refresh cannot publish a roster" true
+    (take_early_keeper_roster_observation state early=None);
+  let state,early = early_roster_fixture () in
+  let Workspace_authority generation=state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation+1);
+  Alcotest.(check bool) "retired workspace cannot publish a roster" true
+    (take_early_keeper_roster_observation state early=None)
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
-      , [ Alcotest.test_case "refresh observations retain independent source outcomes" `Quick
+      , [ Alcotest.test_case "roster arrives before unrelated readers and settles once" `Quick
+            test_early_roster_settles_before_slow_siblings_once
+        ; Alcotest.test_case "early roster preserves source and workspace ownership" `Quick
+            test_early_roster_preserves_read_ownership
+        ; Alcotest.test_case "refresh observations retain independent source outcomes" `Quick
             test_refresh_progress_tracks_independent_sources_and_interruption
         ; Alcotest.test_case "refresh observations reject superseded source authority" `Quick
             test_refresh_progress_rejects_old_request_and_workspace

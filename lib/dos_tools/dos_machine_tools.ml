@@ -177,6 +177,35 @@ let no_machine ~base_path ~tool_name ~start_time =
     ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
 ;;
 
+(* [masc_dos_load] found an autosave on disk and the call did not consent to
+   moving it. A refusal before anything changed: it names what is there and
+   both ways forward, so the caller does not have to guess which one keeps the
+   campaign. *)
+let autosave_exists ~tool_name ~start_time held =
+  let slot = Machine_checkpoint.slot_to_string in
+  let resume = slot Dos_lane.autosave_slot and prev = slot Dos_lane.autosave_prev_slot in
+  let found, message =
+    match held with
+    | Dos_lane.Held s ->
+      ( Dos_lane.Autosave s
+      , Printf.sprintf
+          "nothing was loaded: an autosave is waiting (%s, %d steps, saved by %s at %s). \
+           Resume it with masc_dos_restore slot=%s. To start this program instead, call \
+           masc_dos_load again with replace_autosave=true: the autosave moves to %s and \
+           replaces what %s holds."
+          s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
+          (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at) resume prev prev )
+    | Dos_lane.Held_unreadable reason ->
+      ( Dos_lane.Autosave_unreadable reason
+      , Printf.sprintf
+          "nothing was loaded: an autosave file is there that this server cannot read (%s). \
+           To start this program anyway, call masc_dos_load again with \
+           replace_autosave=true: the file moves to %s and replaces what %s holds."
+          reason prev prev )
+  in
+  reject ~tool_name ~start_time ~data:(reject_data_of_fields (autosave_lookup_fields found)) message
+;;
+
 (* [png] adds the frame for a model that reads images: the observation's text,
    then the PNG. A caller that shows only text still has the whole observation
    in [data]. *)
@@ -196,6 +225,7 @@ let of_lane ?(extra = []) ?png ~base_path ~tool_name ~start_time
     in
     Tool_result.make_ok ~tool_name ~start_time ~data ?content_blocks ()
   | Error Dos_lane.No_machine -> no_machine ~base_path ~tool_name ~start_time
+  | Error (Dos_lane.Autosave_exists held) -> autosave_exists ~tool_name ~start_time held
   | Error ((Dos_lane.Activity_disabled | Dos_lane.Activity_unobserved) as error) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Workflow_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect ~start_time
@@ -596,6 +626,13 @@ let release_retired_keeper ~holder ~by =
          ~announce:(announce ~author:by (departure_notice holder Keeper_stopped))))
 ;;
 
+(* The wire carries a boolean; the lane takes a variant, so every call site
+   of [Dos_lane.load] states which of the two it means. *)
+let autosave_consent args =
+  if get_bool args "replace_autosave" false then Dos_lane.Replace_autosave
+  else Dos_lane.Keep_autosave
+;;
+
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
   match get_string_opt args "program" with
   | None | Some "" ->
@@ -625,7 +662,8 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
          off_domain (fun () ->
            Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
              ~saves_dir:(saves_dir ~base_path (String.trim name))
-             ~checkpoint_dir:(checkpoints_dir ~base_path) ~program_name ~program_bytes
+             ~checkpoint_dir:(checkpoints_dir ~base_path) ~autosave:(autosave_consent args)
+             ~program_name ~program_bytes
              ~files
              ~announce:
                (announce ~author:agent_name
@@ -985,7 +1023,8 @@ let handle_peek ~tool_name ~start_time ~base_path args =
        | Dos_lane.Guest_fault _
        | Dos_lane.Unsaveable _
        | Dos_lane.Checkpoint_refused _
-       | Dos_lane.Other_program _ ) as e) ->
+       | Dos_lane.Other_program _
+       | Dos_lane.Autosave_exists _ ) as e) ->
     reject ~tool_name ~start_time (Dos_lane.error_to_string e)
 ;;
 

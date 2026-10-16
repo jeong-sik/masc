@@ -17,7 +17,7 @@ let with_machine run =
     ignore (Dos_lane.eject ~who:holder ~announce:ignore ());
     Dos_lane.install_activity_observer None; remove directory) (fun () ->
     let load () = Dos_lane.load ~who ~ledger_dir:directory ~saves_dir:saves ~checkpoint_dir:checkpoints
-      ~program_name:"hello.com" ~program_bytes:hello ~files:[] ~announce:ignore in
+      ~autosave:Dos_lane.Keep_autosave ~program_name:"hello.com" ~program_bytes:hello ~files:[] ~announce:ignore in
     ignore (require (load ()));
     run directory saves checkpoints load)
 let rejected name = function

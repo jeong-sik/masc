@@ -185,7 +185,7 @@ let test_a_person_plays_in_turn () =
           dos_ok "load"
             (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                ~saves_dir:(Filename.concat dir "saves")
-               ~checkpoint_dir:(Filename.concat dir "checkpoints") ~program_name:"game.com"
+               ~checkpoint_dir:(Filename.concat dir "checkpoints") ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com"
                ~program_bytes:hello_com ~files:[] ~announce:ignore);
           check (option string) "the loader holds the controller" (Some "operator") (controller ());
           check int "no bearer is refused" 401
@@ -260,7 +260,7 @@ let test_expired_credential_releases_controller_on_next_move role () =
           dos_ok "load"
             (Dos_lane.load ~who:"operator" ~ledger_dir:(Filename.concat dir "ledger")
                ~saves_dir:(Filename.concat dir "saves")
-               ~checkpoint_dir:(Filename.concat dir "checkpoints") ~program_name:"game.com"
+               ~checkpoint_dir:(Filename.concat dir "checkpoints") ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com"
                ~program_bytes:hello_com ~files:[] ~announce:ignore);
           (match role with
            | Masc_domain.Admin | Masc_domain.Player ->

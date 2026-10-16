@@ -103,10 +103,12 @@ says `unreadable` and why. Nothing resumes it for you: read the field and call
 `masc_dos_restore slot=autosave` yourself when you want it back.
 
 There is one `autosave` slot, and the next call that runs the guest replaces
-it -- except a new machine's own first autosave, which moves whatever was
-there to `autosave-prev` first. So after a restart, `masc_dos_load` with a
-program name is safe to call directly: it starts a new machine, and that
-machine's own first autosave preserves what was there before the restart
-under `autosave-prev` (`masc_dos_restore slot=autosave-prev` to get it back)
-rather than overwriting it. Calling `masc_dos_screen` first is still fine,
-just no longer required to avoid losing the previous run.
+it. `masc_dos_load` with a program name is refused while an `autosave` file
+exists, readable or not, and the refusal names it: program, steps, who saved it
+and when. Nothing is loaded and the file is as it was. Resume it with
+`masc_dos_restore slot=autosave`. To start the program anyway, call
+`masc_dos_load` again with `replace_autosave: true`. The new machine's first
+autosave then moves the file to `autosave-prev` and replaces whatever
+`autosave-prev` held, so ask yourself first whether that campaign is still
+wanted. `masc_dos_restore slot=autosave-prev` brings it back until a later
+consented load replaces it.

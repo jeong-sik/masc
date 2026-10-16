@@ -24,6 +24,22 @@ type observation = {
 
 type entry = { at_step : int; who : string; key_name : string }
 
+type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
+
+type autosave_lookup =
+  | No_autosave
+  | Autosave of autosave_status
+  | Autosave_unreadable of string
+
+(* An autosave file that a load would move aside. *)
+type held_autosave =
+  | Held of autosave_status
+  | Held_unreadable of string
+
+type autosave_consent =
+  | Keep_autosave
+  | Replace_autosave
+
 type error =
   | Activity_disabled
   | Activity_unobserved
@@ -35,6 +51,7 @@ type error =
   | Unsaveable of string
   | Checkpoint_refused of Machine_checkpoint.error
   | Other_program of { expected : string; loaded : string }
+  | Autosave_exists of held_autosave
 
 let error_to_string = function
   | Activity_disabled -> "machines.dos is off; enable it before new machine work"
@@ -54,6 +71,12 @@ let error_to_string = function
   | Checkpoint_refused e -> Machine_checkpoint.error_to_string e
   | Other_program { expected; loaded } ->
     Printf.sprintf "%s is loaded now, not %s, so nothing was pressed" loaded expected
+  | Autosave_exists (Held s) ->
+    Printf.sprintf "an autosave is waiting (%s, %d steps, saved by %s), so nothing was loaded"
+      s.program s.steps s.saved_by
+  | Autosave_exists (Held_unreadable reason) ->
+    Printf.sprintf "an autosave file is there that this server cannot read (%s), so nothing was loaded"
+      reason
 ;;
 
 let ( let* ) = Result.bind
@@ -262,7 +285,7 @@ let running f =
    | Ok _ | Error (Unreadable _ | Guest_fault _) -> mark_change ()
    | Error
        ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
-       | Other_program _ ) ->
+       | Other_program _ | Autosave_exists _ ) ->
      publish_stable ());
   result
 ;;
@@ -289,7 +312,7 @@ let with_control ~who f =
          (* the call ran: the machine may have moved *)
        | Error
            ( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _ | Held_by _ | Unsaveable _ | Checkpoint_refused _
-           | Other_program _ ) ->
+           | Other_program _ | Autosave_exists _ ) ->
          st.controller <- before);
       result)
 ;;
@@ -663,6 +686,83 @@ let autosave_after st ~who =
   end
 ;;
 
+type restored_meta = {
+  saved_program : string;
+  saved_saves : string;
+  saved_steps : int;
+  saved_by : string;
+  saved_ledger : entry list;  (* oldest first *)
+}
+
+(* Every field the lane wrote, or the checkpoint is corrupt: a missing step
+   count is not zero and a missing ledger is not empty. *)
+let meta_of_json json =
+  let corrupt message = Error (Checkpoint_refused (Machine_checkpoint.Corrupt message)) in
+  let field name =
+    match json with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  let entry_of = function
+    | `Assoc fields ->
+      (match
+         ( List.assoc_opt "step" fields
+         , List.assoc_opt "who" fields
+         , List.assoc_opt "key" fields )
+       with
+       | Some (`Int at_step), Some (`String who), Some (`String key_name) ->
+         Some { at_step; who; key_name }
+       | _ -> None)
+    | _ -> None
+  in
+  match field "program", field "saves", field "steps", field "ledger", field "saved_by" with
+  | ( Some (`String program)
+    , Some (`String saves)
+    , Some (`Int steps)
+    , Some (`List items)
+    , Some (`String saved_by) ) ->
+    let ledger = List.filter_map entry_of items in
+    let rec ordered previous = function
+      | [] -> true
+      | e :: rest -> e.at_step >= previous && e.at_step <= steps && ordered e.at_step rest
+    in
+    if List.length ledger <> List.length items then corrupt "a ledger line does not read"
+    else if not (ordered 0 ledger) then corrupt "the ledger does not fit the saved step count"
+    else if escapes saves || String.equal saves "" then corrupt "the saves name is a path"
+    else Ok { saved_program = program; saved_saves = saves; saved_steps = steps; saved_by; saved_ledger = ledger }
+  | _ -> corrupt "the lane's fields are missing"
+;;
+
+(* Read only, through {!Machine_checkpoint}'s header and meta -- never
+   {!Dos_snapshot.restore}, which would reconstruct the whole guest machine
+   just to say who last saved it. The meta goes through the same [meta_of_json]
+   a restore reads it with, so what this names is what a restore would find.
+   A file that is there but will not read is its own answer: reporting it as
+   "nothing there" would hide it until the next run replaced it. *)
+let lookup_autosave ~dir =
+  match
+    Machine_checkpoint.read_meta ~dir autosave_slot ~machine:Machine_checkpoint.Dos
+      ~format:checkpoint_format
+  with
+  | Error (Machine_checkpoint.No_slot _) -> No_autosave
+  | Error
+      ((Machine_checkpoint.Unreadable _
+       | Machine_checkpoint.Other_machine _
+       | Machine_checkpoint.Other_format _
+       | Machine_checkpoint.Corrupt _) as e) ->
+    Autosave_unreadable (Machine_checkpoint.error_to_string e)
+  | Ok { Machine_checkpoint.meta; modified; header = _ } ->
+    (match meta_of_json meta with
+     | Error e -> Autosave_unreadable (error_to_string e)
+     | Ok m ->
+       Autosave
+         { program = m.saved_program
+         ; steps = m.saved_steps
+         ; saved_by = m.saved_by
+         ; saved_at = modified
+         })
+;;
+
 (* Every call that ran the guest ends here. The guest has moved whatever the
    disk did, so the observation always comes back; a save that did not reach
    disk rides along in [unsaved] instead of turning the call into an error a
@@ -729,7 +829,23 @@ type prepared_load = {
   load_change_count : int;
 }
 
-let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files =
+(* A fresh machine's first autosave moves whatever [autosave_slot] holds to
+   [autosave_prev_slot], replacing what that slot held. After a worker restart
+   the autosave is the only copy of the campaign, and a second load moves it
+   once more -- the campaign is gone from both slots. So an existing autosave
+   file, readable or not, stops a load unless the caller consented to the
+   move. With no file the lookup returns at once; with one it reads the file
+   to name it in the refusal. *)
+let check_autosave_consent ~checkpoint_dir = function
+  | Replace_autosave -> Ok ()
+  | Keep_autosave ->
+    (match lookup_autosave ~dir:checkpoint_dir with
+     | No_autosave -> Ok ()
+     | Autosave status -> Error (Autosave_exists (Held status))
+     | Autosave_unreadable reason -> Error (Autosave_exists (Held_unreadable reason)))
+;;
+
+let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave ~program_name ~program_bytes ~files =
   let* () = require_activity () in
   (* Guest writes raise this counter. A load must not install a save overlay
      read across a concurrent run of the old machine. *)
@@ -742,6 +858,7 @@ let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_b
       Error (Invalid_request (Printf.sprintf
         "%s and %s are one name to DOS; the guest can only see one" earlier later))
   | None ->
+      let* () = check_autosave_consent ~checkpoint_dir autosave in
       let m = Dos_machine.create () in
       List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
       if is_mz program_bytes then Dos_machine.load_exe m program_bytes
@@ -783,8 +900,8 @@ let commit_load ~who prepared ~announce =
         booted)
 ;;
 
-let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~program_name ~program_bytes ~files ~announce =
-  let* prepared = prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir
+let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave ~program_name ~program_bytes ~files ~announce =
+  let* prepared = prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave
       ~program_name ~program_bytes ~files in
   commit_load ~who prepared ~announce
 ;;
@@ -1068,53 +1185,6 @@ let save ~who ~dir ~slot =
     | Error e -> Error e)
 ;;
 
-type restored_meta = {
-  saved_program : string;
-  saved_saves : string;
-  saved_steps : int;
-  saved_by : string;
-  saved_ledger : entry list;  (* oldest first *)
-}
-
-(* Every field the lane wrote, or the checkpoint is corrupt: a missing step
-   count is not zero and a missing ledger is not empty. *)
-let meta_of_json json =
-  let corrupt message = Error (Checkpoint_refused (Machine_checkpoint.Corrupt message)) in
-  let field name =
-    match json with
-    | `Assoc fields -> List.assoc_opt name fields
-    | _ -> None
-  in
-  let entry_of = function
-    | `Assoc fields ->
-      (match
-         ( List.assoc_opt "step" fields
-         , List.assoc_opt "who" fields
-         , List.assoc_opt "key" fields )
-       with
-       | Some (`Int at_step), Some (`String who), Some (`String key_name) ->
-         Some { at_step; who; key_name }
-       | _ -> None)
-    | _ -> None
-  in
-  match field "program", field "saves", field "steps", field "ledger", field "saved_by" with
-  | ( Some (`String program)
-    , Some (`String saves)
-    , Some (`Int steps)
-    , Some (`List items)
-    , Some (`String saved_by) ) ->
-    let ledger = List.filter_map entry_of items in
-    let rec ordered previous = function
-      | [] -> true
-      | e :: rest -> e.at_step >= previous && e.at_step <= steps && ordered e.at_step rest
-    in
-    if List.length ledger <> List.length items then corrupt "a ledger line does not read"
-    else if not (ordered 0 ledger) then corrupt "the ledger does not fit the saved step count"
-    else if escapes saves || String.equal saves "" then corrupt "the saves name is a path"
-    else Ok { saved_program = program; saved_saves = saves; saved_steps = steps; saved_by; saved_ledger = ledger }
-  | _ -> corrupt "the lane's fields are missing"
-;;
-
 type restore_payload = {
   restore_machine : Dos_machine.t;
   restore_kept : (string, string) Hashtbl.t;
@@ -1236,45 +1306,6 @@ let checkpoints ~dir =
   match Machine_checkpoint.list ~dir with
   | Ok listed -> Ok listed
   | Error message -> Error (Unreadable message)
-;;
-
-(* ---------- autosave ---------- *)
-
-type autosave_status = { program : string; steps : int; saved_by : string; saved_at : float }
-
-type autosave_lookup =
-  | No_autosave
-  | Autosave of autosave_status
-  | Autosave_unreadable of string
-
-(* Read only, through {!Machine_checkpoint}'s header and meta -- never
-   {!Dos_snapshot.restore}, which would reconstruct the whole guest machine
-   just to say who last saved it. The meta goes through the same [meta_of_json]
-   a restore reads it with, so what this names is what a restore would find.
-   A file that is there but will not read is its own answer: reporting it as
-   "nothing there" would hide it until the next run replaced it. *)
-let lookup_autosave ~dir =
-  match
-    Machine_checkpoint.read_meta ~dir autosave_slot ~machine:Machine_checkpoint.Dos
-      ~format:checkpoint_format
-  with
-  | Error (Machine_checkpoint.No_slot _) -> No_autosave
-  | Error
-      ((Machine_checkpoint.Unreadable _
-       | Machine_checkpoint.Other_machine _
-       | Machine_checkpoint.Other_format _
-       | Machine_checkpoint.Corrupt _) as e) ->
-    Autosave_unreadable (Machine_checkpoint.error_to_string e)
-  | Ok { Machine_checkpoint.meta; modified; header = _ } ->
-    (match meta_of_json meta with
-     | Error e -> Autosave_unreadable (error_to_string e)
-     | Ok m ->
-       Autosave
-         { program = m.saved_program
-         ; steps = m.saved_steps
-         ; saved_by = m.saved_by
-         ; saved_at = modified
-         })
 ;;
 
 (* ---------- introspection ---------- *)

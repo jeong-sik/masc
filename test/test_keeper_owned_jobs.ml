@@ -2815,6 +2815,31 @@ let test_completion_retains_unknown_launch_and_owner () = with_fixture @@ fun _e
   check int "restored owner still cannot authorize an absent start" 0 (effect_count fixture "start")
 
 
+let test_cancelled_unknown_launch_delivery_and_cleanup () = with_fixture @@ fun _env initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  control fixture (`Assoc ["mode", `String "create_unknown_absent"]);
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-unknown-completion" ~turn:42
+      "keeper_job_cancel" (argument id)));
+  let delivered = recover_completions fixture in
+  check int "cancelled unknown launch delivers once" 1 delivered.delivered;
+  check int "cancelled unknown launch leaves waiting" 0 delivered.waiting;
+  check int "cancellation delivery has no failure" 0 (List.length delivered.failures);
+  let queued = completion_payload (only_selection fixture) in
+  check string "notification keeps the original cancelled job" id (Store.Job_id.to_string queued.oj_job_id);
+  let cleaned = recover_completions fixture in
+  check int "next pulse confirms absence and retires cancellation" 1 cleaned.retired;
+  check int "cancellation cleanup has no failure" 0 (List.length cleaned.failures);
+  let record = load fixture id in
+  check bool "cancellation remains a readable result" true (Store.result_ready record);
+  check bool "cancellation resources are removed" true (record.cleanup = Store.Resources_removed);
+  check int "absence-only cleanup never removes an unknown container" 0 (effect_count fixture "rm");
+  Process_eio.reset_for_testing (); initialize ();
+  check int "retired cancellation is not reinspected" 0 (recover_completions fixture).inspected;
+  check int "cancellation is not redelivered" 1 (List.length (pending_completions fixture));
+  check int "unknown launch is never repeated" 1 (effect_count fixture "create");
+  check int "cancelled unknown launch never starts" 0 (effect_count fixture "start")
+
 let test_finished_without_outputs_absent_inventory_notified_once () = with_fixture @@ fun _env initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let started = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
@@ -5338,6 +5363,7 @@ let () = match Array.to_list Sys.argv with
       ; test_case "completion enqueue failure recovers original result after restart" `Quick test_completion_delivery_failure_and_restart
       ; test_case "consumed notification survives missing producer ACK" `Quick test_completion_consumed_before_producer_ack
       ; test_case "completion recovery retains unknown launch and corrupt owner" `Quick test_completion_retains_unknown_launch_and_owner
+      ; test_case "cancelled unknown launch delivers and cleans without replay" `Quick test_cancelled_unknown_launch_delivery_and_cleanup
       ; test_case "finished without outputs and absent inventory is notified once and leaves waiting" `Quick test_finished_without_outputs_absent_inventory_notified_once
       ; test_case "running with absent inventory is notified once and leaves waiting" `Quick test_running_absent_inventory_notified_once
       ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag

@@ -84,7 +84,7 @@ let make_backend () =
   let proven ~engine work =
     Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_engine ~on_created ->
+    start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_engine ~is_live_instance ~on_created ->
       Hashtbl.replace state.state_owners instance_id
         (Option.map (Lane_addon_worker_state.volume_name ~runtime:package.runtime) state_owner);
       let stopped, release_stop = Eio.Promise.create () in
@@ -136,12 +136,23 @@ let make_backend () =
             record (Startup_failed instance_id);
             Error (Lifecycle.Worker_failed (Option.value ~default:"" !(state.create_refusal)))
         | Ok () ->
-            ignore (Fake.add (Fake.current state.world) ~id:container_id ~name:(container_name instance_id)
-              ~labels:["masc.lane.instance", instance_id] ());
-            record (Started instance_id);
-            on_created connection;
-            Option.iter Eio.Promise.await !(state.startup_barrier);
-            Ok connection
+            let name, mine = match state_owner with
+              | Some owner ->
+                  Lane_addon_worker_state.container_name ~runtime:package.runtime owner,
+                  Some (Lane_addon_worker_state.identity owner)
+              | None -> container_name instance_id, None in
+            (match Lane_addon_slot.claim (Fake.port state.world) ~name ~instance_id ~mine ~is_live_instance with
+             | Error failure -> record (Startup_failed instance_id); Error failure
+             | Ok () ->
+                 match Fake.add (Fake.current state.world) ~id:container_id ~name
+                         ~labels:(["masc.lane.instance", instance_id]
+                                  @ Option.fold ~none:[] ~some:(fun owner -> ["masc.lane.state.owner", owner]) mine) () with
+                 | Error detail -> record (Startup_failed instance_id); Error (Lifecycle.Worker_failed detail)
+                 | Ok _ ->
+                     record (Started instance_id);
+                     on_created connection;
+                     Option.iter Eio.Promise.await !(state.startup_barrier);
+                     Ok connection)
       end);
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready = (fun ~package:_ ->
@@ -157,18 +168,20 @@ let make_backend () =
         if not !(state.cleanup_available) then Error (Lifecycle.Cleanup_unconfirmed "historical cleanup dependency unavailable")
         else begin
           Option.iter Eio.Promise.await !(state.recovery_barrier);
+          let lookup, mine = match container_id, state_owner with
+            | Some id, _ -> Lane_addon_engine.Id id, Option.map Lane_addon_worker_state.identity state_owner
+            | None, Some owner ->
+                Lane_addon_engine.Name (Lane_addon_worker_state.container_name ~runtime owner),
+                Some (Lane_addon_worker_state.identity owner)
+            | None, None -> Lane_addon_engine.Name (container_name instance_id), None in
           let removed = proven ~engine (fun () ->
-            Fake.remove state.world (Store.digest instance_id);
-            Ok ()) in
+            Lane_addon_slot.release (Fake.port state.world) ~lookup ~instance_id ~mine) in
           Result.map (fun () -> record (Recovery_completed (instance_id, container_id))) removed
         end
       end);
     condition_met = (fun ~runtime:_ condition ->
       incr state.condition_checks;
-      match (Fake.port state.world).read_engine (), condition with
-      | Ok _, Lifecycle.Engine_reachable -> true
-      | Ok actual, Lifecycle.Engine_is expected -> Lifecycle.engine_equal actual expected
-      | Error _, (Lifecycle.Engine_reachable | Lifecycle.Engine_is _) -> false);
+      Fake.condition_met state.world condition);
   } in
   state, backend
 
@@ -1570,6 +1583,89 @@ let test_an_unreachable_engine_waits_and_then_releases () =
     await_detached clock config id;
     check bool "released once the engine answers" false (Fake.holds state.home (Store.digest id)))
 
+let persistent_package packages id =
+  let manifest = package packages id in
+  write manifest (In_channel.with_open_bin manifest In_channel.input_all ^ "\n[world.state]\nmode = \"persistent\"\n");
+  manifest
+
+(* Install and release one persistent worker, and return the shared writer
+   container it held: its name and labels are the slot every later incarnation
+   of the installation needs. *)
+let released_writer_slot env config directory packages state =
+  let clock = Eio.Stdenv.clock env in
+  let manifest = persistent_package packages "ready" in
+  let path = Filename.concat directory "observer.toml" in
+  write path (declaration ~id:"observer" ~manifest ());
+  ignore (reconcile config directory);
+  let first = declared_instance config "observer" |> text "instance_id" in
+  await_ready clock config first;
+  let slot = match Fake.find state.home (Store.digest first) with
+    | Some container -> container | None -> fail "the worker's container is on its engine" in
+  write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+  ignore (reconcile config directory);
+  await_detached clock config first;
+  check bool "the first incarnation's container is released" false (Fake.holds state.home slot.id);
+  manifest, path, first, slot
+
+let other_instance (slot : Fake.container) instance =
+  ("masc.lane.instance", instance) :: List.remove_assoc "masc.lane.instance" slot.labels
+
+(* The incident: a server died and left an exited container holding the
+   installation's writer name, while its record already says released. A new
+   incarnation must not trust that record. It reads the slot, clears the dead
+   predecessor and starts. *)
+let test_a_dead_predecessor_holding_the_slot_does_not_block_a_new_instance () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest, path, first, slot = released_writer_slot env config directory packages state in
+    check bool "the released record carries its evidence" true
+      (member "release" (lifecycle (instance config first)) <> `Null);
+    ignore (Fake.add state.home ~run_state:Fake.Exited ~id:"dead-writer-container" ~name:slot.name
+      ~labels:(other_instance slot "dead-writer") ());
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let second = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config second;
+    check bool "the dead predecessor was removed" false (Fake.holds state.home "dead-writer-container");
+    check bool "the new incarnation holds the slot" true (Fake.holds state.home (Store.digest second));
+    check int "two incarnations were started" 2 (List.length (starts state));
+    detach clock config second)
+
+(* A container under the slot's name that is not a dead predecessor is never
+   removed. The attempt says who holds the slot and then waits for that
+   container to change; beats read it and do nothing else. *)
+let test_a_foreign_holder_makes_the_attempt_wait_for_the_holder_to_change () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest, path, _first, slot = released_writer_slot env config directory packages state in
+    ignore (Fake.add state.home ~id:"foreign-container" ~name:slot.name
+      ~labels:["masc.lane.instance", "someone"] ());
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let failed_id = declared_instance config "observer" |> text "instance_id" in
+    await clock (fun () -> phase (instance config failed_id) = "failed");
+    let cause = failed_record (instance config failed_id) |> member "cause" in
+    check string "the cause is a foreign slot holder" "slot_foreign" (text "kind" cause);
+    check string "it names the container" "foreign-container"
+      (member "holder" cause |> text "container_id");
+    check bool "it names the holder's labels" true
+      (member "holder" cause |> member "instance" = `String "someone"
+       && member "holder" cause |> member "state_owner" = `Null);
+    check bool "the foreign container was not touched" true (Fake.holds state.home "foreign-container");
+    let attempts_before = attempts state and probes = !(state.condition_checks) in
+    for _ = 1 to 4 do ignore (reconcile config directory) done;
+    check int "four beats start nothing" attempts_before (attempts state);
+    check int "four beats clean up nothing" 0 (recovery_requests state);
+    check int "each beat reads the holder once" (probes + 4) !(state.condition_checks);
+    Fake.remove state.world "foreign-container";
+    ignore (reconcile config directory);
+    await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> failed_id) (instances config));
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    check bool "the new incarnation holds the freed slot" true (Fake.holds state.home (Store.digest id));
+    detach clock config id)
+
 let test_binding_inventory_issues_carry_failure_kind_tags () =
   with_fixture (fun _ _ config _directory _packages _state ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1690,4 +1786,8 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_another_engine_does_not_release_a_worker;
   test_case "an unreachable engine waits and then releases" `Quick
     test_an_unreachable_engine_waits_and_then_releases;
+  test_case "a dead predecessor holding the slot does not block a new instance" `Quick
+    test_a_dead_predecessor_holding_the_slot_does_not_block_a_new_instance;
+  test_case "a foreign holder makes the attempt wait for the holder to change" `Quick
+    test_a_foreign_holder_makes_the_attempt_wait_for_the_holder_to_change;
 ]]

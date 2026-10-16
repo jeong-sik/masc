@@ -2,10 +2,11 @@
    containers with labels and a run state. The world has one ambient target,
    like the Docker CLI's current context: pointing it at another engine is
    what [colima start] does to the next command. The fake models only what a
-   lifecycle decision depends on; classification and engine proofs run in the
-   real [Lane_addon_slot] over [port]. *)
+   lifecycle decision depends on; classification, claims and engine proofs run
+   in the real [Lane_addon_slot] over [port]. *)
 module Lifecycle = Masc.Lane_addon_lifecycle
 module Slot = Masc.Lane_addon_slot
+module Engine = Masc.Lane_addon_engine
 
 type run_state = Running | Exited
 type container = {
@@ -18,21 +19,19 @@ type engine = {
   identity : Lifecycle.engine;
   mutable up : bool;
   containers : (string, container) Hashtbl.t;
+  refusing_removal : (string, unit) Hashtbl.t;
 }
 type t = { mutable current : engine }
 
-let engine ?(up = true) identity = { identity; up; containers = Hashtbl.create 4 }
+let engine ?(up = true) identity =
+  { identity; up; containers = Hashtbl.create 4; refusing_removal = Hashtbl.create 1 }
 let docker name = engine (Lifecycle.Docker_engine name)
 let create engine = { current = engine }
 let point_at world engine = world.current <- engine
 let current world = world.current
 let set_up engine up = engine.up <- up
-
-let port world : Slot.port = {
-  read_engine = (fun () ->
-    if world.current.up then Ok world.current.identity
-    else Error (Lifecycle.Unreachable "fixture engine is down"))
-}
+let refuse_removal engine id = Hashtbl.replace engine.refusing_removal id ()
+let allow_removal engine id = Hashtbl.remove engine.refusing_removal id
 
 let containers engine =
   Hashtbl.to_seq_values engine.containers |> List.of_seq
@@ -51,3 +50,37 @@ let add engine ?(run_state = Running) ~id ~name ~labels () =
    absence needs the engine proof. *)
 let remove world id = Hashtbl.remove world.current.containers id
 let exists world id = Hashtbl.mem world.current.containers id
+
+let down = "fixture engine is down"
+let engine_command world work =
+  if world.current.up then work world.current else Error down
+
+let port world : Slot.port = {
+  read_engine = (fun () ->
+    if world.current.up then Ok world.current.identity
+    else Error (Lifecycle.Unreachable down));
+  find = (fun lookup -> engine_command world (fun engine ->
+    match lookup with
+    | Engine.Name name -> Ok (Option.map (fun c -> c.id) (find_by_name engine name))
+    | Engine.Id id -> Ok (if holds engine id then Some id else None)));
+  inspect = (fun id -> engine_command world (fun engine ->
+    match find engine id with
+    | None -> Error ("no such container: " ^ id)
+    | Some c ->
+        Ok { Engine.container_id = c.id; name = c.name;
+             instance = List.assoc_opt Engine.instance_label c.labels;
+             state_owner = List.assoc_opt Engine.state_owner_label c.labels;
+             run_state = (match c.run_state with Running -> Engine.Running | Exited -> Engine.Exited) }));
+  remove = (fun id -> engine_command world (fun engine ->
+    if Hashtbl.mem engine.refusing_removal id then Error ("removal refused: " ^ id)
+    else (Hashtbl.remove engine.containers id; Ok ())));
+}
+
+(* The runtime's one cheap read of a waiting failure's condition. *)
+let condition_met world = function
+  | Lifecycle.Engine_reachable -> Result.is_ok ((port world).read_engine ())
+  | Lifecycle.Engine_is expected ->
+      (match (port world).read_engine () with
+       | Ok actual -> Lifecycle.engine_equal actual expected
+       | Error _ -> false)
+  | Lifecycle.Holder_changes holder -> Slot.holder_changed (port world) holder

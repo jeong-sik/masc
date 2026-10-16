@@ -59,7 +59,7 @@ let make_backend ?observe_step () =
   let proven ~engine work =
     Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_engine ~on_created ->
+    start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_engine ~is_live_instance:_ ~on_created ->
       match (Fake.port state.world).read_engine () with
       | Error (Lifecycle.Unreachable detail) -> Error (Lifecycle.Engine_unreachable detail)
       | Error (Lifecycle.Identity_unreadable detail) -> Error (Lifecycle.Worker_failed detail)
@@ -133,11 +133,7 @@ let make_backend ?observe_step () =
           proven ~engine (fun () -> Fake.remove state.world id; Ok ())
           |> Result.map (fun () -> state.recovery := (instance_id, id) :: !(state.recovery))
       | Some _ | None -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "owner mismatch"));
-    condition_met = (fun ~runtime:_ condition ->
-      match (Fake.port state.world).read_engine (), condition with
-      | Ok _, Lifecycle.Engine_reachable -> true
-      | Ok actual, Lifecycle.Engine_is expected -> Lifecycle.engine_equal actual expected
-      | Error _, (Lifecycle.Engine_reachable | Lifecycle.Engine_is _) -> false)
+    condition_met = (fun ~runtime:_ condition -> Fake.condition_met state.world condition)
   } in state, backend
 
 let manifest ?refresh_policy dir mode =

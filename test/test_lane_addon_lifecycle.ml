@@ -12,6 +12,9 @@ let failures = [
   L.Engine_unreachable "daemon down";
   L.Engine_mismatch { recorded = engine_a; observed = L.Other_engine engine_b };
   L.Engine_mismatch { recorded = apple; observed = L.Unreadable_engine "blank ID" };
+  L.Slot_foreign { container_id = String.make 64 'f'; instance = Some "live-sibling"; state_owner = Some "owner" };
+  L.Slot_foreign { container_id = String.make 64 'e'; instance = None; state_owner = None };
+  L.Slot_predecessor_unremovable { instance_id = "dead-writer"; detail = "removal refused" };
   L.Worker_failed "start refused";
   L.Cleanup_unconfirmed "remove refused";
   L.Persistence_failed "disk full";
@@ -66,7 +69,8 @@ let test_retry_is_decided_per_failure () =
   let expected = function
     | L.Engine_unreachable _ -> L.Wait_until L.Engine_reachable
     | L.Engine_mismatch { recorded; _ } -> L.Wait_until (L.Engine_is recorded)
-    | L.Worker_failed _ | L.Cleanup_unconfirmed _ | L.Persistence_failed _
+    | L.Slot_foreign holder -> L.Wait_until (L.Holder_changes holder)
+    | L.Slot_predecessor_unremovable _ | L.Worker_failed _ | L.Cleanup_unconfirmed _ | L.Persistence_failed _
     | L.Previous_process | L.Effect_outcome_unknown _ -> L.Retry in
   List.iter (fun failure ->
     check bool (L.failure_to_string failure) true (L.heal failure = expected failure)) failures

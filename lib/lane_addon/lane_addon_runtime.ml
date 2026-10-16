@@ -35,8 +35,11 @@ type connection = {
 type backend = {
   start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
     on_engine:(Lifecycle.engine -> (unit, string) result) ->
+    is_live_instance:(string -> bool) ->
     on_created:(connection -> unit) -> (connection, Lifecycle.failure) result;
-  (* [on_engine] receives the engine identity before the first create and
+  (* [is_live_instance] names the incarnations this process still owns; a dead
+     one's container may be cleared from a slot the new incarnation needs.
+     [on_engine] receives the engine identity before the first create and
      returns only once it is persisted. A start that creates without calling
      it has no engine on record. *)
   acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
@@ -737,6 +740,11 @@ let observing e =
   e.state <- Lifecycle.Observing;
   if recovering then notify_tool_change e.package
 
+(* An incarnation is live in this process while it has an entry or a cleanup
+   in progress. A container of any other incarnation of the same installation
+   was left by a process that died, which is the only server on this base path. *)
+let is_live_instance m id = Hashtbl.mem m.entries id || Hashtbl.mem m.recovering id
+
 let run ~sw backend m e =
   fork_isolated ~sw (fun () ->
     let work () = try
@@ -756,7 +764,8 @@ let run ~sw backend m e =
         let started = let* state_owner = state_owner_for_entry m e
             |> Result.map_error (fun message -> Lifecycle.Worker_failed message) in
           backend.start ~state_owner ~sw:worker_sw ~instance_id:e.instance_id
-            ~package:e.package ~binding:e.binding ~on_engine ~on_created:created in
+            ~package:e.package ~binding:e.binding ~on_engine
+            ~is_live_instance:(is_live_instance m) ~on_created:created in
         match started with
         | Error failure ->
             publish_resource Lane_addon_resource_events.Acquire_failed e
@@ -841,7 +850,7 @@ let backend ~store () = match !override with
        adding a second timeout with the same meaning. *)
     let control_timeout_sec = Env_config_runtime.Sidecar.control_command_timeout_sec in
     {
-      start = (fun ~sw ~state_owner ~instance_id ~package ~binding ~on_engine ~on_created ->
+      start = (fun ~sw ~state_owner ~instance_id ~package ~binding ~on_engine ~is_live_instance ~on_created ->
         let* sampling_handler = prepare_sampling_handler
           ~sw ~store ~instance_id ~package ~binding
           |> Result.map_error (fun message -> Lifecycle.Worker_failed message) in
@@ -863,7 +872,7 @@ let backend ~store () = match !override with
         | None -> Error (Lifecycle.Worker_failed "Lane Add-on Docker control requires the server Eio clock")
         | Some clock ->
             Lane_addon_worker.start ~sw ~clock ~control_timeout_sec
-              ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package ?state_owner ~on_engine
+              ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package ?state_owner ~on_engine ~is_live_instance
               ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ?sampling_handler ()
             |> Result.map wrap |> Result.map_error Lane_addon_worker.start_failure);
       acquire = Lane_addon_sources.acquire;
@@ -895,7 +904,10 @@ let backend ~store () = match !override with
                  (match Lane_addon_worker.read_engine ~clock ~control_timeout_sec
                     ~mgr:Posix_spawn_process_mgr.mgr ~runtime () with
                   | Ok actual -> Lifecycle.engine_equal actual expected
-                  | Error _ -> false))) }
+                  | Error _ -> false)
+             | Lifecycle.Holder_changes holder ->
+                 Lane_addon_worker.holder_changed ~clock ~control_timeout_sec
+                   ~mgr:Posix_spawn_process_mgr.mgr ~runtime holder)) }
 let manager config =
   let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
   match Hashtbl.find_opt managers root with
@@ -2545,6 +2557,7 @@ module For_testing = struct
   type nonrec backend = backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:package -> binding:Yojson.Safe.t ->
       on_engine:(Lifecycle.engine -> (unit, string) result) ->
+      is_live_instance:(string -> bool) ->
       on_created:(connection -> unit) -> (connection, Lifecycle.failure) result;
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->

@@ -417,7 +417,7 @@ max_reply_bytes=4194304
         ~invoke:(fun ~route:_ ~request:_ _params ->
           incr invocations; Error "fixture forbids provider invocation") ()) in
   let backend : Lane_addon_runtime.For_testing.backend = {
-    start=(fun ~sw ~state_owner:_ ~instance_id ~package ~binding ~on_engine ~on_created ->
+    start=(fun ~sw ~state_owner:_ ~instance_id ~package ~binding ~on_engine ~is_live_instance:_ ~on_created ->
       let _handler = require (factory ~sw ~store ~instance_id ~package ~binding) in
       starts := instance_id :: !starts;
       let connection : Lane_addon_runtime.For_testing.connection = {

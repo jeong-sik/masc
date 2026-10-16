@@ -183,6 +183,7 @@ module For_testing : sig
   type backend = {
     start : sw:Eio.Switch.t -> state_owner:Lane_addon_worker_state.owner option -> instance_id:string -> package:Lane_addon_types.package -> binding:Yojson.Safe.t ->
       on_engine:(Lane_addon_lifecycle.engine -> (unit, string) result) ->
+      is_live_instance:(string -> bool) ->
       on_created:(connection -> unit) -> (connection, Lane_addon_lifecycle.failure) result;
     (** [on_engine] receives the engine identity before the first create and
         returns once it is persisted. A start that creates without calling it

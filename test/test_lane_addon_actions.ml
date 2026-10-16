@@ -40,7 +40,7 @@ let echoed request_id = if String.length request_id > 256 then Store.digest requ
 type fixture = {config:Workspace.config; root:string; calls:int ref; observes:int ref;
   outcome:outcome ref; barrier:unit Eio.Promise.t option ref}
 let backend fixture : Runtime.For_testing.backend = {
-  start=(fun ~sw:_ ~state_owner:_ ~instance_id ~(package:Types.package) ~binding:_ ~on_engine ~on_created ->
+  start=(fun ~sw:_ ~state_owner:_ ~instance_id ~(package:Types.package) ~binding:_ ~on_engine ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {
       container_id=Store.digest instance_id;
       exported_tools = (fun () -> []);

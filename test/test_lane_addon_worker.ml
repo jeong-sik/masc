@@ -63,19 +63,25 @@ def load(cid):
     return json.loads(path(cid).read_text())
 def output(value):
     print(json.dumps(value), flush=True)
+def labels():
+    return dict(item.split("=", 1) for flag, item in zip(args, args[1:]) if flag == "--label")
 def on_this_engine(cid):
     # A container belongs to the engine it was created on; another engine
     # answers "no such container" for it, as a different Docker daemon would.
     return path(cid).exists() and load(cid).get("engine") == engine_id()
 if action == "create":
     name = value("--name")
-    cid = hashlib.sha256((engine_id() + name).encode()).hexdigest()
-    if path(cid).exists():
+    cid = hashlib.sha256((engine_id() + name + labels().get("masc.lane.instance", "")).encode()).hexdigest()
+    taken = [file for file in root.glob("*.json")
+        if json.loads(file.read_text()).get("Name") == "/" + name
+        and json.loads(file.read_text()).get("engine") == engine_id()]
+    if path(cid).exists() or taken:
         print("container name already exists", file=sys.stderr)
         raise SystemExit(1)
     mode = args[-1]
     config = {"Id": cid, "Name": "/" + name, "engine": engine_id(),
-        "Config": {"Labels": dict([value("--label").split("=", 1)])},
+        "State": {"Status": "running"},
+        "Config": {"Labels": labels()},
         "HostConfig": {"NanoCpus": round(float(value("--cpus")) * 1000000000),
             "Memory": int(value("--memory")),
             "MemorySwap": int(value("--memory-swap")),
@@ -252,8 +258,8 @@ elif argv[:1] == ['create']:
     cid = value('--name')
     assert len(cid) == 64, cid
     mode = argv[-1]
-    config = {'id': cid, 'Id': cid, 'mode': mode, 'argv': argv,
-        'configuration': {'id': cid, 'labels': dict([value('--label').split('=', 1)]),
+    config = {'id': cid, 'Id': cid, 'mode': mode, 'argv': argv, 'status': 'running',
+        'configuration': {'id': cid, 'labels': dict(item.split('=', 1) for flag, item in zip(argv, argv[1:]) if flag == '--label'),
             'resources': {'cpus': int(value('--cpus')), 'memoryInBytes': int(value('--memory')[:-1]) * 1048576},
             'image': {'descriptor': {'digest': digest}}, 'networks': [], 'readOnly': True,
             'capAdd': [], 'capDrop': ['ALL'], 'publishedPorts': [], 'publishedSockets': []}}
@@ -563,10 +569,14 @@ let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw di
   let recover () = Worker.recover_stop ~engine:docker_engine_a ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~instance_id ~container_id:None ~docker_command:docker () in
-  check bool "matching name is not sufficient authority" true (Result.is_error (recover ()));
-  check bool "foreign owner survives recovery refusal" true (Sys.file_exists path);
-  check bool "failed creation does not clean up a foreign name collision" true
-    (Result.is_error (start ~instance_id env sw dir docker "good"));
+  (* A name held by another owner means this binding's create never landed, so
+     recovery has nothing to remove and owes nothing; it must not touch the
+     foreign container. *)
+  unwrap (recover ());
+  check bool "foreign owner survives recovery" true (Sys.file_exists path);
+  (match start ~instance_id env sw dir docker "good" with
+   | Error (Worker.Lifecycle (Masc.Lane_addon_lifecycle.Slot_foreign {instance = Some "foreign-owner"; _})) -> ()
+   | Ok _ | Error _ -> fail "a foreign holder of the name must be refused as Slot_foreign");
   check bool "foreign container remains after failed start cleanup" true (Sys.file_exists path);
   ignore (unwrap (observe worker "good"));
   write path (Yojson.Safe.to_string original);
@@ -760,6 +770,161 @@ let test_the_engine_is_recorded_before_the_first_create () = with_fixture (fun e
        ~docker_command:docker ~on_engine:(fun _ -> Error "disk full") () with
      | Error (Worker.Lifecycle (Masc.Lane_addon_lifecycle.Persistence_failed _)) -> container_files dir
      | Ok _ | Error _ -> fail "an unrecorded engine must stop the start before create"))
+
+
+module Lifecycle = Masc.Lane_addon_lifecycle
+module Slot_state = Masc.Lane_addon_worker_state
+
+let slot_owner dir =
+  match Slot_state.create_owner ~workspace_root:dir ~installation_id:"slot-installation"
+      ~package_id:(package dir "good").id with
+  | Ok owner -> owner | Error message -> fail message
+
+let container_path dir worker = Filename.concat dir (Worker.container_id worker ^ ".json")
+let read_container path = match Yojson.Safe.from_file path with
+  | `Assoc fields -> fields | _ -> fail "expected a fixture container"
+let labels_of path = match List.assoc "Config" (read_container path) with
+  | `Assoc config -> (match List.assoc "Labels" config with
+      | `Assoc labels -> List.map (fun (key, value) -> key, Yojson.Safe.Util.to_string value) labels
+      | _ -> fail "labels")
+  | _ -> fail "config"
+(* What a server that died abruptly leaves behind: its container, stopped. *)
+let leave_exited path =
+  write path (Yojson.Safe.to_string (`Assoc (("State", `Assoc ["Status", `String "exited"])
+    :: List.remove_assoc "State" (read_container path))))
+let relabel path labels =
+  let config = match List.assoc "Config" (read_container path) with
+    | `Assoc config -> config | _ -> fail "config" in
+  write path (Yojson.Safe.to_string (`Assoc (("Config", `Assoc (("Labels",
+    `Assoc (List.map (fun (key, value) -> key, `String value) labels)) :: List.remove_assoc "Labels" config))
+    :: List.remove_assoc "Config" (read_container path))))
+
+let start_writer ?is_live_instance env sw dir docker ~owner instance_id =
+  Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
+    ~package:{ (package dir "good") with state_storage = Types.Persistent }
+    ~state_owner:owner ~docker_command:docker ?is_live_instance ()
+
+(* The incident: the server died and left an exited container holding the
+   shared writer name. A new incarnation clears it by exact ID and starts. *)
+let test_a_dead_predecessor_is_cleared_from_the_writer_slot () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let dead = unwrap (start_writer env sw dir docker ~owner "dead-writer") in
+  let dead_path = container_path dir dead in
+  leave_exited dead_path;
+  let fresh = unwrap (start_writer env sw dir docker ~owner
+    ~is_live_instance:(fun id -> String.equal id "new-writer") "new-writer") in
+  check bool "the dead predecessor was removed" false (Sys.file_exists dead_path);
+  check bool "the new incarnation holds the slot" true (Sys.file_exists (container_path dir fresh));
+  let labels = labels_of (container_path dir fresh) in
+  check (option string) "the new container names its incarnation" (Some "new-writer")
+    (List.assoc_opt "masc.lane.instance" labels);
+  check (option string) "the new container names its state owner" (Some (Slot_state.identity owner))
+    (List.assoc_opt "masc.lane.state.owner" labels);
+  check bool "the persistent state volume was not touched" true
+    (Sys.file_exists (Filename.concat dir (Slot_state.volume_name owner ^ ".volume")));
+  ignore (unwrap (observe fresh "good"));
+  unwrap (Worker.stop fresh))
+
+let slot_foreign_instance = function
+  | Error (Worker.Lifecycle (Lifecycle.Slot_foreign holder)) -> Some holder
+  | Ok _ | Error _ -> None
+
+let test_a_live_sibling_is_never_removed_from_the_writer_slot () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let live = unwrap (start_writer env sw dir docker ~owner "live-writer") in
+  let refused = start_writer env sw dir docker ~owner
+    ~is_live_instance:(fun id -> List.mem id ["live-writer"; "new-writer"]) "new-writer" in
+  check (option string) "the refusal names the live sibling" (Some "live-writer")
+    (Option.bind (slot_foreign_instance refused) (fun (holder : Lifecycle.holder) -> holder.instance));
+  check bool "the live sibling's container is untouched" true (Sys.file_exists (container_path dir live));
+  ignore (unwrap (observe live "good"));
+  unwrap (Worker.stop live))
+
+let test_a_foreign_holder_of_the_writer_slot_is_refused_and_named () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let first = unwrap (start_writer env sw dir docker ~owner "someone") in
+  let path = container_path dir first in
+  (* A container under the slot's name that does not carry this installation's
+     state owner label is not a predecessor, however dead it looks. *)
+  leave_exited path;
+  relabel path ["masc.lane.instance", "someone"];
+  let refused = start_writer env sw dir docker ~owner
+    ~is_live_instance:(fun _ -> false) "new-writer" in
+  (match slot_foreign_instance refused with
+   | Some { Lifecycle.container_id; instance = Some "someone"; state_owner = None } ->
+       check string "the refusal names the container" (Worker.container_id first) container_id
+   | Some _ | None -> fail "the refusal must name the holder and its labels");
+  check bool "the foreign container is untouched" true (Sys.file_exists path);
+  (* Another installation's owner label, with a dead-looking incarnation, is just as foreign. *)
+  relabel path ["masc.lane.instance", "someone"; "masc.lane.state.owner", "another installation"];
+  (match slot_foreign_instance (start_writer env sw dir docker ~owner
+     ~is_live_instance:(fun _ -> false) "new-writer") with
+   | Some { Lifecycle.state_owner = Some "another installation"; _ } -> ()
+   | Some _ | None -> fail "a container of another state owner must be refused");
+  check bool "the other owner's container is untouched" true (Sys.file_exists path);
+  relabel path ["masc.lane.instance", "someone"; "masc.lane.state.owner", Slot_state.identity owner];
+  ignore (unwrap (observe first "good"));
+  unwrap (Worker.stop first))
+
+let test_an_unremovable_predecessor_is_reported_with_its_incarnation () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let dead = unwrap (start_writer env sw dir docker ~owner "dead-writer") in
+  let path = container_path dir dead in
+  leave_exited path;
+  let marker = Filename.concat dir (Worker.container_id dead ^ ".refuse-remove") in
+  write marker "blocked";
+  (match start_writer env sw dir docker ~owner ~is_live_instance:(fun _ -> false) "new-writer" with
+   | Error (Worker.Lifecycle (Lifecycle.Slot_predecessor_unremovable {instance_id = "dead-writer"; _})) -> ()
+   | Ok _ | Error _ -> fail "a predecessor whose removal is refused must be reported as unremovable");
+  check bool "the predecessor survives the refused removal" true (Sys.file_exists path);
+  Sys.remove marker;
+  let fresh = unwrap (start_writer env sw dir docker ~owner ~is_live_instance:(fun _ -> false) "new-writer") in
+  check bool "once removal works the next start clears it" false (Sys.file_exists path);
+  unwrap (Worker.stop fresh))
+
+let test_the_holder_condition_reads_the_container_it_was_refused_for () = with_fixture (fun env sw dir docker ->
+  let owner = slot_owner dir in
+  let live = unwrap (start_writer env sw dir docker ~owner "live-writer") in
+  let holder = match slot_foreign_instance (start_writer env sw dir docker ~owner "new-writer") with
+    | Some holder -> holder | None -> fail "the second start must be refused" in
+  let changed () = Worker.holder_changed ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+    ~mgr:(Eio.Stdenv.process_mgr env) ~runtime:Types.Docker ~docker_command:docker holder in
+  check bool "the same container with the same labels is not a change" false (changed ());
+  relabel (container_path dir live) ["masc.lane.instance", "live-writer"];
+  check bool "different labels are a change" true (changed ());
+  unwrap (Worker.stop live);
+  check bool "a removed container is a change" true (changed ()))
+
+let test_an_apple_dead_predecessor_is_cleared_from_the_writer_slot () =
+  with_apple_fixture (fun env sw dir command ->
+    let owner = match Slot_state.create_owner ~workspace_root:dir ~installation_id:"apple-slot"
+        ~package_id:"worker-test" with Ok value -> value | Error message -> fail message in
+    let dead = unwrap (start_apple ~state_owner:owner ~instance_id:"dead-writer" env sw dir command "good") in
+    let path = Filename.concat dir (Worker.container_id dead ^ ".json") in
+    (* Apple reports a stopped container as stopped. *)
+    let stopped = match Yojson.Safe.from_file path with
+      | `Assoc fields -> `Assoc (("status", `String "stopped") :: List.remove_assoc "status" fields)
+      | _ -> fail "expected a fixture container" in
+    write path (Yojson.Safe.to_string stopped);
+    let base = package dir "good" in
+    let fresh = unwrap (Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"new-writer"
+      ~package:{base with runtime = Types.Apple_container; state_storage = Types.Persistent;
+                resources = {base.resources with cpus = 1.; pids = None}}
+      ~state_owner:owner ~is_live_instance:(fun id -> String.equal id "new-writer")
+      ~container_command:command ()) in
+    let labels = match List.assoc "configuration" (read_container path) with
+      | `Assoc configuration -> (match List.assoc "labels" configuration with
+          | `Assoc labels -> List.map (fun (key, value) -> key, Yojson.Safe.Util.to_string value) labels
+          | _ -> fail "labels")
+      | _ -> fail "configuration" in
+    check (option string) "the Apple slot now belongs to the new incarnation" (Some "new-writer")
+      (List.assoc_opt "masc.lane.instance" labels);
+    check (option string) "and names its state owner" (Some (Slot_state.identity owner))
+      (List.assoc_opt "masc.lane.state.owner" labels);
+    ignore (unwrap (observe fresh "good"));
+    unwrap (Worker.stop fresh))
 
 exception Owner_detached
 
@@ -2192,4 +2357,16 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
     test_an_unreadable_engine_identity_is_not_the_recorded_one;
   test_case "the engine is recorded before the first create" `Quick
     test_the_engine_is_recorded_before_the_first_create;
+  test_case "a dead predecessor is cleared from the writer slot" `Quick
+    test_a_dead_predecessor_is_cleared_from_the_writer_slot;
+  test_case "a live sibling is never removed from the writer slot" `Quick
+    test_a_live_sibling_is_never_removed_from_the_writer_slot;
+  test_case "a foreign holder of the writer slot is refused and named" `Quick
+    test_a_foreign_holder_of_the_writer_slot_is_refused_and_named;
+  test_case "an unremovable predecessor is reported with its incarnation" `Quick
+    test_an_unremovable_predecessor_is_reported_with_its_incarnation;
+  test_case "the holder condition reads the container it was refused for" `Quick
+    test_the_holder_condition_reads_the_container_it_was_refused_for;
+  test_case "an Apple dead predecessor is cleared from the writer slot" `Quick
+    test_an_apple_dead_predecessor_is_cleared_from_the_writer_slot;
 ]]

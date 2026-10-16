@@ -78,9 +78,26 @@
     "lib/workspace/workspace_task_verification.ml",
     "lib/workspace/workspace_utils_ops.ml",
     "lib/workspace/workspace_verification_store.ml",
+    "packages/agent_core/lib/agent/agent.ml",
+    "packages/agent_core/lib/agent/agent_execution_runner.ml",
+    "packages/agent_core/lib/agent/agent_lifecycle.ml",
+    "packages/agent_core/lib/agent/agent_lifecycle_events.ml",
+    "packages/agent_core/lib/agent/agent_run_loop_support.ml",
     "packages/agent_core/lib/execution_event_store.ml",
     "packages/agent_core/lib/execution_journal.ml",
+    "packages/agent_core/lib/llm_provider/complete_stream.ml",
+    "packages/agent_core/lib/llm_provider/complete_stream_acc.ml",
+    "packages/agent_core/lib/llm_provider/complete_stream_error.ml",
+    "packages/agent_core/lib/llm_provider/complete_stream_error.mli",
+    "packages/agent_core/lib/llm_provider/complete_stream_state.ml",
+    "packages/agent_core/lib/llm_provider/complete_sync.ml",
+    "packages/agent_core/lib/llm_provider/provider_admission.ml",
+    "packages/agent_core/lib/llm_provider/provider_admission_state.ml",
+    "packages/agent_core/test/test_agent_lifecycle.ml",
     "packages/agent_core/test/test_execution_event_store.ml",
+    "packages/agent_core/test/test_pipeline.ml",
+    "packages/agent_core/test/test_provider_admission.ml",
+    "packages/agent_core/test/test_wire_parse_dump.ml",
     "test/test_auth_token_rotation_transaction.ml",
     "test/test_board_delete_rewrite_requeue.ml",
     "test/test_board_persistence_load_contract.ml",
@@ -108,5 +125,164 @@
     "test/test_tui_decode.ml",
     "test/test_tui_runtime_config_edit.ml",
     "test/test_verification.ml"
+  ],
+  "focused_reading_scopes": [
+    {
+      "path": "packages/agent_core/lib/agent/agent_lifecycle.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/agent/agent_lifecycle_events.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/agent/agent_execution_runner.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/agent/agent_run_loop_support.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/agent/agent.ml",
+      "ranges": [
+        [
+          155,
+          330
+        ],
+        [
+          794,
+          980
+        ]
+      ],
+      "scope": "Selected standard/advanced loop and execution-scope seams; definitions searched elsewhere"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/provider_admission.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/provider_admission_state.ml",
+      "ranges": null,
+      "scope": "Full source including inline tests"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream_acc.ml",
+      "ranges": null,
+      "scope": "Full source"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream_state.ml",
+      "ranges": [
+        [
+          1,
+          100
+        ],
+        [
+          274,
+          375
+        ]
+      ],
+      "scope": "Selected state shape and helpers; long full-file output was truncated, not full semantic coverage"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_sync.ml",
+      "ranges": [
+        [
+          1,
+          230
+        ]
+      ],
+      "scope": "Selected synchronous parsing boundary"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream.ml",
+      "ranges": [
+        [
+          1,
+          240
+        ],
+        [
+          1100,
+          1205
+        ],
+        [
+          1270,
+          1318
+        ]
+      ],
+      "scope": "Selected event mapping, inline tests and finalization caller"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream_error.ml",
+      "ranges": [
+        [
+          1,
+          130
+        ],
+        [
+          204,
+          356
+        ],
+        [
+          788,
+          826
+        ]
+      ],
+      "scope": "Candidate projection and diagnostic implementation plus excerpt assertions; other test output was partial"
+    },
+    {
+      "path": "packages/agent_core/lib/llm_provider/complete_stream_error.mli",
+      "ranges": null,
+      "scope": "Full public signature"
+    },
+    {
+      "path": "packages/agent_core/test/test_wire_parse_dump.ml",
+      "ranges": null,
+      "scope": "Full existing diagnostic sink scenario"
+    },
+    {
+      "path": "packages/agent_core/test/test_pipeline.ml",
+      "ranges": [
+        [
+          1811,
+          1920
+        ]
+      ],
+      "scope": "Native cancellation scenario setup and dispatch boundaries; terminal-disposition registrations also searched"
+    },
+    {
+      "path": "packages/agent_core/test/test_provider_admission.ml",
+      "ranges": [
+        [
+          220,
+          340
+        ],
+        [
+          886,
+          996
+        ]
+      ],
+      "scope": "Publication/reconfiguration and all-path bounded-wait scenarios"
+    },
+    {
+      "path": "packages/agent_core/test/test_agent_lifecycle.ml",
+      "ranges": [
+        [
+          1,
+          105
+        ],
+        [
+          114,
+          220
+        ]
+      ],
+      "scope": "Snapshot and transition scenarios"
+    }
   ]
 }

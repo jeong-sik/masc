@@ -209,18 +209,22 @@ val handle_keeper_tool_approvals_list :
 val handle_keeper_tool_approval_mode_get :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [GET /api/v1/keepers/tool-approval-mode]: the keepers moved off
-    the default stance, as [{overrides: [{keeper, mode}], default:"auto"}].
-    A keeper absent from the list is [auto]. *)
+    the default stance, as
+    [{overrides: [{keeper, mode}], default:"auto", restore_error}]. A keeper
+    absent from the list is [auto]. [restore_error] is [null] while the
+    persisted store reads cleanly and a string when the last boot replay or
+    set could not read it — a corrupt store must not look identical to an
+    empty one. *)
 
 val handle_keeper_tool_approval_mode_set :
   actor:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/tool-approval-mode]. Reads
     [{"name", "mode"}] where mode is ["auto"] or ["yolo"], validates the
-    keeper is registered, and sets the in-memory stance the approval gate
-    consults per call. The stance does not survive a restart — deliberately:
-    [yolo] runs every tool call unasked. [actor] is the authenticated
-    operator who changed the stance and is recorded in the change log. *)
+    keeper is registered, and persists the stance the approval gate
+    consults per call; it survives restarts and is replayed at boot.
+    [actor] is the authenticated operator who changed the stance and is
+    recorded in the change log and the persisted row. *)
 
 val handle_keeper_run_next :
   Mcp_server.server_state -> actor:string -> Httpun.Request.t -> Httpun.Reqd.t -> unit

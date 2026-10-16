@@ -7401,10 +7401,11 @@ let test_config_post_round_trips_typed_tools_patch () =
   let toml_path = write_config_sync_toml config name in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_tool_approval_mode.set
-        (Masc.Keeper_tool_approval_mode.shared ())
-        ~keeper_name:name
-        Masc.Keeper_tool_approval_mode.Auto;
+      ignore
+        (Masc.Keeper_tool_approval_mode.set
+           (Masc.Keeper_tool_approval_mode.shared ())
+           ~base_path:config.base_path ~actor:"test" ~keeper_name:name
+           Masc.Keeper_tool_approval_mode.Auto);
       ignore
         (Masc.Keeper_keepalive.stop_keepalive_and_await
            ~base_path:config.base_path
@@ -7448,10 +7449,11 @@ let test_config_post_round_trips_typed_tools_patch () =
          (Masc.Keeper_keepalive.stop_keepalive_and_await
             ~base_path:config.base_path
             name);
-       Masc.Keeper_tool_approval_mode.set
-         (Masc.Keeper_tool_approval_mode.shared ())
-         ~keeper_name:name
-         Masc.Keeper_tool_approval_mode.Yolo;
+       ignore
+         (Masc.Keeper_tool_approval_mode.set
+            (Masc.Keeper_tool_approval_mode.shared ())
+            ~base_path:config.base_path ~actor:"test" ~keeper_name:name
+            Masc.Keeper_tool_approval_mode.Yolo);
        let yolo_raw, yolo_json =
          post_config
            ~sw
@@ -7470,10 +7472,11 @@ let test_config_post_round_trips_typed_tools_patch () =
            |> member "full_native_admission"
            |> member "status"
            |> to_string);
-       Masc.Keeper_tool_approval_mode.set
-         (Masc.Keeper_tool_approval_mode.shared ())
-         ~keeper_name:name
-         Masc.Keeper_tool_approval_mode.Auto;
+       ignore
+         (Masc.Keeper_tool_approval_mode.set
+            (Masc.Keeper_tool_approval_mode.shared ())
+            ~base_path:config.base_path ~actor:"test" ~keeper_name:name
+            Masc.Keeper_tool_approval_mode.Auto);
        let invalid_raw, _ =
          post_config
            ~sw

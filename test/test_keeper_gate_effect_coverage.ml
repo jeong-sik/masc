@@ -606,14 +606,18 @@ let test_yolo_does_not_carry_a_call_past_the_gate () =
    | Error error -> fail ("failed to select manual Gate mode: " ^ error));
   ignore (install_exn ~base_path);
   let meta = make_meta "gate-yolo-keeper" in
-  Keeper_tool_approval_mode.set
-    (Keeper_tool_approval_mode.shared ())
-    ~keeper_name:"gate-yolo-keeper" Keeper_tool_approval_mode.Yolo;
+  ignore
+    (Keeper_tool_approval_mode.set
+       (Keeper_tool_approval_mode.shared ())
+       ~base_path ~actor:"test" ~keeper_name:"gate-yolo-keeper"
+       Keeper_tool_approval_mode.Yolo);
   Fun.protect
     ~finally:(fun () ->
-      Keeper_tool_approval_mode.set
-        (Keeper_tool_approval_mode.shared ())
-        ~keeper_name:"gate-yolo-keeper" Keeper_tool_approval_mode.Auto)
+      ignore
+        (Keeper_tool_approval_mode.set
+           (Keeper_tool_approval_mode.shared ())
+           ~base_path ~actor:"test" ~keeper_name:"gate-yolo-keeper"
+           Keeper_tool_approval_mode.Auto))
   @@ fun () ->
   (* The stance is in force -- otherwise this test would pass by not having
      set anything. *)

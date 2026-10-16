@@ -527,9 +527,9 @@ let handle_keeper_turns_list state request reqd =
    unasked, and the operator who set it is not always the operator reading
    the logs later. *)
 let handle_keeper_tool_approval_mode_get _state request reqd =
-  let overrides =
-    Keeper_tool_approval_mode.overrides (Keeper_tool_approval_mode.shared ())
-  in
+  let store = Keeper_tool_approval_mode.shared () in
+  let overrides = Keeper_tool_approval_mode.overrides store in
+  let restore_error = Keeper_tool_approval_mode.last_restore_error store in
   respond_json_value_with_cors ~status:`OK request reqd
     (`Assoc
        [ ( "overrides"
@@ -544,6 +544,10 @@ let handle_keeper_tool_approval_mode_get _state request reqd =
                     ])
                 overrides) )
        ; ("default", `String "auto")
+       ; ( "restore_error"
+         , match restore_error with
+           | Some detail -> `String detail
+           | None -> `Null )
        ])
 ;;
 
@@ -582,21 +586,43 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
       else (
-        Keeper_tool_approval_mode.set
-          (Keeper_tool_approval_mode.shared ())
-          ~keeper_name
-          mode;
-        Log.Keeper.info
-          "keeper_tool_approval_mode: keeper=%s mode=%s actor=%s"
-          keeper_name
-          (Keeper_tool_approval_mode.mode_to_string mode)
-          actor;
-        respond_json_value_with_cors ~status:`OK request reqd
-          (`Assoc
-             [ ("keeper", `String keeper_name)
-             ; ( "mode"
-               , `String (Keeper_tool_approval_mode.mode_to_string mode) )
-             ])))
+        match
+          Keeper_tool_approval_mode.set
+            (Keeper_tool_approval_mode.shared ())
+            ~base_path ~actor ~keeper_name mode
+        with
+        | Error detail ->
+          respond_json_value_with_cors ~status:`Internal_server_error request
+            reqd
+            (keeper_chat_stream_error_json detail)
+        | Ok outcome ->
+          let audit_error =
+            match outcome with
+            | Keeper_tool_approval_mode.Applied -> None
+            | Keeper_tool_approval_mode.Applied_audit_failed detail ->
+              Log.Keeper.warn
+                "keeper_tool_approval_mode: audit failed keeper=%s mode=%s actor=%s: %s"
+                keeper_name
+                (Keeper_tool_approval_mode.mode_to_string mode)
+                actor
+                detail;
+              Some detail
+          in
+          Log.Keeper.info
+            "keeper_tool_approval_mode: keeper=%s mode=%s actor=%s"
+            keeper_name
+            (Keeper_tool_approval_mode.mode_to_string mode)
+            actor;
+          respond_json_value_with_cors ~status:`OK request reqd
+            (`Assoc
+               ([ ("keeper", `String keeper_name)
+                ; ( "mode"
+                  , `String (Keeper_tool_approval_mode.mode_to_string mode) )
+                ]
+                @
+                match audit_error with
+                | None -> []
+                | Some detail -> [ ("audit_error", `String detail) ]))))
 ;;
 
 let handle_keeper_run_next state ~actor request reqd =

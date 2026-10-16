@@ -40,3 +40,10 @@ val keeper_modes : base_path:string -> string
     it: one keeper's stance changing must not rewrite the file every other
     keeper's decision is read from. Holds only keepers an operator has
     actually moved, so the file is also the list of them. *)
+
+val tool_approval_modes : base_path:string -> string
+(** Per-Keeper tool-approval-mode overrides ({!Keeper_tool_approval_mode}),
+    a separate file from {!keeper_modes}: the Gate decides where effects go,
+    this stance decides whether the chat asks at all, and the two are read by
+    different loops. Holds only keepers an operator has moved off [Auto], so
+    the file is also the list of them. *)

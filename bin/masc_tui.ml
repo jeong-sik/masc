@@ -18278,7 +18278,8 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
              (match mode with
               | Masc.Keeper_tool_approval_mode.Yolo ->
                   Printf.sprintf
-                    "%s runs every tool call unasked (%s) until restart or g"
+                    "%s runs every tool call unasked (%s) until set back to \
+                     auto"
                     keeper_name
                     (Masc_tui_types.tool_mode_word Masc.Keeper_tool_approval_mode.Yolo)
               | Masc.Keeper_tool_approval_mode.Auto ->

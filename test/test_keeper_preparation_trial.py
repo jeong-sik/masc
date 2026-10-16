@@ -208,6 +208,45 @@ def malformed_final_evidence(args, root, head):
         "real_model": False, "speedup": None}))
 
 
+def fixed_child_is_not_upstream(args, root, head):
+    experiment = root / "fixed-child-experiment.json"
+    experiment.write_text(json.dumps({"schema_version": 1, "case": "upstream_inline", "pairs": 1,
+        "runtime": {"mode": "synthetic_streaming", "model_id": args.model_id,
+                    "max_context_tokens": args.max_context_tokens, "max_output_tokens": args.max_output_tokens},
+        "synthetic_outcome": "fixed_child"}) + "\n", encoding="utf-8")
+    output = root / "fixed-child"
+    code = subprocess.run([sys.executable, str(args.coordinator.resolve()),
+        "--driver", str(args.driver.resolve()), "--source-head", head,
+        "--experiment", str(experiment), "--prompts", str(args.prompts.resolve()),
+        "--output", str(output)], check=False).returncode
+    require(code == 0, f"fixed-child scenario failed; preserved evidence: {root}")
+    manifest, summary = read(output / "manifest.json"), read(output / "summary.json")
+    require(summary["expected"] == len(manifest["expected_attempts"]) == 2 and
+            summary["outcomes"] == {"correct": 2, "explicit_failure": 0, "unfinished": 0} and
+            summary["strategy_compliant"] == 1,
+            "a correct constant child must stay in the denominator without becoming upstream compliance")
+    for entry in manifest["expected_attempts"]:
+        directory = (output / entry["path"]).parent
+        receipt = read(directory / "attempt.json")
+        require(receipt["strategy_compliant"] is (entry["strategy"] == "direct") and
+                receipt["source_ack"] is True and receipt["verified_stdout_read_execution_ids"] and
+                receipt["remaining_queue"] == receipt["backend_calls_after_ready"] == 0,
+                "noncompliance lost original physical work or changed objective completion")
+        if entry["strategy"] == "exact_skill":
+            calls = read(directory / "tool-calls.json")
+            parents = [row for row in calls if row["tool"] == "keeper_composition_run"]
+            require(len(parents) == 1 and set(parents[0]["input"]) == {"recipe"},
+                    "constant-child reproduction did not cross the original public recipe call")
+            nodes = parents[0]["input"]["recipe"]["nodes"]
+            require(len(nodes) == 1 and nodes[0]["input"]["fields"][0]["value"]["kind"] == "literal",
+                    "reproduction accidentally added an actual upstream producer")
+        peer = read(directory / "provider-events.json")
+        check_http_observation(directory, receipt,
+                               [row for row in peer if row["kind"] == "synthetic_provider_received"])
+    print("PREPARATION_FIXED_CHILD_PASS " + json.dumps({"expected": 2, "correct": 2,
+        "strategy_compliant": 1, "real_model": False, "speedup": None}))
+
+
 def named_skill_reuse(args, root, head):
     experiment = root / "named-inline-experiment.json"
     experiment.write_text(json.dumps({"schema_version": 1, "case": "named_inline", "pairs": 1,
@@ -433,6 +472,7 @@ def main():
     configured_http_refusal(args, root, head)
     malformed_final_evidence(args, root, head)
     named_skill_reuse(args, root, head)
+    fixed_child_is_not_upstream(args, root, head)
 
 
 if __name__ == "__main__":

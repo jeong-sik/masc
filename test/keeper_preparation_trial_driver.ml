@@ -51,6 +51,14 @@ let preparation_case experiment = match string "case" experiment with
   | "named_inline" -> Named_inline
   | _ -> failwith "unsupported preparation case"
 
+type synthetic_outcome = Successful | Provider_refusal | Malformed_final | Fixed_child
+let synthetic_outcome experiment = match string "synthetic_outcome" experiment with
+  | "success" -> Successful
+  | "provider_refusal" -> Provider_refusal
+  | "malformed_final" -> Malformed_final
+  | "fixed_child" -> Fixed_child
+  | _ -> failwith "unsupported synthetic outcome"
+
 let runtime_mode runtime = match string "mode" runtime with
   | "synthetic_streaming" -> Synthetic_streaming
   | "configured_http" -> Configured_http (string "configuration" runtime)
@@ -87,8 +95,7 @@ let settings experiment =
      require (String.trim model = model && model <> "") "model_id must be explicit and nonblank";
      require (integer "max_context_tokens" runtime > 0 && integer "max_output_tokens" runtime > 0)
        "model capability declarations must be positive";
-     require (List.mem (string "synthetic_outcome" experiment) ["success";"provider_refusal";"malformed_final"])
-       "unsupported synthetic outcome"
+     ignore (synthetic_outcome experiment : synthetic_outcome)
    | Configured_http configuration ->
      exact_keys ["schema_version";"case";"pairs";"runtime"] experiment;
      exact_keys ["mode";"configuration"] runtime;
@@ -409,15 +416,20 @@ let step_name = function
   | Finish -> "finish" | Finished -> "finished"
 
 type composition_projection = Selected_stdout | Full_actions
+type composition_arguments = Selection_output | Selected_literal
 
-let recipe ~projection fixture =
-  let output = `Assoc ["kind",`String "output";"node",`String "arguments";"pointer",`String "/content"] in
+let recipe ~projection ~arguments fixture =
+  let selected,producers = match arguments with
+    | Selection_output ->
+      `Assoc ["kind",`String "output";"node",`String "arguments";"pointer",`String "/content"],
+      [`Assoc ["id",`String "arguments";"tool",`String "keeper_artifact_read";
+        "args",`Assoc ["sha256",field "selection_sha256" fixture]]]
+    | Selected_literal ->
+      `Assoc ["kind",`String "literal";"value",field "selected_job_id" fixture],[] in
   `Assoc ["execution",`String "inline";"nodes",`List
-    [`Assoc ["id",`String "arguments";"tool",`String "keeper_artifact_read";
-      "args",`Assoc ["sha256",field "selection_sha256" fixture]];
-     `Assoc ["id",`String "resolved_stdout";"skill_reference",field "skill_reference" fixture;
+    (producers @ [`Assoc ["id",`String "resolved_stdout";"skill_reference",field "skill_reference" fixture;
       "input",`Assoc ["kind",`String "object";"fields",`List
-        [`Assoc ["name",`String "job_id";"value",output]]]]];
+        [`Assoc ["name",`String "job_id";"value",selected]]]]]);
     "exports",`List (match projection with
       | Selected_stdout -> [`Assoc ["name",`String "stdout";"node",`String "resolved_stdout";"pointer",`String "/stdout"]]
       | Full_actions -> [])]
@@ -541,6 +553,45 @@ let named_execution_proven ~base ~fixture ~turn ~raw_records rows stdout_rows
         Yojson.Safe.equal (field "input" node) (field "input" row)) nodes) stdout_rows) = Some true
   | [] | _ :: _ -> false
 
+(* A templated input may contain only constants. Its serialized "upstream"
+   kind is not proof that this child consumed an in-run producer's output. *)
+let selection_dependency_proven ~base ~fixture ~turn ~parent ~draft ~argument_node ~composition_run_id ~nodes rows =
+  let module Plan = Keeper_tool_plan in
+  let canonical = field "nodes" (field "plan" draft) |> to_list in
+  let unique id values = match List.filter (fun node -> field "id" node=`String id) values with
+    | [node] -> node
+    | [] | _ :: _ -> failwith "canonical producer or argument node is not unique" in
+  let template node = Keeper_tool_plan_request.template_of_json (field "input" node)
+      |> get (fun _ -> "canonical input template could not be decoded") in
+  match template (unique argument_node canonical) with
+  | Plan.Json_template.Object ["job_id",Plan.Json_template.Output {node_id;pointer}] ->
+    require (Plan.Json_pointer.to_string pointer="/content") "child does not consume selection content";
+    let producer_id = Plan.Node_id.to_string node_id in
+    let producer = unique producer_id canonical in
+    require (field "tool" producer=`String "keeper_artifact_read") "child producer is not the selection reader";
+    let input = Plan.Json_template.resolve ~lookup:(fun _ -> None) (template producer)
+        |> get (fun _ -> "selection producer input is not fixed") in
+    require (field "sha256" input=field "selection_sha256" fixture) "producer reads a different original input";
+    let physical = List.filter (fun node -> field "node_id" node=`String producer_id &&
+      field "tool_name" node=`String "keeper_artifact_read" && Yojson.Safe.equal (field "input" node) input) nodes in
+    (match physical with
+     | [node] -> List.exists (fun row -> original_turn_source ~fixture ~turn row &&
+       field "execution_id" row=field "execution_id" node &&
+       field "composition_node_id" row=field "node_id" node &&
+       field "tool" row=field "tool_name" node && Yojson.Safe.equal (field "input" row) input &&
+       field "parent_tool_use_id" row=field "tool_use_id" parent &&
+       field "composition_run_id" row=`String composition_run_id &&
+       match Tool_result.recorded_call_outcome row with
+       | Recorded_succeeded ->
+         let page = row_document ~base row in
+         field "offset" page=`Int 0 && field "eof" page=`Bool true &&
+         field "content" page=field "selected_job_id" fixture &&
+         sha (string "content" page)=string "selection_sha256" fixture
+       | Recorded_deferred | Recorded_failed | Recorded_unsettled | Recorded_malformed -> false) rows
+     | [] | _ :: _ -> false)
+  | Plan.Json_template.Literal _ | Plan.Json_template.Output _ | Plan.Json_template.Param _
+  | Plan.Json_template.Object _ | Plan.Json_template.Array _ -> false
+
 let nested_execution_proven ~base ~fixture ~turn ~skill_reference
     ~(scope : Keeper_skill_activation_ledger.nested_composition_scope) ~raw_records rows stdout_rows =
   let parents = List.filter (fun row ->
@@ -575,6 +626,8 @@ let nested_execution_proven ~base ~fixture ~turn ~skill_reference
       Yojson.Safe.equal (field "reference" call) (Skill_reference.to_yojson skill_reference) &&
       field "kind" (field "arguments" call)=`String "upstream" &&
       let child_scope = field "scope" call in
+      selection_dependency_proven ~base ~fixture ~turn ~parent ~draft
+        ~argument_node:(string "argument_node" child_scope) ~composition_run_id:scope.composition_run_id ~nodes rows &&
       let arguments = List.filter (fun node -> field "node_id" node=field "argument_node" child_scope) nodes in
       List.exists (fun node -> field "input" node=`Assoc ["job_id",field "selected_job_id" fixture]) arguments &&
       List.exists (fun mapping -> field "source" mapping=`String "consume" &&
@@ -607,10 +660,13 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
   let model = string "model_id" runtime in
   (* Exercise both valid result presentations with the existing scenarios.
      The malformed-final case still fails solely its final JSON contract. *)
-  let projection = match string "synthetic_outcome" experiment with
-    | "success" | "provider_refusal" -> Selected_stdout
-    | "malformed_final" -> Full_actions
-    | _ -> failwith "unsupported synthetic outcome" in
+  let outcome = synthetic_outcome experiment in
+  let projection = match outcome with
+    | Successful | Provider_refusal -> Selected_stdout
+    | Malformed_final | Fixed_child -> Full_actions in
+  let arguments = match outcome with
+    | Fixed_child -> Selected_literal
+    | Successful | Provider_refusal | Malformed_final -> Selection_output in
   let next_step = ref Select in
   let awaiting = ref None in
   let loading = ref None in
@@ -634,7 +690,7 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
       "body_bytes",`Int (String.length raw);"stream",field "stream" request;"model",field "model" request];
     require (field "stream" request = `Bool true) "actual runtime did not request streaming";
     require (field "model" request = `String model) "actual request model differs from declared model";
-    if string "synthetic_outcome" experiment = "provider_refusal" then
+    if outcome = Provider_refusal then
       Cohttp_eio.Server.respond_string ~status:`Bad_request
         ~body:{|{"error":{"type":"synthetic_refusal","message":"Declared fixture refusal"}}|} ()
     else (
@@ -726,7 +782,7 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
           let digest = sha body in
           require (digest = string "expected_stdout_sha256" fixture) "actual selected stdout digest differs";
           let answer = Yojson.Safe.to_string (`Assoc ["job_id",`String job_id;"stdout_sha256",`String digest]) in
-          let answer = if string "synthetic_outcome" experiment="malformed_final"
+          let answer = if outcome=Malformed_final
             then "Result: " ^ answer else answer in
           final_answer := Some answer;
           next_step := Finished;
@@ -737,11 +793,11 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             | Select -> "keeper_artifact_read",`Assoc ["sha256",field "selection_sha256" fixture]
             | Direct_result -> "keeper_job_result",`Assoc ["job_id",`String (needed !selected)]
             | Direct_stdout -> "keeper_artifact_read",`Assoc ["sha256",`String (needed !draft_sha)]
-            | Prepare -> Keeper_composition_draft.prepare_tool_name,recipe ~projection fixture
+            | Prepare -> Keeper_composition_draft.prepare_tool_name,recipe ~projection ~arguments fixture
             | Named_skill -> string "skill_tool_name" fixture,`Assoc ["job_id",`String (needed !selected)]
             | Run -> Keeper_composition_draft.run_tool_name,(match projection with
                 | Selected_stdout -> `Assoc ["sha256",`String (needed !draft_sha)]
-                | Full_actions -> `Assoc ["recipe",recipe ~projection fixture])
+                | Full_actions -> `Assoc ["recipe",recipe ~projection ~arguments fixture])
             | Finish | Finished -> failwith "final step cannot dispatch a tool" in
           let id = Printf.sprintf "call-%d-%s" request_number (step_name step) in
           if List.mem name actual_tools then (

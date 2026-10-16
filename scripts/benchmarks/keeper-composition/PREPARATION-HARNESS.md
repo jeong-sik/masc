@@ -22,10 +22,14 @@ The synthetic experiment JSON has exactly these fields:
 - `runtime`: exactly `mode="synthetic_streaming"`, a nonblank `model_id`, and
   positive `max_context_tokens` / `max_output_tokens`. These are explicit
   synthetic capability declarations, with no implicit model or capability cap.
-- `synthetic_outcome`: `"success"`, `"provider_refusal"` or `"malformed_final"`.
+- `synthetic_outcome`: `"success"`, `"provider_refusal"`, `"malformed_final"`
+  or `"fixed_child"`.
   Refusal exercises the actual Runtime error boundary. A malformed final
   contains the correct JSON in prose after actual physical work, so objective
   validation must refuse it while retaining the failed attempt's measurements.
+  `fixed_child` exercises an `upstream_inline` task completed with a tagged
+  constant child argument. Its objective is correct, but the Skill arm must
+  remain noncompliant with the assigned upstream strategy.
 
 For an external HTTP Runtime, keep `schema_version`, `case` and `pairs`, omit
 `synthetic_outcome`, and supply `runtime` with exactly `mode="configured_http"`
@@ -164,6 +168,15 @@ argument and physical stdout execution. Model-generated tool-use IDs and child
 aliases need not match the scripted peer. There are no latency percentiles or
 speedup calculations in this harness yet.
 
+A tagged child template containing only constants is executable, but does not
+prove an upstream dependency. The upstream measurement now follows the child
+argument's typed `/content` output reference in the frozen canonical plan to
+the exact original selection reader, then joins its actual complete successful
+read to this same run/SDK parent/Task/turn. This stricter measurement supersedes
+older compliance observations that checked only the serialized `upstream` kind
+and resolved argument value. Keep those older receipts unchanged and annotate
+the limitation when citing them.
+
 Final validation records a closed outcome: verified JSON, missing/malformed
 final, wrong object shape, wrong original job/digest, or scripted wire mismatch.
 It never extracts a JSON fragment from prose. A returned cycle first persists
@@ -230,6 +243,8 @@ physical first-leaf/Task/trace/ACK join, same common input/inventory, actual exa
 Skill activation, resolved child argument, persisted final digest and backend0.
 It also runs a separate named-reuse pair through the actual named Skill Tool,
 checking its activation and original physical leaf/SDK parent without prepare/run.
+The fixed-child scenario additionally completes both objectives while retaining
+the Skill arm's noncompliance, distinguishing a template from an actual dependency.
 It also crosses an independently hosted loopback HTTP refusal through the
 configured Runtime branch for both arms, checks the fixture environment
 credential binding, and retains both refusals as explicit failures. That server

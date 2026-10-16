@@ -39,11 +39,6 @@ val validate_media_type : string -> (string, string) result
 val validate_image_size : string -> (unit, string) result
 (** Validate raw image bytes against {!max_image_bytes}. *)
 
-val truncated_of_stop_reason : Agent_core.Types.stop_reason -> bool
-(** Collapse the provider's typed terminal reason to the single [truncated] bit
-    {!Multimodal.Vision_analyze.classify} consumes: [MaxTokens -> true], every
-    other variant -> [false]. Exhaustive so a new agent-core variant forces a decision. *)
-
 val message_of_request
   :  Multimodal.Vision_analyze.request
   -> Agent_core.Types.message
@@ -134,11 +129,10 @@ type vision_outcome =
 val outcome_of_response :
   runtime_id:string -> requested_model:string ->
   Agent_core.Types.api_response -> vision_outcome
-(** Classify a provider response into a {!vision_outcome}. A reply the model
-    truncated mid-JSON fails the structured parse before its text can be read;
-    when the stop reason is a MaxTokens cut this is reported as [Vo_truncated]
-    (remediation: a larger budget) rather than [Vo_invalid_structured_response],
-    so the operator sees the real cause. Exposed for tests. *)
+(** Classify through the SDK's closed structured response outcome. A token
+    cut is [Vo_truncated]; refusal is a terminal [Vo_provider] policy rejection
+    and is never retried on another candidate. Other interrupted/truncated
+    states are terminal runtime failures, distinct from invalid JSON. *)
 
 val run_vision
   :  ?base_path:string

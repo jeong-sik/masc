@@ -106,17 +106,28 @@ type config_error =
       }
   | SensitiveValueInConfig of { detail : string }
 
+(** Closed parse/schema failure class safe for public diagnostics. Model and
+    parser strings remain private evidence in [StructuredOutputParseError]. *)
 type structured_failure =
   | Empty_response
+  | Multiple_text_blocks
   | Invalid_json
   | Expected_object
   | Schema_rejected
   | Schema_type_mismatch
-(** Closed failure class safe for public diagnostics. Model and parser strings
-    remain private evidence in [StructuredOutputParseError]. *)
+
+type structured_refusal = Policy_refusal | Content_filtered
+type structured_truncation = Token_limit | Repetition_limit | Context_limit
+type structured_interruption = Paused_turn | Compacted_turn | Missing_tool_calls | Unknown_stop
+type structured_response_state =
+  | Awaiting_tool_results
+  | Refused_response of structured_refusal
+  | Truncated_response of structured_truncation
+  | Interrupted_response of structured_interruption
 
 type serialization_error =
   | JsonParseError of { detail : string }
+  | StructuredOutputStateError of structured_response_state
   | StructuredOutputParseError of
       { reason : structured_failure
       ; detail : string
@@ -205,6 +216,10 @@ val to_string : t -> string
 
 (** Public non-identifying label of a structured failure class. *)
 val structured_failure_label : structured_failure -> string
+
+(** Closed public label of a response state which is not terminal structured
+    output. Unlike parse evidence, it contains no provider text or diagnostic. *)
+val structured_response_state_label : structured_response_state -> string
 
 (** Preserve bounded private evidence after a structured response fails parsing.
     Public {!to_string} exposes only the closed class and original byte count.

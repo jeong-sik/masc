@@ -200,6 +200,84 @@ let test_an_unreadable_autosave_stops_a_load_until_consent () =
       (In_channel.with_open_bin (prev_path fixture) In_channel.input_all))
 ;;
 
+(* ---------- slots ---------- *)
+
+let slot_of name =
+  match Machine_checkpoint.slot_of_string name with
+  | Ok slot -> slot
+  | Error message -> fail message
+;;
+
+let named_of name =
+  match Dos_lane.classify_slot (slot_of name) with
+  | Dos_lane.Named named -> named
+  | Dos_lane.Current_autosave | Dos_lane.Previous_autosave ->
+    failf "%s is a slot the lane writes itself" name
+;;
+
+let test_the_lane_owned_slots_are_not_named () =
+  let kind name =
+    match Dos_lane.classify_slot (slot_of name) with
+    | Dos_lane.Named _ -> "named"
+    | Dos_lane.Current_autosave -> "autosave"
+    | Dos_lane.Previous_autosave -> "autosave-prev"
+  in
+  List.iter
+    (fun (name, expected) -> check string name expected (kind name))
+    [ "autosave", "autosave"
+    ; "AUTOSAVE", "autosave"
+    ; "AutoSave", "autosave"
+    ; "autosave-prev", "autosave-prev"
+    ; "Autosave-PREV", "autosave-prev"
+    ; "quick", "named"
+    ; "autosave2", "named"
+    ; "autosave_prev", "named"
+    ; "my-autosave", "named"
+    ]
+;;
+
+let test_a_save_says_what_it_replaced () =
+  with_fixture (fun fixture ->
+    let campaign_steps = play_a_campaign fixture in
+    let named = named_of "before-the-battle" in
+    (match Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:named with
+     | Ok (_, Dos_lane.Fresh_slot) -> ()
+     | Ok (_, (Dos_lane.Replaced _ | Dos_lane.Replaced_unreadable _)) ->
+       fail "a new name replaced something"
+     | Error error -> fail (Dos_lane.error_to_string error));
+    step ();
+    (match Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:named with
+     | Ok (_, Dos_lane.Replaced status) ->
+       check string "the replaced checkpoint's program" "hello.com" status.Dos_lane.program;
+       check int "and its steps" campaign_steps status.Dos_lane.steps;
+       check string "and who saved it" who status.Dos_lane.saved_by
+     | Ok (_, (Dos_lane.Fresh_slot | Dos_lane.Replaced_unreadable _)) ->
+       fail "the second save did not report the first"
+     | Error error -> fail (Dos_lane.error_to_string error));
+    check bool "the slot now holds the later machine" true
+      (steps_in fixture "before-the-battle" > campaign_steps))
+;;
+
+let test_a_save_over_an_unreadable_file_says_so () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    write_file (slot_path fixture "junk") "not a checkpoint";
+    match Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:(named_of "junk") with
+    | Ok (_, Dos_lane.Replaced_unreadable _) -> ()
+    | Ok (_, (Dos_lane.Fresh_slot | Dos_lane.Replaced _)) ->
+      fail "the unreadable file was not reported"
+    | Error error -> fail (Dos_lane.error_to_string error))
+;;
+
+let test_a_save_leaves_only_the_checkpoint () =
+  with_fixture (fun fixture ->
+    ignore (play_a_campaign fixture);
+    ignore (require (Dos_lane.save ~who ~dir:fixture.checkpoints ~slot:(named_of "kept")));
+    let files = List.sort String.compare (Array.to_list (Sys.readdir fixture.checkpoints)) in
+    check (list string) "the slot and the autosave, no stray temp file"
+      [ "autosave.ckpt"; "kept.ckpt" ] files)
+;;
+
 (* lea ax,ax: the core does not implement it, so the boot faults at once. *)
 let faulting_program = "\x8d\xc0"
 
@@ -244,6 +322,15 @@ let () =
             test_an_unreadable_autosave_stops_a_load_until_consent
         ; test_case "a faulted boot installs the machine and keeps the autosave" `Quick
             test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave
+        ] )
+    ; ( "slots"
+      , [ test_case "the lane-owned slots are not names" `Quick
+            test_the_lane_owned_slots_are_not_named
+        ; test_case "a save says what it replaced" `Quick test_a_save_says_what_it_replaced
+        ; test_case "a save over an unreadable file says so" `Quick
+            test_a_save_over_an_unreadable_file_says_so
+        ; test_case "a save leaves only the checkpoint" `Quick
+            test_a_save_leaves_only_the_checkpoint
         ] )
     ]
 ;;

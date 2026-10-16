@@ -50,9 +50,10 @@ val path : dir:string -> slot -> string
 val write :
   dir:string -> slot -> header -> meta:Yojson.Safe.t -> machine_bytes:string ->
   (unit, string) result
-(** Replaces the slot atomically: the file is written beside its target and
-    renamed over it, so a reader sees the old checkpoint or the new one,
-    never half of one. Creates [dir]. *)
+(** Replaces the slot atomically and durably: the file is written beside its
+    target, fsynced, renamed over it, and the directory is fsynced, so a
+    reader sees the old checkpoint or the new one, never half of one, and a
+    crash after [Ok] does not lose the rename. Creates [dir]. *)
 
 type contents = { header : header; meta : Yojson.Safe.t; machine_bytes : string }
 

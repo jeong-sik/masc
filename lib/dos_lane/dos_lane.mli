@@ -472,9 +472,31 @@ val checkpoint_format : int
     carry the core's own. The core identity is written beside both, to be
     shown and never compared. *)
 
-val save : who:string -> dir:string -> slot:Machine_checkpoint.slot -> (observation, error) result
-(** Writes the machine to [slot], replacing what was there. Needs no
-    controller and does not move the machine: anyone watching may save. *)
+type named_slot
+(** A slot name a caller chose: never one the lane writes itself. *)
+
+type slot =
+  | Named of named_slot
+  | Current_autosave  (** {!autosave_slot}, in any letter case *)
+  | Previous_autosave  (** {!autosave_prev_slot}, in any letter case *)
+
+val classify_slot : Machine_checkpoint.slot -> slot
+val named_slot_to_string : named_slot -> string
+
+type replaced =
+  | Fresh_slot
+  | Replaced of autosave_status
+      (** the slot held a checkpoint: its program, steps, saver and time,
+          read just before the write replaced it *)
+  | Replaced_unreadable of string
+      (** a file was there that this server could not read, with the reason *)
+
+val save :
+  who:string -> dir:string -> slot:named_slot -> (observation * replaced, error) result
+(** Writes the machine to [slot], replacing what was there, and says what
+    that was. Needs no controller and does not move the machine: anyone
+    watching may save. The type keeps a manual save off the two slots the lane
+    writes itself. *)
 
 type prepared_restore
 (** Validated guest snapshot owning one uniquely named staged ledger file.

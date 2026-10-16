@@ -109,17 +109,23 @@ let checkpoints_dir ~base_path = Filename.concat (dos_dir ~base_path) "checkpoin
    refusal or the program-less inventory needs to decide whether to resume:
    what it is, when, by whom, and the one line that does it. A file that is
    there but does not read is said so, not left out. *)
+(* What a checkpoint is, whichever slot holds it. *)
+let checkpoint_status_fields (s : Dos_lane.autosave_status) =
+  [ ("program", `String s.Dos_lane.program)
+  ; ("steps", `Int s.Dos_lane.steps)
+  ; ("saved_by", `String s.Dos_lane.saved_by)
+  ; ("saved_at", `String (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at))
+  ]
+;;
+
 let autosave_status_json (s : Dos_lane.autosave_status) =
   `Assoc
-    [ ("program", `String s.Dos_lane.program)
-    ; ("steps", `Int s.Dos_lane.steps)
-    ; ("saved_by", `String s.Dos_lane.saved_by)
-    ; ("saved_at", `String (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at))
-    ; ( "resume"
-      , `String
-          (Printf.sprintf "masc_dos_restore slot=%s"
-             (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)) )
-    ]
+    (checkpoint_status_fields s
+     @ [ ( "resume"
+         , `String
+             (Printf.sprintf "masc_dos_restore slot=%s"
+                (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)) )
+       ])
 ;;
 
 (* Reads the autosave slot on a system thread: the read decompresses and
@@ -1095,13 +1101,36 @@ let slot_arg ?default args =
 
 let slot_field slot = ("slot", `String (Machine_checkpoint.slot_to_string slot))
 
+(* What the save replaced, when it replaced something: the caller finds out
+   that a name it reused held a different game. *)
+let replaced_fields = function
+  | Dos_lane.Fresh_slot -> []
+  | Dos_lane.Replaced status -> [ ("replaced", `Assoc (checkpoint_status_fields status)) ]
+  | Dos_lane.Replaced_unreadable reason ->
+    [ ("replaced", `Assoc [ ("unreadable", `String reason) ]) ]
+;;
+
 let handle_save ~tool_name ~start_time ~base_path ~who args =
   match slot_arg ~default:default_slot args with
   | Error message -> reject ~tool_name ~start_time message
   | Ok None -> reject ~tool_name ~start_time "slot must name a checkpoint"
   | Ok (Some slot) ->
-    of_lane ~base_path ~extra:[ slot_field slot ] ~tool_name ~start_time
-      (off_domain (fun () -> Dos_lane.save ~who ~dir:(checkpoints_dir ~base_path) ~slot))
+    (match Dos_lane.classify_slot slot with
+     | Dos_lane.Current_autosave | Dos_lane.Previous_autosave ->
+       reject ~tool_name ~start_time
+         (Printf.sprintf
+            "%s is written by the lane after each call that runs the guest, so a save cannot \
+             take it: save under another name"
+            (Machine_checkpoint.slot_to_string slot))
+     | Dos_lane.Named named ->
+       (match
+          off_domain (fun () ->
+            Dos_lane.save ~who ~dir:(checkpoints_dir ~base_path) ~slot:named)
+        with
+        | Ok (observation, replaced) ->
+          of_lane ~base_path ~extra:(slot_field slot :: replaced_fields replaced) ~tool_name
+            ~start_time (Ok observation)
+        | Error error -> of_lane ~base_path ~tool_name ~start_time (Error error)))
 ;;
 
 let listed_json (l : Machine_checkpoint.listed) =

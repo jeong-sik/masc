@@ -212,10 +212,19 @@ let rec mkdir_p dir =
   end
 ;;
 
-(* Fs_compat.save_file_atomic writes a sibling temp file, fsyncs it, renames it
-   over the slot and fsyncs the directory. A bare rename could leave an empty
-   or partial checkpoint after a crash, and that file is the only copy of a
-   campaign after a restart. *)
+(* Fs_compat.save_file_atomic writes a sibling temp file, fsyncs it, renames
+   it over the slot and fsyncs the directory. A bare rename could leave an
+   empty or partial checkpoint after a crash, and that file is the only copy
+   of a campaign after a restart.
+
+   It is not the strict variant, on purpose. Both fsync the bytes before the
+   rename, which is what keeps a partial file out of the slot. They differ in
+   the fsync of the directory after it: this one ignores its error, and a file
+   system's refusal to fsync (EINVAL, EOPNOTSUPP, as on some tmpfs and FUSE
+   mounts). What that costs is a crash right after the rename bringing back the
+   previous checkpoint, which is a valid one. The strict variant would turn
+   the same file systems into a permanent write failure, with no autosave at
+   all. *)
 let write ~dir slot header ~meta ~machine_bytes =
   let contents = encode header ~meta ~machine_bytes in
   match mkdir_p dir with

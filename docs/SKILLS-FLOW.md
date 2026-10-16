@@ -107,9 +107,11 @@ sequenceDiagram
 ### 2a. 턴 시작 — 도구 표면
 
 턴(`keeper_turn.ml`, `keeper_unified_turn.ml`)이 먼저
-`Keeper_task_skill_turn.resolve_observations`로 **보유한 모든 task**(current + 나머지
-Claimed/InProgress, task-364 수리)가 지명한 exact reference를 frozen snapshot에서 해석한다.
-`prepare_agent_setup`(`keeper_run_tools_setup.ml`)은 그 결과와 snapshot을 받아 투영하고,
+`Keeper_task_skill_turn.resolve_live_observations`가 Tool descriptor를 먼저 고정하고,
+**보유한 모든 task**(current + 나머지 Claimed/InProgress, task-364 수리)의 exact reference를
+묶어 서로 다른 참조마다 한 번 해석한다. 공유 참조에는 모든 Task ID가 남는다.
+`prepare_agent_setup`(`keeper_run_tools_setup.ml`)은 그 결과를 받는다. snapshot 객체와
+descriptor 객체들이 같으면 같은 불변 선택을 재사용하고, 입력이 바뀌면 원래 참조를 재해석한다.
 설정이 정상인 snapshot에서 해소되지 않는 reference(pin한 Skill을 고치거나 지운 경우)와
 catalog가 투영하지 못하는 entry는 그 Task의 unavailable row이며 턴을 막지 않는다.
 이유(`error_code`, `detail`)는 prompt와 로그에 보인다. Skill 설정이 거절됐거나 읽히지 않은
@@ -133,6 +135,30 @@ Task Skill도 실행 projection과 prompt에서 unavailable이며 admission 전�
 - 지시 스킬 → `keeper_skill` 도구 하나(`make_instruction_skill_tool`,
   `keeper_tool_composition_surface.ml`). 본문은 이 도구가 서빙한다(#30635 이후
   파일시스템 프로비저닝 불필요).
+
+#### Task 참조 준비의 As-Is / To-Be
+
+비교 기준은 #43452의 `e76940898cb5347810918def2fddefc60174f32b`다. 일반 direct/autonomous
+턴의 live selection → Tool binding → 실행 setup 경로에서, 전체 Task 참조 출현 수를 `R`,
+서로 다른 exact reference 수를 `U`라 하면 Task 참조 해석 요청은 소스상 `R + 2U`에서 `U`로
+줄어든다. 같은 Skill을 두 Task가 쓰는 경우에는 `R=2, U=1`이므로 `4 → 1`이다.
+이는 실제 실행 횟수나 지연 실측이 아닌 소스 경로 비교다. 카탈로그의 기존 projection cache는
+별도로 존재하므로 이 수치를 전체 카탈로그 컴파일 횟수 감소로 해석하지 않는다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| 여러 Task가 같은 exact Skill 참조 | Task별 해석 후 중복 병합 | 해석 전에 참조를 묶고 Task 출처를 모두 보존 |
+| live Tool authority 반영 | 기본 descriptor로 해석한 뒤 다시 해석 | 고정된 실제 descriptor로 첫 해석 |
+| setup이 같은 입력을 다시 받음 | 원래 참조를 다시 해석 | 같은 불변 선택 재사용 |
+| snapshot 또는 descriptor가 바뀜 | 새 입력으로 재해석 | 새 입력으로 재해석 |
+| 서로 다른 snapshot 또는 Tool binding의 선택 병합 | 하나의 재사용 근거 없음 | 재사용 입력을 미확인으로 두고 요청한 입력으로 재해석 |
+
+재사용 키는 snapshot과 실제 descriptor 객체 identity다. revision 문자열, Task 이름, 시간으로
+동일성을 추측하지 않는다. profile별 실행 가능성은 기존 capability surface가 판정한다.
+새 snapshot의 unreadable/stale pin도 기존 실패·unavailable 정책을 따른다. 복합 시나리오는
+공유 Task 출처, 같은 입력 재사용, 빠진 Tool, 바뀐 Skill revision, 섞인 source와 읽을 수 없는
+설정을 함께 다룬다. 이 단위에서는 작성만 했고 실행하지 않았다. 구문 검사만으로 타입·동작·
+첫 모델 요청까지의 시간이나 모델 왕복 개선을 증명하지 않는다.
 
 ### 2b. 프롬프트 — 지명된 스킬 안내
 

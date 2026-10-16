@@ -989,19 +989,20 @@ let test_gemini_with_json_schema () =
   let json = Yojson.Safe.from_string body in
   let open Yojson.Safe.Util in
   let generation_config = json |> member "generationConfig" in
+  let text_format = generation_config |> member "responseFormat" |> member "text" in
   Alcotest.(check string)
-    "responseMimeType"
-    "application/json"
-    (generation_config |> member "responseMimeType" |> to_string);
+    "responseFormat.text.mimeType"
+    "APPLICATION_JSON"
+    (text_format |> member "mimeType" |> to_string);
   Alcotest.(check string)
-    "responseJsonSchema.type"
+    "responseFormat.text.schema.type"
     "object"
-    (generation_config |> member "responseJsonSchema" |> member "type" |> to_string);
+    (text_format |> member "schema" |> member "type" |> to_string);
   Alcotest.(check string)
-    "responseJsonSchema.required[0]"
+    "responseFormat.text.schema.required[0]"
     "answer"
-    (generation_config
-     |> member "responseJsonSchema"
+    (text_format
+     |> member "schema"
      |> member "required"
      |> to_list
      |> List.hd

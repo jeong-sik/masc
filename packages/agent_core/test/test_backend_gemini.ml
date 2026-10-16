@@ -457,9 +457,9 @@ let test_json_mode () =
   let gen = json |> member "generationConfig" in
   check
     string
-    "responseMimeType"
-    "application/json"
-    (gen |> member "responseMimeType" |> to_string)
+    "responseFormat.text.mimeType"
+    "APPLICATION_JSON"
+    (gen |> member "responseFormat" |> member "text" |> member "mimeType" |> to_string)
 ;;
 
 let test_output_schema () =
@@ -477,10 +477,15 @@ let test_output_schema () =
   let gen = json |> member "generationConfig" in
   check
     string
-    "responseMimeType"
-    "application/json"
-    (gen |> member "responseMimeType" |> to_string);
-  check bool "responseJsonSchema copied" true (gen |> member "responseJsonSchema" = schema)
+    "responseFormat.text.mimeType"
+    "APPLICATION_JSON"
+    (gen |> member "responseFormat" |> member "text" |> member "mimeType" |> to_string);
+  check bool "responseFormat.text.schema copied" true
+    (gen |> member "responseFormat" |> member "text" |> member "schema" = schema);
+  check bool "generation config has no separate schema or MIME fields" true
+    ((gen |> member "responseJsonSchema") = `Null
+     && (gen |> member "responseSchema") = `Null
+     && (gen |> member "responseMimeType") = `Null)
 ;;
 
 let test_role_mapping () =

@@ -1874,7 +1874,9 @@ let test_gemini_any_of_nullable_enum_admitted_unchanged () =
     let captured_schema =
       Yojson.Safe.from_string capture.body
       |> Yojson.Safe.Util.member "generationConfig"
-      |> Yojson.Safe.Util.member "responseJsonSchema"
+      |> Yojson.Safe.Util.member "responseFormat"
+      |> Yojson.Safe.Util.member "text"
+      |> Yojson.Safe.Util.member "schema"
     in
     check
       bool

@@ -321,19 +321,6 @@ let preserve_thinking_control_format_table =
   ]
 ;;
 
-(* [true] when the preserve wire is a provider [thinking] request object that
-   carries the thinking toggle itself. Such a row encodes an explicit
-   enable/disable on the wire even when its [thinking_control_format] is
-   [No_thinking_control], so admission must not report the request as
-   unencodable. Exhaustive: a new preserve wire has to state its answer. *)
-let preserve_wire_owns_thinking_object = function
-  | Thinking_object_clear_thinking -> true
-  | No_preserve_thinking_control
-  | Thinking_object_keep_all
-  | Chat_template_kwargs_preserve_thinking
-  | Always_preserved_thinking -> false
-;;
-
 let preserve_thinking_control_format_values =
   List.map fst preserve_thinking_control_format_table
 ;;

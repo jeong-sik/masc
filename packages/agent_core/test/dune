@@ -725,3 +725,9 @@
  (_
   (flags
    (:standard -w -4))))
+
+(test
+ (name test_glm_thinking_contract)
+ (modules test_glm_thinking_contract)
+ (libraries agent_core_test_deps llm_provider alcotest)
+ (deps ../models.toml))

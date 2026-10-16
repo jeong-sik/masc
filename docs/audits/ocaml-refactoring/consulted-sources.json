@@ -41,10 +41,28 @@
     "lib/completion_authority_agent.ml",
     "lib/core/eio_guard.ml",
     "lib/dated_jsonl/dated_jsonl_store.ml",
+    "lib/exec/command_gate/shell_command_gate.ml",
+    "lib/exec/exec_dispatch.ml",
+    "lib/exec/exec_dispatch.mli",
+    "lib/exec/parser/bash.ml",
+    "lib/exec/parser/bash_lexer.mll",
+    "lib/exec/parser/bash_subset.mly",
+    "lib/exec/parser/dune",
+    "lib/exec/shell_ir.mli",
+    "lib/exec/test/test_bash_parser.ml",
+    "lib/exec/test/test_exec_dispatch_pipeline_streaming.ml",
+    "lib/exec/test/test_shell_ir_subst_exec.ml",
+    "lib/exec_policy/exec_policy.ml",
+    "lib/exec_policy/execute_script_paths.ml",
     "lib/fs_compat/atomic_replace.mli",
     "lib/fs_compat/atomic_write.ml",
     "lib/fs_compat/fd_cache.ml",
     "lib/fusion/fusion_decision.ml",
+    "lib/fusion_core/fusion_config.ml",
+    "lib/fusion_core/fusion_config.mli",
+    "lib/fusion_core/fusion_config_writer.ml",
+    "lib/fusion_core/fusion_config_writer.mli",
+    "lib/fusion_core/fusion_policy.ml",
     "lib/gate/channel_gate_connector.ml",
     "lib/gate/channel_gate_connector.mli",
     "lib/gate/channel_gate_slack_state.ml",
@@ -60,6 +78,7 @@
     "lib/keeper/keeper_composition_continuation_wake.ml",
     "lib/keeper/keeper_composition_dependency_result.ml",
     "lib/keeper/keeper_composition_dependency_result.mli",
+    "lib/keeper/keeper_gate_readonly.ml",
     "lib/keeper/keeper_heartbeat_loop.ml",
     "lib/keeper/keeper_heartbeat_loop_scheduling.ml",
     "lib/keeper/keeper_keepalive.ml",
@@ -67,18 +86,31 @@
     "lib/keeper/keeper_librarian_queue_refresh.ml",
     "lib/keeper/keeper_librarian_runtime.ml",
     "lib/keeper/keeper_memory_os_current.ml",
+    "lib/keeper/keeper_sandbox_docker.ml",
     "lib/keeper/keeper_tool_composition_surface.ml",
     "lib/keeper/keeper_tool_descriptor.ml",
+    "lib/keeper/keeper_tool_execute_runtime.ml",
+    "lib/keeper/keeper_tool_execute_typed_input.ml",
     "lib/keeper/keeper_tool_plan_executor.ml",
+    "lib/keeper/keeper_tool_runtime.ml",
     "lib/keeper/keeper_tools_agent_core_bundle.ml",
     "lib/keeper/keeper_turn.ml",
+    "lib/keeper_tooling/execute_shell_ir.ml",
+    "lib/keeper_tooling/shell_costume.ml",
+    "lib/process/process_eio.ml",
+    "lib/runtime/dune",
     "lib/runtime/runtime.ml",
+    "lib/runtime/runtime.mli",
     "lib/runtime/runtime_antigravity.ml",
+    "lib/runtime/runtime_config_projection.ml",
     "lib/runtime/runtime_config_text.ml",
+    "lib/runtime/runtime_config_text.mli",
     "lib/runtime/runtime_provider_usage_read.ml",
     "lib/runtime/runtime_provider_usage_window.ml",
     "lib/runtime/runtime_provider_usage_window.mli",
+    "lib/runtime/runtime_schema.ml",
     "lib/schedule/schedule_domain.mli",
+    "lib/server/server_dashboard_runtime_request.ml",
     "lib/server/server_dashboard_runtime_resolved_json.ml",
     "lib/server/server_discord_in_process_gateway.ml",
     "lib/server/server_provider_usage_history.ml",
@@ -91,6 +123,7 @@
     "lib/server/server_slack_in_process_gateway.ml",
     "lib/task/task_goal_assignment.ml",
     "lib/task/tool_task.ml",
+    "lib/toml_line_editor/toml_line_editor.ml",
     "lib/tui_decode.ml",
     "lib/tui_decode_connectors.ml",
     "lib/verification_protocol.ml",
@@ -123,6 +156,7 @@
     "packages/agent_core/test/test_pipeline.ml",
     "packages/agent_core/test/test_provider_admission.ml",
     "packages/agent_core/test/test_wire_parse_dump.ml",
+    "test/dune",
     "test/test_auth_token_rotation_transaction.ml",
     "test/test_board_delete_rewrite_requeue.ml",
     "test/test_board_persistence_load_contract.ml",
@@ -131,6 +165,8 @@
     "test/test_browser_lane.ml",
     "test/test_browser_lane_watched_work.ml",
     "test/test_channel_gate_connector_routes.ml",
+    "test/test_exact_output_catalog_precedence.ml",
+    "test/test_fusion_config_edit.ml",
     "test/test_fusion_decision.ml",
     "test/test_goal_store.ml",
     "test/test_keeper_approval_queue.ml",
@@ -572,6 +608,540 @@
       ],
       "scope": "Reply/command arrival at timeout boundary scenarios",
       "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime.ml",
+      "ranges": [
+        [
+          1459,
+          1483
+        ],
+        [
+          1716,
+          1811
+        ],
+        [
+          2039,
+          2089
+        ],
+        [
+          2500,
+          2625
+        ],
+        [
+          3058,
+          3730
+        ]
+      ],
+      "scope": "Declared-lane resolution priority; observations, locks and receipts; save validation/commit; complete first-run, conversation and exact-slot edit implementation."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime.mli",
+      "ranges": [
+        [
+          970,
+          1143
+        ]
+      ],
+      "scope": "Public lane edit signatures, CAS, refusal behavior, Fusion rename limits and slot move contract."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime_config_text.ml",
+      "ranges": [
+        [
+          1,
+          478
+        ]
+      ],
+      "scope": "Complete pure text editor and route-reference helper implementation."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime_config_text.mli",
+      "ranges": [
+        [
+          1,
+          65
+        ]
+      ],
+      "scope": "Complete public text-helper and route-reference interface."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime_config_projection.ml",
+      "ranges": [
+        [
+          65,
+          107
+        ]
+      ],
+      "scope": "Typed lane-set CAS error and config lock receipt ownership."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/runtime_schema.ml",
+      "ranges": [
+        [
+          25,
+          45
+        ],
+        [
+          413,
+          435
+        ],
+        [
+          520,
+          596
+        ]
+      ],
+      "scope": "API-format schema channel; immutable raw declaration/config products; provider and binding key lookups."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/runtime/dune",
+      "ranges": [
+        [
+          1,
+          86
+        ]
+      ],
+      "scope": "Public unwrapped runtime library and private module registration/dependencies."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/server/server_routes_http_routes_dashboard.ml",
+      "ranges": [
+        [
+          1090,
+          1212
+        ]
+      ],
+      "scope": "Routing endpoint consumes typed CAS errors and string edit refusals, audits changes and returns commit receipts."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/server/server_dashboard_runtime_request.ml",
+      "ranges": [
+        [
+          145,
+          265
+        ]
+      ],
+      "scope": "Request decoding, reserved route namespace, CAS shape, exact move direction and per-slot operation construction."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/server/server_dashboard_runtime_resolved_json.ml",
+      "ranges": [
+        [
+          59,
+          73
+        ]
+      ],
+      "scope": "Resolved projection consumes canonical public exact-slot-format classification."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "bin/masc_tui_http.ml",
+      "ranges": [
+        [
+          2020,
+          2126
+        ]
+      ],
+      "scope": "TUI transport submits single-slot edits rather than rebuilding declared state and retains existing wire action names."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_config.mli",
+      "ranges": [
+        [
+          1,
+          81
+        ]
+      ],
+      "scope": "Complete configuration error and relaxed seat-reading contracts."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_config.ml",
+      "ranges": [
+        [
+          245,
+          269
+        ]
+      ],
+      "scope": "Relaxed seat enumeration reads both panel grammars, catches only TOML type error."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_config_writer.mli",
+      "ranges": [
+        [
+          1,
+          84
+        ]
+      ],
+      "scope": "Complete writer interface and source-preservation/addressability constraints."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_config_writer.ml",
+      "ranges": [
+        [
+          810,
+          865
+        ]
+      ],
+      "scope": "Pure preset upsert follows source layout and refuses unaddressable existing declarations."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/fusion_core/fusion_policy.ml",
+      "ranges": [
+        [
+          80,
+          100
+        ]
+      ],
+      "scope": "Seat kinds, enumeration order and immutable map of all seat routes."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "lib/toml_line_editor/toml_line_editor.ml",
+      "ranges": [
+        [
+          1090,
+          1144
+        ]
+      ],
+      "scope": "Typed table removal/rename outcomes, structural-header handling and trailing-newline normalization."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "test/test_runtime_per_keeper_routing.ml",
+      "ranges": [
+        [
+          1215,
+          1745
+        ],
+        [
+          1910,
+          2085
+        ]
+      ],
+      "scope": "Read complete conversation create/remove/rename/default/CAS and exact set/append/drop/move/replace scenario bodies, plus HTTP/CLI placement and schema-channel cases."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "test/test_fusion_config_edit.ml",
+      "ranges": [
+        [
+          235,
+          615
+        ]
+      ],
+      "scope": "Read complete seat-linked lane edit scenarios, invalid-unrelated-presets distinction, unreadable seat refusal, raw save behavior and writer refusal."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "test/test_exact_output_catalog_precedence.ml",
+      "ranges": [
+        [
+          1120,
+          1196
+        ]
+      ],
+      "scope": "Real frozen-catalog publication scenario verifies rejected-but-declared slot preservation and updated registry admission."
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "path": "test/dune",
+      "ranges": [
+        [
+          1410,
+          1420
+        ],
+        [
+          1487,
+          1495
+        ],
+        [
+          2159,
+          2170
+        ]
+      ],
+      "scope": "Existing scenario target names, libraries and catalog fixture dependency; not executed."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/parser/bash_lexer.mll",
+      "ranges": [
+        [
+          1,
+          492
+        ]
+      ],
+      "scope": "Lexer rules, process-global counter, recursive substitution callback and quote/heredoc refusal ownership."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/parser/bash_subset.mly",
+      "ranges": [
+        [
+          1,
+          137
+        ]
+      ],
+      "scope": "Menhir raw grammar and semantic action ordering, pipeline/sequence/redirection construction."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/parser/bash.ml",
+      "ranges": [
+        [
+          1,
+          230
+        ]
+      ],
+      "scope": "Raw grammar to closed Shell_ir conversion, refusal translation, top-level and nested parser entrypoints."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/parser/dune",
+      "ranges": [
+        [
+          1,
+          16
+        ]
+      ],
+      "scope": "Actual ocamllex/Menhir generator and nested library declarations."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/exec_dispatch.mli",
+      "ranges": [
+        [
+          1,
+          97
+        ]
+      ],
+      "scope": "Public recursive dispatch, output/callback, validation and shared timeout epoch contracts."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/exec_dispatch.ml",
+      "ranges": [
+        [
+          22,
+          232
+        ],
+        [
+          393,
+          1071
+        ]
+      ],
+      "scope": "Redirect planning/capture, timeout arithmetic, recursive substitution, pipeline/sequence runner selection and dispatch effects; lines 1-21 and 233-392 not directly read."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/shell_ir.mli",
+      "ranges": [
+        [
+          1,
+          108
+        ]
+      ],
+      "scope": "Canonical closed IR, substitution argv semantics, sandbox/cwd inheritance and nonempty sequence encoding."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/command_gate/shell_command_gate.ml",
+      "ranges": [
+        [
+          249,
+          361
+        ]
+      ],
+      "scope": "Recursive structural refusal and pure typed/raw verdict before effectful gate log."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_tool_execute_typed_input.ml",
+      "ranges": [
+        [
+          1,
+          155
+        ],
+        [
+          231,
+          350
+        ]
+      ],
+      "scope": "Typed source ownership, shadow findings and Command/Argv lowering to literal Simple IR."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_tool_execute_runtime.ml",
+      "ranges": [
+        [
+          502,
+          540
+        ],
+        [
+          550,
+          615
+        ],
+        [
+          737,
+          793
+        ],
+        [
+          819,
+          855
+        ]
+      ],
+      "scope": "IR preparation, gate observation callback, shadow findings, authorized dispatch and host lease; not whole runtime."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper_tooling/execute_shell_ir.ml",
+      "ranges": [
+        [
+          1,
+          103
+        ]
+      ],
+      "scope": "Typed gate and path validation before Exec_dispatch, preserving target ownership."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec_policy/execute_script_paths.ml",
+      "ranges": [
+        [
+          187,
+          258
+        ]
+      ],
+      "scope": "Script parse consumption and static path destination findings; not whole containment policy."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec_policy/exec_policy.ml",
+      "ranges": [
+        [
+          130,
+          184
+        ]
+      ],
+      "scope": "parse_string_to_ir mode-specific failure translation and associated typed guards."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/test/test_shell_ir_subst_exec.ml",
+      "ranges": [
+        [
+          1,
+          280
+        ]
+      ],
+      "scope": "Existing parser-to-dispatch substitution scenarios, timeout observer, target/cwd inheritance and backpressure examples; source only."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/test/test_bash_parser.ml",
+      "ranges": [
+        [
+          56,
+          83
+        ],
+        [
+          325,
+          419
+        ],
+        [
+          669,
+          748
+        ]
+      ],
+      "scope": "Pipeline order, nested substitutions/refusal/token budget and newline/heredoc/token-piece scenarios; source only."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/process/process_eio.ml",
+      "ranges": [
+        [
+          90,
+          125
+        ],
+        [
+          1142,
+          1259
+        ],
+        [
+          1368,
+          1601
+        ]
+      ],
+      "scope": "Explicit relative timeout contract and selected status-split/native pipeline resource, spawn/drain/cancel ownership; not whole process library."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_sandbox_docker.ml",
+      "ranges": [
+        [
+          360,
+          440
+        ]
+      ],
+      "scope": "Docker command parse and rewritten host-path validation; parsed IR is validation input, not dispatched child AST."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_tool_runtime.ml",
+      "ranges": [
+        [
+          120,
+          205
+        ]
+      ],
+      "scope": "Descriptor route into typed Execute owner; unrelated runtime arms only as context."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper_tooling/shell_costume.ml",
+      "ranges": [
+        [
+          1,
+          82
+        ]
+      ],
+      "scope": "Closed shell argv recognition and pure parser-backed shadow classification."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/keeper/keeper_gate_readonly.ml",
+      "ranges": [
+        [
+          475,
+          530
+        ]
+      ],
+      "scope": "Read-only classification parses raw script then classifies IR, without logging or executing it."
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "path": "lib/exec/test/test_exec_dispatch_pipeline_streaming.ml",
+      "ranges": [
+        [
+          1,
+          67
+        ]
+      ],
+      "scope": "Live callback-before-completion scenario and full returned chunk concatenation; source only."
     }
   ],
   "discovery_only_sources": [
@@ -600,6 +1170,88 @@
       "direct_reading_records": 26,
       "discovery_only_records": 3,
       "meaning": "The original 29 records and their scopes remain split between focused_reading_scopes and discovery_only_sources. This accounting correction adds no retrospective source-reading claim."
+    },
+    {
+      "round": 6,
+      "area": "Exec and lane planning",
+      "direct_reading_records": 42,
+      "new_unique_paths": 36,
+      "unique_files_after_round": 193,
+      "focused_records_after_round": 98,
+      "meaning": "21 Exec source/generator/build/test records and 21 lane-planning records. Two Exec governance reads are excluded from these semantic-reading totals. Discovery searches are retained separately. The historical ml/mli census denominator is unchanged."
+    }
+  ],
+  "generator_inputs": {
+    "baseline": "684336274720034611073beab836159fd4ee3b94",
+    "tracked_generator_input_count": 2,
+    "paths": [
+      "lib/exec/parser/bash_lexer.mll",
+      "lib/exec/parser/bash_subset.mly"
+    ],
+    "reason": "A .ml/.mli-only census omits authored lexer and grammar inputs that generate production OCaml modules. Both have now been directly read, and parser/dune confirms ocamllex plus Menhir.",
+    "accounting": "Record two generator-source inputs separately from the historical .ml/.mli denominator. Do not relabel this bounded path audit as complete exec, process, or whole-repository coverage."
+  },
+  "discovery_searches": [
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "method": "git ls-tree plus filename filters",
+      "scope": "Parser, exec, process and shell-related tracked paths; only paths listed in direct_read_paths count as reads.",
+      "examples": [
+        "lib/keeper_tooling/shell_costume.mli",
+        "test/test_shell_costume.ml",
+        "test/test_keeper_tool_execute_typed_input.ml",
+        "test/test_process_eio_coverage.ml",
+        "test/test_process_eio_detached.ml",
+        "lib/exec/test/test_shell_ir_chaining_benchmark.ml",
+        "lib/exec_policy/exec_policy.mli"
+      ]
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "method": "git grep production parser/dispatch references",
+      "scope": "Bash.parse_string, parse_string_to_ir, Shell_ir.Subst, Exec_dispatch.dispatch and Execute_shell_ir.dispatch under lib and bin. References guide caller tracing; no claim all aliases or external library consumers were enumerated.",
+      "examples": [
+        "lib/keeper/keeper_gate_replay.ml",
+        "lib/keeper/keeper_shell_tool_command.ml",
+        "lib/keeper/keeper_tool_execute_observe.ml",
+        "lib/exec_policy/exec_policy_literal_words.ml"
+      ]
+    },
+    {
+      "baseline": "684336274720034611073beab836159fd4ee3b94",
+      "method": "git grep Domain.spawn, Domain_manager.run, Domain_pool and Executor_pool submission references; broad result output was bounded",
+      "scope": "Only symbol-level scheduler discovery; no end-to-end parser invocation on two production domains established. These results are excluded from direct-read counts.",
+      "examples": [
+        "lib/core/domain_pool.ml",
+        "lib/core/domain_pool_ref.ml",
+        "lib/core/executor_pool_ref.mli",
+        "lib/server/server_h2_gateway_helpers.ml",
+        "lib/server/server_dashboard_http_runtime_support.ml",
+        "lib/keeper/keeper_turn_sandbox_runtime.ml",
+        "bin/masc_tui_io_domain.ml"
+      ]
+    },
+    {
+      "baseline": "01168475d83c920242df72fa0bd549f6c798cf2a",
+      "method": "Lane helper/consumer discovery, excluded from this round reading counts",
+      "records": [
+        {
+          "path": "lib/runtime/runtime_instance.ml",
+          "scope": "Read lines 1-40 for ownership context and symbol occurrence showing id_of_binding at line 132 delegates to Runtime_schema.binding_key. No full module review."
+        },
+        {
+          "path": "test/test_runtime_muse_serve_config.ml",
+          "scope": "Occurrence census only: public exact_slot_list_key_of_api_format used at line 124."
+        },
+        {
+          "path": "test/test_runtime_config_validity.ml",
+          "scope": "Occurrence census only: public exact_slot_list_key_of_api_format used at lines 6070 and 6072."
+        },
+        {
+          "path": "lib/prompt_preset.ml",
+          "scope": "Occurrence census only: public Runtime_config_text.remove_runtime_assignment_text and update_runtime_assignment_text at lines 800 and 807."
+        }
+      ]
     }
   ]
 }

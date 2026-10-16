@@ -278,10 +278,33 @@ let test_read_meta_refusals_match_read () =
       (match read_meta dir "flip" with Error (C.Corrupt _) -> true | _ -> false))
 ;;
 
+(* The slot a checkpoint call names. The MSX tool and its HTTP route both read
+   their arguments through this one definition. *)
+let test_slot_of_arguments () =
+  let named json =
+    match C.slot_of_arguments ~default:"quick" json with
+    | Ok slot -> Some (C.slot_to_string slot)
+    | Error _ -> None in
+  check (option string) "no field is the default" (Some "quick") (named (`Assoc []));
+  check (option string) "a named slot" (Some "campaign-2")
+    (named (`Assoc [ "slot", `String "campaign-2" ]));
+  List.iter (fun (label, json) -> check (option string) label None (named json))
+    [ "a slot that is not a string", `Assoc [ "slot", `Int 3 ]
+    ; "a slot that is a path", `Assoc [ "slot", `String "../escape" ]
+    ; "an empty slot", `Assoc [ "slot", `String "" ]
+    ; "a slot of 65 characters", `Assoc [ "slot", `String (String.make 65 'a') ]
+    ; "two slot fields", `Assoc [ "slot", `String "a"; "slot", `String "b" ]
+    ; "another field", `Assoc [ "extra", `Bool true ]
+    ; "a field beside the slot", `Assoc [ "slot", `String "a"; "extra", `Bool true ]
+    ; "arguments that are not an object", `List [] ];
+  check bool "a default that is not a valid slot is an error, not a silent pass" true
+    (Result.is_error (C.slot_of_arguments ~default:"not a slot" (`Assoc [])))
+
 let () =
   run "machine-checkpoint"
     [ ( "store"
       , [ test_case "slot names" `Quick test_slot_names
+        ; test_case "slot of arguments" `Quick test_slot_of_arguments
         ; test_case "round trip" `Quick test_round_trip
         ; test_case "refusals" `Quick test_refusals
         ; test_case "atomic replace" `Quick test_replace_is_atomic

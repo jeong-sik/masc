@@ -48,3 +48,5 @@ let reads_only = function
   | Step_until_change ->
     false
 ;;
+
+let default_checkpoint_slot = "quick"

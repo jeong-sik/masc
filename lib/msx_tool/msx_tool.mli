@@ -33,3 +33,7 @@ val reads_only : t -> bool
 (** [true] when the tool only reads: it changes neither the machine nor a
     file. The read-only flag a misc tool reports and the permission its
     catalog entry requires are both this value. *)
+
+val default_checkpoint_slot : string
+(** The slot a save, restore or checkpoint report names when the caller names
+    none. *)

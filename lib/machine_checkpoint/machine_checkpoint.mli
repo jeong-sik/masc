@@ -28,6 +28,11 @@ type slot = private string
 val slot_of_string : string -> (slot, string) result
 val slot_to_string : slot -> string
 
+val slot_of_arguments : default:string -> Yojson.Safe.t -> (slot, string) result
+(** The slot a checkpoint call names: an object whose only field, if any, is
+    ["slot"] holding one string. No field means [default]. The name is checked
+    like {!slot_of_string}; any other shape is an [Error] naming what is wrong. *)
+
 type header = {
   machine : machine;
   format : int;  (** the lane's own format number; the one thing compared *)

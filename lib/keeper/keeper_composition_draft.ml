@@ -384,7 +384,6 @@ let load_continuation_admission ~base_path ~capability_surface continuation =
     let compile_plan ~execution ~capability_surface json =
       map_nested_error (Nested.compile_for_refusal ~execution ~capability_surface json) in
     let* draft = load_continuation_with ~compile_plan ~base_path ~capability_surface continuation in
-    let* () = match Nested.calls draft.compiled with [] -> Ok () | _::_ -> Error original_error in
     let denied = Plan.nodes draft.plan |> List.find_map (fun (node : Plan.node) ->
       match Plan.descriptor draft.plan node.id with
       | None -> None

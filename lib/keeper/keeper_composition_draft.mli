@@ -79,8 +79,9 @@ val continuation_refusal_to_json : continuation_refusal -> Yojson.Safe.t
 val load_continuation_admission : base_path:string ->
   capability_surface:Keeper_capability_surface.t ->
   Keeper_tool_execution_journal.continuation -> (continuation_admission, error) result
-(** For an ordinary recipe, explicit Tool denial can return a fully revalidated original draft
-    only as [Refused]. Missing/corrupt evidence and changed contracts stay Error.
+(** Explicit Tool denial can return a fully revalidated original draft, including
+    its exact nested child contracts and mappings, only as [Refused]. Missing or
+    corrupt evidence, unavailable child references and changed contracts stay Error.
     Ordinary [load]/[load_continuation] never admit denied descriptors. *)
 
 val plan : t -> Keeper_tool_plan.t

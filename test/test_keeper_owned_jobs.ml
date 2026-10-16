@@ -3546,14 +3546,15 @@ pointer = "/content"
   operation ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
     ~publication_recovery ~physical_turn_ref ~delivery ~recorder ~snapshot
 
-let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=false) ?(launch_in_child=false) () =
+let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=false) ?(launch_in_child=false) ?(parent_tool_denied=false) () =
   with_nested_job_skill ~wait_only:(not launch_in_child) ~parameterized:dynamic_arguments ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
-      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot:_ ->
+      ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot ->
   let module Async = Masc.Keeper_msg_async in
   let module Ledger = Masc.Keeper_skill_activation_ledger in
   let module Tools = Masc.Keeper_tool_composition_surface in
   let module Plan = Masc.Keeper_tool_plan in
+  let module Surface = Masc.Keeper_capability_surface in
   let original_args,independent_bytes = if dynamic_arguments then
       let id = read (Filename.concat fixture.base_path "physical-original-job") in
       argument id,id
@@ -3564,10 +3565,13 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
     else "input",`Assoc ["kind",`String "object";"fields",`List
       [`Assoc ["name",`String "job_id";"value",`Assoc
         ["kind",`String "output";"node",`String "sibling";"pointer",`String "/content"]]]] in
-  let recipe = `Assoc ["execution",`String "async";"nodes",`List
+  let denial_probe = if parent_tool_denied then
+      [`Assoc ["id",`String "denial-probe";"tool",`String "keeper_lane_status";
+        "input",`Assoc ["kind",`String "literal";"value",`Assoc []]]] else [] in
+  let recipe = `Assoc ["execution",`String "async";"nodes",`List (
       [`Assoc ["id",`String "sibling";"tool",`String "keeper_artifact_read";
           "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String sibling.sha256]]];
-       `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;child_arguments]];
+       `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;child_arguments]] @ denial_probe);
       "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
   let started = Mtime_clock.counter () in
   let backend_calls () = if Sys.file_exists fixture.daemon_path then List.length (calls fixture) else 0 in
@@ -3629,11 +3633,11 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-fixed-child-job"
     ~turn:52 "keeper_job_status" (argument id)));
   let backend_after_result = List.length (calls fixture) in
-  let resume continuation tool_use_id =
+  let resume ?(capability_surface=surface) continuation tool_use_id =
     let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id ~turn:52
         ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
         ~completion:Agent_core.Tool_contract.Continue_after_success in
-    Tools.resume_continuation ~capability_surface:surface ~continuation ~config ~meta:fixture.meta
+    Tools.resume_continuation ~capability_surface ~continuation ~config ~meta:fixture.meta
       ~publication_recovery ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"fresh fixed child supervisor")
       ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
       ~invocation ~clock:(Eio.Stdenv.clock env) () in
@@ -3666,10 +3670,52 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
   List.iter (fun field -> check_json ("original child job occurrence " ^ field)
       (composition_node "await" previous_child_nodes |> member field)
       (composition_node "await" child_nodes |> member field)) ["execution_id";"tool_use_id"];
-  let resumed_parent = resume parent_continuation "resume-original-fixed-parent" in
+  let parent_surface = if not parent_tool_denied then surface else (
+      let descriptors = Descriptor.all_descriptors () in
+      let selection = Masc.Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:"task-A" [reference]
+          |> require "denied parent original Task selection" in
+      let denied = Surface.create_with_descriptors ~tool_descriptors:descriptors
+          ~tool_deny:["keeper_lane_status"] ~sandbox_profile:fixture.meta.sandbox_profile
+          ~skill_names:None ~global_skill_catalog:(Surface.skill_catalog surface)
+          ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
+          ~task_skills:(Masc.Keeper_task_skill_turn.skills selection) in
+      let ledger_path = Filename.concat (Masc.Keeper_fs.keeper_session_dir config
+          (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id)) "skill-activation-events.jsonl" in
+      let original_ledger = read ledger_path in
+      Fun.protect ~finally:(fun () -> write ledger_path original_ledger) (fun () ->
+        write ledger_path "unreadable original Nested activation\n";
+        let refused = resume ~capability_surface:denied parent_continuation "refuse-unreadable-denied-parent" in
+        check bool "proven Tool denial cannot bypass unavailable original child authority" true
+          (Tool_result.is_failed refused));
+      let retained = Journal.load ~base_path:fixture.base_path ~keeper_name:keeper
+          ~composition_run_id:parent_run |> require "denied parent original journal"
+          |> Journal.waiting_continuation |> require "unreadable child authority retains parent"
+          |> function Some value -> value | None -> fail "unreadable original child authority closed the parent" in
+      check string "temporary authority refusal keeps the original bound parent request"
+        parent_entry.request_id (Journal.continuation_request_id retained);
+      denied) in
+  let resumed_parent = resume ~capability_surface:parent_surface parent_continuation "resume-original-fixed-parent" in
   check bool "whole canonical child result makes original parent ready" true (Tool_result.is_success resumed_parent);
   let parent_ok,completed,parent_completed = await_composition env fixture (Tool_result.data resumed_parent) in
-  check bool "native result barrier preserves actual whole-child failure" (not child_failure) parent_ok;
+  check bool "native result barrier preserves actual whole-child failure"
+    (not child_failure && not parent_tool_denied) parent_ok;
+  if parent_tool_denied then (
+    check_json "denied parent settles a typed permanent refusal" (`String "current_tool_denied")
+      (completed |> member "kind");
+    check_json "permanent refusal names the exact denied ordinary Tool" (`String "keeper_lane_status")
+      (completed |> member "tool_name");
+    (match parent_completed.status with
+     | Async.Done {ok=false;_} -> ()
+     | _ -> fail "denied nested parent did not reach canonical terminal failure");
+    check bool "permanent refusal has a new physical successor" true
+      (parent_completed.request_id <> parent_entry.request_id);
+    let discovery = Journal.pending_continuations
+        ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+        ~base_path:fixture.base_path |> require "terminal denied parent discovery" in
+    check bool "permanent refusal never re-readies the original parent" false
+      (List.exists (fun continuation ->
+        Journal.continuation_request_id continuation = parent_completed.request_id) discovery.ready))
+  else (
   if child_failure then
     check_json "failed canonical child provides no successful parent export" (`Bool false)
       (completed |> member "exports" |> member "stdout" |> member "available")
@@ -3683,7 +3729,7 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
       (composition_node submission_id nodes |> member field)
       (composition_node submission_id completed_nodes |> member field)) ["execution_id";"tool_use_id"];
   check_json "accepted child submission is retained rather than resubmitted" (`String "retained_completion")
-    (composition_node submission_id completed_nodes |> member "execution_origin");
+    (composition_node submission_id completed_nodes |> member "execution_origin"));
   check int "fresh child and parent use no backend after canonical output" backend_after_result (List.length (calls fixture));
   check int "fixed child creates one job" 1 (effect_count fixture "create");
   check int "fixed child starts one job" 1 (effect_count fixture "start");
@@ -4977,6 +5023,8 @@ let () = match Array.to_list Sys.argv with
       ; test_case "fixed async Skill child submits once and resumes its canonical whole result" `Quick (test_fixed_async_skill_child ~child_failure:false)
       ; test_case "fixed async Skill child preserves an actual canonical whole-child failure" `Quick (test_fixed_async_skill_child ~child_failure:true)
       ; test_case "typed recovery terminates proven refusal and holds uncertain effects" `Quick test_typed_continuation_recovery
+      ; test_case "nested parent distinguishes a denied Tool from unavailable original child authority" `Quick
+          (test_fixed_async_skill_child ~parent_tool_denied:true)
       ; test_case "upstream async Skill arguments survive fresh child and parent continuation" `Quick (test_fixed_async_skill_child ~dynamic_arguments:true)
       ; test_case "async Skill child launches its own isolated job once and resumes the whole result" `Quick (test_fixed_async_skill_child ~launch_in_child:true)
       ; test_case "upstream enum, type and extra-field rejection creates no child activation" `Quick test_upstream_arguments_reject_before_child_activation

@@ -1,11 +1,15 @@
 (** Compile exact frozen Skill calls into one typed DAG without dispatch.
-    Async children may bind explicit upstream argument templates; the native
-    submission contract validates resolved arguments before activation. *)
+    Inline and async children may bind explicit upstream argument templates.
+    Their private argument/submission contract validates resolved arguments
+    before activation. *)
 
 type arguments = Fixed of Yojson.Safe.t | Upstream of Keeper_tool_plan.Json_template.t
 
 type scope =
-  | Inline of (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t) list
+  | Inline of
+      { argument_node : Keeper_tool_plan.Node_id.t option
+      ; mapping : (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t) list
+      }
   | Async of
       { submission : Keeper_tool_plan.Node_id.t
       ; result : Keeper_tool_plan.Node_id.t
@@ -32,7 +36,6 @@ type error =
       }
   | Instruction_reference of Keeper_tool_plan.Node_id.t
   | Async_child_requires_suspension of Keeper_tool_plan.Node_id.t
-  | Dynamic_inline_arguments of Keeper_tool_plan.Node_id.t
   | Child_policy_mismatch of Keeper_tool_plan.Node_id.t
   | Arguments_rejected of Keeper_tool_plan.Node_id.t * Tool_input_validation.rejection
   | Binding_rejected of Keeper_tool_plan.Node_id.t * Keeper_tool_composition_catalog.instantiation_error
@@ -48,7 +51,7 @@ val input_schema : Yojson.Safe.t
 (** Ordinary request nodes or [{id; skill_reference; args|input; after?}].
     [skill_reference] is the strict pinned identity JSON from Skill inventory;
     Exactly one of literal [args] or an explicit [input] template is required.
-    [input] is supported for async children. Child outputs are named exports,
+    [input] is supported for inline and async children. Child outputs are named exports,
     addressed by [/export-name/subpath]. *)
 
 val compile :

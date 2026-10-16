@@ -988,11 +988,20 @@ let branch_failure_policy_of_string = function
   | _ -> None
 ;;
 
+type inline_arguments =
+  { alias : Node_id.t
+  ; reference : Skill_reference.t
+  ; node : node
+  ; input_schema : Yojson.Safe.t
+  ; output_schema : Yojson.Safe.t
+  }
+
 type t =
   { identity : int
   ; nodes : node list
   ; descriptors : (string * Keeper_tool_descriptor.t) list
   ; children : child_nodes list
+  ; arguments : inline_arguments list
   ; branch_failure_policy : branch_failure_policy
   ; exports : export list
   }
@@ -1013,6 +1022,7 @@ and child_nodes =
 
 type execution_target =
   | Descriptor_target of Keeper_tool_descriptor.t
+  | Child_arguments of inline_arguments
   | Child_submission of child_nodes
   | Child_result of child_nodes
 
@@ -1023,13 +1033,13 @@ type contract =
   ; execution : Keeper_tool_descriptor.execution
   }
 
-let fixed_async_child ~alias ~reference ~tool_name ~args ~input_schema ~bound_plan =
+let fixed_async_child ~alias ~reference ~tool_name ~args ~input_schema ~bound_plan : async_child =
   {alias;reference;tool_name;input=Json_template.literal args;input_schema;declared_plan=bound_plan}
-let dynamic_async_child ~alias ~reference ~tool_name ~input ~input_schema ~declared_plan =
+let dynamic_async_child ~alias ~reference ~tool_name ~input ~input_schema ~declared_plan : async_child =
   {alias;reference;tool_name;input;input_schema;declared_plan}
-let child_alias child = child.alias
-let child_reference child = child.reference
-let child_tool_name child = child.tool_name
+let child_alias (child : async_child) = child.alias
+let child_reference (child : async_child) = child.reference
+let child_tool_name (child : async_child) = child.tool_name
 let child_input (child : async_child) = child.input
 let child_input_schema (child : async_child) = child.input_schema
 let child_plan child = child.declared_plan
@@ -1177,11 +1187,19 @@ let node_for_id nodes id =
 let empty_object_schema = `Assoc
   ["type",`String "object";"properties",`Assoc [];"required",`List [];"additionalProperties",`Bool false]
 
-let contract_for_node descriptors children (node : node) =
-  match List.find_map (fun child ->
+let contract_for_node descriptors children arguments (node : node) =
+  let target = match List.find_opt (fun (arguments : inline_arguments) ->
+      Node_id.equal arguments.node.id node.id) arguments with
+    | Some arguments -> Some (Child_arguments arguments)
+    | None -> List.find_map (fun child ->
     if Node_id.equal child.submission.id node.id then Some (Child_submission child)
     else if Node_id.equal child.result.id node.id then Some (Child_result child)
-    else None) children with
+    else None) children in
+  match target with
+  | Some (Child_arguments arguments as target) -> Some
+      {target;input_schema=arguments.input_schema;
+       composable_output=Keeper_tool_descriptor.Json_output {schema=arguments.output_schema};
+       execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent}
   | Some (Child_submission child as target) -> Some
       {target;input_schema=child.child.input_schema;composable_output=Keeper_tool_descriptor.Opaque_output;
        execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial}
@@ -1199,7 +1217,7 @@ let child_exports_schema plan =
   let properties = List.map (fun (export : export) ->
     let producer = match node_for_id plan.nodes export.node_id with
       | Some node -> node | None -> invalid_arg "validated child export lost its producer" in
-    let schema = match contract_for_node plan.descriptors plan.children producer with
+    let schema = match contract_for_node plan.descriptors plan.children plan.arguments producer with
       | Some {composable_output=Keeper_tool_descriptor.Json_output {schema};_} -> schema
       | Some {composable_output=Keeper_tool_descriptor.Opaque_output;_} | None ->
         invalid_arg "validated child export lost its output contract" in
@@ -1219,14 +1237,17 @@ let child_nodes ~child ~submission_id ~result_id ?(after=[]) () =
   }
 
 let contract plan node_id =
-  Option.bind (node_for_id plan.nodes node_id) (contract_for_node plan.descriptors plan.children)
+  Option.bind (node_for_id plan.nodes node_id) (contract_for_node plan.descriptors plan.children plan.arguments)
+
+let inline_arguments ~alias ~reference ~id ~tool_name ~input ~input_schema ~output_schema ?(after=[]) () =
+  {alias;reference;node=node ~id ~tool_name ~input ~after ();input_schema;output_schema}
 
 let readonly_for_input plan ~node_id ~input =
   match contract plan node_id with
   | None -> None
   | Some {target=Descriptor_target descriptor;_} -> Keeper_tool_descriptor.readonly_for_input descriptor ~input
   | Some {target=Child_submission _;_} -> Some false
-  | Some {target=Child_result _;_} -> Some true
+  | Some {target=(Child_arguments _ | Child_result _);_} -> Some true
 
 let validate_known_tools (resolve : node -> contract option) off_surface nodes =
   List.find_map
@@ -1406,12 +1427,15 @@ let validate_terminal_dependency_boundary (resolve : node -> contract option) no
       nodes
 ;;
 
-let create_compiled ~descriptors ~children ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
+let create_compiled ~descriptors ~children ?(arguments=[]) ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
   match nodes with
   | [] -> Error Empty_plan
   | _ ->
-    let fixed_nodes = List.concat_map (fun child -> [child.submission;child.result]) children in
-    let conflict = match first_duplicate Node_id.equal (List.map (fun child -> child.child.alias) children) with
+    let fixed_nodes = List.map (fun (arguments : inline_arguments) -> arguments.node) arguments
+      @ List.concat_map (fun child -> [child.submission;child.result]) children in
+    let aliases = List.map (fun child -> child.child.alias) children
+      @ List.map (fun (arguments : inline_arguments) -> arguments.alias) arguments in
+    let conflict = match first_duplicate Node_id.equal aliases with
       | Some id -> Some id
       | None -> match first_duplicate Node_id.equal (List.map (fun node -> node.id) fixed_nodes) with
       | Some id -> Some id
@@ -1429,7 +1453,7 @@ let create_compiled ~descriptors ~children ?(branch_failure_policy = default_bra
         | Some id -> Error (Duplicate_node_id id)
         | None ->
           let descriptors = descriptor_entries canonical_descriptors in
-          let resolve = contract_for_node descriptors children in
+          let resolve = contract_for_node descriptors children arguments in
           let off_surface = off_surface_entries canonical_descriptors in
           (match first_repeated_name (List.map fst descriptors) with
            | Some name -> Error (Duplicate_tool_name name)
@@ -1462,6 +1486,7 @@ let create_compiled ~descriptors ~children ?(branch_failure_policy = default_bra
                                     ; nodes
                                     ; descriptors
                                     ; children
+                                    ; arguments
                                     ; branch_failure_policy
                                     ; exports
                                     }))))))))))
@@ -1481,7 +1506,7 @@ let instantiate_params ~descriptors ~args plan =
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
     | `Tuple _ | `Variant _ -> None in
   let rec rebuild rebuilt = function
-    | [] -> create_compiled ~descriptors ~children:plan.children
+    | [] -> create_compiled ~descriptors ~children:plan.children ~arguments:plan.arguments
         ~branch_failure_policy:plan.branch_failure_policy ~exports:plan.exports (List.rev rebuilt)
       |> Result.map_error (fun error -> Instantiated_plan_rejected error)
     | (node : node) :: rest ->
@@ -1541,7 +1566,7 @@ let dependency_layers plan =
 let descriptor plan node_id =
   match contract plan node_id with
   | Some {target=Descriptor_target descriptor;_} -> Some descriptor
-  | Some {target=(Child_submission _ | Child_result _);_} | None -> None
+  | Some {target=(Child_arguments _ | Child_submission _ | Child_result _);_} | None -> None
 ;;
 
 type output =

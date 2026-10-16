@@ -351,7 +351,7 @@ let rec plan_to_yojson ~allow_params plan =
          let* json = node_to_yojson ~allow_params node in
          let* json = match (contract_exn plan node.Plan.id).target with
            | Plan.Descriptor_target _ -> Ok json
-           | (Plan.Child_submission _ | Plan.Child_result _) as target ->
+           | (Plan.Child_arguments _ | Plan.Child_submission _ | Plan.Child_result _) as target ->
              let* operand = compiled_operand_to_yojson target in
              (match json with
               | `Assoc fields -> Ok (`Assoc (fields @ ["compiled_child",operand]))
@@ -379,6 +379,13 @@ let rec plan_to_yojson ~allow_params plan =
   Ok (`Assoc ([ "nodes", `List (List.rev nodes) ] @ exports @ policy))
 and compiled_operand_to_yojson = function
   | Plan.Descriptor_target _ -> invalid_arg "ordinary descriptor is not a compiled child operand"
+  | Plan.Child_arguments arguments -> Ok (`Assoc
+      ["kind",`String "arguments";"alias",`String (Plan.Node_id.to_string arguments.alias);
+       "reference",Skill_reference.to_yojson arguments.reference;
+       "node",`String (Plan.Node_id.to_string arguments.node.id);
+       "tool_name",`String arguments.node.tool_name;
+       "input_schema_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort arguments.input_schema));
+       "output_schema_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort arguments.output_schema))])
   | (Plan.Child_submission nodes | Plan.Child_result nodes) as target ->
     let child = nodes.Plan.child in
     let* declared_plan = plan_to_yojson ~allow_params:true (Plan.child_plan child) in
@@ -387,7 +394,7 @@ and compiled_operand_to_yojson = function
     let kind = match target with
       | Plan.Child_submission _ -> "submission"
       | Plan.Child_result _ -> "result"
-      | Plan.Descriptor_target _ -> invalid_arg "compiled target changed during encoding" in
+      | Plan.Descriptor_target _ | Plan.Child_arguments _ -> invalid_arg "compiled target changed during encoding" in
     Ok (`Assoc ["kind",`String kind;"alias",`String (Plan.Node_id.to_string (Plan.child_alias child));
       "reference",Skill_reference.to_yojson (Plan.child_reference child);
       "tool_name",`String (Plan.child_tool_name child);"input",input;
@@ -402,7 +409,7 @@ and contracts_to_yojson plan =
     let contract = contract_exn plan node.id in
     let* route = match contract.target with
       | Plan.Descriptor_target descriptor -> Ok (Keeper_tool_descriptor.route_evidence_json descriptor)
-      | (Plan.Child_submission _ | Plan.Child_result _) as target -> compiled_operand_to_yojson target in
+      | (Plan.Child_arguments _ | Plan.Child_submission _ | Plan.Child_result _) as target -> compiled_operand_to_yojson target in
     let output_schema = match contract.composable_output with
       | Keeper_tool_descriptor.Opaque_output -> `Null
       | Keeper_tool_descriptor.Json_output {schema} -> schema in

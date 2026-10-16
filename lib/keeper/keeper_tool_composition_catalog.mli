@@ -239,6 +239,10 @@ val input_schema_of_params : param list -> Yojson.Safe.t
     [Enum_param] property is a string with its members under [enum]. The
     empty list yields the zero-param object schema. *)
 
+val output_schema_of_params : param list -> Yojson.Safe.t
+(** Composable type projection of the declared arguments. Enum membership and
+    descriptions remain in [input_schema_of_params] for input validation. *)
+
 type instantiation_error = Keeper_tool_plan.parameter_binding_error =
   | Missing_argument of string
   | Instantiated_plan_rejected of Keeper_tool_plan.error

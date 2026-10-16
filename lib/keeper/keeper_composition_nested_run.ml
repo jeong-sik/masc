@@ -44,7 +44,7 @@ let async_result_parent = Plan.Composition_run_id.result_receipt_id
 ;;
 
 let member_nodes (call : Nested.call) = match call.scope with
-  | Nested.Inline mapping -> List.map snd mapping
+  | Nested.Inline {argument_node;mapping} -> Option.to_list argument_node @ List.map snd mapping
   | Nested.Async {submission;result} -> [submission;result]
 ;;
 
@@ -259,7 +259,9 @@ let evidence_to_json run ~plan ~execution =
           ; "activation_frame_sha256", `String (Ledger.activation_frame_sha256 activation) ]
       | Rejected rejection -> `Assoc [ "rejection", rejection.data ] in
     let members = match child.call.scope with
-      | Nested.Inline mapping -> List.map (fun (source,id) -> ["source",`String (Plan.Node_id.to_string source)],id) mapping
+      | Nested.Inline {argument_node;mapping} ->
+        List.map (fun id -> ["phase",`String "arguments"],id) (Option.to_list argument_node)
+        @ List.map (fun (source,id) -> ["source",`String (Plan.Node_id.to_string source)],id) mapping
       | Nested.Async {submission;result} -> [(["phase",`String "submission"],submission);(["phase",`String "result"],result)] in
     let node_states = List.map (fun (origin,id) ->
         let fields = origin @ ["node_id",`String (Plan.Node_id.to_string id)] in

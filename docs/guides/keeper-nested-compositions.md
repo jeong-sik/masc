@@ -46,7 +46,7 @@ surface. Changing the content revision is a refusal, without a name-based fallba
 or a source-file reread.
 
 Fixed arguments pass the direct named-call schema validator during preparation.
-An async child can instead declare an explicit `input` template using the ordinary
+An inline or async child can instead declare an explicit `input` template using the ordinary
 literal/output/object/array grammar. Supply exactly one of `args` or `input`:
 
 ```json
@@ -59,14 +59,24 @@ literal/output/object/array grammar. Supply exactly one of `args` or `input`:
 }
 ```
 
-The native submission node resolves upstream values and checks the frozen Skill
-parameter schema before child activation or broker entry. Missing fields, types,
+The private inline argument node or native async submission node resolves upstream
+values and checks the frozen Skill parameter schema before child activation or broker entry. Missing fields, types,
 enums and extra fields fail that parent branch without activating the child.
 The opaque original parent occurrence supplies the resolved input for both the
 child's parameter binding and its immutable Nested producer source. Continuation
 reuses those arguments and the accepted source; it does not select current values
 or reread a Skill document. Repeated exact references retain separate aliases,
-inputs and child sources. Inline children currently require fixed `args`.
+inputs and child sources.
+
+An inline child uses a compiler-owned pure argument node, followed by its expanded
+leaves. Each parameter reads the validated argument's exact output field. The
+argument node needs no async submission or execution journal, so an inline parent
+can consume an earlier Tool output directly. With an async parent, the canonical
+journal retains the original resolved arguments, occurrence IDs and child activation
+through fresh continuation. The argument node is part of the child's membership
+and immutable evidence; its complete namespace path cannot collide with a leaf or
+ordinary parent ID. Invalid arguments dispatch no child leaf, while independent
+branches retain the parent's declared failure policy.
 
 The declared plan and contracts are frozen even when arguments depend on output.
 Parameter substitution is pure and shared with ordinary named Skill calls.

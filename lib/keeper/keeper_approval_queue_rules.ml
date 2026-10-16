@@ -69,111 +69,53 @@ let report_rules_read_drop ~reason ~path ~detail =
     ~detail
 ;;
 
-let rule_json_preview json =
-  Yojson.Safe.to_string json |> String_util.utf8_prefix ~max_bytes:240
-;;
-
 let nonempty_string_opt = function
   | Some value when String.trim value <> "" -> Some (String.trim value)
   | _ -> None
 ;;
 
-let rule_identity_matches left right =
-  String.equal left.keeper_name right.keeper_name
-  && String.equal left.tool_name right.tool_name
-  && String.equal left.request_fingerprint right.request_fingerprint
-;;
+module Application_store = Keeper_approval_rule_application_store
 
-let validate_unique_rules rules =
-  let rec loop seen = function
-    | [] -> Ok rules
-    | (rule : approval_rule) :: rest ->
-      if List.exists (fun previous -> String.equal previous.id rule.id) seen
-      then Error (Printf.sprintf "duplicate approval rule id %s" rule.id)
-      else if List.exists (fun previous -> rule_identity_matches previous rule) seen
-      then
-        Error
-          (Printf.sprintf
-             "duplicate exact Always Allowed identity for keeper=%s operation=%s"
-             rule.keeper_name
-             rule.tool_name)
-      else loop (rule :: seen) rest
-  in
-  loop [] rules
-;;
+let rule_identity_matches = Application_store.rule_identity_matches
 
-let load_rules_unlocked ~base_path () =
+let load_rule_store_unlocked ~base_path () =
   let path = rules_path ~base_path () in
-  let rec parse_entries index acc = function
-    | [] ->
-      let rules = List.rev acc in
-      (match validate_unique_rules rules with
-       | Ok _ as result -> result
-       | Error reason ->
-         report_rules_read_drop
-           ~reason:Read_drop_reason.Invalid_payload
-           ~path
-           ~detail:reason;
-         Error { path; reason })
-    | entry :: rest ->
-      (match approval_rule_of_yojson_with_error entry with
-       | Ok rule -> parse_entries (index + 1) (rule :: acc) rest
-       | Error reason ->
-         let detail =
-           Printf.sprintf
-             "approval rule entry %d rejected (%s): %s"
-             index
-             reason
-             (rule_json_preview entry)
-         in
-         report_rules_read_drop
-           ~reason:Read_drop_reason.Invalid_payload
-           ~path
-           ~detail;
-         Error { path; reason = detail })
+  let rejected reason =
+    report_rules_read_drop ~reason:Read_drop_reason.Invalid_payload ~path ~detail:reason;
+    Error { path; reason }
   in
   try
-    if not (Sys.file_exists path)
-    then Ok []
-    else (
+    if not (Sys.file_exists path) then Ok Application_store.empty
+    else
       match Safe_ops.read_json_file_safe path with
-      | Ok (`List entries) -> parse_entries 0 [] entries
       | Ok json ->
-        let reason =
-          Printf.sprintf
-            "approval rules file must be a JSON list, got: %s"
-            (rule_json_preview json)
-        in
-        report_rules_read_drop
-          ~reason:Read_drop_reason.Invalid_payload
-          ~path
-          ~detail:reason;
-        Error { path; reason }
+        (match Application_store.decode_current_or_migrate_legacy json with
+         | Ok store -> Ok store
+         | Error reason -> rejected reason)
       | Error reason ->
-        report_rules_read_drop
-          ~reason:Read_drop_reason.Entry_load_error
-          ~path
-          ~detail:reason;
-        Error { path; reason })
+        report_rules_read_drop ~reason:Read_drop_reason.Entry_load_error ~path ~detail:reason;
+        Error { path; reason }
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     let reason = Printexc.to_string exn in
-    report_rules_read_drop
-      ~reason:Read_drop_reason.Entry_load_error
-      ~path
-      ~detail:reason;
+    report_rules_read_drop ~reason:Read_drop_reason.Entry_load_error ~path ~detail:reason;
     Error { path; reason }
 ;;
 
-let save_rules_unlocked ~base_path rules : (unit, rule_store_error) result =
+let load_rules_unlocked ~base_path () =
+  Result.map (fun (store : Application_store.t) -> store.rules)
+    (load_rule_store_unlocked ~base_path ())
+;;
+
+let save_rule_store_unlocked ~base_path store : (unit, rule_store_error) result =
   let path = rules_path ~base_path () in
   try
     Fs_compat.mkdir_p (Filename.dirname path);
-    let json = `List (List.map approval_rule_to_yojson rules) in
-    (match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
-     | Ok () -> Ok ()
-     | Error reason -> Error { path; reason })
+    let json = Application_store.to_yojson store in
+    match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
+    | Ok () -> Ok ()
+    | Error reason -> Error { path; reason }
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error { path; reason = Printexc.to_string exn }
@@ -198,78 +140,95 @@ type rule_upsert_disposition =
   | Existing
   | Renewed of { previous_expires_at : float option }
 
-(* The expiry option is required: [None] deliberately requests a permanent
-   rule, and [Some] is applied exactly, including an earlier or past expiry. *)
-let upsert_rule
-      ~base_path
-      ~keeper_name
-      ~tool_name
-      ~input
-      ?created_by
-      ?source_approval_id
-      ~expires_at
-      ()
+type rule_upsert_result =
+  | Applied of { rule : approval_rule; disposition : rule_upsert_disposition }
+  | Already_applied of approval_rule option
+
+(* Both expiry and approval identity are deliberate inputs. New approvals
+   record a witness even at equal expiry; an exact retry never writes again. *)
+let upsert_rule_with_save
+      ~save
+      ~base_path ~keeper_name ~tool_name ~input ?created_by
+      ~source_approval_id ~expires_at ()
   =
   with_rules_write_lock (fun () ->
-    match load_rules_unlocked ~base_path () with
-    | Error _ as error -> error
-    | Ok rules ->
-      let request_fingerprint =
-        Keeper_approval_request_fingerprint.request_fingerprint input
-      in
+    let application : Application_store.application =
+      { approval_id = source_approval_id; keeper_name; tool_name
+      ; request_fingerprint = Keeper_approval_request_fingerprint.request_fingerprint input
+      ; expires_at; actor = created_by }
+    in
+    let ( let* ) = Result.bind in
+    let* () = Application_store.validate_application application
+      |> Result.map_error (fun reason -> { path = rules_path ~base_path (); reason }) in
+    let* store = load_rule_store_unlocked ~base_path () in
+    match Application_store.find_application store ~approval_id:source_approval_id with
+    | Some receipt ->
+      if Application_store.same_application application receipt.application then
+        Ok (Already_applied
+          (List.find_opt (fun (rule : approval_rule) -> String.equal rule.id receipt.rule_id)
+             store.rules))
+      else Error
+        { path = rules_path ~base_path ()
+        ; reason = "remembered approval application identity conflicts with its durable receipt" }
+    | None ->
       let candidate =
-        { id = make_generated_id "rule"
-        ; keeper_name
-        ; tool_name
-        ; request_fingerprint
-        ; created_at = Unix.gettimeofday ()
-        ; created_by
-        ; source_approval_id
-        ; expires_at
-        }
+        { id = make_generated_id "rule"; keeper_name; tool_name
+        ; request_fingerprint = application.request_fingerprint
+        ; created_at = Unix.gettimeofday (); created_by
+        ; source_approval_id = Some source_approval_id; expires_at }
       in
-      let persist rule disposition next_rules =
-         match save_rules_unlocked ~base_path next_rules with
-          | Ok () -> Ok (rule, disposition)
-          | Error error ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string ApprovalQueueFailures)
-              ~labels:
-                [ "keeper", keeper_name
-                ; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save)
-                ]
-              ();
-            Log.Keeper.warn "upsert_rule: save failed: %s" (rule_store_error_to_string error);
-            Error error
+      let persist rule disposition rules =
+        let receipt : Application_store.receipt = { application; rule_id = rule.id } in
+        let next = { Application_store.rules; applications = receipt :: store.applications } in
+        match save ~base_path next with
+        | Ok () -> Ok (Applied { rule; disposition })
+        | Error error ->
+          Otel_metric_store.inc_counter Keeper_metrics.(to_string ApprovalQueueFailures)
+            ~labels:[ "keeper", keeper_name
+                    ; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save) ] ();
+          Log.Keeper.warn "upsert_rule: save failed: %s" (rule_store_error_to_string error);
+          Error error
       in
-      match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
+      match List.find_opt (fun rule -> rule_identity_matches rule candidate) store.rules with
       | Some existing when Option.equal Float.equal existing.expires_at expires_at ->
-        Ok (existing, Existing)
+        persist existing Existing store.rules
       | Some existing ->
         let rule = { existing with expires_at } in
-        let next_rules =
-          List.map
-            (fun previous -> if String.equal previous.id existing.id then rule else previous)
-            rules
-        in
-        persist rule (Renewed { previous_expires_at = existing.expires_at }) next_rules
-      | None -> persist candidate Created (candidate :: rules))
+        let rules = List.map
+          (fun previous -> if String.equal previous.id existing.id then rule else previous)
+          store.rules in
+        persist rule (Renewed { previous_expires_at = existing.expires_at }) rules
+      | None -> persist candidate Created (candidate :: store.rules))
 ;;
+
+let upsert_rule
+      ~base_path ~keeper_name ~tool_name ~input ?created_by
+      ~source_approval_id ~expires_at ()
+  =
+  upsert_rule_with_save ~save:save_rule_store_unlocked
+    ~base_path ~keeper_name ~tool_name ~input ?created_by
+    ~source_approval_id ~expires_at ()
+;;
+
+module For_testing = struct
+  let upsert_rule_with_save = upsert_rule_with_save
+  let save_rule_store = save_rule_store_unlocked
+end
 
 let delete_rule ~base_path ~id () =
   with_rules_write_lock (fun () ->
-    match load_rules_unlocked ~base_path () with
+    match load_rule_store_unlocked ~base_path () with
     | Error _ as error -> error
-    | Ok rules ->
-      (match List.find_opt (fun rule -> String.equal rule.id id) rules with
+    | Ok store ->
+      (match List.find_opt (fun rule -> String.equal rule.id id) store.rules with
        | None ->
          Error
            { path = rules_path ~base_path ()
            ; reason = Printf.sprintf "approval rule %s not found" id
            }
        | Some deleted ->
-         let remaining = List.filter (fun rule -> not (String.equal rule.id id)) rules in
-         (match save_rules_unlocked ~base_path remaining with
+         let rules = List.filter (fun rule -> not (String.equal rule.id id)) store.rules in
+         (match save_rule_store_unlocked ~base_path { store with rules } with
           | Ok () -> Ok deleted
           | Error _ as error -> error)))
 ;;

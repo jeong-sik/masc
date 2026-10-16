@@ -2075,6 +2075,71 @@ let test_expired_rule_reapproval_reaches_gate_and_http_readback () =
        | Gate.Unavailable reason -> Alcotest.fail (Gate.unavailable_reason_to_string reason))
 ;;
 
+let test_retained_rule_deliveries_are_idempotent_after_restart_and_delete () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-rule-replay" in
+  AQ.For_testing.reset_runtime_state ();
+  Keeper_approval.Audit.For_testing.reset_store ();
+  Fun.protect ~finally:(fun () ->
+    AQ.For_testing.reset_runtime_state ();
+    Keeper_approval.Audit.For_testing.reset_store ();
+    cleanup_dir base_path) (fun () ->
+    ignore (install_exn ~base_path);
+    let input = `Assoc [ "target", `String "retained-rule-deliveries" ] in
+    let submit_task task_id = submit_with_context ~base_path ~keeper_name ~input ~task_id () in
+    let a = submit_task "older-A" in
+    let b = submit_task "newer-B" in
+    let c = submit_task "retry-C" in
+    let d = submit_task "retry-D" in
+    let until = Unix.gettimeofday () +. 600.0 in
+    let resolve id expires_at =
+      match Server_dashboard_http.dashboard_gate_resolve_http_json
+        ~base_path ~created_by:"same-operator"
+        ~args:(`Assoc [ "id", `String id; "decision", `String "approve"
+                     ; "remember_rule", `Bool true; "rule_expires_at", `Float expires_at ]) () with
+      | Ok json -> json
+      | Error error -> Alcotest.fail (Server_dashboard_http.approval_resolve_http_error_to_string error)
+    in
+    let readback expected json =
+      Alcotest.(check (float 0.0)) "HTTP returns the current committed expiry" expected
+        Yojson.Safe.Util.(json |> member "rule_expires_at" |> to_float)
+    in
+    readback (until +. 100.0) (resolve b (until +. 100.0));
+    (* A is older in submission order but this is its first real resolution. *)
+    readback until (resolve a until);
+    readback (until +. 200.0) (resolve c (until +. 200.0));
+    let latest = resolve d (until +. 300.0) in
+    readback (until +. 300.0) latest;
+    readback (until +. 300.0) (resolve c (until +. 200.0));
+    let rule_id = Yojson.Safe.Util.(latest |> member "rule_id" |> to_string) in
+    AQ.For_testing.reset_runtime_state ();
+    ignore (install_exn ~base_path);
+    (match Rules.list_rules ~base_path () with
+     | Ok [ rule ] -> Alcotest.(check (option (float 0.0)))
+         "boot delivery replay preserves latest expiry" (Some (until +. 300.0)) rule.expires_at
+     | Ok _ -> Alcotest.fail "boot replay duplicated or lost the rule"
+     | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
+    (* Exercise retained deliveries in reverse order after reopening their owner. *)
+    readback (until +. 300.0) (resolve d (until +. 300.0));
+    readback (until +. 300.0) (resolve c (until +. 200.0));
+    (match Server_dashboard_http.dashboard_gate_rule_delete_http_json
+      ~base_path ~deleted_by:"operator-deleting-rule"
+      ~args:(`Assoc [ "id", `String rule_id ]) with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail error);
+    let replay = resolve c (until +. 200.0) in
+    Alcotest.(check yojson) "replayed deleted rule is not reported active" `Null
+      Yojson.Safe.Util.(replay |> member "rule_id");
+    Alcotest.(check yojson) "replayed deleted rule has no expiry claim" `Null
+      Yojson.Safe.Util.(replay |> member "rule_expires_at");
+    AQ.For_testing.reset_runtime_state ();
+    ignore (install_exn ~base_path);
+    match Rules.list_rules ~base_path () with
+    | Ok [] -> ()
+    | Ok _ -> Alcotest.fail "boot replay resurrected deleted permission"
+    | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error))
+;;
+
 let test_remembered_rule_carries_requested_expiry () =
   let base_path = temp_dir () in
   let keeper_name = "queue-expiry-origin" in
@@ -6853,6 +6918,10 @@ let () =
             "expired rule reapproval reaches Gate and HTTP readback"
             `Quick
             test_expired_rule_reapproval_reaches_gate_and_http_readback
+        ; Alcotest.test_case
+            "retained rule delivery retries survive restart and deletion"
+            `Quick
+            test_retained_rule_deliveries_are_idempotent_after_restart_and_delete
         ; Alcotest.test_case
             "remembered rule carries requested expiry"
             `Quick

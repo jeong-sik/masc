@@ -5,6 +5,7 @@ module Rules = Masc.Keeper_approval_queue_rules
 module Rule_types = Keeper_approval_queue_rules_types
 module Gate = Masc.Keeper_gate
 module Gate_mode = Masc.Keeper_gate_mode
+module Application_store = Masc.Keeper_approval_rule_application_store
 
 let audit_rows_exn = function
   | Ok rows -> rows
@@ -52,10 +53,13 @@ let upsert_exn ~base_path ~input =
       ~keeper_name:"keeper"
       ~tool_name:"external-effect"
       ~input
+      ~source_approval_id:("test-approval-" ^ Masc.Keeper_approval_request_fingerprint.request_fingerprint input)
       ~expires_at:None
       ()
   with
-  | Ok result -> result
+  | Ok (Rules.Applied { rule; disposition }) -> rule, disposition
+  | Ok (Rules.Already_applied (Some rule)) -> rule, Rules.Existing
+  | Ok (Rules.Already_applied None) -> fail "fixture approval's rule was deleted"
   | Error error -> fail (Rule_types.rule_store_error_to_string error)
 ;;
 
@@ -174,10 +178,13 @@ let upsert_with_expiry_exn ~base_path ~input ~expires_at =
       ~keeper_name:"keeper"
       ~tool_name:"external-effect"
       ~input
+      ~source_approval_id:("test-approval-" ^ Masc.Keeper_approval_request_fingerprint.request_fingerprint input)
       ~expires_at:(Some expires_at)
       ()
   with
-  | Ok result -> result
+  | Ok (Rules.Applied { rule; disposition }) -> rule, disposition
+  | Ok (Rules.Already_applied (Some rule)) -> rule, Rules.Existing
+  | Ok (Rules.Already_applied None) -> fail "fixture approval's rule was deleted"
   | Error error -> fail (Rule_types.rule_store_error_to_string error)
 ;;
 
@@ -269,7 +276,8 @@ let test_reapproval_applies_each_requested_expiry_option () =
              ~base_path ~keeper_name:"keeper" ~tool_name:"external-effect" ~input
              ~created_by ~source_approval_id ~expires_at ()
          with
-         | Ok result -> result
+         | Ok (Rules.Applied { rule; disposition }) -> rule, disposition
+         | Ok (Rules.Already_applied _) -> fail "new fixture approval was already applied"
          | Error error -> fail (Rule_types.rule_store_error_to_string error)
        in
        let original, disposition =
@@ -281,7 +289,7 @@ let test_reapproval_applies_each_requested_expiry_option () =
        List.iter
          (fun (label, requested, changed) ->
             let rule, disposition =
-              apply ~created_by:"renewing-operator" ~source_approval_id:"later-approval"
+              apply ~created_by:"renewing-operator" ~source_approval_id:("later-approval-" ^ label)
                 requested
             in
             (match disposition, changed with
@@ -313,6 +321,192 @@ let test_reapproval_applies_each_requested_expiry_option () =
          ; "equal permanent", None, false
          ; "permanent to finite", Some 2500.0, true
          ])
+;;
+
+let apply_rule_approval ~base_path ~approval_id ~expires_at =
+  Rules.upsert_rule ~base_path ~keeper_name:"keeper" ~tool_name:"external-effect"
+    ~input:(`Assoc [ "request", `String "application-retry" ])
+    ~created_by:("actor-" ^ approval_id) ~source_approval_id:approval_id ~expires_at ()
+;;
+
+let application_result_exn = function
+  | Ok result -> result
+  | Error error -> fail (Rule_types.rule_store_error_to_string error)
+;;
+
+let application_rule_exn = function
+  | Rules.Applied { rule; _ } | Rules.Already_applied (Some rule) -> rule
+  | Rules.Already_applied None -> fail "expected a present rule"
+;;
+
+let read_application_store ~base_path =
+  let json = Yojson.Safe.from_file (Rules.rules_path ~base_path ()) in
+  match Application_store.decode_current_or_migrate_legacy json with
+  | Ok store -> store
+  | Error reason -> fail reason
+;;
+
+let test_rule_application_retries_never_rollback_or_resurrect () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let apply id expiry = apply_rule_approval ~base_path ~approval_id:id ~expires_at:expiry
+      |> application_result_exn in
+    let first = apply "approval-A" (Some 1000.0) |> application_rule_exn in
+    let newer = apply "approval-B" (Some 2000.0) |> application_rule_exn in
+    check string "renewal retains identity" first.id newer.id;
+    List.iter (fun (id, expiry) ->
+      match apply id (Some expiry) with
+      | Rules.Already_applied (Some current) ->
+        check (option (float 0.0)) "retry reads current expiry without rollback"
+          (Some 2000.0) current.expires_at
+      | Rules.Applied _ | Rules.Already_applied None -> fail "exact retry was reapplied")
+      [ "approval-A", 1000.0; "approval-B", 2000.0; "approval-A", 1000.0 ];
+    (match apply_rule_approval ~base_path ~approval_id:"approval-A" ~expires_at:None with
+     | Error _ -> ()
+     | Ok _ -> fail "same approval id changed its bound expiry");
+    List.iter (fun (keeper_name, tool_name, input, created_by) ->
+      match Rules.upsert_rule ~base_path ~keeper_name ~tool_name ~input ~created_by
+        ~source_approval_id:"approval-A" ~expires_at:(Some 1000.0) () with
+      | Error _ -> ()
+      | Ok _ -> fail "same approval id changed its bound actor or request identity")
+      [ "another-keeper", "external-effect",
+          `Assoc [ "request", `String "application-retry" ], "actor-approval-A"
+      ; "keeper", "another-effect",
+          `Assoc [ "request", `String "application-retry" ], "actor-approval-A"
+      ; "keeper", "external-effect", `Assoc [ "request", `String "changed" ],
+          "actor-approval-A"
+      ; "keeper", "external-effect",
+          `Assoc [ "request", `String "application-retry" ], "another-actor" ];
+    (match Rules.delete_rule ~base_path ~id:first.id () with
+     | Ok _ -> ()
+     | Error error -> fail (Rule_types.rule_store_error_to_string error));
+    List.iter (fun (id, expiry) -> match apply id expiry with
+      | Rules.Already_applied None -> ()
+      | Rules.Applied _ | Rules.Already_applied (Some _) ->
+        fail "retained delivery recreated a deleted rule")
+      [ "approval-B", Some 2000.0; "approval-A", Some 1000.0 ];
+    let stored = read_application_store ~base_path in
+    check int "deleted permission stays absent" 0 (List.length stored.rules);
+    check int "deletion retains exact receipts" 2 (List.length stored.applications);
+    let current = apply "approval-C" None |> application_rule_exn in
+    check (option (float 0.0)) "genuine new approval may create permanent rule" None
+      current.expires_at)
+;;
+
+let test_equal_expiry_witness_survives_legacy_migration () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let apply id expiry = apply_rule_approval ~base_path ~approval_id:id ~expires_at:expiry
+      |> application_result_exn in
+    let original = apply "approval-A" (Some 1000.0) |> application_rule_exn in
+    write_rules ~base_path (`List [ Rule_types.approval_rule_to_yojson original ]);
+    (match apply "approval-A" (Some 1000.0) with
+     | Rules.Already_applied (Some _) -> ()
+     | Rules.Applied _ | Rules.Already_applied None -> fail "legacy creation was replayed");
+    (match apply "approval-B" (Some 1000.0) with
+     | Rules.Applied { disposition = Rules.Existing; _ } -> ()
+     | Rules.Applied { disposition = (Rules.Created | Rules.Renewed _); _ }
+     | Rules.Already_applied _ -> fail "new equal-expiry approval was not witnessed");
+    let json = Yojson.Safe.from_file (Rules.rules_path ~base_path ()) in
+    check int "new writes use canonical envelope" 1
+      Yojson.Safe.Util.(json |> member "schema_version" |> to_int);
+    check int "equal expiry records its application" 2
+      (List.length (read_application_store ~base_path).applications);
+    (* The following retry/readback is the assertion for this intervening approval. *)
+    ignore (apply "approval-C" (Some 2000.0) : Rules.rule_upsert_result);
+    match apply "approval-B" (Some 1000.0) with
+    | Rules.Already_applied (Some current) ->
+      check (option (float 0.0)) "equal-expiry approval cannot later roll back"
+        (Some 2000.0) current.expires_at
+    | Rules.Applied _ | Rules.Already_applied None -> fail "equal-expiry receipt was lost")
+;;
+
+let test_rule_and_application_commit_atomically_across_failed_ack () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    (* Establish the persisted prefix whose atomicity the failing writes must preserve. *)
+    ignore (apply_rule_approval ~base_path ~approval_id:"approval-A" ~expires_at:(Some 1000.0)
+      |> application_result_exn : Rules.rule_upsert_result);
+    let invoke save = Rules.For_testing.upsert_rule_with_save ~save
+      ~base_path ~keeper_name:"keeper" ~tool_name:"external-effect"
+      ~input:(`Assoc [ "request", `String "application-retry" ])
+      ~created_by:"actor-approval-B" ~source_approval_id:"approval-B"
+      ~expires_at:(Some 2000.0) () in
+    let failed_ack ~base_path _store = Error
+      { Rule_types.path = Rules.rules_path ~base_path (); reason = "fixture lost write ack" } in
+    (match invoke failed_ack with Error _ -> () | Ok _ -> fail "failed write was accepted");
+    let before = read_application_store ~base_path in
+    check int "failed write adds no receipt" 1 (List.length before.applications);
+    check (option (float 0.0)) "failed write preserves rule" (Some 1000.0)
+      (List.hd before.rules).expires_at;
+    let commit_then_lose_ack ~base_path store =
+      match Rules.For_testing.save_rule_store ~base_path store with
+      | Error _ as error -> error
+      | Ok () -> failed_ack ~base_path store in
+    (match invoke commit_then_lose_ack with
+     | Error _ -> () | Ok _ -> fail "lost acknowledgment was hidden");
+    let after = read_application_store ~base_path in
+    check int "completed atomic write contains receipt" 2 (List.length after.applications);
+    check (option (float 0.0)) "completed atomic write contains rule" (Some 2000.0)
+      (List.hd after.rules).expires_at;
+    match apply_rule_approval ~base_path ~approval_id:"approval-B" ~expires_at:(Some 2000.0)
+      |> application_result_exn with
+    | Rules.Already_applied (Some rule) ->
+      check (option (float 0.0)) "retry observes committed value" (Some 2000.0) rule.expires_at
+    | Rules.Applied _ | Rules.Already_applied None -> fail "lost ack caused application replay")
+;;
+
+let test_application_identity_is_scoped_to_its_workspace_store () =
+  let first = temp_dir () in
+  let second = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir first; cleanup_dir second) (fun () ->
+    List.iter (fun (base_path, expiry) ->
+      let rule = apply_rule_approval ~base_path ~approval_id:"same-opaque-approval-id"
+        ~expires_at:(Some expiry) |> application_result_exn |> application_rule_exn in
+      check (option (float 0.0)) "independent workspace keeps its requested expiry"
+        (Some expiry) rule.expires_at;
+      check int "workspace owns exactly its application" 1
+        (List.length (read_application_store ~base_path).applications))
+      [ first, 1000.0; second, 2000.0 ])
+;;
+
+let test_application_envelope_rejects_missing_or_conflicting_provenance () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    (* The committed fixture supplies the exact rule/receipt pair under test. *)
+    ignore (apply_rule_approval ~base_path ~approval_id:"approval-A" ~expires_at:(Some 1000.0)
+      |> application_result_exn : Rules.rule_upsert_result);
+    let store = read_application_store ~base_path in
+    let json = Application_store.to_yojson store in
+    let replace key value = match json with
+      | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+      | _ -> fail "canonical store must be an object"
+    in
+    let receipt = match json with
+      | `Assoc fields -> (match List.assoc "applications" fields with
+          | `List [ receipt ] -> receipt
+          | _ -> fail "one canonical receipt expected")
+      | _ -> fail "canonical store must be an object"
+    in
+    let changed_receipt = match receipt with
+      | `Assoc fields -> `Assoc (("keeper_name", `String "wrong-keeper")
+          :: List.remove_assoc "keeper_name" fields)
+      | _ -> fail "receipt must be an object"
+    in
+    List.iter (fun (label, malformed) ->
+      match Application_store.decode_current_or_migrate_legacy malformed with
+      | Error _ -> ()
+      | Ok _ -> fail (label ^ " was accepted"))
+      [ "unknown version", replace "schema_version" (`Int 2)
+      ; "missing creation receipt", replace "applications" (`List [])
+      ; "duplicate application", replace "applications" (`List [ receipt; receipt ])
+      ; "conflicting rule identity", replace "applications" (`List [ changed_receipt ])
+      ; "missing envelope field", (match json with
+          | `Assoc fields -> `Assoc (List.remove_assoc "applications" fields)
+          | _ -> fail "canonical store must be an object")
+      ; "duplicate envelope field", (match json with
+          | `Assoc fields -> `Assoc (("schema_version", `Int 1) :: fields)
+          | _ -> fail "canonical store must be an object") ])
 ;;
 
 let test_unknown_persisted_shape_is_reported_and_rejected () =
@@ -893,6 +1087,16 @@ let () =
             "reapproval persists exact finite and permanent options"
             `Quick
             test_reapproval_applies_each_requested_expiry_option
+        ; test_case "retained applications never rollback or resurrect" `Quick
+            test_rule_application_retries_never_rollback_or_resurrect
+        ; test_case "equal-expiry witnesses and legacy migration" `Quick
+            test_equal_expiry_witness_survives_legacy_migration
+        ; test_case "rule and receipt atomicity after failed ack" `Quick
+            test_rule_and_application_commit_atomically_across_failed_ack
+        ; test_case "application receipts belong to their workspace" `Quick
+            test_application_identity_is_scoped_to_its_workspace_store
+        ; test_case "application envelope rejects conflicting provenance" `Quick
+            test_application_envelope_rejects_missing_or_conflicting_provenance
         ; test_case
             "Gate consumes exact persisted rule"
             `Quick

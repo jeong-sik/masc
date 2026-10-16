@@ -2265,7 +2265,8 @@ let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pen
         ~expires_at:rule_expires_at
         ()
     with
-    | Ok (rule, disposition) ->
+    | Ok (Keeper_approval_queue_rules.Already_applied rule) -> Ok (rule, [])
+    | Ok (Keeper_approval_queue_rules.Applied { rule; disposition }) ->
       let audit_receipts =
         match disposition with
         | Keeper_approval_queue_rules.Created ->
@@ -2279,7 +2280,7 @@ let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pen
               ~previous_expires_at
               rule ]
       in
-      Ok (rule, audit_receipts)
+      Ok (Some rule, audit_receipts)
     | Error reason -> Error reason
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2313,7 +2314,7 @@ let remember_rule_for_delivery delivery =
          ?rule_expires_at:delivery.rule_expires_at
          delivery.entry
      with
-     | Ok (rule, audit_receipts) -> Ok (Some rule, audit_receipts)
+     | Ok (rule, audit_receipts) -> Ok (rule, audit_receipts)
      | Error rule_error ->
        Error
          { path = rule_error.path

@@ -279,6 +279,10 @@ val resolve_error_to_string : resolve_error -> string
     Omitting it requests a permanent rule, including when replacing an
     existing finite expiry. Reapproval applies the requested option exactly
     while preserving the rule's identity and original creation metadata.
+    Each approval's exact application is persisted atomically with the rule.
+    An already-applied approval only reads the current rule, so retry or boot
+    replay cannot overwrite a later renewal. If that rule was deleted, the
+    retry returns no remembered rule and cannot recreate permission.
 
     [base_path] is the authenticated caller workspace. The pending or
     in-progress delivery entry must belong to it exactly before any resolution

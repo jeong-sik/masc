@@ -34,6 +34,8 @@ val make_tool_bundle_for_capability_surface
     declaration permits deferred loading. Selection comes from the frozen activation frame and must match
     the executable surface's full Skill identity and content revision. This
     records no activation; other deferrable tools retain the normal loader.
+    The public recipe run control is also ready for a selected composition, so
+    an upstream input DAG needs no preliminary schema-loader exchange.
 
     [checkpoint_owner] is asked on each tool call, not when the bundle is
     built: the turn resolves its runtime afterwards, and a heterogeneous lane

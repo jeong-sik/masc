@@ -270,9 +270,17 @@ type commit_observer =
   ; failed_deliveries : int Atomic.t
   }
 
-let commit_observer_key : commit_observer Eio.Fiber.key = Eio.Fiber.create_key ()
+let commit_observer_key : commit_observer option Eio.Fiber.key = Eio.Fiber.create_key ()
 let make_commit_observer notify = {notify; failed_deliveries = Atomic.make 0}
-let with_commit_observer observer operation = Eio.Fiber.with_binding commit_observer_key observer operation
+let current_commit_observer () = match Fs_compat.execution_context () with
+  | Fs_compat.Non_eio -> None
+  | Fs_compat.Eio_fiber -> Option.join (Eio.Fiber.get commit_observer_key)
+let with_commit_observer observer operation = Eio.Fiber.with_binding commit_observer_key (Some observer) operation
+let capture_commit_observer operation =
+  let observer = current_commit_observer () in
+  fun () -> match Fs_compat.execution_context () with
+    | Fs_compat.Non_eio -> operation ()
+    | Fs_compat.Eio_fiber -> Eio.Fiber.with_binding commit_observer_key observer operation
 let failed_commit_deliveries observer = Atomic.get observer.failed_deliveries
 
 let notify_commit observer receipt =
@@ -786,9 +794,7 @@ let log_call
       ?on_committed
       ()
   =
-  let commit_observer = match Fs_compat.execution_context () with
-    | Fs_compat.Non_eio -> None
-    | Fs_compat.Eio_fiber -> Eio.Fiber.get commit_observer_key in
+  let commit_observer = current_commit_observer () in
   let requires_commit =
     Option.is_some commit_observer || Option.is_some on_committed || artifact_refs <> []
     || Option.exists (fun result -> Tool_result.retained_artifacts result <> []) typed_result

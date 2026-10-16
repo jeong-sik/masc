@@ -1506,6 +1506,9 @@ let cached_credential_index ~key ~now ~stamp =
     | Some _ | None -> None)
 ;;
 
+(* HIGH-RISK-UNREVIEWED: decides which bearer tokens are accepted. A rebuild
+   that could not read a credential answers an error and stores nothing; it
+   never answers or caches a smaller index. *)
 let credential_token_index config
   : ((string, agent_credential list) Hashtbl.t, masc_error) result
   =

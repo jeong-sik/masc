@@ -171,6 +171,22 @@ let parse body =
       | value -> Error ("unknown event queue operator action: " ^ value)
 ;;
 
+let record_audit record =
+  match record () with
+  | () -> `Assoc [ "recorded", `Bool true ]
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception _ ->
+    (* The mutation result remains authoritative even if its audit append
+       fails. No exception representation belongs in this HTTP receipt: a
+       filesystem path or opaque credential need not match a redaction rule.
+       The enclosing response retains the Keeper and mutation identity. *)
+    `Assoc
+      [ "recorded", `Bool false
+      ; "code", `String "keeper_event_queue_audit_unavailable"
+      ; "error", `String "The event queue audit could not be recorded."
+      ]
+;;
+
 let handle_post state ~actor request reqd ~keeper_name body =
   let respond ?(status = `OK) json =
     Http.Response.json_value ~status ~request json reqd
@@ -233,7 +249,7 @@ let handle_post state ~actor request reqd ~keeper_name body =
            keeper_name
            action);
       let audit =
-        try
+        record_audit (fun () ->
           let source_details =
             match result with
             | Ok (Some source, _) ->
@@ -263,15 +279,7 @@ let handle_post state ~actor request reqd ~keeper_name body =
               (match result with
                | Ok _ -> Audit_log.Success
                | Error detail -> Audit_log.Failure detail)
-            ();
-          `Assoc [ "recorded", `Bool true ]
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          `Assoc
-            [ "recorded", `Bool false
-            ; "error", `String (Observability_redact.redact_text (Printexc.to_string exn))
-            ]
+            ())
       in
       match result with
       | Ok (_, result) ->
@@ -293,3 +301,7 @@ let handle_post state ~actor request reqd ~keeper_name body =
             ; "audit", audit
             ])
 ;;
+
+module For_testing = struct
+  let record_audit = record_audit
+end

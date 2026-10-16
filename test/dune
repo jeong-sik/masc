@@ -1197,6 +1197,11 @@
  (libraries alcotest masc_test_deps eio_main))
 
 (test
+ (name test_keeper_event_queue_operator_audit_receipt)
+ (modules test_keeper_event_queue_operator_audit_receipt)
+ (libraries alcotest masc_test_deps eio_main))
+
+(test
  (name test_server_request_authority)
  (modules test_server_request_authority)
  (libraries alcotest masc_test_deps eio_main h2))

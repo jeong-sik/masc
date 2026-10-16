@@ -14,3 +14,9 @@ val handle_post :
   keeper_name:string ->
   string ->
   unit
+
+module For_testing : sig
+  val record_audit : (unit -> unit) -> Yojson.Safe.t
+  (** The production audit receipt boundary. Exceptions never become public
+      payload; cancellation still propagates. *)
+end

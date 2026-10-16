@@ -189,6 +189,25 @@ val partition_documents :
     receives the rejection list explicitly, so one bad optional Skill cannot
     stop unrelated Keeper turns or disappear silently. *)
 
+type prepared
+(** Immutable entry projections bound to the exact snapshot and canonical Tool
+    objects. A caller may retain this value across other catalog preparations;
+    it does not grant invocation or replay authority. *)
+val prepare_snapshot :
+  descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> prepared
+val prepared_matches :
+  prepared -> descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> bool
+val prepared_snapshot : prepared -> Skill_catalog_snapshot.t
+val prepared_catalog : prepared -> t * projection_diagnostic list
+val project_prepared_entry : prepared -> Skill_catalog_snapshot.entry -> entry_projection
+val fold_prepared_entries :
+  prepared ->
+  init:'a ->
+  f:('a -> Skill_catalog_snapshot.entry -> entry_projection -> effective:bool -> 'a) ->
+  'a
+(** Fold every exact entry once in snapshot order, including shadowed entries,
+    without consulting a process-global cache or reprojecting per entry. *)
+
 val of_snapshot :
   ?descriptors:Keeper_tool_descriptor.t list -> Skill_catalog_snapshot.t -> t * projection_diagnostic list
 (** Project effective snapshot entries into the temporary composition-tool

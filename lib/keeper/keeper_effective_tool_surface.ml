@@ -135,9 +135,6 @@ let project
     | Some descriptors -> descriptors
     | None -> Keeper_tool_descriptor.all_descriptors ()
         @ List.map Keeper_lane_addon_descriptor.create lane_addon_exports in
-  let global_skill_catalog, projection_diagnostics =
-    Keeper_skill_catalog.of_snapshot ~descriptors:tool_descriptors skill_snapshot
-  in
   let skill_resource_read_max_bytes =
     match Skill_catalog_snapshot.config_state skill_snapshot with
     | Configured { config; _ } ->
@@ -150,13 +147,18 @@ let project
     match task_selection with
     | Some selection -> Ok selection
     | None ->
-      Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot task_skill_references
+      Keeper_task_skill_turn.resolve ~descriptors:tool_descriptors
+        ~snapshot:skill_snapshot task_skill_references
   in
   let task_selection = Result.bind task_selection
     (Keeper_task_skill_turn.with_descriptors ~descriptors:tool_descriptors ~snapshot:skill_snapshot) in
   match task_selection with
   | Error _ as error -> error
   | Ok task_selection ->
+    let preparation = Keeper_task_skill_turn.prepare_surface
+        ~descriptors:tool_descriptors ~snapshot:skill_snapshot task_selection in
+    let global_skill_catalog = preparation.catalog in
+    let projection_diagnostics = preparation.diagnostics in
     let capability_surface =
       Keeper_capability_surface.create_with_descriptors
         ~tool_descriptors
@@ -164,7 +166,7 @@ let project
         ~sandbox_profile
         ~skill_names
         ~global_skill_catalog
-        ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors:tool_descriptors skill_snapshot)
+        ~skill_inventory:preparation.inventory
         ~task_skills:(Keeper_task_skill_turn.skills task_selection)
     in
     let descriptors = Keeper_capability_surface.descriptors capability_surface in

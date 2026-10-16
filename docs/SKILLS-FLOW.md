@@ -160,6 +160,35 @@ Task Skill도 실행 projection과 prompt에서 unavailable이며 admission 전�
 설정을 함께 다룬다. 이 단위에서는 작성만 했고 실행하지 않았다. 구문 검사만으로 타입·동작·
 첫 모델 요청까지의 시간이나 모델 왕복 개선을 증명하지 않는다.
 
+#### 턴이 보유하는 카탈로그·inventory 준비 결과
+
+Task 선택은 exact reference 해석에 쓴 `Keeper_skill_catalog.prepared`와 그로부터 만든
+유효 카탈로그·diagnostic·전체 inventory를 함께 보관한다. 프롬프트의 exact Task 표면,
+실행 setup, 유효 Tool 표면, 대기 중 Composition 재개는 `prepare_surface`로 같은 결과를
+받는다. 재개가 새 snapshot을 관측하면 그 새 입력으로 준비하며, 이전 실행 권한을
+준비 결과에서 가져오지 않는다. 원래 Task 출처·실행 admission은 기존 경로가 판정한다.
+
+비교 기준은 `6633d8223ca8ffe5eff597f3592f518c0cac322a`다. 기존에도 마지막 snapshot과
+descriptor 객체에 결속된 전역 projection cache가 있었다. 다른 Keeper나 workspace의
+준비가 끼어들면 그 한 칸이 교체될 수 있었다. 이제 턴이 보유한 불변 handle은 그 교체와
+무관하게 유지된다. 전역 cache를 무제한으로 늘리거나 시간으로 유효성을 추측하지 않는다.
+
+| 조건 | As-Is | To-Be 소스 경로 |
+| --- | --- | --- |
+| 같은 선택을 여러 소비 지점이 사용 | 유효 카탈로그와 inventory를 각각 다시 조립 | 선택이 보유한 한 준비 결과를 공유 |
+| 다른 입력의 준비가 중간에 실행 | 마지막 한 칸 cache가 교체돼 원래 입력을 다시 투영할 수 있음 | 원래 선택의 handle과 그 파생 결과 유지 |
+| inventory의 exact entry 처리 | 항목마다 cache 조회·전체 projection 목록 검색, 유효 항목 목록 재검색 | 준비된 entry·projection·effective 상태를 한 번 순회 |
+| shadowed·잘못된 sibling 문서 | exact 출처와 독립된 오류 행 보존 | 같은 순서·출처·typed 상태 보존 |
+| source·Tool 객체 변경 또는 서로 다른 준비 결과 병합 | 요청한 입력으로 재해석 | 요청한 입력으로 재해석하고 일관된 준비 결과 생성 |
+
+같은 binding의 준비 결과를 사용하는 소비 지점 수를 `K`, snapshot exact entry 수를 `E`라
+하면, 카탈로그·inventory 조립은 소스상 `K회 → 1회`다. 각 inventory 조립이 추가로 하던
+항목별 전체 projection·effective 목록 검색은 직접 순회로 바뀐다. 이는 inventory 파생
+단계의 반복을 제거한 것이며, 최초 카탈로그 투영 내부의 effective 검색이나 Task exact
+lookup까지 선형으로 바꾼 것은 아니다. 이 단위의 복합 시나리오는 작성만 했고 실행하지
+않았다. 실제 준비 시간·첫 요청 크기·모델 왕복·TUI 전체 갱신 지연은 이 소스 비교로
+판정하지 않는다.
+
 ### 2b. 프롬프트 — 지명된 스킬 안내
 
 `task.skills`(`masc_add_task`가 지정, `lib/task/tool_task_handlers.ml`의

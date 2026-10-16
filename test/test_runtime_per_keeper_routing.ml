@@ -1526,6 +1526,42 @@ let test_an_exact_slot_append_keeps_the_declared_order () =
       [ "openai.gpt" ] (exact_lane_slots path "hitl_auto_judge"))
 ;;
 
+let test_an_exact_slot_append_reads_after_lock_admission () =
+  Eio_main.run @@ fun _env ->
+  with_runtime_file (fun path ->
+    let original = read_file path in
+    Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slots:["catalog.original"; "openai.gpt"] ()
+    |> lane_write_ok "declare the original order";
+    Eio.Switch.run @@ fun sw ->
+    let completed, publish_completed = Eio.Promise.create () in
+    let lock_path = path ^ ".lock" in
+    let rec await_waiter () =
+      if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 then ()
+      else match Eio.Promise.peek completed with
+        | Some _ -> Alcotest.fail "the append bypassed the held configuration lock"
+        | None -> Eio.Fiber.yield (); await_waiter ()
+    in
+    Runtime.with_config_lock ~runtime_config_path:path (fun () ->
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve publish_completed
+          (Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+             ~lane:Runtime.Board_attention ~slot:"runpod_mtp.qwen" ()));
+      await_waiter ();
+      (* The prior writer changes the file after the append is waiting. The
+         published runtime view still holds the old order at this point. *)
+      let intervening = original
+          ^ "\n[runtime.exact_output_lanes.board_attention_exact]\n\
+             slots = [\"catalog.original\", \"catalog.intervening\", \"openai.gpt\"]\n" in
+      write_file path intervening;
+      Ok ())
+    |> lane_write_ok "the preceding writer releases its committed declaration";
+    Eio.Promise.await completed |> lane_write_ok "the waiting append commits";
+    Alcotest.(check (list string)) "the append preserves both unadmitted declarations and latest order"
+      ["catalog.original"; "catalog.intervening"; "openai.gpt"; "runpod_mtp.qwen"]
+      (exact_lane_slots path "board_attention_exact"))
+;;
+
 (* A lane's name is its routing key, so a rename is the table header and every
    reference to it -- assignments, and [runtime].default when it names the lane
    -- in the one write. A file written with a reference missed would route
@@ -1966,6 +2002,47 @@ let test_an_exact_lane_refuses_a_client_without_an_output_schema_channel () =
        Alcotest.(check (list string)) "only that client is a CLI slot"
          [ "codex.codex" ]
          (exact_lane_cli_slots path "board_attention_exact"))
+;;
+
+let test_exact_cli_replacement_preserves_declared_groups () =
+  with_official_client_runtime_file
+    ~lane:(String.trim muse_serve_bindings
+      ^ "\n\n[runtime.exact_output_lanes.board_attention_exact]\n\
+         slots = [\"catalog.only\", \"openai.gpt\"]\n\
+         cli_slots = [\"codex.codex\"]\n\
+         enabled = true\nthinking = false\nmax_output_tokens = 512\n")
+    (fun path ->
+      let declaration () =
+        match Runtime_toml.parse_string (read_file path) with
+        | Error _ -> Alcotest.fail "replacement fixture must parse"
+        | Ok config ->
+          match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+              lane.id = "board_attention_exact") config.exact_output_lane_decls with
+          | Some lane -> lane
+          | None -> Alcotest.fail "replacement lost the declared exact lane"
+      in
+      let before = declaration () in
+      Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+        ~lane:Runtime.Board_attention ~slot:" codex.codex " ~replacement:" codex.mini " ()
+      |> lane_write_ok "replace a CLI candidate in its original group";
+      Alcotest.(check bool) "replacement keeps HTTP declarations and every other lane field" true
+        (declaration () = {before with cli_slot_ids = ["codex.mini"]});
+      lane_write_refused "a replacement cannot cross transport groups" ~path
+        ~names:["within its HTTP or CLI group"] (fun () ->
+          Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+            ~lane:Runtime.Board_attention ~slot:"codex.mini" ~replacement:"openai.small" ());
+      lane_write_refused "a replacement cannot duplicate its own declaration" ~path
+        ~names:["codex.mini is already declared"] (fun () ->
+          Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+            ~lane:Runtime.Board_attention ~slot:"codex.mini" ~replacement:"codex.mini" ());
+      lane_write_refused "schema refusal still precedes absent original-slot refusal" ~path
+        ~names:[muse_serve_runtime_id; "no output-schema channel"] (fun () ->
+          Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+            ~lane:Runtime.Board_attention ~slot:"absent" ~replacement:muse_serve_runtime_id ());
+      lane_write_refused "an absent original still refuses the group replacement" ~path
+        ~names:["within its HTTP or CLI group"] (fun () ->
+          Runtime.replace_exact_output_lane_slot ~runtime_config_path:path
+            ~lane:Runtime.Board_attention ~slot:"absent" ~replacement:"codex.codex" ()))
 ;;
 
 (* The curator lane walks its CLI slots after its HTTP slots, as every exact
@@ -4244,6 +4321,10 @@ let () =
             `Quick
             test_an_exact_slot_append_keeps_the_declared_order
         ; Alcotest.test_case
+            "a waiting exact append reads the preceding writer's declaration"
+            `Quick
+            test_an_exact_slot_append_reads_after_lock_admission
+        ; Alcotest.test_case
             "a rename carries the references with it"
             `Quick
             test_a_rename_carries_the_references_with_it
@@ -4276,6 +4357,9 @@ let () =
         ; Alcotest.test_case
             "an exact lane refuses a client without an output-schema channel" `Quick
             test_an_exact_lane_refuses_a_client_without_an_output_schema_channel
+        ; Alcotest.test_case
+            "CLI replacement preserves declared groups and refusal order" `Quick
+            test_exact_cli_replacement_preserves_declared_groups
         ; Alcotest.test_case
             "multiple official client accounts stay distinct"
             `Quick

@@ -286,17 +286,45 @@ let contains text needle =
 let test_lane_rename_rewrites_fusion_seats () =
   with_config (fun path ->
     let trio = seat_trio path in
+    let keeper_name = "edgar.a.poe" in
+    let new_lane_id = "arbiter.primary" in
+    (match Runtime.set_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name
+        ~runtime_id:"fusion-judge" () with
+     | Ok _ -> ()
+     | Error detail -> failf "assigning the seated lane: %s" detail);
+    (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"fusion-judge" () with
+     | Ok _ -> ()
+     | Error detail -> failf "setting the seated default: %s" detail);
     (match
        Runtime.rename_runtime_lane ~runtime_config_path:path ~lane_id:"fusion-judge"
-         ~new_lane_id:"arbiter" ()
+         ~new_lane_id ()
      with
      | Ok _ -> ()
      | Error detail -> failf "rename refused: %s" detail);
     check (testable Fusion_policy.pp_preset Fusion_policy.equal_preset)
       "every seat on the lane took the new name"
-      (seats_on ~route:"arbiter" ~panel:true ~judge:true ~judges:true trio)
+      (seats_on ~route:new_lane_id ~panel:true ~judge:true ~judges:true trio)
       (preset_named path "trio");
     check bool "no seat names the old lane" false (contains (read path) "\"fusion-judge\"");
+    let declared = match Runtime_toml.parse_string (read path) with
+      | Ok declared -> declared
+      | Error _ -> fail "the combined lane rename wrote invalid runtime TOML" in
+    check (option string) "the persisted dotted Keeper assignment follows the lane"
+      (Some new_lane_id) (List.assoc_opt keeper_name declared.keeper_assignments);
+    check (option string) "the persisted default follows the same lane"
+      (Some new_lane_id) declared.default_runtime_id;
+    check (option (list string)) "the persisted lane keeps its full candidate order"
+      (Some ["stub-http.stub-model"; "stub-http.stub-alt"])
+      (List.find_opt (fun (lane : Runtime_schema.lane_decl) -> lane.id = new_lane_id)
+         declared.lane_decls |> Option.map (fun lane -> lane.Runtime_schema.candidate_ids));
+    check (option string) "the running Keeper assignment follows the committed rename"
+      (Some new_lane_id) (Runtime.runtime_id_for_keeper keeper_name);
+    check string "the running default is the same renamed route" new_lane_id
+      (Runtime.get_default_route ());
+    (match Runtime.resolve_assignment new_lane_id with
+     | `Lane lane -> check (list string) "the renamed route resolves the original order"
+         ["stub-http.stub-model"; "stub-http.stub-alt"] (Runtime_lane.ordered_candidates lane)
+     | `Missing | `Unavailable _ -> fail "the committed renamed lane does not resolve");
     (* The Fusion editor resolves every seat the way a run does, so saving
        trio again proves a run would find the renamed lane. *)
     match apply path (Masc.Fusion_config_edit.Upsert_preset (preset_named path "trio")) with
@@ -651,7 +679,7 @@ let () =
         ; test_case "rename follows the default" `Quick test_rename_follows_the_default
         ] )
     ; ( "lane references"
-      , [ test_case "a lane rename rewrites the Fusion seats" `Quick
+      , [ test_case "a lane rename carries assignments, default and Fusion seats together" `Quick
             test_lane_rename_rewrites_fusion_seats
         ; test_case "a lane remove is refused while a seat names it" `Quick
             test_lane_remove_is_refused_while_a_seat_names_it

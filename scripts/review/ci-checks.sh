@@ -61,6 +61,9 @@ check_leader_selected_ci() {
 # record; docs-only heads settle instantly by input identity.
 check_merge_compile() {
   local rows status target_url
+  # Take the LAST merge-compile status: the API returns them oldest-first, so
+  # `last` is the current verdict. A head whose verdict was overwritten keeps
+  # the newest one, which is exactly what the merge decision must read.
   rows=$(ci_gh_json "repos/$repo/commits/$selected_head/status" '[.statuses[] | select(.context == "merge-compile") | [.state, .target_url] | @tsv] | last // empty') || return 1
   [ -n "$rows" ] || { echo "REFUSED #$selected_pr: no merge-compile record for exact head $selected_head — dispatch merge-compile.yml on this head (gh workflow run merge-compile.yml --ref main -f sha=$selected_head -f pr=$selected_pr) and merge after it succeeds" >&2; return 2; }
   IFS=$'\t' read -r status target_url <<<"$rows"

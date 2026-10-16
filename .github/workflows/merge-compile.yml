@@ -29,11 +29,6 @@ jobs:
       # Keep user-written rules (including generated build identity) live.
       DUNE_CACHE: enabled-except-user-rules
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.sha }}
-          persist-credentials: false
-
       - name: Validate dispatch and pin pending status
         env:
           GH_TOKEN: ${{ github.token }}
@@ -64,11 +59,28 @@ jobs:
               data=body, method='POST',
               headers={'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
                        'Accept': 'application/vnd.github+json'})
-          with urllib.request.urlopen(request) as response:
+          with urllib.request.urlopen(request, timeout=30) as response:
               if response.status != 201:
                   raise SystemExit(f'status pin failed for {sha}: {response.status}')
               print(f'pinned merge-compile pending on {sha[:12]}')
           PY
+
+      # Pull refs exist on origin for same-repo and fork PRs alike, unlike a
+      # raw SHA fetch, so this is the fork-safe way to reach the head. The
+      # next step binds the tree to the dispatched SHA so a head that moved
+      # between dispatch and checkout is re-dispatched, not mis-certified.
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/pull/${{ inputs.pr }}/head
+          persist-credentials: false
+
+      - name: Bind the tree to the exact head
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          [ "$head" = "$SHA" ] || { echo "pull/${{ inputs.pr }}/head is $head, not the dispatched $SHA; re-dispatch on the current head" >&2; exit 1; }
 
       - name: Identify build inputs
         id: inputs
@@ -80,6 +92,9 @@ jobs:
           # shares that workflow's namespace on purpose, so a main build
           # warms merge checks and vice versa: identical inputs mean an
           # identical compile result, whichever SHA was actually built.
+          # This digest is computed early so a receipt hit can skip the
+          # toolchain entirely; the pristine-tree assertion after setup
+          # proves the tree the build reads is still the digest's tree.
           digest=$(python3 - <<'PY'
           import hashlib, subprocess
           entries = subprocess.check_output(['git', 'ls-tree', '-r', '-z', 'HEAD']).split(b'\0')
@@ -98,11 +113,15 @@ jobs:
           echo "dune=main-dune-v1-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
           echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache" >> "$GITHUB_ENV"
 
+      # The receipt lives outside the tree on purpose: the pristine-tree
+      # assertion below requires a completely clean workspace, and the
+      # cache key (identical to main-minimal-build's namespace) is what
+      # makes receipts interchangeable, not the file path.
       - name: Look for a successful build of these inputs
         id: receipt
         uses: actions/cache/restore@v6
         with:
-          path: .ci-main-build-receipt
+          path: ${{ runner.temp }}/.ci-main-build-receipt
           key: ${{ steps.inputs.outputs.receipt }}
 
       - uses: ./.github/actions/setup-ocaml-toolchain
@@ -121,6 +140,20 @@ jobs:
           restore-keys: |
             ${{ steps.inputs.outputs.dune }}-
 
+      # The toolchain above is head-supplied code (.github/actions,
+      # scripts) running before the build it is about to certify. The
+      # receipt lives outside the tree, so legitimately nothing in the
+      # workspace is new or modified; refuse rather than certify a tree
+      # the setup steps mutated. On a receipt hit nothing runs here, so
+      # this passes trivially and costs nothing.
+      - name: Prove the tree still matches the head
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$SHA" ] || { echo 'HEAD moved during setup' >&2; exit 1; }
+          [ -z "$(git status --porcelain)" ] || { echo 'workspace modified during setup:' >&2; git status --porcelain >&2; exit 1; }
+
       - name: Build the operator executables
         if: steps.receipt.outputs.cache-hit != 'true'
         run: |
@@ -130,15 +163,18 @@ jobs:
             bin/deployment_preflight_helper.exe
           # Record the SHA that was actually built: GITHUB_SHA is main's
           # (the dispatch ref), not the checked-out head.
-          printf '%s\n' "${{ inputs.sha }}" > .ci-main-build-receipt
+          printf '%s\n' "${{ inputs.sha }}" > "${{ runner.temp }}/.ci-main-build-receipt"
 
       # Only a completed successful build creates a receipt. A failed build
       # settles the head red; the author repairs the head and dispatches again.
+      # The save races a parallel run with identical inputs; losing that race
+      # must not fail an otherwise green compile, so report but ignore it.
       - name: Remember successful build inputs
         if: success() && steps.receipt.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
+        continue-on-error: true
         with:
-          path: .ci-main-build-receipt
+          path: ${{ runner.temp }}/.ci-main-build-receipt
           key: ${{ steps.inputs.outputs.receipt }}
 
       - name: Record checked scope
@@ -151,7 +187,7 @@ jobs:
             echo "Checked merge-head SHA: ${{ inputs.sha }} (PR #${{ inputs.pr }})"
             if [ "$RECEIPT_HIT" = true ]; then
               echo 'Build skipped: non-documentation inputs already built successfully.'
-              echo "Previously built SHA: $(cat .ci-main-build-receipt)"
+              echo "Previously built SHA: $(cat "${{ runner.temp }}/.ci-main-build-receipt")"
               echo 'Identical inputs mean an identical compile result, so this skip IS compilation evidence for the checked SHA.'
             else
               echo "Build job status: $BUILD_STATUS"
@@ -164,6 +200,7 @@ jobs:
     needs: [compile]
     if: always()
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Write verdict and settle the head status
         env:
@@ -199,7 +236,7 @@ jobs:
               data=body, method='POST',
               headers={'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
                        'Accept': 'application/vnd.github+json'})
-          with urllib.request.urlopen(request) as response:
+          with urllib.request.urlopen(request, timeout=30) as response:
               if response.status != 201:
                   raise SystemExit(f'status settle failed for {sha}: {response.status}')
               print(f'settled merge-compile on {sha[:12]} -> {state}')

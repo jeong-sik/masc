@@ -726,7 +726,7 @@ let test_run_vision_invalid_structured_response_is_typed () =
     in
     match outcome with
     | Vt.Vo_invalid_structured_response detail ->
-      assert (String_util.contains_substring detail "JSON parse error")
+      assert (String_util.contains_substring detail "Structured output parse error")
     | _ -> failwith "expected Vo_invalid_structured_response")
 
 let test_explicit_vision_runtime_selection () =

@@ -86,6 +86,44 @@ let test_origin_json_is_closed_and_retains_original_witness () =
     ]
 ;;
 
+let test_origin_admission_uses_actual_source_envelopes () =
+  let turn_ref = origin_turn 1 in
+  let board : Keeper_event_queue.stimulus =
+    { post_id = "board-post-a"; urgency = Normal; arrived_at = 1.0
+    ; payload = Board_signal
+        { kind = Post_created; author = "author"; title = "request"; content = "do this"
+        ; hearth = None; updated_at = None } } in
+  let bootstrap = {board with post_id = "bootstrap-is-not-a-board-post"; payload = Bootstrap} in
+  let queue = Keeper_event_queue.enqueue
+      (Keeper_event_queue.enqueue Keeper_event_queue.empty board) bootstrap in
+  let state = Keeper_event_queue_state.with_pending queue
+      (Keeper_event_queue_state.with_revision 7L Keeper_event_queue_state.empty) in
+  let selections = Keeper_event_queue_state.pending_selections state in
+  let value = match Origin.from_admission (Origin.Admitted selections) ~turn_ref with
+    | Ok value -> value | Error reason -> fail reason in
+  (match value.source with
+   | Origin.Admitted_sources sources ->
+     check int "both actual selections retained" 2 (List.length sources);
+     List.iter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+       let snapshot_ref = Keeper_event_queue_state.source_snapshot_ref selection.source in
+       let source = List.find (fun (source : Origin.admitted_source) -> source.snapshot_ref = snapshot_ref) sources in
+       check int64 "durable admission revision" selection.admitted_revision source.admitted_revision;
+       check (option string) "only Board source owns Board witness"
+         (if selection.source.post_id = board.post_id then Some board.post_id else None) source.board_post_id)
+       selections
+   | Direct_operation _ | No_admitted_source -> fail "actual source batch disappeared");
+  List.iter (fun admission -> match Origin.from_admission admission ~turn_ref with
+    | Ok value -> check yojson "absence is explicit, no invented turn"
+        (Origin.to_yojson Origin.unavailable) (Origin.to_yojson value)
+    | Error reason -> fail reason) [Origin.Unavailable; Origin.Admitted []];
+  let operation_id = match Keeper_operation_id.of_string "admitted-direct" with
+    | Ok value -> value | Error reason -> fail reason in
+  match Origin.from_admission (Origin.Direct_request operation_id) ~turn_ref with
+  | Ok value -> check yojson "direct operation comes from admission"
+      (Origin.to_yojson (Origin.direct_operation ~operation_id ~turn_ref)) (Origin.to_yojson value)
+  | Error reason -> fail reason
+;;
+
 let sample_rule =
   { Q.id = "rule-1"
   ; keeper_name = "keeper"
@@ -576,6 +614,7 @@ let () =
     [ ( "approval origin"
       , [ test_case "logical identity survives physical turns" `Quick test_origin_identity_ignores_physical_turns
         ; test_case "admitted source sets are canonical" `Quick test_origin_source_sets_are_canonical
+        ; test_case "actual admission owns origin coordinates" `Quick test_origin_admission_uses_actual_source_envelopes
         ; test_case "strict origin JSON retains witness" `Quick test_origin_json_is_closed_and_retains_original_witness
         ] )
     ; ( "judgment"

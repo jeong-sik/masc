@@ -115,6 +115,7 @@ val prepare_agent_setup
   -> context_injector:Agent_core.Hooks.context_injector
   -> start_turn_count:int
   -> keeper_turn_id:int
+  -> approval_admission:Keeper_approval_origin.admission
   -> turn_kind:Turn_record.turn_kind
   -> runtime_id:string
   -> config_root:string

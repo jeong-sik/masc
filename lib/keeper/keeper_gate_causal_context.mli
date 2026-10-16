@@ -14,7 +14,11 @@ val evidence_budget_bytes : int
     so the two evidence axes of the judge bundle stay one declared number
     instead of two independently tuned ones. *)
 
-val create : turn_id:int option -> initial:Yojson.Safe.t -> t
+val create :
+  turn_id:int option -> origin:Keeper_approval_origin.t -> initial:Yojson.Safe.t -> t
+(** [origin] describes this turn's admitted context. A mixed HITL/Board turn
+    keeps that context for new requests; an exact resumed grant retains its
+    own original durable origin independently. *)
 
 val fork : t -> t
 (** Capture the currently completed calls in a fresh invocation-owned cell.

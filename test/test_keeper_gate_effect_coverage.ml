@@ -138,7 +138,7 @@ let keeper_effect_names =
 
 let test_second_tool_snapshot_contains_first_tool_result () =
   let context =
-    Keeper_gate_causal_context.create
+    Keeper_gate_causal_context.create ~origin:Keeper_approval_origin.unavailable
       ~turn_id:(Some 17)
       ~initial:(`Assoc [ "user_message", `String "inspect, then act" ])
   in

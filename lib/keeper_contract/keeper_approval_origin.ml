@@ -147,3 +147,32 @@ let of_yojson json =
   | "no_admitted_source", Some _ -> Error "unavailable approval origin must not invent a turn witness"
   | ("direct_operation" | "admitted_sources"), None -> Error "admitted approval origin requires its original turn witness"
   | _, (Some _ | None) -> Error "unknown approval origin kind"
+
+type admission =
+  | Direct_request of Keeper_operation_id.t
+  | Admitted of Keeper_event_queue_state.pending_selection list
+  | Unavailable
+
+let from_admission admission ~turn_ref =
+  match admission with
+  | Direct_request operation_id -> Ok (direct_operation ~operation_id ~turn_ref)
+  | Unavailable | Admitted [] -> Ok unavailable
+  | Admitted (_ :: _ as selections) ->
+    let* sources =
+      List.fold_left
+        (fun state (selection : Keeper_event_queue_state.pending_selection) ->
+           let* sources = state in
+           let board_post_id = match selection.source.payload with
+             | Keeper_event_queue.Board_signal _ | Board_attention _ -> Some selection.source.post_id
+             | Bootstrap | Fusion_completed _ | Schedule_due _ | Connector_attention _
+             | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
+             | Task_cancelled _ | Workspace_message _ | Delegate_completed _
+             | Composition_completed _ | Owned_job_completed _ | Task_outcome _ -> None
+           in
+           let* source = admitted_source
+               ~snapshot_ref:(Keeper_event_queue_state.source_snapshot_ref selection.source)
+               ~admitted_revision:selection.admitted_revision ~board_post_id in
+           Ok (source :: sources))
+        (Ok []) selections
+    in
+    admitted_sources ~sources ~turn_ref

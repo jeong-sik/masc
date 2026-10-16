@@ -57,6 +57,7 @@ type ctx =
   ; continuation_channel : Keeper_continuation_channel.t option
       (* Reply route for a continuation-bearing wake, handed to tool setup so
          surface posts know the admitted external destination. *)
+  ; approval_admission : Keeper_approval_origin.admission
   ; hitl_resolution : Keeper_event_queue.hitl_resolution option
       (* Typed decision for the originating Keeper's exact external-effect
          Gate. It is never converted to a generic AGENT_CORE approval. *)
@@ -106,6 +107,7 @@ let run (ctx : ctx)
       ; turn_id
       ; channel
       ; continuation_channel
+      ; approval_admission
       ; hitl_resolution
       ; shared_context
       ; base_dir
@@ -223,6 +225,7 @@ let run (ctx : ctx)
                  ~prev:Keeper_turn_fsm.Awaiting_provider
                  Keeper_turn_fsm.Streaming;
                Keeper_agent_run.run_turn
+                 ~approval_admission
                  ~event_scope
                  ~observation_token
                  ~config

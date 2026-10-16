@@ -1409,17 +1409,45 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   Keeper_composition_completion_outbox.prepare_terminal ~proof:waiting_proof
     |> Result.map_error Keeper_composition_completion_outbox.error_to_string
     |> require "pre-settlement obligation write while waiting";
-  let raced_reconcile = Masc.Keeper_composition_completion_wake.reconcile
-      ~base_path:fixture.base_path |> require "outbox flush racing before refusal settlement" in
-  check int "racing flush before settlement delivers 0" 0 raced_reconcile.delivered;
-  (* The node contract changes after admission: the sealed tool contract can
-     never be re-admitted, so the next pulse must refuse permanently. *)
+  (* Suspend the real acknowledgement between its canonical Waiting read and
+     removal. A concurrent maintenance refusal must wait for that same lock;
+     it then creates its obligation after the old one has been retired. *)
   write_profile true;
   let before_refusal_calls = List.length (calls fixture) in
-  let refused,notify_refused = Eio.Promise.create () in
-  let denied_wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
-  Wake.pulse ~sw:context.sw denied_wake |> require "actual maintenance pulse under changed node contract";
-  (match Eio.Promise.await refused with
+  let raced_outcome = Eio.Switch.run (fun race_sw ->
+    let waiting_read,notify_waiting_read = Eio.Promise.create () in
+    let allow_delete,release_delete = Eio.Promise.create () in
+    let acknowledged,notify_acknowledged = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw:race_sw (fun () ->
+      let result = Keeper_composition_completion_outbox.For_testing.acknowledge_waiting
+          ~after_waiting_read:(fun () ->
+            Eio.Promise.resolve notify_waiting_read ();
+            Eio.Promise.await allow_delete)
+          ~base_path:fixture.base_path ~keeper_name:keeper
+          ~request_id:second_entry.request_id ~composition_tool:"keeper_composition_run" in
+      Eio.Promise.resolve notify_acknowledged result);
+    Eio.Promise.await waiting_read;
+    let refused,notify_refused = Eio.Promise.create () in
+    let intake_completed = ref false in
+    let denied_wake = Wake.create ~context ~on_result:(fun _ outcome ->
+        intake_completed := true; Eio.Promise.resolve notify_refused outcome) () in
+    let intake_started,notify_intake_started = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw:race_sw (fun () ->
+      Eio.Promise.resolve notify_intake_started ();
+      Wake.pulse ~sw:race_sw denied_wake
+        |> require "maintenance refusal races the locked waiting acknowledgement");
+    let blocked = Fun.protect
+        ~finally:(fun () -> Eio.Promise.resolve release_delete ())
+        (fun () ->
+          Eio.Promise.await intake_started;
+          Eio.Fiber.yield ();
+          not !intake_completed) in
+    check bool "refusal cannot pass the locked waiting read/delete interval" true blocked;
+    Eio.Promise.await acknowledged
+      |> Result.map_error Keeper_composition_completion_outbox.error_to_string
+      |> require "racing waiting acknowledgement retires only its old obligation";
+    Eio.Promise.await refused) in
+  (match raced_outcome with
    | Ok result -> check bool "maintenance honors current TOML tool denial" true (Tool_result.is_failed result)
    | Error error -> fail (Wake.error_to_string error));
   check int "permanent refusal performs no backend operation" before_refusal_calls (List.length (calls fixture));

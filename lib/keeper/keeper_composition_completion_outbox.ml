@@ -128,7 +128,7 @@ let acknowledge ~base_path ~keeper_name ~request_id =
   | Some _ -> Error (Invalid_obligation "completion acknowledgement changed request/recipient identity")
 ;;
 
-let acknowledge_waiting ~base_path ~keeper_name ~request_id ~composition_tool:tool =
+let acknowledge_waiting_with ~after_waiting_read ~base_path ~keeper_name ~request_id ~composition_tool:tool =
   let* outcome = Async.with_canonical_durable_terminal ~base_path ~caller:keeper_name request_id
       ~f:(fun proof ->
         let entry = Async.durable_terminal_entry proof in
@@ -136,13 +136,20 @@ let acknowledge_waiting ~base_path ~keeper_name ~request_id ~composition_tool:to
         if not (String.equal entry.keeper_name keeper_name && String.equal producer tool)
         then Error (Invalid_obligation "canonical waiting request changed its producer")
         else match entry.status with
-          | Async.Waiting_for_owned_jobs _ -> acknowledge
-              ~base_path:entry.base_path ~keeper_name ~request_id
+          | Async.Waiting_for_owned_jobs _ ->
+            after_waiting_read ();
+            acknowledge ~base_path:entry.base_path ~keeper_name ~request_id
           | Queued | Running | Cancelling _ | Lost _ | Cancelled _
           | Persistence_failed _ | Done _ ->
             Error (Invalid_obligation "canonical request is not an owned-job waiting attempt"))
       |> Result.map_error (fun error -> Canonical_result_unavailable error) in
   outcome
+
+let acknowledge_waiting = acknowledge_waiting_with ~after_waiting_read:(fun () -> ())
+
+module For_testing = struct
+  let acknowledge_waiting = acknowledge_waiting_with
+end
 
 let prepare_terminal ~proof =
   protect_io @@ fun () ->

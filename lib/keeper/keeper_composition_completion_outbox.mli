@@ -56,3 +56,12 @@ val flush :
     requests keep their obligation. Malformed/unreadable records stay visible
     in [failures] and remain on disk. Canonically released owned-job waiting
     attempts retire their attempt notification without calling [deliver]. *)
+
+module For_testing : sig
+  val acknowledge_waiting :
+    after_waiting_read:(unit -> unit) ->
+    base_path:string -> keeper_name:string -> request_id:string -> composition_tool:string ->
+    (unit, error) result
+  (** Pause the production acknowledgement after its locked status check and
+      before removal, to exercise contention with canonical status writers. *)
+end

@@ -48,6 +48,10 @@ let is_eio_backed ctx =
 
 let concurrency_backend ctx = if is_eio_backed ctx then Eio_mutex else Stdlib_mutex
 
+(* Private: callers below supply only closed table/list operations. They must
+   not suspend, perform I/O, or invoke user callbacks while either lock is held.
+   A sync context can be passed to Agent.create; the constructor preserves its
+   shared identity, so this boundary also applies when an Eio fiber uses it. *)
 let with_lock ctx f =
   match ctx.mu with
   | Stdlib_mu mu ->

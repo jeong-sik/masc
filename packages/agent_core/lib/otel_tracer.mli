@@ -43,7 +43,7 @@ type span =
   ; status : bool option
   ; attributes : (string * string) list
   ; events : otel_event list
-  ; mutable links : otel_link list
+  ; links : otel_link list
   }
 
 type config =
@@ -68,10 +68,15 @@ type mutex_impl =
   | Stdlib_mu of Mutex.t
   | Eio_mu of Eio.Mutex.t
 
+type span_cell
+(** Internal active-span state shared with descendant scopes. Each scope
+    owns its stack spine; explicit updates to an ancestor handle remain
+    visible to that ancestor. *)
+
 type instance =
   { config : config
   ; mu : mutex_impl
-  ; fiber_key : span list ref Eio.Fiber.key option
+  ; fiber_key : span_cell list ref Eio.Fiber.key option
   ; mutable current_spans : span list
   ; mutable completed_spans : span list
   ; mutable metrics : metric_entry list

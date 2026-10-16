@@ -11,9 +11,10 @@
     for backward compatibility.
 
     v0.44.0: Fiber-safe Eio instances.  Per-instance [Eio.Fiber.key]
-    stores a [span list ref] so parallel fibers (e.g. tool batches)
-    each have their own active-span stack.  Parent lookups and
-    current-spans mutations are lock-free inside a fiber;
+    stores a scope-owned stack spine so parallel fibers (e.g. tool batches)
+    keep their active spans separate. Ancestor span cells stay shared for
+    explicit handle updates; their payloads are immutable snapshots.
+    Parent lookups and current-spans mutations are lock-free inside a fiber;
     [completed_spans] remains mutex-protected because many fibers
     may finish spans concurrently. *)
 
@@ -58,7 +59,7 @@ type span =
   ; status : bool option
   ; attributes : (string * string) list
   ; events : otel_event list
-  ; mutable links : otel_link list
+  ; links : otel_link list
   }
 
 (* -- Config ----------------------------------------------------------- *)
@@ -98,10 +99,12 @@ type mutex_impl =
   | Stdlib_mu of Mutex.t
   | Eio_mu of Eio.Mutex.t
 
+type span_cell = span Atomic.t
+
 type instance =
   { config : config
   ; mu : mutex_impl
-  ; fiber_key : span list ref Eio.Fiber.key option
+  ; fiber_key : span_cell list ref Eio.Fiber.key option
   ; mutable current_spans : span list
   ; mutable completed_spans : span list
   ; mutable metrics : metric_entry list
@@ -183,7 +186,7 @@ let inst_with_lock inst f =
 
 (** Return the fiber-local span-stack ref cell, if we are running inside
     an Eio fiber that has the instance's [fiber_key] bound. *)
-let get_fiber_stack inst : span list ref option =
+let get_fiber_stack inst : span_cell list ref option =
   match inst.fiber_key with
   | None -> None
   | Some key ->
@@ -196,6 +199,19 @@ let get_fiber_stack inst : span list ref option =
      | _ -> None)
 ;;
 
+let rec update_span_cell cell update =
+  let before = Atomic.get cell in
+  let after = update before in
+  if Atomic.compare_and_set cell before after then after
+  else update_span_cell cell update
+;;
+
+let update_fiber_span stack_ref (span : span) update =
+  List.iter (fun cell ->
+    if String.equal (Atomic.get cell).span_id span.span_id
+    then ignore (update_span_cell cell update : span)) !stack_ref
+;;
+
 let inst_start_span inst (attrs : Tracing.span_attrs) : span =
   let new_trace_id = gen_trace_id () in
   let span_id = gen_span_id () in
@@ -203,7 +219,7 @@ let inst_start_span inst (attrs : Tracing.span_attrs) : span =
   | Some stack_ref ->
     let parent =
       match !stack_ref with
-      | p :: _ -> Some p
+      | p :: _ -> Some (Atomic.get p)
       | [] -> None
     in
     let trace_id =
@@ -230,7 +246,7 @@ let inst_start_span inst (attrs : Tracing.span_attrs) : span =
       ; links = List.map (fun (trace_id, span_id) -> { trace_id; span_id }) attrs.links
       }
     in
-    stack_ref := s :: !stack_ref;
+    stack_ref := Atomic.make s :: !stack_ref;
     s
   | None ->
     inst_with_lock inst
@@ -275,15 +291,18 @@ let inst_end_span inst (s : span) ~ok =
       let target = ref None in
       stack_ref
       := List.filter_map
-           (fun sp ->
+           (fun cell ->
+              let sp = Atomic.get cell in
               if sp.span_id = s.span_id
               then (
+                let end_time_ns = Some (now_ns ()) in
                 let updated =
-                  { sp with end_time_ns = Some (now_ns ()); status = Some ok }
+                  update_span_cell cell (fun span ->
+                    { span with end_time_ns; status = Some ok })
                 in
                 target := Some updated;
                 None)
-              else Some sp)
+              else Some cell)
            !stack_ref;
       !target
     | None ->
@@ -312,50 +331,51 @@ let inst_end_span inst (s : span) ~ok =
 ;;
 
 let inst_add_event inst (s : span) (msg : string) =
+  let evt = { event_name = msg; timestamp_ns = now_ns (); attributes = [] } in
+  let update sp = { sp with events = Util.snoc sp.events evt } in
   let update_spans spans =
-    let evt = { event_name = msg; timestamp_ns = now_ns (); attributes = [] } in
     List.map
       (fun sp ->
          if sp.span_id = s.span_id
-         then { sp with events = Util.snoc sp.events evt }
+         then update sp
          else sp)
       spans
   in
   match get_fiber_stack inst with
-  | Some stack_ref -> stack_ref := update_spans !stack_ref
+  | Some stack_ref -> update_fiber_span stack_ref s update
   | None ->
     inst_with_lock inst @@ fun () -> inst.current_spans <- update_spans inst.current_spans
 ;;
 
 let inst_add_attrs inst (s : span) (attrs : (string * string) list) =
+  let update sp = { sp with attributes = Util.snoc_list sp.attributes attrs } in
   let update_spans spans =
     List.map
       (fun sp ->
          if sp.span_id = s.span_id
-         then { sp with attributes = Util.snoc_list sp.attributes attrs }
+         then update sp
          else sp)
       spans
   in
   match get_fiber_stack inst with
-  | Some stack_ref -> stack_ref := update_spans !stack_ref
+  | Some stack_ref -> update_fiber_span stack_ref s update
   | None ->
     inst_with_lock inst @@ fun () -> inst.current_spans <- update_spans inst.current_spans
 ;;
 
 let inst_add_link inst (s : span) ~trace_id ~span_id =
   let link = { trace_id; span_id } in
+  let update sp = { sp with links = link :: sp.links } in
   let update_spans spans =
     List.map
       (fun sp ->
          if sp.span_id = s.span_id
-         then (
-           sp.links <- link :: sp.links;
-           sp)
+         then update sp
          else sp)
       spans
   in
   match get_fiber_stack inst with
-  | Some stack_ref -> stack_ref := update_spans !stack_ref
+  | Some stack_ref -> update_fiber_span stack_ref s update
   | None ->
     inst_with_lock inst @@ fun () -> inst.current_spans <- update_spans inst.current_spans
 ;;
@@ -392,7 +412,7 @@ let inst_current_span inst =
   match get_fiber_stack inst with
   | Some stack_ref ->
     (match !stack_ref with
-     | current :: _ -> Some current
+     | current :: _ -> Some (Atomic.get current)
      | [] -> None)
   | None ->
     inst_with_lock inst
@@ -744,7 +764,11 @@ let tracer_of_instance inst : Tracing.t =
       | Some key ->
         let stack_ref =
           match Eio.Fiber.get key with
-          | Some ref -> ref
+          (* Eio inherits the binding value when it forks a child fiber.
+             Copy the stack spine so overlapping siblings never push onto
+             each other's stack. Ancestor span cells stay shared: explicit
+             updates through an ancestor handle survive nested scopes. *)
+          | Some parent -> ref !parent
           | None -> ref []
         in
         Eio.Fiber.with_binding key stack_ref run

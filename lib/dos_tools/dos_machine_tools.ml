@@ -283,13 +283,20 @@ let of_lane_run ?(extra = []) ~base_path ~tool_name ~start_time
    boot a MAIN.EXE. *)
 let saves_dir ~base_path name = Filename.concat (Filename.concat (dos_dir ~base_path) "saves") name
 
+(* The names in [dir], or [Error] when the directory is there and will not
+   read (permissions, a vanished mount). The message carries the host path and
+   stays here: the caller says only that the inventory is unavailable. *)
 let entries_of dir =
-  if Sys.file_exists dir && Sys.is_directory dir then
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun f -> not (String.starts_with ~prefix:"." f))
-    |> List.sort String.compare
-  else []
+  match
+    if Sys.file_exists dir && Sys.is_directory dir then
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun f -> not (String.starts_with ~prefix:"." f))
+      |> List.sort String.compare
+    else []
+  with
+  | names -> Ok names
+  | exception Sys_error message -> Error message
 ;;
 
 let programs_available ~base_path = entries_of (programs_dir ~base_path)
@@ -664,13 +671,17 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
        an autosave from before it is worth resuming rather than starting
        over. *)
     let autosave = autosave_lookup_fields (lookup_autosave ~base_path) in
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:
-        (`Assoc
-          ([ ( "programs_available"
-             , `List (List.map (fun n -> `String n) (programs_available ~base_path)) ) ]
-           @ autosave))
-      ()
+    (match programs_available ~base_path with
+     | Ok names ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:
+           (`Assoc
+             ([ ("programs_available", `List (List.map (fun n -> `String n) names)) ] @ autosave))
+         ()
+     | Error reason ->
+       Log.DosLog.warn "masc_dos_load: the program inventory cannot be listed: %s" reason;
+       Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
+         ~data:(reject_data_of_fields autosave) "DOS inventory is unavailable")
   | Some name ->
     let boot =
       match get_string_opt args "boot" with

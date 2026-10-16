@@ -29,10 +29,10 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
       let call name arguments = Eio.Mutex.use_ro mutex (fun () -> rpc ~name ~arguments) in
       let backend : R.For_testing.backend = {
         image_ready=(fun ~package:_ -> Ok ());
-        recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ());
+        recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~engine:_ ~container_id:_ -> Ok ());
         condition_met = (fun ~runtime:_ _ -> true);
         acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-        start=(fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Masc.Lane_addon_types.package) ~binding:_ ~on_created ->
+        start=(fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Masc.Lane_addon_types.package) ~binding:_ ~on_engine ~on_created ->
           let store = Masc.Lane_addon_store.create
             ~root:(Filename.concat (Masc.Workspace.masc_dir config) "lane-addons") in
           let history = Masc.Lane_addon_machine_history.create () in
@@ -58,15 +58,16 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
             act=(fun ~arguments:_ -> Error "no fixture action port");
             stop=(fun () -> Ok ())
           } in
+          ignore (on_engine (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"));
           on_created connection; Ok connection)
       } in
       let backend = match other_backend with
         | None -> backend
         | Some (other : R.For_testing.backend) ->
-            { other with start=(fun ~sw ~state_owner ~instance_id ~package ~binding ~on_created ->
+            { other with start=(fun ~sw ~state_owner ~instance_id ~package ~binding ~on_engine ~on_created ->
                 let selected = if package.Masc.Lane_addon_types.id = machine ^ "-fixture"
                   then backend else other in
-                selected.start ~sw ~state_owner ~instance_id ~package ~binding ~on_created) }
+                selected.start ~sw ~state_owner ~instance_id ~package ~binding ~on_engine ~on_created) }
       in
       R.For_testing.with_backend backend (fun () ->
         let manifest = Filename.concat base_path (machine ^ "-fixture.toml") in

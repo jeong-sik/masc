@@ -5459,7 +5459,7 @@
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
- (libraries machine_worker_fixture mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
+ (libraries machine_worker_fixture lane_addon_fake_engine mcp_protocol masc.machine_configuration masc_test_deps masc.fusion_core masc.server masc.msx_lane eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_sources)
@@ -5591,7 +5591,7 @@
  (modules test_lane_addon_reconcile)
  (deps
   (glob_files fixtures/lane_addon_bindings_without_read_authority/*.json))
- (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+ (libraries masc_test_deps lane_addon_fake_engine eio eio_main eio.mock yojson unix))
 
 ; Mock clock as the dashboard compute's clock: a payload computed as the
 ; window closed is the answer, not a timeout that opens the key's circuit.

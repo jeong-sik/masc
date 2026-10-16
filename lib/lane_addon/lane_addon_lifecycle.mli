@@ -20,10 +20,18 @@ val engine_to_string : engine -> string
 val engine_to_json : engine -> Yojson.Safe.t
 val engine_of_json : Yojson.Safe.t -> (engine, string) result
 
+(** The engine a later command reached when it was not the recorded one. *)
+type observed_engine =
+  | Other_engine of engine
+  | Unreadable_engine of string
+
 (** Why a worker or its cleanup cannot proceed. The variant, not the text,
     decides whether the runtime retries ({!heal}); the string is for people. *)
 type failure =
   | Engine_unreachable of string
+  | Engine_mismatch of { recorded : engine; observed : observed_engine }
+      (** The command reached an engine other than the one that holds the
+          container, so its answer says nothing about that container. *)
   | Worker_failed of string
   | Cleanup_unconfirmed of string
   | Persistence_failed of string
@@ -37,16 +45,25 @@ type failure =
     never replaced by its own cleanup. *)
 type failed = { cause : failure; first : failure option }
 
+(** What a confirmed release stands on. [Never_created] is true only when no
+    create was ever issued: the engine is recorded before the first create, so
+    a record with no engine has never reached one. [Released] names the
+    recorded engine that answered, and the container when one was known; an
+    absence read from any other engine is never recorded as a release. *)
+type release =
+  | Never_created
+  | Released of { engine : engine; container_id : string option }
+
 (** [Detaching] keeps the failure that was in place when the detach began. *)
 type state =
   | Attached
   | Observing
   | Failed of failed
   | Detaching of failed option
-  | Detached
+  | Detached of release
 
 (** What a waiting failure needs before another attempt is worth making. *)
-type condition = Engine_reachable
+type condition = Engine_reachable | Engine_is of engine
 
 type heal =
   | Retry  (** Another attempt can succeed without anything else changing. *)
@@ -60,6 +77,9 @@ val failed : failure -> failed
 val fail_again : failed -> failure -> failed
 (** A later attempt failed: [cause] is replaced and the earliest different
     cause is kept as [first]. *)
+
+val release_to_json : release -> Yojson.Safe.t
+val release_of_json : Yojson.Safe.t -> (release, string) result
 
 val failure_to_string : failure -> string
 val failure_detail : failure -> string

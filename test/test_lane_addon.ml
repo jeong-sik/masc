@@ -14,6 +14,8 @@ module Runtime = struct
 end
 module Types = Lane_addon_types
 module Store = Lane_addon_store
+module Fake = Lane_addon_fake_engine
+module Lifecycle = Lane_addon_lifecycle
 
 let unwrap = function Ok value -> value | Error message -> fail message
 let member key json = Yojson.Safe.Util.member key json
@@ -37,6 +39,8 @@ type fake = {
   principals : Lane_addon_call_context.principal list ref;
   controller : string option ref;
   admissions : Machine_controller_contract.admission option list ref;
+  world : Fake.t;
+  home : Fake.engine;
 }
 
 let fake_output : Types.output = {
@@ -48,10 +52,18 @@ let fake_output : Types.output = {
 }
 
 let make_backend ?observe_step () =
+  let home = Fake.docker "engine-a" in
   let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
-                recovery=ref []; principals=ref []; controller=ref None; admissions=ref [] } in
+                recovery=ref []; principals=ref []; controller=ref None; admissions=ref [];
+                world = Fake.create home; home } in
+  let proven ~engine work =
+    Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_created ->
+    start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_engine ~on_created ->
+      match (Fake.port state.world).read_engine () with
+      | Error (Lifecycle.Unreachable detail) -> Error (Lifecycle.Engine_unreachable detail)
+      | Error (Lifecycle.Identity_unreadable detail) -> Error (Lifecycle.Worker_failed detail)
+      | Ok engine ->
       let released, release = Eio.Promise.create () in
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
@@ -94,13 +106,19 @@ let make_backend ?observe_step () =
           let count = 1 + Option.value ~default:0 (Hashtbl.find_opt state.stops instance_id) in
           Hashtbl.replace state.stops instance_id count;
           if package.id = "stop-retry" && count = 1 then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "cleanup refused")
-          else begin
-            if not !stopped then (stopped := true; Eio.Promise.resolve release ());
-            Ok ()
-          end)
+          else
+            proven ~engine (fun () -> Fake.remove state.world (Store.digest instance_id); Ok ())
+            |> Result.map (fun () ->
+              if not !stopped then (stopped := true; Eio.Promise.resolve release ())))
       } in
       if package.id = "start-error" then Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
       else begin
+        (match on_engine engine with
+         | Ok () -> ()
+         | Error detail -> fail ("engine persistence: " ^ detail));
+        ignore (Fake.add (Fake.current state.world) ~id:(Store.digest instance_id)
+          ~name:("masc-lane-" ^ Store.digest instance_id)
+          ~labels:["masc.lane.instance", instance_id] ());
         on_created connection;
         if package.id = "start-hang" then
           (Eio.Promise.await released; Error (Masc.Lane_addon_lifecycle.Worker_failed "initialization stopped"))
@@ -109,12 +127,17 @@ let make_backend ?observe_step () =
     image_ready = (fun ~package:_ -> Ok ());
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
-    recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id ~container_id ->
+    recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id ~engine ~container_id ->
       match container_id with
       | Some id when id = Store.digest instance_id ->
-          state.recovery := (instance_id, id) :: !(state.recovery); Ok ()
+          proven ~engine (fun () -> Fake.remove state.world id; Ok ())
+          |> Result.map (fun () -> state.recovery := (instance_id, id) :: !(state.recovery))
       | Some _ | None -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "owner mismatch"));
-    condition_met = (fun ~runtime:_ _ -> true)
+    condition_met = (fun ~runtime:_ condition ->
+      match (Fake.port state.world).read_engine (), condition with
+      | Ok _, Lifecycle.Engine_reachable -> true
+      | Ok actual, Lifecycle.Engine_is expected -> Lifecycle.engine_equal actual expected
+      | Error _, (Lifecycle.Engine_reachable | Lifecycle.Engine_is _) -> false)
   } in state, backend
 
 let manifest ?refresh_policy dir mode =
@@ -314,6 +337,43 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
         :: List.remove_assoc "lifecycle" (List.remove_assoc "phase" fields))));
     detach config id; await_phase clock config id "detached";
     check Alcotest.int "one exact persisted-container recovery" 1 (List.length !(state.recovery)))
+
+(* A record left by an earlier process says a container exists. The container
+   is released only by the engine that holds it: asked through a context that
+   reaches another, empty engine, the record stays failed and the container
+   stays where it is. *)
+let test_retained_record_is_released_only_by_its_recorded_engine () =
+  with_fixture (fun env _sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
+    let captured = instance config id in
+    let container = Store.digest id in
+    detach config id; await_phase clock config id "detached";
+    (* The earlier release is taken back: the container is on its engine again. *)
+    ignore (Fake.add (Fake.current state.world) ~id:container ~name:("masc-lane-" ^ container)
+      ~labels:["masc.lane.instance", id] ());
+    Runtime.For_testing.reset ();
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let fields = Yojson.Safe.Util.to_assoc captured in
+    unwrap (Store.save_binding store ~instance_id:id
+      (`Assoc (("phase", Types.phase_to_json Types.Attached)
+        :: ("lifecycle", Lifecycle.state_to_json Lifecycle.Attached)
+        :: List.remove_assoc "lifecycle" (List.remove_assoc "phase" fields))));
+    Fake.point_at state.world (Fake.docker "engine-b");
+    detach config id;
+    await_phase clock config id "failed";
+    check string "another engine's silence is a mismatch, not a release" "engine_mismatch"
+      (instance config id |> member "lifecycle" |> member "failed" |> member "cause" |> text "kind");
+    check bool "the container is still on its engine" true (Fake.holds state.home container);
+    check Alcotest.int "no recovery was recorded" 0 (List.length !(state.recovery));
+    Fake.point_at state.world state.home;
+    detach config id;
+    await_phase clock config id "detached";
+    check bool "the recorded engine released the container" false (Fake.holds state.home container);
+    let release = instance config id |> member "lifecycle" |> member "release" in
+    check string "the release names the engine" "engine-a" (member "engine" release |> text "id");
+    check string "the release names the container" container (text "container_id" release))
 
 let test_request_refusals_preserve_runtime_failure_distinction () =
   with_fixture (fun _env _sw config dir _state ->
@@ -1775,6 +1835,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "machine source dependencies reject cycles" `Quick test_machine_dependencies_reject_cycles;
   test_case "machine activity applies to worker calls" `Quick test_machine_activity_applies_to_worker_calls;
   test_case "machine export host admission" `Quick test_machine_export_host_admission;
+  test_case "a retained record is released only by its recorded engine" `Quick
+    test_retained_record_is_released_only_by_its_recorded_engine;
   test_case "tool exports bind live incarnations" `Quick test_tool_exports_bind_live_incarnations;
   test_case "unreadable retained bindings are isolated" `Quick test_unreadable_retained_bindings_are_isolated;
   test_case "MCP attribution never authorizes private Lane reads" `Quick

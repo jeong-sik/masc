@@ -26,8 +26,13 @@ let engine_of_json = function
        | _ -> Error "invalid container engine identity")
   | _ -> Error "invalid container engine identity"
 
+type observed_engine =
+  | Other_engine of engine
+  | Unreadable_engine of string
+
 type failure =
   | Engine_unreachable of string
+  | Engine_mismatch of { recorded : engine; observed : observed_engine }
   | Worker_failed of string
   | Cleanup_unconfirmed of string
   | Persistence_failed of string
@@ -35,13 +40,16 @@ type failure =
   | Effect_outcome_unknown of string
 
 type failed = { cause : failure; first : failure option }
+type release =
+  | Never_created
+  | Released of { engine : engine; container_id : string option }
 type state =
   | Attached
   | Observing
   | Failed of failed
   | Detaching of failed option
-  | Detached
-type condition = Engine_reachable
+  | Detached of release
+type condition = Engine_reachable | Engine_is of engine
 type heal = Retry | Wait_until of condition
 
 let ( let* ) = Result.bind
@@ -50,6 +58,7 @@ let ( let* ) = Result.bind
    whether repeating the attempt is worth making. *)
 let heal = function
   | Engine_unreachable _ -> Wait_until Engine_reachable
+  | Engine_mismatch { recorded; _ } -> Wait_until (Engine_is recorded)
   | Worker_failed _ -> Retry
   | Cleanup_unconfirmed _ -> Retry
   | Persistence_failed _ -> Retry
@@ -63,8 +72,15 @@ let fail_again previous cause =
     | None -> if previous.cause = cause then None else Some previous.cause in
   { cause; first }
 
+let observed_to_string = function
+  | Other_engine engine -> engine_to_string engine
+  | Unreadable_engine detail -> "an engine whose identity cannot be read (" ^ detail ^ ")"
+
 let failure_to_string = function
   | Engine_unreachable detail -> "container engine is unreachable: " ^ detail
+  | Engine_mismatch { recorded; observed } ->
+      "the container engine is not the one that holds this worker: recorded "
+      ^ engine_to_string recorded ^ ", reached " ^ observed_to_string observed
   | Worker_failed detail -> detail
   | Cleanup_unconfirmed detail -> "cleanup incomplete: " ^ detail
   | Persistence_failed detail -> detail
@@ -73,15 +89,22 @@ let failure_to_string = function
 
 let failure_detail = function
   | Cleanup_unconfirmed detail -> detail
-  | (Engine_unreachable _ | Worker_failed _ | Persistence_failed _ | Previous_process
-    | Effect_outcome_unknown _) as failure -> failure_to_string failure
+  | (Engine_unreachable _ | Engine_mismatch _ | Worker_failed _ | Persistence_failed _
+    | Previous_process | Effect_outcome_unknown _) as failure -> failure_to_string failure
 
 let failed_to_string { cause; first } = match first with
   | None -> failure_to_string cause
   | Some earlier -> failure_to_string cause ^ " (first failure: " ^ failure_to_string earlier ^ ")"
 
+let observed_to_json = function
+  | Other_engine engine -> `Assoc ["kind", `String "other"; "engine", engine_to_json engine]
+  | Unreadable_engine detail -> `Assoc ["kind", `String "unreadable"; "detail", `String detail]
+
 let failure_to_json = function
   | Engine_unreachable detail -> `Assoc ["kind", `String "engine_unreachable"; "detail", `String detail]
+  | Engine_mismatch { recorded; observed } ->
+      `Assoc ["kind", `String "engine_mismatch"; "recorded", engine_to_json recorded;
+              "observed", observed_to_json observed]
   | Worker_failed detail -> `Assoc ["kind", `String "worker_failed"; "detail", `String detail]
   | Cleanup_unconfirmed detail -> `Assoc ["kind", `String "cleanup_unconfirmed"; "detail", `String detail]
   | Persistence_failed detail -> `Assoc ["kind", `String "persistence_failed"; "detail", `String detail]
@@ -91,10 +114,23 @@ let failure_to_json = function
 
 let sorted fields = List.sort (fun (a, _) (b, _) -> String.compare a b) fields
 
+let observed_of_json = function
+  | `Assoc fields ->
+      (match sorted fields with
+       | ["engine", engine; "kind", `String "other"] ->
+           let* engine = engine_of_json engine in Ok (Other_engine engine)
+       | ["detail", `String detail; "kind", `String "unreadable"] -> Ok (Unreadable_engine detail)
+       | _ -> Error "invalid observed container engine")
+  | _ -> Error "invalid observed container engine"
+
 let failure_of_json = function
   | `Assoc fields ->
       (match sorted fields with
        | ["detail", `String detail; "kind", `String "engine_unreachable"] -> Ok (Engine_unreachable detail)
+       | ["kind", `String "engine_mismatch"; "observed", observed; "recorded", recorded] ->
+           let* recorded = engine_of_json recorded in
+           let* observed = observed_of_json observed in
+           Ok (Engine_mismatch { recorded; observed })
        | ["detail", `String detail; "kind", `String "worker_failed"] -> Ok (Worker_failed detail)
        | ["detail", `String detail; "kind", `String "cleanup_unconfirmed"] -> Ok (Cleanup_unconfirmed detail)
        | ["detail", `String detail; "kind", `String "persistence_failed"] -> Ok (Persistence_failed detail)
@@ -120,12 +156,32 @@ let failed_of_json = function
        | _ -> Error "invalid Lane failure record")
   | _ -> Error "invalid Lane failure record"
 
+let release_to_json = function
+  | Never_created -> `Assoc ["kind", `String "never_created"]
+  | Released { engine; container_id } ->
+      `Assoc ["kind", `String "released"; "engine", engine_to_json engine;
+              "container_id", (match container_id with None -> `Null | Some id -> `String id)]
+
+let release_of_json = function
+  | `Assoc ["kind", `String "never_created"] -> Ok Never_created
+  | `Assoc fields ->
+      (match sorted fields with
+       | ["container_id", container_id; "engine", engine; "kind", `String "released"] ->
+           let* engine = engine_of_json engine in
+           let* container_id = match container_id with
+             | `Null -> Ok None
+             | `String id when String.trim id <> "" -> Ok (Some id)
+             | _ -> Error "invalid released container identity" in
+           Ok (Released { engine; container_id })
+       | _ -> Error "invalid Lane release evidence")
+  | _ -> Error "invalid Lane release evidence"
+
 let project = function
   | Attached -> Lane_addon_types.Attached
   | Observing -> Lane_addon_types.Observing
   | Failed failed -> Lane_addon_types.Failed (failed_to_string failed)
   | Detaching _ -> Lane_addon_types.Detaching
-  | Detached -> Lane_addon_types.Detached
+  | Detached _ -> Lane_addon_types.Detached
 
 let state_to_json = function
   | Attached -> `Assoc ["kind", `String "attached"]
@@ -134,14 +190,15 @@ let state_to_json = function
   | Detaching previous ->
       `Assoc ["kind", `String "detaching";
               "failed", (match previous with None -> `Null | Some failed -> failed_to_json failed)]
-  | Detached -> `Assoc ["kind", `String "detached"]
+  | Detached release -> `Assoc ["kind", `String "detached"; "release", release_to_json release]
 
 let state_of_json = function
   | `Assoc ["kind", `String "attached"] -> Ok Attached
   | `Assoc ["kind", `String "observing"] -> Ok Observing
-  | `Assoc ["kind", `String "detached"] -> Ok Detached
   | `Assoc fields ->
       (match sorted fields with
+       | ["kind", `String "detached"; "release", release] ->
+           let* release = release_of_json release in Ok (Detached release)
        | ["failed", failed; "kind", `String "failed"] ->
            let* failed = failed_of_json failed in Ok (Failed failed)
        | ["failed", `Null; "kind", `String "detaching"] -> Ok (Detaching None)

@@ -49,7 +49,7 @@ let make_backend () =
   let state = { calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
                 recovery=ref [] } in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
+    start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Types.package) ~binding:_ ~on_engine ~on_created ->
       let released, release = Eio.Promise.create () in
       let stopped = ref false in
       Hashtbl.add state.modes instance_id package.id;
@@ -74,6 +74,9 @@ let make_backend () =
             Ok ()
           end)
       } in
+      (* The engine is on record before the first create, so a create that fails
+         leaves a record that names an engine to ask. *)
+      ignore (on_engine (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"));
       if package.id = "start-error" then Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
       else begin
         on_created connection;
@@ -82,7 +85,7 @@ let make_backend () =
     image_ready = (fun ~package:_ -> Ok ());
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
-    recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id ~container_id ->
+    recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id ~engine:_ ~container_id ->
       match container_id with
       | Some id when id = Store.digest instance_id ->
           state.recovery := (instance_id, id) :: !(state.recovery); Ok ()

@@ -85,7 +85,7 @@ let worker_tool_definition name =
       | Error message -> fail message
 
 let backend fixture : Lane.For_testing.backend = {
-  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Lane_addon_types.package) ~binding:_ ~on_created ->
+  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Lane_addon_types.package) ~binding:_ ~on_engine ~on_created ->
     incr fixture.starts;
     let stopped = ref false in
     let exported = List.map worker_tool_definition package.exported_tools in
@@ -103,11 +103,12 @@ let backend fixture : Lane.For_testing.backend = {
         if not !(fixture.cleanup_available) then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "fixture cleanup unavailable")
         else (if not !stopped then (stopped := true; incr fixture.stops); Ok ()));
     } in
+    ignore (on_engine (Masc.Lane_addon_lifecycle.Docker_engine "fixture-engine"));
     on_created connection;
     Ok connection);
   image_ready = (fun ~package:_ -> Ok ());
   acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
-  recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ());
+  recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~engine:_ ~container_id:_ -> Ok ());
   condition_met = (fun ~runtime:_ _ -> true);
 }
 

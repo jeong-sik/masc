@@ -42,6 +42,9 @@ type worker_event = Started of string | Startup_failed of string
   | Recovery_requested of string * string option
   | Recovery_completed of string * string option
 
+module Fake = Lane_addon_fake_engine
+module Lifecycle = Lane_addon_lifecycle
+
 type fake = {
   events : worker_event list ref;
   state_owners : (string, string option) Hashtbl.t;
@@ -53,7 +56,9 @@ type fake = {
   startup_barrier : unit Eio.Promise.t option ref;
   cleanup_available : bool ref;
   image_available : bool ref;
-  engine_reachable : bool ref;
+  create_refusal : string option ref;
+  world : Fake.t;
+  home : Fake.engine;
   condition_checks : int ref;
 }
 
@@ -65,19 +70,36 @@ let output : Types.output = {
     cursor = Some "1"; complete = true; detail = None }];
 }
 
+let container_name instance_id = "masc-lane-" ^ Store.digest instance_id
+
+(* The engine the fixture starts on. Tests point the world at another engine,
+   or switch an engine off, the way an operator's Docker context changes. *)
 let make_backend () =
+  let home = Fake.docker "engine-a" in
   let state = { events = ref []; state_owners=Hashtbl.create 4; recovered_state_owners=Hashtbl.create 4; recovered_runtimes=Hashtbl.create 4; observations = ref []; recovery_barrier = ref None;
                 startup_available = ref true; startup_barrier = ref None; cleanup_available = ref true;
-                image_available = ref true; engine_reachable = ref true; condition_checks = ref 0 } in
+                image_available = ref true; create_refusal = ref None;
+                world = Fake.create home; home; condition_checks = ref 0 } in
   let record event = state.events := event :: !(state.events) in
+  let proven ~engine work =
+    Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_created ->
+    start = (fun ~sw:_ ~state_owner ~instance_id ~(package : Types.package) ~binding:_ ~on_engine ~on_created ->
       Hashtbl.replace state.state_owners instance_id
         (Option.map (Lane_addon_worker_state.volume_name ~runtime:package.runtime) state_owner);
       let stopped, release_stop = Eio.Promise.create () in
       let stop_sent = ref false in
+      let container_id = Store.digest instance_id in
+      match (Fake.port state.world).read_engine () with
+      | Error (Lifecycle.Unreachable detail) ->
+          record (Startup_failed instance_id);
+          Error (Lifecycle.Engine_unreachable detail)
+      | Error (Lifecycle.Identity_unreadable detail) ->
+          record (Startup_failed instance_id);
+          Error (Lifecycle.Worker_failed detail)
+      | Ok engine ->
       let connection : Runtime.For_testing.connection = {
-        container_id = Store.digest instance_id;
+        container_id;
         exported_tools = (fun () -> []);
         call_exported_tool = (fun ~on_result:_ ~authorize:_ ~principal:_ ~name:_ ~arguments:_ -> Error (Lane_addon_call_context.Transport_error "no exported tools"));
         action_schema = (fun () -> None);
@@ -89,49 +111,64 @@ let make_backend () =
           | _ -> Ok output);
         stop = (fun () ->
           record (Stop_requested instance_id);
-          if not !(state.cleanup_available) then Error (Lane_addon_lifecycle.Cleanup_unconfirmed "cleanup dependency unavailable")
-          else begin
-          if not !stop_sent then begin
-            stop_sent := true;
-            record (Stopped instance_id);
-            Eio.Promise.resolve release_stop ()
-          end;
-          Ok ()
-          end);
+          if not !(state.cleanup_available) then Error (Lifecycle.Cleanup_unconfirmed "cleanup dependency unavailable")
+          else
+            let removed = proven ~engine (fun () ->
+              Fake.remove state.world container_id;
+              if Fake.exists state.world container_id
+              then Error (Lifecycle.Cleanup_unconfirmed "container remains visible")
+              else Ok ()) in
+            Result.map (fun () ->
+              if not !stop_sent then begin
+                stop_sent := true;
+                record (Stopped instance_id);
+                Eio.Promise.resolve release_stop ()
+              end) removed);
       } in
-      if not !(state.engine_reachable) then begin
+      if not !(state.startup_available) then begin
         record (Startup_failed instance_id);
-        Error (Lane_addon_lifecycle.Engine_unreachable "fixture engine is down")
-      end else if not !(state.startup_available) then begin
-        record (Startup_failed instance_id);
-        Error (Lane_addon_lifecycle.Worker_failed "worker dependency unavailable")
+        Error (Lifecycle.Worker_failed "worker dependency unavailable")
       end else begin
-        record (Started instance_id);
-        on_created connection;
-        Option.iter Eio.Promise.await !(state.startup_barrier);
-        Ok connection
+        match on_engine engine with
+        | Error detail -> Error (Lifecycle.Persistence_failed detail)
+        | Ok () when !(state.create_refusal) <> None ->
+            (* The engine is on record; the create itself is refused. *)
+            record (Startup_failed instance_id);
+            Error (Lifecycle.Worker_failed (Option.value ~default:"" !(state.create_refusal)))
+        | Ok () ->
+            ignore (Fake.add (Fake.current state.world) ~id:container_id ~name:(container_name instance_id)
+              ~labels:["masc.lane.instance", instance_id] ());
+            record (Started instance_id);
+            on_created connection;
+            Option.iter Eio.Promise.await !(state.startup_barrier);
+            Ok connection
       end);
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     image_ready = (fun ~package:_ ->
       if !(state.image_available) then Ok () else Error "image is not on the host");
-    recover_stop = (fun ~runtime ~state_owner ~instance_id ~container_id ->
+    recover_stop = (fun ~runtime ~state_owner ~instance_id ~engine ~container_id ->
       Hashtbl.replace state.recovered_runtimes instance_id runtime;
       Hashtbl.replace state.recovered_state_owners instance_id
         (Option.map (Lane_addon_worker_state.volume_name ~runtime) state_owner);
       if Option.exists (fun id -> id <> Store.digest instance_id) container_id
-      then Error (Lane_addon_lifecycle.Cleanup_unconfirmed "persisted container does not belong to instance")
+      then Error (Lifecycle.Cleanup_unconfirmed "persisted container does not belong to instance")
       else begin
         record (Recovery_requested (instance_id, container_id));
-        if not !(state.cleanup_available) then Error (Lane_addon_lifecycle.Cleanup_unconfirmed "historical cleanup dependency unavailable")
+        if not !(state.cleanup_available) then Error (Lifecycle.Cleanup_unconfirmed "historical cleanup dependency unavailable")
         else begin
           Option.iter Eio.Promise.await !(state.recovery_barrier);
-          record (Recovery_completed (instance_id, container_id));
-          Ok ()
+          let removed = proven ~engine (fun () ->
+            Fake.remove state.world (Store.digest instance_id);
+            Ok ()) in
+          Result.map (fun () -> record (Recovery_completed (instance_id, container_id))) removed
         end
       end);
     condition_met = (fun ~runtime:_ condition ->
       incr state.condition_checks;
-      match condition with Lane_addon_lifecycle.Engine_reachable -> !(state.engine_reachable));
+      match (Fake.port state.world).read_engine (), condition with
+      | Ok _, Lifecycle.Engine_reachable -> true
+      | Ok actual, Lifecycle.Engine_is expected -> Lifecycle.engine_equal actual expected
+      | Error _, (Lifecycle.Engine_reachable | Lifecycle.Engine_is _) -> false);
   } in
   state, backend
 
@@ -195,6 +232,13 @@ let check_application config id expected =
   if actual <> expected then
     failf "observed declaration application: expected %S, got %S (application: %s)"
       expected actual (Yojson.Safe.to_string observed)
+let lifecycle value = member "lifecycle" value
+let failed_record value = lifecycle value |> member "failed"
+let attempts state =
+  List.length (List.filter (function Started _ | Startup_failed _ -> true | _ -> false) !(state.events))
+let recovery_requests state =
+  List.length (List.filter (function Recovery_requested _ -> true | _ -> false) !(state.events))
+
 let await clock predicate =
   let rec loop () =
     if predicate () then () else (Eio.Time.sleep clock 0.001; loop ())
@@ -727,9 +771,10 @@ let test_historical_never_started_leaves_no_binding () =
     in
     write path bytes;
     ignore (reconcile config directory);
-    await_yield (fun () -> List.mem (Recovery_completed (old_id, None)) !(state.events));
     await_yield (fun () -> not (has_binding ()));
     check bool "a never-started binding is gone after restart recovery" false (has_binding ());
+    check int "a record that names no engine never issued a create, so no engine is asked" 0
+      (recovery_requests state);
     (* Recovery nudges configuration, but this test runs no configuration
        service, so the declaration attaches again only on the next reconcile. *)
     ignore (reconcile config directory);
@@ -1065,7 +1110,9 @@ let test_historical_publication_is_not_completion ~never_started ~cold_recovery 
         release ();
         await clock (fun () -> text "kind" (application config "observer") = "failed");
         let requests () = List.filter (function Recovery_requested _ -> true | _ -> false) !(state.events) |> List.length in
-        check int "resource cleanup happened once" 1 (requests ());
+        (* A worker that never reached its engine has none on record, so its
+           cleanup asks no engine; any other cleanup asks the recorded one once. *)
+        check int "resource cleanup happened once" (if never_started then 0 else 1) (requests ());
         let root = Store.root store in
         let unreadable = Store.For_testing.binding_inventory ~root
           ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync","cold read parent"))) in
@@ -1080,7 +1127,8 @@ let test_historical_publication_is_not_completion ~never_started ~cold_recovery 
           check bool "cold read establishes publication durability" true (!synced && confirmed.complete));
         ignore (reconcile config directory);
         await clock (fun () -> text "kind" (application config "observer") = "inactive");
-        check int "publication retry never repeats successful cleanup" 1 (requests ());
+        check int "publication retry never repeats successful cleanup"
+          (if never_started then 0 else 1) (requests ());
         check string "publication does not alter desired bytes" off (In_channel.with_open_bin path In_channel.input_all))))
 
 (* Three real retained records that carry neither visibility nor
@@ -1359,13 +1407,6 @@ let test_unparsable_file_holds_every_declaration_but_not_inspect () =
    non-regular) without opening the store (task-2382). The production path is
    exercised: a corrupt record and a replaced file land in one issues list and
    the two details differ by their bracketed tag. *)
-let lifecycle value = member "lifecycle" value
-let failed_record value = lifecycle value |> member "failed"
-let attempts state =
-  List.length (List.filter (function Started _ | Startup_failed _ -> true | _ -> false) !(state.events))
-let recovery_requests state =
-  List.length (List.filter (function Recovery_requested _ -> true | _ -> false) !(state.events))
-
 (* A start that fails and a cleanup that then fails are two different causes.
    The second must not erase the first: the operator reads why the worker
    never started, not only that its cleanup was refused. *)
@@ -1374,7 +1415,7 @@ let test_a_failed_start_keeps_its_first_cause_through_a_failed_cleanup () =
     let clock = Eio.Stdenv.clock env in
     let manifest = package packages "ready" in
     write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
-    state.startup_available := false;
+    state.create_refusal := Some "container name is already in use";
     ignore (reconcile config directory);
     let first_id = declared_instance config "observer" |> text "instance_id" in
     await clock (fun () -> phase (instance config first_id) = "failed");
@@ -1388,13 +1429,13 @@ let test_a_failed_start_keeps_its_first_cause_through_a_failed_cleanup () =
     check string "the start failure is kept as the first cause" "worker_failed"
       (member "first" record |> text "kind");
     check string "the first cause names why the worker did not start"
-      "worker dependency unavailable" (member "first" record |> text "detail");
+      "container name is already in use" (member "first" record |> text "detail");
     check bool "the display message names both" true
       (let message = instance config first_id |> member "phase" |> text "message" in
        String_util.contains_substring message "cleanup incomplete"
-       && String_util.contains_substring message "worker dependency unavailable");
+       && String_util.contains_substring message "container name is already in use");
     state.cleanup_available := true;
-    state.startup_available := true;
+    state.create_refusal := None;
     ignore (reconcile config directory);
     await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> first_id) (instances config));
     ignore (reconcile config directory);
@@ -1411,7 +1452,7 @@ let test_a_waiting_failure_is_probed_and_not_retried () =
     let clock = Eio.Stdenv.clock env in
     let manifest = package packages "ready" in
     write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
-    state.engine_reachable := false;
+    Fake.set_up state.home false;
     ignore (reconcile config directory);
     let failed_id = declared_instance config "observer" |> text "instance_id" in
     await clock (fun () -> phase (instance config failed_id) = "failed");
@@ -1425,10 +1466,11 @@ let test_a_waiting_failure_is_probed_and_not_retried () =
     check int "each beat read the condition once" (probes_before + 5) !(state.condition_checks);
     check string "the failed attempt is still the one on record" failed_id
       (declared_instance config "observer" |> text "instance_id");
-    state.engine_reachable := true;
+    Fake.set_up state.home true;
     ignore (reconcile config directory);
     await clock (fun () -> List.for_all (fun v -> text "instance_id" v <> failed_id) (instances config));
-    check int "the failed attempt was cleaned up once the engine answered" 1 (recovery_requests state);
+    check int "no engine was recorded, so no create was issued and nothing is asked of any engine" 0
+      (recovery_requests state);
     ignore (reconcile config directory);
     let id = declared_instance config "observer" |> text "instance_id" in
     await_ready clock config id;
@@ -1465,6 +1507,68 @@ let test_a_record_without_the_current_lifecycle_is_unreadable () =
     let id = declared_instance config "dos-counter" |> text "instance_id" in
     await_ready clock config id;
     detach clock config id)
+
+(* The incident: the CLI is pointed at another engine, which holds none of this
+   worker's containers. Its "nothing here" is not a release. The record stays
+   failed, with the recorded engine as the condition for the next attempt,
+   and the container is released once that engine answers again. *)
+let test_another_engine_does_not_release_a_worker () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    let container = Store.digest id in
+    check bool "the container is on the first engine" true (Fake.holds state.home container);
+    check string "the first engine is on record" "engine-a"
+      (instance config id |> member "engine" |> text "id");
+    Fake.point_at state.world (Fake.docker "engine-b");
+    write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    await clock (fun () -> phase (instance config id) = "failed");
+    let cause = failed_record (instance config id) |> member "cause" in
+    check string "the refusal is a mismatch" "engine_mismatch" (text "kind" cause);
+    check string "it names the recorded engine" "engine-a" (member "recorded" cause |> text "id");
+    check string "and the engine that answered" "engine-b"
+      (member "observed" cause |> member "engine" |> text "id");
+    check bool "the container was not released" true (Fake.holds state.home container);
+    let probes = !(state.condition_checks) in
+    for _ = 1 to 4 do ignore (reconcile config directory) done;
+    check int "four more beats stop nothing" 1 (List.length (stop_requests state));
+    check int "each beat reads the condition once" (probes + 4) !(state.condition_checks);
+    Fake.point_at state.world state.home;
+    ignore (reconcile config directory);
+    await_detached clock config id;
+    check bool "the recorded engine released the container" false (Fake.holds state.home container);
+    let release = lifecycle (instance config id) |> member "release" in
+    check string "the release names the engine" "engine-a" (member "engine" release |> text "id");
+    check string "the release names the container" container (text "container_id" release))
+
+let test_an_unreachable_engine_waits_and_then_releases () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    Fake.set_up state.home false;
+    write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    await clock (fun () -> phase (instance config id) = "failed");
+    check string "an engine that does not answer is its own cause" "engine_unreachable"
+      (failed_record (instance config id) |> member "cause" |> text "kind");
+    check bool "the container is kept" true (Fake.holds state.home (Store.digest id));
+    for _ = 1 to 3 do ignore (reconcile config directory) done;
+    check int "waiting beats stop nothing" 1 (List.length (stop_requests state));
+    Fake.set_up state.home true;
+    ignore (reconcile config directory);
+    await_detached clock config id;
+    check bool "released once the engine answers" false (Fake.holds state.home (Store.digest id)))
 
 let test_binding_inventory_issues_carry_failure_kind_tags () =
   with_fixture (fun _ _ config _directory _packages _state ->
@@ -1582,4 +1686,8 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_a_waiting_failure_is_probed_and_not_retried;
   test_case "a record without the current lifecycle is unreadable" `Quick
     test_a_record_without_the_current_lifecycle_is_unreadable;
+  test_case "another engine does not release a worker" `Quick
+    test_another_engine_does_not_release_a_worker;
+  test_case "an unreachable engine waits and then releases" `Quick
+    test_an_unreachable_engine_waits_and_then_releases;
 ]]

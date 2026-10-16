@@ -57,10 +57,9 @@ Machine input ledgers also live under the respective `.masc/msx` or `.masc/dos`
 directory. Copying only a checkpoint file is not a full state backup. Retain the
 whole machine directory when transferring an existing installation.
 
-Explicit MSX media paths refer to the worker filesystem. A file included in the
-package can be addressed under `/addon`; a host path outside the package is not
-implicitly mounted. DOS program names resolve within its `programs` inventory.
-No game images are included by these packages.
+MSX media are named, not addressed: `cart` and `disk` take a file name from
+`carts/` and refuse a path. DOS program names resolve within its `programs`
+inventory. No game images are included by these packages.
 
 ## Provision or transfer state
 

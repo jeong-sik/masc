@@ -34,6 +34,11 @@ let member name = function
   | _ -> None
 ;;
 
+(* The inventory a tool call names cartridges and disks in. *)
+let carts_dir base_path =
+  Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "carts"
+;;
+
 let frame_of result =
   match member "frame" (Tool_result.data result) with
   | Some (`Int n) -> n
@@ -498,6 +503,39 @@ let write_cart carts name content =
     output_string oc content)
 ;;
 
+(* A cartridge is named in the inventory, never addressed. A path to a file
+   that exists is refused as a path, a name cannot climb out of carts/, and
+   only a regular file in carts/ is a cartridge. *)
+let test_cart_is_a_name_never_a_path () =
+  with_workspace @@ fun base_path ->
+  let carts = carts_dir base_path in
+  Fs_compat.mkdir_p carts;
+  write_cart carts "hero.rom" (String.make 0x4000 '\000');
+  write_cart carts "game.dsk" "";
+  let outside = Filename.concat base_path "outside.rom" in
+  Out_channel.with_open_bin outside (fun oc -> output_string oc (String.make 0x4000 '\000'));
+  Sys.mkdir (Filename.concat carts "folder.rom") 0o755;
+  Unix.symlink "/nonexistent-target" (Filename.concat carts "dangling.rom");
+  let load name =
+    dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String name) ] in
+  check bool "an inventory name loads" true (is_completed (load "hero"));
+  let loaded = incarnation () in
+  List.iter (fun (label, name) ->
+    let r = load name in
+    check bool (label ^ " is refused") true (rejected r);
+    check string (label ^ " leaves the loaded machine alone") loaded (incarnation ()))
+    [ "an absolute path to an existing file", outside
+    ; "a relative path out of the inventory", "../../../outside.rom"
+    ; "a path inside the inventory", "./hero.rom"
+    ; "a name with a separator", "sub/hero.rom"
+    ; "a dot file", ".hidden"
+    ; "a directory", "folder.rom"
+    ; "a link that points nowhere", "dangling.rom"
+    ];
+  let swap name = dispatch ~base_path "masc_msx_change_disk" [ ("disk", `String name) ] in
+  check bool "a disk is refused by path too" true (rejected (swap (Filename.concat carts "game.dsk")))
+;;
+
 (* Reloading the cartridge in the slot or the disk in the drive posts nothing;
    a different cartridge or disk posts once more; a BIOS-only boot, an unknown
    name and a rejected disk boot leave the count where it was. *)
@@ -655,8 +693,11 @@ let test_rejected_disk_preserves_machine () =
      | Ok _ -> fail "unreadable boot sector must reject load");
     check_preserved ()
   ) [0; 511];
+  Fs_compat.mkdir_p (carts_dir base_path);
+  Out_channel.with_open_bin (Filename.concat (carts_dir base_path) "short-0.dsk") (fun oc ->
+    output_string oc "");
   let failed_load = dispatch ~base_path "masc_msx_load"
-    [ ("roms_dir", `String ""); ("cart", `String (Filename.concat base_path "short-0.dsk")) ]
+    [ ("roms_dir", `String ""); ("cart", `String "short-0.dsk") ]
   in
   check bool "public load reports disk boot rejection" true (rejected failed_load);
   check_preserved ()
@@ -671,7 +712,9 @@ let test_disk_boot_smoke () =
   match Sys.getenv_opt "MSX_ROMS", Sys.getenv_opt "MSX_DISK" with
   | Some roms, Some disk when roms <> "" && disk <> "" ->
     with_workspace @@ fun base_path ->
-    let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String roms); ("cart", `String disk) ] in
+    Fs_compat.mkdir_p (carts_dir base_path);
+    Unix.symlink disk (Filename.concat (carts_dir base_path) "host-disk.dsk");
+    let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String roms); ("cart", `String "host-disk.dsk") ] in
     check bool "load with a BIOS and a disk completes" true (is_completed r);
     check int "the load clock carries the warm-up replay"
       (Msx_lane.disk_boot_frames + Msx_lane.boot_frames) (frame_of r);
@@ -754,7 +797,9 @@ let disk_swap_fixture base_path =
     0xcd;0x10;0x40;
     0x3e;0x00;0xd3;0x99;0x3e;0x40;0xd3;0x99;
     0x3a;0x00;0xc4;0xd3;0x98;0xc9 ];
-  let a = Filename.concat base_path "A.dsk" and b = Filename.concat base_path "B.dsk" in
+  Fs_compat.mkdir_p (carts_dir base_path);
+  let a = Filename.concat (carts_dir base_path) "A.dsk"
+  and b = Filename.concat (carts_dir base_path) "B.dsk" in
   Out_channel.with_open_bin a (fun oc -> output_bytes oc disk);
   Bytes.fill disk 512 512 'B';
   Out_channel.with_open_bin b (fun oc -> output_bytes oc disk);
@@ -777,7 +822,7 @@ let test_disk_swap_retains_guest_writes_and_checkpoint () =
   let call name args = dispatch ~base_path name args in
   let swap path =
     let before = Msx_lane.screen () |> lane_observation "before swap" in
-    let result = call "masc_msx_change_disk" ["disk", `String path] in
+    let result = call "masc_msx_change_disk" ["disk", `String (Filename.basename path)] in
     check bool "disk swap succeeds" true (is_completed result);
     check int "disk swap preserves execution frame" before.frame (frame_of result)
   in
@@ -811,9 +856,8 @@ let test_disk_export_survives_fresh_boot () =
   let ledger_dir, a, b = disk_swap_fixture base_path in
   let call name args = dispatch ~base_path name args in
   let catalog = Filename.concat ledger_dir "carts" in
-  Sys.mkdir catalog 0o755;
   check bool "mount data disk" true
-    (is_completed (call "masc_msx_change_disk" ["disk", `String b]));
+    (is_completed (call "masc_msx_change_disk" ["disk", `String (Filename.basename b)]));
   check bool "guest writes data disk" true
     (is_completed (call "masc_msx_press"
       ["keys", `List [`String "return"]; "hold_frames", `Int 1; "frames", `Int 2]));
@@ -1457,7 +1501,9 @@ let test_xspelunker_two_presses () =
   match Sys.getenv_opt "MSX_ROMS", Sys.getenv_opt "MSX_CART" with
   | Some roms, Some cart when roms <> "" && cart <> "" ->
     with_workspace @@ fun base_path ->
-    let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String roms); ("cart", `String cart) ] in
+    Fs_compat.mkdir_p (carts_dir base_path);
+    Unix.symlink cart (Filename.concat (carts_dir base_path) "host-cart.rom");
+    let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String roms); ("cart", `String "host-cart.rom") ] in
     check bool "load with ROMs completes" true (is_completed r);
     let nonzero_tiles result =
       match member "tiles" (Tool_result.data result) with
@@ -1577,6 +1623,7 @@ let () =
         ; test_case "press validation" `Quick test_press_validation
         ; test_case "press sequence taps keys in turn" `Quick test_press_sequence
         ; test_case "cartridge inventory" `Quick test_inventory
+        ; test_case "a cart is a name, never a path" `Quick test_cart_is_a_name_never_a_path
         ; test_case "rendered snapshot reuse and invalidation" `Quick test_rendered_pixel_snapshot
         ; test_case "arcade relay posts once per medium change" `Quick
             test_arcade_relay_posts_once_per_medium_change

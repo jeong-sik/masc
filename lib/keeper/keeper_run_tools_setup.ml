@@ -146,7 +146,10 @@ let expected_model_tool_names
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
   in
   (* Frozen turns can prepare async work without a named Skill. Derive the
-     declared, transient and request-control names from their schema owner. *)
+     declared, transient and request-control names from their schema owner.
+     Composition names are not checked independently of that owner; this
+     projection still compares descriptor/Skill membership, attached tools
+     and duplicate names against each assembled model surface. *)
   let composition_names =
     Keeper_skill_catalog.composition_entries skill_catalog
     |> List.map (fun entry -> entry, ())

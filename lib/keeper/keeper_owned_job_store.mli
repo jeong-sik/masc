@@ -1,5 +1,7 @@
 (** Durable ownership of an isolated job. Every backend effect requires an
-    appended intent; absent or unreadable authority never permits a relaunch. *)
+    appended intent; absent or unreadable authority never permits a relaunch.
+    Strict owner journal v2 retains source/input/output/cleanup authority; it is
+    not removed with private program data. *)
 module Job_id = Keeper_owned_job_identity.Job_id
 
 type source = Keeper_owned_job_identity.source =
@@ -21,6 +23,12 @@ type phase =
   | Cancelled_unconfirmed_launch
 
 type input = { path : string; artifact : Tool_output.artifact_ref }
+type cleanup = Keeper_owned_job_cleanup_state.t =
+  | Resources_retained
+  | Container_removal_requested
+  | Container_removed
+  | Data_removal_requested
+  | Resources_removed
 type paths = { job_dir : string; workspace : string; cli_config_dir : string }
 type outputs =
   | Outputs_complete of Tool_output.artifact_ref * Tool_output.artifact_ref
@@ -42,6 +50,7 @@ type record = private
   ; detail : string option
   ; completion_channel : Keeper_continuation_channel.t
   ; completion_delivered : bool
+  ; cleanup : cleanup
   }
 
 type error =
@@ -84,6 +93,10 @@ val result_ready : record -> bool
 (** True for a confirmed exit with complete outputs, a confirmed running or
     exited job closed with [Outputs_unavailable] evidence after exact inventory
     absence, and cancellation confirmed before start or after an absent unconfirmed launch. *)
+val advance_cleanup : record -> cleanup -> (record, error) result
+(** Exact full-record CAS; only adjacent cleanup states advance, after result
+    readiness and canonical delivery ACK. Execution phase/source/outputs remain
+    retained. Intent is durable before effects; confirmation follows them. *)
 val acknowledge_completion : record -> (record, error) result
 (** CAS the canonical owner only after a durable completion enqueue. *)
 type pending_delivery = { job_id : Job_id.t; keeper_name : string }
@@ -93,8 +106,9 @@ val pending_deliveries : base_path:string -> (pending_deliveries, error) result
 (** Only the pending discovery partition. Markers do not authorize any effect;
     the exact canonical job journal owns source, channel and delivery state. *)
 val retire_delivery_marker : record -> (unit, error) result
-(** Cleanup only for an acknowledged canonical owner. Cleanup uncertainty
-    cannot permit another launch or delivery. *)
+(** Retire only an acknowledged owner whose resource cleanup is confirmed.
+    Pending discovery survives interrupted cleanup; no historical scan is needed.
+    Cleanup uncertainty cannot permit another launch or delivery. *)
 val source_absent :
   base_path:string -> keeper_name:string -> source:source -> (bool, error) result
 (** Prove whether every owned-job authority directory and pending completion

@@ -74,11 +74,8 @@ val cancel : container_id:string -> preparation -> (observation, error) result
     caller's persisted intent remains authoritative when no receipt returns.
     Cancel kills only an exactly verified owned running container. A cancelled
     job whose exact label inventory confirms no owned container closes into a
-    terminal cancelled phase instead of waiting forever. Terminal jobs keep
-    their stopped container, captured logs, private workspace, CLI directory
-    and owner journal until an operator removes them by the procedure in
-    docs/guides/keeper-owned-jobs.md; automated cleanup and retention are
-    tracked in issue #42799. *)
+    terminal cancelled phase instead of waiting forever. Terminal resources are cleaned only after durable result delivery, through
+    the removal contract below; owner journals and output artifacts remain retained. *)
 
 type logs = { stdout : Tool_output.artifact_ref; stderr : Tool_output.artifact_ref }
 val logs : container_id:string -> preparation -> (logs, error) result
@@ -89,3 +86,23 @@ val logs : container_id:string -> preparation -> (logs, error) result
     retention determines what remains available. Saved container identity and private-directory authority are checked
     before and after capture. Cancellation propagates and partial capture files
     remain evidence. No limit, timeout or retry is added. *)
+
+type removal_target =
+  | Never_created
+  | Absent_after_launch of string
+  | Before_start of string
+  | After_exit of { container_id : string; exit_code : int }
+val remove_container : target:removal_target -> preparation -> (unit, error) result
+(** Called only after durable terminal result/delivery and removal intent.
+    Inspect the saved daemon/owner/isolation contract; remove only the exact
+    saved Created/Stopped container without force. Running/replaced/unknown
+    resources refuse, including a changed terminal phase or exit code. Absence
+    is canonical recovery evidence, not CLI prose. [Never_created] authorizes
+    absence confirmation only, never removal of a container.
+    [Absent_after_launch] also confirms the exact saved container ID is absent;
+    it never authorizes removal if that container reappears. *)
+val remove_data : preparation -> (unit, error) result
+(** Called only after confirmed container removal and durable data-removal
+    intent. Delete the original private data tree (workspace, CLI and captures)
+    through no-follow descriptors and frozen retained parents. An interrupted
+    deletion may resume or confirm absence. Owner journals and blob roots stay. *)

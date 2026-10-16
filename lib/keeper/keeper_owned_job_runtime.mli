@@ -16,3 +16,10 @@ val reconcile : Keeper_owned_job_store.record ->
   (Keeper_owned_job_store.record, Keeper_owned_job_store.error) result
 (** Uses only the original frozen backend and durable intents. A completion
     recovery pulse has no authority to prepare a replacement or replay launch. *)
+
+val cleanup : Keeper_owned_job_store.record ->
+  (Keeper_owned_job_store.record, Keeper_owned_job_store.error) result
+(** Continue the original acknowledged terminal owner's resource cleanup.
+    Commit each intent before its effect, retain uncertainty for the next
+    maintenance pulse and preserve source/result/journal/GC authority. Never
+    create/start a program or remove a running/replacement container. *)

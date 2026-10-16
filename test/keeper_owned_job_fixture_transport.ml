@@ -20,6 +20,9 @@ while args and args[0] in ("--config", "--host"):
 if control.get("state") == "exited" and state["container"]:
     state["container"]["State"].update(Status="exited", Running=False, ExitCode=control.get("exit_code", 0))
     save()
+if control.get("state") == "running" and state["container"]:
+    state["container"]["State"].update(Status="running", Running=True, ExitCode=0)
+    save()
 if control.get("replacement") and state["container"]:
     state["container"]["Id"] = "c" * 64
     save()
@@ -61,9 +64,11 @@ elif args[:2] == ["container", "ls"]:
     container = state["container"]
     if container:
         filters = many("--filter", args)
-        assert all(value.startswith("label=") for value in filters)
-        wanted = dict(value[len("label="):].split("=", 1) for value in filters)
-        if all(container["Config"]["Labels"].get(key) == value for key, value in wanted.items()):
+        assert all(value.startswith("label=") or value.startswith("id=") for value in filters)
+        wanted = dict(value[len("label="):].split("=", 1) for value in filters if value.startswith("label="))
+        exact_ids = [value[len("id="):] for value in filters if value.startswith("id=")]
+        visible = not (wanted and control.get("mode") == "hide_owner_inventory")
+        if visible and all(container["Config"]["Labels"].get(key) == value for key, value in wanted.items()) and all(value == container["Id"] for value in exact_ids):
             emit(container["Id"])
 elif args[:2] == ["container", "create"]:
     labels = dict(value.split("=", 1) for value in many("--label", args))
@@ -97,6 +102,9 @@ elif args[:2] == ["container", "create"]:
         + [{"Type": "tmpfs", "Destination": target, "RW": True} for target in tmpfs],
       "State": {"Status": "created", "Running": False, "Paused": False, "Restarting": False, "Dead": False, "ExitCode": 0}}
     save()
+    if control.get("mode") == "create_unknown_created":
+        print("synthetic create receipt lost after creation", file=sys.stderr)
+        sys.exit(24)
     print(container_id)
 elif args[:2] == ["container", "inspect"]:
     assert state["container"] is not None and args[2] == state["container"]["Id"]
@@ -126,6 +134,20 @@ elif args[:2] == ["container", "start"]:
         while True:
             time.sleep(1)
     print(container_id)
+elif args[:2] == ["container", "rm"]:
+    assert len(args) == 3 and state["container"] is not None and args[2] == state["container"]["Id"]
+    container = state["container"]
+    owner = root / ".masc" / "keeper_msg_requests" / "owned_jobs" / container["Config"]["Labels"]["masc.mcp.owned_job"] / "owner.jsonl"
+    record = json.loads(owner.read_text().splitlines()[-1])
+    assert record["cleanup"] == "container_removal_requested" and record["completion_delivered"] is True
+    assert record["phase"]["kind"] in ("exited", "cancelled_before_start") and record["phase"]["container_id"] == args[2]
+    assert container["State"]["Status"] in ("created", "exited") and container["State"]["Running"] is False
+    state["container"] = None
+    save()
+    if control.get("mode") == "remove_unknown_removed":
+        print("synthetic removal transport lost its receipt", file=sys.stderr)
+        sys.exit(23)
+    print(args[2])
 elif args[:2] == ["container", "kill"]:
     assert state["container"] is not None and args[2] == state["container"]["Id"]
     if control.get("mode") == "kill_blocked":

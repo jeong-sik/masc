@@ -1,4 +1,5 @@
 module Backend = Keeper_owned_job_backend
+module Cleanup = Keeper_owned_job_cleanup_state
 let ( let* ) = Result.bind
 
 module Job_id = Keeper_owned_job_identity.Job_id
@@ -20,6 +21,8 @@ type phase =
   | Cancelled_before_start of string option
   | Cancelled_unconfirmed_launch
 type input = { path : string; artifact : Tool_output.artifact_ref }
+type cleanup = Cleanup.t = Resources_retained | Container_removal_requested | Container_removed
+  | Data_removal_requested | Resources_removed
 type paths = { job_dir : string; workspace : string; cli_config_dir : string }
 type outputs =
   | Outputs_complete of Tool_output.artifact_ref * Tool_output.artifact_ref
@@ -31,7 +34,8 @@ type record =
   ; outputs : outputs option
   ; detail : string option
   ; completion_channel : Keeper_continuation_channel.t
-  ; completion_delivered : bool }
+  ; completion_delivered : bool
+  ; cleanup : cleanup }
 type error =
   | Invalid_authority of string | Corrupt of string | Missing | Conflict
   | Io_failed of string | Commit_unconfirmed of string
@@ -100,9 +104,14 @@ let outputs_to_json = function
       ; "stderr", Tool_output.normalized_artifact_ref_to_json stderr ]
   | Some (Outputs_unavailable {evidence}) -> `Assoc ["unavailable", `String evidence]
 
+let cleanup_of_json = function
+  | `String value -> (match Cleanup.of_string value with
+    | Some state -> Ok state | None -> Error (Corrupt "unknown cleanup state"))
+  | _ -> Error (Corrupt "invalid cleanup state")
+
 let record_to_json record =
   `Assoc
-    [ "version", `Int 1; "job_id", `String (Job_id.to_string record.job_id)
+    [ "version", `Int 2; "job_id", `String (Job_id.to_string record.job_id)
     ; "base_path", `String record.base_path; "keeper_name", `String record.keeper_name
     ; "source", source_to_json record.source
     ; "preparation", Backend.preparation_to_json record.preparation
@@ -111,7 +120,8 @@ let record_to_json record =
     ; "cancel_requested", `Bool record.cancel_requested
     ; "outputs", outputs_to_json record.outputs; "detail", string_option record.detail
     ; "completion_channel", Keeper_continuation_channel.to_yojson record.completion_channel
-    ; "completion_delivered", `Bool record.completion_delivered ]
+    ; "completion_delivered", `Bool record.completion_delivered
+    ; "cleanup", `String (Cleanup.to_string record.cleanup) ]
 
 let exact_object keys = function
   | `Assoc fields ->
@@ -186,6 +196,13 @@ let input_of_json value =
   let* path = decode_field fields "path" string in
   let* artifact = decode_field fields "artifact" artifact in Ok {path;artifact}
 
+let result_ready (record : record) = match record.phase, record.outputs with
+  | Exited _, Some _ | Running _, Some (Outputs_unavailable _)
+  | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), None -> true
+  | (Prepared | Create_requested | Created _ | Start_requested _), _
+  | Running _, (None | Some (Outputs_complete _))
+  | Exited _, None | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), Some _ -> false
+
 let validate_record (record : record) =
   let spec = Backend.specification record.preparation in
   let expected_paths = paths ~base_path:record.base_path record.job_id in
@@ -197,6 +214,11 @@ let validate_record (record : record) =
   then Error (Invalid_authority "backend owner or private workspace differs")
   else let* _ = source_of_json (source_to_json record.source) in
     let* () = validate_inputs record.inputs in
+    let* () = match record.cleanup with
+      | Resources_retained -> Ok ()
+      | Container_removal_requested | Container_removed | Data_removal_requested | Resources_removed ->
+        if record.completion_delivered && result_ready record then Ok ()
+        else Error (Corrupt "resource cleanup precedes complete result delivery") in
     let* _ = Keeper_continuation_channel.of_yojson
         (Keeper_continuation_channel.to_yojson record.completion_channel)
         |> Result.map_error (fun detail -> Corrupt detail) in
@@ -220,10 +242,10 @@ let record_of_json value =
   let* fields = exact_object
       ["version";"job_id";"base_path";"keeper_name";"source";"preparation";
        "inputs";"sequence";"phase";"cancel_requested";"outputs";"detail";
-       "completion_channel";"completion_delivered"] value in
+       "completion_channel";"completion_delivered";"cleanup"] value in
   let* version = decode_field fields "version" integer in
   let* sequence = decode_field fields "sequence" integer in
-  if version <> 1 || sequence < 1 then Error (Corrupt "invalid version or sequence")
+  if version <> 2 || sequence < 1 then Error (Corrupt "invalid version or sequence")
   else
     let* raw_id = decode_field fields "job_id" string in
     let* job_id = Job_id.of_string raw_id |> Result.map_error (fun detail -> Corrupt detail) in
@@ -244,15 +266,16 @@ let record_of_json value =
         (fun json -> Keeper_continuation_channel.of_yojson json
           |> Result.map_error (fun detail -> Corrupt detail)) in
     let* completion_delivered = decode_field fields "completion_delivered" boolean in
+    let* cleanup = decode_field fields "cleanup" cleanup_of_json in
     let record = {job_id;base_path;keeper_name;source;preparation;inputs;sequence;
-                  phase;cancel_requested;outputs;detail;completion_channel;completion_delivered} in
+                  phase;cancel_requested;outputs;detail;completion_channel;completion_delivered;cleanup} in
     let* () = validate_record record in Ok record
 
 let same_record left right = record_to_json left = record_to_json right
 let same_owner left right =
   same_record {left with sequence=right.sequence;phase=right.phase;
       cancel_requested=right.cancel_requested;outputs=right.outputs;detail=right.detail;
-      completion_delivered=right.completion_delivered} right
+      completion_delivered=right.completion_delivered;cleanup=right.cleanup} right
 
 let phase_transition before after =
   if before = after then true else match before, after with
@@ -271,6 +294,7 @@ let phase_transition before after =
 let follows previous next =
   previous.sequence < max_int && next.sequence = previous.sequence + 1
   && same_owner previous next && phase_transition previous.phase next.phase
+  && Cleanup.can_transition previous.cleanup next.cleanup
   && (not previous.cancel_requested || next.cancel_requested)
   && (not previous.completion_delivered || next.completion_delivered)
   && (match previous.outputs with None -> true | Some _ -> previous.outputs = next.outputs)
@@ -288,6 +312,7 @@ let decode_journal bytes =
               | None -> next.sequence = 1 && next.phase = Prepared
                   && not next.cancel_requested && next.outputs = None
                   && not next.completion_delivered
+                  && next.cleanup=Resources_retained
               | Some previous -> follows previous next in
             if valid then fold (Some next) rest else Error (Corrupt "invalid ownership transition")
       in fold None (List.rev reversed)
@@ -468,7 +493,7 @@ let create ~base_path ~keeper_name ~job_id ~source ~completion_channel ~preparat
   let* base_path = canonical_base_path base_path in
   let record = {job_id;base_path;keeper_name;source;preparation;inputs;sequence=1;
       phase=Prepared;cancel_requested=false;outputs=None;detail=None;
-      completion_channel;completion_delivered=false} in
+      completion_channel;completion_delivered=false;cleanup=Resources_retained} in
   let* () = validate_record record in
   (* The discovery pointer is durable first. A pulse seeing it before the
      owner journal exists keeps uncertainty; it never prepares or launches. *)
@@ -509,12 +534,12 @@ let transition record ~phase ~cancel_requested ~outputs ~detail =
   if record.sequence = max_int then Error (Corrupt "sequence exhausted") else
   append_next record {record with phase;cancel_requested;outputs;detail;sequence=record.sequence+1}
 
-let result_ready (record : record) = match record.phase, record.outputs with
-  | Exited _, Some _ | Running _, Some (Outputs_unavailable _)
-  | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), None -> true
-  | (Prepared | Create_requested | Created _ | Start_requested _), _
-  | Running _, (None | Some (Outputs_complete _))
-  | Exited _, None | (Cancelled_before_start _ | Cancelled_unconfirmed_launch), Some _ -> false
+let advance_cleanup (record : record) cleanup =
+  if not record.completion_delivered || not (result_ready record)
+  then Error (Invalid_authority "cleanup requires complete result delivery")
+  else if record.cleanup=cleanup then Error (Invalid_authority "cleanup must advance to its next state")
+  else if record.sequence=max_int then Error (Corrupt "sequence exhausted")
+  else append_next record {record with cleanup;detail=None;sequence=record.sequence+1}
 
 let acknowledge_completion (record : record) =
   if not (result_ready record) then Error (Invalid_authority "completion result is not ready")
@@ -526,7 +551,8 @@ let retire_delivery_marker (record : record) =
   (* This marker is discovery only. The canonical owner retains the monotone
      acknowledgement, so a concurrent duplicate marker cannot replay delivery. *)
   let* current = load ~base_path:record.base_path ~keeper_name:record.keeper_name record.job_id in
-  if not current.completion_delivered then Error (Invalid_authority "completion was not acknowledged")
+  if not current.completion_delivered || current.cleanup<>Resources_removed
+  then Error (Invalid_authority "completion or resource cleanup is not confirmed")
   else Keeper_fs.remove_file_durable ~ownership_root:(Common.masc_dir_from_base_path ~base_path:record.base_path)
       (delivery_path ~base_path:record.base_path record.job_id)
     |> Result.map_error (fun error -> Io_failed (Keeper_fs.durable_remove_error_to_string error))
@@ -621,6 +647,7 @@ let result_json record =
   `Assoc ["job_id", `String (Job_id.to_string record.job_id); "status", `String status;
       "source", source_to_json record.source; "phase", `String (phase_to_string record.phase);
       "cancel_requested", `Bool record.cancel_requested;
+      "cleanup", `String (Cleanup.to_string record.cleanup);
       "artifacts", `List (List.map Tool_output.normalized_artifact_ref_to_json artifacts);
       "detail", string_option record.detail;
       "container_id", string_option (container_id record.phase); "exit_code", int_option exit_code]

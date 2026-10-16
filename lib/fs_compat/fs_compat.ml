@@ -15,6 +15,10 @@
 
 open Fs_compat_internal
 
+type cleanup_directory = Owned_tree_cleanup.directory =
+  { path : string; device : int; inode : int; owner_uid : int; permissions : int }
+let remove_owned_tree = Owned_tree_cleanup.remove
+
 module Atomic_orphan_size_class = Atomic_orphan_size_class
 
 (** Global fs — WORM Atomic (write-once at startup, read from any domain).

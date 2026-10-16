@@ -642,6 +642,60 @@ let cancel ~container_id prepared =
     Ok (after_effect prepared ~operation ~expected_id:id result)
   | Absent | Created _ | Stopped _ | Unconfirmed _ as observation -> Ok observation
 
+let confirm_removed ~container_id prepared =
+  let operation = "owned job container removal confirmation" in
+  match inspect prepared with
+  | Created _ | Running _ | Stopped _ ->
+    Error (Response_rejected {operation; detail="a container still claims the original job"})
+  | Unconfirmed detail -> Error (Response_rejected {operation; detail})
+  | Absent ->
+    match container_id with
+    | None -> Ok ()
+    | Some id ->
+      (* Label inventory alone cannot prove the saved full ID disappeared. *)
+      let* result = run ~env:(cli_environment ()) ~operation (command prepared)
+        ["container";"ls";"--all";"--no-trunc";"--filter";"id=" ^ id;"--format";"{{json .ID}}"] in
+      let* stdout = success ~operation result in
+      let* ids = decode operation (fun () ->
+        String.split_on_char '\n' stdout |> List.filter (fun line -> String.trim line <> "")
+        |> List.map (fun line -> let id = string (Yojson.Safe.from_string line) in
+          require (valid_container_id id) "invalid full container identity"; id)) in
+      if ids=[] then Ok () else
+        Error (Response_rejected {operation;detail="saved container ID remains outside its ownership inventory"})
+
+type removal_target = Never_created | Absent_after_launch of string | Before_start of string
+  | After_exit of { container_id : string; exit_code : int }
+
+let remove_container ~target prepared =
+  let* () = isolation_guard () in
+  let operation = "owned job container removal" in
+  let container_id = match target with Never_created -> None
+    | Absent_after_launch id | Before_start id | After_exit {container_id=id;_} -> Some id in
+  let remove id =
+    let* () = directories_unchanged prepared in
+    let* () = daemon prepared in
+    let* result = run ~env:(cli_environment ()) ~operation (command prepared) ["container";"rm";id] in
+    let* _ = success ~operation result in
+    confirm_removed ~container_id prepared in
+  match inspect prepared, target with
+  | Absent, (Never_created | Absent_after_launch _ | Before_start _ | After_exit _) -> confirm_removed ~container_id prepared
+  | Created id, Before_start expected when id=expected -> remove id
+  | Stopped (id,code), After_exit {container_id=expected;exit_code} when id=expected && code=exit_code -> remove id
+  | Unconfirmed detail, (Never_created | Absent_after_launch _ | Before_start _ | After_exit _) -> Error (Response_rejected {operation;detail})
+  | Running _, (Never_created | Absent_after_launch _ | Before_start _ | After_exit _) -> Error (Response_rejected {operation;detail="cleanup never removes a running container"})
+  | (Created _ | Stopped _), (Never_created | Absent_after_launch _ | Before_start _ | After_exit _) ->
+    Error (Response_rejected {operation;detail="saved terminal phase or container identity differs; cleanup cannot remove a replacement"})
+
+let remove_data prepared =
+  let _,data,_,_ = private_paths prepared.spec in
+  let chain = List.filter (fun (directory : directory_identity) -> descendant ~parent:directory.path data) prepared.directories
+    |> List.map (fun (directory : directory_identity) -> Fs_compat.
+      {path=directory.path;device=directory.device;inode=directory.inode;
+       owner_uid=directory.owner_uid;permissions=directory.permissions}) in
+  Eio_guard.run_in_systhread ~label:"owned-job-terminal-data-cleanup" (fun () ->
+    Fs_compat.remove_owned_tree chain)
+  |> Result.map_error (fun detail -> Preparation_refused ("owned job data cleanup: " ^ detail))
+
 let log_container_authority ~container_id prepared =
   match inspect prepared with
   | Created id | Running id | Stopped (id, _) when id = container_id -> Ok ()

@@ -2021,11 +2021,20 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
     (List.map (fun (name,value) -> name,(if name="container" then `Null else value))
        second_daemon_state)));
-  control fixture (`Assoc ["state", `String "running"]);
+  (* Clear the first job's exit injection; only the real start command may
+     move the next container out of Created. *)
+  control fixture (`Assoc []);
   set_source fixture ~task_id:"task-C" ~turn:61;
   let second_id = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"start-second" ~turn:61 "keeper_job_start"
       (`Assoc ["argv", `List [`String "fixture-program-second"]; "inputs", `List []])) |> job_id in
+  (match (load fixture second_id).phase with
+   | Store.Running _ -> ()
+   | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+   | Store.Exited _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch ->
+     fail "second job did not pass its own durable start intent");
+  check int "both original jobs were actually created" 2 (effect_count fixture "create");
+  check int "both original jobs were actually started" 2 (effect_count fixture "start");
   let second_literal value = `Assoc ["kind", `String "literal"; "value", value] in
   let second_node name tool input after = `Assoc ["id", `String name; "tool", `String tool;
       "input", input; "after", `List (List.map (fun name -> `String name) after)] in
@@ -2705,14 +2714,26 @@ let test_completion_delivery_failure_and_restart () =
    | Intake.Stimulus_job_unavailable _ -> () | _ -> fail "a different Task authorized the original result");
   Event_registry.ack_pending_result ~base_path:fixture.base_path keeper ~selection
     |> require "actual completion queue consumption";
+  let before_cleanup = List.length (calls fixture) in
   let again = recover_completions fixture in
-  check int "acknowledged jobs leave the pending discovery partition" 0 again.inspected;
+  let cleanup_backend_calls = List.length (calls fixture) - before_cleanup in
+  check int "acknowledged job remains discoverable for its later cleanup round" 1 again.inspected;
+  check int "later cleanup confirms resources and retires the same owner" 1 again.retired;
+  check int "later cleanup has no unavailable authority" 0 (List.length again.failures);
+  let cleaned = load fixture id in
+  check bool "resource cleanup is canonically complete" true (cleaned.cleanup = Store.Resources_removed);
+  check bool "complete original result remains readable after cleanup" true (Store.result_ready cleaned);
+  check_json "cleanup preserves the original result source" (Store.source_to_json original.source)
+    (Store.source_to_json cleaned.source);
+  let settled = recover_completions fixture in
+  check int "confirmed cleanup leaves no pending marker work" 0 settled.inspected;
   check_no_completion fixture;
   check int "original command is created once" 1 (effect_count fixture "create");
   check int "original command is started once" 1 (effect_count fixture "start");
   Printf.printf "owned_job_completion_measurement=%s\n%!"
     (Yojson.Safe.to_string (`Assoc ["scope", `String "synthetic CLI public job, completed-output enqueue failure and restart recovery";
       "durable_result_recovery_ms", `Float recovery_ms; "backend_calls_on_delivery_recovery", `Int 0;
+      "backend_calls_on_resource_cleanup", `Int cleanup_backend_calls;
       "creates", `Int 1; "starts", `Int 1; "completion_notifications", `Int 1]))
 
 let test_completion_consumed_before_producer_ack () = with_fixture @@ fun _env initialize fixture ->
@@ -2753,8 +2774,12 @@ let test_completion_consumed_before_producer_ack () = with_fixture @@ fun _env i
   check bool "producer ACK follows existing durable consumer evidence" true (load fixture id).completion_delivered;
   check int "producer ACK recovery makes no backend command" before (List.length (calls fixture));
   check int "no original launch replay" 1 (effect_count fixture "start");
+  let discovery = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "cleanup discovery" in
+  check int "acknowledged cleanup remains discoverable" 1 (List.length discovery.entries);
+  let cleaned = recover_completions fixture in
+  check int "a later maintenance round retires confirmed cleanup" 1 cleaned.retired;
   let discovery = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "retired discovery" in
-  check int "acknowledged marker is retired" 0 (List.length discovery.entries)
+  check int "cleaned acknowledged marker is retired" 0 (List.length discovery.entries)
 
 let test_completion_retains_unknown_launch_and_owner () = with_fixture @@ fun _env initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
@@ -2815,6 +2840,10 @@ let test_finished_without_outputs_absent_inventory_notified_once () = with_fixtu
        check bool "closure carries exact absence evidence" true (String.length evidence > 0)
    | _ -> fail "finished job without outputs was not closed as unavailable");
   check bool "canonical owner acknowledged the one delivery" true record.completion_delivered;
+  let cleanup = recover_completions fixture in
+  check int "next pulse retires delivered unavailable result" 1 cleanup.retired;
+  check int "unavailable result cleanup has no failure" 0 (List.length cleanup.failures);
+  check bool "original resources are confirmed removed" true ((load fixture id).cleanup = Store.Resources_removed);
   let discovery = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "retired discovery" in
   check int "delivery marker is retired by the one notification" 0 (List.length discovery.entries);
   check int "absence closure collects no further output commands" 1 (effect_count fixture "logs");
@@ -2857,6 +2886,10 @@ let test_running_absent_inventory_notified_once () = with_fixture @@ fun _env in
          (String.length evidence > 0 && Astring.String.is_infix ~affix:container_id evidence)
    | _ -> fail "running job with absent inventory was not closed as unavailable");
   check bool "canonical owner acknowledged the one delivery" true record.completion_delivered;
+  let cleanup = recover_completions fixture in
+  check int "next pulse retires delivered unavailable result" 1 cleanup.retired;
+  check int "unavailable result cleanup has no failure" 0 (List.length cleanup.failures);
+  check bool "original resources are confirmed removed" true ((load fixture id).cleanup = Store.Resources_removed);
   let discovery = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "retired discovery" in
   check int "delivery marker is retired by the one notification" 0 (List.length discovery.entries);
   let result_doc = with_bundle fixture (fun bundle ->
@@ -5057,9 +5090,200 @@ let test_completion_recovery_preserves_refused_owner_bytes () = with_fixture @@ 
   let corrupt = recover_completions fixture in
   check int "complete malformed prefix stays refused" 1 (List.length corrupt.failures);
   check string "complete corruption and incomplete suffix remain byte-identical" corrupt_bytes (read first_path);
-  check int "corrupt authority authorizes no backend call" before (List.length (calls fixture));
+  check int "independent valid acknowledged owner alone authorizes cleanup" 1 (effect_count fixture "rm");
+  check int "corrupt owner never authorizes another program launch" 2 (effect_count fixture "create");
   write first_path original_first;
   check bool "original authority remains recoverable after restoration" false (load fixture first_id).completion_delivered
+
+let terminal_cleanup_fixture fixture =
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let input = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:fixture.base_path)
+    ~bytes:"cleanup immutable input" ~mime:"text/plain" in
+  let inputs = [`Assoc ["path",`String "input.txt";
+    "artifact",Tool_output.normalized_artifact_ref_to_json input]] in
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ~inputs ["fixture-program"]) |> job_id in
+  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  let completed = with_bundle fixture (fun bundle -> invoke fixture bundle
+    ~tool_use_id:"collect-before-cleanup" ~turn:42 "keeper_job_status" (argument id)) in
+  let delivered = recover_completions fixture in
+  check int "terminal result delivery precedes cleanup" 1 delivered.delivered;
+  check int "result delivery issues no container removal" 0 (effect_count fixture "rm");
+  let original = load fixture id in
+  check bool "original owner acknowledged before cleanup" true original.completion_delivered;
+  let paths = Store.paths ~base_path:fixture.base_path original.job_id in
+  id,paths,completed,original
+
+let check_cleaned_original fixture id (original : Store.record) =
+  let record = load fixture id in
+  check bool "resource cleanup is confirmed" true (record.cleanup=Store.Resources_removed);
+  check_json "cleanup retains original source" (Store.source_to_json original.source)
+    (Store.source_to_json record.source);
+  check bool "cleanup retains exact terminal phase" true (record.phase=original.phase);
+  check bool "cleanup retains exact full output references" true (record.outputs=original.outputs);
+  let pending = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "cleanup discovery" in
+  check int "only confirmed cleanup retires discovery" 0 (List.length pending.entries);
+  check int "original completion stays queued once" 1 (List.length (pending_completions fixture));
+  let before = List.length (calls fixture) in
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  let result = with_bundle fixture (fun bundle -> invoke fixture bundle
+    ~tool_use_id:"read-after-cleanup" ~turn:52 "keeper_job_result" (argument id)) in
+  let status = with_bundle fixture (fun bundle -> invoke fixture bundle
+    ~tool_use_id:"status-after-cleanup" ~turn:52 "keeper_job_status" (argument id)) in
+  check_original_source fixture result;
+  check string "public status exposes confirmed cleanup" "resources_removed" (status |> member "cleanup" |> to_string);
+  check int "result and status after cleanup use no backend" before (List.length (calls fixture));
+  result
+
+let test_terminal_cleanup_preserves_result_and_gc () = with_fixture @@ fun _env _initialize fixture ->
+  let id,paths,completed,original = terminal_cleanup_fixture fixture in
+  let outside = Filename.concat fixture.base_path "unrelated-output" in
+  Unix.mkdir outside 0o700;
+  let sentinel = Filename.concat outside "keep.txt" in write sentinel "keep unrelated bytes";
+  Unix.symlink outside (Filename.concat paths.workspace "unrelated-link");
+  Unix.link sentinel (Filename.concat paths.workspace "unrelated-hardlink");
+  Unix.mkfifo (Filename.concat paths.workspace "program-pipe") 0o600;
+  let cleanup_backend_before = List.length (calls fixture) in
+  let counter = Mtime_clock.counter () in
+  let report = recover_completions fixture in
+  let cleanup_ms = Mtime.Span.to_float_ns (Mtime_clock.count counter) /. 1_000_000. in
+  check int "cleanup retires one terminal obligation" 1 report.retired;
+  check string "cleanup never follows a program link" "keep unrelated bytes" (read sentinel);
+  check bool "private workspace CLI and captures are removed" false (Sys.file_exists (Filename.dirname paths.workspace));
+  let result = check_cleaned_original fixture id original in
+  check_json "public result retains complete original output" (completed |> member "artifacts") (result |> member "artifacts");
+  (match result |> member "artifacts" |> to_list with
+   | [stdout;stderr] -> check_artifact_bytes fixture stdout_bytes stdout; check_artifact_bytes fixture stderr_bytes stderr
+   | _ -> fail "cleanup lost an original stream");
+  let owner = read (owner_path fixture id) in
+  check bool "canonical owner journal remains after data cleanup" true (String.length owner > 0);
+  ignore (Tool_blob_maintenance.run ~base_path:fixture.base_path
+    ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode:Tool_blob_maintenance.Observe_only
+    |> require "GC observation after cleanup");
+  let candidates = read (Tool_blob_maintenance.candidate_snapshot_path ~base_path:fixture.base_path)
+    |> Yojson.Safe.from_string |> member "unreferenced_candidates" |> to_list |> List.map to_string in
+  let references = Tool_output.normalized_artifact_refs_in_json (Yojson.Safe.from_string
+    (List.hd (String.split_on_char '\n' owner))) in
+  let references = references @ (match original.outputs with
+    | Some (Store.Outputs_complete (stdout,stderr)) -> [stdout;stderr]
+    | Some (Store.Outputs_unavailable {evidence}) ->
+      failf "cleanup fixture output is unavailable: %s" evidence
+    | None -> fail "cleanup fixture has no complete original outputs") in
+  List.iter (fun (reference : Tool_output.artifact_ref) -> check bool "retained owner remains a GC root" false
+    (List.mem reference.sha256 candidates)) references;
+  check int "one exact terminal container removal" 1 (effect_count fixture "rm");
+  check int "cleanup never creates a replacement program" 1 (effect_count fixture "create");
+  check int "cleanup never restarts the program" 1 (effect_count fixture "start");
+  Printf.printf "owned_job_cleanup_measurement=%s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["scope",`String "synthetic CLI actual terminal cleanup";"cleanup_ms",`Float cleanup_ms;
+     "container_removals",`Int 1;"program_replays",`Int 0;
+     "cleanup_backend_calls",`Int (List.length (calls fixture)-cleanup_backend_before);
+     "complete_outputs_retained",`Bool true;"private_data_removed",`Bool true]))
+
+let test_cleanup_refuses_backend_change fault = with_fixture @@ fun _env _initialize fixture ->
+  let id,paths,_,original = terminal_cleanup_fixture fixture in
+  control fixture (`Assoc fault);
+  let refused = recover_completions fixture in
+  check int "changed backend retains cleanup failure" 1 (List.length refused.failures);
+  check int "changed authority never removes a container" 0 (effect_count fixture "rm");
+  check bool "refused cleanup preserves private data" true (Sys.file_exists paths.workspace);
+  check bool "unconfirmed cleanup retains its durable intent" true
+    ((load fixture id).cleanup=Store.Container_removal_requested);
+  let pending = Store.pending_deliveries ~base_path:fixture.base_path |> store_value "refused cleanup discovery" in
+  check int "refused cleanup stays discoverable" 1 (List.length pending.entries);
+  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7;"restore_identity",`Bool true]);
+  check int "restored original resource can be cleaned" 1 (recover_completions fixture).retired;
+  ignore (check_cleaned_original fixture id original)
+
+let test_cleanup_recovers_lost_remove_receipt () = with_fixture @@ fun _env initialize fixture ->
+  let id,paths,_,original = terminal_cleanup_fixture fixture in
+  control fixture (`Assoc ["mode",`String "remove_unknown_removed"]);
+  let uncertain = recover_completions fixture in
+  check int "lost removal receipt remains unconfirmed" 1 (List.length uncertain.failures);
+  check int "the original remove actually ran once" 1 (effect_count fixture "rm");
+  check bool "actual container is gone before confirmation" true (daemon fixture |> member "container" = `Null);
+  check bool "data waits for canonical container absence" true (Sys.file_exists paths.workspace);
+  check bool "removal intent survives missing receipt" true ((load fixture id).cleanup=Store.Container_removal_requested);
+  Process_eio.reset_for_testing (); initialize ();
+  control fixture (`Assoc []);
+  check int "fresh maintenance confirms the original absence" 1 (recover_completions fixture).retired;
+  check int "absence recovery never repeats removal" 1 (effect_count fixture "rm");
+  ignore (check_cleaned_original fixture id original)
+
+let enter_original_data_cleanup (original : Store.record) =
+  (* Stop between real durable cleanup boundaries, with the actual producer's
+     removal receipt. No fabricated owner or backend absence is substituted. *)
+  let intent = Store.advance_cleanup original Store.Container_removal_requested |> store_value "real cleanup intent" in
+  Masc.Keeper_owned_job_backend.remove_container ~target:(match original.phase with
+    | Store.Exited {container_id;exit_code} -> Masc.Keeper_owned_job_backend.After_exit {container_id;exit_code}
+    | Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+    | Store.Running _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch -> fail "original terminal handle") original.preparation
+    |> require "actual original container removal";
+  let removed = Store.advance_cleanup intent Store.Container_removed |> store_value "actual removal confirmation" in
+  Store.advance_cleanup removed Store.Data_removal_requested |> store_value "real data cleanup intent"
+
+let test_cleanup_recovers_partial_data ~symbolic_replacement () = with_fixture @@ fun _env initialize fixture ->
+  let id,paths,_,original = terminal_cleanup_fixture fixture in
+  ignore (enter_original_data_cleanup original);
+  Unix.unlink (Filename.concat paths.workspace "input.txt");
+  Unix.rmdir paths.cli_config_dir;
+  let data = Filename.dirname paths.workspace in
+  let detached = Filename.concat fixture.base_path "interrupted-original-data" in
+  Unix.rename data detached;
+  let foreign = Filename.concat fixture.base_path "unrelated-cleanup-target" in
+  Unix.mkdir foreign 0o700;
+  write (Filename.concat foreign "keep.txt") "foreign target remains";
+  if symbolic_replacement then Unix.symlink foreign data
+  else (Unix.mkdir data 0o700; write (Filename.concat data "keep.txt") "replacement remains");
+  Process_eio.reset_for_testing (); initialize ();
+  let backend_before = List.length (calls fixture) in
+  let refused = recover_completions fixture in
+  check int "replacement data identity refuses cleanup" 1 (List.length refused.failures);
+  check string "unrelated target remains untouched" "foreign target remains" (read (Filename.concat foreign "keep.txt"));
+  if symbolic_replacement then Unix.unlink data
+  else (check string "replacement tree remains untouched" "replacement remains" (read (Filename.concat data "keep.txt"));
+    Unix.unlink (Filename.concat data "keep.txt"); Unix.rmdir data);
+  Unix.rename detached data;
+  check int "fresh maintenance resumes partial original data cleanup" 1 (recover_completions fixture).retired;
+  check bool "partial original data is fully removed" false (Sys.file_exists data);
+  check int "data cleanup recovery performs no Docker I/O" backend_before (List.length (calls fixture));
+  ignore (check_cleaned_original fixture id original)
+
+let test_cleanup_recovers_data_absence_under_original_parent () = with_fixture @@ fun _env initialize fixture ->
+  let id,paths,_,original = terminal_cleanup_fixture fixture in
+  ignore (enter_original_data_cleanup original);
+  Masc.Keeper_owned_job_backend.remove_data original.preparation |> require "actual complete original data removal";
+  let data = Filename.dirname paths.workspace in
+  check bool "data effect finished before journal confirmation" false (Sys.file_exists data);
+  let parent = Filename.dirname data in
+  let held = Filename.concat fixture.base_path "original-owned-data-parent" in
+  Unix.rename parent held;
+  Unix.mkdir parent 0o700;
+  let sentinel = Filename.concat parent "keep.txt" in write sentinel "replacement parent remains";
+  Process_eio.reset_for_testing (); initialize ();
+  let backend_before = List.length (calls fixture) in
+  let refused = recover_completions fixture in
+  check int "target absence cannot bypass changed parent authority" 1 (List.length refused.failures);
+  check string "replacement parent remains untouched" "replacement parent remains" (read sentinel);
+  Unix.unlink sentinel; Unix.rmdir parent; Unix.rename held parent;
+  check int "original parent confirms lost successful data removal" 1 (recover_completions fixture).retired;
+  check int "confirmed original data absence needs no Docker call" backend_before (List.length (calls fixture));
+  ignore (check_cleaned_original fixture id original)
+
+let test_cleanup_cancelled_before_start () = with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  control fixture (`Assoc ["mode",`String "create_unknown_created"]);
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  control fixture (`Assoc []);
+  let cancelled = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"cancel-created"
+    ~turn:42 "keeper_job_cancel" (argument id)) in
+  check string "actual created job cancels before start" "cancelled_before_start" (cancelled |> member "phase" |> to_string);
+  check int "cancelled program was never started" 0 (effect_count fixture "start");
+  check int "before-start cancellation is delivered first" 1 (recover_completions fixture).delivered;
+  let original = load fixture id in
+  check int "the exact created container is later cleaned" 1 (recover_completions fixture).retired;
+  check int "one exact created-container removal" 1 (effect_count fixture "rm");
+  let result = check_cleaned_original fixture id original in
+  check_json "before-start cancellation does not fabricate logs" (`List []) (result |> member "artifacts")
 
 
 let () = match Array.to_list Sys.argv with
@@ -5070,6 +5294,18 @@ let () = match Array.to_list Sys.argv with
   run "Keeper owned jobs"
     ["public lifecycle",
       [ test_case "structured launch, original source, restart and artifact ownership" `Quick test_running_restart_exit_and_artifacts
+      ; test_case "terminal cleanup preserves full result and GC ownership" `Quick test_terminal_cleanup_preserves_result_and_gc
+      ; test_case "cleanup refuses a changed daemon" `Quick (fun () -> test_cleanup_refuses_backend_change ["daemon_id",`String "different-daemon"])
+      ; test_case "cleanup refuses a same-label replacement container" `Quick (fun () -> test_cleanup_refuses_backend_change ["replacement",`Bool true])
+      ; test_case "cleanup refuses a running terminal resource" `Quick (fun () -> test_cleanup_refuses_backend_change ["state",`String "running"])
+      ; test_case "cleanup refuses a changed terminal exit code" `Quick (fun () -> test_cleanup_refuses_backend_change ["state",`String "exited";"exit_code",`Int 99])
+      ; test_case "cleanup checks saved ID beyond owner-label absence" `Quick (fun () -> test_cleanup_refuses_backend_change ["mode",`String "hide_owner_inventory"])
+      ; test_case "cleanup refuses changed private mount authority" `Quick (fun () -> test_cleanup_refuses_backend_change ["corrupt",`String "mount"])
+      ; test_case "fresh maintenance recovers a lost successful removal receipt" `Quick test_cleanup_recovers_lost_remove_receipt
+      ; test_case "partial data cleanup refuses a replaced original tree" `Quick (test_cleanup_recovers_partial_data ~symbolic_replacement:false)
+      ; test_case "partial data cleanup never follows a replaced root symlink" `Quick (test_cleanup_recovers_partial_data ~symbolic_replacement:true)
+      ; test_case "lost data removal confirmation retains exact parent authority" `Quick test_cleanup_recovers_data_absence_under_original_parent
+      ; test_case "cancelled-before-start job cleans its exact created resources" `Quick test_cleanup_cancelled_before_start
       ; test_case "unknown create absence cannot relaunch" `Quick test_unknown_create_absence_never_replays
       ; test_case "unknown start absence cannot restart" `Quick test_unknown_start_absence_never_replays
       ; test_case "cancelled absent create closes terminally" `Quick test_cancelled_unconfirmed_launch_closes_absent_create

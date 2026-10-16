@@ -108,11 +108,13 @@ let reconcile (record : Store.record) =
       else Ok record
   | Store.Cancelled_before_start _ -> Ok record
   | Store.Cancelled_unconfirmed_launch ->
+      if record.cleanup <> Store.Resources_retained then Ok record else
       (match observe record (Backend.inspect record.preparation) with
        | Ok observed -> Ok (record_of_settlement observed)
        | Error error -> Error error)
   | Store.Create_requested | Store.Created _ | Store.Start_requested _
   | Store.Running _ | Store.Exited _ ->
+      if Store.result_ready record then Ok record else
       let* observed =
         if record.cancel_requested then match record.phase with
           | Store.Start_requested container_id | Store.Running container_id ->
@@ -125,6 +127,32 @@ let reconcile (record : Store.record) =
       (match observed with
        | Unconfirmed record -> Ok record
        | Confirmed record -> let* started = launch_created record in collect started)
+
+let rec cleanup (record : Store.record) =
+  let next state = let* record = Store.advance_cleanup record state in cleanup record in
+  let run_cleanup operation confirmed =
+    match operation () with
+    | Ok () -> next confirmed
+    | Error error ->
+      let detail = Backend.error_to_string error in
+      let* _ = note record detail in
+      Error (Store.Invalid_authority detail)
+  in
+  match record.cleanup with
+  | Store.Resources_retained -> next Store.Container_removal_requested
+  | Store.Container_removal_requested ->
+    let* target = match record.phase, record.outputs with
+      | Store.Exited {container_id;exit_code}, _ -> Ok (Backend.After_exit {container_id;exit_code})
+      | Store.Running id, Some (Store.Outputs_unavailable _) -> Ok (Backend.Absent_after_launch id)
+      | Store.Cancelled_before_start (Some id), _ -> Ok (Backend.Before_start id)
+      | (Store.Cancelled_before_start None | Store.Cancelled_unconfirmed_launch), _ -> Ok Backend.Never_created
+      | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _), _
+      | Store.Running _, (None | Some (Store.Outputs_complete _)) ->
+        Error (Store.Invalid_authority "resource cleanup requires the original terminal handle") in
+    run_cleanup (fun () -> Backend.remove_container ~target record.preparation) Store.Container_removed
+  | Store.Container_removed -> next Store.Data_removal_requested
+  | Store.Data_removal_requested -> run_cleanup (fun () -> Backend.remove_data record.preparation) Store.Resources_removed
+  | Store.Resources_removed -> Ok record
 
 let launch (record : Store.record) =
   let* intent = save record ~phase:Store.Create_requested ~cancel_requested:false

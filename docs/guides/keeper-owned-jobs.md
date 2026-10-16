@@ -62,6 +62,58 @@ authority sources. A program's output files or symlinks therefore cannot become
 durable GC ownership evidence. Input and terminal-output references stay in the
 canonical owner journal.
 
+### Terminal resource cleanup
+
+Completion delivery and cleanup are separate maintenance rounds. Full terminal
+output is durable before delivery; delivery commits its original notification
+and owner acknowledgement without waiting for cleanup I/O. The pending discovery
+marker stays until a later maintenance fiber confirms resource removal. Failed
+or interrupted cleanup stays discoverable without scanning historical owners or
+repeating the program. Independent jobs keep independent fibers.
+
+The same canonical owner records an ordered cleanup lifecycle:
+`resources_retained` → `container_removal_requested` → `container_removed` →
+`data_removal_requested` → `resources_removed`. Each intent is committed before
+its effect. Only a complete terminal result with an acknowledged delivery can
+advance. Execution phase, exact handle, source and output references remain.
+`keeper_job_status` exposes this cleanup stage; `keeper_job_result` and terminal
+status continue reading the original result after the resources disappear.
+
+Container cleanup uses the saved daemon and complete ownership/isolation
+contract. Only the exact saved Created/Stopped container may be removed, without
+force. Running resources, changed terminal phase/exit code, copied labels,
+changed daemon/mounts and uncertain
+observations refuse. Confirming a saved ID's absence also inventories that full
+ID independently of owner labels. A lost successful remove receipt is recovered
+by confirming original absence, without another removal or create/start.
+Cancellation before start can clean its exact created container; an owner that
+never acquired a container can only confirm absence.
+
+After confirmed container removal, data cleanup deletes the original private
+workspace, CLI directory and log captures. It binds the frozen root and retained
+parent device/inode/owner/permissions through no-follow descriptors. Links and
+other non-directory entries are unlinked, never traversed; another filesystem
+or foreign-owned directory refuses traversal. Partial removal can resume under
+the same original target identity, or confirm target absence under unchanged
+parents. A replacement tree or root symlink refuses. This ownership transaction
+requires the writer to have stopped; POSIX does not provide atomic conditional
+unlink against an unrelated host writer bypassing ownership. Inaccessible data
+or failed fsync remains an explicit pending cleanup failure.
+
+Canonical owner and invocation journals remain retained as source, deduplication
+and blob-GC authority. Their input and complete output references stay live after
+private data removal. There is no journal TTL, automatic authority deletion or
+new cleanup timer. The existing maintenance pulse recovers the pending marker
+until resource cleanup is confirmed, then retires discovery.
+
+The owner journal codec is v2. Finish pending v1 work on its original runtime and
+use a fresh base for this candidate; no conversion or deletion is performed.
+Synthetic CLI feature scenarios check real public launch/result/status and
+maintenance, persisted removal intent, exact resource refusals, lost removal
+receipt, partial data cleanup/replacement, before-start cancellation, retained
+full output and GC roots. These scenarios are not real Docker, physical process
+restart, installed runtime or whole-task preparation speedup evidence.
+
 `keeper_job_result` reads the same job's owner journal without contacting the
 backend. It is read-only and permits concurrent admission. It returns Deferred
 until a confirmed exit has both complete stdout/stderr artifacts, or until a
@@ -210,21 +262,6 @@ program runs. Shared mutable workspace claims, remote Docker bind authority
 and effectful draft admission remain separate contracts. This result-read continuation does not
 automatically resume a plan when a container exits. Those remaining contracts are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).
-
-Terminal jobs do not clean up automatically yet. A finished or cancelled job
-keeps its stopped Docker container, its captured log evidence, its private
-workspace and CLI directory under `<base-path>/.masc/owned_job_data`, and its
-owner journal under `<base-path>/.masc/keeper_msg_requests/owned_jobs`.
-Durable output artifacts stay in the blob store while the owner journal
-references them. To reclaim disk once a job is terminal (`exited` or
-`cancelled`) and its outputs are collected, an operator removes the exact
-saved container (`docker container rm` on the result's `container_id`, or
-`docker container ls --all --filter label=masc.mcp.owned_job=<job_id>` when
-the id is unknown) and then deletes that job's directories under
-`owned_job_data`. Keep the owner journal while its artifact references must
-stay discoverable. Automated cleanup and retention are tracked in
-[issue #42799](https://github.com/jeong-sik/masc/issues/42799).
-
 
 ### Waiting for an already submitted named async Composition
 

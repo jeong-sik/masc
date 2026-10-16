@@ -1367,7 +1367,8 @@ let test_scoped_dispatch_survives_loading_and_preparation_refusal_keeps_receipt 
           output "prepared-output")))
       end
     in
-    Agent_core.Tool.of_schema ~descriptor:(Agent_core.Tool.ordinary_descriptor_scoped ~prepare)
+    Agent_core.Tool.of_schema ~descriptor:(Agent_core.Tool.ordinary_descriptor_scoped
+      ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible) ~prepare)
       offer.schema (fun _ _ -> incr ordinary_calls; output "ordinary-fallback")
   in
   let surface =

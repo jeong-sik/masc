@@ -71,9 +71,13 @@ val ordinary_descriptor :
 val ordinary_descriptor_concurrent_when : (Yojson.Safe.t -> bool) -> descriptor
 
 val ordinary_descriptor_scoped
-  :  prepare:(sw:Eio.Switch.t -> Yojson.Safe.t -> (scoped_call option, Types.tool_error) result)
+  :  call_effect:(Yojson.Safe.t -> call_effect)
+  -> prepare:(sw:Eio.Switch.t -> Yojson.Safe.t -> (scoped_call option, Types.tool_error) result)
   -> descriptor
-(** An effect-possible ordinary call. Its pure execution mode remains Serial.
+(** An ordinary call with independent resource and effect contracts. The
+    producer's [call_effect] must cover both its prepared and fallback handlers;
+    resource Read claims alone do not prove the whole call read-only.
+    Its pure execution mode remains Serial.
     Batch preparation may resolve a scope, then schedule disjoint calls in
     parallel while preserving the order of conflicting calls.
 
@@ -84,8 +88,8 @@ val ordinary_descriptor_scoped
     preparation it cannot transfer to a scoped call. Cancellation propagates;
     [sw] bounds the lifetime of transferred resources. Pair through [of_schema]
     (or [create]), which binds the descriptor to that exact handler. Replacing
-    the public record's handler invalidates scoped admission and retains the
-    replacement handler's ordinary Serial path. *)
+    the public record's handler invalidates scoped admission and its original
+    read-only declaration; the replacement is Serial and [Effect_possible]. *)
 
 val terminal_descriptor : Tool_contract.failure_effect_disposition -> descriptor
 
@@ -200,8 +204,9 @@ val execution_mode : t -> input:Yojson.Safe.t -> Tool_contract.execution_mode
 val completion : t -> Tool_contract.completion
 
 val call_effect : t -> Yojson.Safe.t -> call_effect
-(** Read the producer's contract before entering the handler. A terminal or
-    undescribed tool is [Effect_possible]. The producer callback must be pure,
+(** Read the producer's contract before entering the handler. A terminal,
+    undescribed or unpaired resource-scoped tool is [Effect_possible].
+    The producer callback must be pure,
     total, and return the same classification for the same input: transports
     may evaluate it more than once before execution. This does not authorize
     execution. *)
@@ -237,6 +242,7 @@ val wire_bytes_of_schema : Types.tool_schema -> int
 val schema_to_json : t -> Yojson.Safe.t
 
 (** Wrap a tool to inject default arguments when not provided.
-    Defaults are merged into the input JSON before the handler runs. Scoped
-    preparation and its bound handler receive the same merged input. *)
+    Effect classification, conditional scheduling, scoped preparation and the
+    handler all see the same merged input. Original wire input remains the
+    hook/transcript input. This does not rebind an unpaired scoped handler. *)
 val with_defaults : (string * Yojson.Safe.t) list -> t -> t

@@ -99,7 +99,8 @@ let batch env config meta recovery inputs =
     | Tool_result.Deferred () | Tool_result.Failed _ ->
       Error {Agent_core.Types.message = result.raw_output; recoverable = false
             ; error_class = Some Agent_core.Types.Unknown} in
-  let descriptor = Agent_core.Tool.ordinary_descriptor_scoped ~prepare:(fun ~sw input ->
+  let descriptor = Agent_core.Tool.ordinary_descriptor_scoped
+      ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible) ~prepare:(fun ~sw input ->
     match FS.prepare_edit ~sw ~config ~meta ~args:input with
     | Error error -> FS.edit_preparation_error_to_execution error |> to_sdk |> Result.map (fun _ -> None)
     | Ok None -> Ok None

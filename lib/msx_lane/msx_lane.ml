@@ -1133,7 +1133,6 @@ let core =
 type checkpoint_info = {
   exists : bool;
   version : int;
-  frame : int option;
   saved_at_unix : float option;
   mtime_utc : string option;
   core_sha : string option;
@@ -1199,11 +1198,6 @@ let checkpoint_info ~path =
              frame >= 0 && who <> "" && key <> ""
            | _ -> false)
         | _ -> false in
-      let optional_int name =
-        match find name with
-        | None | Some `Null -> Ok None
-        | Some (`Int value) -> Ok (Some value)
-        | Some _ -> invalid (name ^ " must be an integer or null") in
       let optional_string name =
         match find name with
         | None | Some `Null -> Ok None
@@ -1224,7 +1218,6 @@ let checkpoint_info ~path =
       else if version <> 1
       then invalid (Printf.sprintf "unsupported version %d" version)
       else
-        let* frame = optional_int "frame" in
         let* core_sha = optional_string "core_sha" in
         let* cartridge = optional_string "cartridge" in
         let* disk = optional_string "disk" in
@@ -1241,7 +1234,6 @@ let checkpoint_info ~path =
         Ok
           { exists = true
           ; version
-          ; frame
           ; saved_at_unix
           ; mtime_utc
           ; core_sha

@@ -1265,6 +1265,9 @@ let test_checkpoint_info_reads_without_restoring () =
   check bool "checkpoint saved" true (is_completed save);
   let info = call "masc_msx_checkpoint_info" ["slot", `String "info-slot"] in
   check bool "info completes" true (is_completed info);
+  (* Version 1 never recorded a frame, so the field was always null. *)
+  check bool "the report carries no frame field" true
+    (member "frame" (Tool_result.data info) = None);
   check bool "a returned slot reports exists=true" true
     (match member "exists" (Tool_result.data info) with
      | Some (`Bool true) -> true

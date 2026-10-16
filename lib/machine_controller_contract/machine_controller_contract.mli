@@ -20,6 +20,13 @@ val admission_to_json : admission -> Yojson.Safe.t
 val admission_of_json : Yojson.Safe.t -> (admission, string) result
 val admission_schema : Yojson.Safe.t
 
+val pass_target :
+  parse:(string -> (string, string) result) -> Yojson.Safe.t -> (string option, string) result
+(** The recipient a [masc_dos_pass] call names, read from its [to] argument
+    and checked by [parse], which gets the trimmed text and returns the name.
+    [None] is a call that frees the controller, and only a [to] that is left
+    out or null means that: an empty, blank or non-string [to] is an [Error]. *)
+
 (** {1 DOS tools}
 
     The shared DOS machine's tools, named once for the host that admits a

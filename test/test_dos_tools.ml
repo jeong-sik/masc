@@ -1331,6 +1331,44 @@ let test_a_pass_to_an_impossible_name_is_refused () =
       (controller (dispatch ~base_path "masc_dos_screen" [])))
 ;;
 
+(* Only a [to] that is left out frees the controller. An empty [to] used to
+   free it too, so a caller whose template left the name unset handed the
+   machine to whoever moved it next. *)
+let test_only_an_absent_recipient_frees_the_controller () =
+  let parse name = Ok name in
+  let target arguments = Machine_controller_contract.pass_target ~parse arguments in
+  check bool "no to frees" true (target (`Assoc []) = Ok None);
+  check bool "a null to frees" true (target (`Assoc [ ("to", `Null) ]) = Ok None);
+  check bool "no arguments at all frees" true (target `Null = Ok None);
+  check bool "a name is trimmed" true
+    (target (`Assoc [ ("to", `String " liu-bei ") ]) = Ok (Some "liu-bei"));
+  List.iter
+    (fun (name, value) ->
+      check bool (name ^ " is an error") true
+        (Result.is_error (target (`Assoc [ ("to", value) ]))))
+    [ "an empty to", `String ""; "a blank to", `String "  \t"; "a number", `Int 7 ];
+  check bool "a name the parser refuses is an error" true
+    (Result.is_error
+       (Machine_controller_contract.pass_target
+          ~parse:(fun _ -> Error "no") (`Assoc [ ("to", `String "x") ])));
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~agent:"liu-bei" ~base_path "hello.com";
+    List.iter
+      (fun recipient ->
+        let refused =
+          dispatch ~base_path ~agent:"liu-bei" "masc_dos_pass" [ ("to", `String recipient) ]
+        in
+        refused_before_any_effect (Printf.sprintf "to=%S" recipient) refused;
+        match Dos_lane.screen () with
+        | Ok { Dos_lane.controller = Some "liu-bei"; _ } -> ()
+        | Ok _ | Error _ -> fail (Printf.sprintf "to=%S freed or moved the controller" recipient))
+      [ ""; "   " ];
+    let freed = dispatch ~base_path ~agent:"liu-bei" "masc_dos_pass" [] in
+    check bool "leaving to out frees it" true (is_completed freed);
+    check (option string) "and nobody holds it" None (controller freed))
+;;
+
 (* lea ax, ax: an instruction the emulator does not implement. The core
    raises instead of misbehaving. A fault while the program boots is still a
    load: the machine is installed and the loader holds the controller, so the
@@ -2451,6 +2489,8 @@ let () =
             test_a_holder_departs_with_its_credential
         ; test_case "a pass is refused when the credentials do not list" `Quick
             test_a_pass_is_refused_when_the_credentials_do_not_list
+        ; test_case "only an absent recipient frees the controller" `Quick
+            test_only_an_absent_recipient_frees_the_controller
         ; test_case "a fault while booting is a load" `Quick
             test_a_fault_while_booting_is_a_load
         ; test_case "a clean boot says so" `Quick test_a_clean_boot_says_so

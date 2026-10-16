@@ -78,7 +78,7 @@ let call_failure = function
 
 let recover config =
   Machine_addon_host.call_shared ~config ~principal:(Lane_addon_call_context.Host_actor "operator")
-    ~name:"masc_dos_pass" ~arguments:(`Assoc ["to",`String ""])
+    ~name:"masc_dos_pass" ~arguments:(`Assoc [])  (* no [to] frees the controller; an empty one is refused *)
 
 let recovered ~released = function
   | Ok result -> check bool "worker return request reflects current holder authority" released (result.S.is_error <> Some true)

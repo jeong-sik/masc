@@ -915,18 +915,7 @@ let handle_eject ~tool_name ~start_time ~agent_name _args =
    eject the machine again, and the post meant to wake the next player would
    address no one. Host admission and the worker use the same normalized
    target, which the worker verifies before changing the controller. *)
-let pass_target args =
-  match get_string_opt args "to" with
-  | None -> Ok None
-  | Some t when String.trim t = "" -> Ok None
-  | Some t ->
-    (match Host.parse_controller (String.trim t) with
-     | Ok id -> Ok (Some id)
-     | Error _ ->
-       Error
-         (Printf.sprintf
-            "to %S is not a Keeper name: give the name alone, without @ or spaces" t))
-;;
+let pass_target args = Machine_controller_contract.pass_target ~parse:Host.parse_controller args
 
 (* The hand-off is also the wake-up: the board post names the next holder
    with @, which the board delivers to that Keeper as an explicit mention, so

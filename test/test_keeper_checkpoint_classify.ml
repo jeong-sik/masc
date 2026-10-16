@@ -103,7 +103,8 @@ let test_serialization_json_routes_parse_error () =
 
 let test_structured_failure_routes_without_private_evidence () =
   let raw = "private-model-output-api-key-value" in
-  let error = Agent_core.Error.structured_output_parse_error ~detail:raw ~raw in
+  let error = Agent_core.Error.structured_output_parse_error
+      ~reason:Agent_core.Error.Invalid_json ~detail:raw ~raw in
   match Store.classify_core_error error with
   | Store.Parse_error message ->
     Alcotest.(check string) "only public error text reaches checkpoint diagnostics"

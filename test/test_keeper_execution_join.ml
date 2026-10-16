@@ -706,10 +706,13 @@ let test_timeout_projection_without_phase_reports_null () =
 
 let test_structured_error_projection_omits_private_model_output () =
   let raw = "private-model-output-api-key-value" in
-  let error = Agent_core.Error.structured_output_parse_error ~detail:raw ~raw in
+  let error = Agent_core.Error.structured_output_parse_error
+      ~reason:Agent_core.Error.Invalid_json ~detail:raw ~raw in
   let projection = Error_json.agent_failed_error_projection error in
   check (option string) "structured error kind" (Some "structured_output_parse_error")
     (string_of_field (member "variant" projection.error_detail));
+  check (option string) "safe structured failure class" (Some "invalid_json")
+    (string_of_field (member "reason" projection.error_detail));
   check (option int) "original bytes remain observable" (Some (String.length raw))
     (int_of_field (member "raw_len" projection.error_detail));
   check bool "preview omitted" true (member "raw_preview" projection.error_detail = None);

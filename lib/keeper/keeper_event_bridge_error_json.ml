@@ -300,8 +300,9 @@ let core_config_error_fields = function
 let core_serialization_error_fields = function
   | Agent_core.Error.JsonParseError { detail } ->
     [ "variant", `String "json_parse_error"; "detail", `String detail ]
-  | Agent_core.Error.StructuredOutputParseError { detail = _; raw_preview = _; raw_len } ->
+  | Agent_core.Error.StructuredOutputParseError { reason; detail = _; raw_preview = _; raw_len } ->
     [ "variant", `String "structured_output_parse_error"
+    ; "reason", `String (Agent_core.Error.structured_failure_label reason)
     ; "raw_len", `Int raw_len
     ]
   | Agent_core.Error.VersionMismatch { expected; got } ->

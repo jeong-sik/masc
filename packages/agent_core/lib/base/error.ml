@@ -106,11 +106,19 @@ type config_error =
       }
   | SensitiveValueInConfig of { detail : string }
 
+type structured_failure =
+  | Empty_response
+  | Invalid_json
+  | Expected_object
+  | Schema_rejected
+  | Schema_type_mismatch
+
 (** Serialization / deserialization errors. *)
 type serialization_error =
   | JsonParseError of { detail : string }
   | StructuredOutputParseError of
-      { detail : string
+      { reason : structured_failure
+      ; detail : string
       ; raw_preview : string
       ; raw_len : int
       }
@@ -287,10 +295,19 @@ let config_error_to_string = function
   | SensitiveValueInConfig r -> Printf.sprintf "Sensitive value in config: %s" r.detail
 ;;
 
+let structured_failure_label = function
+  | Empty_response -> "empty_response"
+  | Invalid_json -> "invalid_json"
+  | Expected_object -> "expected_object"
+  | Schema_rejected -> "schema_rejected"
+  | Schema_type_mismatch -> "schema_type_mismatch"
+;;
+
 let serialization_error_to_string = function
   | JsonParseError r -> Printf.sprintf "JSON parse error: %s" r.detail
   | StructuredOutputParseError r ->
-    Printf.sprintf "Structured output parse error (response bytes: %d)" r.raw_len
+    Printf.sprintf "Structured output parse error: %s (response bytes: %d)"
+      (structured_failure_label r.reason) r.raw_len
   | VersionMismatch r ->
     Printf.sprintf "Version mismatch: expected %d, got %d" r.expected r.got
   | UnknownVariant r -> Printf.sprintf "Unknown %s variant: %s" r.type_name r.value
@@ -338,10 +355,11 @@ let bounded_structured_evidence text =
     String.sub text 0 (prefix_end 0)
 ;;
 
-let structured_output_parse_error ~detail ~raw =
+let structured_output_parse_error ~reason ~detail ~raw =
   Serialization
     (StructuredOutputParseError
-       { detail = bounded_structured_evidence detail
+       { reason
+       ; detail = bounded_structured_evidence detail
        ; raw_preview = bounded_structured_evidence raw
        ; raw_len = String.length raw
        })

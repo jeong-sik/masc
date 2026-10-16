@@ -3,6 +3,7 @@ open Alcotest
 module Boundary = Server_dashboard_http_keeper_event_queue_operator.For_testing
 
 let member name json = Yojson.Safe.Util.member name json
+let contains text needle = Re.execp (Re.compile (Re.str needle)) text
 
 let check_unavailable receipt =
   check bool "audit failure stays visible" false
@@ -25,9 +26,9 @@ let test_opaque_exception () =
   check_unavailable receipt;
   let serialized = Yojson.Safe.to_string receipt in
   check bool "opaque exception payload is not projected" false
-    (Masc.String_util.contains_substring serialized secret);
+    (contains serialized secret);
   check bool "large exception payload is not projected" false
-    (Masc.String_util.contains_substring serialized diagnostic)
+    (contains serialized diagnostic)
 
 let test_filesystem_failure () =
   let path = Filename.temp_file "opaque-audit-credential-" "" in
@@ -40,7 +41,7 @@ let test_filesystem_failure () =
       close_out channel) in
     check_unavailable receipt;
     check bool "filesystem path is not projected" false
-      (Masc.String_util.contains_substring (Yojson.Safe.to_string receipt) path))
+      (contains (Yojson.Safe.to_string receipt) path))
 
 let test_cancellation () =
   let cancellation = Eio.Cancel.Cancelled (Failure "audit-cancelled") in

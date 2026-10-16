@@ -991,6 +991,30 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
       settle_failed_process ();
       raise (Runtime_error error)
     in
+    (* The CLI opens its files at startup — workspace scans plus project
+       preload — before its first protocol event, so one sample there reads
+       the turn's order of magnitude: ~7.5k healthy, 26k+ sick (#43259). *)
+    let checked_child_fds = ref false in
+    let enforce_child_fd_ceiling_once () =
+      if not !checked_child_fds
+      then (
+        checked_child_fds := true;
+        (match
+           Runtime_cli_spawn_gate.child_fd_count
+             ~mgr
+             ~cwd
+             ~pid:(Eio.Process.pid proc)
+         with
+         | None -> ()
+         | Some count when count <= Runtime_cli_spawn_gate.child_fd_ceiling -> ()
+         | Some count ->
+           abort_with_runtime_error
+             (Spawn_failed
+                (Printf.sprintf
+                   "Antigravity CLI holds %d open files past the %d ceiling; failing a turn shaped like the ENFILE incident (#43259)"
+                   count
+                   Runtime_cli_spawn_gate.child_fd_ceiling))))
+    in
     (* This handler runs before Eio's process release handler (LIFO). It must
        only signal: awaiting here would race the release handler's reap and
        deadlock timeout cancellation. Typed non-cancellation failures reap in
@@ -1037,7 +1061,9 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
                   event)
             with
             | Error error -> abort_with_runtime_error error
-            | Ok next -> state := next)
+            | Ok next ->
+              state := next;
+              enforce_child_fd_ceiling_once ())
        done
      with
      | End_of_file -> ()
@@ -1089,18 +1115,19 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
   let run_result =
     try
       Ok
-        (run_spawned
-           ?home_dir
-           ?on_spawned
-           ?on_prompt_sent
-           ~mgr
-           ~clock
-           ~cwd
-           config
-           ~conversation_mode
-           ~prompt
-           ~on_conversation_ready
-           ~on_stream_event)
+        (Runtime_cli_spawn_gate.with_cli_spawn_slot (fun () ->
+           run_spawned
+             ?home_dir
+             ?on_spawned
+             ?on_prompt_sent
+             ~mgr
+             ~clock
+             ~cwd
+             config
+             ~conversation_mode
+             ~prompt
+             ~on_conversation_ready
+             ~on_stream_event))
     with
     | Idle_timeout seconds -> Error (Timeout seconds)
     | Eio.Time.Timeout as exn -> raise exn

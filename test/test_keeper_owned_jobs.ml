@@ -1548,8 +1548,8 @@ let test_named_producer_switched_to_inline_settles_run_and_ends_parent () =
   ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-before-producer-switch"
       ~turn:52 "keeper_job_status" (argument parked.job_id)));
   let skill_md = Filename.concat fixture.base_path ".agents/skills/named-result-child/SKILL.md" in
-  let inline_md = String.concat "execution = "inline""
-      (Astring.String.cuts ~sep:"execution = "async"" (read skill_md)) in
+  let inline_md = String.concat {|execution = "inline"|}
+      (Astring.String.cuts ~sep:{|execution = "async"|} (read skill_md)) in
   write skill_md inline_md;
   let inline_surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
   let settled = resume_parked_continuation env fixture inline_surface parked.child_continuation in

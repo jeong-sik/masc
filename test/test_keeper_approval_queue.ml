@@ -6510,6 +6510,8 @@ let test_incomplete_tail_predicate_matches_the_recovered_errors () =
            , Fs_compat.Ambiguous_transaction_file_identity { path = "p"; link_count = 2 } )
          ; ( "Transaction_path_binding_changed"
            , Fs_compat.Transaction_path_binding_changed { path = "p" } )
+         ; ( "Transaction_content_changed"
+           , Fs_compat.Transaction_content_changed { path = "p" } )
          ; "Incomplete_transaction_tail", Fs_compat.Incomplete_transaction_tail { end_offset = 7 }
          ; "Invalid_transaction_suffix", Fs_compat.Invalid_transaction_suffix
          ; ( "Private_jsonl_operation_failed"
@@ -6530,7 +6532,7 @@ let test_incomplete_tail_predicate_matches_the_recovered_errors () =
                { append_failure = Fs_compat.No_write_progress; rollback_failures = [] } )
          ]
        in
-       Alcotest.(check int) "every bare constructor is listed" 14 (List.length bare);
+       Alcotest.(check int) "every bare constructor is listed" 15 (List.length bare);
        let expected : Fs_compat.private_jsonl_transaction_error -> bool = function
          | Fs_compat.Incomplete_transaction_tail _ -> true
          | Fs_compat.Stable_lock_contended _
@@ -6540,6 +6542,7 @@ let test_incomplete_tail_predicate_matches_the_recovered_errors () =
          | Fs_compat.Unexpected_transaction_file_kind _
          | Fs_compat.Ambiguous_transaction_file_identity _
          | Fs_compat.Transaction_path_binding_changed _
+         | Fs_compat.Transaction_content_changed _
          | Fs_compat.Invalid_transaction_suffix
          | Fs_compat.Private_jsonl_operation_failed _
          | Fs_compat.Rewrite_stage_failed _

@@ -380,6 +380,7 @@ let persist_delta_unlocked
               | Fs_compat.Unexpected_transaction_file_kind _
               | Fs_compat.Ambiguous_transaction_file_identity _
               | Fs_compat.Transaction_path_binding_changed _
+              | Fs_compat.Transaction_content_changed _
               | Fs_compat.Incomplete_transaction_tail _
               | Fs_compat.Private_jsonl_operation_failed _
               | Fs_compat.Rewrite_stage_failed _

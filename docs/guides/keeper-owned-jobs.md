@@ -86,6 +86,25 @@ that captured candidate stale, including when the competing worker has already
 finished. One job may supply several waiting nodes; each keeps its own occurrence
 identity while the waiting job IDs form a set. These reads and admission do not
 automatically start a continuation on job completion.
+Each prepared worker admission records a separate pending discovery marker
+before it can own the journal or execute a node. Recovery reads this pending
+partition and the exact original journal, request and job records; it can find
+a ready result without another completion event. A marker grants no execution
+permission. Completed attempts and superseded markers retire after canonical
+terminal proof bound to the exact marker inode, end offset and bytes under
+its retained stable sibling lock. Publishing and retirement share that lock;
+a physical replacement or same-inode content change during proof reads is
+refused and retained. This is the owned-directory transaction protocol, not an
+atomic POSIX compare-unlink against a writer bypassing its lock.
+Unavailable original authority remains reported and retained. Discovery
+excludes retained lock siblings from pending marker counts; a lock whose
+marker data file was already retired is skipped by an existence-only check
+and is never re-acquired or validated, so each pass stays proportional to
+live markers. It does not scan historical terminal records. Corrupt, unbound
+or refused markers stay visible as named discovery failures; an operator
+confirms the canonical request record and then removes the named file from
+the prepared_continuations directory. This discovery boundary does not
+dispatch continuation workers yet.
 The journal retains the exact producer-owned job wait separately from the
 provider-facing body. Only this exact read-only leaf may be rechecked; it keeps
 its original execution ID and tool-use ID. Completed siblings reuse their full

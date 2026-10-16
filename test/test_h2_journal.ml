@@ -393,6 +393,11 @@ let test_owned_transport_and_race () = with_workspace (fun env sw base_path ->
   let first = submit ~before_execute:(fun _ -> Eio.Promise.resolve enter (); Eio.Promise.await release)
       base_path sw prepared (initial_dispatch base_path Tool_result.Proven_pre_effect) |> accepted in
   Eio.Promise.await entered;
+  let discovery = Journal.pending_continuations ~base_path |> journal_value "pre-dispatch discovery" in
+  check int "run is discoverable before its first node effect" 1 discovery.inspected;
+  check int "active owner does not grant another worker" 0 (List.length discovery.ready);
+  check int "active owner remains pending" 1 discovery.waiting;
+  check int "active original authority is readable" 0 (List.length discovery.failures);
   let refused_calls = ref 0 in
   submit base_path sw prepared (no_dispatch refused_calls)
   |> expect_admission_error (function Journal.Prior_owner_not_terminal _ -> true | _ -> false);
@@ -718,6 +723,110 @@ let test_exact_queued_admission () = with_workspace (fun env sw base_path ->
   exact submission.request.request_id |> reject "terminal request cannot be re-admitted"
     (function Async.Canonical_queued_not_queued (Async.Done _) -> true | _ -> false))
 
+let test_pending_marker_retirement_rejects_replacement () =
+  List.iter (fun damage -> with_workspace (fun _env sw base_path ->
+    let prepared = prepare base_path in
+    let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+      Executor.dispatch_result (success base_path node "original-profile") in
+    let submission = submit base_path sw prepared dispatch |> accepted in
+    ignore (await base_path submission);
+    ignore (executed submission |> require "original plan completed");
+    let original = ref None and replacement = ref None in
+    let hook path =
+      let bytes = read path in
+      original := Some (path, bytes);
+      let foreign = match Yojson.Safe.from_string bytes with
+        | `Assoc fields -> Yojson.Safe.to_string (`Assoc
+            (("keeper_name", `String "foreign-keeper") :: List.remove_assoc "keeper_name" fields)) ^ "\n"
+        | _ -> fail "real marker is not an object" in
+      let replacement_bytes = match damage with
+        | `Physical_foreign -> foreign
+        | `Physical_malformed -> "{malformed-marker\n"
+        | `Same_inode_same_length -> String.make (String.length bytes - 1) 'x' ^ "\n" in
+      (match damage with
+       | `Physical_foreign | `Physical_malformed ->
+         let staged = path ^ ".fixture-replacement" in
+         write staged replacement_bytes;
+         Unix.chmod staged 0o600;
+         Unix.rename staged path
+       | `Same_inode_same_length -> write path replacement_bytes);
+      replacement := Some (replacement_bytes, (Unix.lstat path).st_ino) in
+    let report = Journal.For_testing.pending_continuations ~base_path ~before_retire:hook
+        |> journal_value "guarded retirement discovery" in
+    let path, bytes = !original |> Option.get in
+    let replacement_bytes, inode = !replacement |> Option.get in
+    check int "changed marker was not retired by stale proof" 0 report.retired;
+    check bool "changed marker is reported" true (report.failures <> []);
+    check string "actual replacement bytes retained" replacement_bytes (read path);
+    check int "actual replacement inode retained" inode (Unix.lstat path).st_ino;
+    let denied = Journal.pending_continuations ~base_path |> journal_value "changed authority remains visible" in
+    check int "malformed or foreign authority remains unretired" 0 denied.retired;
+    check bool "malformed or foreign authority remains refused" true (denied.failures <> []);
+    write path bytes;
+    let settled = Journal.pending_continuations ~base_path |> journal_value "restored exact authority retirement" in
+    check int "fresh validated terminal proof retires restored marker" 1 settled.retired;
+    check int "normal retirement has no failure" 0 (List.length settled.failures);
+    let empty = Journal.pending_continuations ~base_path |> journal_value "retained infrastructure discovery" in
+    check int "retired marker is not a pending marker" 0 empty.inspected;
+    check int "retired marker discovery has no failure" 0 (List.length empty.failures);
+    let lock_path = Fs_compat.private_jsonl_lock_path path in
+    check bool "retirement leaves the lock sibling" true (Sys.file_exists lock_path);
+    Unix.chmod lock_path 0o000;
+    let skipped = Journal.pending_continuations ~base_path |> journal_value "orphaned lock discovery" in
+    check int "orphaned lock is not a pending marker" 0 skipped.inspected;
+    check int "orphaned lock is skipped without validation" 0 (List.length skipped.failures);
+    Unix.chmod lock_path 0o600))
+    [`Physical_foreign; `Physical_malformed; `Same_inode_same_length]
+
+let test_pending_marker_retirement_settlement () =
+  List.iter (fun failure -> with_workspace (fun _env sw base_path ->
+    let prepared = prepare base_path in
+    let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+      Executor.dispatch_result (success base_path node "original-profile") in
+    let submission = submit base_path sw prepared dispatch |> accepted in
+    ignore (await base_path submission);
+    let directory = Filename.concat (Filename.concat
+        (Common.masc_dir_from_base_path ~base_path) "keeper_msg_requests") "prepared_continuations" in
+    let filename = Digestif.SHA256.(digest_string submission.request.request_id |> to_hex) ^ ".json" in
+    let path = Filename.concat directory filename in
+    let expected = Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+        |> require "actual terminal marker snapshot" in
+    let first_close = ref true in
+    let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+      {before_sync_parent=(fun _ -> match failure with
+        | `Parent_sync -> raise (Unix.Unix_error (Unix.EIO, "fsync", "retired-marker-parent"))
+        | `Close -> ());
+       close_fd=(fun fd -> Unix.close fd;
+         match failure with
+         | `Close when !first_close -> first_close := false;
+           raise (Unix.Unix_error (Unix.EIO, "close", "retired-marker-data"))
+         | `Close | `Parent_sync -> ())} in
+    let outcome = Fs_compat.purge_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+        ~io path ~expected in
+    (match failure, outcome with
+     | `Close, _ ->
+       let receipt = outcome |> Fs_compat.private_jsonl_cursor_success_receipt
+           |> require "known removal survives descriptor settlement failure" in
+       check bool "known primary removal is missing" true
+         (Fs_compat.Private_jsonl_cursor.is_missing receipt.value);
+       check bool "descriptor settlement failure remains evidence" true
+         (Option.is_some receipt.settlement_error)
+     | `Parent_sync, Error (Fs_compat.Private_jsonl_operation_failed
+         {operation=Fs_compat.Sync_removal_parent;_}) -> ()
+     | `Parent_sync, _ -> fail "parent durability failure was not returned");
+    check bool "unlink actually occurred" false (Sys.file_exists path);
+    let report = Journal.pending_continuations ~base_path |> journal_value "post-settlement discovery" in
+    check int "settled marker is not synthesized by lock validation" 0 report.inspected;
+    check int "settled marker discovery has no failure" 0 (List.length report.failures);
+    let lock_path = Fs_compat.private_jsonl_lock_path path in
+    check bool "settlement leaves the lock sibling" true (Sys.file_exists lock_path);
+    Unix.chmod lock_path 0o000;
+    let skipped = Journal.pending_continuations ~base_path |> journal_value "orphaned lock discovery" in
+    check int "orphaned lock is not synthesized by lock validation" 0 skipped.inspected;
+    check int "orphaned lock is skipped without validation" 0 (List.length skipped.failures);
+    Unix.chmod lock_path 0o600))
+    [`Close; `Parent_sync]
+
 let () = match Array.to_list Sys.argv with
   | [_; "--resume-child"; base_path; run_id] -> child_resume base_path run_id
   | [_; "--refuse-active-child"; base_path; run_id] -> child_refuse_active base_path run_id
@@ -731,4 +840,6 @@ let () = match Array.to_list Sys.argv with
         test_case "foreign owned-job wait receipt cannot authorize rechecking" `Quick test_foreign_job_wait_receipt_is_rejected;
         test_case "owned cancellation retries only declared readonly unfinished work" `Quick test_cancelled_readonly_attempt;
         test_case "public prepare run resume preserves original task" `Quick test_public_run_resume_keeps_original_task;
+        test_case "pending marker retirement retains physical and same-inode replacements" `Quick test_pending_marker_retirement_rejects_replacement;
+        test_case "pending marker retirement preserves settlement and durability failures" `Quick test_pending_marker_retirement_settlement;
         test_case "exact Queued admission and matched inventory read measurements" `Quick test_exact_queued_admission]]

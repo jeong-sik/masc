@@ -1064,6 +1064,7 @@ module Private_jsonl_cursor : sig
   type t
 
   val equal : t -> t -> bool
+  val is_missing : t -> bool
 end
 
 type private_jsonl_snapshot =
@@ -1243,6 +1244,7 @@ and private_jsonl_transaction_error =
       ; link_count : int
       }
   | Transaction_path_binding_changed of { path : string }
+  | Transaction_content_changed of { path : string }
   | Incomplete_transaction_tail of { end_offset : int }
   | Invalid_transaction_suffix
   | Private_jsonl_operation_failed of private_jsonl_operation_failure
@@ -1306,6 +1308,16 @@ val private_jsonl_lock_path : string -> string
 val purge_private_jsonl_durable_locked_result :
   string -> (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
+(** Remove only the exact observed file identity, end offset and bytes under
+    the retained stable sibling lock. Replacement and content edits fail
+    without unlinking; an already missing file remains idempotent. Participants
+    must use the stable transaction protocol and keep the directory owned while
+    it runs. Path/descriptor revalidation is not an atomic POSIX compare-unlink
+    against actors bypassing that protocol. *)
+val purge_private_jsonl_durable_locked_at_snapshot_result :
+  string -> expected:private_jsonl_snapshot ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
 (** Read a private JSONL store under its stable sibling lock. [after = None]
     returns the full store. [after = Some cursor] returns only bytes appended
     after that exact file identity and offset. A replacement, truncation, or
@@ -1339,6 +1351,11 @@ type private_jsonl_transaction_io_for_testing =
 val purge_private_jsonl_durable_locked_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->
   string -> (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+val purge_private_jsonl_durable_locked_at_snapshot_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> expected:private_jsonl_snapshot ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
 (** Same non-creating shared-lock read with injected descriptor settlement. *)
 val read_private_jsonl_rows_locked_with_io_for_testing :

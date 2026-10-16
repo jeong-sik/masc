@@ -43,6 +43,7 @@ type error =
   | Plan_identity_conflict
   | Draft_unavailable of string
   | Invalid_result of string
+  | Invalid_continuation_marker of string
   | Persistence_failed of string
 
 let error_to_json error =
@@ -62,6 +63,7 @@ let error_to_json error =
     | Plan_identity_conflict -> "plan_identity_conflict", []
     | Draft_unavailable detail -> "draft_unavailable", ["detail", `String detail]
     | Invalid_result detail -> "invalid_result", ["detail", `String detail]
+    | Invalid_continuation_marker detail -> "invalid_continuation_marker", ["detail", `String detail]
     | Persistence_failed detail -> "persistence_failed", ["detail", `String detail]
   in
   `Assoc (("kind", `String kind) :: details)
@@ -74,6 +76,7 @@ let failure_class = function
   | Replay_not_proven _ | Attempt_conflict _ | Plan_identity_conflict -> Tool_result.Workflow_rejection
   | Missing_journal | Unreadable_journal _ | Corrupt_journal _
   | Invalid_result _ | Persistence_failed _ | Draft_unavailable _ -> Tool_result.Runtime_failure
+  | Invalid_continuation_marker _ -> Tool_result.Runtime_failure
 
 exception Decode_error of string
 let refuse detail = raise (Decode_error detail)
@@ -584,7 +587,74 @@ let canonical_queued journal request_id =
   Result.map_error (fun detail -> Queued_request_rejected detail)
     (entry_matches_source journal.immutable_source (Async.durable_queued_entry proof))
 
-let bind_expected_owner journal ~request_id ~expected ~expected_terminal ~expected_nodes =
+type continuation_marker =
+  { request_id : string; keeper_name : string
+  ; composition_run_id : Plan.Composition_run_id.t }
+
+let continuation_directory ~base_path =
+  Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path)
+    "keeper_msg_requests") "prepared_continuations"
+let continuation_filename request_id = sha request_id ^ ".json"
+let continuation_marker_json (marker : continuation_marker) =
+  `Assoc ["schema", `String "keeper.prepared_continuation.v1";
+    "request_id", `String marker.request_id; "keeper_name", `String marker.keeper_name;
+    "composition_run_id", `String (Plan.Composition_run_id.to_string marker.composition_run_id)]
+let decode_continuation_marker bytes =
+  Result.map_error (fun detail -> Invalid_continuation_marker detail) (decode (fun () ->
+    let fields = object_fields ["schema";"request_id";"keeper_name";"composition_run_id"]
+        (Yojson.Safe.from_string bytes) in
+    require (field "schema" fields = `String "keeper.prepared_continuation.v1") "unknown continuation marker schema";
+    let request_id = string (field "request_id" fields)
+    and keeper_name = string (field "keeper_name" fields) in
+    require (exact_name request_id && exact_name keeper_name) "invalid continuation marker owner";
+    let composition_run_id = match Plan.Composition_run_id.of_string
+        (string (field "composition_run_id" fields)) with
+      | Ok identity -> identity
+      | Error (Plan.Composition_run_id.Invalid_uuid_v7 detail) -> refuse detail in
+    {request_id;keeper_name;composition_run_id}))
+
+let continuation_receipt path (receipt : 'a Fs_compat.private_jsonl_success_receipt) =
+  (match receipt.settlement_error with
+   | None -> ()
+   | Some error ->
+     (try Log.Keeper.warn "prepared continuation primary outcome preserved; settlement failed path=%s detail=%s"
+        path (Fs_compat.private_jsonl_transaction_error_to_string error)
+      with Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+        | Sys_error _ | Unix.Unix_error _ -> ()));
+  receipt.value
+
+let continuation_snapshot ~root path =
+  let* () = validate_owned_path ~root ~path ~create:true in
+  let* () = validate_owned_path ~root ~path:(Fs_compat.private_jsonl_lock_path path) ~create:true in
+  let* receipt = Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+    |> Fs_compat.private_jsonl_snapshot_success_receipt
+    |> Result.map_error (fun error -> Persistence_failed
+        (Fs_compat.private_jsonl_transaction_error_to_string error)) in
+  let* () = validate_owned_path ~root ~path ~create:true in
+  let* () = validate_owned_path ~root ~path:(Fs_compat.private_jsonl_lock_path path) ~create:false in
+  Ok (continuation_receipt path receipt)
+
+let prepare_continuation_marker journal ~request_id = filesystem (fun () ->
+  let source = journal.immutable_source in
+  let marker = {request_id;keeper_name=source.keeper_name;composition_run_id=source.composition_run_id} in
+  let path = Filename.concat (continuation_directory ~base_path:journal.base_path)
+      (continuation_filename request_id) in
+  let* () = validate_owned_path ~root:journal.root ~path ~create:true in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let* snapshot = continuation_snapshot ~root:journal.root path in
+  if Fs_compat.Private_jsonl_cursor.is_missing snapshot.cursor then
+    let* receipt = Fs_compat.append_private_jsonl_durable_locked_at_cursor_result path
+        ~expected:snapshot.cursor (row (continuation_marker_json marker))
+      |> Fs_compat.private_jsonl_cursor_success_receipt
+      |> Result.map_error (fun error -> Persistence_failed
+          (Fs_compat.private_jsonl_transaction_error_to_string error)) in
+    ignore (continuation_receipt path receipt); Ok ()
+  else
+    let* found = decode_continuation_marker snapshot.bytes in
+    if continuation_marker_json found = continuation_marker_json marker then Ok ()
+    else Error (Invalid_continuation_marker "marker changed request/run/owner identity"))
+
+let bind_expected_owner journal ~request_id ~(expected : binding option) ~expected_terminal ~expected_nodes =
   let* () = match expected with
     | None -> Ok ()
     | Some prior when String.equal prior.request_id request_id -> Ok ()
@@ -600,6 +670,7 @@ let bind_expected_owner journal ~request_id ~expected ~expected_terminal ~expect
   (* on_accepted holds the new request before its worker starts. Terminal
      publication is immutable. Only run ownership needs a CAS under this lock. *)
   let* () = canonical_queued journal request_id in
+  let* () = prepare_continuation_marker journal ~request_id in
   update_existing journal (fun state ->
     if not (same_owner state.owner expected)
         || Option.fold ~none:false ~some:(fun nodes -> nodes <> state.nodes) expected_nodes
@@ -691,6 +762,116 @@ let continuation_readiness (continuation : continuation) = filesystem (fun () ->
     | (Waiting_for_results | Results_ready), false
     | Waiting_for_results, true -> Ok Waiting_for_results)
       (Ok Results_ready) continuation.job_ids)
+
+type pending_continuations =
+  { inspected : int; ready : continuation list; waiting : int; retired : int
+  ; failures : (string * error) list }
+type discovery = Ready of continuation | Still_waiting | Retired | Lock_infrastructure
+
+let continuation_data_name name =
+  let suffix = ".json" in
+  String.length name = 64 + String.length suffix && String.ends_with ~suffix name
+  && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) (String.sub name 0 64)
+
+let continuation_lock_data_name name =
+  let suffix = ".lock" in
+  if not (String.ends_with ~suffix name) then None else
+  let data_name = String.sub name 0 (String.length name - String.length suffix) in
+  if continuation_data_name data_name then Some data_name else None
+
+let pending_continuations_with ~before_retire ~base_path = filesystem (fun () ->
+  let base_path = Fs_compat.realpath base_path in
+  let root = Common.masc_dir_from_base_path ~base_path in
+  let directory = continuation_directory ~base_path in
+  let* inspection = Fs_compat.inspect_owned_directory_chain ~ownership_root:root directory
+    |> Result.map_error (fun error -> Persistence_failed
+        (Fs_compat.owned_directory_chain_rejection_to_string error)) in
+  let* names = match inspection with
+    | Fs_compat.Owned_directory_missing -> Ok []
+    | Owned_directory _ -> Fs_compat.read_owned_directory ~owner_uid:(Unix.getuid ())
+        ~ownership_root:root directory
+        |> Result.map_error (fun error -> Persistence_failed
+            (Fs_compat.owned_regular_file_read_error_to_string error)) in
+  let inspect name = filesystem (fun () ->
+    let path = Filename.concat directory name in
+    match continuation_lock_data_name name with
+    | Some data_name ->
+      (* Retirement unlinks only the marker data file, leaving this lock
+         sibling behind. An existence-only check skips those orphaned locks
+         without acquiring or validating them, so each pass stays
+         proportional to live markers, not to every historical request. *)
+      let data_path = Filename.concat directory data_name in
+      if Fs_compat.file_exists data_path then
+        let* _ = continuation_snapshot ~root data_path in
+        Ok Lock_infrastructure
+      else Ok Lock_infrastructure
+    | None when not (continuation_data_name name) ->
+      Error (Invalid_continuation_marker "unexpected pending partition filename")
+    | None ->
+      let* snapshot = continuation_snapshot ~root path in
+      if Fs_compat.Private_jsonl_cursor.is_missing snapshot.cursor then Ok Retired
+      else
+        let* marker = decode_continuation_marker snapshot.bytes in
+        if name <> continuation_filename marker.request_id
+        then Error (Invalid_continuation_marker "marker filename does not bind its request") else
+        let* journal = load ~base_path ~keeper_name:marker.keeper_name
+            ~composition_run_id:marker.composition_run_id in
+        let* state = strict_read ~root journal.path in
+        let* () = check_source journal state in
+        match Async.load_canonical_durable_terminal ~base_path ~caller:marker.keeper_name marker.request_id with
+        | Error (Async.Canonical_terminal_runtime_active _ | Canonical_terminal_nonterminal _) -> Ok Still_waiting
+        | Error error -> Error (Prior_owner_not_terminal
+            {request_id=marker.request_id;reason=Async.canonical_terminal_error_to_string error})
+        | Ok proof ->
+          let entry = Async.durable_terminal_entry proof in
+          let* () = entry_matches_source journal.immutable_source entry
+            |> Result.map_error (fun reason -> Invalid_continuation_marker reason) in
+          let retire () =
+            before_retire path;
+            let* () = validate_owned_path ~root ~path ~create:true in
+            let* receipt = Fs_compat.purge_private_jsonl_durable_locked_at_snapshot_result path
+                ~expected:snapshot
+              |> Fs_compat.private_jsonl_cursor_success_receipt
+              |> Result.map_error (fun error -> Persistence_failed
+                  (Fs_compat.private_jsonl_transaction_error_to_string error)) in
+            ignore (continuation_receipt path receipt); Ok Retired in
+          match state.owner with
+          | None -> Error (Invalid_continuation_marker "request has no bound journal owner")
+          | Some current when current.request_id <> marker.request_id -> retire ()
+          | Some _ ->
+            match entry.status with
+            | Async.Waiting_for_owned_jobs _ ->
+              let* candidate = waiting_continuation journal in
+              (match candidate with
+               | None -> Error Ownership_changed
+               | Some continuation when continuation_request_id continuation <> marker.request_id -> Error Ownership_changed
+               | Some continuation ->
+                 let* readiness = continuation_readiness continuation in
+                 match readiness with
+                 | Waiting_for_results -> Ok Still_waiting
+                 | Results_ready -> Ok (Ready continuation))
+            | Lost _ | Cancelled _ | Persistence_failed _ | Done _ -> retire ()
+            | Queued | Running | Cancelling _ -> Error (Invalid_continuation_marker "terminal proof has an active status")) in
+  let empty = {inspected=0;ready=[];waiting=0;retired=0;failures=[]} in
+  let report = List.fold_left (fun report name ->
+    match inspect name with
+    | Ok Lock_infrastructure -> report
+    | outcome ->
+      let report = {report with inspected=report.inspected+1} in
+      match outcome with
+      | Ok (Ready continuation) -> {report with ready=continuation :: report.ready}
+      | Ok Still_waiting -> {report with waiting=report.waiting+1}
+      | Ok Retired -> {report with retired=report.retired+1}
+      | Ok Lock_infrastructure -> report
+      | Error error -> {report with failures=(name,error) :: report.failures}) empty names in
+  Ok {report with ready=List.rev report.ready;failures=List.rev report.failures})
+
+let pending_continuations ~base_path =
+  pending_continuations_with ~before_retire:(fun _ -> ()) ~base_path
+
+module For_testing = struct
+  let pending_continuations = pending_continuations_with
+end
 
 let check_worker (worker : worker) (state : state) = if same_owner state.owner (Some worker.binding) then Ok () else Error Ownership_changed
 

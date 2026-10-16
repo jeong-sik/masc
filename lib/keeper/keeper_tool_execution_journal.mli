@@ -46,6 +46,7 @@ type error =
   | Plan_identity_conflict
   | Draft_unavailable of string
   | Invalid_result of string
+  | Invalid_continuation_marker of string
   | Persistence_failed of string
 
 val error_to_string : error -> string
@@ -79,6 +80,34 @@ type readiness = Waiting_for_results | Results_ready
 val continuation_readiness : continuation -> (readiness, error) result
 (** Strict owner reads only. No collection, backend call, launch or Task
     inference. The read does not reserve execution or replace admission. *)
+
+type pending_continuations =
+  { inspected : int
+  ; ready : continuation list
+  ; waiting : int
+  ; retired : int
+  ; failures : (string * error) list
+  }
+
+val pending_continuations : base_path:string -> (pending_continuations, error) result
+(** Discover only per-request pending markers published before journal
+    ownership and worker effects. Canonical journal/request/job records decide
+    readiness. Completed or superseded markers retire only after exact terminal
+    proof bound to the exact marker snapshot under its retained stable lock;
+    unavailable, unbound or corrupt authority stays visible. Directory listing
+    still includes retained lock siblings, which are excluded from [inspected];
+    a lock whose marker data file was already retired is skipped by an
+    existence-only check — it is never acquired or validated, so the pass
+    stays proportional to live markers. No worker
+    dispatch, historical terminal scan, backend operation or automatic resume. *)
+
+module For_testing : sig
+  (** The hook runs after canonical terminal proof and before the guarded
+      marker retirement transaction, enabling physical replacement scenarios. *)
+  val pending_continuations :
+    before_retire:(string -> unit) -> base_path:string ->
+    (pending_continuations, error) result
+end
 
 val bind_continuation : continuation -> request_id:string -> (worker, error) result
 (** Async [on_accepted] admission pinned to the captured exact owner and

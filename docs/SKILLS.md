@@ -209,9 +209,14 @@ name = "query"
 `availability` 와 설명을 읽고, 실행 가능한 결과의 `invocation_name` 을 사용한다.
 이름을 이미 알면 검색을 거치지 않아도 된다.
 
-검색식은 FTS5 문법이다. 하이픈이 있는 이름은 `"browser-navigate-read"` 처럼 쌍따옴표로
-감싼다. 대안을 찾을 때는 `browser OR screenshot` 처럼 쓴다. 의미 검색이나 자동 번역은
-하지 않으므로 결과가 없으면 작업에 맞는 다른 단어를 시도한다.
+기본 검색은 입력 전체를 하나의 literal phrase로 찾는다. 하이픈이 있는 이름도
+`{"query":"browser-navigate-read"}`처럼 그대로 넘긴다. 따옴표나 `OR`도 검색할
+텍스트로 취급하며, 단어 경계와 순위는 SQLite tokenizer가 정한다.
+
+대안·접두어·컬럼 조건 같은 FTS5 검색식은 `syntax`를 명시한다. 예를 들어
+`{"query":"browser OR screenshot","syntax":"fts5"}`는 두 단어 중 하나를 찾는다.
+명시한 검색식이 잘못되면 오류로 반환하며 literal 검색으로 자동 재시도하지 않는다.
+의미 검색이나 자동 번역은 하지 않으므로 결과가 없으면 작업에 맞는 다른 단어를 시도한다.
 
 Agent Core 에서 선택한 도구가 아직 호출 스키마에 없고 `keeper_tool_search` 목록에 있으면
 그 정확한 이름을 로드한다. 로드 성공 후 Composition 을 별도로 호출해야 노드가 실행된다.

@@ -75,7 +75,7 @@ let make_meta ~name () : Keeper_meta_contract.keeper_meta =
    while the tools this gate exists for were never in it. These two skills
    put every kind in: an inline composition and an async one (which is what
    brings keeper_composition_status and _cancel with it). *)
-let composition_skill ~name ~execution =
+let composition_skill ~deferred ~name ~execution =
   Printf.sprintf
     {|---
 name: %s
@@ -89,7 +89,7 @@ description: A composition used by the bundle classification gate.
 name = "%s"
 description = "A composition used by the bundle classification gate."
 execution = "%s"
-
+%s
 [[compositions.nodes]]
 id = "lane"
 tool = "keeper_lane_status"
@@ -98,7 +98,7 @@ kind = "literal"
 value = {}
 ```
 |}
-    name name name execution
+    name name name execution (if deferred then "defer_loading = true\n" else "")
 ;;
 
 let mixed_composition_document =
@@ -131,7 +131,7 @@ let instruction_document =
   "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n"
 ;;
 
-let skill_snapshot_and_catalog () =
+let skill_snapshot_and_catalog ?(deferred = false) () =
   let source_config =
     match
       Skill_source_config.parse_text
@@ -149,11 +149,35 @@ let skill_snapshot_and_catalog () =
     Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
   in
   let documents =
-    [ "gate-inline", composition_skill ~name:"gate-inline" ~execution:"inline"
-    ; "gate-async", composition_skill ~name:"gate-async" ~execution:"async"
+    [ "gate-inline", composition_skill ~deferred ~name:"gate-inline" ~execution:"inline"
+    ; "gate-async", composition_skill ~deferred ~name:"gate-async" ~execution:"async"
     ; "gate-instruction", instruction_document
     ; "gate-mixed", mixed_composition_document
-    ]
+    ] @ if deferred then ["gate-result", {|---
+name: gate-result
+description: Read a selected original job result.
+---
+```toml composition
+[[compositions]]
+name = "gate-result"
+execution = "inline"
+defer_loading = true
+[[compositions.params]]
+name = "job_id"
+type = "string"
+description = "Original selected job"
+[[compositions.nodes]]
+id = "result"
+tool = "keeper_job_result"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "job_id"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "job_id"
+```
+|}] else []
   in
   let scan : Skill_catalog_snapshot.source_scan =
     { source = resolved
@@ -282,6 +306,10 @@ let assert_exact_activation snapshot expected
 let with_bundle_tools
       ?(record_activations = true)
       ?(agent_core = false)
+      ?(deferred_compositions = false)
+      ?(task_skill_names = ["gate-instruction"])
+      ?(current_task_id = None)
+      ?(tool_deny = [])
       f
   =
   ignore (Masc_test_deps.init_unified_tool_registry ());
@@ -296,7 +324,11 @@ let with_bundle_tools
     (fun () ->
        let config = Workspace.default_config dir in
        let meta = make_meta ~name:"bundle-classifiable" () in
-       let skill_snapshot, skill_catalog = skill_snapshot_and_catalog () in
+       let current_task_id = Option.map (fun task_id ->
+         match Keeper_id.Task_id.of_string task_id with
+         | Ok task_id -> task_id | Error detail -> fail detail) current_task_id in
+       let meta = {meta with current_task_id} in
+       let skill_snapshot, skill_catalog = skill_snapshot_and_catalog ~deferred:deferred_compositions () in
        let trace_id = meta.runtime.trace_id in
        let session_dir =
          Keeper_fs.keeper_session_dir
@@ -304,7 +336,6 @@ let with_bundle_tools
            (Keeper_id.Trace_id.to_string trace_id)
        in
        Unix.mkdir session_dir 0o700;
-       let reference = instruction_reference () in
        let snapshot_revision =
          Skill_catalog_snapshot.snapshot_revision skill_snapshot
        in
@@ -314,7 +345,7 @@ let with_bundle_tools
              Keeper_task_skill_turn.resolve_for_task
                ~snapshot:skill_snapshot
                ~task_id:"task-001"
-               [ reference ]
+               (List.map (snapshot_reference skill_snapshot) task_skill_names)
            with
            | Ok selection -> selection
            | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
@@ -349,7 +380,7 @@ let with_bundle_tools
        in
        let capability_surface =
          Keeper_capability_surface.create
-           ~tool_deny:[]
+           ~tool_deny
            ~sandbox_profile:Masc.Keeper_types_profile.Docker
            ~skill_names:None
            ~global_skill_catalog:skill_catalog
@@ -696,6 +727,42 @@ let test_composition_activation_is_durable ?expected_failure ~skill_name tool_na
       failf "expected one composition activation, got %d" (List.length activations))
 ;;
 
+let test_task_selected_composition_is_callable_without_loading () =
+  with_bundle_tools ~agent_core:true ~deferred_compositions:true
+    ~task_skill_names:["gate-inline"; "gate-result"] ~current_task_id:(Some "task-001")
+    (fun config meta snapshot _index _surface tools ->
+      let name = "keeper_compose_gate-inline" in
+      let tool = match List.find_opt (fun (tool : Agent_core.Tool.t) -> tool.schema.name = name) tools with
+        | Some tool -> tool | None -> fail "exact Task composition was absent from the first callable surface" in
+      check bool "the exact Task plan's ordinary result Tool is callable without a load" true
+        (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_job_result") tools);
+      check bool "another deferred composition remains behind the loader" false
+        (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_compose_gate-async") tools);
+      let before = match Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id with
+        | Ok None -> []
+        | Ok (Some ledger) -> Keeper_skill_activation_ledger.activations ledger
+        | Error error -> fail (Keeper_skill_activation_ledger.store_error_to_string error) in
+      check int "providing a schema records no activation" 0 (List.length before);
+      run_composition_tool tool;
+      let ledger = match Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id with
+        | Ok (Some ledger) -> ledger
+        | Ok None -> fail "actual exact composition call did not record activation"
+        | Error error -> fail (Keeper_skill_activation_ledger.store_error_to_string error) in
+      match Keeper_skill_activation_ledger.activations ledger with
+      | [activation] -> assert_exact_activation snapshot (snapshot_reference snapshot "gate-inline") activation
+      | _ -> fail "one actual exact composition call must retain one activation")
+;;
+
+let test_task_schema_readiness_keeps_other_task_and_profile_boundaries () =
+  List.iter (fun (current_task_id, tool_deny) ->
+    with_bundle_tools ~agent_core:true ~deferred_compositions:true
+      ~task_skill_names:["gate-inline"] ~current_task_id ~tool_deny
+      (fun _config _meta _snapshot _index _surface tools ->
+        check bool "other Task or denied node cannot preload a composition" false
+          (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_compose_gate-inline") tools)))
+    [Some "task-002", []; None, []; Some "task-001", ["keeper_lane_status"]]
+;;
+
 let test_inline_composition_activation_is_durable () =
   test_composition_activation_is_durable
     ~skill_name:"gate-inline"
@@ -1036,6 +1103,10 @@ let () =
             test_the_skill_tool_serves_the_body
         ; test_case "a revisionless ask is taught the exact reference" `Quick
             test_a_revisionless_ask_is_taught_the_exact_reference
+        ; test_case "current Task exact composition runs on the first callable surface" `Quick
+            test_task_selected_composition_is_callable_without_loading
+        ; test_case "Task schema readiness preserves other Task and profile boundaries" `Quick
+            test_task_schema_readiness_keeps_other_task_and_profile_boundaries
         ; test_case "inline composition activation is durable" `Quick
             test_inline_composition_activation_is_durable
         ; test_case "async composition activation is durable" `Quick

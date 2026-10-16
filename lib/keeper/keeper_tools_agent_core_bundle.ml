@@ -539,7 +539,7 @@ let make_tool_bundle_for_descriptors_with_policy
       descriptors
   in
   let descriptor_tools = List.map fst descriptor_tools_with_loading in
-  let composition_tools_with_loading =
+  let composition_tools_with_loading, task_required_tool_names =
     let instruction_skills =
       Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
     in
@@ -552,6 +552,20 @@ let make_tool_bundle_for_descriptors_with_policy
            | None, _ | Some _, Keeper_skill_catalog.Instruction ->
              None)
     in
+    let task_references = match skill_activation_context, meta.current_task_id with
+      | Some context, Some task_id ->
+        Keeper_skill_activation_recorder.task_references ~task_id context
+      | None, _ | Some _, None -> [] in
+    let task_required_tool_names = List.concat_map
+        (fun (skill : Keeper_tool_composition_surface.composition_skill) ->
+          if List.exists (Skill_reference.equal skill.reference) task_references then
+            Keeper_tool_composition_catalog.tool_name skill.entry ::
+              List.filter_map (fun (node : Keeper_tool_plan.node) ->
+                match Keeper_tool_plan.descriptor skill.entry.plan node.id with
+                | Some _ -> Some node.tool_name
+                | None -> None) (Keeper_tool_plan.nodes skill.entry.plan)
+          else []) composition_skills
+        |> List.sort_uniq String.compare in
     let record_instruction_activation =
       Option.map
         (fun context ~invocation ~content reference ->
@@ -588,7 +602,7 @@ let make_tool_bundle_for_descriptors_with_policy
         Keeper_tool_composition_surface.Compatibility.make_tools ~descriptors ?record_nested_composition_activation
           ?nested_activation_context:skill_activation_context
     in
-    make_composition_tools
+    let tools = make_composition_tools
         ?result_delivery:composition_result_delivery
         ~instruction_skills
         ~skill_compositions:composition_skills
@@ -622,6 +636,8 @@ let make_tool_bundle_for_descriptors_with_policy
         ~on_failed:mark_terminal_effect_failed
         ~on_externalization_error:mark_completed_terminal_externalization_failed
         ()
+    in
+    tools, task_required_tool_names
   in
   let composition_tools =
     List.map (fun (tool, _, _) -> tool) composition_tools_with_loading
@@ -679,10 +695,16 @@ let make_tool_bundle_for_descriptors_with_policy
        request controls beside the compositions from their own tool files.
        Splitting only the descriptors would leave a [defer_loading = true]
        that nothing honours and nothing reports -- a declaration is either
-       read wherever it can be written or it is a trap. *)
+       read wherever it can be written or it is a trap. Exact current-Task
+       composition selection already names the schemas needed for the work:
+       its callable and ordinary leaves are provided now, without a model
+       loader roundtrip. This changes delivery, not the stored declaration,
+       source authority, or activation. Unrelated tools remain deferrable. *)
     let split tools_with_loading =
       let deferred, loaded =
-        List.partition (fun (_, loading) -> deferrable loading) tools_with_loading
+        List.partition (fun ((tool : Agent_core.Tool.t), loading) ->
+          deferrable loading
+          && not (List.exists (String.equal tool.schema.name) task_required_tool_names)) tools_with_loading
       in
       List.map fst deferred, List.map fst loaded
     in

@@ -207,6 +207,13 @@ turn still collects every completion for later judgments. Without producer-owned
 resource preparation, a serial leaf keeps its enclosing composition serial.
 Transient run and async submission controls keep their serial admission contracts.
 
+When the current Task pins an exact executable composition, its callable schema
+and declared ordinary node Tool schemas are supplied on the first request. Their
+deferrable declarations still apply when that exact Task selection is absent.
+This needs no fresh discovery/read and records no activation. See
+[Task schema readiness](keeper-task-schema-readiness.md) for source identity,
+scope and Before/After measurement.
+
 Named Inline Skills with at least one Edit and only ordinary Read/Edit leaves
 can also prepare producer-owned file claims when every validated input and the
 original call source are available before execution. Read/Read sharing may

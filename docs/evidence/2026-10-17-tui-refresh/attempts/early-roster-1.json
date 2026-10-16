@@ -1,0 +1,44 @@
+{
+  "arm": "early-roster",
+  "base": "/private/tmp/masc-tui-observability-evidence-20261016/native-early-roster-attempt-1/workspace",
+  "viewport": [
+    120,
+    36
+  ],
+  "delay_seconds": 2.0,
+  "status": "failed",
+  "physical_paint_measured": false,
+  "input_scope": "Real isolated backend; proxy delays briefing/operator and marks fixture roster paused at warm refresh",
+  "dependency_scope": "Both CI binaries use the same recorded local Homebrew dependencies",
+  "frame_scope": "Captured native PTY output decoded with pyte; PNG is a rendering of that captured cell state",
+  "inherited_environment_keys": [
+    "COLORTERM",
+    "HOME",
+    "LANG",
+    "MASC_BASE_PATH",
+    "PATH",
+    "TERM",
+    "TMPDIR",
+    "XDG_CONFIG_HOME"
+  ],
+  "binary_identity": {
+    "server": {
+      "path": "/private/tmp/masc-tui-observability-evidence-20261016/baseline-native-subset/masc-macos-arm64",
+      "sha256": "9cc1f84b908aa7978a7ed6d4364022edc8db1fee0762b082ecb38ce8e993fadf",
+      "source": "683c7950682b45a2591002e09f654515ccf02155",
+      "returncode": 0,
+      "stderr": "[2026-10-17 00:07:40] [INFO] [MCP] Tag registry initialized: 178 tools registered\n"
+    },
+    "tui": {
+      "path": "/private/tmp/masc-tui-observability-evidence-20261016/early-roster-native-subset/masc-tui-macos-arm64",
+      "sha256": "a45f76b90db249a19a76976fcbc7e827fe8f660242dc84f419820fcad4076183",
+      "source": "f7632e71601da3ce6c7b5a5e8a6b528bcf42fa4c",
+      "returncode": 0,
+      "stderr": ""
+    }
+  },
+  "fixture_sha256": "20a5411360dbef927f7a9021b802e5656ede61d312bcb12f964ca7c99831aada",
+  "error_type": "TypeError",
+  "error": "Screen.report_device_status() got an unexpected keyword argument 'private'",
+  "elapsed_seconds": 5.686901040957309
+}

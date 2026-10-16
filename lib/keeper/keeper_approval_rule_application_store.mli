@@ -20,7 +20,11 @@ type receipt =
   }
 
 (** Rules and application receipts share one atomic persisted value. Receipts
-    survive rule deletion so a retained delivery cannot recreate permission. *)
+    survive rule deletion so a retained delivery cannot recreate permission.
+    They are retained without compaction: the store has no authoritative
+    proof that all delayed deliveries and restart replays have retired.
+    Receipt retirement and whole-file growth remain follow-up work in #25483;
+    individual receipts must not be removed as a maintenance shortcut. *)
 type t =
   { rules : approval_rule list
   ; applications : receipt list

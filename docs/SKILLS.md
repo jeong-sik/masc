@@ -188,8 +188,18 @@ name = "query"
 ```
 ````
 
-- 같은 dependency layer의 노드 중 descriptor가 `Ordinary Concurrent`인 것만 묶여
-  실행된다. `Ordinary Serial`과 `Terminal` 노드는 의존이 없어도 각자 직렬 batch다.
+- 일반 스케줄은 같은 dependency layer의 `Ordinary Concurrent` 노드를 함께 실행하고,
+  `Ordinary Serial`과 `Terminal` 노드는 각각 직렬 batch로 실행한다.
+- 고정된 이름의 inline Skill이 Read/Edit 노드로 이루어지고 Edit을 하나 이상 포함하며,
+  모든 입력과 원래 호출 출처를 실행 전에 확인할 수 있으면 파일 자원 준비 경로를 쓴다.
+  Keeper 소유 공유 마운트의 Read와 지원되는 Edit이 실제 파일 관계에 따라 함께 실행된다.
+  Read끼리는 같은 파일을 공유할 수 있고, 같은 엔트리·객체의 Read/Write는 순서를 지킨다.
+  준비가 성립하지 않는 호출은 일반 스케줄을 쓴다. 상세 경계는
+  [Read/Edit 자원](guides/PREPARED-EDIT-RESOURCES.md)에 있다.
+- 앞선 결과를 쓰거나 작업 순서 자체가 의미 있을 때 `after`를 선언하고, 앞선 출력으로
+  인자를 만들 때는 `input` 템플릿에도 그 관계를 적는다. 파일 자원과 승인 권한은 실행기가
+  판단한다. 문서나 모델 인자로 자원 범위를 선언할 수 없다. 이 준비 경로는 named inline
+  Skill에 적용되며, 작업용 `keeper_composition_run.recipe`는 일반 도구 스케줄을 쓴다.
 - input template 의 `kind` 는 `literal` / `output` / `param` / `object` / `array` 다.
 - `execution = "inline"` 은 결과를 그 자리에서 돌려주고, `"async"` 는 durable broker 로
   넘긴 뒤 `keeper_composition_status` / `keeper_composition_cancel` 로 조회·취소한다.

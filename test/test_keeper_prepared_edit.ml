@@ -322,7 +322,14 @@ let test_inline_recipe_writes_original_upstream_bytes () =
       Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
   check int "all three results reach the original Gate aggregate" 3
     Yojson.Safe.Util.(member "completed_tool_calls"
-      (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length)
+      (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length);
+  Printf.printf "inline_file_write_measurement=%s\n%!"
+    (Yojson.Safe.to_string (`Assoc ["scope", `String "actual public inline recipe and filesystem producer";
+      "public_recipe_calls", `Int (List.length rows);
+      "physical_leaf_receipts", `Int (List.length leaves);
+      "write_authorization_calls", `Int !authorized;
+      "preserved_output_bytes", `Int (String.length (read target));
+      "original_task_and_parent_retained", `Bool true]))
 ;;
 
 let test_recipe_edits_overlap_with_original_source ?(dynamic = false) ~nested () =

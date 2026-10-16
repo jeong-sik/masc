@@ -101,6 +101,50 @@ publication authority. Removing one request is a source-level result; matched
 native request counts, full refresh timing and final workspace-refusal behavior
 must be recorded separately before claiming an observed latency improvement.
 
+## Keep the last Ask answer receipt visible
+
+The Approvals surface retains its last admitted answer receipt after transient
+notices expire, an empty question reload or an ordinary refresh. Its status is
+drawn before the Keeper/choice detail, and the same rendered block determines
+the remaining question and approval row budgets. This is session-local feedback,
+not a durable history or a current Keeper execution status.
+
+| Aspect | As-Is | To-Be source change |
+|---|---|---|
+| First answer feedback dependency | Answer POST, then question reload, then UI delivery | Original POST result is offered to the UI before the reload starts |
+| Result after transient notice expires | Empty question list can hide the accepted result | Last admitted receipt remains on Approvals |
+| HTTP requests | Original POST and workspace-bound question reload | Same original POST and reload; no additional request |
+| Duplicate answer | Newly submitted labels cannot describe the canonical winner | Same rule applies to retained feedback |
+| Keeper progress | A stored wake does not prove resumed work | Delivery receipt remains distinct from Keeper activity |
+
+The early observation changes no submission/draft gate and settles no workspace
+operation. The original operation continues through its canonical list reload
+and final completion. Both phases share one typed submission with its original
+Keeper, Ask, dispatch authority and opaque request identity. A newer submission
+supersedes old observations. The same submission cannot log or replace its
+receipt twice; a later reread failure cannot downgrade an earlier admitted POST
+receipt. Workspace withdrawal clears it, and unread or changed authority hides it.
+
+Recorded, existing-winner, delivery-pending, append-without-confirmed-winner,
+refused and recording-unconfirmed outcomes remain distinct. Only a newly
+recorded canonical answer retains submitted choice labels. A pending receipt
+describes the last response; automatic recovery may subsequently change delivery.
+Observe Keeper activity to establish whether actual work has resumed.
+
+`tui_ask_answer_receipt` records the admitted phase (`post_response` or the
+terminal fallback `reread_complete`), a process-local monotonic `admitted_ns`,
+and a `receipt` object with `keeper`, `ask_id`, `recording`, and `delivery`.
+Delivery is null when no delivery fact was established. Choice/free-text bodies
+and server error details are excluded from that log. These are state-admission
+observations, not physical POST counts, first paint or Keeper action proof.
+
+For native Before/After, keep question bytes, backend, viewport and submission
+actions fixed; delay only the post-answer question reload. Retain actual POST
+responses, UI receipt clocks, original canonical answer/wake records and later
+frames at both normal and narrow widths. Native latency and visible After for
+this new source remain unmeasured; prior answer frames establish the transient
+feedback problem, not the result of this implementation.
+
 ## Early operator confirmation delivery
 
 A warm full refresh can apply its operator confirmations while unrelated

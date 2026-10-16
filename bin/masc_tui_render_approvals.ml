@@ -242,6 +242,38 @@ let ask_summary_line ~now ~(row : Masc.Tui_decode_asks.ask_row) =
     (if count = 1 then "" else "s")
     Ansi.reset
 
+let draw_ask_answer_feedback buf cols (state : state) =
+  let module Decode = Masc.Tui_decode_asks in
+  Option.iter (fun feedback ->
+    let delivered ~already = function
+      | Decode.Ask_wake_stored ->
+          (if already then "Last answer: existing answer retained · delivery queued"
+           else "Last answer: saved · delivery queued"), Theme.info (),
+          Some "Keeper activity shows whether work has resumed."
+      | Decode.Ask_wake_pending detail ->
+          (if already then "Last answer: existing answer retained · delivery pending"
+           else "Last answer: saved · delivery pending"), Theme.warn (), Some detail in
+    let status, style, detail = match feedback.Ask_projection.af_receipt with
+      | Ok (Decode.Ask_answer_recorded delivery) -> delivered ~already:false delivery
+      | Ok (Decode.Ask_answer_already_recorded { aar_delivery; _ }) ->
+          delivered ~already:true aar_delivery
+      | Ok (Decode.Ask_answer_written_unconfirmed detail) ->
+          "Last answer: log written · winning answer unconfirmed", Theme.warn (), Some detail
+      | Ok (Decode.Ask_answer_refused detail) ->
+          "Last answer: refused", Theme.bad (), Some detail
+      | Error detail ->
+          "Last answer: recording unconfirmed", Theme.warn (), Some detail in
+    box_divider buf cols;
+    (* The state comes first; a long label or error cannot hide it. The same
+       drawn block below determines the question and approval row budgets. *)
+    box_wrapped_field buf cols ~head:"  " ~style status;
+    let subject = match feedback.af_submitted_label with
+      | Some label -> label | None -> feedback.af_keeper_name in
+    box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line subject ^ Ansi.reset);
+    Option.iter (fun detail ->
+      box_line buf cols ("  " ^ Ansi.dim ^ Terminal_text.single_line detail ^ Ansi.reset)) detail)
+    (Masc_tui_types.current_ask_answer_feedback state)
+
 let draw_ask_questions buf cols (state : state) ~budget =
   let now = Unix.gettimeofday () in
   (* Questions Keepers put to a human sit under the approval queue rather than
@@ -757,6 +789,7 @@ let render_approvals (state : state) =
   (* Drawn before the queue's own budget is settled so its height is a measured
      fact rather than a second estimate that can disagree with the drawing. *)
   let ask_buf = Buffer.create 1024 in
+  draw_ask_answer_feedback ask_buf cols state;
   draw_ask_questions ask_buf cols state ~budget:ask_budget;
   let ask_rows = count_frame_lines ask_buf in
   let approval_body_rows = max 1 (rows - around_rows - ask_rows) in

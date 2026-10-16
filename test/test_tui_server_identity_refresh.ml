@@ -1208,11 +1208,56 @@ let test_early_roster_preserves_read_ownership () =
   Alcotest.(check bool) "retired workspace cannot publish a roster" true
     (take_early_keeper_roster_observation state early=None)
 
+let test_answer_receipt_has_one_original_submission_owner () =
+  let open Masc_tui_types in
+  let module Decode = Masc.Tui_decode_asks in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
+    ~port:0 ~refresh_interval:0. () in
+  state.workspace_identity <- Workspace_identity_match;
+  state.server_identity <- Some (identity "/workspace/a");
+  let submission ask_id : ask_submission =
+    { as_request = ref (); as_authority = state.workspace_authority;
+      as_keeper_name = "reader"; as_ask_id = ask_id; as_answered_label = "reader: choice" } in
+  let first = submission "first" in
+  begin_ask_submission_state ~submission:first state;
+  let receipt = Ok (Decode.Ask_answer_recorded Decode.Ask_wake_stored) in
+  let feedback = match retain_ask_answer_feedback state first receipt with
+    | Some feedback -> feedback
+    | None -> Alcotest.fail "current original receipt was not retained" in
+  state.asks_error <- Some "reread failed";
+  state.asks_snapshot <- None;
+  finish_http_refresh_state state;
+  Alcotest.(check bool) "ordinary refresh and failed reread preserve the receipt" true
+    (current_ask_answer_feedback state = Some feedback);
+  Alcotest.(check bool) "terminal duplicate cannot replace the earlier POST receipt" true
+    (Option.is_none (retain_ask_answer_feedback state first (Error "later observation failed")));
+  let second = submission "second" in
+  begin_ask_submission_state ~submission:second state;
+  let next = match retain_ask_answer_feedback state second (Error "recording unknown") with
+    | Some next -> next | None -> Alcotest.fail "new original submission must own its receipt" in
+  Alcotest.(check bool) "an older request cannot overwrite the newer receipt" true
+    (Option.is_none (retain_ask_answer_feedback state first receipt));
+  Alcotest.(check bool) "newer unconfirmed result remains unconfirmed" true
+    (current_ask_answer_feedback state = Some next);
+  let Workspace_authority generation = state.workspace_authority in
+  state.workspace_authority <- Workspace_authority (generation + 1);
+  Alcotest.(check bool) "old workspace receipt is hidden" true
+    (Option.is_none (current_ask_answer_feedback state));
+  Alcotest.(check bool) "old submission cannot enter a replacement workspace" true
+    (Option.is_none (retain_ask_answer_feedback state second receipt));
+  let unread = submission "unread" in
+  begin_ask_submission_state ~submission:unread state;
+  state.workspace_identity <- Workspace_identity_unread;
+  Alcotest.(check bool) "unconfirmed workspace grants no receipt admission" true
+    (Option.is_none (retain_ask_answer_feedback state unread receipt))
+
 let () =
   Alcotest.run "tui_server_identity_refresh"
     [ ( "server-identity-refresh"
       , [ Alcotest.test_case "roster arrives before unrelated readers and settles once" `Quick
             test_early_roster_settles_before_slow_siblings_once
+        ; Alcotest.test_case "answer receipt has one original submission owner" `Quick
+            test_answer_receipt_has_one_original_submission_owner
         ; Alcotest.test_case "early roster preserves source and workspace ownership" `Quick
             test_early_roster_preserves_read_ownership
         ; Alcotest.test_case "refresh observations retain independent source outcomes" `Quick

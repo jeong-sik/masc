@@ -1,0 +1,145 @@
+{
+  "arm": "candidate",
+  "status": "captured",
+  "base": "/private/tmp/masc-tui-ask-readability-evidence-20261017/native-answer-80x24-attempt-1/workspace",
+  "fixture_sha256": "29aac8efa06ca7740ecab9a38540546edeb14d6d2c305863b18e9fc7d056aa11",
+  "captures": {
+    "cold": {
+      "since_arm_started_ms": 5525.268374942243,
+      "native_ansi_bytes": 10662,
+      "since_warm_action_ms": null
+    },
+    "warm-0.1": {
+      "since_arm_started_ms": 6134.666415979154,
+      "native_ansi_bytes": 12391,
+      "since_warm_action_ms": 117.12370906025171
+    },
+    "warm-0.5": {
+      "since_arm_started_ms": 6536.523540969938,
+      "native_ansi_bytes": 12391,
+      "since_warm_action_ms": 518.9811249729246
+    },
+    "warm-1": {
+      "since_arm_started_ms": 7037.995332968421,
+      "native_ansi_bytes": 12391,
+      "since_warm_action_ms": 1020.4518339596689
+    },
+    "warm-2.5": {
+      "since_arm_started_ms": 8550.06829102058,
+      "native_ansi_bytes": 12391,
+      "since_warm_action_ms": 2532.5250000460073
+    },
+    "draft-3.5": {
+      "since_arm_started_ms": 9530.14099993743,
+      "native_ansi_bytes": 15227,
+      "since_warm_action_ms": 3512.597542023286
+    },
+    "warm-9.5": {
+      "since_arm_started_ms": 15536.268332973123,
+      "native_ansi_bytes": 18236,
+      "since_warm_action_ms": 9518.72525003273
+    }
+  },
+  "actions": [
+    {
+      "action": "work",
+      "keys_hex": "09",
+      "since_arm_started_ms": 3025.5416659638286,
+      "since_collector_started_ms": 3032.5867920182645
+    },
+    {
+      "action": "approvals",
+      "keys_hex": "70",
+      "since_arm_started_ms": 3327.6055000023916,
+      "since_collector_started_ms": 3334.650042001158
+    },
+    {
+      "action": "refresh",
+      "keys_hex": "72",
+      "since_arm_started_ms": 6017.551707918756,
+      "since_collector_started_ms": 6024.596375063993
+    },
+    {
+      "action": "answer-draft",
+      "keys_hex": "61",
+      "since_arm_started_ms": 9227.45608293917,
+      "since_collector_started_ms": 9234.500958002172
+    },
+    {
+      "action": "choose-first",
+      "keys_hex": "31",
+      "since_arm_started_ms": 9709.295790991746,
+      "since_collector_started_ms": 9716.34066698607
+    },
+    {
+      "action": "arm-answer",
+      "keys_hex": "0d",
+      "since_arm_started_ms": 10013.146540964954,
+      "since_collector_started_ms": 10020.191750023514
+    },
+    {
+      "action": "confirm-answer",
+      "keys_hex": "0d",
+      "since_arm_started_ms": 10319.305707933381,
+      "since_collector_started_ms": 10326.351292082109
+    }
+  ],
+  "warm_refresh_sent_ms": 6024.584708036855,
+  "delivered_health_interventions": 0,
+  "durable_after": [
+    {
+      "relative_source": ".masc/keeper_ask/probe-one.jsonl",
+      "saved_as": "durable-after/probe-one.jsonl",
+      "bytes": 1144,
+      "sha256": "20728d3ae7967518bcdaefa9ac65a3641a4500ea57c8957cc26abf6b143c36d3"
+    },
+    {
+      "relative_source": ".masc/keepers/probe-one/event-queue-v19.json",
+      "saved_as": "durable-after/event-queue-v19.json",
+      "bytes": 716,
+      "sha256": "fd68b8737071c98f36169d427a881640f1644638ef211d342c74027674f7cf41"
+    }
+  ],
+  "answer_requests": [
+    {
+      "arm": "candidate",
+      "warm": true,
+      "method": "POST",
+      "target": "/api/v1/keepers/ask-answer",
+      "path": "/api/v1/keepers/ask-answer",
+      "delayed": false,
+      "started_ms": 10333.48608308006,
+      "state": "returned",
+      "request": 71,
+      "answer_request": {
+        "name": "probe-one",
+        "ask_id": "native-ask-choice",
+        "answers": [
+          {
+            "question_id": "next-work",
+            "response": {
+              "kind": "chose",
+              "choice_ids": [
+                "continue"
+              ]
+            }
+          }
+        ]
+      },
+      "request_body_sha256": "a569ce7c980391716f4eaf29d6539234ab9750b682f2d77ef3a4dc1d885d6d7e",
+      "status": 200,
+      "response_bytes": 118,
+      "response_sha256": "35fbe3c35717142cff0e66574f48e444cddbcea5833d8a8c2d4b2b8c807bfed2",
+      "answer_response": {
+        "recorded": true,
+        "ask_id": "native-ask-choice",
+        "actor": "masc-tui",
+        "answer_count": 1,
+        "delivered": true,
+        "open_remaining": 0
+      },
+      "finished_ms": 10341.242416994646
+    }
+  ],
+  "fixture_verified": true
+}

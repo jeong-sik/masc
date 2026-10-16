@@ -206,6 +206,8 @@ type async_msg =
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
+  | Ask_answer_receipt_observed of
+      ask_submission * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
   (** A workspace-bound roster can settle before unrelated readers. *)
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   (** Diagnostic reader status; it grants no data or action authority. *)
@@ -235,11 +237,10 @@ type async_msg =
       * (approval_snapshot, string) result
   (* The answer that came back, and the list re-read behind it. The store
      settles on first write, so the response says what was actually recorded
-     -- which may be someone else's answer. The first field is the human
-     confirmation label (the Keeper and what was chosen), built at submit time
-     from the labels the operator saw rather than the ask's opaque id. *)
+     -- which may be someone else's answer. The submission carries the original
+     workspace, Keeper, Ask and human label; none is recovered from prose. *)
   | Ask_answer_done of
-      string
+      ask_submission
       * (Masc.Tui_decode_asks.ask_answer_receipt, string) result
       * (Masc.Tui_decode_asks.asks_snapshot, string) result
   | Keeper_chat_dispatch_started of

@@ -18,6 +18,24 @@ type draft_response =
 
 type draft
 
+type answer_feedback = private {
+  af_keeper_name : string;
+  af_ask_id : string;
+  af_receipt : (Masc.Tui_decode_asks.ask_answer_receipt, string) result;
+  af_submitted_label : string option;
+}
+(** Last observed answer receipt, not current Keeper execution status. Only
+    a newly recorded canonical answer may retain the submitted choice label.
+    An existing winner or uncertain/refused write never inherits that label. *)
+
+val answer_feedback :
+  keeper_name:string -> ask_id:string -> submitted_label:string ->
+  (Masc.Tui_decode_asks.ask_answer_receipt, string) result -> answer_feedback
+
+val answer_feedback_to_json : answer_feedback -> Yojson.Safe.t
+(** Original request identities and typed recording/delivery facts only.
+    Choice/free-text bodies and server error details are not logged. *)
+
 val empty_draft : ask_id:string -> draft
 val draft_ask_id : draft -> string
 

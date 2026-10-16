@@ -10,6 +10,35 @@ type draft = {
   d_responses : (string * draft_response) list;
 }
 
+type answer_feedback = {
+  af_keeper_name : string;
+  af_ask_id : string;
+  af_receipt : (Decode.ask_answer_receipt, string) result;
+  af_submitted_label : string option;
+}
+
+let answer_feedback ~keeper_name ~ask_id ~submitted_label receipt =
+  let af_submitted_label = match receipt with
+    | Ok (Decode.Ask_answer_recorded _) -> Some submitted_label
+    | Ok (Decode.Ask_answer_already_recorded _ | Decode.Ask_answer_written_unconfirmed _
+         | Decode.Ask_answer_refused _) | Error _ -> None in
+  { af_keeper_name = keeper_name; af_ask_id = ask_id;
+    af_receipt = receipt; af_submitted_label }
+
+let answer_feedback_to_json feedback =
+  let delivery = function
+    | Decode.Ask_wake_stored -> `String "stored"
+    | Decode.Ask_wake_pending _ -> `String "pending" in
+  let recording, delivery = match feedback.af_receipt with
+    | Ok (Decode.Ask_answer_recorded outcome) -> "recorded", delivery outcome
+    | Ok (Decode.Ask_answer_already_recorded { aar_delivery; _ }) ->
+        "already_recorded", delivery aar_delivery
+    | Ok (Decode.Ask_answer_written_unconfirmed _) -> "winner_unconfirmed", `Null
+    | Ok (Decode.Ask_answer_refused _) -> "refused", `Null
+    | Error _ -> "unconfirmed", `Null in
+  `Assoc ["keeper", `String feedback.af_keeper_name; "ask_id", `String feedback.af_ask_id;
+    "recording", `String recording; "delivery", delivery]
+
 let empty_draft ~ask_id = { d_ask_id = ask_id; d_responses = [] }
 let draft_ask_id draft = draft.d_ask_id
 

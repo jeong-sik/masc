@@ -728,6 +728,10 @@ let () =
         [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, larger_capacity] 1 true;
       cli_case ~expected_limit:(Fixture.cli_primary_runtime, 21) "cli-two-capacities-reversed"
         [Fixture.cli_primary_runtime, larger_capacity; Fixture.cli_secondary_runtime, capacity] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-equal-capacities-keep-first"
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, capacity] 1 true;
+      cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 17) "cli-equal-capacities-reversed"
+        [Fixture.cli_secondary_runtime, capacity; Fixture.cli_primary_runtime, capacity] 1 true;
       (* The API walk that sent the pass to the official client met a size
          refusal. The client's own failure says nothing, and the verdict
          still comes from the walk before it. *)

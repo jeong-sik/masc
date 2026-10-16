@@ -1,5 +1,5 @@
 (* In-memory container engines for lifecycle tests. An engine holds named
-   containers with labels and a run state. The world has one ambient target,
+   containers with labels. The world has one ambient target,
    like the Docker CLI's current context: pointing it at another engine is
    what [colima start] does to the next command. The fake models only what a
    lifecycle decision depends on; classification, claims and engine proofs run
@@ -8,12 +8,10 @@ module Lifecycle = Masc.Lane_addon_lifecycle
 module Slot = Masc.Lane_addon_slot
 module Engine = Masc.Lane_addon_engine
 
-type run_state = Running | Exited
 type container = {
   id : string;
   name : string;
   labels : (string * string) list;
-  run_state : run_state;
 }
 type engine = {
   identity : Lifecycle.engine;
@@ -43,9 +41,9 @@ let find_by_name engine name = List.find_opt (fun c -> String.equal c.name name)
 let holds engine id = Hashtbl.mem engine.containers id
 
 (* The engine refuses a second container under one name, like Docker. *)
-let add engine ?(run_state = Running) ~id ~name ~labels () =
+let add engine ~id ~name ~labels () =
   if find_by_name engine name <> None then Error ("container name is already in use: " ^ name)
-  else (Hashtbl.replace engine.containers id { id; name; labels; run_state }; Ok id)
+  else (Hashtbl.replace engine.containers id { id; name; labels }; Ok id)
 
 (* `docker rm` on whichever engine the CLI reaches. A missing container is
    not an error to the caller that only wants it gone, which is exactly why an
@@ -71,8 +69,7 @@ let port world : Slot.port = {
     | Some c ->
         Ok { Engine.container_id = c.id; name = c.name;
              instance = List.assoc_opt Engine.instance_label c.labels;
-             state_owner = List.assoc_opt Engine.state_owner_label c.labels;
-             run_state = (match c.run_state with Running -> Engine.Running | Exited -> Engine.Exited) }));
+             state_owner = List.assoc_opt Engine.state_owner_label c.labels }));
   remove = (fun id -> engine_command world (fun engine ->
     if Hashtbl.mem engine.refusing_removal id then Error ("removal refused: " ^ id)
     else (Hashtbl.remove engine.containers id; Ok ())));

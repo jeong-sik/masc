@@ -12,13 +12,11 @@ let state_owner_label = "masc.lane.state.owner"
    can share one engine, so a sweep must only ever see its own. *)
 let scope_label = "masc.lane.scope"
 
-type run_state = Created | Running | Paused | Restarting | Removing | Exited | Dead
 type held = {
   container_id : string;
   name : string;
   instance : string option;
   state_owner : string option;
-  run_state : run_state;
 }
 
 let ( let* ) = Result.bind
@@ -165,43 +163,27 @@ let label_value labels key = match Option.bind labels (member key) with
   | Some (`String value) -> Ok (Some value)
   | Some _ -> Error ("label " ^ key ^ " is not text")
 
-(* Docker documents exactly these container states. Any other word is an
-   engine this code has not been taught, and is refused rather than guessed. *)
-let docker_run_state = function
-  | "created" -> Ok Created | "running" -> Ok Running | "paused" -> Ok Paused
-  | "restarting" -> Ok Restarting | "removing" -> Ok Removing | "exited" -> Ok Exited
-  | "dead" -> Ok Dead
-  | other -> Error ("unrecognized container state: " ^ other)
-
-(* The Apple runtime reports a stopped container as stopped. *)
-let apple_run_state = function
-  | "running" -> Ok Running | "stopped" -> Ok Exited | "stopping" -> Ok Removing
-  | other -> Error ("unrecognized container state: " ^ other)
-
 let held_of_inspect runtime raw =
   let* entry = one raw in
   match runtime with
   | Docker ->
-      (match member "Id" entry, member "Name" entry, path ["State"; "Status"] entry with
-       | Some (`String id), Some (`String name), Some (`String status)
+      (match member "Id" entry, member "Name" entry with
+       | Some (`String id), Some (`String name)
          when valid_id id && String.length name > 1 && name.[0] = '/' ->
            let labels = path ["Config"; "Labels"] entry in
            let* instance = label_value labels instance_label in
            let* state_owner = label_value labels state_owner_label in
-           let* run_state = docker_run_state status in
            Ok { container_id = id; name = String.sub name 1 (String.length name - 1);
-                instance; state_owner; run_state }
-       | _ -> Error "container identity, name or state is absent")
+                instance; state_owner }
+       | _ -> Error "container identity or name is absent")
   | Apple_container ->
-      (match member "id" entry, path ["configuration"; "id"] entry, member "status" entry with
-       | Some (`String id), Some (`String configured), Some (`String status)
-         when String.equal id configured ->
+      (match member "id" entry, path ["configuration"; "id"] entry with
+       | Some (`String id), Some (`String configured) when String.equal id configured ->
            let labels = path ["configuration"; "labels"] entry in
            let* instance = label_value labels instance_label in
            let* state_owner = label_value labels state_owner_label in
-           let* run_state = apple_run_state status in
-           Ok { container_id = id; name = id; instance; state_owner; run_state }
-       | _ -> Error "container identity, name or state is absent")
+           Ok { container_id = id; name = id; instance; state_owner }
+       | _ -> Error "container identity or name is absent")
 
 (* Docker lists one JSON string per line and filters by label itself. The
    Apple runtime lists every container, so the label is filtered here. *)

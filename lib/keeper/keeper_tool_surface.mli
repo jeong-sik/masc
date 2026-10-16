@@ -47,6 +47,7 @@ module For_testing : sig
   val reset_keeper_list_cache : unit -> unit
   val cached_keeper_list_data :
     key:string -> ttl_s:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
+  val invalidate_keeper_list_cache : unit -> unit
 
 end
 

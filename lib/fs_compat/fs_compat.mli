@@ -1650,6 +1650,15 @@ type durable_append_io_for_testing =
   ; fsync : Unix.file_descr -> unit
   }
 
+val update_private_file_tail_durable_locked_with_append_io_for_testing :
+  append_io:durable_append_io_for_testing ->
+  string ->
+  max_bytes:int ->
+  (string -> string option * 'a) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+(** Same complete locked tail transaction with only its actual fd write,
+    rollback and fsync operations replaced for deterministic fault injection. *)
+
 (** Direct fd-level seam for deterministic partial-write and rollback tests.
     Production code uses the same implementation with [Unix] operations. *)
 val append_fd_durable_for_testing :

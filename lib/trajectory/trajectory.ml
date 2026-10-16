@@ -497,13 +497,8 @@ let append_withheld_thinking ~(masc_root : string) ~(keeper_name : string)
   Fs_compat.append_jsonl path (withheld_thinking_entry_to_json entry)
 ;;
 
-(** Write a trajectory summary line (appended after session ends). *)
-let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
-    (traj : trajectory) : unit =
-  let dir = trajectories_dir masc_root keeper_name in
-  Fs_compat.mkdir_p dir;
-  let path = trajectory_path masc_root keeper_name trace_id in
-  let summary = `Assoc [
+let summary_to_json (traj : trajectory) =
+  `Assoc [
     ("type", `String "trajectory_summary");
     ("keeper_name", `String traj.keeper_name);
     ("trace_id", `String traj.trace_id);
@@ -513,8 +508,8 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     ("task_id", Json_util.string_opt_to_json traj.task_id);
     ("started_at", `Float traj.started_at);
     ("ended_at", `Float traj.ended_at);
-  ] in
-  Fs_compat.append_jsonl path summary
+  ]
+;;
 
 let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
@@ -529,9 +524,16 @@ let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
 (* Trajectory accumulator (mutable, per-session)                    *)
 (* ================================================================ *)
 
-type pending_entry = {
-  pe_json : Yojson.Safe.t;
-}
+type accumulator_phase =
+  | Recording
+  | Closing of { trajectory : trajectory; receipt : Trajectory_buffer.receipt }
+  | Closed of trajectory
+
+type record_result = Recorded | Recorder_closed
+
+type finalization_result =
+  | Finalized of trajectory
+  | Finalization_pending of Trajectory_buffer.outcome
 
 type accumulator = {
   mutable entries : tool_call_entry list;
@@ -545,26 +547,28 @@ type accumulator = {
   (** Claimed task ID for cost attribution.
       Starts as None; set via [set_task_id] when keeper claims a task.
       Propagated to trajectory record on [finalize]. *)
-  pending_queue : pending_entry Queue.t;
-  pending_mu : Stdlib.Mutex.t;
+  writer : Trajectory_buffer.t;
+  mu : Stdlib.Mutex.t;
+  mutable phase : accumulator_phase;
   mutable last_flush : float;
   mutable on_flush_error : (exn -> unit) option;
 }
 
 (* Global registry of active accumulators for batch flush.
    The background flush fiber iterates this to drain pending queues. *)
-let active_accumulators : (string * string, accumulator) Hashtbl.t = Hashtbl.create 16
+let active_accumulators : accumulator list ref = ref []
 let active_acc_mu = Stdlib.Mutex.create ()
 
 let register_accumulator (acc : accumulator) =
   Stdlib.Mutex.protect active_acc_mu (fun () ->
-    Hashtbl.replace active_accumulators (acc.keeper_name, acc.trace_id) acc)
+    active_accumulators := acc :: !active_accumulators)
 
 let unregister_accumulator (acc : accumulator) =
   Stdlib.Mutex.protect active_acc_mu (fun () ->
-    Hashtbl.remove active_accumulators (acc.keeper_name, acc.trace_id))
+    active_accumulators := List.filter (fun current -> current != acc) !active_accumulators)
 
-let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id () : accumulator =
+let create_accumulator_with_writer ~acquire ?on_flush_error ~masc_root ~keeper_name ~trace_id () : accumulator =
+  let writer = acquire ~path:(trajectory_path masc_root keeper_name trace_id) in
   let acc = {
     entries = [];
     total_calls = 0;
@@ -574,110 +578,143 @@ let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id () : ac
     started_at = Time_compat.now ();
     masc_root;
     task_id = None;
-    pending_queue = Queue.create ();
-    pending_mu = Stdlib.Mutex.create ();
+    writer;
+    mu = Stdlib.Mutex.create ();
+    phase = Recording;
     last_flush = 0.0;
     on_flush_error;
   } in
   register_accumulator acc;
   acc
+;;
+
+let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id () =
+  create_accumulator_with_writer ~acquire:Trajectory_buffer.acquire
+    ?on_flush_error ~masc_root ~keeper_name ~trace_id ()
+;;
 
 (** Bind a claimed task to this trajectory for cost attribution. *)
 let set_task_id (acc : accumulator) (id : string) : unit =
-  acc.task_id <- Some id
+  Stdlib.Mutex.protect acc.mu (fun () -> acc.task_id <- Some id)
 
 (** Clear task binding (e.g., after masc_transition action=done). *)
 let clear_task_id (acc : accumulator) : unit =
-  acc.task_id <- None
+  Stdlib.Mutex.protect acc.mu (fun () -> acc.task_id <- None)
 
 let increment_turn (acc : accumulator) : unit =
-  acc.turn <- acc.turn + 1
+  Stdlib.Mutex.protect acc.mu (fun () -> acc.turn <- acc.turn + 1)
 
 let set_turn (acc : accumulator) (turn : int) : unit =
-  if turn > acc.turn then acc.turn <- turn
+  Stdlib.Mutex.protect acc.mu (fun () -> if turn > acc.turn then acc.turn <- turn)
 
 let record_entry ?runtime_contract ?action_radius ?on_persist_error
-    (acc : accumulator) (entry : tool_call_entry) : unit =
-  acc.entries <- entry :: acc.entries;
-  acc.total_calls <- acc.total_calls + 1;
-  (* Store on_persist_error for use during batch flush *)
-  (match on_persist_error, acc.on_flush_error with
-   | Some cb, None -> acc.on_flush_error <- Some cb
-   | _ -> ());
-  (* Enqueue for batched write instead of synchronous disk I/O *)
+    (acc : accumulator) (entry : tool_call_entry) : record_result =
   let json = entry_to_json ?runtime_contract ?action_radius entry in
-  Stdlib.Mutex.protect acc.pending_mu (fun () ->
-    Queue.push { pe_json = json } acc.pending_queue)
+  Stdlib.Mutex.protect acc.mu (fun () ->
+    match acc.phase with
+    | Closing _ | Closed _ -> Recorder_closed
+    | Recording ->
+      acc.entries <- entry :: acc.entries;
+      acc.total_calls <- acc.total_calls + 1;
+      (match on_persist_error, acc.on_flush_error with
+       | Some cb, None -> acc.on_flush_error <- Some cb
+       | Some _, Some _ | None, (None | Some _) -> ());
+      ignore (Trajectory_buffer.enqueue acc.writer json : Trajectory_buffer.receipt);
+      Recorded)
+;;
 
-(** Drain the pending queue and write all entries in a single batch.
-    Acquires the per-accumulator mutex to safely drain the queue. *)
-let flush_pending (acc : accumulator) : unit =
-  let entries_to_flush =
-    Stdlib.Mutex.protect acc.pending_mu (fun () ->
-      if Queue.is_empty acc.pending_queue then []
-      else
-        let items = Queue.fold (fun acc pe -> pe :: acc) [] acc.pending_queue in
-        Queue.clear acc.pending_queue;
-        List.rev items)
+exception Persistence_issue of Trajectory_persistence.issue
+
+let retire_if_finalized acc =
+  let retire = Stdlib.Mutex.protect acc.mu (fun () ->
+    match acc.phase with
+    | Closing {trajectory; receipt} when Trajectory_buffer.is_durable receipt ->
+      acc.phase <- Closed trajectory; true
+    | Recording | Closing _ | Closed _ -> false)
   in
-  match entries_to_flush with
-  | [] -> ()
-  | _ ->
-    (try
-       let dir = trajectories_dir acc.masc_root acc.keeper_name in
-       Fs_compat.mkdir_p dir;
-       let path = trajectory_path acc.masc_root acc.keeper_name acc.trace_id in
-       let jsons = List.map (fun pe -> pe.pe_json) entries_to_flush in
-       Fs_compat.append_jsonl_batch path jsons;
-       acc.last_flush <- Time_compat.now ()
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.error "Failed to flush trajectory batch for %s: %s"
-         acc.trace_id (Printexc.to_string exn);
-       (match acc.on_flush_error with
-        | None -> ()
-        | Some report ->
-            try report exn
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | report_exn ->
-                Log.Keeper.warn
-                  "Failed to report trajectory flush error for %s: %s"
-                  acc.trace_id
-                  (Printexc.to_string report_exn)))
+  if retire then begin
+    unregister_accumulator acc;
+    Trajectory_buffer.release acc.writer
+  end
+;;
+
+let observe_flush acc outcome =
+  retire_if_finalized acc;
+  match outcome with
+  | Trajectory_buffer.Flushed {rows=_; cleanup_failure} ->
+    let now = Time_compat.now () in
+    Stdlib.Mutex.protect acc.mu (fun () -> acc.last_flush <- now);
+    Option.iter (fun failure -> Log.Keeper.warn
+      "Trajectory append committed with descriptor settlement failure for %s: %s"
+      acc.trace_id (Fs_compat.private_jsonl_operation_failure_to_string failure)) cleanup_failure
+  | Trajectory_buffer.Retryable_failure issue
+  | Trajectory_buffer.Indeterminate_failure issue ->
+    Log.Keeper.error "Trajectory persistence incomplete for %s: %s"
+      acc.trace_id (Trajectory_persistence.issue_to_string issue);
+    let callback = Stdlib.Mutex.protect acc.mu (fun () -> acc.on_flush_error) in
+    (match callback with
+     | None -> ()
+     | Some report ->
+       (try report (Persistence_issue issue) with
+        | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+        | exception_ -> Log.Keeper.warn "Failed to report trajectory persistence issue for %s: %s"
+            acc.trace_id (Printexc.to_string exception_)))
+  | Trajectory_buffer.Empty | Trajectory_buffer.Busy | Trajectory_buffer.Blocked _ -> ()
+;;
+
+let flush_pending acc =
+  let outcome = Trajectory_buffer.flush acc.writer in
+  let owners = Stdlib.Mutex.protect active_acc_mu (fun () ->
+    List.filter (fun owner -> owner.writer == acc.writer) !active_accumulators) in
+  List.iter (fun owner -> observe_flush owner outcome) owners;
+  outcome
+;;
 
 (** Flush pending entries for all active accumulators.
     Called by the background flush fiber in server_runtime_bootstrap. *)
 let flush_all_pending () : unit =
-  let accs = Stdlib.Mutex.protect active_acc_mu (fun () ->
-    Hashtbl.fold (fun _ acc accs -> acc :: accs) active_accumulators []) in
-  List.iter flush_pending accs
+  let outcomes = Trajectory_buffer.flush_all () in
+  let accs = Stdlib.Mutex.protect active_acc_mu (fun () -> !active_accumulators) in
+  List.iter (fun acc ->
+    match List.find_opt (fun (writer, _) -> writer == acc.writer) outcomes with
+    | Some (_, outcome) -> observe_flush acc outcome
+    | None -> ()) accs
+;;
 
-let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
-  (* Flush any remaining pending entries before writing summary *)
-  flush_pending acc;
-  unregister_accumulator acc;
-  let traj = {
-    scenario_id = None;
-    keeper_name = acc.keeper_name;
-    trace_id = acc.trace_id;
-    started_at = acc.started_at;
-    ended_at = Time_compat.now ();
-    entries = List.rev acc.entries;
-    total_turns = acc.turn;
-    total_tool_calls = acc.total_calls;
-    outcome;
-    task_id = acc.task_id;
-  } in
-  (try append_summary ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name
-       ~trace_id:acc.trace_id traj
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Keeper.error "Failed to persist summary for %s: %s" acc.trace_id (Printexc.to_string exn));
-  traj
+let finalize acc outcome =
+  Stdlib.Mutex.protect acc.mu (fun () ->
+    match acc.phase with
+    | Closing _ | Closed _ -> ()
+    | Recording ->
+      let trajectory =
+        { scenario_id=None; keeper_name=acc.keeper_name; trace_id=acc.trace_id
+        ; started_at=acc.started_at; ended_at=Time_compat.now (); entries=List.rev acc.entries
+        ; total_turns=acc.turn; total_tool_calls=acc.total_calls; outcome; task_id=acc.task_id }
+      in
+      let receipt = Trajectory_buffer.enqueue acc.writer (summary_to_json trajectory) in
+      acc.phase <- Closing {trajectory; receipt});
+  let flushed = flush_pending acc in
+  Stdlib.Mutex.protect acc.mu (fun () ->
+    match acc.phase with
+    | Closed trajectory -> Finalized trajectory
+    | Recording | Closing _ -> Finalization_pending flushed)
+;;
+
+module For_testing = struct
+  let create_accumulator_with_append ~append ?on_flush_error ~masc_root ~keeper_name ~trace_id () =
+    create_accumulator_with_writer
+      ~acquire:(Trajectory_buffer.For_testing.acquire_with_append ~append)
+      ?on_flush_error ~masc_root ~keeper_name ~trace_id ()
+
+  let pending_depth acc = Trajectory_buffer.depth acc.writer
+  let finalized acc = Stdlib.Mutex.protect acc.mu (fun () ->
+    match acc.phase with Closed _ -> true | Recording | Closing _ -> false)
+end
 
 (** Count tool calls in current turn. *)
 let calls_in_current_turn (acc : accumulator) : int =
-  List_util.count_if (fun (e : tool_call_entry) -> e.turn = acc.turn) acc.entries
+  Stdlib.Mutex.protect acc.mu (fun () ->
+    List_util.count_if (fun (e : tool_call_entry) -> e.turn = acc.turn) acc.entries)
 
 (* ================================================================ *)
 (* Tool stats aggregation                                          *)

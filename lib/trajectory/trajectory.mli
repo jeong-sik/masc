@@ -143,9 +143,16 @@ val read_recent_lines :
 
     Mutable session-scoped state for tracking tool calls in progress. *)
 
-type pending_entry = {
-  pe_json : Yojson.Safe.t;
-}
+type accumulator_phase =
+  | Recording
+  | Closing of { trajectory : trajectory; receipt : Trajectory_buffer.receipt }
+  | Closed of trajectory
+
+type record_result = Recorded | Recorder_closed
+
+type finalization_result =
+  | Finalized of trajectory
+  | Finalization_pending of Trajectory_buffer.outcome
 
 type accumulator = {
   mutable entries : tool_call_entry list;
@@ -156,8 +163,9 @@ type accumulator = {
   started_at : float;
   masc_root : string;
   mutable task_id : string option;
-  pending_queue : pending_entry Queue.t;
-  pending_mu : Mutex.t;
+  writer : Trajectory_buffer.t;
+  mu : Mutex.t;
+  mutable phase : accumulator_phase;
   mutable last_flush : float;
   mutable on_flush_error : (exn -> unit) option;
 }
@@ -182,13 +190,17 @@ val record_entry :
   ?on_persist_error:(exn -> unit) ->
   accumulator ->
   tool_call_entry ->
-  unit
-val finalize : accumulator -> trajectory_outcome -> trajectory
+  record_result
+val finalize : accumulator -> trajectory_outcome -> finalization_result
+(** The first call seals the accumulator and appends one summary after its
+    accepted tool rows. [Finalized] requires that summary's durable receipt;
+    pending finalization stays owned by the background writer. Repeating the
+    call never creates another summary or changes the sealed outcome. *)
 
-val flush_pending : accumulator -> unit
-(** [flush_pending acc] drains the pending queue and writes all entries
-    to disk in a single batch. Called automatically by [finalize] and
-    by the background flush fiber. *)
+val flush_pending : accumulator -> Trajectory_buffer.outcome
+(** Flush one shared trace writer. Recoverable pending rows leave memory only
+    after fsync acknowledgement. Later turns of the same trace share its FIFO;
+    an indeterminate append remains blocked and is never blindly retried. *)
 
 val flush_all_pending : unit -> unit
 (** [flush_all_pending ()] flushes pending entries for all active
@@ -196,6 +208,15 @@ val flush_all_pending : unit -> unit
     server_runtime_bootstrap. *)
 
 val calls_in_current_turn : accumulator -> int
+
+module For_testing : sig
+  val create_accumulator_with_append :
+    append:(path:string -> Yojson.Safe.t list -> Trajectory_persistence.outcome) ->
+    ?on_flush_error:(exn -> unit) ->
+    masc_root:string -> keeper_name:string -> trace_id:string -> unit -> accumulator
+  val pending_depth : accumulator -> int
+  val finalized : accumulator -> bool
+end
 
 (** {1 Tool stats aggregation}
 

@@ -2,6 +2,22 @@
 
 open Masc
 
+let record_accepted acc entry =
+  match Trajectory.record_entry acc entry with
+  | Trajectory.Recorded -> ()
+  | Trajectory.Recorder_closed -> Alcotest.fail "recording unexpectedly closed"
+
+let finalize_durable acc outcome =
+  match Trajectory.finalize acc outcome with
+  | Trajectory.Finalized trajectory -> trajectory
+  | Trajectory.Finalization_pending state ->
+    Alcotest.failf "finalization not durable: %s" (Trajectory_buffer.outcome_label state)
+
+let flush_durable acc =
+  match Trajectory.flush_pending acc with
+  | Trajectory_buffer.Flushed _ -> ()
+  | state -> Alcotest.failf "append not durable: %s" (Trajectory_buffer.outcome_label state)
+
 let () =
   (* Ensure RNG is initialized for any code that may need it *)
   ignore (Unix.gettimeofday ())
@@ -64,7 +80,7 @@ let test_record_entry () =
       error = None;
       execution_id = Some "exec-1000-0001";
     } in
-    Trajectory.record_entry acc entry;
+    record_accepted acc entry;
     Alcotest.(check int) "entries count" 1 (List.length acc.Trajectory.entries);
     ())
 
@@ -154,8 +170,8 @@ let test_finalize () =
       error = None;
       execution_id = None;
     } in
-    Trajectory.record_entry acc entry;
-    let traj = Trajectory.finalize acc Trajectory.Completed in
+    record_accepted acc entry;
+    let traj = finalize_durable acc Trajectory.Completed in
     Alcotest.(check int) "total turns" 1 traj.Trajectory.total_turns;
     Alcotest.(check int) "total calls" 1 traj.Trajectory.total_tool_calls;
     Alcotest.(check string) "trace_id" "trace-006" traj.Trajectory.trace_id)
@@ -190,8 +206,8 @@ let test_calls_in_current_turn () =
       error = None;
       execution_id = None;
     } in
-    Trajectory.record_entry acc (mk "tool_execute");
-    Trajectory.record_entry acc (mk "tool_read_file");
+    record_accepted acc (mk "tool_execute");
+    record_accepted acc (mk "tool_read_file");
     let count = Trajectory.calls_in_current_turn acc in
     Alcotest.(check int) "calls in turn 1" 2 count)
 
@@ -231,7 +247,7 @@ let test_finalize_propagates_task_id () =
       ~trace_id:"trace-tid-004" () in
     Trajectory.set_task_id acc "task-099";
     Trajectory.increment_turn acc;
-    let traj = Trajectory.finalize acc Trajectory.Completed in
+    let traj = finalize_durable acc Trajectory.Completed in
     Alcotest.(check (option string)) "task_id propagated"
       (Some "task-099") traj.Trajectory.task_id)
 
@@ -241,7 +257,7 @@ let test_task_id_in_trajectory_json () =
       ~masc_root:dir ~keeper_name:"test-keeper"
       ~trace_id:"trace-tid-005" () in
     Trajectory.set_task_id acc "task-json-test";
-    let traj = Trajectory.finalize acc Trajectory.Completed in
+    let traj = finalize_durable acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
     let open Yojson.Safe.Util in
     let task_id_val = json |> member "task_id" in
@@ -255,7 +271,7 @@ let test_task_id_null_when_none () =
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
       ~trace_id:"trace-tid-006" () in
-    let traj = Trajectory.finalize acc Trajectory.Completed in
+    let traj = finalize_durable acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
     let open Yojson.Safe.Util in
     let task_id_val = json |> member "task_id" in
@@ -595,9 +611,9 @@ let test_read_recent_lines_skips_malformed_rows () =
       Trajectory.create_accumulator
         ~masc_root:dir ~keeper_name:"test-keeper" ~trace_id:"trace-malformed" ()
     in
-    Trajectory.record_entry acc
+    record_accepted acc
       (mk_entry "tool_execute" 10 "2026-07-01T00:00:00Z");
-    Trajectory.flush_pending acc;
+    flush_durable acc;
     write_raw_line ~masc_root:dir ~keeper_name:"test-keeper"
       ~trace_id:"trace-malformed" "{not valid json";
     let recent =

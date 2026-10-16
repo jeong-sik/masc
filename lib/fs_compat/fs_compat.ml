@@ -4100,7 +4100,8 @@ type 'a private_jsonl_recovered =
   | Recovered_prefix of string
   | Recovery_result of 'a
 
-let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?tail_bytes ~io path decide =
+let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?tail_bytes
+    ?(append_io=durable_append_unix_io) ~io path decide =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
   if create then mkdir_p_memoized dir;
@@ -4205,7 +4206,7 @@ let update_private_file_durable_locked_with_io ?(create=true) ?validate_prefix ?
               (* See Unix.lseek: only the file-position side effect is required. *)
               let original_length = Unix.lseek fd 0 Unix.SEEK_END in
               append_fd_durable
-                ~io:durable_append_unix_io
+                ~io:append_io
                 ~fd
                 ~original_length
                 suffix
@@ -4222,6 +4223,13 @@ let update_private_file_durable_locked_result ?(create=true) path decide =
 let update_private_file_tail_durable_locked_result path ~max_bytes decide =
   if max_bytes <= 0 then invalid_arg "update_private_file_tail_durable_locked_result";
   update_private_file_durable_locked_with_io ~tail_bytes:max_bytes
+    ~io:private_jsonl_transaction_unix_io path decide
+;;
+
+let update_private_file_tail_durable_locked_with_append_io_for_testing
+    ~append_io path ~max_bytes decide =
+  if max_bytes <= 0 then invalid_arg "update_private_file_tail_durable_locked_result";
+  update_private_file_durable_locked_with_io ~tail_bytes:max_bytes ~append_io
     ~io:private_jsonl_transaction_unix_io path decide
 ;;
 

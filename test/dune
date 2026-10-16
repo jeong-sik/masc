@@ -1739,6 +1739,7 @@
   test_keeper_telemetry_consumer
   test_runtime_event_bus
   test_trajectory
+  test_trajectory_durability
   test_tool_board_coverage
   test_board_comment_id_is_visible
   test_board_read_shows_viewer_vote
@@ -1887,6 +1888,7 @@
   test_keeper_telemetry_consumer
   test_runtime_event_bus
   test_trajectory
+  test_trajectory_durability
   test_tool_board_coverage
   test_board_comment_id_is_visible
   test_board_read_shows_viewer_vote

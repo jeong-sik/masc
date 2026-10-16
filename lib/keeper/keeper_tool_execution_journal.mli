@@ -31,7 +31,27 @@ type completed =
   }
 
 type recheck = { execution_id : Ids.Execution_id.t; tool_use_id : string }
-type replay = Dispatch | Reuse_completed of completed | Recheck_job_result of recheck
+
+type launch_invocation =
+  { trace_id : string
+  ; turn_ref : Ids.Turn_ref.t
+  }
+(** Exact invocation identity a launch leaf used when its owned-job binding was
+    reserved. A replayed launch must re-call with this identity so the
+    invocation binding returns the same job instead of launching a
+    replacement. *)
+
+type recheck_launch =
+  { execution_id : Ids.Execution_id.t
+  ; tool_use_id : string
+  ; invocation : launch_invocation
+  }
+
+type replay =
+  | Dispatch
+  | Reuse_completed of completed
+  | Recheck_job_result of recheck
+  | Recheck_launch of recheck_launch
 
 type error =
   | Invalid_source of string
@@ -74,9 +94,11 @@ val waiting_continuation : t -> (continuation option, error) result
     has no original owned-job wait. A current [Lost] owner may recover that
     wait through the journal's exact predecessor bindings and canonical
     terminal records, including repeated Lost successors. Unfinished nodes
-    must prove read-only replay; cancellation and unknown effects do not grant
-    continuation. Unavailable or inconsistent evidence is [Error]. A later
-    owner change makes the captured value stale. *)
+    must prove replay: read-only nodes by the read-only replay rules, and an
+    owned launch leaf by its recorded exact invocation identity, which grants
+    a [Recheck_launch] replay. Cancellation and unknown effects without that
+    identity do not grant continuation. Unavailable or inconsistent evidence
+    is [Error]. A later owner change makes the captured value stale. *)
 
 val continuation_base_path : continuation -> string
 (** Canonical workspace where the sealed owner and node snapshot were read.
@@ -147,6 +169,13 @@ val lookup
     marker. An owned read-only job-result Attempting record from a terminal
     prior worker preserves those IDs when rechecking after cancellation or
     interruption.
+    An owned launch leaf ({!Keeper_tool_descriptor.Owned_job_launch_leaf})
+    whose durable occurrence recorded its exact invocation identity replays
+    with [Recheck_launch] after an interrupted attempt or an unknown effect
+    outcome: the new owner re-calls the launch with the original occurrence
+    and invocation identity, so the owned-job invocation binding returns the
+    same job ([Existing]) and never launches a replacement. A launch leaf
+    without recorded invocation identity keeps refusing replay.
     Other producer-proven pre-effect failures and previous statically read-only
     Attempting records may dispatch again. Other deferred and unproven effect
     outcomes reject replay. *)
@@ -159,7 +188,13 @@ val begin_attempt
   -> execution_id:Ids.Execution_id.t
   -> tool_use_id:string
   -> readonly:bool
+  -> ?launch_invocation:launch_invocation
+  -> unit
   -> (attempt, error) result
+(** [launch_invocation] is recorded on the durable occurrence for owned-job
+    launch leaves and is required to equal the exact identity a replayed
+    launch will re-call with. Only meaningful for non-read-only launch
+    leaves; other nodes record [None]. *)
 
 val settle_attempt
   : ?failure_effect_disposition:Tool_result.failure_effect_disposition

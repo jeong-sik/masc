@@ -2162,6 +2162,308 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
      "durable_job_notifications_before_hint",`Int (List.length job_notifications);
      "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
 
+
+let test_prepared_job_launch_and_continuation () = with_fixture @@ fun env _initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  let module Async = Masc.Keeper_msg_async in
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
+  let recipe = `Assoc ["execution",`String "async";"nodes",`List
+      [`Assoc ["id",`String "launch";"tool",`String "keeper_job_start";
+         "input",`Assoc ["kind",`String "literal";"value",`Assoc
+           ["argv",`List [`String "fixture-program"]]]];
+       `Assoc ["id",`String "await";"tool",`String "keeper_job_result";
+         "input",`Assoc ["kind",`String "object";"fields",`List
+           [`Assoc ["name",`String "job_id";"value",`Assoc
+             ["kind",`String "output";"node",`String "launch";"pointer",`String "/job_id"]]]]];
+       `Assoc ["id",`String "consume";"tool",`String "keeper_artifact_read";
+         "after",`List [`String "await"];
+         "input",`Assoc ["kind",`String "object";"fields",`List
+           [`Assoc ["name",`String "sha256";"value",`Assoc
+             ["kind",`String "output";"node",`String "await";
+              "pointer",`String "/artifacts/0/_blob/sha256"]]]]]]] in
+  let prepare_started = Mtime_clock.counter () in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-hint" ~turn:41 "keeper_composition_prepare" recipe) in
+  check bool "preparing a launch plan performs no backend operation" false (Sys.file_exists fixture.daemon_path);
+  let reference = prepared |> member "draft" |> composition_reference "actual completion hint draft" in
+  let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"run-hint" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String reference.sha256])) in
+  let ok,waiting,waiting_entry = await_composition env fixture accepted in
+  let prepare_to_wait_ms = Mtime.Span.to_float_ns (Mtime_clock.count prepare_started) /. 1_000_000. in
+  check bool "original DAG is suspended before completion" false ok;
+  let id = match waiting_entry.status with
+    | Async.Waiting_for_owned_jobs {job_ids=[id];_} -> Store.Job_id.to_string id
+    | _ -> fail "prepared launch did not produce one canonical original job wait" in
+  let waiting_nodes = waiting |> member "settled" |> to_list in
+  let original_launch = composition_node "launch" waiting_nodes in
+  check string "prepared launch result is the exact awaited job" id
+    (original_launch |> member "result" |> member "data" |> member "job_id" |> to_string);
+  let original_job = load fixture id in
+  check (option string) "prepared launch belongs to the original Task" (Some "task-A") original_job.source.task_id;
+  check (option string) "durable launch belongs to its exact node occurrence"
+    (Some (original_launch |> member "tool_use_id" |> to_string)) original_job.source.tool_use_id;
+  let before_refused_preparation = List.length (calls fixture) in
+  let denied_job_id = Store.Job_id.fresh () |> Store.Job_id.to_string in
+  List.iter (fun tool ->
+    let unsupported = `Assoc ["execution",`String "async";"nodes",`List
+      [`Assoc ["id",`String "unsupported";"tool",`String tool;
+        "input",`Assoc ["kind",`String "literal";"value",argument denied_job_id]]]] in
+    with_bundle fixture (fun bundle ->
+      match invoke_raw bundle ~tool_use_id:("unsupported-" ^ tool) ~turn:41 "keeper_composition_prepare" unsupported with
+      | Error _ -> () | Ok _ -> failf "prepared launch admission also admitted %s" tool))
+    ["keeper_job_status";"keeper_job_cancel"];
+  check int "refused status/cancel preparation performs no backend operation" before_refused_preparation (List.length (calls fixture));
+  let config = Workspace.default_config fixture.base_path in
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  write declaration "[keeper]\nactivation_mode = \"manual\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original completion hint fixture\"\n";
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  write runtime_path "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n";
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+      |> require "completion hint Skill publication authority" in
+  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
+  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
+   | Published _ | Unchanged _ -> () | Workspace_retired -> fail "completion hint publication retired early");
+  let context : _ Masc.Keeper_types_profile.context =
+    {config;agent_name="completion-hint-fixture";
+     sw=Async.server_background_switch () |> require "completion hint background switch";
+     clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let resumed,notify_resumed = Eio.Promise.create () in
+  let accepted_intakes = ref 0 and other_intakes = ref [] in
+  let continuations = Wake.create ~context ~on_result:(fun _ outcome -> match outcome with
+      | Ok (Tool_result.Completed _ as result) ->
+        incr accepted_intakes; Eio.Promise.resolve notify_resumed result
+      | Ok (Tool_result.Deferred _ | Tool_result.Failed _) | Error _ ->
+        other_intakes := outcome :: !other_intakes) () in
+  let hints = ref [] in
+  let jobs = Completion_wake.create ~config ~on_result_ready:(fun (record : Store.record) ->
+      hints := (record,Store.result_ready record,pending_completions fixture,List.length (calls fixture)) :: !hints;
+      Wake.pulse ~sw:context.sw continuations |> require "actual durable completion hints original DAG") () in
+  (* Change the current turn before the original job completes. No direct
+     composition resume or independent continuation pulse follows this point. *)
+  set_source fixture ~task_id:"task-B" ~turn:52;
+  control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
+  let backend_before = List.length (calls fixture) in
+  let completion_started = Mtime_clock.counter () in
+  Completion_wake.pulse ~sw:context.sw jobs |> store_value "actual owned completion maintenance pulse";
+  let resumed = Eio.Promise.await resumed |> Tool_result.data in
+  let ok,completed,completed_entry = await_composition env fixture resumed in
+  let completion_ms = Mtime.Span.to_float_ns (Mtime_clock.count completion_started) /. 1_000_000. in
+  check bool "durable completion hint finishes the original DAG" true ok;
+  check int "durable completion hint accepts one original worker" 1 !accepted_intakes;
+  let record,ready,queued,backend_at_ready = match !hints with
+    | [hint] -> hint | _ -> fail "expected exactly one original durable result hint" in
+  check bool "hint follows full durable output" true ready;
+  check string "hint identifies the original job" id (Store.Job_id.to_string record.job_id);
+  check (option string) "hint keeps the original Task" (Some "task-A") record.source.task_id;
+  let job_notifications = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      match selection.source.payload with
+      | Keeper_event_queue.Owned_job_completed completion ->
+        Store.Job_id.to_string completion.oj_job_id = id
+      | _ -> false) queued in
+  check int "original notification is durable before hint" 1 (List.length job_notifications);
+  let rec await_original_ack () =
+    if (load fixture id).completion_delivered then ()
+    else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; await_original_ack ()) in
+  await_original_ack ();
+  check bool "ordinary completion ACK is retained" true (load fixture id).completion_delivered;
+  check int "continuation does not query the backend after complete output" backend_at_ready (List.length (calls fixture));
+  check string "completion keeps the original run" (accepted |> member "composition_run_id" |> to_string)
+    (resumed |> member "composition_run_id" |> to_string);
+  let completed_nodes = completed |> member "actions" |> to_list in
+  let waiting_node = composition_node "await" waiting_nodes
+  and completed_node = composition_node "await" completed_nodes in
+  List.iter (fun field -> check_json ("completion hint keeps original occurrence " ^ field)
+      (waiting_node |> member field) (completed_node |> member field)) ["execution_id";"tool_use_id"];
+  let retained_launch = composition_node "launch" completed_nodes in
+  List.iter (fun field -> check_json ("completed launch retains original " ^ field)
+      (original_launch |> member field) (retained_launch |> member field)) ["execution_id";"tool_use_id";"result"];
+  check_json "completed effectful launch is reused without dispatch" (`String "retained_completion")
+    (retained_launch |> member "execution_origin");
+  check_json "hint consumer receives complete original stdout" (`String stdout_bytes)
+    (composition_node "consume" completed_nodes |> member "result"
+     |> member "data" |> member "content");
+  let request_context = match completed_entry.request_context with
+    | Some fields -> `Assoc fields | None -> fail "original hint completion has no source context" in
+  check_json "hint completion belongs to original Task" (`String "task-A") (request_context |> member "source_task_id");
+  check int "completion never recreates the original program" 1 (effect_count fixture "create");
+  check int "completion never restarts the original program" 1 (effect_count fixture "start");
+  Printf.printf "OWNED_PREPARED_JOB_LAUNCH_CONTINUATION %s\n%!" (Yojson.Safe.to_string (`Assoc
+    ["scope",`String "synthetic CLI public prepare/run launching an owned job within the original DAG";
+     "prepare_and_launch_to_saved_job_wait_ms",`Float prepare_to_wait_ms;
+     "completion_pulse_to_original_dag_completion_ms",`Float completion_ms;
+     "backend_calls_to_complete_original_job",`Int (backend_at_ready-backend_before);
+     "backend_calls_after_result_ready",`Int (List.length (calls fixture)-backend_at_ready);
+     "accepted_intakes",`Int !accepted_intakes;"other_intakes",`Int (List.length !other_intakes);
+     "durable_job_notifications_before_hint",`Int (List.length job_notifications);
+     "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
+
+let invocation_binding_job_ids fixture =
+  let directory = Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path)
+         "keeper_msg_requests") "owned_job_invocations" in
+  Array.to_list (Sys.readdir directory)
+  |> List.filter (fun name -> Filename.check_suffix name ".json")
+  |> List.map (fun name ->
+      Yojson.Safe.from_file (Filename.concat directory name) |> member "job_id" |> to_string)
+
+let test_interrupted_prepared_launch_resumes_the_same_job () = with_fixture @@ fun env initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  let module Async = Masc.Keeper_msg_async in
+  let module Draft = Masc.Keeper_composition_draft in
+  let module Plan = Masc.Keeper_tool_plan in
+  let module Executor = Masc.Keeper_tool_plan_executor in
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  Call_log.init ~base_path:fixture.base_path ();
+  control fixture (`Assoc ["mode", `String "start_blocked"]);
+  let recipe = `Assoc
+    [ "execution", `String "async"
+    ; "nodes", `List
+        [ `Assoc
+            [ "id", `String "launch"
+            ; "tool", `String "keeper_job_start"
+            ; "input", `Assoc
+                [ "kind", `String "literal"
+                ; "value", `Assoc ["argv", `List [`String "fixture-program"]] ] ] ] ] in
+  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-interrupted" ~turn:41 "keeper_composition_prepare" recipe) in
+  let reference = prepared |> member "draft" |> composition_reference "interrupted launch draft" in
+  let capability_surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
+  let draft = Draft.load ~base_path:fixture.base_path ~capability_surface ~keeper_name:keeper
+      ~sha256:reference.sha256 |> require "interrupted launch draft" in
+  let composition_run_id = Plan.Composition_run_id.fresh () in
+  let parent_invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"run-interrupted"
+      ~turn:41 ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let run_reference = Draft.record_invocation ~base_path:fixture.base_path ~composition_run_id
+      ~invocation:parent_invocation draft |> require "interrupted launch run artifact" in
+  let source : Journal.source =
+    { keeper_name = keeper; composition_run_id
+    ; draft_reference = Draft.reference draft; run_reference
+    ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation
+    ; source_turn = 41; source_task_id = Some "task-A" } in
+  let journal = Journal.prepare ~base_path:fixture.base_path source |> require "interrupted launch journal" in
+  let request_context = Some
+      [ "composition_tool", `String Draft.run_tool_name
+      ; "parent_tool_use_id", `String source.parent_tool_use_id
+      ; "source_turn", `Int 41
+      ; "composition_run_id", `String (Plan.Composition_run_id.to_string composition_run_id)
+      ; "draft_reference", Tool_output.normalized_artifact_ref_to_json source.draft_reference
+      ; "run_artifact", Tool_output.normalized_artifact_ref_to_json source.run_reference
+      ; "source_task_id", `String "task-A" ] in
+  let publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context =
+    {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
+  let config = Workspace.default_config fixture.base_path in
+  let execute worker request_sw =
+    Eio_context.with_turn_switch request_sw (fun () ->
+      Executor.execute_keeper ~capability_surface ~plan:(Draft.plan draft)
+        ~run_id:(Plan.Run_id.fresh ()) ~composition_run_id ~parent_invocation
+        ~config ~meta:fixture.meta ~publication_recovery
+        ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"interrupted launch fixture")
+        ~keeper_turn_id:(fun () -> Some 41)
+        ~source_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell ())
+        ~clock:(Eio.Stdenv.clock env) ~journal:worker ()) in
+  (* The first worker reaches the launch effect; the synthetic transport keeps
+     the start reply, and the abandoned worker leaves the launch leaf
+     Attempting between begin_attempt and settle_attempt. *)
+  let worker1 = ref None in
+  let settled1, notify_settled1 = Eio.Promise.create () in
+  let first = Async.submit_worker_with_request_id ?request_context
+      ~background_sw:(Async.server_background_switch () |> require "interrupted worker switch")
+      ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~on_accepted:(fun request_id ->
+        match Journal.bind_request journal ~request_id with
+        | Ok worker -> worker1 := Some worker; Ok ()
+        | Error error -> Error (Journal.error_to_string error))
+      ~on_worker_settled:(Eio.Promise.resolve notify_settled1)
+      ~f:(fun ~request_id:_ request_sw ->
+        let worker = match !worker1 with Some worker -> worker | None -> fail "unbound interrupted worker" in
+        let rec await_start () =
+          if Sys.file_exists (Filename.concat fixture.base_path "start-entered") then ()
+          else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.005; await_start ()) in
+        let interrupted = Eio.Fiber.first
+            (fun () -> ignore (execute worker request_sw); false)
+            (fun () -> await_start (); true) in
+        check bool "start reply interrupted after the launch effect" true interrupted;
+        Async.worker_finished (Tool_result.make_err ~tool_name:Draft.run_tool_name
+          ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Effect_outcome_unknown
+          ~start_time:(Tool_timing.start ()) "interrupted launch worker")) () in
+  ignore first;
+  ignore (Eio.Promise.await settled1);
+  let bound_ids = invocation_binding_job_ids fixture in
+  check int "interrupted launch reserved exactly one job" 1 (List.length bound_ids);
+  let id = List.hd bound_ids in
+  (match (load fixture id).phase with
+   | Store.Start_requested _ -> ()
+   | _ -> fail "interrupted launch did not retain its exact start intent");
+  check int "interrupted launch created the job exactly once" 1 (effect_count fixture "create");
+  check int "interrupted launch started the program exactly once" 1 (effect_count fixture "start");
+  (match Journal.lookup (Option.get !worker1) ~node_id:(Plan.Node_id.make "launch" |> require "launch node")
+        ~tool_name:"keeper_job_start" ~input:(`Assoc ["argv", `List [`String "fixture-program"]]) with
+   | Ok (Journal.Recheck_launch replay) ->
+     check string "interrupted launch replay preserves its recorded trace"
+       (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) replay.Journal.invocation.trace_id;
+     check int "interrupted launch replay preserves its recorded turn" 41
+       (Ids.Turn_ref.absolute_turn replay.Journal.invocation.turn_ref)
+   | Ok _ -> fail "interrupted launch leaf did not authorize a launch replay"
+   | Error error -> fail (Journal.error_to_string error));
+  Process_eio.reset_for_testing (); initialize ();
+  (* A later turn resumes the run. The ambient identity differs from the
+     recorded one; replay must still reach the same owned job. *)
+  set_source fixture ~task_id:"task-A" ~turn:52;
+  let worker2 = ref None and executed2 = ref None in
+  let settled2, notify_settled2 = Eio.Promise.create () in
+  let second = Async.submit_worker_with_request_id ?request_context
+      ~background_sw:(Async.server_background_switch () |> require "resuming worker switch")
+      ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~on_accepted:(fun request_id ->
+        match Journal.bind_request journal ~request_id with
+        | Ok worker -> worker2 := Some worker; Ok ()
+        | Error error -> Error (Journal.error_to_string error))
+      ~on_worker_settled:(Eio.Promise.resolve notify_settled2)
+      ~f:(fun ~request_id:_ request_sw ->
+        let worker = match !worker2 with Some worker -> worker | None -> fail "unbound resuming worker" in
+        let result = execute worker request_sw in
+        executed2 := Some result;
+        match result with
+        | Ok _rows ->
+          Async.worker_finished (Masc.Keeper_types_profile.tool_result_ok_data
+            ~tool_name:Draft.run_tool_name (`Assoc ["composition_run_id",
+              `String (Plan.Composition_run_id.to_string composition_run_id)]))
+        | Error _failure ->
+          Async.worker_finished (Masc.Keeper_types_profile.tool_result_error_data
+            ~tool_name:Draft.run_tool_name ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Effect_outcome_unknown
+            (`Assoc ["composition_run_id", `String (Plan.Composition_run_id.to_string composition_run_id)])))
+      () in
+  ignore second;
+  ignore (Eio.Promise.await settled2);
+  let rows = match !executed2 with
+    | Some (Ok rows) -> rows
+    | Some (Error _) | None -> fail "resumed launch run did not complete" in
+  let resumed_launch = List.find
+      (fun (row : Executor.node_result) ->
+         Plan.Node_id.equal row.Executor.node_id (Plan.Node_id.make "launch" |> require "launch node"))
+      rows in
+  check bool "resumed launch settles fresh" true
+    (resumed_launch.execution_origin = Executor.Fresh_dispatch);
+  let job = load fixture id in
+  check string "resumed launch returns the same job" id (Store.Job_id.to_string job.job_id);
+  check int "resume never recreates the original program" 1 (effect_count fixture "create");
+  check int "resume never restarts the original program" 1 (effect_count fixture "start");
+  let terminal = Async.load_canonical_durable_terminal ~base_path:fixture.base_path ~caller:keeper
+      (match second with Ok outcome -> outcome.request_id | Error _ -> fail "resume not accepted")
+    |> require "resumed canonical terminal" |> Async.durable_terminal_entry in
+  (match terminal.status with
+   | Async.Done {ok=true;_} -> ()
+   | _ -> fail "resumed launch run did not settle successfully");
+  Printf.printf "OWNED_INTERRUPTED_LAUNCH_RESUME job=%s phase=%s\n%!" id
+    (match job.phase with Store.Running _ -> "running" | _ -> "other")
+
 exception Fixture_result_observer_failed
 
 let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun env _initialize fixture ->
@@ -2281,5 +2583,7 @@ let () =
       ; test_case "finished without outputs and absent inventory is notified once and leaves waiting" `Quick test_finished_without_outputs_absent_inventory_notified_once
       ; test_case "running with absent inventory is notified once and leaves waiting" `Quick test_running_absent_inventory_notified_once
       ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag
+      ; test_case "prepared DAG launches an owned job and resumes its original result" `Quick test_prepared_job_launch_and_continuation
+      ; test_case "interrupted prepared launch resumes the same job without recreating it" `Quick test_interrupted_prepared_launch_resumes_the_same_job
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

@@ -133,25 +133,24 @@ let entry_for_call ~capability_surface (node : nested_node) =
       | Surface.Exact_skill (Inventory.Valid valid) -> Skill_reference.equal valid.reference node.reference
       | Surface.Exact_skill (Inventory.Invalid invalid) -> Option.exists (Skill_reference.equal node.reference) invalid.reference
       | Surface.Missing_configured_skill_name _ -> false) in
+  let unavailable availability =
+    Error (Reference_unavailable { alias = node.alias; reference = node.reference; availability }) in
   match row with
-  | None ->
-    Error (Reference_unavailable { alias = node.alias; reference = node.reference; availability = None })
+  | None -> unavailable None
   | Some row ->
     (match row.identity, row.exposure, row.availability with
      | Surface.Exact_skill (Inventory.Valid valid), Surface.Model_visible, Surface.Active ->
        (match valid.kind with
         | Inventory.Instruction -> Error (Instruction_reference node.alias)
         | Inventory.Composition entry -> Ok entry)
-     | ( Surface.Exact_skill (Inventory.Valid _)
-       | Surface.Exact_skill (Inventory.Invalid _)
-       | Surface.Missing_configured_skill_name _ )
-     , (Surface.Model_visible | Surface.Operator_only)
-     , ( Surface.Active | Surface.Outside_skill_surface | Surface.Not_model_invocable
-       | Surface.Denied_by_profile | Surface.Refused_by_sandbox _
-       | Surface.Node_tools_outside_surface _ | Surface.Invalid_definition
-       | Surface.Missing_configured_skill ) ->
-       Error (Reference_unavailable
-         { alias = node.alias; reference = node.reference; availability = Some row.availability }))
+     | (Surface.Exact_skill (Inventory.Valid _ | Inventory.Invalid _)
+        | Surface.Missing_configured_skill_name _),
+       (Surface.Model_visible | Surface.Operator_only),
+       (Surface.Active | Surface.Outside_skill_surface | Surface.Not_model_invocable
+        | Surface.Denied_by_profile | Surface.Refused_by_sandbox _
+        | Surface.Node_tools_outside_surface _ | Surface.Invalid_definition
+        | Surface.Missing_configured_skill) ->
+       unavailable (Some row.availability))
 ;;
 
 let expand ~capability_surface ~policy = function
@@ -247,9 +246,9 @@ let validate_leaves plan =
   let* () = List.fold_left (fun acc (node : Plan.node) ->
       let* () = acc in
       match Plan.descriptor plan node.id with
-      | Some descriptor -> (match descriptor.Keeper_tool_descriptor.execution, Keeper_tool_descriptor.readonly_static_hint descriptor with
-          | Keeper_tool_descriptor.Ordinary _, Some true -> Ok ()
-          | Keeper_tool_descriptor.Terminal, _ | Keeper_tool_descriptor.Ordinary _, (None | Some false) ->
+      | Some descriptor -> (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
+          | Read_only_ordinary_leaf | Owned_job_launch_leaf -> Ok ()
+          | Direct_only ->
             Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name }))
       | None -> Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name })) (Ok ()) (Plan.nodes plan) in
   Plan.prepare_inputs plan |> Result.map (fun _ -> ()) |> Result.map_error (fun (id, error) -> Inputs_rejected (id, error))

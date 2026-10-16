@@ -55,9 +55,15 @@ let observe (record : Store.record) observation =
              (save record ~phase:record.phase ~cancel_requested:record.cancel_requested
                 ~outputs:(Some (Store.Outputs_unavailable {evidence}))
                 ~detail:(Some evidence)))
-  | _, Backend.Unconfirmed detail -> preserve detail
-  | _, Backend.Absent -> preserve "saved backend job is absent; launch intent is retained, no relaunch"
-  | _, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
+  | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+      | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _
+      | Store.Cancelled_unconfirmed_launch), Backend.Unconfirmed detail -> preserve detail
+  | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+      | Store.Cancelled_before_start _), Backend.Absent ->
+      preserve "saved backend job is absent; launch intent is retained, no relaunch"
+  | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
+      | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _),
+      (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
       preserve "backend observation differs from durable job phase or handle"
 
 let backend_result record = function

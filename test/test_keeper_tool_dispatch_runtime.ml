@@ -8665,7 +8665,7 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
            | Ok plan -> plan | Error _ -> fail "refusal fixture plan was rejected" in
          let execution = Masc.Keeper_tool_plan_executor.execute ~plan
            ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
-           ~dispatch:(fun ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input:_ ->
+           ~dispatch:(fun ?launch_replay:_ ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input:_ () ->
              Masc.Keeper_tool_plan_executor.dispatch_result
                ~failure_effect_disposition:Tool_result.Proven_pre_effect
                (Tool_result.make_err ~tool_name:"keeper_lane_status"

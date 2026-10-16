@@ -161,7 +161,7 @@ let test_child_failure_blocks_whole_child_consumers_but_keeps_exports () =
       ; leaf ~after:[ "child" ] "uses-after"; leaf "independent" ]) in
   let plan = Nested.plan compiled in
   let dispatched = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     dispatched := node.Plan.id :: !dispatched;
     if node.tool_name = "keeper_memory_search" then
       Executor.dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect

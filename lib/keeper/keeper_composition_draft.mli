@@ -41,7 +41,8 @@ val prepare
 (** Compile ordinary nodes or exact frozen inline child Skill references,
     preflight every fixed argument/input, and durably store the original recipe,
     flattened plan, child provenance, owner, execution mode and contracts.
-    Every leaf must be statically read-only and ordinary. Nested recipes use
+    Ordinary leaves carry either a static read-only contract or the isolated
+    owned-job launch producer's durable Serial effect contract. Nested recipes use
     inline execution; async worker binding and named nested publication are
     separate contracts. Ordinary drafts support both execution modes. *)
 (* Optional [skill] metadata freezes [package_id] and [description] into a

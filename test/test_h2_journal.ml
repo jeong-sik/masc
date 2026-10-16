@@ -130,7 +130,7 @@ type submission =
   ; execution : (Executor.node_result list, Executor.failure) result option ref }
 let submit ?request_context ?(caller = keeper) ?(target = keeper)
     ?(on_acceptance_probe = fun _ -> ())
-    ?(before_execute = fun _ -> ()) ?plan ?observe base_path sw prepared dispatch =
+    ?(before_execute = fun _ -> ()) ?plan ?observe ?launch_invocation_of base_path sw prepared dispatch =
   let bound = ref None and admission_error = ref None and execution = ref None in
   let terminal, resolver = Eio.Promise.create () in
   let request_context = Option.value request_context ~default:(context prepared.source) in
@@ -150,7 +150,7 @@ let submit ?request_context ?(caller = keeper) ?(target = keeper)
         let worker = match !bound with Some worker -> worker | None -> fail "unbound worker dispatched" in
         before_execute worker;
         let result = Executor.execute ~plan:(Option.value plan ~default:(Draft.plan prepared.draft))
-            ~run_id:(Plan.Run_id.fresh ()) ~journal:worker ~dispatch ?observe_node_result:observe () in
+            ~run_id:(Plan.Run_id.fresh ()) ~journal:worker ~dispatch ?launch_invocation_of ?observe_node_result:observe () in
         execution := Some result;
         let data = `Assoc ["composition_run_id", `String (Plan.Composition_run_id.to_string prepared.source.composition_run_id)] in
         match result with
@@ -208,10 +208,10 @@ let failing phase (node : Plan.node) =
   Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Dependency_unavailable
     ~start_time:(Tool_timing.start ()) ~effect_disposition:phase "producer failure"
   |> Executor.dispatch_result ~failure_effect_disposition:phase
-let initial_dispatch base_path phase ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+let initial_dispatch base_path phase ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
   if node_name node = "consumer" then failing phase node
   else Executor.dispatch_result (success base_path node "original-profile")
-let resume_dispatch base_path calls ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
+let resume_dispatch base_path calls ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
   calls := node_name node :: !calls;
   if node_name node = "consumer" then check_json "saved producer drives dependent input"
       (`Assoc ["query", `String "original-profile"]) input;
@@ -302,7 +302,7 @@ let expect_admission_error expected = function
       (Async.submit_error_to_json error |> Yojson.Safe.to_string)
       (Option.fold ~none:"none" ~some:Journal.error_to_string journal_error)
   | Ok _ -> fail "invalid resume accepted"
-let no_dispatch calls ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input:_ =
+let no_dispatch calls ?launch_replay:_ ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input:_ () =
   incr calls; fail "unsafe dispatch"
 let test_source_and_plan_identity () = with_workspace (fun _env sw base_path ->
   let prepared = prepare base_path in
@@ -324,7 +324,7 @@ let test_source_and_plan_identity () = with_workspace (fun _env sw base_path ->
    | _ -> fail "changed plan did not refuse before dispatch");
   ignore (Journal.begin_attempt changed.worker ~node_id:(node_id "consumer") ~tool_name:"masc_board_search"
       ~input:(`Assoc ["query", `String "original-profile"]) ~execution_id:(Ids.Execution_id.generate ())
-      ~tool_use_id:"original-consumer" ~readonly:true |> journal_value "record input identity");
+      ~tool_use_id:"original-consumer" ~readonly:true () |> journal_value "record input identity");
   (match Journal.lookup changed.worker ~node_id:(node_id "consumer") ~tool_name:"masc_board_search"
       ~input:(`Assoc ["query", `String "different"]) with
    | Error (Journal.Node_identity_conflict _) -> () | _ -> fail "changed node input accepted");
@@ -406,7 +406,7 @@ let test_owned_transport_and_race () = with_workspace (fun env sw base_path ->
   ignore (await base_path first);
   let attempt = Journal.begin_attempt first.worker ~node_id:(node_id "consumer") ~tool_name:"masc_board_search"
       ~input:(`Assoc ["query", `String "original-profile"]) ~execution_id:(Ids.Execution_id.generate ())
-      ~tool_use_id:"pre-resume-occurrence" ~readonly:true |> journal_value "original attempt" in
+      ~tool_use_id:"pre-resume-occurrence" ~readonly:true () |> journal_value "original attempt" in
   let resume_release, resume_resolver = Eio.Promise.create () in
   let calls = ref [] in
   let contender () = submit ~before_execute:(fun _ -> Eio.Promise.await resume_release)
@@ -436,7 +436,7 @@ let test_owned_transport_and_race () = with_workspace (fun env sw base_path ->
 let test_unproven_outcomes_refuse_replay () =
   List.iter (fun outcome -> with_workspace (fun _env sw base_path ->
     let prepared = prepare base_path in
-    let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
       if node_name node <> "consumer" then Executor.dispatch_result (success base_path node "original-profile")
       else match outcome with
         | `Failure phase -> failing phase node
@@ -462,7 +462,7 @@ let test_unproven_outcomes_refuse_replay () =
 
 let test_foreign_job_wait_receipt_is_rejected () = with_workspace (fun _env sw base_path ->
   let prepared = prepare base_path in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     if node_name node <> "consumer" then Executor.dispatch_result (success base_path node "original-profile")
     else Executor.dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
       ~deferred_kind:(Masc.Keeper_tool_execution.Owned_job_result_wait
@@ -481,7 +481,7 @@ let test_foreign_job_wait_receipt_is_rejected () = with_workspace (fun _env sw b
 let test_cancelled_readonly_attempt () = with_workspace (fun _env sw base_path ->
   let prepared = prepare base_path in
   let entered, enter = Eio.Promise.create () and never, _ = Eio.Promise.create () in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     if node_name node = "consumer" then (Eio.Promise.resolve enter (); Eio.Promise.await never);
     Executor.dispatch_result (success base_path node "original-profile") in
   let first = submit base_path sw prepared dispatch |> accepted in
@@ -714,7 +714,7 @@ let test_exact_queued_admission () = with_workspace (fun env sw base_path ->
           (function Async.Canonical_queued_not_queued Async.Running
             | Canonical_queued_runtime_nonqueued Async.Running -> true | _ -> false))
       base_path sw prepared
-      (fun ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ ->
+      (fun ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () ->
         incr calls; Executor.dispatch_result (success base_path node "original-profile"))
     |> accepted in
   ignore (await base_path submission);
@@ -726,7 +726,7 @@ let test_exact_queued_admission () = with_workspace (fun env sw base_path ->
 let test_pending_marker_retirement_rejects_replacement () =
   List.iter (fun damage -> with_workspace (fun _env sw base_path ->
     let prepared = prepare base_path in
-    let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
       Executor.dispatch_result (success base_path node "original-profile") in
     let submission = submit base_path sw prepared dispatch |> accepted in
     ignore (await base_path submission);
@@ -781,7 +781,7 @@ let test_pending_marker_retirement_rejects_replacement () =
 let test_pending_marker_retirement_settlement () =
   List.iter (fun failure -> with_workspace (fun _env sw base_path ->
     let prepared = prepare base_path in
-    let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
       Executor.dispatch_result (success base_path node "original-profile") in
     let submission = submit base_path sw prepared dispatch |> accepted in
     ignore (await base_path submission);
@@ -827,6 +827,146 @@ let test_pending_marker_retirement_settlement () =
     Unix.chmod lock_path 0o600))
     [`Close; `Parent_sync]
 
+let launch_input = `Assoc ["argv", `List [`String "fixture-program"]]
+let make_launch_plan () =
+  Plan.create ~descriptors:(List.map descriptor ["keeper_job_start"])
+    ~branch_failure_policy:Plan.Continue_independent
+    [Plan.node ~id:(node_id "launcher") ~tool_name:"keeper_job_start"
+       ~input:(Plan.Json_template.literal launch_input) ()]
+  |> require "valid owned launch plan"
+let launch_invocation_fixture absolute_turn =
+  { Journal.trace_id = "launch-trace-fixture"
+  ; turn_ref = Ids.Turn_ref.make ~trace_id:"launch-trace-fixture" ~absolute_turn }
+let launch_success (node : Plan.node) =
+  Executor.dispatch_result
+    (Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ())
+       ~data:(`Assoc
+         [ "job_id", `String "00000000-0000-7777-8000-000000000001"
+         ; "status", `String "running"
+         ; "source", `Assoc
+             [ "task_id", `Null
+             ; "turn_ref", `String "launch-trace-fixture#41"
+             ; "tool_use_id", `String "fixture-launch"
+             ; "trace_id", `String "launch-trace-fixture"
+             ; "keeper_turn_id", `Int 41 ]
+         ; "phase", `String "running"
+         ; "cancel_requested", `Bool false
+         ; "artifacts", `List []
+         ; "detail", `Null
+         ; "container_id", `Null
+         ; "exit_code", `Null ])
+       ())
+let check_recheck_identity label expected replay =
+  check string (label ^ " trace") expected.Journal.trace_id replay.Journal.invocation.trace_id;
+  check int (label ^ " absolute turn") (Ids.Turn_ref.absolute_turn expected.turn_ref)
+    (Ids.Turn_ref.absolute_turn replay.invocation.turn_ref);
+  check string (label ^ " turn trace") (Ids.Turn_ref.trace_id expected.turn_ref)
+    (Ids.Turn_ref.trace_id replay.invocation.turn_ref)
+
+let test_interrupted_launch_replays_with_recorded_identity () = with_workspace (fun _env sw base_path ->
+  let prepared = prepare ~plan:(make_launch_plan ()) base_path in
+  let recorded = launch_invocation_fixture 41 in
+  let entered, enter = Eio.Promise.create () and never, _ = Eio.Promise.create () in
+  let original_occurrence = ref None in
+  let dispatch ?launch_replay:_ ~tool_use_id ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+    if node_name node = "launcher" then (
+      original_occurrence := Some tool_use_id;
+      Eio.Promise.resolve enter (); Eio.Promise.await never);
+    launch_success node in
+  let first = submit ~launch_invocation_of:(fun () -> Some recorded) base_path sw prepared dispatch
+    |> accepted in
+  Eio.Promise.await entered;
+  (match Async.cancel ~base_path ~caller:keeper first.request.request_id with
+   | Cancellation_requested Durably_committed -> () | _ -> fail "owned cancellation not durable");
+  (match (await base_path first).status with
+   | Cancelled _ -> () | _ -> fail "cancelled launch worker has no canonical terminal");
+  (match Journal.lookup first.worker ~node_id:(node_id "launcher") ~tool_name:"keeper_job_start" ~input:launch_input with
+   | Ok (Journal.Recheck_launch replay) ->
+     check string "interrupted attempt preserves its occurrence" (Option.get !original_occurrence)
+       replay.Journal.tool_use_id;
+     check_recheck_identity "interrupted attempt" recorded replay
+   | Ok _ -> fail "interrupted launch leaf did not authorize a launch replay"
+   | Error error -> failf "interrupted launch lookup: %s" (Journal.error_to_string error));
+  (* A later owner derives a different ambient identity. The replay must still
+     carry the identity recorded on the durable occurrence. *)
+  let replay_seen = ref None and calls = ref [] in
+  let resume ?launch_replay ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+    replay_seen := launch_replay;
+    calls := node_name node :: !calls;
+    launch_success node in
+  let second = submit ~launch_invocation_of:(fun () -> Some (launch_invocation_fixture 52))
+      base_path sw prepared resume |> accepted in
+  ignore (await base_path second);
+  check (list string) "interrupted launch leaf redispatches" ["launcher"] !calls;
+  (match !replay_seen with
+   | Some replay ->
+     check string "resume replays the original occurrence" (Option.get !original_occurrence)
+       replay.Journal.tool_use_id;
+     check_recheck_identity "resume carries the recorded identity, not the ambient one" recorded replay
+   | None -> fail "replayed launch dispatch carried no recorded invocation");
+  (match executed second with
+   | Ok rows ->
+     let row = node_result "launcher" rows in
+     check bool "replayed launch settles fresh" true (row.Executor.execution_origin = Executor.Fresh_dispatch);
+     check string "replayed launch keeps the original occurrence join key" (Option.get !original_occurrence)
+       row.Executor.tool_use_id
+   | Error _ -> fail "replayed launch leaf did not complete");
+  check_completion base_path prepared second)
+
+let test_unknown_launch_effect_replays_with_recorded_identity () = with_workspace (fun _env sw base_path ->
+  let prepared = prepare ~plan:(make_launch_plan ()) base_path in
+  let recorded = launch_invocation_fixture 41 in
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~(node : Plan.node) ~descriptor:_ ~schedule:_ ~input:_ () =
+    Executor.dispatch_result ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
+      (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Runtime_failure
+         ~effect_disposition:Tool_result.Effect_outcome_unknown
+         ~start_time:(Tool_timing.start ()) "lost reply around the launch effect") in
+  let first = submit ~launch_invocation_of:(fun () -> Some recorded) base_path sw prepared dispatch
+    |> accepted in
+  ignore (await base_path first);
+  (match Journal.lookup first.worker ~node_id:(node_id "launcher") ~tool_name:"keeper_job_start" ~input:launch_input with
+   | Ok (Journal.Recheck_launch replay) -> check_recheck_identity "unknown launch effect" recorded replay
+   | Ok _ -> fail "unknown launch effect did not authorize a launch replay"
+   | Error error -> failf "unknown launch lookup: %s" (Journal.error_to_string error));
+  let calls = ref 0 in
+  let resume ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+    incr calls; launch_success node in
+  let second = submit ~launch_invocation_of:(fun () -> Some recorded) base_path sw prepared resume
+    |> accepted in
+  ignore (await base_path second);
+  check int "unknown launch effect redispatches exactly once" 1 !calls;
+  (match executed second with
+   | Ok _ -> ()
+   | Error _ -> fail "replayed unknown launch effect did not complete");
+  check_completion base_path prepared second)
+
+let test_launch_leaf_refuses_incomplete_invocation_identity () = with_workspace (fun _env sw base_path ->
+  let prepared = prepare ~plan:(make_launch_plan ()) base_path in
+  let calls = ref 0 in
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+    incr calls; launch_success node in
+  let refused = function
+    | Error {Executor.cause = Executor.Tool_did_not_complete row; _} ->
+      check bool "incomplete identity refuses before dispatch" true
+        (row.Executor.execution_origin = Executor.Dispatch_refused);
+      check_json "refusal names the incomplete launch identity"
+        (`String "launch_invocation_incomplete")
+        (Tool_result.to_json row.Executor.result |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "kind")
+    | Ok _ | Error _ -> fail "incomplete launch identity was admitted" in
+  let first = submit base_path sw prepared dispatch |> accepted in
+  ignore (await base_path first);
+  check int "launch without identity derivation never dispatches" 0 !calls;
+  refused (executed first);
+  (* An explicit derivation that cannot complete is refused the same way, and
+     the refusal happens before any durable attempt is recorded. *)
+  let second = submit ~launch_invocation_of:(fun () -> None) base_path sw prepared dispatch |> accepted in
+  ignore (await base_path second);
+  check int "incomplete derived identity never dispatches" 0 !calls;
+  refused (executed second);
+  (match Journal.lookup second.worker ~node_id:(node_id "launcher") ~tool_name:"keeper_job_start" ~input:launch_input with
+   | Ok Journal.Dispatch -> ()
+   | Ok _ | Error _ -> fail "identity refusal left a durable attempt behind"))
+
 let () = match Array.to_list Sys.argv with
   | [_; "--resume-child"; base_path; run_id] -> child_resume base_path run_id
   | [_; "--refuse-active-child"; base_path; run_id] -> child_refuse_active base_path run_id
@@ -842,4 +982,7 @@ let () = match Array.to_list Sys.argv with
         test_case "public prepare run resume preserves original task" `Quick test_public_run_resume_keeps_original_task;
         test_case "pending marker retirement retains physical and same-inode replacements" `Quick test_pending_marker_retirement_rejects_replacement;
         test_case "pending marker retirement preserves settlement and durability failures" `Quick test_pending_marker_retirement_settlement;
-        test_case "exact Queued admission and matched inventory read measurements" `Quick test_exact_queued_admission]]
+        test_case "exact Queued admission and matched inventory read measurements" `Quick test_exact_queued_admission;
+        test_case "interrupted launch leaf replays with its recorded identity" `Quick test_interrupted_launch_replays_with_recorded_identity;
+        test_case "unknown launch effect replays with its recorded identity" `Quick test_unknown_launch_effect_replays_with_recorded_identity;
+        test_case "launch leaf refuses incomplete invocation identity" `Quick test_launch_leaf_refuses_incomplete_invocation_identity]]

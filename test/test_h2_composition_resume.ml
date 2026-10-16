@@ -157,7 +157,7 @@ let make_plan () =
 
 (* dispatch: 노드 a·b 의 효과를 흉내 내고, crash flag 가 있으면 흔적을
    남긴 뒤 그대로 예외로 전파한다 (executor 는 이를 settlement 로 삼는다). *)
-let dispatch ~marker_for ~commit_crash ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
+let dispatch ~marker_for ~commit_crash ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
   let id = Plan.Node_id.to_string node.Plan.id in
   log "DISPATCH %s input=%s" id (Yojson.Safe.to_string input);
   (match marker_for id with
@@ -313,7 +313,7 @@ let s2_disposition_preserved () =
   stage "s2: failed node keeps its declared effect disposition";
   reset ();
   let plan, _a, _b = make_plan () in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     Executor.dispatch_result
       ~failure_effect_disposition:Tool_result.Proven_pre_effect
       (Tool_result.make_err

@@ -90,12 +90,20 @@ type failure = private
   }
 
 type dispatch =
-  tool_use_id:string
+  ?launch_replay:Keeper_tool_execution_journal.recheck_launch
+  -> tool_use_id:string
   -> node:Keeper_tool_plan.node
   -> descriptor:Keeper_tool_descriptor.t
   -> schedule:Agent_core.Tool_contract.schedule
   -> input:Yojson.Safe.t
+  -> unit
   -> dispatch_result
+(** [launch_replay] accompanies the replayed dispatch of an owned launch leaf:
+    the original occurrence identity plus the invocation identity recorded on
+    the durable journal occurrence. Adapters that run the real Keeper handler
+    use it to re-derive exactly the recorded invocation identity, so the
+    owned-job start is idempotent across interruption. Dispatchers that never
+    admit launch leaves may ignore it. *)
 
 (** Execute a validated plan as a dynamic ready wave to completion. Before any
     node runs, every node input that reads no producer output is validated
@@ -120,6 +128,12 @@ type dispatch =
     composable output, so it cannot satisfy a downstream output reference and
     ends this worker attempt. A prepared run can later recheck a producer-owned
     [keeper_job_result] wait for that same job; other deferrals reject replay.
+    A journaled owned launch leaf must be able to name its exact invocation
+    identity through [launch_invocation_of] (trace_id, turn_ref, and the
+    executor-minted non-empty tool_use_id): the durable attempt records it,
+    and an interrupted launch replays with it later. Without a complete
+    identity the executor refuses the launch dispatch before any durable
+    attempt, instead of starting a job interruption could not re-prove.
     The executor mints one non-empty [tool_use_id] before calling [dispatch];
     the dispatch, exception settlement, durable row, and live refresh all share
     that identity. [observe_node_result], when supplied, is part of settlement: an observation
@@ -136,6 +150,7 @@ val execute
   :  plan:Keeper_tool_plan.t
   -> run_id:Keeper_tool_plan.Run_id.t
   -> dispatch:dispatch
+  -> ?launch_invocation_of:(unit -> Keeper_tool_execution_journal.launch_invocation option)
   -> ?journal:Keeper_tool_execution_journal.worker
   -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
@@ -148,7 +163,11 @@ val execute
     the handler. A rejection settles the leaf as a runtime failure with
     [Proven_pre_effect], preserving the normal branch failure policy.
     [source_context] is the original composition invocation snapshot passed
-    unchanged to each leaf; absence remains unavailable source context. *)
+    unchanged to each leaf; absence remains unavailable source context. A
+    replayed launch leaf is the one exception: its dispatch re-derives the
+    invocation identity recorded on the durable journal occurrence, never the
+    resuming turn's ambient context, so the owned-job invocation binding
+    returns the same job. *)
 val execute_keeper
   :  capability_surface:Keeper_capability_surface.t
   -> plan:Keeper_tool_plan.t

@@ -186,11 +186,13 @@ type failure =
   }
 
 type dispatch =
-  tool_use_id:string
+  ?launch_replay:Keeper_tool_execution_journal.recheck_launch
+  -> tool_use_id:string
   -> node:Keeper_tool_plan.node
   -> descriptor:Keeper_tool_descriptor.t
   -> schedule:Agent_core.Tool_contract.schedule
   -> input:Yojson.Safe.t
+  -> unit
   -> dispatch_result
 
 type node_settlement =
@@ -282,6 +284,7 @@ let execute_one
       ~outputs
       ~tool_use_id_for_node
       ~dispatch
+      ?launch_invocation_of
       ?journal
       ?observe_node_result
       scheduled
@@ -333,7 +336,25 @@ let execute_one
            ~data:(Keeper_tool_execution_journal.error_to_json error)
            (Keeper_tool_execution_journal.error_to_string error))
     in
-    let dispatch_fresh ~tool_use_id () =
+    (* A launch leaf in a journaled run must stay re-provable after an
+       interruption. Refuse the dispatch before any durable attempt when its
+       exact invocation identity cannot be derived: launching without it could
+       never return to the same owned job. *)
+    let launch_identity_refusal () =
+      dispatch_result
+        ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err
+           ~class_:Tool_result.Policy_rejection
+           ~effect_disposition:Tool_result.Proven_pre_effect
+           ~tool_name:node.tool_name ~start_time
+           ~data:(`Assoc
+             [ "kind", `String "launch_invocation_incomplete"
+             ; "node_id", `String (Keeper_tool_plan.Node_id.to_string node_id)
+             ; "tool_name", `String node.tool_name ])
+           "composition launch leaf lacks complete invocation identity (trace_id, turn_ref, tool_use_id); \
+            refusing dispatch instead of launching a job that interruption cannot re-prove")
+    in
+    let dispatch_fresh ~tool_use_id ?launch_replay () =
       Cancel_safe.protect
         ~on_exn:(fun exn ->
           dispatch_result
@@ -342,8 +363,8 @@ let execute_one
                ~class_:Tool_result.Runtime_failure
                ~tool_name:node.tool_name ~start_time exn))
         (fun () ->
-           dispatch ~tool_use_id ~node ~descriptor:scheduled.descriptor
-             ~schedule:scheduled.schedule ~input)
+           dispatch ?launch_replay ~tool_use_id ~node ~descriptor:scheduled.descriptor
+             ~schedule:scheduled.schedule ~input ())
     in
     let execution_id, tool_use_id, execution_origin, result, journal_error =
       match journal with
@@ -358,23 +379,44 @@ let execute_one
            dispatch_result ~result_bytes:stored.result_bytes
              ?truncated_to:stored.truncated_to stored.result, None
          | Ok ((Keeper_tool_execution_journal.Dispatch
-              | Keeper_tool_execution_journal.Recheck_job_result _) as replay) ->
+              | Keeper_tool_execution_journal.Recheck_job_result _
+              | Keeper_tool_execution_journal.Recheck_launch _) as replay) ->
            let execution_id, tool_use_id = match replay with
              | Keeper_tool_execution_journal.Recheck_job_result stored ->
                  stored.execution_id, stored.tool_use_id
+             | Keeper_tool_execution_journal.Recheck_launch stored ->
+                 stored.execution_id, stored.tool_use_id
              | Keeper_tool_execution_journal.Dispatch
              | Keeper_tool_execution_journal.Reuse_completed _ -> execution_id, tool_use_id in
+           let launch_leaf =
+             Keeper_tool_descriptor.prepared_leaf_admission scheduled.descriptor
+             = Keeper_tool_descriptor.Owned_job_launch_leaf in
+           let launch_invocation, launch_replay = match replay with
+             | Keeper_tool_execution_journal.Recheck_launch stored ->
+                 Some stored.invocation, Some stored
+             | Keeper_tool_execution_journal.Dispatch
+             | Keeper_tool_execution_journal.Recheck_job_result _
+             | Keeper_tool_execution_journal.Reuse_completed _ ->
+                 if launch_leaf then
+                   (match launch_invocation_of with
+                    | Some derive -> derive (), None
+                    | None -> None, None)
+                 else None, None in
+           (match launch_leaf, launch_invocation with
+            | true, None ->
+                execution_id, tool_use_id, Dispatch_refused, launch_identity_refusal (), None
+            | _ ->
            let readonly =
              Keeper_tool_descriptor.readonly_for_input scheduled.descriptor ~input
              = Some true
            in
            match Keeper_tool_execution_journal.begin_attempt worker
                    ~node_id ~tool_name:node.tool_name ~input
-                   ~execution_id ~tool_use_id ~readonly with
+                   ~execution_id ~tool_use_id ~readonly ?launch_invocation () with
            | Error error ->
              execution_id, tool_use_id, Dispatch_refused, journal_failure error, None
            | Ok attempt ->
-             let result = dispatch_fresh ~tool_use_id () in
+             let result = dispatch_fresh ~tool_use_id ?launch_replay () in
              let result_bytes = match result.result_bytes with
                | Some bytes -> bytes
                | None -> String.length (Tool_result.message result.result)
@@ -389,7 +431,7 @@ let execute_one
                | Ok () -> None
                | Error error -> Some (Keeper_tool_execution_journal.error_to_string error)
              in
-             execution_id, tool_use_id, Fresh_dispatch, result, journal_error)
+             execution_id, tool_use_id, Fresh_dispatch, result, journal_error))
     in
     let result_bytes =
       match result.result_bytes with
@@ -456,6 +498,7 @@ let execute_with_tool_use_id
       ~run_id
       ~tool_use_id_for_node
       ~dispatch
+      ?launch_invocation_of
       ?journal
       ?observe_node_result
       ()
@@ -695,6 +738,7 @@ let execute_with_tool_use_id
                 ~outputs
                 ~tool_use_id_for_node
                 ~dispatch
+                ?launch_invocation_of
                 ?journal
                 ?observe_node_result
                 scheduled
@@ -796,7 +840,7 @@ let execute_with_tool_use_id
 
 (* TEL-OK: forwards to [execute_with_tool_use_id] below; no new effect
    originates here, so there is nothing local to instrument. *)
-let execute ~plan ~run_id ~dispatch ?journal ?observe_node_result () =
+let execute ~plan ~run_id ~dispatch ?launch_invocation_of ?journal ?observe_node_result () =
   let tool_use_id_for_node ~execution_id _node =
     "composition-node:" ^ Ids.Execution_id.to_string execution_id
   in
@@ -805,6 +849,7 @@ let execute ~plan ~run_id ~dispatch ?journal ?observe_node_result () =
     ~run_id
     ~tool_use_id_for_node
     ~dispatch
+    ?launch_invocation_of
     ?journal
     ?observe_node_result
     ()
@@ -897,7 +942,29 @@ let execute_keeper_with_authority
   else
   (* TEL-OK: [handler] below is Keeper_tools_agent_core_handler, which
      already records telemetry (Otel_metric_store.inc_counter). *)
-  let dispatch_admitted ~tool_use_id ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input =
+  let dispatch_admitted ?launch_replay ~tool_use_id ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input () =
+    (* A replayed launch re-calls the owned-job runtime with the occurrence's
+       recorded invocation identity, never the resuming turn's ambient
+       context. Overriding both the ledger turn and the source snapshot makes
+       the runtime derive exactly the recorded (trace_id, turn_ref) pair, so
+       the invocation binding returns the same job. *)
+    let keeper_turn_id, source_context =
+      match (launch_replay : Keeper_tool_execution_journal.recheck_launch option) with
+      | None -> keeper_turn_id, source_context
+      | Some replay ->
+          let absolute_turn = Ids.Turn_ref.absolute_turn replay.invocation.turn_ref in
+          let apply (context : Keeper_tool_call_log_context.turn_context) =
+            { context with
+              Keeper_tool_call_log_context.trace_id = Some replay.invocation.trace_id
+            ; turn = Some absolute_turn
+            ; keeper_turn_id = Some absolute_turn } in
+          (fun () -> Some absolute_turn),
+          (match source_context with
+           | Some context -> Some (apply context)
+           | None ->
+             Some (apply { Keeper_tool_call_log_context.empty_turn_context with
+               agent_name = Some meta.Keeper_meta_contract.name }))
+    in
     let terminal_on_completed, terminal_on_failed =
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed
@@ -971,14 +1038,39 @@ let execute_keeper_with_authority
         ?truncated_to
         result
   in
-  let dispatch ~tool_use_id ~node ~descriptor ~schedule ~input =
+  let dispatch ?launch_replay ~tool_use_id ~node ~descriptor ~schedule ~input () =
     match (match admit_node with None -> Ok () | Some admit -> admit ~node) with
-    | Ok () -> dispatch_admitted ~tool_use_id ~node ~descriptor ~schedule ~input
+    | Ok () -> dispatch_admitted ?launch_replay ~tool_use_id ~node ~descriptor ~schedule ~input ()
     | Error rejection ->
       dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
         (Tool_result.make_err ~tool_name:node.Keeper_tool_plan.tool_name
            ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
            ~start_time:(Tool_timing.start ()) ~data:rejection.data rejection.detail)
+  in
+  (* Derive the exact invocation identity a launch leaf will pass to the
+     owned-job runtime, from the same ambient values that boundary reads:
+     the turn snapshot supplies trace_id (and the turn fallback), the keeper
+     turn supplies the absolute turn. [None] means the runtime could never
+     build a complete invocation — the executor then refuses the dispatch. *)
+  let launch_invocation_of () =
+    let trace_id = Option.bind source_context (fun context ->
+      context.Keeper_tool_call_log_context.trace_id) in
+    let turn_ref = match keeper_turn_id () with
+      | Some absolute_turn ->
+        Some (Ids.Turn_ref.make
+          ~trace_id:(Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id)
+          ~absolute_turn)
+      | None -> Option.bind source_context (fun context ->
+          match context.Keeper_tool_call_log_context.trace_id,
+                context.Keeper_tool_call_log_context.turn with
+          | Some trace_id, Some absolute_turn ->
+            Some (Ids.Turn_ref.make ~trace_id ~absolute_turn)
+          | Some _, None | None, _ -> None) in
+    match trace_id, turn_ref with
+    | Some trace_id, Some turn_ref
+      when String.equal trace_id (Ids.Turn_ref.trace_id turn_ref) ->
+      Some { Keeper_tool_execution_journal.trace_id; turn_ref }
+    | Some _, Some _ | Some _, None | None, _ -> None
   in
   let tool_use_id_for_node ~execution_id:_ node =
     nested_tool_use_id ~composition_run_id parent_invocation node.Keeper_tool_plan.id
@@ -988,6 +1080,7 @@ let execute_keeper_with_authority
     ~run_id
     ~tool_use_id_for_node
     ~dispatch
+    ~launch_invocation_of
     ?journal
     ?observe_node_result
     ()

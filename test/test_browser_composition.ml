@@ -106,7 +106,7 @@ let test_follow_then_read observation case () =
     let plan = match Catalog.instantiate ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) ~args entry with
       | Ok plan -> plan | Error e -> fail (Catalog.instantiation_error_to_string e) in
     let calls = ref [] in
-    let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
+    let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
       calls := !calls @ [node.Plan.tool_name];
       let result = match node.tool_name with
         | "BrowserInteract" ->
@@ -183,7 +183,7 @@ let test_navigate_then_read observation case () =
       | Error error -> fail (Catalog.instantiation_error_to_string error)
     in
     let calls = ref [] in
-    let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
+    let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
       calls := !calls @ [ node.Plan.tool_name ];
       let ok data = Tool_result.make_ok ~tool_name:node.tool_name ~start_time:(Tool_timing.start ()) ~data () in
       let rejected message = Tool_result.make_err ~tool_name:node.tool_name

@@ -135,6 +135,14 @@ original DAG completion. The independent-job scenario also raises an observer
 exception while another backend stays blocked, then waits for the new result's
 durable ACK. These are synthetic CLI scenarios; execution and timing claims
 require the selected run's completed artifact.
+An additional prepared-launch scenario places `keeper_job_start` inside the
+same async DAG and binds its typed `/job_id` output into the result read. Prepare
+performs no backend operation. The actual serial launch owns the original node
+occurrence and Task; the completed launch is reused after the wait instead of
+dispatching again. The receipt separately records public prepare/run to the
+saved job wait and completion pulse to original DAG completion. Status and
+cancel remain direct effects. These component intervals do not measure model
+preparation or whole-task improvement.
 If a resumed request durably owns the journal but its worker is canonically
 `Lost`, recovery follows the journal's exact predecessor bindings to the
 original `waiting_for_owned_jobs` record. Its saved node snapshot must match

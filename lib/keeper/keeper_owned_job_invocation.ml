@@ -143,7 +143,8 @@ let lookup ~base_path ~keeper_name invocation = protect (fun () ->
   let location = path ~base_path ~keeper_name invocation in
   match validate_path ~base_path ~location ~create:false with
   | Error Store.Missing -> Ok None
-  | Error cause -> Error (wrap cause)
+  | Error (Store.Invalid_authority _ | Store.Corrupt _ | Store.Conflict
+      | Store.Io_failed _ | Store.Commit_unconfirmed _ as cause) -> Error (wrap cause)
   | Ok () ->
       let* contents = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ())
           ~ownership_root:(Common.masc_dir_from_base_path ~base_path) location

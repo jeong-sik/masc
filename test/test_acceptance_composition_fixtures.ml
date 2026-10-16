@@ -139,7 +139,7 @@ let execute_fixture name =
     | Error error -> fail (Catalog.instantiation_error_to_string error)
   in
   let calls = ref [] in
-  let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule ~input =
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule ~input () =
     let node_id = Plan.Node_id.to_string node.Plan.id in
     let row =
       Printf.sprintf

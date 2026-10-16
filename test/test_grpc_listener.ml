@@ -139,7 +139,7 @@ let test_bind_failure_classification () =
      Eio.Exn.create (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, "bind", "private socket"))),
      TM.Address_in_use]
 
-let test_h2_health_handoff () =
+let run_h2_health_handoff ~before_health () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
@@ -155,6 +155,8 @@ let test_h2_health_handoff () =
         Listener.serve_socket ~sw ~clock ~socket server)))
     (fun () ->
       let addr = Eio.Promise.await bound in
+      check_state Listening;
+      before_health net addr;
       check_state Listening;
       let target = match addr with
         | `Tcp (_, port) -> Printf.sprintf "http://127.0.0.1:%d" port
@@ -176,6 +178,28 @@ let test_h2_health_handoff () =
         (fun () -> Eio.Promise.await checked));
   check_state Stopped
 
+let test_h2_health_handoff () =
+  run_h2_health_handoff ~before_health:(fun _net _addr -> ()) ()
+
+let test_malformed_connection_keeps_listener_alive () =
+  run_h2_health_handoff
+    ~before_health:(fun net addr ->
+      Eio.Switch.run @@ fun sw ->
+      let flow = Eio.Net.connect net ~sw addr in
+      (* An invalid 24-byte HTTP/2 connection preface reaches the actual H2
+         parser. Half-close only our send side, then await the server's EOF
+         before attempting a healthy RPC on this same bound listener. *)
+      Eio.Flow.copy_string (String.make 24 'x') flow;
+      Eio.Flow.shutdown flow `Send;
+      let bytes = Cstruct.create 64 in
+      let rec await_peer_close () =
+        match Eio.Flow.single_read flow bytes with
+        | _ -> await_peer_close ()
+        | exception End_of_file -> ()
+      in
+      await_peer_close ())
+    ()
+
 let () =
   Alcotest.run "gRPC listener ownership"
     ["lifecycle", [
@@ -186,4 +210,6 @@ let () =
       Alcotest.test_case "serve failure remains typed" `Quick test_serve_failure_is_retained;
       Alcotest.test_case "other and wrapped bind failures" `Quick test_bind_failure_classification;
       Alcotest.test_case "actual h2 gRPC health handoff" `Quick test_h2_health_handoff;
+      Alcotest.test_case "malformed connection then same-listener health" `Quick
+        test_malformed_connection_keeps_listener_alive;
     ]]

@@ -539,3 +539,39 @@ let is_candidate_access_rejection = function
   | InvalidRequest _
   | ProviderTerminal _ -> false
 ;;
+
+let is_end_turn_empty_completion = function
+  | EmptyCompletion { stop_reason; provider = _; detail = _ } ->
+    (match stop_reason with
+     | Types.EndTurn -> true
+     | Types.StopToolUse
+     | Types.MaxTokens
+     | Types.StopSequence
+     | Types.Refusal
+     | Types.ContentFilter
+     | Types.RepetitionTruncation
+     | Types.PauseTurn
+     | Types.Compaction
+     | Types.ContextWindowExceeded
+     | Types.UnmatchedToolCalls
+     | Types.Unknown _ -> false)
+  | MissingApiKey _
+  | InvalidConfig _
+  | ParseError _
+  | ProviderWireError _
+  | ProviderReportedError _
+  | UnknownVariant _
+  | ProviderUnavailable _
+  | RepeatingGeneration _
+  | RateLimit _
+  | HardQuota _
+  | CapacityExhausted _
+  | AuthError _
+  | AuthorizationError _
+  | ServerError _
+  | NetworkError _
+  | Timeout _
+  | InvalidRequest _
+  | NotFound _
+  | ProviderTerminal _ -> false
+;;

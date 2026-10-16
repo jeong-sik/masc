@@ -151,3 +151,9 @@ val is_candidate_access_rejection : provider_error -> bool
 (** [true] for [AuthError], [AuthorizationError] and [NotFound]: the candidate
     refused this credential or does not serve this model, so the next
     candidate may succeed where this one cannot. *)
+
+val is_end_turn_empty_completion : provider_error -> bool
+(** [true] only for [EmptyCompletion] whose stop_reason is [EndTurn]: the
+    provider finished its turn and returned no content. An empty completion
+    with any other stop reason ([MaxTokens], [Refusal], [PauseTurn], an
+    unknown one) reports a turn that was cut short and is [false]. *)

@@ -206,7 +206,18 @@ let test_empty_terminal_completion_requires_this_attempt_saved_checkpoint () =
   List.iter (fun stop_reason ->
     check_decision "non-EndTurn failure remains a failure" false
       (decide ~before ~stop_reason ()))
-    [Agent_core.Types.MaxTokens; Agent_core.Types.StopSequence];
+    [ Agent_core.Types.StopToolUse
+    ; Agent_core.Types.MaxTokens
+    ; Agent_core.Types.StopSequence
+    ; Agent_core.Types.Refusal
+    ; Agent_core.Types.ContentFilter
+    ; Agent_core.Types.RepetitionTruncation
+    ; Agent_core.Types.PauseTurn
+    ; Agent_core.Types.Compaction
+    ; Agent_core.Types.ContextWindowExceeded
+    ; Agent_core.Types.UnmatchedToolCalls
+    ; Agent_core.Types.Unknown "provider-specific"
+    ];
   let next_attempt = saved_count () in
   check_decision "an earlier attempt cannot authorize completion" false
     (decide ~before:next_attempt ());

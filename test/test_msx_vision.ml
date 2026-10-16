@@ -92,8 +92,13 @@ let test_worker_capture () =
                   ~principal:(Lane_addon_call_context.Keeper "vision-player")) ()) in
               let screen () = call "masc_msx_screen" (`Assoc []) in
               check bool "unloaded worker screen fails explicitly" true ((screen ()).is_error = Some true);
-              check bool "synthetic worker load succeeds" false
-                ((call "masc_msx_load" (`Assoc ["roms_dir",`String ""])).is_error = Some true);
+              (* The load tool boots an image. This test is about the screen, so it
+                 boots the shared lane the worker serves with no image. *)
+              let boot () = match Msx_lane.load
+                  ~ledger_dir:(Filename.concat (Filename.concat base_path ".masc") "msx")
+                  ~roms_dir:None ~cart_path:None ~disk_path:None with
+                | Ok _ -> () | Error error -> fail (Msx_lane.error_to_string error) in
+              boot ();
               let before,frame = match Msx_lane.capture () with
                 | Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
               let result = screen () in
@@ -112,7 +117,7 @@ let test_worker_capture () =
               check int "screen reads do not inject input" 0 (List.length (Msx_lane.ledger ()));
               ignore (call "masc_msx_eject" (`Assoc []));
               check bool "eject cannot return the retained old image" true ((screen ()).is_error = Some true);
-              ignore (call "masc_msx_load" (`Assoc ["roms_dir",`String ""]));
+              boot ();
               let _,fresh = match Msx_lane.capture () with
                 | Ok value -> value | Error error -> fail (Msx_lane.error_to_string error) in
               let fresh_png = png (screen ()) in

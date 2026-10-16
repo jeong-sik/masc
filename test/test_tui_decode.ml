@@ -4096,7 +4096,7 @@ let skill_activation_projection_json activations =
       [ "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "activations", `List activations
-      ; "transition_rejections", `List []; "async_result_deliveries", `List []
+      ; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List []
       ]
     |> Yojson.Safe.to_string
     |> Digestif.SHA256.digest_string
@@ -4107,12 +4107,12 @@ let skill_activation_projection_json activations =
     ; "keeper_name", `String "codex-mcp-client"
     ; ( "ledger"
       , `Assoc
-          [ "schema", `String "masc.skill-activations/v6"
+          [ "schema", `String "masc.skill-activations/v7"
           ; "workspace_key", `String workspace_key
           ; "session_id", `String session_id
           ; "revision", `String revision
           ; "activations", `List activations
-          ; "transition_rejections", `List []; "async_result_deliveries", `List []
+          ; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List []
           ] )
     ]
 
@@ -4308,6 +4308,20 @@ let test_decode_tool_snapshot_requires_both_keeper_projection_fields () =
   match Masc.Tui_decode_tools.decode_tool_snapshot missing_activations with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "missing skill_activations field was accepted"
+
+let test_decode_async_actions_keeps_original_scope () =
+  let ledger = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in
+  let activations = `Assoc ["status",`String "available";"keeper_name",`String "fixture";"ledger",ledger] in
+  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  | Ok {Masc.Tui_decode_tools.ts_skill_activations=Some (Skill_activations_available {sap_ledger;_});_} ->
+    Alcotest.(check int) "typed action facts survive the TUI data boundary" 3
+      (List.length (Keeper_skill_activation_ledger.async_actions sap_ledger));
+    Alcotest.(check int) "the original child activation remains distinct" 1
+      (List.length (Keeper_skill_activation_ledger.activations sap_ledger));
+    Alcotest.(check int) "summary counts observed facts without claiming native completion" 3
+      (Keeper_skill_activation_ledger.summarize sap_ledger).composition_actions_observed
+  | Ok _ -> Alcotest.fail "actual async action ledger unavailable at TUI boundary"
+  | Error error -> Alcotest.failf "async action data decode failed: %s" error
 
 let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
   let activation = skill_activation_json () in
@@ -13131,6 +13145,7 @@ let () =
           test_decode_tool_snapshot_requires_both_keeper_projection_fields;
         Alcotest.test_case "Skill activation reuses canonical ledger decoder" `Quick
           test_decode_skill_activations_reuses_canonical_ledger_decoder;
+        Alcotest.test_case "async actions retain original scope" `Quick test_decode_async_actions_keeps_original_scope;
       ] );
     ( "decode_connectors",
       [

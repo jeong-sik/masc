@@ -90,11 +90,12 @@ STEP_ZERO = {
 
 def ledger():
     value = {
-        "schema": "masc.skill-activations/v6",
+        "schema": "masc.skill-activations/v7",
         "workspace_key": WORKSPACE,
         "session_id": SESSION,
         "revision": "",
         "async_result_deliveries": [],
+        "async_actions": [],
         "activations": [
             activation(
                 "call-a",
@@ -162,6 +163,29 @@ class SkillActivationEventsTest(unittest.TestCase):
         self.assertIs(caught.exception.fault, Fault.INVALID_ASYNC_RESULT_EVIDENCE)
         self.assertEqual(expected, original)
 
+    def test_async_action_facts_fold_with_original_frame_and_strict_causal_links(self):
+        expected = json.loads((REPO_ROOT / "test/fixtures/skill-ledger-async-actions.json").read_text())
+        self.assertEqual(events.fold_event_log(log_fixture.event_log(expected)), expected)
+        self.assertEqual(len(expected["async_actions"]), 3)
+        for field, bad in (("delivery_sha256", "1" * 64), ("physical_turn_ref", "other#74"),
+                           ("runtime_id", "wrong-runtime")):
+            changed = copy.deepcopy(expected)
+            changed["async_actions"][0][field] = bad
+            with self.subTest(field=field), self.assertRaises(events.SkillLedgerError) as caught:
+                events.ledger_revision(changed)
+            self.assertIs(caught.exception.fault, Fault.INVALID_ASYNC_ACTION_EVIDENCE)
+        changed = copy.deepcopy(expected)
+        changed["async_actions"][0]["occurrence"]["invocation"]["turn"] = 1
+        with self.assertRaises(events.SkillLedgerError) as caught:
+            events.fold_event_log(log_fixture.event_log(changed))
+        self.assertIs(caught.exception.fault, Fault.INVALID_ASYNC_ACTION_EVIDENCE)
+        changed = copy.deepcopy(expected)
+        changed["async_actions"].append(copy.deepcopy(changed["async_actions"][0]))
+        changed["async_actions"][-1]["occurrence"]["result"]["sha256"] = "0" * 64
+        with self.assertRaises(events.SkillLedgerError) as caught:
+            events.fold_event_log(log_fixture.event_log(changed))
+        self.assertIs(caught.exception.fault, Fault.INVALID_ASYNC_ACTION_EVIDENCE)
+
     def test_folding_the_log_of_a_ledger_returns_that_ledger(self):
         expected = ledger()
 
@@ -178,6 +202,7 @@ class SkillActivationEventsTest(unittest.TestCase):
                 "activations",
                 "transition_rejections",
                 "async_result_deliveries",
+                "async_actions",
             ],
         )
         self.assertEqual(
@@ -194,7 +219,7 @@ class SkillActivationEventsTest(unittest.TestCase):
 
         canonical = (
             '{"workspace_key":"' + WORKSPACE + '","session_id":"' + session + '",'
-            '"activations":[],"transition_rejections":[],"async_result_deliveries":[]}'
+            '"activations":[],"transition_rejections":[],"async_result_deliveries":[],"async_actions":[]}'
         )
         self.assertEqual(folded["activations"], [])
         self.assertEqual(folded["transition_rejections"], [])
@@ -488,7 +513,7 @@ class SkillActivationEventsTest(unittest.TestCase):
         value["activations"] = [activation("call-\x7f", 7)]
         value["transition_rejections"] = []
         canonical = json.dumps({key: value[key] for key in
-            ("workspace_key", "session_id", "activations", "transition_rejections", "async_result_deliveries")},
+            ("workspace_key", "session_id", "activations", "transition_rejections", "async_result_deliveries", "async_actions")},
             ensure_ascii=False, separators=(",", ":")).replace("\x7f", "\\u007f")
 
         self.assertEqual(

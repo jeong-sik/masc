@@ -7,7 +7,7 @@ event: an activation recorded, deliveries observed, an action observed, or a
 transition rejected. Each row ends with a newline; text after the last newline
 is a row the server is still appending.
 
-The ledger the Dashboard serves under ``masc.skill-activations/v6`` is those
+The ledger the Dashboard serves under ``masc.skill-activations/v7`` is those
 events applied in order. ``fold_event_log`` applies them with the rules of
 ``Keeper_skill_activation_ledger.apply_event`` and returns that projection, so
 a reader can compare the file with what the server reports.
@@ -30,7 +30,7 @@ from typing import TypeAlias, Union, assert_never
 
 EVENTS_FILENAME = "skill-activation-events.jsonl"
 EVENTS_SCHEMA = "masc.skill-activation-events/v1"
-LEDGER_SCHEMA = "masc.skill-activations/v6"
+LEDGER_SCHEMA = "masc.skill-activations/v7"
 
 JsonValue: TypeAlias = Union[
     None, bool, int, float, str, list["JsonValue"], dict[str, "JsonValue"]
@@ -70,6 +70,7 @@ class SkillLedgerFault(Enum):
     MALFORMED_LEDGER = "malformed_ledger"
     UNTERMINATED_HEADER_ROW = "unterminated_header_row"
     INVALID_ASYNC_RESULT_EVIDENCE = "invalid_async_result_evidence"
+    INVALID_ASYNC_ACTION_EVIDENCE = "invalid_async_action_evidence"
 
 
 class SkillLedgerError(RuntimeError):
@@ -137,8 +138,13 @@ class _AsyncResultDelivered:
     delivery: JsonObject
 
 
+@dataclass(frozen=True, slots=True)
+class _AsyncActionObserved:
+    action: JsonObject
+
+
 _Event: TypeAlias = Union[
-    _ActivationRecorded, _DeliveriesObserved, _ActionObserved, _TransitionRejected, _AsyncResultDelivered
+    _ActivationRecorded, _DeliveriesObserved, _ActionObserved, _TransitionRejected, _AsyncResultDelivered, _AsyncActionObserved
 ]
 
 
@@ -165,6 +171,7 @@ class _Fold:
     cells: dict[str, _Cell] = field(default_factory=dict)
     rejections: list[JsonValue] = field(default_factory=list)
     async_deliveries: list[JsonValue] = field(default_factory=list)
+    async_actions: list[JsonValue] = field(default_factory=list)
 
 
 class _RepeatedField(Exception):
@@ -580,17 +587,8 @@ def _uuid_v7(value: JsonObject, name: str, row: int) -> None:
     value[name] = value[name].lower()
 
 
-def _async_delivery(value: JsonValue, row: int, session: str) -> JsonObject:
-    delivery = _exact_object(value, ("original_turn_ref", "composition_run_id", "logical_parent_tool_use_id",
-        "request_id", "physical_turn_ref", "runtime_id", "status_invocation", "boundary", "receipt",
-        "presentation", "child_activations", "observed_at"), "async delivery", row)
-    _turn_ref(delivery, "original_turn_ref", session, row, positive=True)
-    physical = _string(delivery, "physical_turn_ref", "async delivery", row)
-    _turn_ref(delivery, "physical_turn_ref", physical.rpartition("#")[0], row, positive=True)
-    _uuid_v7(delivery, "composition_run_id", row)
-    for name in ("logical_parent_tool_use_id", "request_id", "runtime_id"):
-        _nonblank(delivery, name, "async delivery", row)
-    invocation = _exact_object(delivery["status_invocation"], ("tool_use_id", "turn", "schedule", "completion"), "SDK occurrence", row)
+def _sdk_invocation(value: JsonValue, row: int) -> JsonObject:
+    invocation = _exact_object(value, ("tool_use_id", "turn", "schedule", "completion"), "SDK occurrence", row)
     tool_id = _nonblank(invocation, "tool_use_id", "SDK occurrence", row)
     turn = _natural(invocation, "turn", "SDK occurrence", row)
     schedule = _exact_object(invocation["schedule"], ("planned_index", "batch_index", "batch_size", "execution_mode"), "SDK schedule", row)
@@ -608,6 +606,21 @@ def _async_delivery(value: JsonValue, row: int, session: str) -> JsonObject:
                 raise _malformed("invalid SDK completion disposition", row)
         case _:
             raise _malformed("invalid SDK completion kind", row)
+    return invocation
+
+
+def _async_delivery(value: JsonValue, row: int, session: str) -> JsonObject:
+    delivery = _exact_object(value, ("original_turn_ref", "composition_run_id", "logical_parent_tool_use_id",
+        "request_id", "physical_turn_ref", "runtime_id", "status_invocation", "boundary", "receipt",
+        "presentation", "child_activations", "observed_at"), "async delivery", row)
+    _turn_ref(delivery, "original_turn_ref", session, row, positive=True)
+    physical = _string(delivery, "physical_turn_ref", "async delivery", row)
+    _turn_ref(delivery, "physical_turn_ref", physical.rpartition("#")[0], row, positive=True)
+    _uuid_v7(delivery, "composition_run_id", row)
+    for name in ("logical_parent_tool_use_id", "request_id", "runtime_id"):
+        _nonblank(delivery, name, "async delivery", row)
+    invocation = _sdk_invocation(delivery["status_invocation"], row)
+    tool_id, turn = invocation["tool_use_id"], invocation["turn"]
     boundary = _exact_object(delivery["boundary"], ("kind", "agent_core_turn"), "async boundary", row)
     handoff_turn = _natural(boundary, "agent_core_turn", "async boundary", row)
     match boundary["kind"]:
@@ -663,6 +676,73 @@ def _async_identity(delivery: JsonObject) -> str:
                       ensure_ascii=False, separators=(",", ":"))
 
 
+def _compact_hash(value: JsonObject) -> str:
+    payload = json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("\x7f", "\\u007f")
+    return sha256(payload.encode()).hexdigest()
+
+
+def _async_action(value: JsonValue, row: int) -> JsonObject:
+    action = _exact_object(value, ("delivery_sha256", "physical_turn_ref", "runtime_id", "tool_name",
+        "occurrence", "observed_at"), "async action", row)
+    _digest(action, "delivery_sha256", "async action", row)
+    physical = _string(action, "physical_turn_ref", "async action", row)
+    _turn_ref(action, "physical_turn_ref", physical.rpartition("#")[0], row, positive=True)
+    for name in ("runtime_id", "tool_name"):
+        _nonblank(action, name, "async action", row)
+    occurrence = _object(action["occurrence"], "async occurrence", row)
+    match occurrence.get("kind"):
+        case "sdk_result":
+            _exact_object(occurrence, ("kind", "invocation", "result"), "async occurrence", row)
+            _sdk_invocation(occurrence["invocation"], row)
+            result = _object(occurrence["result"], "async SDK result", row)
+            match result.get("kind"):
+                case "handler_returned":
+                    _exact_object(result, ("kind", "bytes", "sha256"), "async SDK result", row)
+                case "handler_errored":
+                    _exact_object(result, ("kind", "bytes", "sha256", "recoverable", "error_class"), "async SDK result", row)
+                    if type(result["recoverable"]) is not bool or result["error_class"] not in (None, "transient", "deterministic", "unknown"):
+                        raise _malformed("invalid SDK tool error", row)
+                case _:
+                    raise _malformed("unknown SDK result", row)
+            _natural(result, "bytes", "async SDK result", row)
+            _digest(result, "sha256", "async SDK result", row)
+        case "native_started":
+            _exact_object(occurrence, ("kind", "official_turn", "identity"), "async occurrence", row)
+            _natural(occurrence, "official_turn", "async occurrence", row)
+            _action_identity(occurrence["identity"], row)
+        case _:
+            raise _malformed("unknown async occurrence", row)
+    _timestamp(action, "observed_at", "async action", row)
+    return action
+
+
+def _async_occurrence_identity(action: JsonObject) -> str:
+    occurrence = {key: value for key, value in action["occurrence"].items() if key != "result"}
+    payload = {key: action[key] for key in ("physical_turn_ref", "runtime_id")}
+    payload["occurrence"] = occurrence
+    return _compact_hash(payload)
+
+
+def _async_action_identity(action: JsonObject) -> str:
+    return sha256((action["delivery_sha256"] + _async_occurrence_identity(action)).encode()).hexdigest()
+
+
+def _validate_async_action(action: JsonObject, deliveries: list[JsonValue], actions: list[JsonValue], row: int) -> None:
+    facts = {key: value for key, value in action.items() if key not in ("delivery_sha256", "observed_at")}
+    for known in actions:
+        if (_async_occurrence_identity(known) == _async_occurrence_identity(action)
+            and {key: value for key, value in known.items() if key not in ("delivery_sha256", "observed_at")} != facts):
+            raise SkillLedgerError(SkillLedgerFault.INVALID_ASYNC_ACTION_EVIDENCE, "physical occurrence differs across causal links", row=row)
+    delivery = next((value for value in deliveries if _compact_hash({key: child for key, child in value.items()
+        if key != "observed_at"}) == action["delivery_sha256"]), None)
+    if (delivery is None or delivery["presentation"] != "inline_result"
+        or delivery["physical_turn_ref"] != action["physical_turn_ref"]
+        or delivery["runtime_id"] != action["runtime_id"]
+        or (action["occurrence"]["kind"] == "sdk_result"
+            and action["occurrence"]["invocation"]["turn"] < delivery["boundary"]["agent_core_turn"])):
+        raise SkillLedgerError(SkillLedgerFault.INVALID_ASYNC_ACTION_EVIDENCE, "action has no matching inline causal delivery", row=row)
+
+
 def _parse_event(value: JsonValue, row: int, session: str) -> _Event:
     """The event one row after the header records."""
     event = _object(value, "event", row)
@@ -685,6 +765,9 @@ def _parse_event(value: JsonValue, row: int, session: str) -> _Event:
         case "transition_rejected":
             fields = ("kind", "rejection",)
             return _parse_rejection(_exact_object(event, fields, kind, row), row, session)
+        case "async_action_observed":
+            _exact_object(event, ("kind", "action"), kind, row)
+            return _AsyncActionObserved(_async_action(event["action"], row))
         case "async_result_delivered":
             _exact_object(event, ("kind", "delivery"), kind, row)
             return _AsyncResultDelivered(_async_delivery(event["delivery"], row, session))
@@ -723,6 +806,11 @@ def _recorded_cell(fold: _Fold, skill_tool_use_id: str, row: int) -> _Cell:
 
 def _apply(fold: _Fold, event: _Event, row: int) -> None:
     match event:
+        case _AsyncActionObserved():
+            _validate_async_action(event.action, fold.async_deliveries, fold.async_actions, row)
+            if any(_async_action_identity(value) == _async_action_identity(event.action) for value in fold.async_actions):
+                raise SkillLedgerError(SkillLedgerFault.INVALID_ASYNC_ACTION_EVIDENCE, "duplicate causal occurrence", row=row)
+            fold.async_actions.append(event.action)
         case _AsyncResultDelivered():
             _validate_async_children(event.delivery, {id: cell.activation for id, cell in fold.cells.items()}, row)
             if any(_async_identity(value) == _async_identity(event.delivery) for value in fold.async_deliveries):
@@ -833,12 +921,14 @@ def _revision(
     activations: list[JsonValue],
     transition_rejections: list[JsonValue],
     async_result_deliveries: list[JsonValue],
+    async_actions: list[JsonValue],
 ) -> str:
     # Projection callers also supply decoded JSON, potentially in any object
     # order. Validate and canonicalize copies just like the event reader.
     activations = copy.deepcopy(activations)
     transition_rejections = copy.deepcopy(transition_rejections)
     async_result_deliveries = copy.deepcopy(async_result_deliveries)
+    async_actions = copy.deepcopy(async_actions)
     try:
         parsed_activations = [
             _parse_activation({"activation": activation}, 0, session_id)
@@ -878,6 +968,16 @@ def _revision(
             if identity in identities:
                 raise SkillLedgerError(SkillLedgerFault.INVALID_ASYNC_RESULT_EVIDENCE, "duplicate physical handoff")
             identities.add(identity)
+        identities = set()
+        known_actions = []
+        for action in async_actions:
+            _async_action(action, 0)
+            _validate_async_action(action, async_result_deliveries, known_actions, 0)
+            identity = _async_action_identity(action)
+            if identity in identities:
+                raise SkillLedgerError(SkillLedgerFault.INVALID_ASYNC_ACTION_EVIDENCE, "duplicate causal occurrence")
+            identities.add(identity)
+            known_actions.append(action)
     except SkillLedgerError as error:
         # These values come from a projection, with no event-log row.
         # Shape refusals are ledger faults; specific invariant codes remain.
@@ -890,6 +990,7 @@ def _revision(
         "activations": activations,
         "transition_rejections": transition_rejections,
         "async_result_deliveries": async_result_deliveries,
+        "async_actions": async_actions,
     }
     # Yojson escapes U+007F as it escapes the C0 controls; json.dumps writes
     # it as is. A DEL can only sit inside a string here, so the swap is exact.
@@ -922,6 +1023,7 @@ def ledger_revision(ledger: Mapping[str, JsonValue]) -> str:
     activations = ledger.get("activations")
     transition_rejections = ledger.get("transition_rejections")
     async_result_deliveries = ledger.get("async_result_deliveries")
+    async_actions = ledger.get("async_actions")
     if not (isinstance(workspace_key, str) and workspace_key != ""):
         raise SkillLedgerError(
             SkillLedgerFault.MALFORMED_LEDGER, "skill ledger.workspace_key is empty"
@@ -942,11 +1044,13 @@ def ledger_revision(ledger: Mapping[str, JsonValue]) -> str:
         )
     if not isinstance(async_result_deliveries, list):
         raise SkillLedgerError(SkillLedgerFault.MALFORMED_LEDGER, "skill ledger.async_result_deliveries is not an array")
-    return _revision(workspace_key, session_id, activations, transition_rejections, async_result_deliveries)
+    if not isinstance(async_actions, list):
+        raise SkillLedgerError(SkillLedgerFault.MALFORMED_LEDGER, "skill ledger.async_actions is not an array")
+    return _revision(workspace_key, session_id, activations, transition_rejections, async_result_deliveries, async_actions)
 
 
 def fold_event_log(raw: bytes) -> JsonObject | None:
-    """The ledger an event log records, in the Dashboard's v6 shape.
+    """The ledger an event log records, in the Dashboard's v7 shape.
 
     Returns None when the log is empty: the session has recorded nothing.
     Bytes with no newline at all are refused: the server creates a log with
@@ -972,9 +1076,10 @@ def fold_event_log(raw: bytes) -> JsonObject | None:
         "workspace_key": workspace_key,
         "session_id": session_id,
         "revision": _revision(
-            workspace_key, session_id, fold.activations, fold.rejections, fold.async_deliveries
+            workspace_key, session_id, fold.activations, fold.rejections, fold.async_deliveries, fold.async_actions
         ),
         "activations": fold.activations,
         "transition_rejections": fold.rejections,
         "async_result_deliveries": fold.async_deliveries,
+        "async_actions": fold.async_actions,
     }

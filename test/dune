@@ -1947,7 +1947,7 @@
   ; digest of the directory's own (st_dev, st_ino) identity.
   digestif
   masc.tool_metrics_store)
- (deps ../bin/main_eio.exe))
+ (deps ../bin/main_eio.exe fixtures/skill-ledger-async-actions.json))
 
 ; Extracted from the Group 3 (tests ...) list above: the read-model fixtures
 ; seed sandbox_profile = "local" (incidental — the suite measures namespace
@@ -4232,6 +4232,7 @@
   test_skill_activation_events.py
   fixtures/skill-ledger-revision.json
   fixtures/skill-ledger-async-delivery.json
+  fixtures/skill-ledger-async-actions.json
   skill_activation_event_log_fixture.py
   ../scripts/harness/workload/skill_activation_events.py)
  (action
@@ -4719,7 +4720,7 @@
 (test
  (name test_keeper_skill_activation_ledger)
  (modules test_keeper_skill_activation_ledger)
- (deps fixtures/skill-ledger-revision.json fixtures/skill-ledger-async-delivery.json)
+ (deps fixtures/skill-ledger-revision.json fixtures/skill-ledger-async-delivery.json fixtures/skill-ledger-async-actions.json)
  (libraries
   alcotest
   digestif

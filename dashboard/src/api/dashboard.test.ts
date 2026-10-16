@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runtimeReservedProviderIdsFixture } from '../lib/runtime-config-receipt.test-fixture'
 import sharedAsyncSkillLedger from '../../../test/fixtures/skill-ledger-async-delivery.json'
+import sharedAsyncActionLedger from '../../../test/fixtures/skill-ledger-async-actions.json'
 
 const devTokenMock = vi.hoisted(() => ({
   ensureDevToken: vi.fn(() => Promise.resolve()),
@@ -1264,8 +1265,9 @@ function validSkillActivationProjectionFixture() {
       action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
     }],
     ledger: {
-      schema: 'masc.skill-activations/v6',
+      schema: 'masc.skill-activations/v7',
         async_result_deliveries: [],
+        async_actions: [],
       workspace_key: 'c'.repeat(64),
       session_id: 'trace-one',
       revision: 'd'.repeat(64),
@@ -1311,6 +1313,46 @@ function validSkillActivationProjectionFixture() {
 }
 
 describe('fetchDashboardTools', () => {
+  it('receives typed SDK results and native starts with verified causal delivery links', async () => {
+    const projection = { ...validSkillActivationProjectionFixture(), ledger: sharedAsyncActionLedger }
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: projection}),
+      {status: 200, headers: {'Content-Type': 'application/json'}}))
+    const result = await fetchDashboardTools()
+    expect(result.skill_activations?.status).toBe('available')
+    if (result.skill_activations?.status !== 'available') throw new Error('action ledger unavailable')
+    expect(result.skill_activations.ledger).toEqual(sharedAsyncActionLedger)
+    expect(result.skill_activations.ledger.async_actions.map(action => action.occurrence.kind))
+      .toEqual(['sdk_result', 'sdk_result', 'native_started'])
+    const invalid = structuredClone(projection)
+    invalid.ledger.async_actions[0]!.delivery_sha256 = '1'.repeat(64)
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: invalid}),
+      {status: 200, headers: {'Content-Type': 'application/json'}}))
+    await expect(fetchDashboardTools()).rejects.toThrow('matching inline causal delivery')
+    for (const identity of [{kind: 'call_id', call_id: ' '},
+      {kind: 'provider_step', conversation_id: ' ', step_index: 0}]) {
+      const invalidIdentity = structuredClone(projection)
+      const native = invalidIdentity.ledger.async_actions[2]!
+      Object.assign(native.occurrence, {identity})
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: invalidIdentity}),
+        {status: 200, headers: {'Content-Type': 'application/json'}}))
+      await expect(fetchDashboardTools()).rejects.toThrow('blank')
+    }
+    const duplicate = structuredClone(projection)
+    duplicate.ledger.async_actions.push(structuredClone(duplicate.ledger.async_actions[0]!))
+    expect(() => normalizeSkillActivationProjection(duplicate)).toThrow('causal occurrence')
+  })
+
+  it('verifies causal action receipts on supported HTTP origins without SubtleCrypto', async () => {
+    const projection = { ...validSkillActivationProjectionFixture(), ledger: sharedAsyncActionLedger }
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: projection}),
+      {status: 200, headers: {'Content-Type': 'application/json'}}))
+    vi.stubGlobal('crypto', {})
+    try {
+      const result = await fetchDashboardTools()
+      expect(result.skill_activations?.status).toBe('available')
+    } finally { vi.unstubAllGlobals() }
+  })
+
   it('retains async child receipts across SDK turns without changing the original Task', () => {
     const projection = { ...validSkillActivationProjectionFixture(), ledger: sharedAsyncSkillLedger }
     const decoded = normalizeSkillActivationProjection(projection)
@@ -1396,7 +1438,7 @@ describe('fetchDashboardTools', () => {
       keeper_name: 'keeper/one',
       scoped_summaries: [],
       ledger: { schema: 'masc.skill-activations/v3', activations: [] },
-    })).toThrow('skill_activations schema is not v6')
+    })).toThrow('skill_activations schema is not v7')
   })
 
   it('decodes every nested field of an available v5 Skill activation projection', () => {

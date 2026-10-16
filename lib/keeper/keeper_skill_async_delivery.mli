@@ -26,6 +26,9 @@ val make : original_turn_ref:Ids.Turn_ref.t ->
   presentation:presentation -> child_activations:child_activation list ->
   observed_at:string -> (t, string) result
 val invocation_to_json : Agent_core.Tool_contract.Invocation.t -> Yojson.Safe.t
+val invocation_of_json : Yojson.Safe.t -> (Agent_core.Tool_contract.Invocation.t, string) result
+val equal_invocation : Agent_core.Tool_contract.Invocation.t -> Agent_core.Tool_contract.Invocation.t -> bool
+val validate_invocation : Agent_core.Tool_contract.Invocation.t -> (unit, string) result
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val identity : t -> string

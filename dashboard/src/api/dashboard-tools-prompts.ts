@@ -6,6 +6,8 @@ import { get, post, type AbortableRequestOptions } from './core'
 import { nestedCompositionScopeIsValid, type NestedCompositionScope } from './skill-activation-scope'
 import { validate as isUuid, version as uuidVersion } from 'uuid'
 import { parseStrictRfc3339 } from '../lib/rfc3339'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
 import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
@@ -14,7 +16,7 @@ import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 // The activation ledger's wire schema — keeper_skill_activation_ledger.ml
 // writes exactly this tag, and every reader below pins it before trusting
 // the rows.
-const SKILL_ACTIVATIONS_SCHEMA = 'masc.skill-activations/v6'
+const SKILL_ACTIVATIONS_SCHEMA = 'masc.skill-activations/v7'
 
 // --- Tool metrics (P4 Phase 4.5) ---
 
@@ -780,6 +782,19 @@ export interface DashboardSkillAsyncResultDelivery {
   observed_at: string
 }
 
+export interface DashboardSkillAsyncAction {
+  delivery_sha256: string
+  physical_turn_ref: string
+  runtime_id: string
+  tool_name: string
+  occurrence:
+    | { kind: 'sdk_result'; invocation: DashboardSkillAsyncResultDelivery['status_invocation']; result:
+        | { kind: 'handler_returned'; bytes: number; sha256: string }
+        | { kind: 'handler_errored'; bytes: number; sha256: string; recoverable: boolean; error_class: 'transient' | 'deterministic' | 'unknown' | null } }
+    | { kind: 'native_started'; official_turn: number; identity: DashboardSkillActivation['actions'][number]['identity'] }
+  observed_at: string
+}
+
 export type DashboardSkillActivationProjection =
   | {
       status: 'available'
@@ -794,6 +809,7 @@ export type DashboardSkillActivationProjection =
         activations: DashboardSkillActivation[]
         transition_rejections: DashboardSkillTransitionRejection[]
         async_result_deliveries: DashboardSkillAsyncResultDelivery[]
+        async_actions: DashboardSkillAsyncAction[]
       }
     }
   | { status: 'no_session'; keeper_name: string }
@@ -1355,7 +1371,7 @@ function decodeSkillActionIdentity(
     const record = exactSkillActivationObject(value, label, ['kind', 'call_id'])
     return {
       kind: 'call_id',
-      call_id: skillActivationString(record.call_id, `${label}.call_id`),
+      call_id: skillActivationNonblank(record.call_id, `${label}.call_id`),
     }
   }
   if (value.kind === 'provider_step') {
@@ -1366,7 +1382,7 @@ function decodeSkillActionIdentity(
     )
     return {
       kind: 'provider_step',
-      conversation_id: skillActivationString(
+      conversation_id: skillActivationNonblank(
         record.conversation_id,
         `${label}.conversation_id`,
       ),
@@ -1610,23 +1626,18 @@ function decodeSkillTurnRef(value: unknown, label: string): string {
   return `${trace}#${absolute}`
 }
 
-function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkillAsyncResultDelivery {
-  const nonblank = (value: unknown, field: string): string => {
-    const text = skillActivationString(value, field)
-    if (text.trim() === '') throw new Error(`skill_activations ${field} is blank`)
-    return text
-  }
-  const canonicalDigest = (value: unknown, field: string): string => {
-    const digest = skillActivationSha256(value, field)
-    if (digest !== digest.toLowerCase()) throw new Error(`skill_activations ${field} is not a canonical sha256`)
-    return digest
-  }
-  const record = exactSkillActivationObject(value, label, [
-    'original_turn_ref', 'composition_run_id', 'logical_parent_tool_use_id', 'request_id',
-    'physical_turn_ref', 'runtime_id', 'status_invocation', 'boundary', 'receipt',
-    'presentation', 'child_activations', 'observed_at',
-  ])
-  const invocation = exactSkillActivationObject(record.status_invocation, `${label}.status_invocation`,
+function skillActivationNonblank(value: unknown, label: string): string {
+  const text = skillActivationString(value, label)
+  if (text.trim() === '') throw new Error(`skill_activations ${label} is blank`)
+  return text
+}
+function skillActivationCanonicalDigest(value: unknown, label: string): string {
+  const digest = skillActivationSha256(value, label)
+  if (digest !== digest.toLowerCase()) throw new Error(`skill_activations ${label} is not a canonical sha256`)
+  return digest
+}
+function decodeSkillSdkInvocation(value: unknown, label: string): DashboardSkillAsyncResultDelivery['status_invocation'] {
+  const invocation = exactSkillActivationObject(value, `${label}.status_invocation`,
     ['tool_use_id', 'turn', 'schedule', 'completion'])
   const schedule = exactSkillActivationObject(invocation.schedule, `${label}.schedule`,
     ['planned_index', 'batch_index', 'batch_size', 'execution_mode'])
@@ -1647,6 +1658,35 @@ function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkil
   } else {
     throw new Error(`skill_activations ${label}.completion is unsupported`)
   }
+  return {
+    tool_use_id: skillActivationNonblank(invocation.tool_use_id, `${label}.tool_use_id`),
+    turn: skillActivationNonnegativeInteger(invocation.turn, `${label}.turn`),
+    schedule: {
+      planned_index: skillActivationNonnegativeInteger(schedule.planned_index, `${label}.planned_index`),
+      batch_index: skillActivationNonnegativeInteger(schedule.batch_index, `${label}.batch_index`),
+      batch_size: batchSize, execution_mode: schedule.execution_mode,
+    },
+    completion: decodedCompletion,
+  }
+}
+
+function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkillAsyncResultDelivery {
+  const nonblank = (value: unknown, field: string): string => {
+    const text = skillActivationString(value, field)
+    if (text.trim() === '') throw new Error(`skill_activations ${field} is blank`)
+    return text
+  }
+  const canonicalDigest = (value: unknown, field: string): string => {
+    const digest = skillActivationSha256(value, field)
+    if (digest !== digest.toLowerCase()) throw new Error(`skill_activations ${field} is not a canonical sha256`)
+    return digest
+  }
+  const record = exactSkillActivationObject(value, label, [
+    'original_turn_ref', 'composition_run_id', 'logical_parent_tool_use_id', 'request_id',
+    'physical_turn_ref', 'runtime_id', 'status_invocation', 'boundary', 'receipt',
+    'presentation', 'child_activations', 'observed_at',
+  ])
+  const invocation = decodeSkillSdkInvocation(record.status_invocation, `${label}.status_invocation`)
   const boundary = exactSkillActivationObject(record.boundary, `${label}.boundary`, ['kind', 'agent_core_turn'])
   if (boundary.kind !== 'model_response' && boundary.kind !== 'official_client_result_handoff') {
     throw new Error(`skill_activations ${label}.boundary.kind is unsupported`)
@@ -1698,15 +1738,7 @@ function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkil
     request_id: nonblank(record.request_id, `${label}.request_id`),
     physical_turn_ref: decodeSkillTurnRef(record.physical_turn_ref, `${label}.physical_turn_ref`),
     runtime_id: nonblank(record.runtime_id, `${label}.runtime_id`),
-    status_invocation: {
-      tool_use_id: toolUseId, turn,
-      schedule: {
-        planned_index: skillActivationNonnegativeInteger(schedule.planned_index, `${label}.schedule.planned_index`),
-        batch_index: skillActivationNonnegativeInteger(schedule.batch_index, `${label}.schedule.batch_index`),
-        batch_size: batchSize, execution_mode: schedule.execution_mode,
-      },
-      completion: decodedCompletion,
-    },
+    status_invocation: invocation,
     boundary: { kind: boundary.kind, agent_core_turn: handoffTurn },
     receipt: {
       tool_use_id: toolUseId,
@@ -1716,6 +1748,80 @@ function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkil
     presentation: record.presentation,
     child_activations: children,
     observed_at: observedAt,
+  }
+}
+
+function decodeAsyncAction(value: unknown, label: string): DashboardSkillAsyncAction {
+  const record = exactSkillActivationObject(value, label,
+    ['delivery_sha256', 'physical_turn_ref', 'runtime_id', 'tool_name', 'occurrence', 'observed_at'])
+  const occurrence = exactSkillActivationObject(record.occurrence, `${label}.occurrence`,
+    ['kind', 'invocation', 'result', 'official_turn', 'identity'])
+  let decoded: DashboardSkillAsyncAction['occurrence']
+  if (occurrence.kind === 'sdk_result') {
+    exactSkillActivationObject(record.occurrence, `${label}.occurrence`, ['kind', 'invocation', 'result'])
+    const result = exactSkillActivationObject(occurrence.result, `${label}.result`,
+      ['kind', 'bytes', 'sha256', 'recoverable', 'error_class'])
+    const bytes = skillActivationNonnegativeInteger(result.bytes, `${label}.bytes`)
+    const sha256 = skillActivationCanonicalDigest(result.sha256, `${label}.sha256`)
+    let returned: Extract<DashboardSkillAsyncAction['occurrence'], {kind: 'sdk_result'}>['result']
+    if (result.kind === 'handler_returned') {
+      exactSkillActivationObject(occurrence.result, `${label}.result`, ['kind', 'bytes', 'sha256'])
+      returned = {kind: 'handler_returned', bytes, sha256}
+    } else if (result.kind === 'handler_errored') {
+      if (typeof result.recoverable !== 'boolean' || (result.error_class !== null
+        && result.error_class !== 'transient' && result.error_class !== 'deterministic' && result.error_class !== 'unknown')) {
+        throw new Error(`skill_activations ${label}.result is not a typed SDK error`)
+      }
+      returned = {kind: 'handler_errored', bytes, sha256, recoverable: result.recoverable, error_class: result.error_class}
+    } else throw new Error(`skill_activations ${label}.result is unsupported`)
+    decoded = {kind: 'sdk_result', invocation: decodeSkillSdkInvocation(occurrence.invocation, `${label}.invocation`), result: returned}
+  } else if (occurrence.kind === 'native_started') {
+    exactSkillActivationObject(record.occurrence, `${label}.occurrence`, ['kind', 'official_turn', 'identity'])
+    decoded = {kind: 'native_started', official_turn: skillActivationNonnegativeInteger(occurrence.official_turn, `${label}.official_turn`),
+      identity: decodeSkillActionIdentity(occurrence.identity, `${label}.identity`)}
+  } else throw new Error(`skill_activations ${label}.occurrence is unsupported`)
+  const observedAt = skillActivationString(record.observed_at, `${label}.observed_at`)
+  if (parseStrictRfc3339(observedAt) === null) throw new Error(`skill_activations ${label}.observed_at is invalid`)
+  return {
+    delivery_sha256: skillActivationCanonicalDigest(record.delivery_sha256, `${label}.delivery_sha256`),
+    physical_turn_ref: decodeSkillTurnRef(record.physical_turn_ref, `${label}.physical_turn_ref`),
+    runtime_id: skillActivationNonblank(record.runtime_id, `${label}.runtime_id`),
+    tool_name: skillActivationNonblank(record.tool_name, `${label}.tool_name`), occurrence: decoded, observed_at: observedAt,
+  }
+}
+
+function validateAsyncActionLinks(projection: DashboardSkillActivationProjection | null | undefined): void {
+  if (projection?.status !== 'available' || projection.ledger.async_actions.length === 0) return
+  const hash = (value: unknown): string => {
+    const bytes = new TextEncoder().encode(JSON.stringify(value).replaceAll('\u007f', '\\u007f'))
+    return bytesToHex(sha256(bytes))
+  }
+  const deliveries = new Map<string, DashboardSkillAsyncResultDelivery>()
+  for (const delivery of projection.ledger.async_result_deliveries) {
+    const {observed_at: _clock, ...identity} = delivery
+    deliveries.set(hash(identity), delivery)
+  }
+  const activations = new Map(projection.ledger.activations.map(value => [value.skill_tool_use_id, value]))
+  const frameDigests = new Map<string, string>()
+  for (const action of projection.ledger.async_actions) {
+    const delivery = deliveries.get(action.delivery_sha256)
+    if (!delivery || delivery.presentation !== 'inline_result' || delivery.physical_turn_ref !== action.physical_turn_ref
+      || delivery.runtime_id !== action.runtime_id || (action.occurrence.kind === 'sdk_result'
+        && action.occurrence.invocation.turn < delivery.boundary.agent_core_turn)) {
+      throw new Error('skill_activations action has no matching inline causal delivery')
+    }
+    for (const child of delivery.child_activations) {
+      let digest = frameDigests.get(child.skill_tool_use_id)
+      if (digest === undefined) {
+        const activation = activations.get(child.skill_tool_use_id)
+        if (!activation) throw new Error('skill_activations action original frame is absent')
+        digest = hash({...activation, delivery: null, actions: []})
+        frameDigests.set(child.skill_tool_use_id, digest)
+      }
+      if (digest !== child.activation_sha256) {
+        throw new Error('skill_activations action original frame differs')
+      }
+    }
   }
 }
 
@@ -1760,14 +1866,16 @@ export function normalizeSkillActivationProjection(
     'activations',
     'transition_rejections',
     'async_result_deliveries',
+    'async_actions',
   ])
   if (ledger.schema !== SKILL_ACTIVATIONS_SCHEMA) {
-    throw new Error('skill_activations schema is not v6')
+    throw new Error('skill_activations schema is not v7')
   }
   if (
     !Array.isArray(ledger.activations)
     || !Array.isArray(ledger.transition_rejections)
     || !Array.isArray(ledger.async_result_deliveries)
+    || !Array.isArray(ledger.async_actions)
     || !Array.isArray(projection.scoped_summaries)
   ) {
     throw new Error('skill_activations arrays are missing')
@@ -1776,6 +1884,21 @@ export function normalizeSkillActivationProjection(
     decodeSkillActivation(activation, `available.ledger.activations[${index}]`))
   const asyncDeliveries = ledger.async_result_deliveries.map((delivery, index) =>
     decodeAsyncResultDelivery(delivery, `available.ledger.async_result_deliveries[${index}]`))
+  const asyncActions = ledger.async_actions.map((action, index) => decodeAsyncAction(action, `available.ledger.async_actions[${index}]`))
+  const actionIdentities = new Set<string>()
+  const occurrenceFacts = new Map<string, string>()
+  for (const action of asyncActions) {
+    const occurrence = action.occurrence.kind === 'sdk_result'
+      ? {kind: action.occurrence.kind, invocation: action.occurrence.invocation} : action.occurrence
+    const identity = JSON.stringify([action.delivery_sha256, action.physical_turn_ref, action.runtime_id, occurrence])
+    if (actionIdentities.has(identity)) throw new Error('skill_activations repeats a causal occurrence')
+    actionIdentities.add(identity)
+    const occurrenceIdentity = JSON.stringify([action.physical_turn_ref, action.runtime_id, occurrence])
+    const fact = JSON.stringify([action.tool_name, action.occurrence])
+    const known = occurrenceFacts.get(occurrenceIdentity)
+    if (known !== undefined && known !== fact) throw new Error('skill_activations physical occurrence differs across causal links')
+    occurrenceFacts.set(occurrenceIdentity, fact)
+  }
   const byId = new Map(activations.map(activation => [activation.skill_tool_use_id, activation]))
   if (byId.size !== activations.length) throw new Error('skill_activations repeats an original activation')
   const physicalHandoffs = new Set<string>()
@@ -1808,6 +1931,7 @@ export function normalizeSkillActivationProjection(
       revision: skillActivationSha256(ledger.revision, 'available.ledger.revision'),
       activations,
       async_result_deliveries: asyncDeliveries,
+      async_actions: asyncActions,
       transition_rejections: ledger.transition_rejections.map((rejection, index) =>
         decodeTransitionRejection(rejection, `available.ledger.transition_rejections[${index}]`)),
     },
@@ -1834,6 +1958,7 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
     ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined
   const normalizedSkillActivations = normalizeSkillActivationProjection(raw.skill_activations)
+  validateAsyncActionLinks(normalizedSkillActivations)
   return {
     ...raw,
     tool_inventory: {

@@ -24,6 +24,9 @@ and recorded_task_provenance =
 
 type bound_context = { context : t; runtime : string }
 
+let physical_turn_ref (context : t) = context.turn_ref
+let current_runtime_id (context : t) = context.runtime_id ()
+
 type result_child = {alias:string;skill_reference:Skill_reference.t;skill_tool_use_id:string}
 let bound_trace_id bound = bound.context.trace_id
 let bound_turn_ref bound = bound.context.turn_ref

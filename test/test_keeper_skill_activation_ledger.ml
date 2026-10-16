@@ -1108,7 +1108,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
       [ "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "activations", activations
-      ; "transition_rejections", `List []; "async_result_deliveries", `List []
+      ; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List []
       ]
   in
   let revision =
@@ -1116,12 +1116,12 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
   in
   let json =
     `Assoc
-      [ "schema", `String "masc.skill-activations/v6"
+      [ "schema", `String "masc.skill-activations/v7"
       ; "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "revision", `String revision
       ; "activations", activations
-      ; "transition_rejections", `List []; "async_result_deliveries", `List []
+      ; "transition_rejections", `List []; "async_result_deliveries", `List []; "async_actions", `List []
       ]
   in
   match Ledger.of_projection_yojson json with
@@ -1308,15 +1308,17 @@ let test_shared_python_revision_fixture () =
       | Ok _ -> fail "an existing handoff was rebound to a changed original frame")
       [replace "runtime_id" (`String "another-runtime");replace "content_revision" (`String (String.make 64 '1'));
        replace "snapshot_revision" (`String (String.make 64 '2'));replace "activated_at" (`String "2026-10-14T12:00:03Z");task_changed]))
-    ["fixtures/skill-ledger-revision.json"; "fixtures/skill-ledger-async-delivery.json"]
+    ["fixtures/skill-ledger-revision.json"; "fixtures/skill-ledger-async-delivery.json"; "fixtures/skill-ledger-async-actions.json"]
 ;;
 
 let test_receipt_projection_revision_binds_full_unicode_id () =
   let ledger =
     Ledger.empty ~workspace_root:"/workspace" ~trace_id:(trace_id "trace-one")
   in
-  check string "shared OCaml/Python golden"
-    "7bd059bf9278f8f8959786c9c6c54e280a7821cc389a1990a2b09d452b06ef8a"
+  (* The v7 empty ledger hashes the required async_actions array as well.
+     The receipt identifier below occupies 15 UTF-8 bytes. *)
+  check string "v7 receipt UTF-8 golden"
+    "006625c4a4ac38162139eb142a0929eda08121f37fcb5018357b2bb260560651"
     (Ledger.receipt_projection_revision ledger ~skill_tool_use_id:"call-한한한A");
   let shared = "call-" ^ String.concat "" (List.init 200 (fun _ -> "한")) in
   let left = Ledger.receipt_projection_revision ledger ~skill_tool_use_id:(shared ^ "A") in

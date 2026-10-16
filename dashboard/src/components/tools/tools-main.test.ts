@@ -227,8 +227,9 @@ function keeperReceiptFixture(
         action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
       }],
       ledger: {
-        schema: 'masc.skill-activations/v6',
+        schema: 'masc.skill-activations/v7',
         async_result_deliveries: [],
+        async_actions: [],
         workspace_key: 'e'.repeat(64),
         session_id: sessionId,
         revision: 'c'.repeat(64),

@@ -531,17 +531,22 @@ let assemble_hooks
        gate or serializing tool execution itself. *)
     let serialize_tool_observer = create_tool_observer_serialization () in
     let skill_delivery_state = Skill_delivery_state.create () in
+    let async_actions = Keeper_skill_async_action_observer.create ~config ~context:ctx.skill_activation_context in
+    let async_action_error error =
+      Log.Keeper.warn "Async child action evidence refused keeper=%s detail=%s"
+        meta.name (Keeper_skill_async_action_observer.error_to_string error)
+    in
     let observe_composition_result observation =
       Log.Keeper.info
         "Prepared composition result handoff keeper=%s evidence=%s"
         meta.name
         (Keeper_composition_result_delivery.observation_to_json observation |> Yojson.Safe.to_string);
-      match Keeper_composition_result_delivery.persist ~config observation with
+      match Keeper_skill_async_action_observer.record_delivery async_actions observation with
       | Ok None -> ()
       | Ok (Some delivery) -> Log.Keeper.info "Prepared child handoff recorded keeper=%s evidence=%s"
           meta.name (Keeper_skill_async_delivery.to_json delivery |> Yojson.Safe.to_string)
       | Error error -> Log.Keeper.warn "Prepared child handoff ledger refused keeper=%s detail=%s"
-          meta.name (Keeper_composition_result_delivery.error_to_string error)
+          meta.name (Keeper_skill_async_action_observer.error_to_string error)
     in
     let composition_delivery_error error =
       Log.Keeper.warn "Prepared composition result handoff refused keeper=%s detail=%s"
@@ -586,6 +591,9 @@ let assemble_hooks
         (trailing_tool_result_receipts messages)
     in
     let observe_official_client_result_handoff ~runtime_id ~invocation ~content =
+      (* Official clients can receive sibling MCP results before their next
+         native step. Keep all inline receipts in this physical attempt;
+         actual turn/attempt resets below revoke their authority. *)
       Keeper_composition_result_delivery.observe_official_result ctx.composition_result_delivery
         ~runtime_id ~invocation ~content ~observe:observe_composition_result
         ~on_error:composition_delivery_error;
@@ -603,6 +611,9 @@ let assemble_hooks
     in
     let observe_official_client_native_action
           ~runtime_id ~official_turn ~identity ~tool_name =
+      (match Keeper_skill_async_action_observer.native_started async_actions
+          ~runtime_id ~official_turn ~identity ~tool_name with
+       | Ok _ -> () | Error error -> async_action_error error);
       (* [official_turn] is the CLI's own per-session counter and shares no
          axis with the ledger's agent-core turns; it stays in log lines as
          provenance only. The ledger receives the delivery boundary's
@@ -666,6 +677,7 @@ let assemble_hooks
       (* An official-client handoff belongs only to the runtime that produced
          it. A failover candidate must receive the Skill result itself before
          one of its actions can complete that activation's evidence. *)
+      Keeper_skill_async_action_observer.clear async_actions;
       Skill_delivery_state.begin_runtime_attempt skill_delivery_state;
       Keeper_composition_result_delivery.clear_pending ctx.composition_result_delivery;
       ctx.on_runtime_attempt attempt
@@ -846,6 +858,7 @@ let assemble_hooks
             (fun event ->
               match event with
               | Agent_core.Hooks.AfterTurn { turn; _ } ->
+                Keeper_skill_async_action_observer.begin_handoff async_actions;
                 Keeper_composition_result_delivery.commit_provider_response ctx.composition_result_delivery
                   ~agent_core_turn:turn ~observe:observe_composition_result
                   ~on_error:composition_delivery_error;
@@ -875,6 +888,7 @@ let assemble_hooks
             (fun event ->
               match event with
               | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
+                ignore (Keeper_skill_async_action_observer.sdk_hook async_actions ~on_error:async_action_error event);
                 ignore (composition_result_lifecycle_hook ctx.composition_result_delivery event);
                 (* A pre-hook observes a request, before validation/approval.
                    Include Skill without claiming the handler has started. *)
@@ -911,7 +925,10 @@ let assemble_hooks
               | OnToolError _ ->
                 Agent_core.Hooks.Continue)
       ;
-        post_tool_use_failure = Some (composition_result_lifecycle_hook ctx.composition_result_delivery)
+        post_tool_use = Some (Keeper_skill_async_action_observer.sdk_hook async_actions ~on_error:async_action_error)
+      ; post_tool_use_failure = Some (fun event ->
+          ignore (Keeper_skill_async_action_observer.sdk_hook async_actions ~on_error:async_action_error event);
+          composition_result_lifecycle_hook ctx.composition_result_delivery event)
       ; before_turn_params =
           Some
             (guard_repetition_before_turn_params repetition_execution (fun event ->
@@ -923,6 +940,7 @@ let assemble_hooks
                 (* A delivered Skill can only inform tool choices made from this
                    exact provider request. Do not carry causal candidates into a
                    later Agent Core turn. *)
+                Keeper_skill_async_action_observer.clear async_actions;
                 Skill_delivery_state.begin_turn skill_delivery_state;
                 Keeper_composition_result_delivery.clear_pending ctx.composition_result_delivery;
                 (* Reset the in-turn FSM before this hook writes the next agent-core

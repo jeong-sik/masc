@@ -189,7 +189,7 @@ event/projection replay compare that frame before accepting the handoff. A
 changed or unavailable original ledger refuses the write with a structured log.
 It does not dispatch another worker or create a substitute activation.
 
-`masc.skill-activations/v6` exposes these facts as `async_result_deliveries`, with
+`masc.skill-activations/v7` exposes these facts as `async_result_deliveries`, with
 separate original/physical turn references, status SDK occurrence, receiving
 runtime, canonical request, raw transport receipt, presentation and child frame
 digests. Re-observing an identical physical handoff retains its first durable
@@ -199,11 +199,11 @@ per receiving runtime. Manifest references remain observable without increasing
 inline body-delivery counts. Neither delivery form creates a later action.
 
 The Python measurement reader validates the same original frame digests and
-canonical revision as the server. The Dashboard preserves those typed digests
-and validates occurrence shape and scope membership; it does not independently
-authenticate the server's cryptographic revision or child frame. It is a read
-projection, not replay or write authority. Typed attribution of subsequent Tool
-or official-client actions remains a separate integration unit.
+canonical revision as the server. The Dashboard preserves typed digests and validates occurrence shape and scope
+membership. Its async Tools fetch additionally verifies causal delivery digests
+and the original frames referenced by action facts with portable SHA-256. It does not
+authenticate the complete server ledger revision; write authority stays in the
+canonical transaction.
 
 The owned-job feature scenario now continues its public prepare/run and fresh
 supervisor recovery through a real status tool invocation, raw provider-wire
@@ -217,3 +217,46 @@ activation is recreated and emits a separate status-to-correlated-response
 measurement. A run of that fixture proves its synthetic transport scope, not an
 external provider response, real Docker or installed-runtime behavior. Record the
 actual head and run before claiming the new scenarios pass.
+
+
+## Actions after an async result
+
+An actual inline handoff grants a receiving attempt causal handles for the
+original children. These handles retain the original trace and delivery digest;
+they never replace the original Task, runtime, snapshot or activation clock.
+SDK `PreToolUse` captures the handles without recording execution. Only the
+matching `PostToolUse` records the actual handler result as `sdk_result`.
+`handler_returned` means the SDK handler returned an `Ok` value; it does not infer
+business success from its text. `handler_errored` preserves typed recoverability
+and error class. Byte counts and hashes describe returned text or error text,
+not attachments. Validation refusals do not create action facts. The following
+Execution failure callback does not count an already recorded handler error again.
+
+Official native callbacks currently observe a start, so their fact is explicitly
+`native_started`, with the official counter and native identity. They do not
+establish completion, exit status or an SDK turn offset. Sibling official-client
+results accumulate in the same physical attempt. A provider response establishes
+one handoff boundary for all of its staged results. Actual turn/attempt resets
+revoke active and pending authority. Publication after durable I/O rechecks the
+captured attempt/handoff identity; an old write or failure cannot reactivate or
+clear a newer attempt, even if it selects the same runtime id.
+
+The same canonical Skill log appends `async_action_observed`; v7 projections
+require `async_actions`. Append, event replay and projection decoding all verify
+the referenced inline delivery, receiving physical context and original child
+frames. SDK occurrences compare their own counter to the receiving SDK boundary;
+native counters stay independent. Repeated facts retain their first clock. A
+changed name or result for the same physical occurrence is refused, including
+across sibling delivery links. Multiple identical links stay visible while the
+child summary counts that occurrence once. A marker reference grants no inline
+body authority. Unavailable canonical authority clears only the affected current
+observation state and leaves Tool execution running.
+
+The owned-job scenario exercises actual SDK success/error/validation callbacks,
+ID reuse, official native starts, duplicate and contradictory facts, sibling
+receipts, corrupt-ledger recovery and a real canonical lock around an in-flight
+attempt reset. It retains the original child activation and checks zero backend
+redispatch after the result. Record an actual run/head before calling these cases
+passed. Named async children, dynamic child input, general resource admission,
+Skill detail views, installed runtime/UI and matched whole-task timings remain
+separate work.

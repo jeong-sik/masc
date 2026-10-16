@@ -1085,8 +1085,7 @@ let test_load_source_twice_moves_nothing () =
 let test_first_write_creates_the_store () =
   with_workspace @@ fun config ->
   let primary = Goal_store.goals_path config in
-  (* A refused create hands the state back untouched: no empty store is
-     pre-written, so the source stays Uninitialized. *)
+  (* A refused create commits nothing, so the source stays Uninitialized. *)
   (match Goal_store.upsert_goal config ~title:"no condition" () with
    | Error (Goal_store.Rejected _) -> ()
    | Error other -> fail ("B1 refusal was not Rejected: " ^ write_error_msg other)
@@ -1118,6 +1117,102 @@ let test_first_write_creates_the_store () =
 let event_rows path =
   Fs_compat.load_file path |> String.split_on_char '\n'
   |> List.filter (fun line -> line <> "") |> List.map Yojson.Safe.from_string
+
+let test_refused_audited_upserts_preserve_store_and_outbox () =
+  with_workspace ~now:calendar_fixture_now @@ fun config ->
+  let primary = Goal_store.goals_path config in
+  let mirror = goals_recovery_path config in
+  let ledger = Filename.concat (Filename.dirname primary) "goal_events.jsonl" in
+  let refused = function
+    | Error (Goal_store.Rejected _) -> ()
+    | Error error -> fail (write_error_msg error)
+    | Ok _ -> fail "an invalid audited upsert was accepted" in
+  let attempts =
+    [ (fun () -> Goal_store.upsert_goal_with_events config ~actor:"rejected"
+          ~id:"unknown-goal" ~metric:"m" ~target_value:"1" ());
+      (fun () -> Goal_store.upsert_goal_with_events config ~actor:"rejected"
+          ~title:"No condition" ());
+      (fun () -> Goal_store.upsert_goal_with_events config ~actor:"rejected"
+          ~title:"Already late" ~metric:"m" ~target_value:"1"
+          ~due_date:"2026-09-21" ()) ] in
+  List.iter (fun attempt ->
+    refused (attempt ());
+    (match Goal_store.load_source config with
+     | Goal_store.Uninitialized -> ()
+     | Goal_store.Available _ | Goal_store.Unavailable _ ->
+         fail "a refused audited creation initialized the store");
+    List.iter (fun path ->
+      check bool "refused creation writes no store, mirror or ledger" false
+        (Sys.file_exists path)) [primary; mirror; ledger]) attempts;
+  let goal = match Goal_store.upsert_goal_with_events config ~actor:"creator"
+      ~title:"Keep attribution" ~metric:"m" ~target_value:"1" () with
+    | Ok (goal, `created, _) -> goal
+    | Ok (_, `updated _, _) -> fail "expected the first accepted creation"
+    | Error error -> fail (write_error_msg error) in
+  let before = available config in
+  check int "accepted creation has a pending intent" 1 (List.length before.pending_events);
+  let primary_bytes = Fs_compat.load_file primary in
+  let mirror_bytes = Fs_compat.load_file mirror in
+  let invalid_update () =
+    Goal_store.upsert_goal_with_events config ~actor:"rejected"
+      ~id:goal.id ~due_date:"TBD" () in
+  List.iter (fun attempt ->
+    refused (attempt ());
+    check string "rejection preserves primary and its outbox" primary_bytes
+      (Fs_compat.load_file primary);
+    check string "rejection preserves recovery mirror" mirror_bytes
+      (Fs_compat.load_file mirror);
+    check bool "rejection publishes no audit rows" false (Sys.file_exists ledger))
+    (invalid_update :: attempts)
+
+let test_identical_audited_upsert_still_commits () =
+  with_workspace ~now:calendar_fixture_now @@ fun config ->
+  let created = match Goal_store.upsert_goal_with_events config ~actor:"creator"
+      ~title:"Confirmed criterion" ~metric:"m" ~target_value:"1"
+      ~due_date:"2026-09-23" ~priority:2 () with
+    | Ok (goal, `created, _) -> goal
+    | Ok (_, `updated _, _) -> fail "expected a creation"
+    | Error error -> fail (write_error_msg error) in
+  let completed =
+    { created with phase = Goal_phase.Completed;
+      last_review_note = Some "confirmed"; last_review_at = Some created.updated_at } in
+  let initial = available config in
+  Goal_store.write_state config { initial with goals = [completed] };
+  let event_ids events =
+    List.map (fun (event : Goal_store.pending_event) -> event.event_id) events in
+  let attempts =
+    [ (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
+          ~id:created.id ());
+      (fun () -> Goal_store.upsert_goal_with_events config ~actor:"editor"
+          ~id:created.id ~title:"Confirmed criterion" ~metric:"m" ~target_value:"1"
+          ~due_date:"2026-09-23" ~priority:2 ()) ] in
+  List.iter (fun attempt ->
+    let before = available config in
+    let previous = List.hd before.goals in
+    let goal, events = match attempt () with
+      | Ok (goal, `updated actual_previous, events) ->
+          check bool "action carries the exact authoritative previous row" true
+            (actual_previous = previous);
+          goal, events
+      | Ok (_, `created, _) -> fail "an existing goal became a creation"
+      | Error error -> fail (write_error_msg error) in
+    let after = available config in
+    check int "identical update advances the store version" (before.version + 1) after.version;
+    check string "criterion identity stays bound" completed.criterion_revision goal.criterion_revision;
+    check bool "completed phase is retained" true (goal.phase = Goal_phase.Completed);
+    check (option string) "review note is retained" completed.last_review_note goal.last_review_note;
+    check (option string) "review time is retained" completed.last_review_at goal.last_review_at;
+    check bool "returned goal is the persisted row" true (after.goals = [goal]);
+    (match events with
+     | [event] ->
+         check bool "identical edit emits Updated only" true (event.kind = Goal_store.Updated);
+         check int "event witnesses this commit" after.version event.store_revision;
+         check int "snapshot witnesses the same commit" after.version
+           Yojson.Safe.Util.(event.payload |> member "store_version" |> to_int)
+     | _ -> fail "expected one Updated event for an identical edit");
+    check (list string) "accepted edit appends to the existing durable outbox"
+      (event_ids before.pending_events @ event_ids events)
+      (event_ids after.pending_events)) attempts
 
 let test_audit_outbox_retains_creation_and_deduplicates_retry () =
   with_workspace @@ fun config ->
@@ -1307,7 +1402,11 @@ let test_audit_intents_survive_other_goal_mutations () =
 let () =
   run "Goal_store"
     [ ( "audit outbox",
-        [ test_case "malformed complete history preserves delivery and refusals" `Quick
+        [ test_case "refused audited upserts preserve store and outbox" `Quick
+            test_refused_audited_upserts_preserve_store_and_outbox;
+          test_case "identical audited update still commits" `Quick
+            test_identical_audited_upsert_still_commits;
+          test_case "malformed complete history preserves delivery and refusals" `Quick
             test_audit_outbox_preserves_malformed_complete_rows;
           test_case "failed creation delivery and duplicate-safe retry" `Quick
             test_audit_outbox_retains_creation_and_deduplicates_retry;

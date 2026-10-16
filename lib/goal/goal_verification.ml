@@ -333,7 +333,7 @@ let write_state_result config state =
 (* {1 Record operations}
 
    Every mutation is a locked read-modify-write that refuses an undecodable
-   store, mirroring [Goal_store.update_state]. *)
+   authoritative store. *)
 
 let find_record records goal_id =
   List.find_opt (fun (record : record) -> String.equal record.goal_id goal_id) records

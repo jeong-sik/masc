@@ -23,6 +23,25 @@ end
 
 module Invocation_table = Ephemeron.K1.Make (Invocation_key)
 
+let invocation_execution_ids : Ids.Execution_id.t Invocation_table.t =
+  Invocation_table.create 8
+let invocation_execution_ids_mu = Stdlib.Mutex.create ()
+
+let with_invocation_execution_ids_lock f =
+  Stdlib.Mutex.lock invocation_execution_ids_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock invocation_execution_ids_mu)
+    f
+
+let invocation_execution_id ~invocation =
+  with_invocation_execution_ids_lock (fun () ->
+    match Invocation_table.find_opt invocation_execution_ids invocation with
+    | Some execution_id -> execution_id
+    | None ->
+        let execution_id = Ids.Execution_id.generate () in
+        Invocation_table.add invocation_execution_ids invocation execution_id;
+        execution_id)
+
 (** Pre-truncation info, keyed by the exact Agent Core occurrence. Set by the
     tool handler wrapper and consumed by the on-tool-result hook. The weak key
     prevents cancellation before that hook from retaining the invocation. *)
@@ -446,6 +465,7 @@ let reset_for_testing () =
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
   with_pending_truncation_lock (fun () -> Invocation_table.reset pending_truncation);
+  with_invocation_execution_ids_lock (fun () -> Invocation_table.reset invocation_execution_ids);
   with_pending_file_change_evidence_lock (fun () ->
     Invocation_table.reset pending_file_change_evidence);
   with_retained_artifacts_lock (fun () -> Invocation_table.reset pending_retained_artifacts)
@@ -768,6 +788,7 @@ let log_call
       ?prompt_fingerprint
       ?execution_id
       ?tool_observation
+      ?physical_execution_id
       ?tool_use_id
       ?planned_index
       ?batch_index
@@ -915,6 +936,11 @@ let log_call
         match execution_id with
         | Some value ->
           [ "execution_id", `String (Ids.Execution_id.to_string value) ]
+        | None -> []
+      in
+      let physical_execution_id_field =
+        match physical_execution_id with
+        | Some value -> [ "physical_execution_id", Ids.Execution_id.to_yojson value ]
         | None -> []
       in
       (* RFC-0233 PR-2: provider call id — the key the agent_core-event rows
@@ -1166,6 +1192,7 @@ let log_call
               | None -> []
               | Some observation ->
                 [ "tool_observation", Tool_observation.to_yojson observation ])
+           @ physical_execution_id_field
            @ tool_use_id_field
            @ planned_index_field
            @ batch_index_field

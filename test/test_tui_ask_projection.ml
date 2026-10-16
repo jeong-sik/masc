@@ -552,7 +552,8 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
      ("state",`String "unknown")::List.remove_assoc "state" progress;
      List.remove_assoc "evidence_complete" progress];
   let actions = `Assoc ["state", `String "observed"; "observed_count", `Int 1;
-    "first_recorded_at", `Float 202.; "latest", `Assoc ["execution_id", `String "physical-one";
+    "first_recorded_at", `Float 202.; "latest", `Assoc ["execution_id", `String "logical-one";
+      "physical_execution_id", `String "physical-one";
       "trace_id", `String "original-trace"; "keeper_turn_id", `Int 17;
       "tool", `String "Read"; "recorded_at", `Float 202.]] in
   let with_actions value = ("tool_actions", value)::List.remove_assoc "tool_actions" progress in
@@ -561,9 +562,20 @@ let test_followup_protocol_keeps_exact_identity_and_unknowns () =
   Alcotest.(check bool) "Tool evidence retains the exact physical invocation and input turn" true
     (match observed.af_tool_actions with
      | Decode.Ask_tools_observed {at_count=1;at_latest=Some action;_} ->
-         action.ata_execution_id="physical-one" && action.ata_trace_id="original-trace"
+         action.ata_execution_id="logical-one" && action.ata_physical_execution_id="physical-one"
+         && action.ata_trace_id="original-trace"
          && action.ata_keeper_turn_id=17
      | Decode.Ask_tools_observed _ | Decode.Ask_tools_unavailable -> false);
+  let malformed_physical value = match actions with
+    | `Assoc fields -> `Assoc (List.map (fun (key,latest) ->
+        if key<>"latest" then key,latest else match latest with
+          | `Assoc identity -> key,`Assoc (value @ List.remove_assoc "physical_execution_id" identity)
+          | _ -> Alcotest.fail "latest identity is not an object") fields)
+    | _ -> Alcotest.fail "Tool observation is not an object" in
+  List.iter (fun physical -> Alcotest.(check bool) "physical identity must be present, nonempty and unambiguous" true
+    (Result.is_error (decode fields (with_actions (malformed_physical physical)))))
+    [[];["physical_execution_id",`String ""];
+     ["physical_execution_id",`String "first";"physical_execution_id",`String "second"]];
   Alcotest.(check bool) "a count without matching Tool identities cannot be accepted" true
     (Result.is_error (decode fields (with_actions (`Assoc ["state",`String "observed";
        "observed_count",`Int 1; "first_recorded_at",`Null; "latest",`Null]))))

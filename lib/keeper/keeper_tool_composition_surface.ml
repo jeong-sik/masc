@@ -212,6 +212,7 @@ let observe_node_result
       ?thinking_enabled:context.thinking_enabled
       ?prompt_fingerprint:context.prompt_fingerprint
       ~execution_id:result.execution_id
+      ?physical_execution_id:result.physical_execution_id
       ~tool_use_id:result.tool_use_id
       ~planned_index:schedule.planned_index
       ~batch_index:schedule.batch_index
@@ -234,6 +235,7 @@ let observe_node_result
         (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
       ?trace_id:context.trace_id
       ?session_id:context.session_id
+      ~answer_source_ids:context.answer_source_ids
       ~turn:(Agent_core.Tool_contract.Invocation.turn parent_invocation)
       ?keeper_turn_id:context.keeper_turn_id
       ?task_id:context.task_id
@@ -597,6 +599,35 @@ let async_parent_invocation ~request_id source =
 let keeper_turn_id_of turn_context () =
   Option.bind turn_context (fun (context : Keeper_tool_call_log_context.turn_context) ->
     context.keeper_turn_id)
+
+let source_observation_of_context turn_context : Journal.source_observation option =
+  Option.map (fun (context : Keeper_tool_call_log_context.turn_context) ->
+    ({trace_id=Option.bind context.trace_id (fun id ->
+        match Keeper_id.Trace_id.of_string id with Ok id -> Some id | Error _ -> None);
+      session_id=context.session_id;
+      keeper_turn_id=context.keeper_turn_id;answer_source_ids=context.answer_source_ids}
+      : Journal.source_observation)) turn_context
+
+let original_source_context ~(source : Journal.source)
+    ~(observation : Journal.source_observation option) turn_context =
+  let context = match turn_context with
+    | Some context -> context | None -> Keeper_tool_call_log_context.empty_turn_context in
+  let context = {context with task_id=source.source_task_id;turn=Some source.source_turn;
+      answer_source_ids=[]} in
+  match observation with
+  | None -> Some context
+  | Some observation ->
+      let retain_known original current = match original with Some _ -> original | None -> current in
+      (* Partial/absent observation leaves the existing operational frame alone.
+         It cannot attach a current answer to the original invocation. *)
+      let answer_source_ids = match observation.trace_id, observation.keeper_turn_id with
+        | Some _, Some _ -> observation.answer_source_ids
+        | None, _ | _, None -> [] in
+      Some {context with trace_id=retain_known
+          (Option.map Keeper_id.Trace_id.to_string observation.trace_id) context.trace_id;
+        session_id=observation.session_id;
+        keeper_turn_id=retain_known observation.keeper_turn_id context.keeper_turn_id;
+        answer_source_ids}
 ;;
 
 let execute_keeper_plan ~capability_authority =
@@ -1396,6 +1427,25 @@ let rec async_worker_result
   =
   Eio_context.with_turn_switch request_sw
   @@ fun () ->
+  let meta = match journal with
+    | None -> meta
+    | Some worker -> (match Journal.worker_source_observation worker with
+        | Some {trace_id=Some trace_id;_} ->
+            {meta with runtime={meta.Keeper_meta_contract.runtime with trace_id}}
+        | Some {trace_id=None;_} | None -> meta) in
+  let turn_context = match journal with
+    | None -> turn_context
+    | Some worker -> original_source_context ~source:(Journal.worker_source worker)
+        ~observation:(Journal.worker_source_observation worker) turn_context in
+  let observation_context = match journal with
+    | None -> turn_context
+    | Some worker -> Option.map (fun (context : Keeper_tool_call_log_context.turn_context) ->
+        (* Operational fallback coordinates are not original-source evidence.
+           Keep execution behavior while withholding uncaptured log identity. *)
+        match Journal.worker_source_observation worker with
+        | None -> {context with trace_id=None;session_id=None;keeper_turn_id=None;answer_source_ids=[]}
+        | Some observation -> {context with trace_id=Option.map Keeper_id.Trace_id.to_string observation.trace_id;
+            session_id=observation.session_id;keeper_turn_id=observation.keeper_turn_id}) turn_context in
   let sandbox_factory = Keeper_sandbox_factory.create ~config ~meta () in
   Eio.Switch.on_release request_sw (fun () ->
     Keeper_sandbox_factory.cleanup sandbox_factory);
@@ -1459,6 +1509,8 @@ let rec async_worker_result
          let parent_invocation = Agent_core.Tool_contract.Invocation.create
              ~tool_use_id:activation.skill_tool_use_id ~turn:activation.agent_core_turn
              ~schedule ~completion:Agent_core.Tool_contract.Continue_after_success in
+         let physical_execution_id =
+           Keeper_tool_call_log.invocation_execution_id ~invocation:parent_invocation in
          let result = named_async_submission_result
              ~skill_reference:(Plan.child_reference child.child) ~plan:child_plan
              ~tool_name:(Plan.child_tool_name child.child)
@@ -1469,7 +1521,7 @@ let rec async_worker_result
              ~config ~meta ~capability_authority ~publication_recovery
              ~ctx_snapshot ~turn_context ?clock () in
          Option.iter (fun after -> after result) after_child_submission;
-         Executor.dispatch_result result)
+         Executor.dispatch_result ~physical_execution_id result)
     | Plan.Child_result child ->
       (match Journal.child_result_binding attempt ~plan with
        | Error error ->
@@ -1509,7 +1561,7 @@ let rec async_worker_result
         ?on_receipt_committed:None
         ~composition_tool:tool_name ~composition_execution
         ~composition_tool_kind:tool_kind ~composition_run_id
-        ~parent_invocation:source_invocation ~meta ~turn_context) turn_context in
+        ~parent_invocation:source_invocation ~meta ~turn_context) observation_context in
   let on_node_result = match after_node_observation with
     | None -> on_node_result
     | Some after -> Some (fun node ->
@@ -1686,6 +1738,10 @@ and async_submission_result
       ?clock
       ()
   =
+  let turn_context = match journal with
+    | None -> turn_context
+    | Some journal -> original_source_context ~source:(Journal.source journal)
+        ~observation:(Journal.source_observation journal) turn_context in
   let start_time = Tool_timing.start () in
   let composition_run_id = match composition_run_id with
     | Some identity -> identity
@@ -2006,7 +2062,8 @@ and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
          source_task_id;
          producer=Journal.Named {tool_name;skill_reference;activation=Some activation;
            origin=(match admission with Fresh_named _ -> Journal.Standalone | Original_child {origin;_} -> origin)}} in
-      Journal.prepare ~base_path:config.base_path source
+      Journal.prepare ?observation:(source_observation_of_context turn_context)
+        ~base_path:config.base_path source
       |> Result.map_error (fun error -> Submission.Journal_rejected error) in
     let prepared =
       let* trace_id,physical_turn_ref,origin = match admission with
@@ -2200,7 +2257,8 @@ let resume_continuation_with ?on_recovery_held ?owner_metadata_refusal ?on_refus
             ~tool_use_id:source.parent_tool_use_id ~turn:source.source_turn
             ~schedule:(Agent_core.Tool_contract.Invocation.schedule invocation)
             ~completion:Agent_core.Tool_contract.Continue_after_success in
-        let turn_context = Some {turn_context with task_id=source.source_task_id} in
+        let turn_context = original_source_context ~source:(Journal.source journal)
+            ~observation:(Journal.source_observation journal) (Some turn_context) in
         let original_nested = Keeper_composition_nested_run.create ~calls:(Draft.nested_calls draft)
             ~composition_run_id:source.composition_run_id ~parent_invocation
             ~delivery_parent_tool_use_id:(Keeper_composition_nested_run.async_result_parent source.composition_run_id)
@@ -2948,7 +3006,8 @@ let make_tools_with_authority
                       ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation
                       ; source_turn = Agent_core.Tool_contract.Invocation.turn parent_invocation
                       ; source_task_id = Option.bind turn_context (fun context -> context.Keeper_tool_call_log_context.task_id); producer=Journal.Prepared } in
-                    match Journal.prepare ~base_path:config.base_path source with
+                    match Journal.prepare ?observation:(source_observation_of_context turn_context)
+                        ~base_path:config.base_path source with
                     | Error error -> bind_result ~composition_run_id ~run_reference (journal_rejection ~start_time error)
                     | Ok journal -> execute_run ~journal ~nested_activation ~composition_run_id ~run_reference ~parent_invocation ~turn_context ()))
       in

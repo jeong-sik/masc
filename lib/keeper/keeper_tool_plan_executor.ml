@@ -139,6 +139,7 @@ let node_execution_origin_to_string =
 type node_result =
   { node_id : Keeper_tool_plan.Node_id.t
   ; execution_id : Ids.Execution_id.t
+  ; physical_execution_id : Ids.Execution_id.t option
   ; tool_name : string
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
@@ -154,6 +155,7 @@ type node_result =
 
 type dispatch_result =
   { result : Tool_result.result
+  ; physical_execution_id : Ids.Execution_id.t option
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
   ; result_bytes : int option
@@ -168,6 +170,7 @@ type admission_rejection =
 (* TEL-OK: pure smart constructor for the [dispatch_result] record above; it
    performs no action and emits no effect, so there is nothing to instrument. *)
 let dispatch_result
+      ?physical_execution_id
       ?failure_effect_disposition
       ?deferred_kind
       ?result_bytes
@@ -175,6 +178,7 @@ let dispatch_result
       result
   =
   { result
+  ; physical_execution_id
   ; failure_effect_disposition
   ; deferred_kind
   ; result_bytes
@@ -499,6 +503,7 @@ let execute_one
     let node_result =
       { node_id
       ; execution_id
+      ; physical_execution_id = result.physical_execution_id
       ; tool_name = node.tool_name
       ; input
       ; schedule = scheduled.schedule
@@ -1107,29 +1112,39 @@ let execute_keeper_with_authority
         ~schedule
         ~completion:Agent_core.Tool_contract.Continue_after_success
     in
-    let result = handler ~agent_core_invocation:invocation input in
-    let original_bytes, truncated_to =
-      Keeper_tool_call_log.consume_truncation_info ~invocation ()
-    in
-    let result_bytes =
-      if original_bytes > 0
-      then original_bytes
-      else String.length (Tool_result.message result)
-    in
-    match !execution_evidence with
-    | Some (failure_effect_disposition, deferred_kind) ->
-      { result
-      ; failure_effect_disposition
-      ; deferred_kind
-      ; result_bytes = Some result_bytes
-      ; truncated_to
-      }
-    | None ->
-      dispatch_result
+    let physical_execution_id = Keeper_tool_call_log.invocation_execution_id ~invocation in
+    let invocation_started = Tool_timing.start () in
+    Cancel_safe.protect
+      ~on_exn:(fun exn -> dispatch_result ~physical_execution_id
         ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
-        ~result_bytes
-        ?truncated_to
-        result
+        (Tool_result.make_err_of_exn ~class_:Tool_result.Runtime_failure
+          ~tool_name:node.tool_name ~start_time:invocation_started exn))
+      (fun () ->
+        let result = handler ~agent_core_invocation:invocation input in
+        let original_bytes, truncated_to =
+          Keeper_tool_call_log.consume_truncation_info ~invocation ()
+        in
+        let result_bytes =
+          if original_bytes > 0
+          then original_bytes
+          else String.length (Tool_result.message result)
+        in
+        match !execution_evidence with
+        | Some (failure_effect_disposition, deferred_kind) ->
+          { result
+          ; physical_execution_id = Some physical_execution_id
+          ; failure_effect_disposition
+          ; deferred_kind
+          ; result_bytes = Some result_bytes
+          ; truncated_to
+          }
+        | None ->
+          dispatch_result
+            ~physical_execution_id
+            ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
+            ~result_bytes
+            ?truncated_to
+            result)
   in
   (* Mirror the actual handler's source snapshot priority for the K coordinate,
      then its explicit TurnRef and the job producer's fallback. A mismatched

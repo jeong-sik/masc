@@ -33,6 +33,15 @@ type source =
   ; producer : producer
   }
 
+type source_observation = {
+  trace_id : Keeper_id.Trace_id.t option;
+  session_id : string option;
+  keeper_turn_id : int option;
+  answer_source_ids : string list;
+}
+(** Observation captured by the original producer, independently of execution
+    authority. Missing coordinates remain unknown and grant no replay right. *)
+
 type t
 type worker
 type attempt
@@ -106,9 +115,12 @@ val error_to_string : error -> string
 val error_to_json : error -> Yojson.Safe.t
 val failure_class : error -> Tool_result.tool_failure_class
 
-val prepare : base_path:string -> source -> (t, error) result
+val prepare : ?observation:source_observation -> base_path:string -> source -> (t, error) result
 (** Create the immutable source or confirm its exact existing identity. The
-    journal lives in the already-retained [keeper_msg_requests] owned tree. *)
+    journal lives in the already-retained [keeper_msg_requests] owned tree.
+    Only new creation can capture [observation], in the same durable write.
+    Existing journals retain their first observation or its absence; replay
+    cannot populate or replace it with current input. *)
 
 val load
   : base_path:string
@@ -118,8 +130,13 @@ val load
 (** Strict read-only load. Missing/corrupt authority never creates a run. *)
 
 val source : t -> source
+val source_observation : t -> source_observation option
+(** Original producer metadata, if captured. Does not reread current Keeper,
+    Task, answer, or turn context and does not authorize execution. *)
 val worker_source : worker -> source
-(** Immutable original source; this getter does not authorize node dispatch. *)
+val worker_source_observation : worker -> source_observation option
+(** The worker's same frozen source and observation. Neither getter authorizes
+    node dispatch. *)
 
 val same_source : source -> source -> bool
 (** Compare serialized immutable coordinates, including sealed recorder facts. *)

@@ -77,7 +77,9 @@ concurrent runs do not share a Keeper-name context or infer membership from time
 
 `tool_actions.state` is `observed` or `unavailable`. An observed summary has
 `observed_count`, `first_recorded_at` and nullable `latest`; the latest record
-names `execution_id`, `trace_id`, `keeper_turn_id`, `tool` and `recorded_at`.
+names `execution_id`, `physical_execution_id`, `trace_id`, `keeper_turn_id`,
+`tool` and `recorded_at`. The first ID retains the original logical node;
+the second names the actual invocation that supplied this result.
 The TUI shows the result count/latest Tool and turn alongside the retained
 answer receipt. `tui_ask_followup` logs keep the same identity and observation
 clocks without question text, answers or Tool input/output bodies. The existing
@@ -87,8 +89,8 @@ These are positive result observations, including errors. They prove input
 membership, not that the answer caused an action, the model used its content,
 an effect succeeded or the Task finished. No result is invented from a queue
 ACK, turn entry, clock overlap, or an unfinished Tool start. Uninstrumented
-native actions, older rows and fresh continuations without the original answer
-context remain unobserved. A zero count is no proof that no action happened.
+native actions and rows without a captured physical invocation remain
+unobserved. A zero count is no proof that no action happened.
 Ambiguous duplicate physical execution IDs or an unavailable/different Tool
 ledger workspace leave action evidence unavailable while retaining reaction
 facts. Reads neither flush pending Tool appends nor enqueue another answer.
@@ -113,3 +115,38 @@ answer source, request, runtime and original Tool/Task identities and compare
 answer recording, turn entry, first Tool result recording and TUI admission
 separately, including failed/unfinished samples. No new native or model latency
 result is claimed.
+
+## Preserve the answer through async Composition continuation
+
+The original producer captures trace, session, Keeper turn and answer-input
+membership once, in the same durable write as the execution-journal source.
+Reopening the source retains that first observation, including its absence.
+Continuation cannot fill it from the current Keeper, Task or a later answer.
+This metadata does not grant replay authority: the original journal owner,
+artifacts, node admission and effect-replay rules still decide execution.
+
+| Surface | As-Is at #43462 | To-Be in this source change |
+| --- | --- | --- |
+| Internal inline leaf | Answer-input membership omitted from its Tool row | The leaf logs its own captured run input |
+| Fresh async continuation | Original Task restored, original answer frame not retained | Original answer, trace, session and Keeper turn restored from the producer journal |
+| New job after a saved result wait | Current trace can conflict with the original launch frame | The worker restores its original trace before the unchanged identity checks |
+| Result recheck | Stable logical ID can look like ambiguous duplicate execution | New physical invocation IDs distinguish fresh rechecks from duplicate rows |
+| Compiled pure operand | A logical Tool row can be mistaken for a physical call | No physical call is counted without a dispatched invocation |
+
+An opaque SDK invocation owns one physical ID. Repeated provider IDs on
+different invocations remain distinct; repeated callbacks on one invocation
+share one ID. A result recheck keeps its logical `execution_id` and receives a
+fresh `physical_execution_id`. Retained completed nodes emit no new Tool row.
+The TUI follow-up journal carries both IDs. Missing source coordinates remain
+unknown in the Tool observation and cannot borrow current answer membership.
+
+The comparison baseline for this continuation change is #43462 at
+`c4f606876a328f11e3f2f082018e26489054abd5`. Authored public prepare/run/resume
+scenarios change the current Task, trace and answer before resuming. The
+synthetic owned-job scenario checks both reuse of the original completed job
+and a distinct job first launched after its saved result wait; it checks two
+physical result reads under one original logical wait. Ask/Tool-store scenarios
+separate fresh rechecks, logical-only rows and duplicate physical records.
+Protocol cases require both identities without testing TUI wording or layout.
+These cases are authored, not executed here. Parser and whitespace checks do
+not prove types, behavior, native TUI output, real Docker or model latency.

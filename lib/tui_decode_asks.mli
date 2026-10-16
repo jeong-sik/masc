@@ -78,6 +78,7 @@ type ask_answer_delivery =
 
 type ask_tool_action = {
   ata_execution_id : string;
+  ata_physical_execution_id : string;
   ata_trace_id : string;
   ata_keeper_turn_id : int;
   ata_tool : string;

@@ -12,6 +12,12 @@ val max_output_len : int
     the diagnostic away with it (see
     [Keeper_tool_composition_surface.failure_payload]). *)
 
+val invocation_execution_id :
+  invocation:Agent_core.Tool_contract.Invocation.t -> Ids.Execution_id.t
+(** One physical execution identity per exact opaque SDK invocation. Repeated
+    access shares the identity; repeated provider ids on distinct invocations
+    do not. Weak ownership releases cancelled or completed invocations. *)
+
 val set_truncation_info :
   invocation:Agent_core.Tool_contract.Invocation.t ->
   original_bytes:int ->
@@ -278,6 +284,7 @@ val log_call :
   ?prompt_fingerprint:string ->
   ?execution_id:Ids.Execution_id.t ->
   ?tool_observation:Tool_observation.t ->
+  ?physical_execution_id:Ids.Execution_id.t ->
   ?tool_use_id:string ->
   ?planned_index:int ->
   ?batch_index:int ->
@@ -334,9 +341,13 @@ val log_call :
     progress declaration in this same authoritative row. It forces a synchronous
     append, independently of any observational sink or bounded queue. Its absence
     means this producer supplied no immutable attribution; readers cannot infer it.
-    [execution_id] is the RFC-0233 canonical join key minted once at the
-    dispatch boundary; the trajectory row for the same execution carries
-    the identical value. [tool_use_id] is the provider call id for the
+    [execution_id] is the RFC-0233 canonical join key; ordinary SDK calls share
+    it with their trajectory row. A Composition node retains this logical
+    identity across result rechecks. [physical_execution_id] identifies the
+    exact dispatched invocation instead: a fresh result recheck has a new one,
+    while repeated callbacks on the same opaque invocation share one. Absence
+    does not prove a physical call; no identity is inferred from a logical node
+    or provider id. [tool_use_id] is the provider call id for the
     same execution (when the dispatch lane has one) — the key that the
     agent_core:tool_called/agent_core:tool_completed event rows also carry. Blank and
     repeated provider ids remain meaningful when scoped by [turn] and

@@ -780,7 +780,7 @@ let make_hooks
         (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
-        let execution_id = Ids.Execution_id.generate () in
+        let execution_id = Keeper_tool_call_log.invocation_execution_id ~invocation in
         let tool_observation =
           Option.map
             (fun attribute ->
@@ -859,6 +859,7 @@ let make_hooks
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
              ?tool_observation
+             ~physical_execution_id:execution_id
              ~tool_use_id
              ~planned_index:schedule.planned_index
              ~batch_index:schedule.batch_index
@@ -1088,7 +1089,7 @@ let make_hooks
            let schedule =
              Agent_core.Tool_contract.Invocation.schedule invocation
            in
-           let execution_id = Ids.Execution_id.generate () in
+           let execution_id = Keeper_tool_call_log.invocation_execution_id ~invocation in
            Keeper_execution_join.record
              ~invocation
              ~execution_id:(Ids.Execution_id.to_string execution_id);
@@ -1104,6 +1105,7 @@ let make_hooks
                 ?turn_kind:tctx.turn_kind
                 ?lane:tctx.lane
                 ~execution_id
+                ~physical_execution_id:execution_id
                 ~tool_use_id
                 ~planned_index:schedule.planned_index
                 ~batch_index:schedule.batch_index

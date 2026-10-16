@@ -21,9 +21,9 @@ Pass it to `keeper_job_status` to reconcile the saved backend or to
 confirmed exit are separate facts. Available terminal logs are published as
 durable artifact references in stdout, stderr order. A temporary log-collection
 failure can be retried under the same handle without running the program again.
-Confirmed loss of the original backend records a settled result with explicitly
-unavailable output. The
-backend spools both actual `docker logs` pipes and requires authoritative EOF
+Confirmed loss of the original backend before output collection records a settled
+result with explicitly unavailable output. The backend spools both actual
+`docker logs` pipes and requires authoritative EOF
 before publishing their complete files. Bounded process previews never become
 complete output. These artifacts preserve the bytes delivered by the backend;
 Docker's configured log retention determines which program bytes remain

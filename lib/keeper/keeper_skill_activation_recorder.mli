@@ -2,6 +2,13 @@
 
 type t
 type bound_context
+type result_child =
+  { alias : string
+  ; skill_reference : Skill_reference.t
+  ; skill_tool_use_id : string
+  }
+val bound_trace_id : bound_context -> Keeper_id.Trace_id.t
+val bound_turn_ref : bound_context -> Ids.Turn_ref.t
 
 type instruction_content =
   | Body of string
@@ -17,6 +24,14 @@ type error =
   | Activation_rejected of Keeper_skill_activation_ledger.decode_error
   | Store_failed of Keeper_skill_activation_ledger.store_error
   | Invalid_bound_context of string
+
+val find_bound_result_children : config:Workspace.config -> bound_context ->
+  composition_run_id:Keeper_tool_plan.Composition_run_id.t ->
+  logical_parent_tool_use_id:string -> source_turn:int -> tool_name:string ->
+  result_child list -> (Keeper_skill_activation_ledger.activation list, error) result
+(** One strict ledger read for all admitted original children. Compare every
+    original Task/reference/runtime/snapshot/turn against the sealed recorder;
+    missing or changed admitted children do not create replacement activations. *)
 
 val bind_async : t -> (bound_context, error) result
 (** Resolve the selected runtime once, keeping the original trace, turn,

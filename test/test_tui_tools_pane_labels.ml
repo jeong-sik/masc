@@ -24,7 +24,7 @@ let activation =
 let ledger_json revision =
   `Assoc
     [ "status", `String "available"; "keeper_name", `String "imp"
-    ; "ledger", `Assoc [ "schema", `String "masc.skill-activations/v5"; "workspace_key", `String hex64; "session_id", `String trace_id; "revision", `String revision; "activations", `List [ activation ]; "transition_rejections", `List [] ] ]
+    ; "ledger", `Assoc [ "schema", `String "masc.skill-activations/v6"; "workspace_key", `String hex64; "session_id", `String trace_id; "revision", `String revision; "activations", `List [ activation ]; "transition_rejections", `List []; "async_result_deliveries", `List [] ] ]
 
 let async_json =
   `Assoc
@@ -39,7 +39,7 @@ let ledger_of_json revision =
   | Error detail -> failwith ("decode: " ^ Masc.Keeper_skill_activation_ledger.decode_error_code detail)
 
 let revision_solved =
-  let canonical = `Assoc [ "workspace_key", `String hex64; "session_id", `String trace_id; "activations", `List [ activation ]; "transition_rejections", `List [] ] in
+  let canonical = `Assoc [ "workspace_key", `String hex64; "session_id", `String trace_id; "activations", `List [ activation ]; "transition_rejections", `List []; "async_result_deliveries", `List [] ] in
   Digestif.SHA256.(to_hex (digest_string (Yojson.Safe.to_string canonical)))
 
 let async_of_json () =

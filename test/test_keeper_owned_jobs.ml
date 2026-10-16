@@ -2507,6 +2507,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () = with
   let module Recorder = Masc.Keeper_skill_activation_recorder in
   let module Surface = Masc.Keeper_capability_surface in
   let module Delivery = Masc.Keeper_composition_result_delivery in
+  let module Async_delivery = Masc.Keeper_skill_async_delivery in
   let config = Workspace.default_config fixture.base_path in
   set_source fixture ~task_id:"task-A" ~turn:41;
   Call_log.init ~base_path:fixture.base_path ();
@@ -2776,8 +2777,13 @@ pointer = "/content"
     | Error error -> failf "actual async status transport failed: %s" error.Agent_core.Types.message) in
   let status_id = "status-original-result-in-new-turn" in
   let wire = lookup status_id in
-  let observed = ref [] and errors = ref [] in
-  let observe observation = observed := observation :: !observed
+  let observed = ref [] and errors = ref [] and durable = ref [] in
+  let observe observation =
+    observed := observation :: !observed;
+    match Delivery.persist ~config observation with
+    | Ok (Some delivery) -> durable := delivery :: !durable
+    | Ok None -> fail "actual admitted nested child has no durable handoff"
+    | Error error -> failf "actual child handoff persistence failed: %s" (Delivery.error_to_string error)
   and on_error error = errors := error :: !errors in
   let stage_response ?(id=status_id) ?(content=wire) ?(turn=2) () =
     let messages = [{Agent_core.Types.role=Tool;
@@ -2952,6 +2958,69 @@ pointer = "/content"
     | [result] -> result.content | [] | _::_::_ -> fail "actual other tool did not execute once" in
   stage_response ~content:other_wire ~turn:15 (); commit 15;
   check int "real SDK reuse by another tool cannot inherit status result authority" 12 (List.length !observed);
+  let ledger () = Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
+    |> require "durable child handoff replay" |> function Some ledger -> ledger | None -> fail "original ledger missing" in
+  let replay = ledger () in
+  let deliveries = Ledger.async_result_deliveries replay in
+  check int "actual repeated provider boundary is durable exactly once" 11 (List.length deliveries);
+  check bool "original activation, Task and activation clock are unchanged" true
+    (Ledger.activations replay = [original_activation]);
+  let summary = Ledger.summarize replay in
+  check int "repeated inline handoffs count one child provider delivery" 1 summary.composition_provider_deliveries;
+  check int "official client handoffs count one child separately" 1 summary.composition_official_client_handoffs;
+  check int "a result receipt does not invent a later action" 0 summary.composition_actions_observed;
+  check bool "reference handoff remains separate from inline result delivery" true
+    (List.exists (fun (delivery : Async_delivery.t) -> delivery.presentation = Async_delivery.Manifest_reference) deliveries);
+  List.iter (fun (delivery : Async_delivery.t) ->
+    check bool "durable physical handoff keeps the original activation turn" true
+      (Ids.Turn_ref.equal original_activation.turn_ref delivery.original_turn_ref
+       && Ids.Turn_ref.equal physical_turn_ref delivery.physical_turn_ref);
+    check (list string) "durable handoff binds exact original admitted child" [original_activation.skill_tool_use_id]
+      (List.map (fun (child : Async_delivery.child_activation) -> child.skill_tool_use_id) delivery.child_activations);
+    check string "durable handoff retains canonical original request" entry.request_id delivery.request_id) deliveries;
+  let projection = Ledger.to_yojson replay |> Ledger.of_projection_yojson |> require "self-contained async ledger projection" in
+  check int "canonical projection retains all physical handoffs" 11 (List.length (Ledger.async_result_deliveries projection));
+  let repeated = List.hd !durable in
+  let repeated_observation = List.hd !observed in
+  let idempotent = Delivery.persist ~config repeated_observation |> require "actual handoff re-observation"
+    |> function Some value -> value | None -> fail "re-observation lost original child" in
+  check_json "idempotent handoff retains first durable clock" (Async_delivery.to_json repeated) (Async_delivery.to_json idempotent);
+  let valid_events = read events in
+  let change_field name value = function
+    | `Assoc fields -> `Assoc (List.map (fun (key,known) -> key, if String.equal key name then value else known) fields)
+    | _ -> fail "original child frame is not an object" in
+  let change_task = function
+    | `Assoc fields -> `Assoc (List.map (function
+        | "invocation", invocation ->
+          "invocation", change_field "origin" (`Assoc ["kind",`String "task_composition";"task_ids",`List [`String "task-B"]]) invocation
+        | field -> field) fields)
+    | _ -> fail "original child frame is not an object" in
+  List.iter (fun mutate ->
+    let tampered = String.split_on_char '\n' valid_events
+      |> List.filter (fun row -> not (String.equal row ""))
+      |> List.map (fun row ->
+        let json = Yojson.Safe.from_string row in
+        match json with
+        | `Assoc fields when List.assoc_opt "kind" fields = Some (`String "activation_recorded") ->
+          `Assoc (List.map (function "activation", activation -> "activation", mutate activation | field -> field) fields)
+          |> Yojson.Safe.to_string
+        | _ -> row)
+      |> String.concat "\n" in
+    Fun.protect ~finally:(fun () -> write events valid_events) (fun () ->
+      write events (tampered ^ "\n");
+      match Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id with
+      | Error (Ledger.Decode_failed (Ledger.Invalid_async_result_evidence _)) -> ()
+      | Error error -> failf "altered original frame returned wrong refusal: %s" (Ledger.store_error_to_string error)
+      | Ok _ -> fail "canonical event replay rebound handoff to an altered original frame"))
+    [change_task;change_field "runtime_id" (`String "another-runtime");
+     change_field "activated_at" (`String "2026-10-14T12:00:03Z")];
+  Fun.protect ~finally:(fun () -> write events valid_events) (fun () ->
+    write events "corrupt-original-child-ledger\n";
+    match Delivery.persist ~config repeated_observation with
+    | Error (Delivery.Recorder_failed _) -> ()
+    | Ok _ | Error _ -> fail "corrupt original ledger acquired a durable child receipt");
+  Delivery.persist ~config repeated_observation |> require "original child receipt recovers without dispatch" |> ignore;
+  check int "ledger recovery creates no second handoff" 11 (List.length (Ledger.async_result_deliveries (ledger ())));
   check int "all result correlation performs zero backend operations" ready_backend (List.length (calls fixture));
   check int "result correlation creates no program" 1 (effect_count fixture "create");
   check int "result correlation starts no program" 1 (effect_count fixture "start");
@@ -2965,7 +3034,8 @@ pointer = "/content"
      "observed_transport_handoffs",`Int (List.length !observed);
      "backend_calls_after_result_ready",`Int (List.length (calls fixture)-ready_backend);
      "original_activation_count",`Int 1;
-     "durable_child_delivery_ledger_updated",`Bool false]));
+     "durable_child_delivery_ledger_updated",`Bool true;
+     "unique_durable_child_handoffs",`Int (List.length deliveries)]));
   Printf.printf "OWNED_NESTED_SKILL_CONTINUATION %s\n%!" (Yojson.Safe.to_string (`Assoc
     ["scope",`String "synthetic CLI public nested async parent and fresh original child authority recovery";
      "prepare_to_saved_wait_ms",`Float prepare_to_wait_ms;"fresh_pulse_to_original_dag_ms",`Float recovery_ms;

@@ -112,3 +112,10 @@ val load_nested_activation : base_path:string ->
 (** Strictly read the original owned run artifact, including exact draft,
     invocation and child mappings. Restore the sealed original recorder facts;
     ordinary runs carry null. No activation or worker is created. *)
+
+val load_nested_result_children : base_path:string ->
+  Keeper_tool_execution_journal.source -> result:Yojson.Safe.t ->
+  ((Keeper_skill_activation_recorder.bound_context *
+    Keeper_skill_activation_recorder.result_child list) option, error) result
+(** Restore only admitted child IDs whose complete result scope matches the
+    exact frozen run call. Do not infer admission from success text or outputs. *)

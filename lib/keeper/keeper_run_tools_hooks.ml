@@ -163,7 +163,9 @@ let receipt_of_tool_result ~tool_use_id ~content =
    non-Tool, rather than only the very last message -- the previous rule
    dropped the receipt whenever anything followed the results, and the skill
    ledger then never matched. Non-trailing history is not scanned: a result
-   older than this turn was already offered at its own boundary. *)
+   older than this turn was already offered at its own boundary. Prepending
+   each message's forward [results] onto [acc] while walking [List.rev messages]
+   restores chronological message and content order without a second reverse. *)
 let trailing_tool_result_contents messages =
   let rec take acc = function
     | {Agent_core.Types.role=Tool;content;_}::rest ->
@@ -533,7 +535,13 @@ let assemble_hooks
       Log.Keeper.info
         "Prepared composition result handoff keeper=%s evidence=%s"
         meta.name
-        (Keeper_composition_result_delivery.observation_to_json observation |> Yojson.Safe.to_string)
+        (Keeper_composition_result_delivery.observation_to_json observation |> Yojson.Safe.to_string);
+      match Keeper_composition_result_delivery.persist ~config observation with
+      | Ok None -> ()
+      | Ok (Some delivery) -> Log.Keeper.info "Prepared child handoff recorded keeper=%s evidence=%s"
+          meta.name (Keeper_skill_async_delivery.to_json delivery |> Yojson.Safe.to_string)
+      | Error error -> Log.Keeper.warn "Prepared child handoff ledger refused keeper=%s detail=%s"
+          meta.name (Keeper_composition_result_delivery.error_to_string error)
     in
     let composition_delivery_error error =
       Log.Keeper.warn "Prepared composition result handoff refused keeper=%s detail=%s"

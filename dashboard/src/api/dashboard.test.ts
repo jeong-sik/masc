@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runtimeReservedProviderIdsFixture } from '../lib/runtime-config-receipt.test-fixture'
+import sharedAsyncSkillLedger from '../../../test/fixtures/skill-ledger-async-delivery.json'
 
 const devTokenMock = vi.hoisted(() => ({
   ensureDevToken: vi.fn(() => Promise.resolve()),
@@ -1263,7 +1264,8 @@ function validSkillActivationProjectionFixture() {
       action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
     }],
     ledger: {
-      schema: 'masc.skill-activations/v5',
+      schema: 'masc.skill-activations/v6',
+        async_result_deliveries: [],
       workspace_key: 'c'.repeat(64),
       session_id: 'trace-one',
       revision: 'd'.repeat(64),
@@ -1309,6 +1311,54 @@ function validSkillActivationProjectionFixture() {
 }
 
 describe('fetchDashboardTools', () => {
+  it('retains async child receipts across SDK turns without changing the original Task', () => {
+    const projection = { ...validSkillActivationProjectionFixture(), ledger: sharedAsyncSkillLedger }
+    const decoded = normalizeSkillActivationProjection(projection)
+    expect(decoded?.status).toBe('available')
+    if (decoded?.status !== 'available') throw new Error('async ledger unavailable')
+    expect(decoded.ledger).toEqual(sharedAsyncSkillLedger)
+    expect(decoded.ledger.activations[0]?.delivery).toBeNull()
+    for (const field of ['original_turn_ref', 'logical_parent_tool_use_id', 'child_activations'] as const) {
+      const invalid = structuredClone(projection)
+      const receipt = invalid.ledger.async_result_deliveries[0]
+      if (!receipt) throw new Error('shared async receipt missing')
+      if (field === 'child_activations') receipt[field] = [{ skill_tool_use_id: 'new-child', activation_sha256: 'e'.repeat(64) }]
+      else receipt[field] = field === 'original_turn_ref' ? 'trace-one#73' : 'different-original'
+      expect(() => normalizeSkillActivationProjection(invalid)).toThrow('original admitted child')
+    }
+    const invalid = structuredClone(projection)
+    const invalidReceipt = invalid.ledger.async_result_deliveries[0]
+    if (!invalidReceipt) throw new Error('shared async receipt missing')
+    invalidReceipt.status_invocation.turn = 2
+    expect(() => normalizeSkillActivationProjection(invalid)).toThrow('status occurrence')
+    const duplicate = structuredClone(projection)
+    const repeated = structuredClone(duplicate.ledger.async_result_deliveries[0])
+    if (!repeated) throw new Error('shared async receipt missing')
+    repeated.observed_at = '2026-10-14T12:00:01Z'
+    duplicate.ledger.async_result_deliveries.push(repeated)
+    expect(() => normalizeSkillActivationProjection(duplicate)).toThrow('physical handoff')
+    for (const source of ['transport', 'original_frame'] as const) {
+      const malformed = structuredClone(projection)
+      const receipt = malformed.ledger.async_result_deliveries[0]
+      if (!receipt) throw new Error('shared async receipt missing')
+      if (source === 'transport') receipt.receipt.content_sha256 = receipt.receipt.content_sha256.toUpperCase()
+      else {
+        const child = receipt.child_activations[0]
+        if (!child) throw new Error('shared original frame missing')
+        child.activation_sha256 = child.activation_sha256.toUpperCase()
+      }
+      expect(() => normalizeSkillActivationProjection(malformed)).toThrow('canonical sha256')
+    }
+    for (const [field, value] of [ ['physical_turn_ref', 'garbage'], ['composition_run_id', 'bad-run'],
+      ['observed_at', '2026-02-30T12:00:00Z'] ] as const) {
+      const malformed = structuredClone(projection)
+      const receipt = malformed.ledger.async_result_deliveries[0]
+      if (!receipt) throw new Error('shared async receipt missing')
+      receipt[field] = value
+      expect(() => normalizeSkillActivationProjection(malformed)).toThrow()
+    }
+  })
+
   it('decodes nested composition activation with its exact parent and run scope', () => {
     const projection = validSkillActivationProjectionFixture()
     const scope = {
@@ -1346,7 +1396,7 @@ describe('fetchDashboardTools', () => {
       keeper_name: 'keeper/one',
       scoped_summaries: [],
       ledger: { schema: 'masc.skill-activations/v3', activations: [] },
-    })).toThrow('skill_activations schema is not v5')
+    })).toThrow('skill_activations schema is not v6')
   })
 
   it('decodes every nested field of an available v5 Skill activation projection', () => {

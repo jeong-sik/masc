@@ -3,7 +3,7 @@
 The server opens a session's log with a header row naming the workspace and
 the session, then appends one row per event (header_to_yojson and
 event_to_yojson in Keeper_skill_activation_ledger). ``event_log`` writes rows
-that fold to a masc.skill-activations/v5 ledger: the header, every activation
+that fold to a masc.skill-activations/v6 ledger: the header, every activation
 recorded with no delivery and no actions, then each activation's delivery and
 actions, then the transition rejections.
 """
@@ -65,6 +65,8 @@ def event_rows(ledger: dict[str, Any]) -> list[dict[str, Any]]:
     rows.extend(
         rejection_row(rejection) for rejection in ledger["transition_rejections"]
     )
+    rows.extend({"kind": "async_result_delivered", "delivery": delivery}
+                for delivery in ledger["async_result_deliveries"])
     return rows
 
 

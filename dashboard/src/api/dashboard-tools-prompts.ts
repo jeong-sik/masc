@@ -4,6 +4,8 @@
 
 import { get, post, type AbortableRequestOptions } from './core'
 import { nestedCompositionScopeIsValid, type NestedCompositionScope } from './skill-activation-scope'
+import { validate as isUuid, version as uuidVersion } from 'uuid'
+import { parseStrictRfc3339 } from '../lib/rfc3339'
 import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
@@ -12,7 +14,7 @@ import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 // The activation ledger's wire schema — keeper_skill_activation_ledger.ml
 // writes exactly this tag, and every reader below pins it before trusting
 // the rows.
-const SKILL_ACTIVATIONS_SCHEMA = 'masc.skill-activations/v5'
+const SKILL_ACTIVATIONS_SCHEMA = 'masc.skill-activations/v6'
 
 // --- Tool metrics (P4 Phase 4.5) ---
 
@@ -751,6 +753,33 @@ export interface DashboardSkillScopedSummary {
   action_runtime_counts: Array<{ runtime_id: string; count: number }>
 }
 
+export interface DashboardSkillAsyncResultDelivery {
+  original_turn_ref: string
+  composition_run_id: string
+  logical_parent_tool_use_id: string
+  request_id: string
+  physical_turn_ref: string
+  runtime_id: string
+  status_invocation: {
+    tool_use_id: string
+    turn: number
+    schedule: {
+      planned_index: number
+      batch_index: number
+      batch_size: number
+      execution_mode: 'concurrent' | 'serial'
+    }
+    completion:
+      | { kind: 'continue_after_success' }
+      | { kind: 'terminal_after_success'; failure_effect: 'proven_pre_effect' | 'proven_post_effect' | 'effect_outcome_unknown' }
+  }
+  boundary: NonNullable<DashboardSkillActivation['delivery']>['boundary']
+  receipt: { tool_use_id: string; content_bytes: number; content_sha256: string }
+  presentation: 'inline_result' | 'manifest_reference'
+  child_activations: Array<{ skill_tool_use_id: string; activation_sha256: string }>
+  observed_at: string
+}
+
 export type DashboardSkillActivationProjection =
   | {
       status: 'available'
@@ -764,6 +793,7 @@ export type DashboardSkillActivationProjection =
         revision: string
         activations: DashboardSkillActivation[]
         transition_rejections: DashboardSkillTransitionRejection[]
+        async_result_deliveries: DashboardSkillAsyncResultDelivery[]
       }
     }
   | { status: 'no_session'; keeper_name: string }
@@ -1562,6 +1592,133 @@ function decodeScopedSummary(value: unknown, label: string): DashboardSkillScope
   }
 }
 
+function decodeSkillTurnRef(value: unknown, label: string): string {
+  const text = skillActivationString(value, label)
+  const separator = text.lastIndexOf('#')
+  const trace = text.slice(0, separator)
+  const suffix = text.slice(separator + 1)
+  if (separator <= 0 || trace.trim() === ''
+    || !/^[+-]?(?:[0-9][0-9_]*|0[xX][0-9a-fA-F][0-9a-fA-F_]*|0[oO][0-7][0-7_]*|0[bB][01][01_]*)$/.test(suffix)) {
+    throw new Error(`skill_activations ${label} is not a Keeper turn reference`)
+  }
+  const digits = suffix.replace(/^[+-]/, '').replaceAll('_', '')
+  const absolute = BigInt(digits) * (suffix.startsWith('-') ? -1n : 1n)
+  // The canonical OCaml identifier is a positive signed 63-bit integer.
+  if (absolute <= 0n || absolute > (1n << 62n) - 1n) {
+    throw new Error(`skill_activations ${label} has an invalid Keeper turn`)
+  }
+  return `${trace}#${absolute}`
+}
+
+function decodeAsyncResultDelivery(value: unknown, label: string): DashboardSkillAsyncResultDelivery {
+  const nonblank = (value: unknown, field: string): string => {
+    const text = skillActivationString(value, field)
+    if (text.trim() === '') throw new Error(`skill_activations ${field} is blank`)
+    return text
+  }
+  const canonicalDigest = (value: unknown, field: string): string => {
+    const digest = skillActivationSha256(value, field)
+    if (digest !== digest.toLowerCase()) throw new Error(`skill_activations ${field} is not a canonical sha256`)
+    return digest
+  }
+  const record = exactSkillActivationObject(value, label, [
+    'original_turn_ref', 'composition_run_id', 'logical_parent_tool_use_id', 'request_id',
+    'physical_turn_ref', 'runtime_id', 'status_invocation', 'boundary', 'receipt',
+    'presentation', 'child_activations', 'observed_at',
+  ])
+  const invocation = exactSkillActivationObject(record.status_invocation, `${label}.status_invocation`,
+    ['tool_use_id', 'turn', 'schedule', 'completion'])
+  const schedule = exactSkillActivationObject(invocation.schedule, `${label}.schedule`,
+    ['planned_index', 'batch_index', 'batch_size', 'execution_mode'])
+  if (schedule.execution_mode !== 'concurrent' && schedule.execution_mode !== 'serial') {
+    throw new Error(`skill_activations ${label}.schedule.execution_mode is unsupported`)
+  }
+  const batchSize = skillActivationNonnegativeInteger(schedule.batch_size, `${label}.schedule.batch_size`)
+  if (batchSize === 0) throw new Error(`skill_activations ${label}.schedule.batch_size is empty`)
+  const completion = exactSkillActivationObject(invocation.completion, `${label}.completion`, ['kind', 'failure_effect'])
+  let decodedCompletion: DashboardSkillAsyncResultDelivery['status_invocation']['completion']
+  if (completion.kind === 'continue_after_success') {
+    exactSkillActivationObject(invocation.completion, `${label}.completion`, ['kind'])
+    decodedCompletion = { kind: 'continue_after_success' }
+  } else if (completion.kind === 'terminal_after_success'
+    && (completion.failure_effect === 'proven_pre_effect' || completion.failure_effect === 'proven_post_effect'
+      || completion.failure_effect === 'effect_outcome_unknown')) {
+    decodedCompletion = { kind: 'terminal_after_success', failure_effect: completion.failure_effect }
+  } else {
+    throw new Error(`skill_activations ${label}.completion is unsupported`)
+  }
+  const boundary = exactSkillActivationObject(record.boundary, `${label}.boundary`, ['kind', 'agent_core_turn'])
+  if (boundary.kind !== 'model_response' && boundary.kind !== 'official_client_result_handoff') {
+    throw new Error(`skill_activations ${label}.boundary.kind is unsupported`)
+  }
+  const turn = skillActivationNonnegativeInteger(invocation.turn, `${label}.status_invocation.turn`)
+  const handoffTurn = skillActivationNonnegativeInteger(boundary.agent_core_turn, `${label}.boundary.agent_core_turn`)
+  if (boundary.kind === 'model_response' ? handoffTurn <= turn : handoffTurn !== turn) {
+    throw new Error(`skill_activations ${label}.boundary differs from status occurrence`)
+  }
+  const receipt = exactSkillActivationObject(record.receipt, `${label}.receipt`, ['tool_use_id', 'content_bytes', 'content_sha256'])
+  const toolUseId = nonblank(invocation.tool_use_id, `${label}.status_invocation.tool_use_id`)
+  if (receipt.tool_use_id !== toolUseId) throw new Error(`skill_activations ${label}.receipt differs from status occurrence`)
+  if (record.presentation !== 'inline_result' && record.presentation !== 'manifest_reference') {
+    throw new Error(`skill_activations ${label}.presentation is unsupported`)
+  }
+  const runId = skillActivationString(record.composition_run_id, `${label}.composition_run_id`)
+  if (!isUuid(runId) || uuidVersion(runId) !== 7) throw new Error(`skill_activations ${label}.composition_run_id is invalid`)
+  const observedAt = skillActivationString(record.observed_at, `${label}.observed_at`)
+  if (parseStrictRfc3339(observedAt) === null) throw new Error(`skill_activations ${label}.observed_at is invalid`)
+  if (!Array.isArray(record.child_activations) || record.child_activations.length === 0) {
+    throw new Error(`skill_activations ${label}.child_activations must be a nonempty array`)
+  }
+  const children = record.child_activations.map((value, index) => {
+    const childLabel = `${label}.child_activations[${index}]`
+    const child = exactSkillActivationObject(value, childLabel, ['skill_tool_use_id', 'activation_sha256'])
+    return {
+      skill_tool_use_id: nonblank(child.skill_tool_use_id, `${childLabel}.skill_tool_use_id`),
+      activation_sha256: canonicalDigest(child.activation_sha256, `${childLabel}.activation_sha256`),
+    }
+  }).sort((left, right) => {
+    // OCaml String.compare orders the canonical UTF-8 bytes, including IDs
+    // containing characters outside the BMP.
+    const encoder = new TextEncoder()
+    const a = encoder.encode(left.skill_tool_use_id)
+    const b = encoder.encode(right.skill_tool_use_id)
+    for (let index = 0; index < Math.min(a.length, b.length); index++) {
+      const x = a[index]!, y = b[index]!
+      if (x !== y) return x - y
+    }
+    return a.length - b.length
+  })
+  if (new Set(children.map(child => child.skill_tool_use_id)).size !== children.length) {
+    throw new Error(`skill_activations ${label}.child_activations contains duplicates`)
+  }
+  return {
+    original_turn_ref: decodeSkillTurnRef(record.original_turn_ref, `${label}.original_turn_ref`),
+    composition_run_id: runId.toLowerCase(),
+    logical_parent_tool_use_id: nonblank(record.logical_parent_tool_use_id, `${label}.logical_parent_tool_use_id`),
+    request_id: nonblank(record.request_id, `${label}.request_id`),
+    physical_turn_ref: decodeSkillTurnRef(record.physical_turn_ref, `${label}.physical_turn_ref`),
+    runtime_id: nonblank(record.runtime_id, `${label}.runtime_id`),
+    status_invocation: {
+      tool_use_id: toolUseId, turn,
+      schedule: {
+        planned_index: skillActivationNonnegativeInteger(schedule.planned_index, `${label}.schedule.planned_index`),
+        batch_index: skillActivationNonnegativeInteger(schedule.batch_index, `${label}.schedule.batch_index`),
+        batch_size: batchSize, execution_mode: schedule.execution_mode,
+      },
+      completion: decodedCompletion,
+    },
+    boundary: { kind: boundary.kind, agent_core_turn: handoffTurn },
+    receipt: {
+      tool_use_id: toolUseId,
+      content_bytes: skillActivationNonnegativeInteger(receipt.content_bytes, `${label}.receipt.content_bytes`),
+      content_sha256: canonicalDigest(receipt.content_sha256, `${label}.receipt.content_sha256`),
+    },
+    presentation: record.presentation,
+    child_activations: children,
+    observed_at: observedAt,
+  }
+}
+
 export function normalizeSkillActivationProjection(
   value: unknown,
 ): DashboardSkillActivationProjection | null | undefined {
@@ -1602,16 +1759,41 @@ export function normalizeSkillActivationProjection(
     'revision',
     'activations',
     'transition_rejections',
+    'async_result_deliveries',
   ])
   if (ledger.schema !== SKILL_ACTIVATIONS_SCHEMA) {
-    throw new Error('skill_activations schema is not v5')
+    throw new Error('skill_activations schema is not v6')
   }
   if (
     !Array.isArray(ledger.activations)
     || !Array.isArray(ledger.transition_rejections)
+    || !Array.isArray(ledger.async_result_deliveries)
     || !Array.isArray(projection.scoped_summaries)
   ) {
     throw new Error('skill_activations arrays are missing')
+  }
+  const activations = ledger.activations.map((activation, index) =>
+    decodeSkillActivation(activation, `available.ledger.activations[${index}]`))
+  const asyncDeliveries = ledger.async_result_deliveries.map((delivery, index) =>
+    decodeAsyncResultDelivery(delivery, `available.ledger.async_result_deliveries[${index}]`))
+  const byId = new Map(activations.map(activation => [activation.skill_tool_use_id, activation]))
+  if (byId.size !== activations.length) throw new Error('skill_activations repeats an original activation')
+  const physicalHandoffs = new Set<string>()
+  for (const delivery of asyncDeliveries) {
+    const { observed_at: _clock, ...identity } = delivery
+    const physicalIdentity = JSON.stringify(identity)
+    if (physicalHandoffs.has(physicalIdentity)) throw new Error('skill_activations repeats a physical handoff')
+    physicalHandoffs.add(physicalIdentity)
+    for (const child of delivery.child_activations) {
+      const id = child.skill_tool_use_id
+      const activation = byId.get(id)
+      if (!activation || activation.turn_ref !== delivery.original_turn_ref
+        || activation.invocation.kind !== 'nested_composition'
+        || activation.invocation.scope.composition_run_id !== delivery.composition_run_id
+        || activation.invocation.scope.parent_tool_use_id !== delivery.logical_parent_tool_use_id) {
+        throw new Error('skill_activations async handoff does not belong to original admitted child')
+      }
+    }
   }
   return {
     status: 'available',
@@ -1624,8 +1806,8 @@ export function normalizeSkillActivationProjection(
       workspace_key: skillActivationSha256(ledger.workspace_key, 'available.ledger.workspace_key'),
       session_id: skillActivationString(ledger.session_id, 'available.ledger.session_id'),
       revision: skillActivationSha256(ledger.revision, 'available.ledger.revision'),
-      activations: ledger.activations.map((activation, index) =>
-        decodeSkillActivation(activation, `available.ledger.activations[${index}]`)),
+      activations,
+      async_result_deliveries: asyncDeliveries,
       transition_rejections: ledger.transition_rejections.map((rejection, index) =>
         decodeTransitionRejection(rejection, `available.ledger.transition_rejections[${index}]`)),
     },

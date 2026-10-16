@@ -17,7 +17,7 @@ type composition_origin =
       { task_ids : task_id_set }
   | Session_composition
 
-type delivery_boundary =
+type delivery_boundary = Keeper_skill_activation_types.delivery_boundary =
   | Model_response of { agent_core_turn : int }
   | Official_client_result_handoff of { agent_core_turn : int }
 
@@ -29,7 +29,7 @@ type delivery =
   ; content_sha256 : string
   }
 
-type tool_result_receipt =
+type tool_result_receipt = Keeper_skill_activation_types.tool_result_receipt =
   { tool_use_id : string
   ; content_bytes : int
   ; content_sha256 : string
@@ -221,6 +221,7 @@ type decode_error =
   | Delivery_already_observed of string
   | Action_target_not_delivered of string
   | Unterminated_header_row
+  | Invalid_async_result_evidence of string
 
 type store_error =
   | Lock_failed of string
@@ -257,8 +258,13 @@ val nested_composition_scope :
     receipt; they do not imply a prepared child has executed. *)
 
 val empty : workspace_root:string -> trace_id:Keeper_id.Trace_id.t -> t
+val activation_frame_sha256 : activation -> string
+(** Digest of the immutable admission frame, excluding subsequent delivery and actions. *)
 val activations : t -> activation list
 val transition_rejections : t -> transition_rejection list
+val async_result_deliveries : t -> Keeper_skill_async_delivery.t list
+(** Exact physical handoffs, including reference-only delivery, associated with
+    immutable original activations. These do not overwrite same-turn evidence. *)
 val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
 val receipt_projection_revision : t -> skill_tool_use_id:string -> string
@@ -364,6 +370,15 @@ val observe_delivery :
     matches its exact enclosing invocation receipt and retains its own activation
     identity, so two children of the same parent remain distinct. The returned ids
     are matching Skill invocations, including idempotent re-observations. *)
+
+val observe_async_result_delivery :
+  config:Workspace.config -> trace_id:Keeper_id.Trace_id.t ->
+  expected_activations:activation list -> Keeper_skill_async_delivery.t ->
+  (t * Keeper_skill_async_delivery.t, store_error) result
+(** Under the canonical transaction, compare every original activation with
+    the sealed recorder's expected frame, then append the physical handoff.
+    Identical re-observation retains the first durable clock. A reference
+    handoff never becomes a full-body receipt. *)
 
 val observe_action :
   config:Workspace.config ->

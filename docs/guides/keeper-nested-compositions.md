@@ -180,9 +180,30 @@ The reference receipt hashes the actual marker bytes, and does not claim that a
 locally fetched body reached the provider. Repeated status lookups retain their
 actual transport IDs and SDK occurrences, including valid ID reuse. An unstaged
 historical result that no longer has a current producer binding is not observed.
-Correlation currently reaches the structured Keeper log; durable
-async Skill-delivery and later action attribution in the activation ledger remain
-the next integration step. The same-turn inline ledger policy is unchanged.
+After a correlated handoff, the observer restores the sealed run's exact original
+admitted children and appends an `async_result_delivered` fact to that original
+session's canonical Skill event log. The original activation and its Task,
+runtime, snapshot and first activation time stay intact. Each child carries the
+SHA-256 of its entire original admission frame; both transactional append and
+event/projection replay compare that frame before accepting the handoff. A
+changed or unavailable original ledger refuses the write with a structured log.
+It does not dispatch another worker or create a substitute activation.
+
+`masc.skill-activations/v6` exposes these facts as `async_result_deliveries`, with
+separate original/physical turn references, status SDK occurrence, receiving
+runtime, canonical request, raw transport receipt, presentation and child frame
+digests. Re-observing an identical physical handoff retains its first durable
+clock. Distinct physical lookups keep distinct facts. Summary delivery counts
+count each child once per boundary kind; runtime histograms count each child once
+per receiving runtime. Manifest references remain observable without increasing
+inline body-delivery counts. Neither delivery form creates a later action.
+
+The Python measurement reader validates the same original frame digests and
+canonical revision as the server. The Dashboard preserves those typed digests
+and validates occurrence shape and scope membership; it does not independently
+authenticate the server's cryptographic revision or child frame. It is a read
+projection, not replay or write authority. Typed attribution of subsequent Tool
+or official-client actions remains a separate integration unit.
 
 The owned-job feature scenario now continues its public prepare/run and fresh
 supervisor recovery through a real status tool invocation, raw provider-wire

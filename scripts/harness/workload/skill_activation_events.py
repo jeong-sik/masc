@@ -7,7 +7,7 @@ event: an activation recorded, deliveries observed, an action observed, or a
 transition rejected. Each row ends with a newline; text after the last newline
 is a row the server is still appending.
 
-The ledger the Dashboard serves under ``masc.skill-activations/v5`` is those
+The ledger the Dashboard serves under ``masc.skill-activations/v6`` is those
 events applied in order. ``fold_event_log`` applies them with the rules of
 ``Keeper_skill_activation_ledger.apply_event`` and returns that projection, so
 a reader can compare the file with what the server reports.
@@ -30,7 +30,7 @@ from typing import TypeAlias, Union, assert_never
 
 EVENTS_FILENAME = "skill-activation-events.jsonl"
 EVENTS_SCHEMA = "masc.skill-activation-events/v1"
-LEDGER_SCHEMA = "masc.skill-activations/v5"
+LEDGER_SCHEMA = "masc.skill-activations/v6"
 
 JsonValue: TypeAlias = Union[
     None, bool, int, float, str, list["JsonValue"], dict[str, "JsonValue"]
@@ -69,6 +69,7 @@ class SkillLedgerFault(Enum):
     )
     MALFORMED_LEDGER = "malformed_ledger"
     UNTERMINATED_HEADER_ROW = "unterminated_header_row"
+    INVALID_ASYNC_RESULT_EVIDENCE = "invalid_async_result_evidence"
 
 
 class SkillLedgerError(RuntimeError):
@@ -131,8 +132,13 @@ class _TransitionRejected:
     rejection: JsonObject
 
 
+@dataclass(frozen=True, slots=True)
+class _AsyncResultDelivered:
+    delivery: JsonObject
+
+
 _Event: TypeAlias = Union[
-    _ActivationRecorded, _DeliveriesObserved, _ActionObserved, _TransitionRejected
+    _ActivationRecorded, _DeliveriesObserved, _ActionObserved, _TransitionRejected, _AsyncResultDelivered
 ]
 
 
@@ -158,6 +164,7 @@ class _Fold:
     activations: list[JsonValue] = field(default_factory=list)
     cells: dict[str, _Cell] = field(default_factory=dict)
     rejections: list[JsonValue] = field(default_factory=list)
+    async_deliveries: list[JsonValue] = field(default_factory=list)
 
 
 class _RepeatedField(Exception):
@@ -394,8 +401,17 @@ def _identity(value: JsonValue, row: int) -> None:
 def _invocation(value: JsonValue, row: int) -> None:
     invocation = _object(value, "invocation", row)
     kind = invocation.get("kind")
-    if kind not in ("instruction", "composition"):
+    if kind not in ("instruction", "composition", "nested_composition"):
         raise _malformed("unknown invocation kind", row)
+    if kind == "nested_composition":
+        _exact_object(invocation, ("kind", "origin", "tool_name", "scope"), "invocation", row)
+        _invocation({"kind": "composition", "origin": invocation["origin"], "tool_name": invocation["tool_name"]}, row)
+        scope = _exact_object(invocation["scope"], ("parent_tool_use_id", "composition_run_id", "alias"), "nested scope", row)
+        _nonblank(scope, "parent_tool_use_id", "nested scope", row)
+        _uuid_v7(scope, "composition_run_id", row)
+        if _string(scope, "alias", "nested scope", row) == "":
+            raise _malformed("empty child alias", row)
+        return
     payload = "served_content" if kind == "instruction" else "tool_name"
     _exact_object(invocation, ("kind", "origin", payload,), "invocation", row)
     origin = _object(invocation["origin"], "origin", row)
@@ -483,6 +499,9 @@ def _parse_activation(event: JsonObject, row: int, session: str) -> _ActivationR
     tool_id = _nonblank(activation, "skill_tool_use_id", "activation", row)
     turn = _natural(activation, "agent_core_turn", "activation", row)
     _invocation(activation["invocation"], row)
+    invocation = activation["invocation"]
+    if invocation["kind"] == "nested_composition" and invocation["scope"]["parent_tool_use_id"] == tool_id:
+        raise _malformed("child and parent invocation IDs must differ", row)
     _timestamp(activation, "activated_at", "activation", row)
     actions = activation["actions"]
     if not isinstance(actions, list):
@@ -554,6 +573,96 @@ def _parse_rejection(event: JsonObject, row: int, session: str) -> _TransitionRe
     return _TransitionRejected(tool_id, rejection["activation_turn_ref"], rejection)
 
 
+def _uuid_v7(value: JsonObject, name: str, row: int) -> None:
+    if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+                    _string(value, name, "composition run", row), re.IGNORECASE) is None:
+        raise _malformed("composition run is not a canonical UUIDv7", row)
+    value[name] = value[name].lower()
+
+
+def _async_delivery(value: JsonValue, row: int, session: str) -> JsonObject:
+    delivery = _exact_object(value, ("original_turn_ref", "composition_run_id", "logical_parent_tool_use_id",
+        "request_id", "physical_turn_ref", "runtime_id", "status_invocation", "boundary", "receipt",
+        "presentation", "child_activations", "observed_at"), "async delivery", row)
+    _turn_ref(delivery, "original_turn_ref", session, row, positive=True)
+    physical = _string(delivery, "physical_turn_ref", "async delivery", row)
+    _turn_ref(delivery, "physical_turn_ref", physical.rpartition("#")[0], row, positive=True)
+    _uuid_v7(delivery, "composition_run_id", row)
+    for name in ("logical_parent_tool_use_id", "request_id", "runtime_id"):
+        _nonblank(delivery, name, "async delivery", row)
+    invocation = _exact_object(delivery["status_invocation"], ("tool_use_id", "turn", "schedule", "completion"), "SDK occurrence", row)
+    tool_id = _nonblank(invocation, "tool_use_id", "SDK occurrence", row)
+    turn = _natural(invocation, "turn", "SDK occurrence", row)
+    schedule = _exact_object(invocation["schedule"], ("planned_index", "batch_index", "batch_size", "execution_mode"), "SDK schedule", row)
+    for name in ("planned_index", "batch_index", "batch_size"):
+        _natural(schedule, name, "SDK schedule", row)
+    if schedule["batch_size"] == 0 or schedule["execution_mode"] not in ("serial", "concurrent"):
+        raise _malformed("invalid SDK schedule", row)
+    completion = _object(invocation["completion"], "SDK completion", row)
+    match completion.get("kind"):
+        case "continue_after_success":
+            _exact_object(completion, ("kind",), "SDK completion", row)
+        case "terminal_after_success":
+            _exact_object(completion, ("kind", "failure_effect"), "SDK completion", row)
+            if completion["failure_effect"] not in ("proven_pre_effect", "proven_post_effect", "effect_outcome_unknown"):
+                raise _malformed("invalid SDK completion disposition", row)
+        case _:
+            raise _malformed("invalid SDK completion kind", row)
+    boundary = _exact_object(delivery["boundary"], ("kind", "agent_core_turn"), "async boundary", row)
+    handoff_turn = _natural(boundary, "agent_core_turn", "async boundary", row)
+    match boundary["kind"]:
+        case "model_response" if handoff_turn > turn:
+            pass
+        case "official_client_result_handoff" if handoff_turn == turn:
+            pass
+        case _:
+            raise _malformed("async handoff precedes or differs from SDK occurrence", row)
+    receipt = _exact_object(delivery["receipt"], ("tool_use_id", "content_bytes", "content_sha256"), "async receipt", row)
+    if _nonblank(receipt, "tool_use_id", "async receipt", row) != tool_id:
+        raise _malformed("async receipt differs from SDK occurrence", row)
+    _natural(receipt, "content_bytes", "async receipt", row)
+    _digest(receipt, "content_sha256", "async receipt", row)
+    if delivery["presentation"] not in ("inline_result", "manifest_reference"):
+        raise _malformed("unknown async presentation", row)
+    children = delivery["child_activations"]
+    if not isinstance(children, list) or not children:
+        raise _malformed("async children are not a nonempty activation frame list", row)
+    ids = []
+    for child in children:
+        child = _exact_object(child, ("skill_tool_use_id", "activation_sha256"), "original child frame", row)
+        ids.append(_nonblank(child, "skill_tool_use_id", "original child frame", row))
+        _digest(child, "activation_sha256", "original child frame", row)
+    if len(set(ids)) != len(ids):
+        raise _malformed("duplicate original child activation", row)
+    delivery["child_activations"] = sorted(children, key=lambda child: child["skill_tool_use_id"])
+    _timestamp(delivery, "observed_at", "async delivery", row)
+    return delivery
+
+
+def _validate_async_children(delivery: JsonObject, activations: Mapping[str, JsonObject], row: int) -> None:
+    for child in delivery["child_activations"]:
+        id = child["skill_tool_use_id"]
+        activation = activations.get(id)
+        if activation is None:
+            raise SkillLedgerError(SkillLedgerFault.UNKNOWN_EVENT_ACTIVATION, f"no original child {id!r}", row=row)
+        recorded = dict(activation, delivery=None, actions=[])
+        payload = json.dumps(recorded, ensure_ascii=False, separators=(",", ":")).replace("\x7f", "\\u007f")
+        if sha256(payload.encode()).hexdigest() != child["activation_sha256"]:
+            raise SkillLedgerError(SkillLedgerFault.INVALID_ASYNC_RESULT_EVIDENCE,
+                                   "original activation frame differs", row=row)
+        invocation = activation["invocation"]
+        if (activation["turn_ref"] != delivery["original_turn_ref"] or invocation["kind"] != "nested_composition"
+            or invocation["scope"]["composition_run_id"] != delivery["composition_run_id"]
+            or invocation["scope"]["parent_tool_use_id"] != delivery["logical_parent_tool_use_id"]):
+            raise SkillLedgerError(SkillLedgerFault.INVALID_ASYNC_RESULT_EVIDENCE,
+                                   "handoff does not belong to the original admitted child run", row=row)
+
+
+def _async_identity(delivery: JsonObject) -> str:
+    return json.dumps({key: value for key, value in delivery.items() if key != "observed_at"},
+                      ensure_ascii=False, separators=(",", ":"))
+
+
 def _parse_event(value: JsonValue, row: int, session: str) -> _Event:
     """The event one row after the header records."""
     event = _object(value, "event", row)
@@ -576,6 +685,9 @@ def _parse_event(value: JsonValue, row: int, session: str) -> _Event:
         case "transition_rejected":
             fields = ("kind", "rejection",)
             return _parse_rejection(_exact_object(event, fields, kind, row), row, session)
+        case "async_result_delivered":
+            _exact_object(event, ("kind", "delivery"), kind, row)
+            return _AsyncResultDelivered(_async_delivery(event["delivery"], row, session))
         case _:
             raise SkillLedgerError(
                 SkillLedgerFault.INVALID_EVENT_KIND,
@@ -611,6 +723,12 @@ def _recorded_cell(fold: _Fold, skill_tool_use_id: str, row: int) -> _Cell:
 
 def _apply(fold: _Fold, event: _Event, row: int) -> None:
     match event:
+        case _AsyncResultDelivered():
+            _validate_async_children(event.delivery, {id: cell.activation for id, cell in fold.cells.items()}, row)
+            if any(_async_identity(value) == _async_identity(event.delivery) for value in fold.async_deliveries):
+                raise SkillLedgerError(SkillLedgerFault.INVALID_ASYNC_RESULT_EVIDENCE,
+                                       "duplicate physical handoff", row=row)
+            fold.async_deliveries.append(event.delivery)
         case _ActivationRecorded():
             if event.skill_tool_use_id in fold.cells:
                 raise SkillLedgerError(
@@ -714,11 +832,13 @@ def _revision(
     session_id: str,
     activations: list[JsonValue],
     transition_rejections: list[JsonValue],
+    async_result_deliveries: list[JsonValue],
 ) -> str:
     # Projection callers also supply decoded JSON, potentially in any object
     # order. Validate and canonicalize copies just like the event reader.
     activations = copy.deepcopy(activations)
     transition_rejections = copy.deepcopy(transition_rejections)
+    async_result_deliveries = copy.deepcopy(async_result_deliveries)
     try:
         parsed_activations = [
             _parse_activation({"activation": activation}, 0, session_id)
@@ -750,6 +870,14 @@ def _revision(
                     SkillLedgerFault.TRANSITION_REJECTION_ACTIVATION_MISMATCH,
                     f"rejection for {rejection.skill_tool_use_id!r} names a different activation turn",
                 )
+        identities = set()
+        for delivery in async_result_deliveries:
+            _async_delivery(delivery, 0, session_id)
+            _validate_async_children(delivery, {id: value.activation for id, value in by_call.items()}, 0)
+            identity = _async_identity(delivery)
+            if identity in identities:
+                raise SkillLedgerError(SkillLedgerFault.INVALID_ASYNC_RESULT_EVIDENCE, "duplicate physical handoff")
+            identities.add(identity)
     except SkillLedgerError as error:
         # These values come from a projection, with no event-log row.
         # Shape refusals are ledger faults; specific invariant codes remain.
@@ -761,6 +889,7 @@ def _revision(
         "session_id": session_id,
         "activations": activations,
         "transition_rejections": transition_rejections,
+        "async_result_deliveries": async_result_deliveries,
     }
     # Yojson escapes U+007F as it escapes the C0 controls; json.dumps writes
     # it as is. A DEL can only sit inside a string here, so the swap is exact.
@@ -783,7 +912,7 @@ def ledger_revision(ledger: Mapping[str, JsonValue]) -> str:
     """The revision the server derives from a ledger's content.
 
     It is the SHA-256 of the compact JSON object of the ledger's workspace
-    key, session id, activations and transition rejections, in that order.
+    key, session id, activations, transition rejections and async deliveries, in that order.
     ``json.dumps`` with ``ensure_ascii=False`` and no spaces writes what
     Yojson's compact printer writes for these values once U+007F is escaped
     the way Yojson escapes it.
@@ -792,6 +921,7 @@ def ledger_revision(ledger: Mapping[str, JsonValue]) -> str:
     session_id = ledger.get("session_id")
     activations = ledger.get("activations")
     transition_rejections = ledger.get("transition_rejections")
+    async_result_deliveries = ledger.get("async_result_deliveries")
     if not (isinstance(workspace_key, str) and workspace_key != ""):
         raise SkillLedgerError(
             SkillLedgerFault.MALFORMED_LEDGER, "skill ledger.workspace_key is empty"
@@ -810,11 +940,13 @@ def ledger_revision(ledger: Mapping[str, JsonValue]) -> str:
             SkillLedgerFault.MALFORMED_LEDGER,
             "skill ledger.transition_rejections is not an array",
         )
-    return _revision(workspace_key, session_id, activations, transition_rejections)
+    if not isinstance(async_result_deliveries, list):
+        raise SkillLedgerError(SkillLedgerFault.MALFORMED_LEDGER, "skill ledger.async_result_deliveries is not an array")
+    return _revision(workspace_key, session_id, activations, transition_rejections, async_result_deliveries)
 
 
 def fold_event_log(raw: bytes) -> JsonObject | None:
-    """The ledger an event log records, in the Dashboard's v5 shape.
+    """The ledger an event log records, in the Dashboard's v6 shape.
 
     Returns None when the log is empty: the session has recorded nothing.
     Bytes with no newline at all are refused: the server creates a log with
@@ -840,8 +972,9 @@ def fold_event_log(raw: bytes) -> JsonObject | None:
         "workspace_key": workspace_key,
         "session_id": session_id,
         "revision": _revision(
-            workspace_key, session_id, fold.activations, fold.rejections
+            workspace_key, session_id, fold.activations, fold.rejections, fold.async_deliveries
         ),
         "activations": fold.activations,
         "transition_rejections": fold.rejections,
+        "async_result_deliveries": fold.async_deliveries,
     }

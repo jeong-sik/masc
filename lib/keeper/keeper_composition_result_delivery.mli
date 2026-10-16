@@ -22,6 +22,8 @@ type error =
   | Invalid_manifest of string
   | Invalid_result of string
   | Invocation_collision of string
+  | Recorder_failed of Keeper_skill_activation_recorder.error
+  | Ledger_failed of Keeper_skill_activation_ledger.store_error
 
 val error_to_string : error -> string
 val source : binding -> Keeper_tool_execution_journal.source
@@ -29,6 +31,12 @@ val original_recorder : binding -> Keeper_skill_activation_recorder.bound_contex
 val request_id : binding -> string
 val status_invocation : binding -> Agent_core.Tool_contract.Invocation.t
 val observation_to_json : observation -> Yojson.Safe.t
+val persist : config:Workspace.config -> observation ->
+  (Keeper_skill_async_delivery.t option, error) result
+(** Revalidate original authority, restore exact admitted original children,
+    and append this physical handoff to their canonical Skill ledger. None
+    means this original result has no admitted child. No activation or action
+    is created, and reference evidence is never promoted to body delivery. *)
 val status_payload : ?invocation:Agent_core.Tool_contract.Invocation.t ->
   Keeper_msg_async.entry -> Yojson.Safe.t
 (** Canonical status fields plus the actual SDK occurrence, when executing

@@ -15,6 +15,7 @@ type t =
   ; session_id : Keeper_id.Trace_id.t
   ; activations : activation list
   ; transition_rejections : transition_rejection list
+  ; async_result_deliveries : Keeper_skill_async_delivery.t list
   ; mutable revision_memo : ledger_revision option
   }
 
@@ -80,6 +81,7 @@ type decode_error =
   | Delivery_already_observed of string
   | Action_target_not_delivered of string
   | Unterminated_header_row
+  | Invalid_async_result_evidence of string
 
 type store_error =
   | Lock_failed of string
@@ -157,6 +159,7 @@ let decode_error_code = function
   | Delivery_already_observed _ -> "delivery_already_observed"
   | Action_target_not_delivered _ -> "action_target_not_delivered"
   | Unterminated_header_row -> "unterminated_header_row"
+  | Invalid_async_result_evidence _ -> "invalid_async_result_evidence"
 ;;
 
 let store_error_code = function
@@ -213,9 +216,10 @@ let store_error_to_string = function
     "event log failed: " ^ Fs_compat.private_jsonl_transaction_error_to_string error
 ;;
 
-let schema = "masc.skill-activations/v5"
+let schema = "masc.skill-activations/v6"
 let activations ledger = ledger.activations
 let transition_rejections ledger = ledger.transition_rejections
+let async_result_deliveries ledger = ledger.async_result_deliveries
 let ledger_revision_to_string revision = revision
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
@@ -242,12 +246,14 @@ let task_id_set_of_list task_ids =
 let summarize ledger =
   Keeper_skill_activation_summary.summarize
     ~activations:ledger.activations
+    ~async_result_deliveries:ledger.async_result_deliveries
     ~transition_rejections:ledger.transition_rejections
 ;;
 
 let summarize_by_scope ledger =
   Keeper_skill_activation_summary.summarize_by_scope
     ~activations:ledger.activations
+    ~async_result_deliveries:ledger.async_result_deliveries
     ~transition_rejections:ledger.transition_rejections
 ;;
 
@@ -586,11 +592,22 @@ let activation_to_yojson activation =
     ]
 ;;
 
+(* What an activation records when it is made. Its delivery and actions
+   arrive later, by their own events, so whether a repeated recording is the
+   same invocation is judged on this part alone. *)
+let recorded_part (activation : activation) =
+  { activation with delivery = None; actions = [] }
+;;
+
+let activation_frame_sha256 activation =
+  Digestif.SHA256.(digest_string (Yojson.Safe.to_string (activation_to_yojson (recorded_part activation))) |> to_hex)
+;;
+
 let workspace_key_of_root root =
   Digestif.SHA256.(digest_string root |> to_hex)
 ;;
 
-let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejections =
+let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejections ~async_result_deliveries =
   let canonical =
     `Assoc
       [ "workspace_key", `String workspace_key
@@ -598,13 +615,14 @@ let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejec
       ; "activations", `List (List.map activation_to_yojson activations)
       ; ( "transition_rejections"
         , `List (List.map transition_rejection_to_yojson transition_rejections) )
+      ; "async_result_deliveries", `List (List.map Keeper_skill_async_delivery.to_json async_result_deliveries)
       ]
   in
   Digestif.SHA256.(digest_string (Yojson.Safe.to_string canonical) |> to_hex)
 ;;
 
-let make ~workspace_key ~session_id ~activations ~transition_rejections =
-  { workspace_key; session_id; activations; transition_rejections; revision_memo = None }
+let make ~workspace_key ~session_id ~activations ~transition_rejections ~async_result_deliveries =
+  { workspace_key; session_id; activations; transition_rejections; async_result_deliveries; revision_memo = None }
 ;;
 
 let revision ledger =
@@ -617,6 +635,7 @@ let revision ledger =
         ~session_id:ledger.session_id
         ~activations:ledger.activations
         ~transition_rejections:ledger.transition_rejections
+        ~async_result_deliveries:ledger.async_result_deliveries
     in
     ledger.revision_memo <- Some revision;
     revision
@@ -643,6 +662,7 @@ let empty ~workspace_root ~trace_id =
     ~session_id:trace_id
     ~activations:[]
     ~transition_rejections:[]
+    ~async_result_deliveries:[]
 ;;
 
 let to_yojson ledger =
@@ -655,6 +675,7 @@ let to_yojson ledger =
     ; ( "transition_rejections"
       , `List
           (List.map transition_rejection_to_yojson ledger.transition_rejections) )
+    ; "async_result_deliveries", `List (List.map Keeper_skill_async_delivery.to_json ledger.async_result_deliveries)
     ]
 ;;
 
@@ -1289,6 +1310,28 @@ let exact_key_equal (left : activation) (right : activation) =
   String.equal left.skill_tool_use_id right.skill_tool_use_id
 ;;
 
+let validate_async_result ~expected_trace_id ~activations (delivery : Keeper_skill_async_delivery.t) =
+  let invalid detail = Error (Invalid_async_result_evidence detail) in
+  if not (String.equal (Ids.Turn_ref.trace_id delivery.original_turn_ref)
+      (Keeper_id.Trace_id.to_string expected_trace_id)) then Error Turn_ref_session_mismatch
+  else List.fold_left (fun result (child : Keeper_skill_async_delivery.child_activation) ->
+    let id = child.skill_tool_use_id in
+    let* () = result in
+    match List.find_opt (fun (activation : activation) -> String.equal activation.skill_tool_use_id id) activations with
+    | None -> Error (Unknown_event_activation id)
+    | Some activation ->
+      if not (String.equal (activation_frame_sha256 activation) child.activation_sha256)
+      then invalid "original activation frame differs"
+      else if not (Ids.Turn_ref.equal activation.turn_ref delivery.original_turn_ref)
+      then invalid "original child turn differs"
+      else match activation.invocation with
+        | Nested_composition_invocation {scope;_} when
+            String.equal scope.composition_run_id (Keeper_tool_plan.Composition_run_id.to_string delivery.composition_run_id)
+            && String.equal scope.parent_tool_use_id delivery.logical_parent_tool_use_id -> Ok ()
+        | Nested_composition_invocation _ | Instruction_invocation _ | Composition_invocation _ ->
+          invalid "handoff does not belong to the original admitted child run") (Ok ()) delivery.child_activations
+;;
+
 let of_projection_yojson json =
   let* fields = object_field "ledger" json in
   let* () =
@@ -1301,6 +1344,7 @@ let of_projection_yojson json =
         ; "revision"
         ; "activations"
         ; "transition_rejections"
+        ; "async_result_deliveries"
         ]
       fields
   in
@@ -1387,12 +1431,25 @@ let of_projection_yojson json =
       (Ok ())
       transition_rejections
   in
+  let* async_result_deliveries = match List.assoc_opt "async_result_deliveries" fields with
+    | Some (`List rows) ->
+      List.fold_left (fun result json ->
+        let* values = result in
+        let* value = Keeper_skill_async_delivery.of_json json
+          |> Result.map_error (fun detail -> Invalid_async_result_evidence detail) in
+        let* () = validate_async_result ~expected_trace_id:session_id ~activations value in
+        if List.exists (fun known -> String.equal (Keeper_skill_async_delivery.identity known)
+            (Keeper_skill_async_delivery.identity value)) values
+        then Error (Invalid_async_result_evidence "duplicate physical handoff") else Ok (value::values))
+        (Ok []) rows |> Result.map List.rev
+    | Some _ | None -> Error (Expected_object {field="async_result_deliveries"}) in
   let ledger =
     make
       ~workspace_key
       ~session_id
       ~activations
       ~transition_rejections
+      ~async_result_deliveries
   in
   if String.equal (revision ledger) declared_revision
   then Ok ledger
@@ -1411,7 +1468,11 @@ let of_projection_yojson json =
 
    A mutation appends one row. This process keeps each session's applied
    ledger with the file cursor it was read to, and the next read under the
-   session lock takes only the rows written after that cursor. *)
+   session lock takes only the rows written after that cursor.
+   [events_schema] stays "masc.skill-activation-events/v1" so upgraded readers
+   keep decoding existing v1 session logs; once [Async_result_delivered] rows
+   are appended, rollback to earlier binaries is unsupported (see Upgrade notes
+   in changelog.d/43179.md). *)
 
 let events_schema = "masc.skill-activation-events/v1"
 let events_filename = "skill-activation-events.jsonl"
@@ -1425,6 +1486,7 @@ type event =
       ; action : action
       }
   | Transition_rejected of transition_rejection
+  | Async_result_delivered of Keeper_skill_async_delivery.t
 
 let header_to_yojson ~workspace_key ~session_id =
   `Assoc
@@ -1461,6 +1523,8 @@ let event_to_yojson = function
         , `List (List.map (fun id -> `String id) skill_tool_use_ids) )
       ; "action", action_to_yojson action
       ]
+  | Async_result_delivered delivery ->
+    `Assoc ["kind",`String "async_result_delivered";"delivery",Keeper_skill_async_delivery.to_json delivery]
   | Transition_rejected rejection ->
     `Assoc
       [ "kind", `String "transition_rejected"
@@ -1573,6 +1637,12 @@ let decode_event ~expected_trace_id json =
     let* action = required_field ~field:"action" fields in
     let* action = decode_action action in
     Ok (Action_observed { skill_tool_use_ids; action })
+  | "async_result_delivered" ->
+    let* () = exact_fields ~object_name:"event" ~allowed:["kind";"delivery"] fields in
+    let* json = required_field ~field:"delivery" fields in
+    let* delivery = Keeper_skill_async_delivery.of_json json
+      |> Result.map_error (fun detail -> Invalid_async_result_evidence detail) in
+    Ok (Async_result_delivered delivery)
   | "transition_rejected" ->
     let* () =
       exact_fields ~object_name:"event" ~allowed:[ "kind"; "rejection" ] fields
@@ -1593,6 +1663,7 @@ type builder =
   ; cells : (string, activation ref) Hashtbl.t
   ; mutable cells_newest_first : activation ref list
   ; mutable rejections_newest_first : transition_rejection list
+  ; mutable async_deliveries_newest_first : Keeper_skill_async_delivery.t list
   }
 
 let builder_of_ledger (ledger : t) =
@@ -1611,6 +1682,7 @@ let builder_of_ledger (ledger : t) =
   ; cells
   ; cells_newest_first
   ; rejections_newest_first = List.rev ledger.transition_rejections
+  ; async_deliveries_newest_first = List.rev ledger.async_result_deliveries
   }
 ;;
 
@@ -1620,6 +1692,7 @@ let ledger_of_builder builder =
     ~session_id:builder.builder_session_id
     ~activations:(List.rev_map (fun cell -> !cell) builder.cells_newest_first)
     ~transition_rejections:(List.rev builder.rejections_newest_first)
+    ~async_result_deliveries:(List.rev builder.async_deliveries_newest_first)
 ;;
 
 let update_cell builder skill_tool_use_id update =
@@ -1696,6 +1769,13 @@ let apply_event builder = function
                   else Ok { activation with actions = activation.actions @ [ action ] }
             ))
          skill_tool_use_ids)
+  | Async_result_delivered delivery ->
+    let activations = List.map (fun cell -> !cell) builder.cells_newest_first in
+    let* () = validate_async_result ~expected_trace_id:builder.builder_session_id ~activations delivery in
+    if List.exists (fun known -> String.equal (Keeper_skill_async_delivery.identity known)
+        (Keeper_skill_async_delivery.identity delivery)) builder.async_deliveries_newest_first
+    then Error (Invalid_async_result_evidence "duplicate physical handoff")
+    else (builder.async_deliveries_newest_first <- delivery :: builder.async_deliveries_newest_first; Ok ())
   | Transition_rejected rejection ->
     let skill_tool_use_id = rejection_skill_tool_use_id rejection in
     (match Hashtbl.find_opt builder.cells skill_tool_use_id with
@@ -2016,13 +2096,6 @@ let commit_event_locked session_dir (log : session_log) event =
     Ok ledger
 ;;
 
-(* What an activation records when it is made. Its delivery and actions
-   arrive later, by their own events, so whether a repeated recording is the
-   same invocation is judged on this part alone. *)
-let recorded_part (activation : activation) =
-  { activation with delivery = None; actions = [] }
-;;
-
 type activation_clock = Exact_activation_clock | Original_activation_clock
 
 let record_with_clock ~activation_clock ~config ~trace_id (activation : activation) =
@@ -2228,6 +2301,27 @@ let observe_delivery
            commit_event_locked session_dir log (Deliveries_observed deliveries)
          in
          Ok (stored, matched)))
+;;
+
+let observe_async_result_delivery ~config ~trace_id ~expected_activations (delivery : Keeper_skill_async_delivery.t) =
+  with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
+    let* log = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
+    let current = log.ledger in
+    let* () = validate_async_result ~expected_trace_id:trace_id ~activations:current.activations delivery
+      |> Result.map_error (fun error -> Decode_failed error) in
+    let ids = List.sort String.compare (List.map (fun (activation : activation) -> activation.skill_tool_use_id) expected_activations) in
+    let* () = if ids = List.map (fun (child : Keeper_skill_async_delivery.child_activation) -> child.skill_tool_use_id) delivery.child_activations then Ok ()
+      else Error (Decode_failed (Invalid_async_result_evidence "sealed child selection differs")) in
+    let* () = List.fold_left (fun result (expected : activation) ->
+      let* () = result in
+      match List.find_opt (fun (known : activation) -> String.equal expected.skill_tool_use_id known.skill_tool_use_id) current.activations with
+      | Some known when recorded_part known = recorded_part expected -> Ok ()
+      | Some _ | None -> Error (Invocation_id_collision expected.skill_tool_use_id)) (Ok ()) expected_activations in
+    match List.find_opt (fun known -> String.equal (Keeper_skill_async_delivery.identity known)
+        (Keeper_skill_async_delivery.identity delivery)) current.async_result_deliveries with
+    | Some known -> Ok (current,known)
+    | None -> commit_event_locked session_dir log (Async_result_delivered delivery)
+      |> Result.map (fun ledger -> ledger,delivery))
 ;;
 
 let observe_action

@@ -917,6 +917,7 @@ let composition_nodes fixture data =
 let composition_node name nodes = List.find (fun row -> row |> member "node_id" |> to_string = name) nodes
 
 let test_public_composition_wait_and_resume () = with_fixture @@ fun env initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   Call_log.init ~base_path:fixture.base_path ();
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"])
@@ -1220,19 +1221,93 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   (match Journal.continuation_readiness after_second_loss with
    | Ok Journal.Results_ready -> ()
    | Ok Waiting_for_results | Error _ -> fail "restored original wait cannot recover repeated Lost successors");
-  let discovered = after_second_loss in
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  let config = Workspace.default_config fixture.base_path in
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  let write_profile ?(path=declaration) ?declared_name deny =
+    let name = match declared_name with None -> "" | Some name -> "name = \"" ^ name ^ "\"\n" in
+    let tools = if deny then "\n[keeper.tools]\ndeny = [\"keeper_job_result\"]\n" else "" in
+    write path ("[keeper]\n" ^ name ^ "activation_mode = \"manual\"\nsandbox_profile = \"docker\"\n"
+      ^ "sandbox_image = \"base\"\nnetwork_mode = \"inherit\"\ninstructions = \"Original result continuation fixture\"\n" ^ tools) in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  write runtime_path "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"fixture\"\nanchor = \"base-path\"\npath = \".agents/skills\"\naccess = \"read-write\"\n";
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+      |> require "canonical fixture Skill publication authority" in
+  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
+  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
+   | Published _ | Unchanged _ -> () | Workspace_retired -> fail "fixture Skill publication retired early");
+  let context : _ Masc.Keeper_types_profile.context =
+    {config;agent_name="continuation-maintenance-fixture";
+     sw=Async.server_background_switch () |> require "continuation maintenance switch";
+     clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let active_requests () = Async.list_for_keeper ~base_path:fixture.base_path ~caller:keeper
+      ~keeper_name:keeper () |> require "active requests at maintenance profile admission"
+      |> List.map (fun (entry : Async.entry) -> entry.request_id) |> List.sort String.compare in
+  let profile_owner_refusals = ref 0 in
+  let assert_profile_owner_refused label =
+    let requests_before = active_requests () in
+    let refused,notify_refused = Eio.Promise.create () in
+    let wake = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
+    Wake.pulse ~sw:context.sw wake |> require label;
+    (match Eio.Promise.await refused with
+     | Error (Wake.Profile_unavailable {kind=Invalid_name;_}) -> incr profile_owner_refusals
+     | Error error -> failf "%s: unexpected profile failure: %s" label (Wake.error_to_string error)
+     | Ok _ -> failf "%s: invalid declaration owner reached async intake" label);
+    check string (label ^ " retains original owner") (Journal.continuation_request_id after_second_loss)
+      (Journal.continuation_request_id (continuation ()));
+    check (list string) (label ^ " starts no async worker") requests_before (active_requests ());
+    check int (label ^ " performs no backend operation") before_completed_resume (List.length (calls fixture));
+    (match Journal.continuation_readiness after_second_loss with
+     | Ok Journal.Results_ready -> ()
+     | Ok Waiting_for_results | Error _ -> failf "%s: original wait is no longer ready" label) in
+  write_profile ~declared_name:"continuation-foreign" false;
+  assert_profile_owner_refused "maintenance rejects filename/declaration owner mismatch";
+  write_profile false;
+  let duplicate_declaration = Config_dir_resolver.keeper_toml_path_for_base_path
+      ~base_path:fixture.base_path "continuation-duplicate" in
+  Fun.protect ~finally:(fun () -> Unix.unlink duplicate_declaration) (fun () ->
+    write_profile ~path:duplicate_declaration ~declared_name:keeper false;
+    assert_profile_owner_refused "maintenance rejects duplicate declaration owner claims");
+  write_profile false;
+  let accepted,notify_accepted = Eio.Promise.create () in
+  let accepted_callbacks = ref 0 and other_intakes = ref [] in
+  (* A fresh supervisor proves durable discovery does not depend on the
+     previous intake's process-local reservation. This is not an OS restart. *)
+  let wake = Wake.create ~context ~on_result:(fun _ outcome -> match outcome with
+      | Ok (Tool_result.Completed _ as result) ->
+        incr accepted_callbacks; Eio.Promise.resolve notify_accepted result
+      | Ok (Tool_result.Deferred _ | Tool_result.Failed _) | Error _ ->
+        other_intakes := outcome :: !other_intakes) () in
   let recovery_started = Mtime_clock.counter () in
-  let resumed = resume_candidate changed_surface discovered |> Tool_result.data in
+  Wake.pulse ~sw:context.sw wake |> require "actual provider-free maintenance pulse";
+  Wake.pulse ~sw:context.sw wake |> require "repeated pulse while original intake is scheduled";
+  let resumed = Eio.Promise.await accepted |> Tool_result.data in
   let ok, completed, completed_entry = await_composition env fixture resumed in
   let recovery_ms = Mtime.Span.to_float_ns (Mtime_clock.count recovery_started) /. 1_000_000. in
   if not ok then
     failf "original completed job resume failed: %s" (Yojson.Safe.to_string completed);
   check bool "original complete job continues the remaining DAG" true ok;
+  check int "repeated maintenance pulses accept only one original worker" 1 !accepted_callbacks;
+  let deferred_intakes,failed_intakes,unavailable_intakes = List.fold_left
+      (fun (deferred,failed,unavailable) -> function
+        | Ok (Tool_result.Deferred _) -> deferred+1,failed,unavailable
+        | Ok (Tool_result.Failed _) -> deferred,failed+1,unavailable
+        | Error _ -> deferred,failed,unavailable+1
+        | Ok (Tool_result.Completed _) -> fail "accepted intake was recorded as a refusal")
+      (0,0,0) !other_intakes in
   check string "run identity survives resumption" run_id (resumed |> member "composition_run_id" |> to_string);
   check int "completed result read has no backend operation" before_completed_resume (List.length (calls fixture));
   Printf.printf "OWNED_CONTINUATION_RECOVERY %s\n%!" (Yojson.Safe.to_string
     (`Assoc ["post_binding_losses",`Int (List.length [first_lost_entry;second_lost_entry]);
-      "resume_intake_to_continuation_completion_ms",`Float recovery_ms;
+      "maintenance_pulse_to_continuation_completion_ms",`Float recovery_ms;
+      "accepted_intakes",`Int !accepted_callbacks;
+      "deferred_intakes",`Int deferred_intakes;
+      "failed_intakes",`Int failed_intakes;
+      "unavailable_intakes",`Int unavailable_intakes;
+      "profile_owner_refusals",`Int !profile_owner_refusals;
       "backend_calls",`Int (List.length (calls fixture) - before_completed_resume);
       "unstarted_worker_calls",`Int !lost_worker_calls;
       "program_creates",`Int (effect_count fixture "create");
@@ -1290,7 +1365,134 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let stable = pending () in
   check int "retirement leaves no pending marker work" 0 stable.inspected;
   check int "composition never recreates original program" 1 (effect_count fixture "create");
-  check int "composition never restarts original program" 1 (effect_count fixture "start")
+  check int "composition never restarts original program" 1 (effect_count fixture "start");
+  (* A second prepared run proves a permanent intake refusal ends the run
+     instead of re-forking it on every pulse: once the node contract changes,
+     the sealed continuation is refused exactly once, the failure terminal is
+     settled on the run's last async request and delivered through the
+     composition completion outbox, and discovery drops the marker. *)
+  let second_daemon_state = daemon fixture |> to_assoc in
+  write fixture.daemon_path (Yojson.Safe.to_string (`Assoc
+    (List.map (fun (name,value) -> name,(if name="container" then `Null else value))
+       second_daemon_state)));
+  control fixture (`Assoc ["state", `String "running"]);
+  set_source fixture ~task_id:"task-C" ~turn:61;
+  let second_id = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"start-second" ~turn:61 "keeper_job_start"
+      (`Assoc ["argv", `List [`String "fixture-program-second"]; "inputs", `List []])) |> job_id in
+  let second_literal value = `Assoc ["kind", `String "literal"; "value", value] in
+  let second_node name tool input after = `Assoc ["id", `String name; "tool", `String tool;
+      "input", input; "after", `List (List.map (fun name -> `String name) after)] in
+  let second_recipe = `Assoc ["execution", `String "async";
+      "nodes", `List [second_node "await-second" "keeper_job_result"
+        (second_literal (argument second_id)) []]] in
+  let second_prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"prepare-wait-second" ~turn:61 "keeper_composition_prepare" second_recipe) in
+  let second_draft = second_prepared |> member "draft" |> composition_reference "second prepared draft" in
+  let second_accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"run-wait-second" ~turn:61 "keeper_composition_run"
+      (`Assoc ["sha256", `String second_draft.sha256])) in
+  let second_ok, _, second_entry = await_composition env fixture second_accepted in
+  check bool "second run suspends on its original job wait" false second_ok;
+  control fixture (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle
+      ~tool_use_id:"collect-second" ~turn:61 "keeper_job_status" (argument second_id)));
+  let second_ready = pending () in
+  check int "completed second job is discovered without another event" 1 (List.length second_ready.ready);
+  check int "second ready wait has readable original authority" 0 (List.length second_ready.failures);
+  (* An outbox flush racing after an early obligation write while the record is
+     still Waiting_for_owned_jobs retires that pre-settlement obligation, yet
+     settle_waiting_request_as_failed re-establishes the obligation inside the
+     store transition lock before overwriting the terminal record. *)
+  let waiting_proof = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+      ~caller:keeper second_entry.request_id |> require "canonical pre-settlement waiting proof" in
+  Keeper_composition_completion_outbox.prepare_terminal ~proof:waiting_proof
+    |> Result.map_error Keeper_composition_completion_outbox.error_to_string
+    |> require "pre-settlement obligation write while waiting";
+  (* Suspend the real acknowledgement between its canonical Waiting read and
+     removal. A concurrent maintenance refusal must wait for that same lock;
+     it then creates its obligation after the old one has been retired. *)
+  write_profile true;
+  let before_refusal_calls = List.length (calls fixture) in
+  let raced_outcome = Eio.Switch.run (fun race_sw ->
+    let waiting_read,notify_waiting_read = Eio.Promise.create () in
+    let allow_delete,release_delete = Eio.Promise.create () in
+    let acknowledged,notify_acknowledged = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw:race_sw (fun () ->
+      let result = Keeper_composition_completion_outbox.For_testing.acknowledge_waiting
+          ~after_waiting_read:(fun () ->
+            Eio.Promise.resolve notify_waiting_read ();
+            Eio.Promise.await allow_delete)
+          ~base_path:fixture.base_path ~keeper_name:keeper
+          ~request_id:second_entry.request_id ~composition_tool:"keeper_composition_run" in
+      Eio.Promise.resolve notify_acknowledged result);
+    Eio.Promise.await waiting_read;
+    let refused,notify_refused = Eio.Promise.create () in
+    let intake_completed = ref false in
+    let denied_wake = Wake.create ~context ~on_result:(fun _ outcome ->
+        intake_completed := true; Eio.Promise.resolve notify_refused outcome) () in
+    let intake_started,notify_intake_started = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw:race_sw (fun () ->
+      Eio.Promise.resolve notify_intake_started ();
+      Wake.pulse ~sw:race_sw denied_wake
+        |> require "maintenance refusal races the locked waiting acknowledgement");
+    let blocked = Fun.protect
+        ~finally:(fun () -> Eio.Promise.resolve release_delete ())
+        (fun () ->
+          Eio.Promise.await intake_started;
+          Eio.Fiber.yield ();
+          not !intake_completed) in
+    check bool "refusal cannot pass the locked waiting read/delete interval" true blocked;
+    Eio.Promise.await acknowledged
+      |> Result.map_error Keeper_composition_completion_outbox.error_to_string
+      |> require "racing waiting acknowledgement retires only its old obligation";
+    Eio.Promise.await refused) in
+  (match raced_outcome with
+   | Ok result -> check bool "maintenance honors current TOML tool denial" true (Tool_result.is_failed result)
+   | Error error -> fail (Wake.error_to_string error));
+  check int "permanent refusal performs no backend operation" before_refusal_calls (List.length (calls fixture));
+  let settled = Async.load_canonical_durable_terminal ~base_path:fixture.base_path
+      ~caller:keeper second_entry.request_id |> require "permanent refusal settles the run terminal" in
+  (match (Async.durable_terminal_entry settled).status with
+   | Async.Done {ok=false; data=Some data; _} ->
+     check_json "refusal settles the changed node contract"
+       (`String "plan_rejected") (data |> member "kind");
+     check_json "refusal names the node whose contract changed"
+       (`String "unknown_tool") (data |> member "error" |> member "kind");
+     check_json "refusal preserves the changed node identity"
+       (`String "await-second") (data |> member "error" |> member "node_id")
+   | status -> failf "permanent refusal did not settle a failure terminal: %s"
+       (Async.status_to_string status));
+  let reconcile = Masc.Keeper_composition_completion_wake.reconcile
+      ~base_path:fixture.base_path |> require "permanent refusal completion outbox reconcile" in
+  check int "exactly one refusal completion is delivered" 1 reconcile.delivered;
+  let sources = Queue.pending_selections_result ~base_path:fixture.base_path keeper
+    |> require "permanent refusal completion queue" in
+  let failure_completions = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
+      match selection.source.payload with
+      | Keeper_event_queue.Composition_completed completion
+        when String.equal completion.cc_request_id second_entry.request_id ->
+        (match completion.cc_terminal with
+         | Keeper_event_queue.Composition_failed _ -> true
+         | Keeper_event_queue.Composition_succeeded
+         | Keeper_event_queue.Composition_cancelled _ -> false)
+      | _ -> false) sources in
+  check int "exactly one failure completion reaches the original Keeper" 1 (List.length failure_completions);
+  let again = Masc.Keeper_composition_completion_wake.reconcile
+      ~base_path:fixture.base_path |> require "permanent refusal completion outbox re-reconcile" in
+  check int "a settled refusal delivers exactly once" 0 again.delivered;
+  (* Discovery retires the marker, so the next pulse has 0 ready candidates. *)
+  let after_refusal = pending () in
+  check int "next discovery has no ready continuation" 0 (List.length after_refusal.ready);
+  check int "permanently refused marker is retired" 1 after_refusal.retired;
+  let quiet_wake = Wake.create ~context () in
+  Wake.pulse ~sw:context.sw quiet_wake |> require "pulse after permanent refusal";
+  check int "next pulse has 0 ready candidates" 0 (List.length (pending ()).ready);
+  write_profile false;
+  let restored_wake = Wake.create ~context () in
+  Wake.pulse ~sw:context.sw restored_wake |> require "pulse after restoring the profile";
+  check int "restored contract cannot resurrect a settled run" 0 (List.length (pending ()).ready);
+  check (list string) "permanent refusal never starts an async worker" [] (active_requests ())
 
 let test_historical_output_contract_refuses_current_resume () = with_fixture @@ fun env _initialize fixture ->
   let module Draft = Masc.Keeper_composition_draft in
@@ -1856,7 +2058,7 @@ let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun
   let running = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
   let blocked_id = job_id running in
   let config = Workspace.default_config fixture.base_path in
-  let supervisor = Completion_wake.create ~config in
+  let supervisor = Completion_wake.create ~config () in
   let entered = Filename.concat fixture.base_path "inspect-entered" in
   let release = Filename.concat fixture.base_path "inspect-release" in
   control fixture (`Assoc ["mode", `String "inspect_blocked"; "blocked_job_id", `String blocked_id]);

@@ -128,19 +128,52 @@ let acknowledge ~base_path ~keeper_name ~request_id =
   | Some _ -> Error (Invalid_obligation "completion acknowledgement changed request/recipient identity")
 ;;
 
-let acknowledge_waiting ~base_path ~keeper_name ~request_id ~composition_tool:tool =
-  let* proof = Async.load_canonical_durable_terminal ~base_path ~caller:keeper_name request_id
+let acknowledge_waiting_with ~after_waiting_read ~base_path ~keeper_name ~request_id ~composition_tool:tool =
+  let* outcome = Async.with_canonical_durable_terminal ~base_path ~caller:keeper_name request_id
+      ~f:(fun proof ->
+        let entry = Async.durable_terminal_entry proof in
+        let* producer = composition_tool entry in
+        if not (String.equal entry.keeper_name keeper_name && String.equal producer tool)
+        then Error (Invalid_obligation "canonical waiting request changed its producer")
+        else match entry.status with
+          | Async.Waiting_for_owned_jobs _ ->
+            after_waiting_read ();
+            acknowledge ~base_path:entry.base_path ~keeper_name ~request_id
+          | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+          | Persistence_failed _ | Done _ ->
+            Error (Invalid_obligation "canonical request is not an owned-job waiting attempt"))
       |> Result.map_error (fun error -> Canonical_result_unavailable error) in
+  outcome
+
+let acknowledge_waiting = acknowledge_waiting_with ~after_waiting_read:(fun () -> ())
+
+module For_testing = struct
+  let acknowledge_waiting = acknowledge_waiting_with
+end
+
+let prepare_terminal ~proof =
+  protect_io @@ fun () ->
   let entry = Async.durable_terminal_entry proof in
-  let* producer = composition_tool entry in
-  if not (String.equal entry.keeper_name keeper_name && String.equal producer tool)
-  then Error (Invalid_obligation "canonical waiting request changed its producer")
-  else match entry.status with
-    | Async.Waiting_for_owned_jobs _ -> acknowledge
-        ~base_path:entry.base_path ~keeper_name ~request_id
-    | Queued | Running | Cancelling _ | Lost _ | Cancelled _
-    | Persistence_failed _ | Done _ ->
-      Error (Invalid_obligation "canonical request is not an owned-job waiting attempt")
+  let request_id = entry.request_id and keeper_name = entry.keeper_name in
+  match entry.status with
+  | Async.Waiting_for_owned_jobs _ | Async.Done { ok = false; _ } ->
+    let base_path = entry.base_path in
+    (match read ~base_path (filename request_id) with
+     | Ok (Some obligation)
+       when String.equal obligation.request_id request_id
+         && String.equal obligation.keeper_name keeper_name -> Ok ()
+     | Ok (Some _) ->
+       Error (Invalid_obligation "completion obligation changed request/recipient identity")
+     | Ok None ->
+       Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
+         ~temp_dir:(Filename.concat (directory ~base_path) ".atomic-staging") ~pretty:false
+         (path ~base_path request_id) (to_json { request_id; keeper_name })
+       |> Result.map_error (fun error ->
+            Storage_failed (Keeper_fs.durable_write_error_to_string error))
+     | Error error -> Error error)
+  | Queued | Running | Cancelling _ | Lost _ | Cancelled _
+  | Persistence_failed _ | Done _ ->
+    Error (Request_unavailable (Async.Found entry))
 ;;
 
 let flush ~base_path ~deliver =
@@ -180,8 +213,8 @@ let flush ~base_path ~deliver =
             let* tool = composition_tool entry in
             match entry.status with
             | Async.Waiting_for_owned_jobs _ ->
-              let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name
-                  ~request_id:entry.request_id in
+              let* () = acknowledge_waiting ~base_path ~keeper_name:obligation.keeper_name
+                  ~request_id:entry.request_id ~composition_tool:tool in
               Ok Retired
             | Queued | Running | Cancelling _ | Lost _ | Cancelled _
             | Persistence_failed _ | Done _ ->

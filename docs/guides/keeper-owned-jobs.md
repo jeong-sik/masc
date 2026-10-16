@@ -103,8 +103,8 @@ and is never re-acquired or validated, so each pass stays proportional to
 live markers. It does not scan historical terminal records. Corrupt, unbound
 or refused markers stay visible as named discovery failures; an operator
 confirms the canonical request record and then removes the named file from
-the prepared_continuations directory. This discovery boundary does not
-dispatch continuation workers yet.
+the prepared_continuations directory. This discovery boundary returns sealed candidates; the
+maintenance supervisor schedules separate intake fibers for ready original runs.
 
 The explicit typed continuation intake can submit the original prepared worker
 without a provider turn. A sealed continuation loads only its original
@@ -116,8 +116,15 @@ preparation evidence or block unchanged admitted nodes. Current denial or
 schema drift still refuses before acceptance. Ordinary draft loads and Skill
 publication retain their exact whole-surface check. Async acceptance pins the
 original owner/generation/full node snapshot; Task, run, parent, waiting
-occurrences and completed siblings remain original. Server discovery-to-intake
-wiring is still a separate controller step.
+occurrences and completed siblings remain original. Server startup and the existing maintenance pulse use this intake directly.
+An already-durable owned-job completion also hints the supervisor immediately.
+Current declarations, metadata and the published Skill snapshot are resolved for
+each intake. The declaration snapshot refuses filename/name mismatches and
+duplicate owner claims. A paused Keeper, unavailable authority or changed
+admission retains the wait.
+Separate runs have independent intake fibers; the reservation set does not
+authorize execution. A missing hint is recovered by the existing maintenance
+pulse, with no new timer or retry limit.
 If a resumed request durably owns the journal but its worker is canonically
 `Lost`, recovery follows the journal's exact predecessor bindings to the
 original `waiting_for_owned_jobs` record. Its saved node snapshot must match
@@ -127,8 +134,9 @@ sealed candidate pins the current terminal entry, full node snapshot and each
 canonical predecessor used as proof; a changed predecessor refuses readiness
 and admission. Cancellation and unknown effects do not grant continuation, and
 an empty process registry never proves loss. This recovers the original result
-read without another program create/start. It does not itself install server
-scheduling or establish a real process-restart measurement.
+read without another program create/start. The maintenance supervisor consumes
+this proof through the same intake. No real process-restart measurement is
+established by the authored fixture's process-memory resets.
 Worker-fork failure and exclusive startup recovery preserve a durable
 `Cancelling` intent as exact `Cancelled`, including its original reason and
 actor. If signalling the live worker fails and it returns Done or an original

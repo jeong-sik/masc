@@ -5934,7 +5934,7 @@
 (test
  (name test_keeper_owned_jobs)
  (modules test_keeper_owned_jobs)
- (libraries masc_test_deps masc.skill_config mtime.clock.os))
+ (libraries masc_test_deps masc.skill_config masc.skill_snapshot_service mtime.clock.os))
 
 (test
  (name test_h5_media_failover_continuity)

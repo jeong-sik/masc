@@ -3481,6 +3481,15 @@ module Http_refresh_order = struct
   let is_current latest ticket = latest = ticket
 end
 
+(** Display-only result from a refresh whose other reads are still running.
+    The final bundle alone updates [state.overview] and workspace authority. *)
+type overview_preview = {
+  op_ticket: Http_refresh_order.ticket;
+  op_authority: workspace_authority;
+  op_identity: Tui_decode.server_identity;
+  op_snapshot: overview_snapshot;
+}
+
 type scoped_refresh_followup =
   | No_scoped_followup
   | Revalidate_after_scoped
@@ -7088,6 +7097,7 @@ type state = {
   mutable live_context: Masc_tui_context_state.t;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
+  mutable overview_preview: overview_preview option;
   mutable transport: Tui_decode.transport_health option;
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
@@ -7933,6 +7943,34 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+(* These transitions are shared by the mailbox handler and readonly overview
+   projection. Preview admission never changes confirmed data or authority. *)
+let begin_http_refresh_state (state : state) ~ticket ~started_ns =
+  state.http_refresh_order <- ticket;
+  state.overview_preview <- None;
+  state.http_refresh_started_ns <- Some started_ns
+
+let accept_overview_preview (state : state) preview =
+  if Option.is_some state.http_refresh_started_ns
+     && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
+     && preview.op_authority = state.workspace_authority
+     && workspace_identity_of_refresh ~local_base_path:state.local_base_path
+          (Ok preview.op_identity) = Workspace_identity_match then
+    state.overview_preview <- Some preview
+
+let overview_refresh_reading (state : state) =
+  match state.overview_preview with
+  | Some preview
+    when Option.is_some state.http_refresh_started_ns
+      && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
+      && preview.op_authority = state.workspace_authority ->
+      None, Some preview.op_snapshot
+  | Some _ | None -> state.overview_error, state.overview
+
+let finish_http_refresh_state (state : state) =
+  state.http_refresh_started_ns <- None;
+  state.overview_preview <- None
 
 (* Pending reads and post-action offers belong to the workspace that admitted
    them. A successful health response with missing paths is still unread;
@@ -11155,6 +11193,7 @@ let create_state
   live_context = Masc_tui_context_state.empty;
   overview = None;
   overview_error = None;
+  overview_preview = None;
   transport = None;
   transport_error = None;
   approval_snapshot = None;

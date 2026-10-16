@@ -188,6 +188,9 @@ type async_msg =
      rather than a silence: the microphone worked. *)
   | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
+  (** A verified read-only preview. It does not finish the full refresh or
+      grant workspace authority; the terminal bundle still owns both. *)
+  | Http_overview_loaded of overview_preview
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
       string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket

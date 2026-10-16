@@ -1857,7 +1857,7 @@ let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw
     ["masc_msx_screen";"masc_msx_save";"masc_msx_eject";
      "masc_dos_screen";"masc_dos_save";"masc_dos_eject"];
   check bool "off still permits returning the controller" true
-    (Result.is_ok (call "masc_dos_pass" (`Assoc ["to",`String ""])));
+    (Result.is_ok (call "masc_dos_pass" (`Assoc [])));
   write runtime_path (machine_runtime_config ~enabled:true);
   ignore (unwrap (Host_runtime.init_default ~config_path:runtime_path));
   check bool "reenabling resumes the same attached worker" true (Result.is_ok (call "masc_msx_step" (`Assoc [])));

@@ -4,10 +4,24 @@ type tool_inventory =
   | No_tools_member
   | Tools_member of { wire_entries : int; json_bytes : int; json_sha256 : string }
   | Tools_unavailable
+type request_member =
+  { name : string
+  ; wire_bytes : int
+  ; value_json_bytes : int
+  ; value_json_sha256 : string
+  }
+type request_components =
+  | Json_object_members of { members : request_member list; framing_bytes : int }
+  | Components_unavailable
+type request_metadata =
+  { tool_inventory : tool_inventory
+  ; components : request_components
+  }
 type phase =
   | Client_entered of
       { mode : mode; body_bytes : int; body_sha256 : string
-      ; tool_inventory : tool_inventory option }
+      ; tool_inventory : tool_inventory option
+      ; request_components : request_components option }
   | Dispatch_entered
   | Response_headers_received of { status : int }
   | Client_finished of completion
@@ -19,21 +33,23 @@ type t =
   ; delivery_failures : int Atomic.t
   }
 type call = { owner : t; id : int }
-type tools_binding = { body_sha256 : string; inventory : tool_inventory }
+type metadata_binding = { body_sha256 : string; metadata : request_metadata }
 
 let observer_key : t Eio.Fiber.key = Eio.Fiber.create_key ()
-let tools_key : tools_binding Eio.Fiber.key = Eio.Fiber.create_key ()
+let metadata_key : metadata_binding Eio.Fiber.key = Eio.Fiber.create_key ()
 let create observe = { observe; next_id = Atomic.make 0; delivery_failures = Atomic.make 0 }
 let with_observer observer run = Eio.Fiber.with_binding observer_key observer run
-let with_request_tools ~body ~inventory run =
+let with_request_metadata ~body ~metadata run =
   match Eio.Fiber.get observer_key with
   | None -> run ()
   | Some _ ->
-    let inventory = match inventory () with
-      | inventory -> inventory
-      | exception exn -> Reserved_exn.reraise_if_reserved exn; Tools_unavailable in
-    let binding = {body_sha256=Digestif.SHA256.(digest_string body |> to_hex);inventory} in
-    Eio.Fiber.with_binding tools_key binding run
+    let metadata = match metadata () with
+      | metadata -> metadata
+      | exception exn ->
+          Reserved_exn.reraise_if_reserved exn;
+          { tool_inventory = Tools_unavailable; components = Components_unavailable } in
+    let binding = {body_sha256=Digestif.SHA256.(digest_string body |> to_hex);metadata} in
+    Eio.Fiber.with_binding metadata_key binding run
 let capture run =
   match Eio.Fiber.get observer_key with
   | None -> run
@@ -63,11 +79,12 @@ let with_call ~mode ~body run =
   | Some owner ->
     let call = { owner; id = Atomic.fetch_and_add owner.next_id 1 } in
     let body_sha256 = Digestif.SHA256.(digest_string body |> to_hex) in
-    let tool_inventory = match Eio.Fiber.get tools_key with
-      | Some binding when String.equal binding.body_sha256 body_sha256 -> Some binding.inventory
-      | Some _ | None -> None in
+    let tool_inventory, request_components = match Eio.Fiber.get metadata_key with
+      | Some binding when String.equal binding.body_sha256 body_sha256 ->
+          Some binding.metadata.tool_inventory, Some binding.metadata.components
+      | Some _ | None -> None, None in
     emit call (Client_entered
-      { mode; body_bytes = String.length body; body_sha256; tool_inventory });
+      { mode; body_bytes = String.length body; body_sha256; tool_inventory; request_components });
     match run (Some call) with
     | (Ok _ as result) -> emit call (Client_finished Returned_ok); result
     | (Error _ as result) -> emit call (Client_finished Returned_error); result

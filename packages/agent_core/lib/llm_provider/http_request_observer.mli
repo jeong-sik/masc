@@ -20,10 +20,36 @@ type tool_inventory =
     preserving object and array order. [wire_entries] counts top-level entries,
     not functions nested inside a provider entry. No schema content is exposed.
     Absent, observed empty and unavailable are distinct facts. *)
+
+type request_member =
+  { name : string
+  ; wire_bytes : int
+  ; value_json_bytes : int
+  ; value_json_sha256 : string
+  }
+(** One top-level JSON member in original order. [wire_bytes] includes the
+    encoded key, colon and value; it excludes the object's braces and commas.
+    Values and their text are never exposed. Duplicate member names retain
+    their separate occurrences. *)
+
+type request_components =
+  | Json_object_members of { members : request_member list; framing_bytes : int }
+  | Components_unavailable
+(** Exact decomposition is available only when compact re-encoding reproduces
+    the submitted body byte-for-byte. Member [wire_bytes] plus [framing_bytes]
+    account for that body's full byte count. This is structural attribution,
+    not token usage or proof that an unchanged member can be omitted. *)
+
+type request_metadata =
+  { tool_inventory : tool_inventory
+  ; components : request_components
+  }
+
 type phase =
   | Client_entered of
       { mode : mode; body_bytes : int; body_sha256 : string
-      ; tool_inventory : tool_inventory option }
+      ; tool_inventory : tool_inventory option
+      ; request_components : request_components option }
   | Dispatch_entered
   | Response_headers_received of { status : int }
   | Client_finished of completion
@@ -34,13 +60,13 @@ type call
 
 val create : (event -> (unit, unit) result) -> t
 val with_observer : t -> (unit -> 'a) -> 'a
-val with_request_tools :
-  body:string -> inventory:(unit -> tool_inventory) -> (unit -> 'a) -> 'a
-(** Bind serializer-owned Tool metadata only to this exact body digest. The
-    lazy inventory is not evaluated without an observer. An ordinary producer
-    exception records [Tools_unavailable] without changing the HTTP result;
+val with_request_metadata :
+  body:string -> metadata:(unit -> request_metadata) -> (unit -> 'a) -> 'a
+(** Bind serializer-owned metadata only to this exact body digest. The lazy
+    producer is not evaluated without an observer. An ordinary producer
+    exception records unavailable metadata without changing the HTTP result;
     reserved exceptions propagate. Unrelated nested HTTP bodies cannot inherit
-    this request's inventory. [None] in a client event means unobserved. *)
+    this request's metadata. [None] in a client event means unobserved. *)
 val capture : (unit -> 'a) -> (unit -> 'a)
 (** Capture the current observer in a closure before an actor/executor handoff.
     Invoking it rebinds that owner on the receiving fiber. Ordinary child

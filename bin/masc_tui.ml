@@ -11562,10 +11562,6 @@ let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~appr
          { ao_ticket; ao_result = load_approvals ~host ~port })
       approval_ticket
   in
-  let http_asks =
-    when_needed needs.needs_asks (fun () ->
-        Masc_tui_http.fetch_keeper_asks ~host ~port ())
-  in
   let http_board =
     when_needed needs.needs_board (fun () ->
         load_board_list ~host ~port ~sort_by:(board_sort_label board_sort)
@@ -11585,11 +11581,19 @@ let load_http_scoped_surfaces ~refresh_ticket ~server_identity ~host ~port ~appr
   let http_fleet_safety =
     when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
-  let http_keeper_roster =
-    when_needed needs.needs_keeper_roster (fun () ->
-        match expected_workspace with
-        | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
-        | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace)
+  (* These are independent reads even on the first Home refresh. A slow
+     roster must not postpone asking for questions, or vice versa. Both
+     remain inside the same trailing workspace-identity check below. *)
+  let http_asks, http_keeper_roster =
+    Masc_tui_loader.read_pair
+      (fun () ->
+         when_needed needs.needs_asks (fun () ->
+             Masc_tui_http.fetch_keeper_asks ~host ~port ()))
+      (fun () ->
+         when_needed needs.needs_keeper_roster (fun () ->
+             match expected_workspace with
+             | None -> Error (Keeper_control.Roster_malformed "Server workspace identity is unavailable")
+             | Some expected_workspace -> load_keeper_roster ~host ~port ~expected_workspace))
   in
   let http_runtime_quota =
     when_needed needs.needs_runtime_quota (fun () ->
@@ -11670,23 +11674,27 @@ let load_http_surfaces ~refresh_ticket ~host ~port ~approval_ticket ~board_sort
   if Masc_tui_types.server_is_booting http_server_identity
   then Refresh_server_booting { refresh_ticket; identity = http_server_identity; approval_ticket }
   else begin
-    let http_overview = load_overview ~host ~port in
-    let http_approvals =
-      Option.map
-        (fun ao_ticket ->
-           { ao_ticket; ao_result = load_approvals ~host ~port })
-        approval_ticket
-    in
-    let http_scoped =
-      (* Asks ride every refresh, not just the Approvals surface. A question
-         that arrives while the operator is elsewhere has to be read to be
-         announced, so the periodic refresh always fetches them; the surface
-         still decides whether the panel renders, only the fetch is
-         unconditional. Targeted scoped refreshes keep their own needs. *)
-      load_http_scoped_surfaces ~refresh_ticket ~server_identity:http_server_identity
-        ~host ~port ~approval_ticket:None
-        ~board_sort ~board_hearth ~system_log_level ~provider_history_days
-        ~needs:{ needs with needs_asks = true }
+    (* The briefing, confirmations, and visible surface do not depend on
+       each other. Collect them together so Loading lasts for the slowest
+       read, rather than the sum of their waits. Identity is still checked
+       before collection and after all three branches settle. *)
+    let http_overview, (http_approvals, http_scoped) =
+      Masc_tui_loader.read_pair
+        (fun () -> load_overview ~host ~port)
+        (fun () ->
+           Masc_tui_loader.read_pair
+             (fun () ->
+                Option.map
+                  (fun ao_ticket ->
+                     { ao_ticket; ao_result = load_approvals ~host ~port })
+                  approval_ticket)
+             (fun () ->
+                (* Questions are announced from every surface. *)
+                load_http_scoped_surfaces ~refresh_ticket
+                  ~server_identity:http_server_identity
+                  ~host ~port ~approval_ticket:None
+                  ~board_sort ~board_hearth ~system_log_level ~provider_history_days
+                  ~needs:{ needs with needs_asks = true }))
     in
     let identity_after = load_server_identity ~host ~port in
     if Masc_tui_types.server_is_booting identity_after then

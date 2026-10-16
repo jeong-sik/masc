@@ -13158,9 +13158,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     refresh_inflight := true;
     scoped_refresh_followup := No_scoped_followup;
     let refresh_ticket = Http_refresh_order.dispatch state.http_refresh_order in
-    state.http_refresh_order <- refresh_ticket;
-    state.overview_preview <- None;
-    state.http_refresh_started_ns <- Some (Mtime_clock.elapsed_ns ());
+    Masc_tui_types.begin_http_refresh_state state ~ticket:refresh_ticket
+      ~started_ns:(Mtime_clock.elapsed_ns ());
     (* One generation of kept dashboard answers per full pass. A pass reads
        its addresses one after another and can outlive several ticks, and an
        answer read early in it is still kept when the next pass asks. *)
@@ -13232,7 +13231,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         Eio.Fiber.fork ~sw run_refresh
     | None ->
         Fun.protect
-          ~finally:(fun () -> refresh_inflight := false)
+          ~finally:(fun () ->
+            refresh_inflight := false;
+            Masc_tui_types.finish_http_refresh_state state)
           (fun () ->
              apply_http_refresh_outcome state ~mailbox
                (load_http_surfaces ~on_overview:None ~refresh_ticket ~host ~port ~approval_ticket
@@ -16079,19 +16080,12 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
           ("voice failed: " ^ error))
   | Http_overview_loaded preview ->
-      if Option.is_some state.http_refresh_started_ns
-         && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
-         && preview.op_authority = state.workspace_authority
-         && Masc_tui_types.workspace_identity_of_refresh
-              ~local_base_path:state.local_base_path (Ok preview.op_identity)
-            = Workspace_identity_match then
-        state.overview_preview <- Some preview
+      Masc_tui_types.accept_overview_preview state preview
   | Http_refresh_done
       (Refresh_workspace_unconfirmed
          { refresh_ticket; detail; unreachable; approval_ticket; latest_identity }) ->
       http_refresh_inflight := false;
-      state.http_refresh_started_ns <- None;
-      state.overview_preview <- None;
+      Masc_tui_types.finish_http_refresh_state state;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
         let authority = read_authority state in
         apply_workspace_unconfirmed state ~detail ~unreachable ~approval_ticket ~latest_identity;
@@ -16109,8 +16103,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Http_refresh_done (Refresh_server_booting { refresh_ticket; identity; approval_ticket }) ->
       http_refresh_inflight := false;
-      state.http_refresh_started_ns <- None;
-      state.overview_preview <- None;
+      Masc_tui_types.finish_http_refresh_state state;
       (* Nothing else was asked of a booting server, so nothing else follows:
          no held-call listing, no observer. The scoped follow-up is left
          queued on purpose -- draining it now would send surface loads to the
@@ -16123,8 +16116,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
         ~scoped_refresh_followup ~mailbox
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
-      state.http_refresh_started_ns <- None;
-      state.overview_preview <- None;
+      Masc_tui_types.finish_http_refresh_state state;
       if Http_refresh_order.is_current state.http_refresh_order
            results.http_scoped.http_refresh_ticket then begin
       let dispatch_was_unavailable =
@@ -16491,8 +16483,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
       add_event state "observer" ("runtime event feed closed: " ^ reason)
   | Http_refresh_failed (err, approval_ticket, refresh_ticket) ->
       http_refresh_inflight := false;
-      state.http_refresh_started_ns <- None;
-      state.overview_preview <- None;
+      Masc_tui_types.finish_http_refresh_state state;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
       Option.iter
         (fun ao_ticket ->

@@ -7944,6 +7944,34 @@ type state = {
   refresh_interval: float;
 }
 
+(* These transitions are shared by the mailbox handler and readonly overview
+   projection. Preview admission never changes confirmed data or authority. *)
+let begin_http_refresh_state (state : state) ~ticket ~started_ns =
+  state.http_refresh_order <- ticket;
+  state.overview_preview <- None;
+  state.http_refresh_started_ns <- Some started_ns
+
+let accept_overview_preview (state : state) preview =
+  if Option.is_some state.http_refresh_started_ns
+     && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
+     && preview.op_authority = state.workspace_authority
+     && workspace_identity_of_refresh ~local_base_path:state.local_base_path
+          (Ok preview.op_identity) = Workspace_identity_match then
+    state.overview_preview <- Some preview
+
+let overview_refresh_reading (state : state) =
+  match state.overview_preview with
+  | Some preview
+    when Option.is_some state.http_refresh_started_ns
+      && Http_refresh_order.is_current state.http_refresh_order preview.op_ticket
+      && preview.op_authority = state.workspace_authority ->
+      None, Some preview.op_snapshot
+  | Some _ | None -> state.overview_error, state.overview
+
+let finish_http_refresh_state (state : state) =
+  state.http_refresh_started_ns <- None;
+  state.overview_preview <- None
+
 (* Pending reads and post-action offers belong to the workspace that admitted
    them. A successful health response with missing paths is still unread;
    only comparable paths can confirm that an origin has been replaced. *)

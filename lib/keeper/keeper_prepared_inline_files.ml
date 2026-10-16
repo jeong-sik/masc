@@ -48,6 +48,21 @@ let source_matches (meta : Keeper_meta_contract.keeper_meta)
   && Option.is_some source.keeper_turn_id
 ;;
 
+let prepare_operation ~sw ~config ~meta ~tool_name descriptor ~input =
+  match Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+      ~tool_name descriptor ~input with
+  | Error _ -> None
+  | Ok args ->
+    if descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file then
+      (match FS.prepare_read ~sw ~config ~meta ~args with
+       | Ok (Some read) -> Some (Read read)
+       | Ok None | Error _ -> None)
+    else
+      (match FS.prepare_edit ~sw ~config ~meta ~args with
+       | Ok (Some edit) -> Some (Edit edit)
+       | Ok None | Error _ -> None)
+;;
+
 let prepare ~sw ~config ~meta ~source plan =
   match source with
   | None -> None
@@ -64,22 +79,9 @@ let prepare ~sw ~config ~meta ~source plan =
           match Plan.descriptor plan node.id,
                 List.find_opt (fun (id, _) -> Plan.Node_id.equal id node.id) inputs with
           | Some descriptor, Some (_, Plan.Checked_before_run input) ->
-            (match Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
-                ~tool_name:node.tool_name descriptor ~input with
-             | Error _ -> None
-             | Ok args ->
-               let prepared =
-                 if descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file then
-                   FS.prepare_read ~sw ~config ~meta ~args
-                   |> Result.map (Option.map (fun read -> Read read))
-                 else FS.prepare_edit ~sw ~config ~meta ~args
-                   |> Result.map (Option.map (fun edit -> Edit edit))
-                   |> Result.map_error (fun error ->
-                     (FS.edit_preparation_error_to_execution error).raw_output)
-               in
-               match prepared with
-               | Error _ | Ok None -> None
-               | Ok (Some operation) ->
+            (match prepare_operation ~sw ~config ~meta ~tool_name:node.tool_name descriptor ~input with
+               | None -> None
+               | Some operation ->
                  acquired := operation :: !acquired;
                  collect ({node; input; operation} :: leaves) rest)
           | None, _ | _, None | _, Some (_, Plan.Checked_when_node_runs) -> None
@@ -126,3 +128,64 @@ let for_node ~plan ~node ~input t =
     | Some _ -> Error "prepared Inline file model input changed"
     | None -> Error "prepared Inline file node is outside its original plan"
 ;;
+
+module Ready = struct
+  type t =
+    { plan : Plan.t
+    ; sw : Eio.Switch.t
+    ; config : Workspace.config
+    ; meta : Keeper_meta_contract.keeper_meta
+    }
+
+  type binding = Pure_arguments | Ordinary_file | Prepared_file of operation
+
+  let create ~sw ~config ~meta ~source plan =
+    let nodes = Plan.nodes plan in
+    let has_edit = List.exists (fun (node : Plan.node) ->
+      match Plan.descriptor plan node.id with
+      | Some descriptor -> descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+      | None -> false) nodes in
+    let supported = List.for_all (fun (node : Plan.node) ->
+      match Plan.contract plan node.id with
+      | Some {target = Plan.Child_arguments _; _} -> true
+      | Some {target = Plan.Descriptor_target descriptor; _} ->
+        (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+         && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial)
+        || (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file
+            && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent)
+      | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None -> false) nodes in
+    match source with
+    | Some source when source_matches meta source && has_edit && supported ->
+      Some {plan; sw; config; meta}
+    | Some _ | None -> None
+  ;;
+
+  let plan t = t.plan
+
+  let bind t ~node ~input =
+    if not (List.exists (fun member -> member == node) (Plan.nodes t.plan)) then
+      invalid_arg "ready Inline file node is outside its original plan";
+    match Plan.contract t.plan node.Plan.id with
+    | Some {target = Plan.Child_arguments _; _} -> Pure_arguments
+    | Some {target = Plan.Descriptor_target descriptor; _} ->
+      (match prepare_operation ~sw:t.sw ~config:t.config ~meta:t.meta
+          ~tool_name:node.tool_name descriptor ~input with
+       | Some operation -> Prepared_file operation
+       | None -> Ordinary_file)
+    | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None ->
+      invalid_arg "ready Inline file lost its original producer"
+  ;;
+
+  let operation = function Prepared_file operation -> Some operation | Pure_arguments | Ordinary_file -> None
+  let exclusive = function Ordinary_file -> true | Pure_arguments | Prepared_file _ -> false
+
+  let conflicts left right = match left, right with
+    | Pure_arguments, _ | _, Pure_arguments -> false
+    | Ordinary_file, (Ordinary_file | Prepared_file _)
+    | Prepared_file _, Ordinary_file -> true
+    | Prepared_file left, Prepared_file right ->
+      List.exists (fun scope ->
+        List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope)
+          (operation_scopes right)) (operation_scopes left)
+  ;;
+end

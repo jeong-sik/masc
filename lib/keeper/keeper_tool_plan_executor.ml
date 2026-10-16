@@ -306,29 +306,7 @@ type compiled_dispatch =
   tool_use_id:string -> node:Keeper_tool_plan.node ->
   schedule:Agent_core.Tool_contract.schedule -> input:Yojson.Safe.t -> dispatch_result
 
-let execute_one
-      ~plan
-      ~run_id
-      ~prepared_inputs
-      ~outputs
-      ~tool_use_id_for_node
-      ~dispatch
-      ?launch_invocation_of
-      ?admit_node
-      ?dispatch_compiled
-      ?journal
-      ?observe_node_result
-      scheduled
-  =
-  let node = scheduled.node in
-  let node_id = node.Keeper_tool_plan.id in
-  let plan_failure error =
-    { result = None
-    ; output = None
-    ; cause = Some (Plan_execution_failed { node_id; schedule = scheduled.schedule; error })
-    }
-  in
-  let input =
+let resolve_node_input ~plan ~run_id ~node_id ~prepared_inputs ~outputs =
     match
       List.find_map
         (fun (id, prepared) ->
@@ -347,6 +325,28 @@ let execute_one
                if Keeper_tool_plan.Node_id.equal id dependency then Some output else None)
             outputs)
     | None -> Error (Keeper_tool_plan.Unknown_node_id node_id)
+;;
+
+let execute_one
+      ~plan
+      ~run_id
+      ~input
+      ~tool_use_id_for_node
+      ~dispatch
+      ?launch_invocation_of
+      ?admit_node
+      ?dispatch_compiled
+      ?journal
+      ?observe_node_result
+      scheduled
+  =
+  let node = scheduled.node in
+  let node_id = node.Keeper_tool_plan.id in
+  let plan_failure error =
+    { result = None
+    ; output = None
+    ; cause = Some (Plan_execution_failed { node_id; schedule = scheduled.schedule; error })
+    }
   in
   match input with
   | Error error -> plan_failure error
@@ -551,12 +551,18 @@ let execute_one
 
 ;;
 
+type ready_file_dispatch =
+  { files : Keeper_prepared_inline_files.Ready.t
+  ; dispatch : Keeper_prepared_inline_files.Ready.binding -> dispatch
+  }
+
 let execute_with_tool_use_id
       ~plan
       ~run_id
       ~tool_use_id_for_node
       ~dispatch
       ?prepared_files
+      ?ready_files
       ?launch_invocation_of
       ?admit_node
       ?dispatch_compiled
@@ -564,8 +570,14 @@ let execute_with_tool_use_id
       ?observe_node_result
       ()
   =
-  let resource_dependencies = Option.bind prepared_files
-    (Keeper_prepared_inline_files.resource_dependencies ~plan) in
+  let resource_dependencies = match ready_files with
+    | None -> Option.bind prepared_files
+        (Keeper_prepared_inline_files.resource_dependencies ~plan)
+    | Some ready ->
+      if not (Keeper_prepared_inline_files.Ready.plan ready.files == plan) then
+        invalid_arg "ready Inline files belong to a different plan";
+      Some (List.map (fun (node : Keeper_tool_plan.node) -> node.id, [])
+        (Keeper_tool_plan.nodes plan)) in
   let node_effect_disposition (result : node_result) =
     match result.result with
     | Tool_result.Deferred _ | Tool_result.Failed _ ->
@@ -696,125 +708,107 @@ let execute_with_tool_use_id
       loop ()
     in
     let gate = Exclusive_gate.create () in
+    let bindings = match ready_files with
+      | None -> []
+      | Some _ -> List.map (fun (node : Keeper_tool_plan.node) ->
+          let promise, resolve = Eio.Promise.create () in node.id, promise, resolve) nodes in
+    let find_binding node_id =
+      match List.find_opt (fun (id, _, _) -> Keeper_tool_plan.Node_id.equal id node_id) bindings with
+      | Some (_, promise, resolve) -> promise, resolve
+      | None -> invalid_arg "ready Inline file lost its binding promise" in
+    let earlier_nodes node_id =
+      let rec before = function
+        | [] -> invalid_arg "ready Inline file lost its topological position"
+        | (node : Keeper_tool_plan.node) :: rest ->
+          if Keeper_tool_plan.Node_id.equal node.id node_id then []
+          else node.id :: before rest in
+      before (List.concat (Keeper_tool_plan.dependency_layers plan)) in
+    let stopped = function
+      | Wave_skipped -> true
+      | Wave_settled (settlement, _) -> Option.is_some settlement.cause in
     let run_node node =
       let node_id = node.Keeper_tool_plan.id in
       let scheduled = find_scheduled node_id in
-      let exclusive =
-        match scheduled.schedule.execution_mode with
-        | Agent_core.Tool_contract.Serial -> true
-        | Agent_core.Tool_contract.Concurrent -> false
-      in
-      let dependency_outcomes =
-        List.map
-          (fun dependency ->
-            let promise, _ = find_outcome dependency in
-            (dependency, Eio.Promise.await promise))
-          (Keeper_tool_plan.dependencies node)
-      in
+      let dependency_outcomes = List.map (fun dependency ->
+          let promise, _ = find_outcome dependency in
+          dependency, Eio.Promise.await promise) (Keeper_tool_plan.dependencies node) in
+      let publish_binding binding = match ready_files with
+        | None -> ()
+        | Some _ ->
+          let promise, resolve = find_binding node_id in
+          if Option.is_none (Eio.Promise.peek promise) then Eio.Promise.resolve resolve binding in
       let skip () =
+        publish_binding None;
         mark_blocked node_id;
         let _, resolve = find_outcome node_id in
-        Eio.Promise.resolve resolve Wave_skipped
-      in
-      (* Serial order or producer-owned conflicts preserve predecessor effects.
-         Await every such predecessor, including a transitively blocked owner;
-         a disjoint sibling has no resource-order wait. Under either failure
-         policy a failed/deferred/skipped predecessor prevents this dispatch. *)
+        Eio.Promise.resolve resolve Wave_skipped in
+      if Option.is_some ready_files && List.exists (fun (_, outcome) -> stopped outcome) dependency_outcomes
+      then skip ()
+      else
+      let outputs = List.filter_map (fun (dependency, outcome) -> match outcome with
+          | Wave_settled (settlement, _) -> Option.map (fun output -> dependency, output) settlement.output
+          | Wave_skipped -> None) dependency_outcomes in
+      let input = resolve_node_input ~plan ~run_id ~node_id ~prepared_inputs ~outputs in
+      let binding = match ready_files, input with
+        | Some ready, Ok input -> Some (Keeper_prepared_inline_files.Ready.bind ready.files ~node ~input)
+        | None, _ | Some _, Error _ -> None in
+      publish_binding binding;
+      (* Publish resolved producer claims before waiting for earlier claims.
+         Binding order is topological, so an earlier unresolved input cannot
+         depend on this node. Only actual conflicts wait for tool settlement. *)
+      let predecessor_ids = match ready_files with
+        | None -> ordering_predecessors node_id
+        | Some _ -> List.filter (fun earlier ->
+            let promise, _ = find_binding earlier in
+            match binding, Eio.Promise.await promise with
+            | Some current, Some prior -> Keeper_prepared_inline_files.Ready.conflicts prior current
+            | None, _ | Some _, None -> false) (earlier_nodes node_id) in
       let predecessor_outcomes = List.map (fun predecessor ->
           let promise, _ = find_outcome predecessor in
-          predecessor, Eio.Promise.await promise) (ordering_predecessors node_id) in
-      let predecessor_stopped = List.exists (fun (_, outcome) -> match outcome with
-          | Wave_skipped -> true
-          | Wave_settled (settlement, _) -> Option.is_some settlement.cause)
-          predecessor_outcomes in
-      if predecessor_stopped
+          predecessor, Eio.Promise.await promise) predecessor_ids in
+      if List.exists (fun (_, outcome) -> stopped outcome) predecessor_outcomes
       then skip ()
       else (
-        (* A node commits once every dependency has settled: its commit ticket
-           is the latest dependency completion, including prepared resource
-           predecessors when present. Under [Fail_fast] a node stops
-           only when a failure completed before that commit, so siblings that
-           were already unblocked still settle exactly like one static batch.
-           Later or concurrent failures never retroactively stop a committed
-           node. *)
-        let commit_ticket, dependency_blocked =
-          List.fold_left
-            (fun (latest, blocked_found) (dependency, outcome) ->
-              match outcome with
-              | Wave_skipped -> (latest, true)
+        let commit_ticket, dependency_blocked = List.fold_left
+            (fun (latest, blocked_found) (dependency, outcome) -> match outcome with
+              | Wave_skipped -> latest, true
               | Wave_settled (_, ticket) ->
-                ((if ticket > latest then ticket else latest), blocked_found || is_blocked dependency))
+                max ticket latest, blocked_found || is_blocked dependency)
             (-1, false)
             (dependency_outcomes @ (match resource_dependencies with
-              | Some _ -> predecessor_outcomes
-              | None -> []))
-        in
-        let failure_before_ready =
-          List.exists
-            (fun (_, failure_ticket) -> failure_ticket < commit_ticket)
-            (Atomic.get failures)
-        in
-        let halted =
-          match policy with
-          | Keeper_tool_plan.Fail_fast -> failure_before_ready
-          | Keeper_tool_plan.Continue_independent -> false
-        in
-        if dependency_blocked || halted
-        then skip ()
+              | Some _ -> predecessor_outcomes | None -> [])) in
+        let halted () = match policy with
+          | Keeper_tool_plan.Fail_fast -> List.exists
+              (fun (_, failure_ticket) -> failure_ticket < commit_ticket) (Atomic.get failures)
+          | Keeper_tool_plan.Continue_independent -> false in
+        if dependency_blocked || halted () then skip ()
         else (
-          if exclusive
-          then Exclusive_gate.acquire_exclusive gate
+          let exclusive = match ready_files, binding with
+            | Some _, Some binding -> Keeper_prepared_inline_files.Ready.exclusive binding
+            | Some _, None -> false
+            | None, _ -> scheduled.schedule.execution_mode = Agent_core.Tool_contract.Serial in
+          let scheduled = match ready_files with
+            | Some _ when exclusive ->
+              {scheduled with schedule = {scheduled.schedule with
+                execution_mode = Agent_core.Tool_contract.Serial; batch_size = 1}}
+            | Some _ | None -> scheduled in
+          if exclusive then Exclusive_gate.acquire_exclusive gate
           else Exclusive_gate.acquire_shared gate;
           let release () =
-            if exclusive
-            then Exclusive_gate.release_exclusive gate
-            else Exclusive_gate.release_shared gate
-          in
-          let halted_after_gate =
-            match policy with
-            | Keeper_tool_plan.Fail_fast ->
-              List.exists
-                (fun (_, failure_ticket) -> failure_ticket < commit_ticket)
-                (Atomic.get failures)
-            | Keeper_tool_plan.Continue_independent -> false
-          in
-          if halted_after_gate
-          then (
-            release ();
-            skip ())
+            if exclusive then Exclusive_gate.release_exclusive gate
+            else Exclusive_gate.release_shared gate in
+          if halted () then (release (); skip ())
           else (
-            let outputs =
-              List.filter_map
-                (fun (dependency, outcome) ->
-                  match outcome with
-                  | Wave_settled (settlement, _) ->
-                    Option.map
-                      (fun output -> (dependency, output))
-                      settlement.output
-                  | Wave_skipped -> None)
-                dependency_outcomes
-            in
-            let settlement =
-              execute_one
-                ~plan
-                ~run_id
-                ~prepared_inputs
-                ~outputs
-                ~tool_use_id_for_node
-                ~dispatch
-                ?launch_invocation_of
-                ?admit_node
-                ?dispatch_compiled
-                ?journal
-                ?observe_node_result
-                scheduled
-            in
+            let dispatch = match ready_files, binding with
+              | Some ready, Some binding -> ready.dispatch binding
+              | None, _ | Some _, None -> dispatch in
+            let settlement = execute_one ~plan ~run_id ~input
+                ~tool_use_id_for_node ~dispatch ?launch_invocation_of ?admit_node
+                ?dispatch_compiled ?journal ?observe_node_result scheduled in
             let ticket = Atomic.fetch_and_add tick 1 in
             release ();
             (match settlement.cause with
-             | Some _ ->
-               mark_blocked node_id;
-               mark_failed node_id ticket
+             | Some _ -> mark_blocked node_id; mark_failed node_id ticket
              | None -> ());
             let _, resolve = find_outcome node_id in
             Eio.Promise.resolve resolve (Wave_settled (settlement, ticket)))))
@@ -977,6 +971,7 @@ let execute_keeper_with_authority
       ~keeper_turn_id
       ?source_context
       ?prepared_files
+      ?ready_files
       ?turn_sandbox_factory
       ?clock
       ?continuation_channel
@@ -1015,7 +1010,7 @@ let execute_keeper_with_authority
   else
   (* TEL-OK: [handler] below is Keeper_tools_agent_core_handler, which
      already records telemetry (Otel_metric_store.inc_counter). *)
-  let dispatch_admitted ?launch_replay ~tool_use_id ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input () =
+  let dispatch_admitted ?prepared_file ?launch_replay ~tool_use_id ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input () =
     (* Replay identity comes from the admitted journal, not the current turn's
        metadata. The owned-job producer receives it as an Existing-only call. *)
     let replay_context =
@@ -1032,7 +1027,7 @@ let execute_keeper_with_authority
             ; tool_use_id = Some replay.tool_use_id } in
           Keeper_owned_job_invocation.replay_of_source source |> Result.map Option.some in
     let prepared_file = match prepared_files with
-      | None -> Ok None
+      | None -> Ok prepared_file
       | Some prepared ->
         Keeper_prepared_inline_files.for_node ~plan ~node ~input prepared |> Result.map Option.some in
     match prepared_file, replay_context with
@@ -1166,12 +1161,16 @@ let execute_keeper_with_authority
   let tool_use_id_for_node ~execution_id:_ node =
     nested_tool_use_id ~composition_run_id parent_invocation node.Keeper_tool_plan.id
   in
+  let ready_files = Option.map (fun files ->
+    { files; dispatch = (fun binding -> dispatch_admitted
+        ?prepared_file:(Keeper_prepared_inline_files.Ready.operation binding)) }) ready_files in
   execute_with_tool_use_id
     ~plan
     ~run_id
     ~tool_use_id_for_node
-    ~dispatch:dispatch_admitted
+    ~dispatch:(dispatch_admitted ?prepared_file:None)
     ?prepared_files
+    ?ready_files
     ~launch_invocation_of
     ?admit_node
     ?dispatch_compiled

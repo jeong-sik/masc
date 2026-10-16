@@ -3,9 +3,10 @@ description = """
 Execute a composition from recipe or an exact prepared sha256. Use recipe with \
 the same execution/nodes/exports grammar as keeper_composition_prepare to validate, \
 freeze and run in one call. Use prepare first when you need to inspect the plan. \
-Inline Read/Edit plans with fully resolved inputs may overlap independent file \
-leaves through their original Keeper-owned producers, including fixed inline \
-Skill children. Conflicting files retain order. The outer run remains Serial. \
+Inline Read/Edit plans may overlap independent file leaves through their original \
+Keeper-owned producers. Output-dependent inputs and exact inline Skill arguments \
+bind file resources when ready. Conflicting files retain topological order; \
+unsupported resource bindings use their ordinary handler alone. The outer run remains Serial. \
 Ordinary Tool nodes use tool with fixed args as an object, for example \
 {"id":"lane","tool":"keeper_lane_status","args":{}}, or tagged input \
 for output-dependent arguments. Supply only one of args or input. \

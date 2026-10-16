@@ -497,6 +497,7 @@ let validate_opened_directory
       let directory = Eio.Path.open_dir ~sw path in
       let directory = (directory :> Eio.Fs.dir_ty Eio.Path.t) in
       let opened_file = Eio.Path.open_in ~sw Eio.Path.(directory / ".") in
+      Resource_scope.track_close ~sw opened_file;
       directory, Eio.File.stat opened_file)
   with
   | Error _ as error -> error
@@ -1909,7 +1910,7 @@ module For_testing = struct
       Resource_scope.run_resource_only @@ fun sw ->
       Option.iter
         (fun exception_ ->
-           Eio.Switch.on_release sw (fun () -> raise exception_))
+           Resource_scope.on_release sw (fun () -> raise exception_))
         release_failure;
       match callback with
       | Return_completed_rows rows -> rows

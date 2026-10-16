@@ -359,6 +359,8 @@ val project_from_atom
     [history_already_announced=true] means the caller supplies the saved summary:
     an empty suffix needs no omission preamble. A non-User suffix still gets
     the opening preamble required by its message role.
+    [measure_message_bytes] is called only for the messages in the view,
+    never for an atom the cut leaves out.
     Never raises. *)
 
 val is_synthetic_preamble : Agent_core.Types.message -> bool

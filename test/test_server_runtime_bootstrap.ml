@@ -3700,10 +3700,16 @@ let test_health_response_full_query_uses_snapshot_cache () =
             Server_routes_http_runtime.make_health_response_json request
           in
           check_unique_object_keys "$" refreshed;
+          Alcotest.(check string) "cached health retains waiting inventory"
+            "masc.health.keeper_waiting_inventory.v1"
+            (refreshed |> member "keeper_waiting_inventory" |> member "schema" |> to_string);
           List.iter (fun listener ->
             let timed = timed_health_body ~listener request in
             Alcotest.(check string) "timed full response retains full detail" "full"
               (timed |> member "health_detail" |> to_string);
+            Alcotest.(check string) "request timing preserves inventory snapshot"
+              (refreshed |> member "keeper_waiting_inventory" |> Yojson.Safe.to_string)
+              (timed |> member "keeper_waiting_inventory" |> Yojson.Safe.to_string);
             List.iter (fun key ->
               Alcotest.(check string) ("request timing preserves cached " ^ key)
                 (refreshed |> member "full_health_snapshot" |> member key |> Yojson.Safe.to_string)

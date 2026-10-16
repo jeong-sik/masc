@@ -810,6 +810,36 @@ let test_read_empty_when_file_absent () =
   check int "fresh store has no wakes" 0 (List.length state.wakes)
 ;;
 
+let test_read_observation_preserves_source_without_repairing () =
+  with_workspace @@ fun config ->
+  let observe expected_source expected_count =
+    match read_state_observed config with
+    | Ok (state, source) ->
+      check bool "exact read source" true (source = expected_source);
+      check int "observed schedules" expected_count (List.length state.schedules)
+    | Error error -> fail (read_error_to_string error)
+  in
+  observe Uninitialized 0;
+  ignore (insert_ok config (make_request ()));
+  observe Primary_ledger 1;
+  Workspace_core.write_text config (schedules_path config) "{unreadable primary";
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let mirror_before = Workspace_core.read_text config (recovery_path config) in
+  observe (Recovery_mirror Primary_unusable) 1;
+  check string "observation does not repair primary" primary_before
+    (Workspace_core.read_text config (schedules_path config));
+  check string "observation preserves mirror" mirror_before
+    (Workspace_core.read_text config (recovery_path config));
+  delete_primary config;
+  observe (Recovery_mirror Primary_missing) 1;
+  check bool "observation does not recreate primary" false
+    (Workspace_utils.path_exists config (schedules_path config));
+  corrupt_both config;
+  match read_state_observed config with
+  | Error (Corrupt_read_ledger _) -> ()
+  | Ok _ -> fail "unreadable store became an observed empty ledger"
+;;
+
 let test_start_and_accept_persist_wake_record () =
   with_workspace
   @@ fun config ->
@@ -1943,6 +1973,8 @@ let () =
         [
           test_case "absent ledger reads empty" `Quick
             test_read_empty_when_file_absent;
+          test_case "read provenance preserves bytes and source" `Quick
+            test_read_observation_preserves_source_without_repairing;
           test_case "both unparseable return read error" `Quick
             test_read_error_when_both_unparseable;
           test_case "startup recovery refuses corrupt ledger" `Quick

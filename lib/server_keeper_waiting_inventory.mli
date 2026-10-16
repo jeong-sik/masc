@@ -4,6 +4,16 @@ val dashboard_json : Workspace.config -> Yojson.Safe.t
     join MASC stores, but it does not add a dashboard dependency to lower
     keeper/runtime libraries. *)
 
+val health_json : Workspace.config -> Yojson.Safe.t
+(** Compact health projection from the same typed inventory snapshot. Normal
+    waiting does not imply a fault. Unreadable sources and a schedule recovery
+    mirror make completeness unknown, retain explicitly observed counts, and
+    report a repair reason. No payloads or raw storage errors are exposed. *)
+
+val health_placeholder : status:Health_status.t -> Yojson.Safe.t
+(** No inventory has been observed: all counts remain unknown. The caller
+    supplies the background snapshot's grade, including warming/error. *)
+
 val dashboard_json_for_keeper :
   Workspace.config -> keeper_name:string -> Yojson.Safe.t
 (** The same typed projection narrowed to one keeper for latency-sensitive
@@ -57,6 +67,15 @@ type waiting_row =
   }
 
 module For_testing : sig
+  val health_json_with_pending_reader :
+    read_pending:
+      (base_path:string ->
+      ( Keeper_approval_queue_rules_types.pending_approval list
+      , Keeper_approval_queue_result.storage_error )
+      result) ->
+    Workspace.config ->
+    Yojson.Safe.t
+
   val dashboard_json_with_pending_reader :
     read_pending:
       (base_path:string ->

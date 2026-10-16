@@ -1035,6 +1035,78 @@ let test_unavailable_pending_approval_store_is_read_error () =
     failf "expected one pending-store read error row, got %d" (List.length rows)
 ;;
 
+let test_health_counts_normal_waiting_without_alarm () =
+  with_workspace @@ fun config ->
+  ignore (create_schedule_exn config ~schedule_id:"health-pending"
+    ~scheduled_by:(automated "unknown-scheduler") : Schedule_domain.schedule_request);
+  let health = Server_keeper_waiting_inventory.health_json config in
+  check string "waiting alone is not a fault" "ok" (json_string_member "status" health);
+  check bool "normal waiting needs no intervention" false U.(health |> member "operator_action_required" |> to_bool);
+  check bool "readable primary is complete" true U.(health |> member "counts_known" |> to_bool);
+  check int "one visible schedule row" 1 (json_int_member "total_row_count" health);
+  check string "primary read source" "primary" U.(health |> member "schedule_ledger" |> member "source" |> to_string);
+  check int "scheduled count" 1 U.(health |> member "schedule_ledger" |> member "observed_status_counts" |> member "scheduled" |> to_int);
+  check int "waiting source matches dashboard" 1 U.(health |> member "observed_source_counts" |> member "schedule_waiting" |> to_int)
+;;
+
+let test_health_retains_recovery_observation_without_known_totals () =
+  with_workspace @@ fun config ->
+  ignore (create_schedule_exn config ~schedule_id:"health-recovery"
+    ~scheduled_by:(automated "unknown-scheduler") : Schedule_domain.schedule_request);
+  let primary = Filename.concat (Workspace_utils.masc_dir config) "schedules.json" in
+  save_text primary "{private primary /sensitive/path token=secret";
+  let check_recovery reason =
+    let health = Server_keeper_waiting_inventory.health_json config in
+    check string "recovery is visible" "degraded" (json_string_member "status" health);
+    check bool "mirror completeness unknown" false U.(health |> member "counts_known" |> to_bool);
+    check bool "no authoritative total" true U.(health |> member "total_row_count" = `Null);
+    check int "recovery rows remain observed" 1 (json_int_member "observed_row_count" health);
+    check int "mirror schedules remain observed" 1 U.(health |> member "schedule_ledger" |> member "observed_schedule_count" |> to_int);
+    check bool "no authoritative ledger total" true U.(health |> member "schedule_ledger" |> member "schedule_count" = `Null);
+    check (list string) "stable repair reason" [reason] U.(health |> member "status_reasons" |> to_list |> List.map to_string);
+    check bool "health has no private diagnostic" false
+      (String_util.contains_substring (Yojson.Safe.to_string health) "sensitive")
+  in
+  check_recovery "schedule_primary_unusable";
+  check string "health does not repair corrupt primary"
+    "{private primary /sensitive/path token=secret" (Workspace_core.read_text config primary);
+  Workspace_core.delete_path config primary;
+  check_recovery "schedule_primary_missing";
+  save_text (primary ^ ".last-good") "{unreadable mirror";
+  let health = Server_keeper_waiting_inventory.health_json config in
+  check string "unreadable is not empty" "unavailable" (json_string_member "status" health);
+  check bool "unreadable ledger count unknown" true U.(health |> member "schedule_ledger" |> member "observed_schedule_count" = `Null);
+  check bool "unreadable work total unknown" true U.(health |> member "total_row_count" = `Null);
+  check int "read failure remains separate from work" 1 (json_int_member "read_error_count" health)
+;;
+
+let test_health_partial_source_failure_and_exception_are_not_empty () =
+  with_workspace @@ fun config ->
+  ignore (create_schedule_exn config ~schedule_id:"health-readable"
+    ~scheduled_by:(automated "unknown-scheduler") : Schedule_domain.schedule_request);
+  let read_pending ~base_path:_ =
+    Error Masc.Keeper_approval_queue_result.{path="/private/secret"; reason="secret-token"}
+  in
+  let health = Server_keeper_waiting_inventory.For_testing.health_json_with_pending_reader
+    ~read_pending config in
+  check string "one failed source degrades whole observation" "unavailable" (json_string_member "status" health);
+  check int "readable schedule still visible" 1 (json_int_member "observed_row_count" health);
+  check bool "partial inventory total unknown" true U.(health |> member "total_row_count" = `Null);
+  check bool "raw error omitted" false (String_util.contains_substring (Yojson.Safe.to_string health) "secret");
+  let failed = Server_keeper_waiting_inventory.For_testing.health_json_with_pending_reader
+    ~read_pending:(fun ~base_path:_ -> raise (Sys_error "/private/secret-token")) config in
+  check string "unexpected failure explicit" "error" (json_string_member "status" failed);
+  check bool "exception does not become zero" true U.(failed |> member "observed_row_count" = `Null);
+  check bool "exception diagnostic omitted" false (String_util.contains_substring (Yojson.Safe.to_string failed) "secret")
+;;
+
+let test_health_placeholder_has_unknown_counts () =
+  let health = Server_keeper_waiting_inventory.health_placeholder ~status:Health_status.Warming in
+  check bool "not observed" false U.(health |> member "counts_known" |> to_bool);
+  List.iter (fun key -> check bool (key ^ " is unknown") true U.(health |> member key = `Null))
+    ["keeper_count"; "total_row_count"; "observed_row_count"; "observed_source_counts"; "read_error_count"; "schedule_ledger"]
+;;
+
 let () =
   run "keeper_waiting_inventory"
     [ ( "dashboard_json"
@@ -1067,6 +1139,10 @@ let () =
             test_corrupt_pending_confirms_is_read_error
         ; test_case "unavailable pending approval store is read_error" `Quick
             test_unavailable_pending_approval_store_is_read_error
+        ; test_case "health counts waiting without alarm" `Quick test_health_counts_normal_waiting_without_alarm
+        ; test_case "health preserves recovery observation with unknown totals" `Quick test_health_retains_recovery_observation_without_known_totals
+        ; test_case "health source failures remain unknown and redacted" `Quick test_health_partial_source_failure_and_exception_are_not_empty
+        ; test_case "health placeholder has unknown counts" `Quick test_health_placeholder_has_unknown_counts
         ] )
     ]
 ;;

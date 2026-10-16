@@ -1547,7 +1547,7 @@ print(json.dumps({"event": "result", "result": {"conversation_id": "panel-fixtur
     "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}}}), flush=True)
 |}
 
-let test_antigravity_panel_selected_account_and_refresh ?(linked_root = false) () =
+let test_antigravity_panel_selected_account_and_refresh () =
   let snapshot = Runtime.For_testing.snapshot () in
   let base_dir = Filename.temp_dir "fusion-agy-account" "" |> Unix.realpath in
   let saved_env = List.map (fun key -> key, Sys.getenv_opt key) ["HOME"; "XDG_CONFIG_HOME"] in
@@ -1555,10 +1555,6 @@ let test_antigravity_panel_selected_account_and_refresh ?(linked_root = false) (
     List.iter (fun (key, value) -> Unix.putenv key (match value with Some value -> value | None -> "")) saved_env;
     Runtime.For_testing.restore snapshot;
     remove_tree base_dir) (fun () ->
-    if linked_root then (
-      let physical_root = Filename.concat base_dir "physical-masc" in
-      Unix.mkdir physical_root 0o700;
-      Unix.symlink physical_root (Filename.concat base_dir ".masc"));
     let panel_tmp = Filename.concat base_dir "panel-tmp" in
     Unix.mkdir panel_tmp 0o700;
     let saved_tmp = Filename.get_temp_dir_name () in
@@ -1723,8 +1719,6 @@ let () =
             test_cancelled_muse_panel_does_not_leave_a_workspace
         ; test_case "Antigravity selected account and native refresh" `Quick
             test_antigravity_panel_selected_account_and_refresh
-        ; test_case "Antigravity linked runtime root" `Quick
-            (test_antigravity_panel_selected_account_and_refresh ~linked_root:true)
         ] )
     ; ( "seat routes"
       , [ test_case

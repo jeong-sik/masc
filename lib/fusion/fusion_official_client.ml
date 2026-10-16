@@ -381,6 +381,7 @@ let create_antigravity_panel_root () =
 (* The root holds a copy of the account's OAuth file, so a removal that fails
    is said out loud. *)
 let remove_antigravity_panel_root root =
+  Runtime_antigravity_home.forget_prepared_below ~runtime_root:root;
   try Fs_compat.remove_tree root with
   | (Sys_error _ | Unix.Unix_error _) as exn ->
     Log.Runtime_agent.warn

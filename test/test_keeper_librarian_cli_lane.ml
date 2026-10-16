@@ -701,13 +701,17 @@ let test_admission_worker_requires_actual_input_capacity () =
   check bool "typed input refusal alone authorizes partition traversal" true
     (List.for_all (fun (r : Runtime.not_committed) ->
       r.input_capacity_evidence=Runtime.Input_capacity_refused) reports);
+  check bool "native context refusal is distinct from measured range-size evidence" true
+    (List.for_all (fun (r : Runtime.not_committed) ->
+      not r.walk_shows_size && not r.smaller_range_meets_same_failure) reports);
   List.iter (fun (first,second) ->
     let reports = attempt
         ~answers:[Fixture.cli_primary_runtime,first;Fixture.cli_secondary_runtime,second]
         ~expected_calls:2 ~expected_partition_sizes:[4] in
     check bool "invalid output vetoes capacity evidence in either slot order" true
       (List.for_all (fun (r : Runtime.not_committed) ->
-        r.input_capacity_evidence=Runtime.No_input_capacity_refusal) reports))
+        r.input_capacity_evidence=Runtime.No_input_capacity_refusal
+        && not r.walk_shows_size) reports))
     [Ok "{}",capacity_answer;capacity_answer,Ok "not-json"]
 ;;
 

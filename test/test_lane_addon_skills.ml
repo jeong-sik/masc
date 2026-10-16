@@ -100,7 +100,7 @@ let backend fixture : Lane.For_testing.backend = {
         then Ok { Lane_addon_types.rows = []; coverage = [] }
         else Error "fixture observation unavailable");
       stop = (fun () ->
-        if not !(fixture.cleanup_available) then Error "fixture cleanup unavailable"
+        if not !(fixture.cleanup_available) then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "fixture cleanup unavailable")
         else (if not !stopped then (stopped := true; incr fixture.stops); Ok ()));
     } in
     on_created connection;
@@ -108,6 +108,7 @@ let backend fixture : Lane.For_testing.backend = {
   image_ready = (fun ~package:_ -> Ok ());
   acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
   recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ());
+  condition_met = (fun ~runtime:_ _ -> true);
 }
 
 let dispatch fixture operation fields =

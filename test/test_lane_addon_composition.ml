@@ -77,12 +77,13 @@ let with_fixture ?(acquire=Lane_addon_sources.acquire) ?produce_package ?(produc
                         | None -> produce ~binding ~sources));
                     stop=(fun () ->
                       stop_attempts := instance_id :: !stop_attempts;
-                      if not !allow_stop then Error "fixture cleanup unavailable"
+                      if not !allow_stop then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "fixture cleanup unavailable")
                       else (stopped := instance_id :: !stopped; Ok ()))} in
                   on_created connection; Ok connection);
                 image_ready=(fun ~package:_ -> Ok ());
                 acquire;
-                recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ())} in
+                recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ());
+                condition_met = (fun ~runtime:_ _ -> true)} in
               Runtime.For_testing.with_backend backend (fun () ->
                 (* Exceptional exits cancel the Eio switch before the outer
                    cleanup removes this fresh directory. Normal exits retire

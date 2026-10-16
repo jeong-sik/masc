@@ -1,5 +1,5 @@
-(** Typed facts about the container engine that holds an Add-on's worker.
-    Pure: no I/O. *)
+(** Typed facts about the container engine that holds an Add-on's worker, and
+    the lifecycle state the runtime keeps for it. Pure: no I/O. *)
 
 (** The engine a container was created on. Docker reports an engine ID; the
     Apple [container] runtime reports the application data root its API server
@@ -19,3 +19,60 @@ val engine_equal : engine -> engine -> bool
 val engine_to_string : engine -> string
 val engine_to_json : engine -> Yojson.Safe.t
 val engine_of_json : Yojson.Safe.t -> (engine, string) result
+
+(** Why a worker or its cleanup cannot proceed. The variant, not the text,
+    decides whether the runtime retries ({!heal}); the string is for people. *)
+type failure =
+  | Engine_unreachable of string
+  | Worker_failed of string
+  | Cleanup_unconfirmed of string
+  | Persistence_failed of string
+  | Previous_process
+      (** A non-terminal record left by an earlier server process. *)
+  | Effect_outcome_unknown of string
+
+(** [cause] is the failure the runtime acts on now. [first] is the failure that
+    began the sequence, kept when a later attempt (usually the cleanup after a
+    failed start) fails for a different reason, so that the original cause is
+    never replaced by its own cleanup. *)
+type failed = { cause : failure; first : failure option }
+
+(** [Detaching] keeps the failure that was in place when the detach began. *)
+type state =
+  | Attached
+  | Observing
+  | Failed of failed
+  | Detaching of failed option
+  | Detached
+
+(** What a waiting failure needs before another attempt is worth making. *)
+type condition = Engine_reachable
+
+type heal =
+  | Retry  (** Another attempt can succeed without anything else changing. *)
+  | Wait_until of condition
+      (** Repeating the attempt would only repeat the refusal. *)
+
+val heal : failure -> heal
+(** The single place that decides retry or wait for every failure. *)
+
+val failed : failure -> failed
+val fail_again : failed -> failure -> failed
+(** A later attempt failed: [cause] is replaced and the earliest different
+    cause is kept as [first]. *)
+
+val failure_to_string : failure -> string
+val failure_detail : failure -> string
+(** The reason without the context [failure_to_string] adds, for events that
+    already name their own context. *)
+val failed_to_string : failed -> string
+val failure_to_json : failure -> Yojson.Safe.t
+val failure_of_json : Yojson.Safe.t -> (failure, string) result
+
+val project : state -> Lane_addon_types.phase
+(** The display phase of a state. It is derived and never read back. *)
+
+val state_to_json : state -> Yojson.Safe.t
+val state_of_json : Yojson.Safe.t -> (state, string) result
+(** Strict: a record that does not carry the current shape is an error, so an
+    older record surfaces as unreadable instead of being reinterpreted. *)

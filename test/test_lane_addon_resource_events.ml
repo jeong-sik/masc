@@ -68,13 +68,13 @@ let make_backend () =
         stop = (fun () ->
           let count = 1 + Option.value ~default:0 (Hashtbl.find_opt state.stops instance_id) in
           Hashtbl.replace state.stops instance_id count;
-          if package.id = "stop-retry" && count = 1 then Error "cleanup refused"
+          if package.id = "stop-retry" && count = 1 then Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "cleanup refused")
           else begin
             if not !stopped then (stopped := true; Eio.Promise.resolve release ());
             Ok ()
           end)
       } in
-      if package.id = "start-error" then Error "startup unavailable"
+      if package.id = "start-error" then Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
       else begin
         on_created connection;
         Ok connection
@@ -86,8 +86,9 @@ let make_backend () =
       match container_id with
       | Some id when id = Store.digest instance_id ->
           state.recovery := (instance_id, id) :: !(state.recovery); Ok ()
-      | None -> Error "Docker recovery unavailable"
-      | Some _ -> Error "owner mismatch")
+      | None -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "Docker recovery unavailable")
+      | Some _ -> Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "owner mismatch"));
+    condition_met = (fun ~runtime:_ _ -> true)
   } in state, backend
 
 let manifest dir mode =
@@ -245,7 +246,9 @@ let test_recovery_publishes_release_confirmed_for_persisted_identity () =
     let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
     let fields = Yojson.Safe.Util.to_assoc captured in
     unwrap (Store.save_binding store ~instance_id:id
-      (`Assoc (("phase", Types.phase_to_json Types.Attached) :: List.remove_assoc "phase" fields)));
+      (`Assoc (("phase", Types.phase_to_json Types.Attached)
+        :: ("lifecycle", Masc.Lane_addon_lifecycle.state_to_json Masc.Lane_addon_lifecycle.Attached)
+        :: List.remove_assoc "lifecycle" (List.remove_assoc "phase" fields))));
     detach config id;
     await_phase clock config id "detached";
     check Alcotest.int "one exact persisted-container recovery" 1 (List.length !(state.recovery));

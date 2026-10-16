@@ -30,6 +30,7 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
       let backend : R.For_testing.backend = {
         image_ready=(fun ~package:_ -> Ok ());
         recover_stop=(fun ~runtime:_ ~state_owner:_ ~instance_id:_ ~container_id:_ -> Ok ());
+        condition_met = (fun ~runtime:_ _ -> true);
         acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
         start=(fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Masc.Lane_addon_types.package) ~binding:_ ~on_created ->
           let store = Masc.Lane_addon_store.create

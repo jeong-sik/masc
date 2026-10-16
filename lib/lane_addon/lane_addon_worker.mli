@@ -81,6 +81,11 @@ val container_id : t -> string
 val container_name : t -> string
 val error_to_string : error -> string
 
+val start_failure : error -> Lane_addon_lifecycle.failure
+val cleanup_failure : error -> Lane_addon_lifecycle.failure
+(** The typed failure the runtime records for a failed start, or a cleanup
+    that cannot be confirmed. *)
+
 (** The identity of the engine the control command currently reaches. The exit
     status of [docker info] (or [container system status]) alone separates
     [Unreachable] from an identity; no error text is classified. Each query is

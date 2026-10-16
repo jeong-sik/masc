@@ -1,6 +1,7 @@
 (* Real Owner -> Keeper_turn -> Keeper_agent_run. The HTTP peer is a provider
    fixture, not the server ingress. The in-process person-note tool performs
-   the durable effect; no guest sandbox is acquired. *)
+   the durable effect; no guest sandbox is acquired. The empty-terminal case
+   additionally follows the same message through durable Owner settlement. *)
 open Alcotest
 open Masc
 module Native = Keeper_direct_native_continuation
@@ -183,7 +184,8 @@ let check_resume_authority ~env ~root binding =
   check_effect_counts root;
   {original_call=call; canonical_result=List.hd results}
 
-let run_phase ~child ~cut root =
+let run_phase ?(empty_terminal = false) ~child ~cut root =
+  let fresh = child || empty_terminal in
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
@@ -210,10 +212,17 @@ let run_phase ~child ~cut root =
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
       (Exact_output_fixture.Reply_with (fun index body ->
         record root "provider";
-        if child then (`OK, match index with
+        if fresh then (`OK, match index with
           | 0 -> tool_response "ingress-load-call" "keeper_tool_search" (`Assoc ["names", `List [`String tool_name]])
           | 1 -> tool_response target_id tool_name (`Assoc ["speaker_id", `String "fixture-person"; "note", `String note])
-          | _ -> final_response)
+          | _ ->
+            if empty_terminal then (
+              let messages = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "messages" |> to_list) in
+              let results = List.filter (fun message ->
+                Yojson.Safe.Util.member "tool_call_id" message = `String target_id) messages in
+              check int "empty terminal follows one transmitted target ToolResult" 1 (List.length results);
+              response (`Assoc ["role", `String "assistant"; "content", `Null]) "stop")
+            else final_response)
         else (
           let request = Yojson.Safe.from_string body in
           let messages = Yojson.Safe.Util.(request |> member "messages" |> to_list) in
@@ -250,7 +259,7 @@ is-default = true
 |} server.base_url model_id);
   Runtime.init_default ~config_path:runtime_path |> require "runtime";
   let config = Workspace.default_config root in
-  if child then (
+  if fresh then (
     ignore (Workspace.init config ~agent_name:(Some "ingress-fixture"));
     (* The admitted turn validates the complete Docker profile even though
        these in-process tools never acquire a guest. The catalog helper only
@@ -281,18 +290,18 @@ is-default = true
   let completed, resolve_completed = Eio.Promise.create () in
   let execute ~sw:turn_sw ~keeper_name:_ ~claim =
     record root "ingress";
-    if not child && cut = Returned_turn then fail "Owner redispatched a terminal native operation";
+    if not fresh && cut = Returned_turn then fail "Owner redispatched a terminal native operation";
     let operation : Keeper_chat_operation.t = claim () |> require "claim" |> Option.get in
     check bool "Owner claims the original input" true (operation.input = Some (original_input ()));
     check bool "Owner preserves original source" true (operation.source = source);
     check bool "Owner preserves original ID" true
       (Keeper_chat_operation.Operation_id.equal operation_id operation.operation_id);
     let digest_path = Filename.concat root "original-execution-digest" in
-    if child then write digest_path operation.execution_digest
+    if fresh then write digest_path operation.execution_digest
     else check string "execution digest is unchanged after restart" (read digest_path) operation.execution_digest;
     let binding : Native.binding = {base_path=root;keeper_name;operation_id;
       execution_digest=operation.execution_digest;session_dir;session_id} in
-    if not child then resumed_proof := Some (check_resume_authority ~env ~root binding);
+    if not fresh then resumed_proof := Some (check_resume_authority ~env ~root binding);
     let gate = Keeper_tool_approval_gate.create
         ~registry:(Keeper_tool_approval_registry.create ())
         ~late_approvals:(Keeper_late_approval.create ()) ~publish:(fun _ -> ())
@@ -324,9 +333,17 @@ is-default = true
      | Keeper_turn.Turn_settled result ->
        if not (Tool_result.is_success result) then fail (Tool_result.message result));
     let terminal_call = match native_state binding with
-      | Keeper_native_call.Terminal_unacknowledged (call, {Agent_core.Agent.outcome=Terminal_succeeded; recovery=Retire}) ->
+      | Keeper_native_call.Terminal_unacknowledged (call, {Agent_core.Agent.outcome; recovery=Retire}) ->
+        (* Core still rejects an empty terminal. Keeper's saved-tool proof
+           accepts that known failed/retirable result as message completion;
+           it must not rewrite the SDK's actual terminal observation. *)
+        check bool "native disposition honestly records the SDK outcome" true
+          (match empty_terminal, outcome with
+           | true, Agent_core.Agent.Terminal_failed
+           | false, Agent_core.Agent.Terminal_succeeded -> true
+           | (true | false), (Terminal_succeeded | Terminal_failed | Terminal_cancelled) -> false);
         call
-      | No_native_call | Active _ | Terminal_unacknowledged _ -> fail "real ingress omitted its native terminal receipt" in
+      | No_native_call | Active _ | Terminal_unacknowledged _ -> fail "real ingress omitted its retirable native terminal receipt" in
     let checkpoint = retained ~session_dir terminal_call.checkpoint in
     check_original_input checkpoint;
     check int "final checkpoint includes target result once" 1 (List.length (target_results checkpoint));
@@ -350,7 +367,7 @@ is-default = true
       Eio.Promise.resolve resolve_completed execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner) ~on_turn_slot_released:None config
     |> require "install real Owner" |> ignore;
-  if child then Registry.submit_operation ~base_path:root ~keeper_name ~operation_id ~source ~input:(original_input ())
+  if fresh then Registry.submit_operation ~base_path:root ~keeper_name ~operation_id ~source ~input:(original_input ())
     |> require "submit original operation" |> ignore;
   if child || cut = Settled_result then (
     (match Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
@@ -365,7 +382,20 @@ is-default = true
        | Queued | Running _ | Failed _ | Cancelled _ -> false);
     check bool "Owner atomically acknowledged native authority" true
       (Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id |> require "final native state"
-       |> Keeper_native_call.equal_state Keeper_native_call.No_native_call))
+       |> Keeper_native_call.equal_state Keeper_native_call.No_native_call);
+    if empty_terminal then (
+      let duplicate = Registry.submit_operation ~base_path:root ~keeper_name ~operation_id
+          ~source ~input:(original_input ()) |> require "duplicate completed message" in
+      check bool "duplicate admission recognizes the completed original" true duplicate.existing;
+      check int "duplicate admission does not queue another turn" 0 duplicate.queued_count;
+      check bool "duplicate retains terminal success" true
+        (match duplicate.operation.state with
+         | Keeper_chat_operation.Succeeded _ -> true
+         | Queued | Running _ | Failed _ | Cancelled _ -> false);
+      Eio.Fiber.yield ();
+      check int "duplicate does not reenter the admitted message" 1 (count root "ingress");
+      check int "duplicate does not call the provider again" 3 (count root "provider");
+      check_effect_counts root))
   else (
     let operation = Registry.exact_operation ~base_path:root ~keeper_name operation_id |> require "interrupted terminal operation" |> Option.get in
     check bool "unacknowledged terminal never infers successful delivery" true
@@ -400,9 +430,36 @@ let test_restart cut () =
     check string "the child and parent used an unchanged executable" executable_before executable_after;
     emit_evidence ~root ~cut ~executable_sha256:executable_after ~note_rows ~target_tool_log_rows)
 
+let test_empty_terminal_completes_message_without_replay () =
+  let root = Filename.temp_dir "keeper-ingress-empty-terminal-" "" in
+  Fun.protect ~finally:(fun () ->
+    Eio_main.run (fun env -> Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root))) (fun () ->
+    let note_rows, target_tool_log_rows =
+      run_phase ~empty_terminal:true ~child:false ~cut:Settled_result root in
+    check int "loader, target tool, then empty terminal" 3 (count root "provider");
+    check int "one admitted message execution" 1 (count root "ingress");
+    check int "one durable tool effect" 1 note_rows;
+    check int "one durable target tool log row" 1 target_tool_log_rows;
+    let config = Workspace.default_config root in
+    let path = Keeper_chat_operation_store.path_for_keeper
+        ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name in
+    let store = Keeper_chat_operation_store.open_existing ~path
+      |> require "reopen settled operation store" in
+    Fun.protect ~finally:(fun () ->
+      Keeper_chat_operation_store.close store |> require "close reopened operation store") (fun () ->
+      let operation = Keeper_chat_operation_store.get store operation_id
+        |> require "read persisted empty-terminal operation" |> Option.get in
+      check bool "empty terminal durably completed the exact original message" true
+        (match operation.state with
+         | Keeper_chat_operation.Succeeded {outcome_ref; _} -> outcome_ref = "real-ingress-native-recovered"
+         | Queued | Running _ | Failed _ | Cancelled _ -> false);
+      check bool "original caller identity survives settlement" true (operation.source = source)))
+
 let () = match Array.to_list Sys.argv with
   | [_; "--ingress-native-child"; "settled"; root] -> ignore (run_phase ~child:true ~cut:Settled_result root)
   | [_; "--ingress-native-child"; "terminal"; root] -> ignore (run_phase ~child:true ~cut:Returned_turn root)
   | _ -> run "Keeper direct ingress native restart" ["real ingress", [
       test_case "settled result resumes through the original Keeper turn" `Quick (test_restart Settled_result);
-      test_case "unacknowledged terminal does not reexecute ingress" `Quick (test_restart Returned_turn)]]
+      test_case "unacknowledged terminal does not reexecute ingress" `Quick (test_restart Returned_turn);
+      test_case "empty terminal completes the original message without tool replay" `Quick
+        test_empty_terminal_completes_message_without_replay]]

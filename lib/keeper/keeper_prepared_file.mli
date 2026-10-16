@@ -1,8 +1,10 @@
-(** Existing local Edit resources, pinned independently of permission or replay. *)
+(** Existing local file resources, pinned independently of permission or replay. *)
+type operation = Read | Edit
 type t
 
 val prepare
   : sw:Eio.Switch.t
+  -> operation:operation
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> args:Yojson.Safe.t
@@ -10,19 +12,20 @@ val prepare
   -> (t option, string) result
 (** Inspect an existing regular source and pin its existing target/source parent
     capabilities on [sw]. [None] leaves an unsupported or missing resource on
-    the ordinary Serial path. Partial capabilities are released before any
+    the ordinary execution path. Partial capabilities are released before any
     refusal or fallback. This performs no write, Gate decision or source read.
     Native directory identities include complete physical ancestry, so nested
     allowed roots and aliases cannot mint unrelated scheduling resources. *)
 
 val scopes : t -> Agent_core.Tool_contract.Resource_scope.t list
-(** The lexical replacement entry carries [Write]; the resolved source entry
+(** For [Edit], the lexical replacement entry carries [Write]; the resolved source entry
     carries [Read]. Each entry is identified by its physical parent and leaf,
     and retains its parent and complete physical ancestry. Different entries
     may overlap even in the same or nested directories. Additional target
     [Write] and source [Read] object claims retain the backend's inode-based
     mutation ordering for hard links and filesystem spelling aliases. Entry
-    claims keep successive atomic replacements ordered after inode changes. *)
+    claims keep successive atomic replacements ordered after inode changes.
+    [Read] carries only [Read] claims for these same entries and objects. *)
 
 val release : t -> unit
 (** Release a preparation that an aggregate producer cannot transfer. Safe to
@@ -30,7 +33,8 @@ val release : t -> unit
     cannot be consumed. Cancellation cannot interrupt this cleanup. *)
 
 val with_parents
-  : config:Workspace.config
+  : operation:operation
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> args:Yojson.Safe.t
   -> confined:Keeper_alerting_path.confined_path
@@ -43,7 +47,7 @@ val with_parents
       -> ('a, string) result)
   -> ('a, string) result
 (** Revalidate the exact owner/input, current confined resolution, root and
-    physical directory bindings, then consume the pinned parents. The actual
-    source file is opened/read by the ordinary Edit consumer at execution,
-    retaining sequential patches after an earlier atomic replacement. This
+    physical directory bindings and operation, then consume the pinned parents.
+    The source file opens at execution, retaining sequential reads/patches
+    after an earlier atomic replacement. This
     does not authorize the effect or bypass Gate/publication recovery. *)

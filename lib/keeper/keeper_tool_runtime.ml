@@ -74,15 +74,17 @@ let descriptor_for_internal internal_name =
   | [] -> None
 ;;
 
-let handle_filesystem ?prepared_edit ctx descriptor args =
+let handle_filesystem ?prepared_read ?prepared_edit ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_read_file ->
-    Some
-      (Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
-         ~turn_sandbox_factory:ctx.turn_sandbox_factory
-         ~config:ctx.config
-         ~meta:ctx.meta
-         ~args)
+    Some (match prepared_read with
+      | Some prepared_read ->
+        Keeper_tool_filesystem_runtime.handle_prepared_read_file_with_outcome
+          ~prepared_read ~config:ctx.config ~meta:ctx.meta ~args
+      | None ->
+        Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+          ~turn_sandbox_factory:ctx.turn_sandbox_factory
+          ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_edit_file | Tool_write_file ->
     Some
       (Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
@@ -666,9 +668,9 @@ let handle_in_process ctx descriptor args =
 (* [handle] hands itself to the shell-ir owner as a value: a masc stage
    found inside a shell line dispatches through the same routing as a
    direct call, without a forward reference or a module cycle. *)
-let rec handle ?prepared_edit ctx ~descriptor ~args =
+let rec handle ?prepared_read ?prepared_edit ctx ~descriptor ~args =
   match descriptor.Keeper_tool_descriptor.executor with
-  | Filesystem -> handle_filesystem ?prepared_edit ctx descriptor args
+  | Filesystem -> handle_filesystem ?prepared_read ?prepared_edit ctx descriptor args
   | Shell_ir -> handle_shell_ir ctx ~dispatch:(handle ctx) descriptor args
   | In_process -> handle_in_process ctx descriptor args
 ;;

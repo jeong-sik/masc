@@ -120,7 +120,7 @@ let batch env config meta recovery inputs =
   dispatch env [tool] calls
 ;;
 
-let public_bundle ?snapshot ?(sourceful = true) env sw config meta recovery operation =
+let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) env sw config meta recovery operation =
   Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some config.Workspace.base_path) @@ fun () ->
   Config_dir_resolver.reset ();
   Eio.Switch.on_release sw Config_dir_resolver.reset;
@@ -144,10 +144,14 @@ let public_bundle ?snapshot ?(sourceful = true) env sw config meta recovery oper
     ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~keeper_turn_id:13 ~turn:2 ();
   let descriptor = match Keeper_tool_descriptor.find_id "agent.edit_file" with
     | Some value -> value | None -> fail "canonical public Edit descriptor is absent" in
+  let descriptors = if not with_read then [descriptor] else
+    match Keeper_tool_descriptor.find_id "agent.read_file" with
+    | Some read -> [descriptor; read]
+    | None -> fail "canonical public Read descriptor is absent" in
   let snapshot = match snapshot with
     | Some snapshot -> snapshot
     | None -> Skill_catalog_snapshot.config_unreadable ~detail:"tool-only fixture has no shared Skill source" in
-  let catalog, diagnostics = Keeper_skill_catalog.of_snapshot ~descriptors:[descriptor] snapshot in
+  let catalog, diagnostics = Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
   check int "published Edit Skills project without errors" 0 (List.length diagnostics);
   let selection = Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:task.task_id references
       |> function Ok value -> value | Error error -> fail (Keeper_task_skill_turn.error_to_string error) in
@@ -157,10 +161,10 @@ let public_bundle ?snapshot ?(sourceful = true) env sw config meta recovery oper
       ~runtime_id:(fun () -> Some "fixture.resource-edit")
       ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision snapshot) ~task_selection:selection
       |> function Ok value -> value | Error error -> fail (Keeper_skill_activation_recorder.error_to_string error)) in
-  let surface = Keeper_capability_surface.create_with_descriptors ~tool_descriptors:[descriptor]
+  let surface = Keeper_capability_surface.create_with_descriptors ~tool_descriptors:descriptors
       ~tool_deny:[] ~sandbox_profile:meta.sandbox_profile ~skill_names:None
       ~global_skill_catalog:catalog
-      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors:[descriptor] snapshot)
+      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
       ~task_skills:(Keeper_task_skill_turn.skills selection) in
   let causal = Keeper_gate_causal_context.create ~turn_id:(Some 13)
       ~initial:(`Assoc ["task_id", `String task.task_id]) in
@@ -182,7 +186,7 @@ let public_calls inputs = List.mapi (fun index input -> Agent_core.Types.ToolUse
 ;;
 
 let publish_edit_skills ?(two_nodes = false) ?(ordered = false)
-    ?(third_node = false) ?(continue_independent = false) sw config =
+    ?(third_node = false) ?(continue_independent = false) ?read_path_param sw config =
   let source_config = "[skills]\nresource-read-max-bytes = 16384\n[[skills.sources]]\nid = \"edit-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n" in
   let document name =
     let first = ["file_path", "file_path"; "old_string", "old_string"; "new_string", "new_string"] in
@@ -190,6 +194,9 @@ let publish_edit_skills ?(two_nodes = false) ?(ordered = false)
     let third = ["file_path", "later_path"; "old_string", "later_old"; "new_string", "later_new"] in
     let params = List.map snd
       (first @ (if two_nodes then second else []) @ if third_node then third else []) in
+    let params = match read_path_param with
+      | Some param when not (List.mem param params) -> params @ [param]
+      | Some _ | None -> params in
     let node ?(after = []) id bindings =
       Printf.sprintf "[[compositions.nodes]]\nid = %S\ntool = \"Edit\"\nafter = [%s]\n[compositions.nodes.input]\nkind = \"object\"\n"
         id (String.concat ", " (List.map (Printf.sprintf "%S") after))
@@ -202,6 +209,11 @@ let publish_edit_skills ?(two_nodes = false) ?(ordered = false)
     ^ node "patch" first
     ^ (if two_nodes then node ~after:(if ordered then ["patch"] else []) "other-patch" second else "")
     ^ (if third_node then node "later-patch" third else "")
+    ^ (match read_path_param with
+       | None -> ""
+       | Some param ->
+         "[[compositions.nodes]]\nid = \"read\"\ntool = \"Read\"\n[compositions.nodes.input]\nkind = \"object\"\n"
+         ^ Printf.sprintf "[[compositions.nodes.input.fields]]\nname = \"file_path\"\n[compositions.nodes.input.fields.value]\nkind = \"param\"\nname = %S\n" param)
     ^ "```\n" in
   List.iter (fun name -> write (Filename.concat config.Workspace.base_path
       ("skills/" ^ name ^ "/SKILL.md")) (document name)) ["edit-left"; "edit-right"];
@@ -763,7 +775,152 @@ let test_release_closes_the_pinned_directories () =
   check int "release closes every pinned descriptor" before after
 ;;
 
-let () = run "prepared actual Edit resources"
+let mixed_read_content (row : Agent_core.Agent_tools.tool_execution_result) =
+  let open Yojson.Safe.Util in
+  let actions = Yojson.Safe.from_string row.content |> member "actions" |> to_list in
+  let read = List.find (fun action -> member "node_id" action = `String "read") actions in
+  member "result" read |> member "data" |> member "content" |> to_string
+;;
+
+let test_mixed_skills_share_read_claims_while_writes_overlap () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~read_path_param:"read_path" sw config in
+  public_bundle ~snapshot ~with_read:true env sw config meta recovery
+  @@ fun _meta _task _cell _causal bundle ->
+  let source = Filename.concat root "mixed/shared" in
+  let left = Filename.concat root "mixed/left" and right = Filename.concat root "mixed/right" in
+  write source "read-only shared bytes"; write left "before"; write right "before";
+  let input path = match public_args path "before" "after" with
+    | `Assoc fields -> `Assoc (fields @ ["read_path", `String source])
+    | _ -> fail "patch arguments are not an object" in
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered; if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> dispatch env bundle.tools (inline_calls bundle [input left; input right])) in
+  check int "both real mixed Skill write boundaries overlap" 2 !entered;
+  List.iter (fun row ->
+    check string "shared Read returned its actual source" "read-only shared bytes"
+      (mixed_read_content row)) rows;
+  check string "left committed" "after" (read left);
+  check string "right committed" "after" (read right);
+  check string "shared source stayed unchanged" "read-only shared bytes" (read source)
+;;
+
+let test_mixed_read_observes_preceding_edit ~symlink () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~read_path_param:"file_path" sw config in
+  public_bundle ~snapshot ~with_read:true env sw config meta recovery
+  @@ fun _meta _task _cell _causal bundle ->
+  let original = Filename.concat root "mixed-order/original" in
+  let path = Filename.concat root "mixed-order/entry" in
+  write original "before";
+  if symlink then Unix.symlink "original" path else write path "before";
+  let rows = dispatch env bundle.tools (inline_calls bundle [public_args path "before" "after"]) in
+  match rows with
+  | [row] ->
+    check string "Read consumed the earlier atomic replacement" "after" (mixed_read_content row);
+    check string "actual replacement bytes" "after" (read path);
+    check string "other source entry stayed unchanged" "before" (read original)
+  | _ -> fail "one mixed Skill did not return one settlement"
+;;
+
+let test_prepared_read_rejects_changed_authority_and_keeps_line_window () =
+  fixture @@ fun _env sw config meta _recovery root ->
+  let absent = {meta with name = "absent-reader"} in
+  let absent_root = Keeper_sandbox.host_root_abs_of_meta ~config absent in
+  check bool "fixture starts without the other Keeper tree" false (Sys.file_exists absent_root);
+  (match FS.prepare_read ~sw ~config ~meta:absent ~args:(`Assoc ["path", `String "missing"]) with
+   | Ok (Some _) -> fail "a missing tree produced a file preparation"
+   | Ok None | Error _ -> ());
+  check bool "Read preparation creates no sandbox bundle" false (Sys.file_exists absent_root);
+  let path = Filename.concat root "read-window/file" in
+  write path "one\ntwo\nthree\n";
+  let input = `Assoc ["path", `String path; "offset", `Int 2; "limit", `Int 1] in
+  let prepared = match FS.prepare_read ~sw ~config ~meta ~args:input with
+    | Ok (Some value) -> value
+    | Ok None -> fail "owned regular Read was not prepared"
+    | Error detail -> fail detail in
+  let consume meta args = FS.handle_prepared_read_file_with_outcome
+      ~prepared_read:prepared ~config ~meta ~args in
+  let changed = {meta with name = "another-owner"} in
+  consume changed input |> failed;
+  consume meta (`Assoc ["path", `String path]) |> failed;
+  let result = consume meta input in
+  completed result;
+  check string "line-based Read contract survives preparation" "two\n"
+    Yojson.Safe.Util.(Yojson.Safe.from_string result.raw_output |> member "content" |> to_string);
+  let other = Filename.concat root "read-window/other" in
+  write other "unclaimed bytes";
+  Unix.unlink path;
+  Unix.symlink "other" path;
+  consume meta input |> failed;
+  Unix.unlink path;
+  write path "one\ntwo\nthree\n";
+  FS.release_prepared_read prepared;
+  consume meta input |> failed
+;;
+
+let test_mixed_missing_or_nonregular_read_keeps_ordinary_admission () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~read_path_param:"read_path" sw config in
+  public_bundle ~snapshot ~with_read:true env sw config meta recovery
+  @@ fun _meta _task _cell _causal bundle ->
+  let edit_path = Filename.concat root "read-fallback/edit" in
+  let valid_path = Filename.concat root "read-fallback/valid" in
+  let missing_path = Filename.concat root "read-fallback/missing" in
+  let directory = Filename.concat root "read-fallback/directory" in
+  write edit_path "before"; write valid_path "readable"; Fs_compat.mkdir_p directory;
+  List.iter (fun (read_path, scoped) ->
+    let input = match public_args edit_path "before" "after" with
+      | `Assoc fields -> `Assoc (fields @ ["read_path", `String read_path])
+      | _ -> fail "patch arguments are not an object" in
+    let name = match inline_calls bundle [input] with
+      | [Agent_core.Types.ToolUse call] -> call.name
+      | _ -> fail "one Skill did not produce one call" in
+    let tool = List.find (fun tool -> String.equal tool.Agent_core.Tool.schema.name name) bundle.tools in
+    check bool "the actual mixed producer opts into resource preparation" true
+      (Agent_core.Tool.has_scoped_admission tool);
+    let ordinary_calls = ref 0 in
+    (* Observe fallback selection without starting its sandbox process. Actual
+       file preparation and all partial-capability cleanup remain real. *)
+    let tool = Agent_core.Tool.map_handler (fun _handler _env _input ->
+        incr ordinary_calls;
+        Ok {Agent_core.Types.content = "ordinary fallback"; content_blocks = None; _meta = None}) tool in
+    Eio.Switch.run (fun preparation_sw ->
+      let prepared = Agent_core.Tool.prepare_call ~sw:preparation_sw tool ~input in
+      check bool "only existing regular resources transfer scoped admission" scoped
+        (Option.is_some (Agent_core.Tool.prepared_call_scopes prepared));
+      if not scoped then begin
+        (match Agent_core.Tool.execute_prepared prepared with
+         | Ok _ -> ()
+         | Error error -> fail error.message);
+        check int "unsupported Read selects the ordinary handler" 1 !ordinary_calls
+      end);
+    check string "preparation/fallback selection has not executed the Edit" "before" (read edit_path))
+    [valid_path, true; missing_path, false; directory, false]
+;;
+
+let test_prepared_read_skips_a_long_line_and_stops_at_eof () =
+  fixture @@ fun _env sw config meta _recovery root ->
+  let path = Filename.concat root "read-window/long-line" in
+  write path (String.make (Tool_shard_limits.read_file_max_max_bytes + 1) 'x' ^ "\nwanted\n");
+  List.iter (fun (offset, expected) ->
+    let input = `Assoc ["path", `String path; "offset", `Int offset; "limit", `Int 1] in
+    let prepared = match FS.prepare_read ~sw ~config ~meta ~args:input with
+      | Ok (Some value) -> value
+      | Ok None -> fail "long-line regular Read was not prepared"
+      | Error detail -> fail detail in
+    let result = FS.handle_prepared_read_file_with_outcome ~prepared_read:prepared ~config ~meta ~args:input in
+    completed result;
+    check string "line skipping streams past the buffer bound and terminates at EOF" expected
+      Yojson.Safe.Util.(Yojson.Safe.from_string result.raw_output |> member "content" |> to_string);
+    FS.release_prepared_read prepared)
+    [2, "wanted\n"; max_int, ""]
+;;
+
+let () = run "prepared actual file resources"
   ["actual filesystem and SDK", [
     test_case "disjoint actual Edits overlap" `Quick test_disjoint_actual_edits_overlap;
     test_case "conflicting patches read current predecessor bytes" `Quick test_successive_patches_use_current_source;
@@ -806,4 +963,17 @@ let () = run "prepared actual Edit resources"
       test_case "public and published Inline producers share conflict order" `Quick
         test_public_and_published_inline_share_conflict_order;
       test_case "outer claims include a conflict on the later leaf" `Quick
-        test_published_inline_claims_include_later_leaves]]
+        test_published_inline_claims_include_later_leaves];
+    "mixed Read and Edit", [
+      test_case "missing and nonregular Read cleanly retain ordinary admission" `Quick
+        test_mixed_missing_or_nonregular_read_keeps_ordinary_admission;
+      test_case "prepared Read streams a long line and terminates large offsets at EOF" `Quick
+        test_prepared_read_skips_a_long_line_and_stops_at_eof;
+      test_case "mixed Skills share real reads while disjoint writes overlap" `Quick
+        test_mixed_skills_share_read_claims_while_writes_overlap;
+      test_case "Read observes the preceding regular-file Edit" `Quick
+        (fun () -> test_mixed_read_observes_preceding_edit ~symlink:false ());
+      test_case "Read observes an Edit that replaces its symlink entry" `Quick
+        (fun () -> test_mixed_read_observes_preceding_edit ~symlink:true ());
+      test_case "prepared Read retains owner input release and line-window semantics" `Quick
+        test_prepared_read_rejects_changed_authority_and_keeps_line_window]]

@@ -1,10 +1,14 @@
-(** Producer-owned resource binding for an exact instantiated Edit-only plan.
+(** Producer-owned resource binding for an exact instantiated Read/Edit plan.
     These entry claims authorize neither effects nor replay. *)
 type t
+type operation =
+  | Read of Keeper_tool_filesystem_runtime.prepared_read
+  | Edit of Keeper_tool_filesystem_runtime.prepared_edit
 
 val eligible : Keeper_tool_plan.t -> bool
-(** Every leaf must be a canonical ordinary Edit. Compiled children, other
-    effects, readonly mixtures and terminal leaves retain ordinary admission. *)
+(** At least one leaf is Edit; every leaf is a canonical ordinary Read or Edit.
+    Read-only plans, compiled children, other effects and terminal leaves
+    retain ordinary admission. *)
 
 val prepare
   : sw:Eio.Switch.t
@@ -38,7 +42,7 @@ val for_node
   -> node:Keeper_tool_plan.node
   -> input:Yojson.Safe.t
   -> t
-  -> (Keeper_tool_filesystem_runtime.prepared_edit, string) result
+  -> (operation, string) result
 (** The exact immutable plan, member node and model input must match. A
     mismatch is a pre-effect rejection, never an unprepared fallback under
-    the old claims. The ordinary Edit consumer rechecks owner and confinement. *)
+    the old claims. Each file consumer rechecks owner and confinement. *)

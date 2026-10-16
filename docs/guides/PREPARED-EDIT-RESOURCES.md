@@ -1,16 +1,17 @@
-# Existing-file Edit resources
+# Existing-file Read/Edit resources
 
 `Keeper_tool_filesystem_runtime.prepare_edit` resolves already-translated local
 Patch arguments and pins existing target/source parent directory capabilities
-on the caller's switch. Preparation neither reads source bytes nor writes,
+on a preparation-owned child switch. Preparation neither reads source bytes nor writes,
 authorizes an effect or supplies safe replay evidence. Missing resources,
 endpoint-owned trees and other modes stay on their ordinary Serial path.
 
 The opaque result carries exact input and original workspace, Keeper, Task and
-trace identity. Its conservative directory claims use physical device/inode
-identities and complete ancestry, including ancestors above an allowed root.
-Sibling directories can be independent; equal or nested directories, aliases
-and overlapping source/target parents conflict. A resource claim cannot be
+trace identity. Entry claims bind the physical parent and lexical leaf;
+additional object claims retain device/inode alias ordering. Each claim keeps
+complete physical directory ancestry, including ancestors above an allowed
+root. A shared parent alone permits distinct entries. Overlapping claims
+conflict when either is a write; overlapping reads can run together. A resource claim cannot be
 supplied by a Skill document or provider JSON.
 
 Pass the opaque result explicitly as `prepared_edit` to the existing write
@@ -46,7 +47,8 @@ physical Task/trace/execution receipts, conflicting public patches and missing
 source admission. Execution evidence must name the tested head and scenario;
 authored source and parse-only checks do not prove execution.
 
-Named Inline Skills aggregate these claims when every leaf is an ordinary Edit,
+Named Inline Skills aggregate these claims when every leaf is an ordinary Read
+or Edit and at least one leaf is Edit,
 every input is resolved before execution and the original source is available.
 The opaque preparation owns the exact instantiated plan, each original member
 node, its validated model input and its file preparation. It crosses the normal
@@ -65,8 +67,11 @@ its result to the original invocation and turn aggregates.
 
 The producer releases earlier file preparations if it cannot transfer the
 complete aggregate, including on cancellation. Released file preparations
-cannot execute; their owning switch remains responsible for final cleanup.
-Output-dependent paths, mixed plans, compiled children, Async and Terminal keep
+cannot execute. Release ends the child switch and waits for its directory
+cleanup; the caller's switch also owns that lifecycle when a preparation is
+never executed. Directory release uses switch cleanup on every platform,
+including macOS where directory capabilities do not expose a direct close operation.
+Output-dependent paths, other effect mixtures, compiled children, Async and Terminal keep
 their ordinary admission. Published-snapshot fixture scenarios cover two Inline
 Skills' actual effects, overlap and conflict waves, physical leaf/run receipts,
 activation ownership, a conflict with direct public Edit, and a later leaf's
@@ -74,6 +79,35 @@ shared footprint. Single-Skill scenarios additionally cover inner overlap,
 physical alias order, explicit dependencies, failed conflict predecessors with
 a successful disjoint sibling, and cancellation followed by a fresh invocation.
 These require their own executed-head evidence.
+
+`prepare_read` binds existing regular files in the Keeper's own shared-mount
+tree without reading content or initializing its sandbox bundle. Extra read
+roots and endpoint-owned trees keep their ordinary backend and admission.
+Prepared Reads carry only read claims and execute through the pinned owned
+directory capabilities; they never fall back to a process or endpoint after
+accepting that preparation. Current owner, exact input, selected backend,
+confinement, parents and physical ancestry are revalidated before opening.
+Line offsets, line limits, byte bounds and continuation fields use the same
+Read projection. The returned `via` is `owned_capability`.
+
+The shared implementation is `Keeper_prepared_file`; exact Inline plans bind
+typed Read/Edit leaves through `Keeper_prepared_inline_files`. The opaque
+operation token travels through Executor, Handler and runtime dispatch. Reads
+open at execution, so the same entry's preceding atomic Edit is visible. An
+Edit that replaces a symlink can be followed by a Read of that exact claimed
+entry through its original pinned parent; a redirect to another new source is
+refused. Read-only plans retain their ordinary admission. Gate and publication
+recovery remain on the Edit consumer.
+
+Mixed feature scenarios in `test_keeper_prepared_edit` cover two published
+Skills sharing a real Read while their independent write boundaries overlap,
+a Read after a same-file Edit, a Read after symlink-entry replacement, and
+prepared Read owner/input/release and line-window behavior. These scenarios
+also cover missing and nonregular Read resources retaining ordinary admission,
+and streaming past a line larger than the Read byte bound or reaching EOF
+before a large offset. These scenarios are authored source until executed for
+the reported head. The fallback scenario observes ordinary handler selection
+without launching its sandbox process; file preparation and cleanup remain real.
 
 No general Bash,
 endpoint write, Async admission, cross-process exclusion or measured model

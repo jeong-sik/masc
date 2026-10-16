@@ -22,6 +22,7 @@ let make_keeper_tool_handler_with_authority
       ~(keeper_turn_id : unit -> int option)
       ?source_context
       ?owned_job_replay
+      ?prepared_read
       ?prepared_edit
       ?turn_sandbox_factory
       ?clock
@@ -41,6 +42,12 @@ let make_keeper_tool_handler_with_authority
     -> Yojson.Safe.t
     -> Tool_result.result
   =
+  (match prepared_read, prepared_edit, descriptor with
+   | None, _, _ -> ()
+   | Some _, None, Some descriptor
+     when descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file -> ()
+   | Some _, (Some _ | None), _ ->
+     invalid_arg "prepared Read requires its canonical Read descriptor and no Edit resource");
   (match prepared_edit, descriptor with
    | None, _ -> ()
    | Some _, Some descriptor
@@ -263,6 +270,7 @@ let make_keeper_tool_handler_with_authority
                 ~keeper_turn_id:call_keeper_turn_id
                 ?source_context:call_source_context
                 ?owned_job_replay
+                ?prepared_read
                 ?prepared_edit
                 ?turn_sandbox_factory
                 ?sw

@@ -2384,7 +2384,7 @@ let make_tools_with_authority
        [defer_loading] in its Skill block, and nothing downstream should have
        to find that block again by the generated tool name. *)
     let model_projection = Tool_output.default_model_projection in
-    let make_tool ?prepared_edits () = Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    let make_tool ?prepared_files () = Tool_bridge.agent_core_tool_of_masc_with_execution_env
       ~descriptor
       ~base_path:config.base_path
       ~model_projection:(fun () -> model_projection)
@@ -2411,7 +2411,7 @@ let make_tools_with_authority
                "composition execution requires Agent-Core invocation identity"
            | Some parent_invocation ->
              let gate_context, record_gate_result =
-               if (concurrent || Option.is_some prepared_edits) && entry.execution = Catalog.Inline
+               if (concurrent || Option.is_some prepared_files) && entry.execution = Catalog.Inline
                then
                  match gate_causal_context with
                  | Some parent ->
@@ -2428,8 +2428,8 @@ let make_tools_with_authority
                else gate_context, record_gate_result
              in
              let turn_context =
-               match prepared_edits with
-               | Some prepared -> Some (Keeper_prepared_inline_edit.source prepared)
+               match prepared_files with
+               | Some prepared -> Some (Keeper_prepared_inline_files.source prepared)
                | None -> Option.map
                  (fun cell ->
                     Keeper_tool_call_log_context.get_turn_context_record
@@ -2476,8 +2476,8 @@ let make_tools_with_authority
                      ~ctx_snapshot ~turn_context ?clock ())
               | Catalog.Inline ->
                 (match
-                   (match prepared_edits with
-                    | Some prepared -> Ok (Keeper_prepared_inline_edit.plan prepared)
+                   (match prepared_files with
+                    | Some prepared -> Ok (Keeper_prepared_inline_files.plan prepared)
                     | None -> Catalog.instantiate ~descriptors ~args:input entry)
                  with
                  | Error error ->
@@ -2542,7 +2542,7 @@ let make_tools_with_authority
                  ~ctx_snapshot
                  ~keeper_turn_id:(keeper_turn_id_of turn_context)
                  ?source_context:turn_context
-                 ?prepared_edits
+                 ?prepared_files
                  ?turn_sandbox_factory
                  ?clock
                  ?continuation_channel
@@ -2715,7 +2715,7 @@ let make_tools_with_authority
       match capability_authority, entry.execution, completion with
       | Keeper_tool_runtime.Frozen_surface _, Catalog.Inline,
         Agent_core.Tool_contract.Continue_after_success ->
-        causal_context_isolatable && Keeper_prepared_inline_edit.eligible entry.plan
+        causal_context_isolatable && Keeper_prepared_inline_files.eligible entry.plan
       | Keeper_tool_runtime.Compatibility_meta, _, _
       | _, Catalog.Async, _
       | _, _, Agent_core.Tool_contract.Terminal_after_success _ -> false
@@ -2727,13 +2727,13 @@ let make_tools_with_authority
         match Catalog.instantiate ~descriptors ~args:input entry with
         | Error _ -> Ok None
         | Ok plan ->
-          match Keeper_prepared_inline_edit.prepare ~sw ~config ~meta ~source plan with
+          match Keeper_prepared_inline_files.prepare ~sw ~config ~meta ~source plan with
           | None -> Ok None
-          | Some prepared_edits ->
-            match Keeper_prepared_inline_edit.scopes prepared_edits with
-            | [] -> invalid_arg "prepared Inline Edit plan has no file footprint"
+          | Some prepared_files ->
+            match Keeper_prepared_inline_files.scopes prepared_files with
+            | [] -> invalid_arg "prepared Inline file plan has no file footprint"
             | scope :: additional_scopes ->
-              let prepared = make_tool ~prepared_edits () in
+              let prepared = make_tool ~prepared_files () in
               Ok (Some (Agent_core.Tool.scoped_call ~scope ~additional_scopes prepared.handler))
       in
       Agent_core.Tool.of_schema

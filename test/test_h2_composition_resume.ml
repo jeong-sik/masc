@@ -236,6 +236,8 @@ let measure_attempt ~crash_spec =
            log "CAUSE Plan_execution_failed %s" error_name
          | Executor.Node_observation_failed { node; detail } ->
            log "CAUSE Node_observation_failed %s %s" (Plan.Node_id.to_string node.Executor.node_id) detail
+         | Executor.Run_journal_rejected error ->
+           log "CAUSE Run_journal_rejected %s" (Masc.Keeper_tool_execution_journal.error_to_string error)
          | Executor.Outer_completion_mismatch _ -> log "CAUSE Outer_completion_mismatch");
         `Failed)
 ;;

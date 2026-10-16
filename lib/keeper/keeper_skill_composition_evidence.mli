@@ -8,6 +8,15 @@
 
 type t
 
+module Node_execution_origin : sig
+  (** Execution provenance shared by the executor and strict evidence codec.
+      It is independent of the node's execution disposition. *)
+  type t = Fresh_dispatch | Retained_completion | Dispatch_refused
+
+  val to_string : t -> string
+  val of_string : string -> (t, string) result
+end
+
 type error =
   | Invalid_record of string
   | Read_failed of Fs_compat.owned_regular_file_read_error
@@ -30,6 +39,9 @@ val make :
   result:Tool_result.result ->
   executor_settlements:Yojson.Safe.t list ->
   (t, error) result
+(** Every settlement requires a canonical [execution_origin] alongside the
+    exact node identity, schedule and Tool_result projection. Missing,
+    duplicated and unknown origin values are refused by both make and load. *)
 
 val save_latest : Workspace.config -> t -> (save_outcome, error) result
 val load_latest : Workspace.config -> Skill_reference.t -> (t option, error) result

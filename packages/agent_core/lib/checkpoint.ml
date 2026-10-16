@@ -94,6 +94,22 @@ let to_json_result = Checkpoint_codec.to_json_result
 let drop_unencodable_json = Checkpoint_codec.drop_unencodable_json
 let of_json = Checkpoint_codec.of_json
 let to_string = Checkpoint_codec.to_string
+
+let content_block_to_json_result ~scope block =
+  let ( let* ) = Result.bind in
+  let* json = Checkpoint_codec.checkpoint_content_block_to_json_result ~scope block in
+  let* () = Checkpoint_codec.validate_checkpoint_json ~context:scope json in
+  let* _ = Checkpoint_v11_contract.validate_content_block
+      ~scope:(Checkpoint_v11_contract.Root scope) json in
+  Ok json
+
+let content_block_of_json json =
+  let ( let* ) = Result.bind in
+  let* () = Checkpoint_codec.validate_checkpoint_json ~context:"Checkpoint content block" json in
+  let* _ = Checkpoint_v11_contract.validate_content_block
+      ~scope:(Checkpoint_v11_contract.Root "Checkpoint content block") json in
+  Checkpoint_codec.content_block_of_json_strict json
+
 let message_to_json = Checkpoint_codec.message_to_json
 
 let message_of_json json =

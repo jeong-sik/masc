@@ -20,10 +20,14 @@ let make_reference name revision =
        |> Result.get_ok)
 ;;
 
-let node ~node_id ~(schedule : Agent_core.Tool_contract.schedule) () =
+let node ~node_id
+      ?(execution_origin = Keeper_skill_composition_evidence.Node_execution_origin.Fresh_dispatch)
+      ~(schedule : Agent_core.Tool_contract.schedule) () =
   `Assoc
     [ "node_id", `String node_id
     ; "execution_id", Ids.Execution_id.(generate () |> to_yojson)
+    ; ( "execution_origin"
+      , `String (Keeper_skill_composition_evidence.Node_execution_origin.to_string execution_origin) )
     ; "tool_name", `String "keeper_lane_status"
     ; "input", `Assoc []
     ; ( "schedule"
@@ -110,6 +114,7 @@ let settlements_fixture () =
         ; execution_mode = Agent_core.Tool_contract.Serial }
       ()
   ; node ~node_id:"second"
+      ~execution_origin:Keeper_skill_composition_evidence.Node_execution_origin.Retained_completion
       ~schedule:
         { planned_index = 1; batch_index = 1; batch_size = 1
         ; execution_mode = Agent_core.Tool_contract.Serial }
@@ -320,17 +325,21 @@ let test_canonical_failed_results () =
         ~class_:Tool_result.Workflow_rejection ~effect_disposition:phase
         "Missing host permission for the tab" in
       let node_result = Tool_result.to_json (failure "masc_browser_read") in
-      let settled = node ~node_id:"read" ~schedule:{planned_index=1;batch_index=1;
+      let execution_origin = match phase with
+        | Tool_result.Proven_pre_effect -> E.Node_execution_origin.Dispatch_refused
+        | Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown -> E.Node_execution_origin.Fresh_dispatch in
+      let settled = node ~node_id:"read" ~execution_origin ~schedule:{planned_index=1;batch_index=1;
         batch_size=1;execution_mode=Agent_core.Tool_contract.Serial} ()
         |> replace "tool_name" (`String "BrowserRead")
         |> replace "result" node_result in
       let result = failure "keeper_compose_failed-read" in
-      let evidence = E.make ~reference
+      let make settlements = E.make ~reference
         ~composition_run_id:(Keeper_tool_plan.Composition_run_id.fresh ())
         ~parent_invocation:(parent_invocation ()) ~request_id:None ~keeper_name:"delta"
         ~composition_tool:"keeper_compose_failed-read"
         ~composition_execution:Keeper_tool_composition_catalog.Inline
-        ~result ~executor_settlements:[settled] |> Result.get_ok in
+        ~result ~executor_settlements:settlements in
+      let evidence = make [settled] |> Result.get_ok in
       E.save_latest config evidence |> Result.get_ok |> ignore;
       let loaded = E.load_latest config reference |> Result.get_ok |> Option.get |> E.to_yojson in
       let open Yojson.Safe.Util in
@@ -338,6 +347,18 @@ let test_canonical_failed_results () =
         (member "result" loaded = Tool_result.to_json result);
       Alcotest.(check bool) "failed node result round-trips exactly" true
         (member "executor_settlements" loaded |> to_list = [settled]);
+      let fields = to_assoc settled in
+      List.iter (fun malformed ->
+        Alcotest.(check bool) "malformed origin cannot become writable evidence" true
+          (Result.is_error (make [malformed]));
+        Alcotest.(check bool) "malformed origin cannot become readable evidence" true
+          (Result.is_error (E.of_yojson
+             (replace "executor_settlements" (`List [malformed]) loaded))))
+        [ `Assoc (List.remove_assoc "execution_origin" fields)
+        ; replace "execution_origin" (`String "invented") settled
+        ; replace "execution_origin" (`Int 1) settled
+        ; `Assoc (("execution_origin", `String "fresh_dispatch") :: fields)
+        ];
       let wrong_node = replace "result"
         (Tool_result.to_json (failure "masc_browser_act")) settled in
       Alcotest.(check bool) "unrelated registered tool identity is rejected" true

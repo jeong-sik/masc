@@ -5928,7 +5928,7 @@
 (test
  (name test_h2_journal)
  (modules test_h2_journal)
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc.skill_config masc.skill_reference))
 
 (test
  (name test_h5_media_failover_continuity)

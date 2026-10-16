@@ -13,6 +13,21 @@ type t =
   ; recorded_at : float
   }
 
+module Node_execution_origin = struct
+  type t = Fresh_dispatch | Retained_completion | Dispatch_refused
+
+  let to_string = function
+    | Fresh_dispatch -> "fresh_dispatch"
+    | Retained_completion -> "retained_completion"
+    | Dispatch_refused -> "dispatch_refused"
+
+  let of_string = function
+    | "fresh_dispatch" -> Ok Fresh_dispatch
+    | "retained_completion" -> Ok Retained_completion
+    | "dispatch_refused" -> Ok Dispatch_refused
+    | value -> Error ("unknown node execution origin: " ^ value)
+end
+
 type error =
   | Invalid_record of string
   | Read_failed of Fs_compat.owned_regular_file_read_error
@@ -122,6 +137,7 @@ let valid_node = function
     (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
      | [ "deferred_kind", deferred_kind
        ; "execution_id", execution_id
+       ; "execution_origin", `String execution_origin
        ; "failure_effect_disposition", failure_effect_disposition
        ; "input", _
        ; "node_id", `String node_id
@@ -158,6 +174,7 @@ let valid_node = function
        && valid_deferred_kind
        && valid_truncation
        && Result.is_ok (Ids.Execution_id.of_yojson execution_id)
+       && Result.is_ok (Node_execution_origin.of_string execution_origin)
        && valid_schedule schedule
        && valid_result result
        && (match Json_util.assoc_member_opt "tool_name" result with
@@ -172,7 +189,7 @@ let valid_node = function
 let validate_nodes nodes =
   if List.for_all valid_node nodes
   then Ok nodes
-  else Error (Invalid_record "every node must carry typed identity, schedule, and result")
+  else Error (Invalid_record "every node must carry typed identity, execution origin, schedule, and result")
 ;;
 
 let validate_composition_result ~composition_tool result =

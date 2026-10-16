@@ -221,6 +221,8 @@ let test_failed_sibling_stops_downstream_after_batch_settlement () =
        | Tool_result.Failed { class_ = Tool_result.Workflow_rejection; _ } -> ()
         | Tool_result.Completed _ | Tool_result.Deferred _ | Tool_result.Failed _ ->
           fail "canonical failed disposition changed")
+     | Executor.Run_journal_rejected error ->
+       Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
      | Executor.Plan_execution_failed _
      | Executor.Node_observation_failed _
      | Executor.Outer_completion_mismatch _ ->
@@ -288,6 +290,8 @@ let test_observation_failure_settles_siblings_and_stops_downstream () =
      | Executor.Node_observation_failed { node; detail } ->
        check string "failed observation node" "left" (Plan.Node_id.to_string node.node_id);
        check string "exact observation error" "durable append failed" detail
+     | Executor.Run_journal_rejected error ->
+       Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
      | Executor.Plan_execution_failed _
      | Executor.Tool_did_not_complete _
      | Executor.Outer_completion_mismatch _ ->
@@ -331,6 +335,8 @@ let test_dispatch_exception_preserves_pre_minted_tool_identity () =
          "failure carries the same identity"
          (Option.get !dispatched_id)
          result.tool_use_id
+     | Executor.Run_journal_rejected error ->
+       Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
      | Executor.Plan_execution_failed _
      | Executor.Node_observation_failed _
      | Executor.Outer_completion_mismatch _ ->
@@ -394,6 +400,8 @@ let test_deferred_cause_does_not_mask_unknown_sibling () =
         | Tool_result.Deferred _ -> ()
         | Tool_result.Completed _ | Tool_result.Failed _ ->
           fail "lower-index deferred cause changed")
+     | Executor.Run_journal_rejected error ->
+       Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
      | Executor.Plan_execution_failed _
      | Executor.Node_observation_failed _
      | Executor.Outer_completion_mismatch _ ->
@@ -429,6 +437,8 @@ let test_malformed_declared_output_stops_before_consumer () =
      | Executor.Plan_execution_failed
          { error = Plan.Output_validation_failed { node_id = failed; _ }; _ }
        when Plan.Node_id.equal failed (node_id "producer") -> ()
+     | Executor.Run_journal_rejected error ->
+       Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
      | Executor.Plan_execution_failed _
      | Executor.Tool_did_not_complete _
      | Executor.Node_observation_failed _
@@ -586,6 +596,8 @@ let expect_rejected_before_any_node ~label ~node failure =
       }
     when Plan.Node_id.equal failed (node_id node)
          && Plan.Node_id.equal rejected (node_id node) -> rejection.Validation.violation
+  | Executor.Run_journal_rejected error ->
+    Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
   | Executor.Plan_execution_failed _
   | Executor.Tool_did_not_complete _
   | Executor.Node_observation_failed _
@@ -779,6 +791,8 @@ let test_output_value_outside_enum_is_refused_when_its_node_runs () =
          ; _
          }
        when Plan.Node_id.equal rejected (node_id "search") -> ()
+     | Executor.Run_journal_rejected error ->
+       Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
      | Executor.Plan_execution_failed _
      | Executor.Tool_did_not_complete _
      | Executor.Node_observation_failed _
@@ -939,6 +953,8 @@ let test_continue_independent_preserves_unrelated_branch () =
     (match failure.cause with
      | Executor.Tool_did_not_complete result ->
        check string "lowest planned cause" "b" (Plan.Node_id.to_string result.node_id)
+     | Executor.Run_journal_rejected error ->
+       Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
      | Executor.Plan_execution_failed _
      | Executor.Node_observation_failed _
      | Executor.Outer_completion_mismatch _ ->
@@ -1027,6 +1043,8 @@ let test_serial_failure_stops_successor_fail_fast () =
     (match failure.cause with
      | Executor.Tool_did_not_complete result ->
        check string "failed serial node carries the cause" "s1" (Plan.Node_id.to_string result.node_id)
+     | Executor.Run_journal_rejected error ->
+       Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
      | Executor.Plan_execution_failed _
      | Executor.Node_observation_failed _
      | Executor.Outer_completion_mismatch _ ->
@@ -1073,6 +1091,8 @@ let test_serial_failure_stops_successor_continue_independent () =
     (match failure.cause with
      | Executor.Tool_did_not_complete result ->
        check string "failed serial node carries the cause" "s1" (Plan.Node_id.to_string result.node_id)
+     | Executor.Run_journal_rejected error ->
+       Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
      | Executor.Plan_execution_failed _
      | Executor.Node_observation_failed _
      | Executor.Outer_completion_mismatch _ ->

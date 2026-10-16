@@ -304,6 +304,8 @@ let test_prior_art_refuses_an_over_long_query_before_any_search () =
            ; _
            } ->
          check string "the board search owns the bound" "board" (Plan.Node_id.to_string node_id)
+       | Executor.Run_journal_rejected error ->
+         Alcotest.fail (Masc.Keeper_tool_execution_journal.error_to_string error)
        | Executor.Plan_execution_failed _
        | Executor.Tool_did_not_complete _
        | Executor.Node_observation_failed _

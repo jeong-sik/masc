@@ -17,6 +17,7 @@ type node_deferral =
   | External_effect_deferral
 
 type composition_cause =
+  | Run_journal_rejected of { detail : string }
   | Node_failed of failed_node
   | Node_deferred of
       { node_id : string
@@ -126,6 +127,10 @@ let recovery_rejection_of_string = function
 let one_line text = String.map (function '\n' | '\r' -> ' ' | c -> c) text
 
 let summary = function
+  | Composition_failed
+      { composition_tool; cause = Run_journal_rejected { detail }; payload = _ } ->
+    Printf.sprintf "%s: original run journal refused continuation: %s"
+      composition_tool (one_line detail)
   | Tool_failed { internal_tool_name; message } ->
     Printf.sprintf "%s failed: %s" internal_tool_name (one_line message)
   | Composition_failed
@@ -204,6 +209,8 @@ let summary = function
 ;;
 
 let composition_cause_to_yojson = function
+  | Run_journal_rejected { detail } ->
+    `Assoc [ "kind", `String "run_journal_rejected"; "detail", `String detail ]
   | Node_failed { node_id; model_tool_name; message } ->
     `Assoc
       [ "kind", `String "node_failed"
@@ -356,6 +363,10 @@ let composition_cause_of_yojson json =
     object_with_fields ~context ~expected:("kind" :: expected) json
   in
   match kind with
+  | "run_journal_rejected" ->
+    let* fields = with_fields [ "detail" ] in
+    let* detail = string_field ~context fields "detail" in
+    Ok (Run_journal_rejected { detail })
   | "node_failed" ->
     let* fields = with_fields [ "node_id"; "model_tool_name"; "message" ] in
     let* node_id = string_field ~context fields "node_id" in

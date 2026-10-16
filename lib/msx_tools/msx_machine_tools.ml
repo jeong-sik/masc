@@ -307,7 +307,9 @@ let handle_eject ~relay ~tool_name ~start_time ~agent_name _args =
 (* RAM introspection handlers. Read-only, so no board relay and no agent
    identity: anyone may look, nobody may write (RFC-0439's cheat line).
    Addresses arrive as hex strings ("e000", "0xE000") because that is how
-   memory is talked about; digits alone are hex too ({!Msx_lane.Address}). *)
+   memory is talked about; digits alone are hex too ({!Msx_lane.Address}).
+   They leave in the same notation, four hex digits, so an address read from
+   a result goes back into peek unchanged. *)
 let handle_peek ~tool_name ~start_time args =
   match Msx_lane.Address.parse (get_string args "address" "") with
   | Error message -> reject ~tool_name ~start_time message
@@ -317,7 +319,7 @@ let handle_peek ~tool_name ~start_time args =
        Tool_result.make_ok ~tool_name ~start_time
          ~data:
            (`Assoc
-             [ ("address", `Int (Msx_lane.Address.to_int address)); ("hex", `String hex) ])
+             [ ("address", `String (Msx_lane.Address.to_hex address)); ("hex", `String hex) ])
          ()
      | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e))
 ;;
@@ -332,7 +334,7 @@ let handle_ram_diff ~tool_name ~start_time () =
               (List.map
                  (fun (c : Msx_lane.ram_change) ->
                    `Assoc
-                     [ ("address", `Int c.address)
+                     [ ("address", `String (Msx_lane.Address.to_hex c.address))
                      ; ("length", `Int c.length)
                      ; ("from", `String c.from_hex)
                      ; ("to", `String c.to_hex)

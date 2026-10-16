@@ -327,8 +327,26 @@ val step_frame : frames:int -> (frame * entry list * change_mark, error) result
     detour a human eye needs; the game's truth is in memory, and the core
     already holds all of it. *)
 
+(** A logical address: 0x0000-0xFFFF and nothing else. *)
+module Address : sig
+  type t
+
+  val to_int : t -> int
+
+  val to_hex : t -> string
+  (** Four lowercase hex digits (["e000"], ["0000"]): the spelling a keeper
+      writes into [masc_msx_peek], so an address read from {!peek} or
+      {!ram_diff} output can be handed back unchanged. *)
+
+  val parse : string -> (t, string) result
+  (** Hex digits with an optional ["0x"] prefix ([e000], [0xE000]); digits
+      alone are hex too, so [4096] is 0x4096. Case and surrounding blanks are
+      ignored. A character that is not a hex digit, an empty digit string, or
+      a value above 0xFFFF is [Error] naming the input. *)
+end
+
 type ram_change = {
-  address : int;  (** logical address of the first changed byte *)
+  address : Address.t;  (** logical address of the first changed byte *)
   length : int;  (** consecutive changed bytes *)
   from_hex : string;  (** snapshot bytes, hex pairs *)
   to_hex : string;  (** current bytes, hex pairs *)
@@ -342,25 +360,6 @@ type ram_diff = {
 
 val peek_max_bytes : int
 val ram_diff_max_runs : int
-
-(** A logical address: 0x0000-0xFFFF and nothing else. *)
-module Address : sig
-  type t
-
-  val max_value : int
-  (** 0xFFFF *)
-
-  val of_int : int -> t option
-  (** [None] outside 0..{!max_value}. *)
-
-  val to_int : t -> int
-
-  val parse : string -> (t, string) result
-  (** Hex digits with an optional ["0x"] prefix ([e000], [0xE000]); digits
-      alone are hex too, so [4096] is 0x4096. Case and surrounding blanks are
-      ignored. A character that is not a hex digit, an empty digit string, or
-      a value above {!max_value} is [Error] naming the input. *)
-end
 
 val peek : address:Address.t -> length:int -> (string, error) result
 (** Reads [length] (1..{!peek_max_bytes}) bytes starting at [address] as hex

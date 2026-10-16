@@ -112,8 +112,8 @@ let test_stdio_machine_lifecycle () =
               check int "the worker still answers after the refusal" before
                 (frame (call "masc_msx_screen" (`Assoc [])));
               let digits = call "masc_msx_peek" (`Assoc ["address", `String "4096"; "length", `Int 4]) in
-              check int "bare digits are a hex address" 0x4096
-                Yojson.Safe.Util.(data digits |> member "address" |> to_int);
+              check string "bare digits are a hex address, answered as four hex digits" "4096"
+                Yojson.Safe.Util.(data digits |> member "address" |> to_string);
               check bool "loaded observation retains screen pixels in its artifact" true
                 (Yojson.Safe.Util.(live_observation (observe ()) |> member "screen" |> member "rgb_base64" |> to_string |> String.length) > 0);
               let invalid = call "masc_msx_step" (`Assoc ["frames", `Int 301]) in

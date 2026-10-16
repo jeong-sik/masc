@@ -810,17 +810,6 @@ let peek_max_bytes = 256
 let ram_diff_max_runs = 64
 let address_space = 0x10000
 
-(* 스냅샷은 머신이 아니라 레인이 든다: peek을 부른 시점의 세계 그 자체가
-   기준이고, 머신 교체(load/restore) 후의 diff도 "달라졌다"로 옳다. *)
-let last_peek : Bytes.t option ref = ref None
-
-type ram_change = { address : int; length : int; from_hex : string; to_hex : string }
-
-let hex_pairs bytes lo hi =
-  String.concat ""
-    (List.init (hi - lo) (fun i -> Printf.sprintf "%02x" (Char.code (Bytes.get bytes (lo + i)))))
-;;
-
 (* A logical address is 16 bits. The type holds only values in that range, so
    [address + length] cannot wrap and the 64K snapshot cannot be indexed out
    of bounds. *)
@@ -828,8 +817,10 @@ module Address = struct
   type t = int
 
   let max_value = address_space - 1
-  let of_int n = if n >= 0 && n <= max_value then Some n else None
   let to_int address = address
+
+  (* Four lowercase hex digits, the spelling [parse] reads back. *)
+  let to_hex address = Printf.sprintf "%04x" address
 
   let hex_digit_value = function
     | '0' .. '9' as c -> Some (Char.code c - Char.code '0')
@@ -867,6 +858,17 @@ module Address = struct
     if digits = "" then not_hex () else accumulate 0 0
   ;;
 end
+
+(* 스냅샷은 머신이 아니라 레인이 든다: peek을 부른 시점의 세계 그 자체가
+   기준이고, 머신 교체(load/restore) 후의 diff도 "달라졌다"로 옳다. *)
+let last_peek : Bytes.t option ref = ref None
+
+type ram_change = { address : Address.t; length : int; from_hex : string; to_hex : string }
+
+let hex_pairs bytes lo hi =
+  String.concat ""
+    (List.init (hi - lo) (fun i -> Printf.sprintf "%02x" (Char.code (Bytes.get bytes (lo + i)))))
+;;
 
 let peek ~address ~length =
   let address = Address.to_int address in

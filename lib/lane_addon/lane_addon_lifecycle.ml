@@ -102,7 +102,8 @@ let failure_to_string = function
   | Worker_failed detail -> detail
   | Cleanup_unconfirmed detail -> "cleanup incomplete: " ^ detail
   | Persistence_failed detail -> detail
-  | Previous_process -> "previous process; explicit detach can verify container cleanup"
+  | Previous_process ->
+      "left unfinished by an earlier server process; its container is checked and removed on the next configuration pass"
   | Effect_outcome_unknown detail -> detail
 
 let failure_detail = function

@@ -51,7 +51,11 @@ type failure =
   | Cleanup_unconfirmed of string
   | Persistence_failed of string
   | Previous_process
-      (** A non-terminal record left by an earlier server process. *)
+      (** A non-terminal record left by an earlier server process. The
+          configuration pass cleans it through its recorded engine whether or
+          not a declaration still names it, and a declaration waits for that
+          cleanup before it attaches again. An explicit Detach does the same on
+          request and then removes the declaration; nothing waits for it. *)
   | Effect_outcome_unknown of string
 
 (** [cause] is the failure the runtime acts on now. [first] is the failure that

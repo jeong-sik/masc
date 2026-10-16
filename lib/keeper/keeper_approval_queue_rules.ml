@@ -193,6 +193,13 @@ let list_rules_dashboard_json ~base_path () =
     (list_rules ~base_path ())
 ;;
 
+type rule_upsert_disposition =
+  | Created
+  | Existing
+  | Renewed of { previous_expires_at : float option }
+
+(* The expiry option is required: [None] deliberately requests a permanent
+   rule, and [Some] is applied exactly, including an earlier or past expiry. *)
 let upsert_rule
       ~base_path
       ~keeper_name
@@ -200,7 +207,7 @@ let upsert_rule
       ~input
       ?created_by
       ?source_approval_id
-      ?expires_at
+      ~expires_at
       ()
   =
   with_rules_write_lock (fun () ->
@@ -221,11 +228,9 @@ let upsert_rule
         ; expires_at
         }
       in
-      (match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
-       | Some existing -> Ok (existing, false)
-       | None ->
-         (match save_rules_unlocked ~base_path (candidate :: rules) with
-          | Ok () -> Ok (candidate, true)
+      let persist rule disposition next_rules =
+         match save_rules_unlocked ~base_path next_rules with
+          | Ok () -> Ok (rule, disposition)
           | Error error ->
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string ApprovalQueueFailures)
@@ -235,7 +240,20 @@ let upsert_rule
                 ]
               ();
             Log.Keeper.warn "upsert_rule: save failed: %s" (rule_store_error_to_string error);
-            Error error)))
+            Error error
+      in
+      match List.find_opt (fun rule -> rule_identity_matches rule candidate) rules with
+      | Some existing when Option.equal Float.equal existing.expires_at expires_at ->
+        Ok (existing, Existing)
+      | Some existing ->
+        let rule = { existing with expires_at } in
+        let next_rules =
+          List.map
+            (fun previous -> if String.equal previous.id existing.id then rule else previous)
+            rules
+        in
+        persist rule (Renewed { previous_expires_at = existing.expires_at }) next_rules
+      | None -> persist candidate Created (candidate :: rules))
 ;;
 
 let delete_rule ~base_path ~id () =

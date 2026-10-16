@@ -127,6 +127,7 @@ type event =
   | Resolved
   | Summary_updated
   | Rule_created
+  | Rule_renewed
   | Rule_deleted
   | Grant_consumed
   | Gate_allowed
@@ -143,6 +144,7 @@ let event_to_string = function
   | Resolved -> "resolved"
   | Summary_updated -> "summary_updated"
   | Rule_created -> "rule_created"
+  | Rule_renewed -> "rule_renewed"
   | Rule_deleted -> "rule_deleted"
   | Grant_consumed -> "grant_consumed"
   | Gate_allowed -> "gate_allowed"
@@ -165,6 +167,7 @@ let event_of_string = function
   | "resolved" -> Some Resolved
   | "summary_updated" -> Some Summary_updated
   | "rule_created" -> Some Rule_created
+  | "rule_renewed" -> Some Rule_renewed
   | "rule_deleted" -> Some Rule_deleted
   | "grant_consumed" -> Some Grant_consumed
   | "gate_allowed" -> Some Gate_allowed
@@ -502,6 +505,32 @@ let record_rule ~base_path ~event_type ?actor (rule : approval_rule) =
 
 let record_rule_created ~base_path (rule : approval_rule) =
   record_rule ~base_path ~event_type:Rule_created ?actor:rule.created_by rule
+;;
+
+let record_rule_renewed
+      ~base_path
+      ?renewed_by
+      ~source_approval_id
+      ~previous_expires_at
+      (rule : approval_rule)
+  =
+  let expiry_json = function
+    | Some expires_at -> `Float expires_at
+    | None -> `Null
+  in
+  record
+    ~base_path
+    ~event_type:Rule_renewed
+    ~id:rule.id
+    ~keeper_name:rule.keeper_name
+    ~tool_name:rule.tool_name
+    ~source_approval_id
+    ?actor:renewed_by
+    ~extra_fields:
+      [ "previous_expires_at", expiry_json previous_expires_at
+      ; "expires_at", expiry_json rule.expires_at
+      ]
+    ()
 ;;
 
 let record_rule_deleted ~base_path ~deleted_by (rule : approval_rule) =

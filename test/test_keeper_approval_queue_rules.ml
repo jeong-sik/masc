@@ -52,6 +52,7 @@ let upsert_exn ~base_path ~input =
       ~keeper_name:"keeper"
       ~tool_name:"external-effect"
       ~input
+      ~expires_at:None
       ()
   with
   | Ok result -> result
@@ -89,7 +90,7 @@ let test_rule_matches_only_complete_exact_request () =
            ]
        in
        let _rule, created = upsert_exn ~base_path ~input in
-       check bool "created" true created;
+       check bool "created" true (created = Rules.Created);
        let reordered =
          `Assoc
            [ "payload", `Assoc [ "nonce", `Int 7; "body", `String "hello" ]
@@ -128,8 +129,8 @@ let test_equivalent_upsert_is_idempotent () =
        let input = `Assoc [ "request", `String "exact" ] in
        let first, first_created = upsert_exn ~base_path ~input in
        let second, second_created = upsert_exn ~base_path ~input in
-       check bool "first created" true first_created;
-       check bool "second reused" false second_created;
+       check bool "first created" true (first_created = Rules.Created);
+       check bool "second reused" true (second_created = Rules.Existing);
        check string "same rule id" first.id second.id)
 ;;
 
@@ -173,7 +174,7 @@ let upsert_with_expiry_exn ~base_path ~input ~expires_at =
       ~keeper_name:"keeper"
       ~tool_name:"external-effect"
       ~input
-      ~expires_at
+      ~expires_at:(Some expires_at)
       ()
   with
   | Ok result -> result
@@ -203,7 +204,7 @@ let test_unexpired_rule_matches_with_injected_now () =
        let rule, created =
          upsert_with_expiry_exn ~base_path ~input ~expires_at:2000.0
        in
-       check bool "created" true created;
+       check bool "created" true (created = Rules.Created);
        check (option (float 0.0)) "expiry persisted on rule" (Some 2000.0)
          rule.expires_at;
        match find_at ~base_path ~input ~now:1999.0 with
@@ -254,6 +255,64 @@ let test_rule_without_expiry_matches_at_any_now () =
          check string "rule without expiry stays active" rule.id matched.rule_id
        | Rule_types.Rule_match_expired _ -> fail "rule without expiry reported as expired"
        | Rule_types.Rule_match_absent -> fail "rule without expiry did not match")
+;;
+
+let test_reapproval_applies_each_requested_expiry_option () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let input = `Assoc [ "request", `String "renewal" ] in
+       let apply ~created_by ~source_approval_id expires_at =
+         match
+           Rules.upsert_rule
+             ~base_path ~keeper_name:"keeper" ~tool_name:"external-effect" ~input
+             ~created_by ~source_approval_id ~expires_at ()
+         with
+         | Ok result -> result
+         | Error error -> fail (Rule_types.rule_store_error_to_string error)
+       in
+       let original, disposition =
+         apply ~created_by:"original-author" ~source_approval_id:"original-approval"
+           (Some 2000.0)
+       in
+       check bool "initial finite rule created" true (disposition = Rules.Created);
+       let previous = ref original.expires_at in
+       List.iter
+         (fun (label, requested, changed) ->
+            let rule, disposition =
+              apply ~created_by:"renewing-operator" ~source_approval_id:"later-approval"
+                requested
+            in
+            (match disposition, changed with
+             | Rules.Existing, false -> ()
+             | Rules.Renewed { previous_expires_at }, true ->
+               check (option (float 0.0)) (label ^ " previous expiry") !previous
+                 previous_expires_at
+             | Rules.Created, _ | Rules.Existing, true | Rules.Renewed _, false ->
+               fail (label ^ " returned the wrong typed disposition"));
+            check string (label ^ " stable rule identity") original.id rule.id;
+            check (float 0.0) (label ^ " original creation time") original.created_at
+              rule.created_at;
+            check (option string) (label ^ " original author") original.created_by
+              rule.created_by;
+            check (option string) (label ^ " original approval") original.source_approval_id
+              rule.source_approval_id;
+            (match Rules.list_rules ~base_path () with
+             | Ok [ stored ] ->
+               check string (label ^ " one persisted identity") original.id stored.id;
+               check (option (float 0.0)) (label ^ " exact persisted expiry") requested
+                 stored.expires_at
+             | Ok _ -> fail (label ^ " duplicated or lost the rule")
+             | Error error -> fail (Rule_types.rule_store_error_to_string error));
+            previous := requested)
+         [ "equal finite", Some 2000.0, false
+         ; "later finite", Some 3000.0, true
+         ; "earlier past finite", Some 1500.0, true
+         ; "finite to permanent", None, true
+         ; "equal permanent", None, false
+         ; "permanent to finite", Some 2500.0, true
+         ])
 ;;
 
 let test_unknown_persisted_shape_is_reported_and_rejected () =
@@ -830,6 +889,10 @@ let () =
             `Quick
             test_rule_matches_only_complete_exact_request
         ; test_case "idempotent upsert" `Quick test_equivalent_upsert_is_idempotent
+        ; test_case
+            "reapproval persists exact finite and permanent options"
+            `Quick
+            test_reapproval_applies_each_requested_expiry_option
         ; test_case
             "Gate consumes exact persisted rule"
             `Quick

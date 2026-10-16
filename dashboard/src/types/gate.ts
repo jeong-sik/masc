@@ -45,6 +45,7 @@ export type KeeperApprovalAuditEvent =
   | 'resolved'
   | 'summary_updated'
   | 'rule_created'
+  | 'rule_renewed'
   | 'rule_deleted'
   | 'grant_consumed'
   | 'gate_allowed'

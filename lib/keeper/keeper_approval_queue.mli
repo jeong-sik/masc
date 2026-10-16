@@ -276,6 +276,9 @@ val resolve_error_to_string : resolve_error -> string
     [Decision.Approve], then wake only the Keeper captured by the pending entry.
     [rule_expires_at] is an absolute Unix expiry applied to the remembered
     rule; it is ignored unless [remember_rule] is [true].
+    Omitting it requests a permanent rule, including when replacing an
+    existing finite expiry. Reapproval applies the requested option exactly
+    while preserving the rule's identity and original creation metadata.
 
     [base_path] is the authenticated caller workspace. The pending or
     in-progress delivery entry must belong to it exactly before any resolution

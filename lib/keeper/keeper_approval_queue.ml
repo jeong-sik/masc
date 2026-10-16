@@ -2262,15 +2262,22 @@ let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pen
         ~input:entry.input
         ?created_by
         ~source_approval_id:entry.id
-        ?expires_at:rule_expires_at
+        ~expires_at:rule_expires_at
         ()
     with
-    | Ok (rule, created) ->
+    | Ok (rule, disposition) ->
       let audit_receipts =
-        if created
-        then
+        match disposition with
+        | Keeper_approval_queue_rules.Created ->
           [ Keeper_approval.Audit.record_rule_created ~base_path rule ]
-        else []
+        | Keeper_approval_queue_rules.Existing -> []
+        | Keeper_approval_queue_rules.Renewed { previous_expires_at } ->
+          [ Keeper_approval.Audit.record_rule_renewed
+              ~base_path
+              ?renewed_by:created_by
+              ~source_approval_id:entry.id
+              ~previous_expires_at
+              rule ]
       in
       Ok (rule, audit_receipts)
     | Error reason -> Error reason

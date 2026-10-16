@@ -5,6 +5,7 @@
 // parser-derived surface of each effective Skill.
 
 import { Either, ParseResult, Schema } from 'effect'
+import { nestedCompositionScopeIsValid } from './skill-activation-scope'
 import { validate as isUuid, version as uuidVersion } from 'uuid'
 import { ApiRequestError, get, post, postControlPlane, type GetOptions } from './core'
 
@@ -520,6 +521,16 @@ const SkillInvocationSchema = Schema.Union(
     kind: Schema.Literal('composition'),
     origin: Schema.Union(TaskCompositionOriginSchema, SessionCompositionOriginSchema),
     tool_name: Schema.NonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('nested_composition'),
+    origin: Schema.Union(TaskCompositionOriginSchema, SessionCompositionOriginSchema),
+    tool_name: Schema.NonEmptyString,
+    scope: Schema.Struct({
+      parent_tool_use_id: Schema.NonEmptyString,
+      composition_run_id: Schema.NonEmptyString,
+      alias: Schema.NonEmptyString,
+    }),
   }),
 )
 const ActionIdentitySchema = Schema.Union(
@@ -1319,10 +1330,12 @@ function activationPayloadIsValid(
   const served = activation.invocation.kind === 'instruction'
     ? activation.invocation.served_content
     : null
-  const invocationValid = activation.invocation.kind === 'composition'
-    ? isPortableName(activation.invocation.tool_name)
-    : isLowerHexRevision(served!.sha256)
+  const invocationValid = activation.invocation.kind === 'instruction'
+    ? isLowerHexRevision(served!.sha256)
       && (served!.kind === 'skill_body' || isSkillResourcePath(served!.relative_path))
+    : isPortableName(activation.invocation.tool_name)
+      && (activation.invocation.kind === 'composition'
+        || nestedCompositionScopeIsValid(activation.invocation.scope, activation.skill_tool_use_id))
   const actionKeys = activation.actions.map(actionIdentityKey)
   const deliveryTurn = activation.delivery?.boundary.agent_core_turn
   const deliveryValid = activation.delivery === null

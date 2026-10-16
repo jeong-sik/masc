@@ -672,7 +672,8 @@ let test_composition_activation_is_durable ?expected_failure ~skill_name tool_na
          check string "exact composition origin" tool_name observed
        | Keeper_skill_activation_ledger.Composition_invocation
            { origin = Task_composition _; _ }
-       | Keeper_skill_activation_ledger.Instruction_invocation _ ->
+       | Keeper_skill_activation_ledger.Instruction_invocation _
+       | Keeper_skill_activation_ledger.Nested_composition_invocation _ ->
          fail "composition activation kept the wrong typed origin")
     | activations ->
       failf "expected one composition activation, got %d" (List.length activations))

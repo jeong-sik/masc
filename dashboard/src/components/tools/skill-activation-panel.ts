@@ -36,13 +36,17 @@ function originLabel(invocation: DashboardSkillActivation['invocation']): string
     case 'session_instruction':
       return 'Session instruction'
     case 'task_composition':
-      return `Task composition · ${origin.task_ids.join(', ')} · ${invocation.kind === 'composition' ? invocation.tool_name : ''}`
+      return `Task composition · ${origin.task_ids.join(', ')} · ${invocation.kind === 'instruction' ? '' : invocation.tool_name}`
     case 'session_composition':
-      return `Session composition · ${invocation.kind === 'composition' ? invocation.tool_name : ''}`
+      return `Session composition · ${invocation.kind === 'instruction' ? '' : invocation.tool_name}`
   }
 }
 
 function servedLabel(activation: DashboardSkillActivation): string {
+  if (activation.invocation.kind === 'nested_composition') {
+    const { tool_name, scope } = activation.invocation
+    return `nested composition · ${tool_name} · ${scope.alias} · parent ${scope.parent_tool_use_id}`
+  }
   if (activation.invocation.kind === 'composition') {
     return `composition invocation · ${activation.invocation.tool_name}`
   }

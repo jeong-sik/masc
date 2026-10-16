@@ -61,6 +61,12 @@ type served_content =
       ; sha256 : string
       }
 
+type nested_composition_scope = private
+  { parent_tool_use_id : string
+  ; composition_run_id : string
+  ; alias : string
+  }
+
 type invocation =
   | Instruction_invocation of
       { origin : instruction_origin
@@ -69,6 +75,12 @@ type invocation =
   | Composition_invocation of
       { origin : composition_origin
       ; tool_name : string
+      }
+
+  | Nested_composition_invocation of
+      { origin : composition_origin
+      ; tool_name : string
+      ; scope : nested_composition_scope
       }
 
 type transition_rejection =
@@ -175,6 +187,7 @@ type decode_error =
   | Empty_task_ids
   | Duplicate_task_id of string
   | Invalid_tool_name of string
+  | Invalid_nested_composition_scope of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch
   | Invalid_runtime_id
@@ -235,6 +248,13 @@ type store_error =
 val store_error_to_string : store_error -> string
 val store_error_code : store_error -> string
 val decode_error_code : decode_error -> string
+
+val nested_composition_scope :
+  parent_tool_use_id:string -> composition_run_id:string -> alias:string ->
+  (nested_composition_scope, decode_error) result
+(** Exact enclosing invocation, UUIDv7 composition run and source node alias.
+    These identities associate a dispatched child with its parent's result
+    receipt; they do not imply a prepared child has executed. *)
 
 val empty : workspace_root:string -> trace_id:Keeper_id.Trace_id.t -> t
 val activations : t -> activation list
@@ -333,7 +353,9 @@ val observe_delivery :
 (** Mark exact Skill results that are present in a later provider request.
     Unrelated tool results are ignored. Instruction results are matched by
     exact id and content digest; composition results retain their observed
-    digest because no result digest exists before execution. The returned ids
+    digest because no result digest exists before execution. A nested composition
+    matches its exact enclosing invocation receipt and retains its own activation
+    identity, so two children of the same parent remain distinct. The returned ids
     are matching Skill invocations, including idempotent re-observations. *)
 
 val observe_action :

@@ -1309,6 +1309,37 @@ function validSkillActivationProjectionFixture() {
 }
 
 describe('fetchDashboardTools', () => {
+  it('decodes nested composition activation with its exact parent and run scope', () => {
+    const projection = validSkillActivationProjectionFixture()
+    const scope = {
+      parent_tool_use_id: 'outer-run',
+      composition_run_id: '019ffc2b-0a41-7ba2-bf58-598e0e7f711b',
+      alias: 'child/~quoted',
+    }
+    const nested = {
+      ...projection,
+      ledger: {
+        ...projection.ledger,
+        activations: projection.ledger.activations.map(activation => ({
+          ...activation,
+          invocation: { kind: 'nested_composition', origin: { kind: 'session_composition' }, tool_name: 'keeper_compose_review', scope },
+        })),
+      },
+    }
+    expect(normalizeSkillActivationProjection(nested)).toEqual(nested)
+    for (const badScope of [
+      { ...scope, composition_run_id: 'not-a-run' },
+      { ...scope, parent_tool_use_id: 'call-skill-1' },
+      { ...scope, alias: '' },
+      { ...scope, unknown: true },
+    ]) {
+      const bad = { ...nested, ledger: { ...nested.ledger, activations: nested.ledger.activations.map(activation => ({
+        ...activation, invocation: { ...activation.invocation, scope: badScope },
+      })) } }
+      expect(() => normalizeSkillActivationProjection(bad)).toThrow()
+    }
+  })
+
   it('hard-cuts stale Skill activation schemas before rendering', () => {
     expect(() => normalizeSkillActivationProjection({
       status: 'available',

@@ -3,6 +3,7 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, post, type AbortableRequestOptions } from './core'
+import { nestedCompositionScopeIsValid, type NestedCompositionScope } from './skill-activation-scope'
 import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
@@ -655,6 +656,12 @@ export type DashboardSkillActivationInvocation =
       origin: DashboardSkillCompositionOrigin
       tool_name: string
     }
+  | {
+      kind: 'nested_composition'
+      origin: DashboardSkillCompositionOrigin
+      tool_name: string
+      scope: NestedCompositionScope
+    }
 
 export type DashboardSkillActionIdentity =
   | { kind: 'call_id'; call_id: string }
@@ -1233,7 +1240,7 @@ function decodeSkillActivationInvocation(
   const record = exactSkillActivationObject(
     value,
     label,
-    ['kind', 'origin', 'served_content', 'tool_name'],
+    ['kind', 'origin', 'served_content', 'tool_name', 'scope'],
   )
   if (record.kind === 'instruction') {
     exactSkillActivationObject(value, label, ['kind', 'origin', 'served_content'])
@@ -1274,6 +1281,23 @@ function decodeSkillActivationInvocation(
       kind: 'composition',
       origin: decodeCompositionOrigin(record.origin, `${label}.origin`),
       tool_name: skillActivationString(record.tool_name, `${label}.tool_name`),
+    }
+  }
+  if (record.kind === 'nested_composition') {
+    exactSkillActivationObject(value, label, ['kind', 'origin', 'tool_name', 'scope'])
+    const rawScope = exactSkillActivationObject(record.scope, `${label}.scope`,
+      ['parent_tool_use_id', 'composition_run_id', 'alias'])
+    const scope: NestedCompositionScope = {
+      parent_tool_use_id: skillActivationString(rawScope.parent_tool_use_id, `${label}.scope.parent_tool_use_id`),
+      composition_run_id: skillActivationString(rawScope.composition_run_id, `${label}.scope.composition_run_id`),
+      alias: skillActivationString(rawScope.alias, `${label}.scope.alias`),
+    }
+    if (!nestedCompositionScopeIsValid(scope)) throw new Error(`skill_activations ${label}.scope is invalid`)
+    return {
+      kind: 'nested_composition',
+      origin: decodeCompositionOrigin(record.origin, `${label}.origin`),
+      tool_name: skillActivationString(record.tool_name, `${label}.tool_name`),
+      scope,
     }
   }
   throw new Error(`skill_activations ${label}.kind is unsupported`)
@@ -1379,14 +1403,19 @@ function decodeSkillActivation(value: unknown, label: string): DashboardSkillAct
       observed_at: skillActivationString(decoded.observed_at, `${actionLabel}.observed_at`),
     }
   })
+  const invocation = decodeSkillActivationInvocation(record.invocation, `${label}.invocation`)
+  const skillToolUseId = skillActivationString(record.skill_tool_use_id, `${label}.skill_tool_use_id`)
+  if (invocation.kind === 'nested_composition' && !nestedCompositionScopeIsValid(invocation.scope, skillToolUseId)) {
+    throw new Error(`skill_activations ${label}.invocation.scope is invalid`)
+  }
   return {
     ...reference,
     snapshot_revision: skillActivationSha256(record.snapshot_revision, `${label}.snapshot_revision`),
     turn_ref: skillActivationString(record.turn_ref, `${label}.turn_ref`),
     runtime_id: skillActivationString(record.runtime_id, `${label}.runtime_id`),
-    skill_tool_use_id: skillActivationString(record.skill_tool_use_id, `${label}.skill_tool_use_id`),
+    skill_tool_use_id: skillToolUseId,
     agent_core_turn: skillActivationNonnegativeInteger(record.agent_core_turn, `${label}.agent_core_turn`),
-    invocation: decodeSkillActivationInvocation(record.invocation, `${label}.invocation`),
+    invocation,
     delivery,
     actions,
     activated_at: skillActivationString(record.activated_at, `${label}.activated_at`),

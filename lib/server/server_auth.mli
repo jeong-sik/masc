@@ -372,6 +372,14 @@ val authorize_tool_request_with_actor :
     or ["dashboard"] when it supplies no name. The returned name alone does
     not distinguish credential identity from local attribution. *)
 
+(** Route error for credential-standing failures: a bad request detail, or
+    a credential store that could not be read (answer 503 so the client
+    retries). Shared by the schedule and lane routes so the two mappings
+    cannot drift apart. *)
+type request_error =
+  | Bad_request_detail of string
+  | Credential_store_unreadable
+
 (** What the request's credential says about who is calling, beyond the name
     {!authorize_tool_request_with_actor} returns. *)
 type request_credential_standing =

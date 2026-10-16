@@ -451,7 +451,8 @@ let test_live_disk_check_reports_unreadable_as_error () =
         Unix.chmod beta_file 0o000;
         (match matches dir beta_cred with
          | Error (Masc_domain.System _) -> ()
-         | Ok _ -> fail "an unreadable credential matched or differed instead of erroring");
+         | Ok _ -> fail "an unreadable credential matched or differed instead of erroring"
+         | Error _ -> fail "an unreadable credential answered a non-system error");
         check bool "an unreadable match outranks a differing one" true
           (Result.is_error (hold dir [ rotated_alpha; beta_cred ]));
         check bool "order does not matter: unreadable still outranks" true

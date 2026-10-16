@@ -123,12 +123,9 @@ let schedule_write_schema tool =
    request and names it, but a same-origin request with no bearer and a
    keeper holding the internal token are admitted too, and neither is the
    operator. Only an operator credential makes the operator. *)
-type schedule_write_error =
-  | Bad_request_detail of string
-  | Credential_store_unreadable
-
+(* Route errors share [Server_auth.request_error] with the lane routes. *)
 let schedule_caller ~state ~agent_name request
-  : (Tool_schedule.caller, schedule_write_error) result =
+  : (Tool_schedule.caller, Server_auth.request_error) result =
   let base_path = (Mcp_server.workspace_config state).base_path in
   match Server_auth.request_credential_standing ~base_path request with
   | Server_auth.Operator_credential -> Ok (Tool_schedule.Operator_caller agent_name)

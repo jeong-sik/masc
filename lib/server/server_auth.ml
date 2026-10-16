@@ -1122,6 +1122,10 @@ let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority r
   let* () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
   Ok agent_name
 
+type request_error =
+  | Bad_request_detail of string
+  | Credential_store_unreadable
+
 type request_credential_standing =
   | Operator_credential
   | Agent_credential
@@ -1146,13 +1150,20 @@ let request_credential_standing ~base_path request =
          unnamed caller. Only a store that failed to answer (I/O failure
          or lock contention) is [Unreadable_credential]; a token the
          store positively refused, and any other error, is
-         [No_credential]. *)
+         [No_credential]. Every constructor is named: no catch-all may
+         silently adopt a future error. *)
       | Error
           (Masc_domain.System
              (Masc_domain.System_error.IoError _
              | Masc_domain.System_error.LockContention _)) ->
           Unreadable_credential
-      | Error _ -> No_credential)
+      | Error
+          (Masc_domain.System
+             (Masc_domain.System_error.NotInitialized
+             | Masc_domain.System_error.ValidationError _)
+          | Masc_domain.Task _
+          | Masc_domain.Agent _
+          | Masc_domain.Auth _) -> No_credential)
 
 let authorize_tool_request ~base_path ~tool_name ~request_authority request :
     (unit, Masc_domain.masc_error) result =

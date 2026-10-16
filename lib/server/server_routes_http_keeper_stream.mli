@@ -8,6 +8,12 @@ val ask_answer_response :
   delivered:bool ->
   Http.Status.t * Yojson.Safe.t
 
+val ask_already_answered_response :
+  ask_id:string -> answers:Keeper_ask.answer list -> answered_at:float ->
+  delivered:bool -> Http.Status.t * Yojson.Safe.t
+(** Conflict receipt for the canonical first answer, never the requesting
+    surface's losing choices. Delivery can still await automatic recovery. *)
+
 (** Server_routes_http_keeper_stream — keeper chat
     streaming HTTP route + payload parser.
 

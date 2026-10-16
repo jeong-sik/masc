@@ -1220,6 +1220,17 @@ let test_exact_delivery_survives_unrelated_corruption () =
   delivery_seen_strict ~base_path ~keeper_name source
     |> require_strict_delivery "exact valid positive overrides unrelated damaged rows" true;
   let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  let snapshot = match Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+      ~base_path ~keeper_name ~since:0. with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error) in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> require_strict_delivery "batch snapshot preserves the canonical positive" true;
+  (match Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+      ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Ask_answered with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete _) -> ()
+   | _ -> fail "a different typed source cannot inherit another delivery proof");
   match delivery_seen_strict ~base_path ~keeper_name unknown with
   | Error (Keeper_reaction_ledger.Evidence_incomplete
       { malformed_row_count; semantic_invalid_row_count; _ }) ->
@@ -1231,7 +1242,23 @@ let test_exact_delivery_survives_unrelated_corruption () =
 ;;
 
 let test_valid_complete_delivery_scan_can_prove_absence () =
-  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source:_ ->
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let snapshot = match Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+      ~base_path ~keeper_name ~since:0. with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error) in
+  let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:unknown.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> require_strict_delivery "one batch read proves valid absence" false;
+  let restore = corrupt_exact_ack ~base_path ~keeper_name ~source (fun _ -> "not-json") in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:source.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+    |> require_strict_delivery "a snapshot is immutable across later file changes" true;
+  (match delivery_seen_strict ~base_path ~keeper_name source with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete _) -> ()
+   | _ -> fail "fresh owner evidence must reread the changed journal");
+  restore ();
   delivery_seen_strict ~base_path ~keeper_name (board_stimulus ~post_id:"never-delivered-source" ())
     |> require_strict_delivery "complete valid ledger proves exact absence" false
 ;;
@@ -1290,6 +1317,39 @@ let test_delivery_absence_still_counts_damage_inside_the_request_window () =
   | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
   | Ok _ -> fail "in-window damage was ignored by the narrowed scan"
+;;
+
+(* A delivery cannot predate the answer it delivers. Damage written before the
+   answer's day is outside the evidence window: it must not make the snapshot
+   incomplete, must not forbid absence, and must not hide a valid positive.
+   Damage inside the window keeps the strict semantics unchanged. *)
+let test_delivery_window_excludes_corruption_before_the_answer () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let dir = Filename.concat (reaction_ledger_dir ~base_path ~keeper_name) "1970-01" in
+  mkdir_p dir;
+  write_file (Filename.concat dir "01.jsonl") "not-json\n";
+  let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  (match delivery_seen_strict ~base_path ~keeper_name unknown with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete _) -> ()
+   | _ -> fail "whole-history scan must keep the pre-answer damage as incomplete evidence");
+  let since = Unix.gettimeofday () -. 86400. in
+  let seen_since ~base_path ~keeper_name since source =
+    Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
+      ~base_path ~keeper_name ~not_before:since ~post_id:source.Keeper_event_queue.post_id
+      ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
+  in
+  seen_since ~base_path ~keeper_name since source
+  |> require_strict_delivery "valid positive survives outside the damaged window" true;
+  seen_since ~base_path ~keeper_name since unknown
+  |> require_strict_delivery "pre-answer corruption cannot forbid absence" false;
+  let snapshot = match
+      Keeper_reaction_ledger.strict_source_delivery_snapshot_result
+        ~base_path ~keeper_name ~since with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error) in
+  Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
+    ~post_id:unknown.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
+  |> require_strict_delivery "bounded snapshot proves absence across its window" false
 ;;
 
 let test_syntax_error_does_not_claim_an_occurrence_identity () =
@@ -1662,6 +1722,9 @@ let () =
         ; test_case
             "delivery absence still counts damage inside the request window"
             `Quick test_delivery_absence_still_counts_damage_inside_the_request_window
+        ; test_case
+            "delivery window excludes corruption before the answer"
+            `Quick test_delivery_window_excludes_corruption_before_the_answer
         ; test_case
             "syntax error cannot claim an occurrence identity"
             `Quick

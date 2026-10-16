@@ -59,8 +59,9 @@ val heartbeat_event_intake :
   heartbeat_event_intake
 
 (** Source-authority gate applied after world scheduling. A durable selection
-    failure blocks dispatch. An unread Connector store or missing item retains
-    its sources but preserves independent world scheduling. *)
+    failure blocks dispatch. Unread, missing or unanswered Ask sources and
+    unread or missing Connector sources retain their selections while
+    preserving independent world scheduling. *)
 val should_run_turn_after_event_intake :
   scheduled:bool ->
   event_queue_intake_error:
@@ -321,6 +322,10 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  val record_replay_owned_turn_started_reactions :
+    ctx:'a context -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
+  (** Production turn-entry recording for the admitted source batch. *)
+
   val provider_wait_interrupt :
     keeper_name:string ->
     dispatch_snapshot:Runtime.keeper_dispatch_snapshot ->

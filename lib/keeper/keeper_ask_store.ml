@@ -20,6 +20,19 @@ type answer_failure =
   | Already_withdrawn of { reason : string; withdrawn_at : float }
   | Rejected of Keeper_ask.invalid_answer list
   | Store_failed of string
+  | Answer_recorded_unconfirmed of { detail : string }
+
+type read_error =
+  | Log_read_failed of { path : string; detail : string }
+  | Log_decode_failed of { path : string; line : int; detail : string }
+
+type row = string * (Keeper_ask.ask * Keeper_ask.resolution)
+type rows_snapshot = Missing_log | Stored_rows of row list
+
+let read_error_to_string = function
+  | Log_read_failed { path; detail } -> Printf.sprintf "%s ask log read failed: %s" path detail
+  | Log_decode_failed { path; line; detail } ->
+      Printf.sprintf "%s:%d ask log decode failed: %s" path line detail
 
 type withdraw_failure =
   | Withdraw_ask_not_found of { ask_id : string }
@@ -35,6 +48,8 @@ let answer_failure_to_string = function
   | Rejected errors ->
       String.concat "; " (List.map Keeper_ask.invalid_answer_to_string errors)
   | Store_failed detail -> "store failed: " ^ detail
+  | Answer_recorded_unconfirmed { detail } ->
+      "answer append committed but canonical answer could not be confirmed: " ^ detail
 
 let withdraw_failure_to_string = function
   | Withdraw_ask_not_found { ask_id } -> "no such ask: " ^ ask_id
@@ -44,25 +59,37 @@ let withdraw_failure_to_string = function
       Printf.sprintf "already withdrawn at %.0f" withdrawn_at
   | Withdraw_store_failed detail -> "store failed: " ^ detail
 
-(* Each keeper's decoded log, kept with the file version it was read from.
-   The fleet question list is read on every TUI refresh and a keeper's
-   heartbeat reads its own log, while an ask, an answer or a withdrawal
-   appends a row now and then, so a reader of an unchanged log takes the
-   events the last miss decoded. [append_event] forgets the log it appends
-   to. *)
-let decoded_logs : Keeper_ask.event list File_version_cache.t =
-  File_version_cache.create ()
+(* Every read validates the owned descriptor and its before/after snapshot.
+   Keep decoding work only for those exact validated bytes; a same-size write
+   restoring mtime cannot turn old events into mutation authority. *)
+let decoded_logs :
+    (string, Fs_compat.owned_regular_file_snapshot * string * Keeper_ask.event list) Hashtbl.t =
+  Hashtbl.create 16
+let decoded_logs_mutex = Stdlib.Mutex.create ()
+
+let forget_log path =
+  Stdlib.Mutex.protect decoded_logs_mutex (fun () -> Hashtbl.remove decoded_logs path)
 
 let append_event ~base_path ~keeper_name event =
   let path = log_path ~base_path ~keeper_name in
   let appended =
     try
       ensure_ask_dir ~base_path;
-      Fs_compat.append_file path (Yojson.Safe.to_string (Keeper_ask.event_to_json event) ^ "\n");
-      Ok ()
+      let suffix = Yojson.Safe.to_string (Keeper_ask.event_to_json event) ^ "\n" in
+      (match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
+       | Fs_compat.Private_file_succeeded () -> Ok ()
+       | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
+           Log.Keeper.warn "keeper_ask_store: append committed; descriptor cleanup failed: %s"
+             (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+           Ok ()
+       | Fs_compat.Private_file_failed error ->
+           Error (Fs_compat.private_jsonl_append_error_to_string error)
+       | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+           Error (Fs_compat.private_jsonl_append_error_to_string error ^ "; " ^
+             Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
     with
     | Eio.Cancel.Cancelled _ as e ->
-        File_version_cache.forget decoded_logs path;
+        forget_log path;
         raise e
     | exn ->
         let detail = Printexc.to_string exn in
@@ -71,7 +98,7 @@ let append_event ~base_path ~keeper_name event =
         Error detail
   in
   (* Landed or not, the log may no longer be the version that was decoded. *)
-  File_version_cache.forget decoded_logs path;
+  forget_log path;
   appended
 
 let decode_line line =
@@ -79,17 +106,16 @@ let decode_line line =
   | exception Yojson.Json_error detail -> Error detail
   | json -> Keeper_ask.event_of_json json
 
-let decode_log ~path ~keeper_name =
-    try
-      let (parsed_rev, line_count), _boundary =
-        Fs_compat.fold_appended_lines ~path ~from:0 ~init:([], 0)
-          ~f:(fun (acc, line_no) line ->
-            let line_no = line_no + 1 in
-            let trimmed = String.trim line in
-            if trimmed = "" then (acc, line_no)
-            else ((line_no, decode_line trimmed) :: acc, line_no))
-      in
-      let parsed = List.rev parsed_rev in
+let decode_log ~path content =
+      (* As [fold_appended_lines], read only newline-complete nonblank rows.
+         Keep its final complete malformed-line policy as well. *)
+      let complete_lines = match List.rev (String.split_on_char '\n' content) with
+        | [] -> []
+        | _tail :: complete -> List.rev complete in
+      let lines = List.filter_map (fun line ->
+          let trimmed = String.trim line in if trimmed = "" then None else Some trimmed) complete_lines in
+      let parsed = List.mapi (fun index line -> index + 1, decode_line line) lines in
+      let line_count = List.length lines in
       (* A final line that does not decode is the shape an append cut short by
          a crash leaves. Anywhere else it means the history itself is damaged,
          and a reader that skipped it would report a shortened past as
@@ -104,30 +130,95 @@ let decode_log ~path ~keeper_name =
       in
       match fatal with
       | (line_no, detail) :: _ ->
-          Error (Printf.sprintf "%s:%d ask log decode failed: %s" path line_no detail)
+          Error (Log_decode_failed { path; line = line_no; detail })
       | [] ->
           Ok
             (List.filter_map
                (fun (_, result) -> match result with Ok event -> Some event | Error _ -> None)
                parsed)
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | Sys_error detail -> Error (Printf.sprintf "%s ask log read failed: %s" path detail)
-    | exn ->
-        Error
-          (Printf.sprintf "%s ask log load failed for %s: %s" path (sanitize_name keeper_name)
-             (Printexc.to_string exn))
+
+let load_events_at_path_result ~base_path ~path =
+  match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ())
+      ~ownership_root:(Common.masc_dir_from_base_path ~base_path) path with
+  | Error error -> Error (Log_read_failed
+      { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
+  | Ok None -> forget_log path; Ok None
+  | Ok (Some { content; snapshot }) ->
+      let held = Stdlib.Mutex.protect decoded_logs_mutex
+          (fun () -> Hashtbl.find_opt decoded_logs path) in
+      (match held with
+       | Some (previous, bytes, events)
+         when Fs_compat.equal_owned_regular_file_snapshot previous snapshot
+           && String.equal bytes content -> Ok (Some events)
+       | Some _ | None ->
+           match decode_log ~path content with
+           | Error error -> forget_log path; Error error
+           | Ok events ->
+               Stdlib.Mutex.protect decoded_logs_mutex
+                 (fun () -> Hashtbl.replace decoded_logs path (snapshot, content, events));
+               Ok (Some events))
+
+let validate_owner ~base_path ~path ~keeper_name events =
+  List.find_map (fun (index, event) ->
+    match event with
+    | Keeper_ask.Asked ask when not (String.equal ask.keeper_name keeper_name)
+        || not (String.equal (log_path ~base_path ~keeper_name:ask.keeper_name) path) ->
+        Some (Log_decode_failed { path; line = index + 1;
+          detail = "Asked record belongs to a different canonical Keeper log" })
+    | Keeper_ask.Asked _ | Keeper_ask.Answered _ | Keeper_ask.Withdrawn _ -> None)
+    (List.mapi (fun index event -> index, event) events)
+  |> function None -> Ok events | Some error -> Error error
 
 let load_events_result ~base_path ~keeper_name =
   let path = log_path ~base_path ~keeper_name in
-  if not (Sys.file_exists path) then Ok []
-  else File_version_cache.load decoded_logs path ~decode:(fun () -> decode_log ~path ~keeper_name)
+  match load_events_at_path_result ~base_path ~path with
+  | Error error -> Error error
+  | Ok None -> Ok None
+  | Ok (Some events) -> Result.map Option.some
+      (validate_owner ~base_path ~path ~keeper_name events)
+
+let rows_result ~base_path ~keeper_name =
+  Result.map (function
+    | None -> Missing_log
+    | Some events -> Stored_rows (Keeper_ask.fold_events events))
+    (load_events_result ~base_path ~keeper_name)
+
+type discovered_log =
+  | Canonical_rows of { keeper_name : string; rows : row list }
+  | Unreadable_log of read_error
+
+let discover_rows_result ~base_path =
+  let path = ask_dir base_path in
+  match Fs_compat.read_owned_directory_if_present ~owner_uid:(Unix.getuid ())
+      ~ownership_root:(Common.masc_dir_from_base_path ~base_path) path with
+  | Error error -> Error (Log_read_failed
+      { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })
+  | Ok None -> Ok []
+  | Ok (Some names) ->
+      Ok (List.filter_map (fun name ->
+        if not (Filename.check_suffix name ".jsonl") then None else
+        let path = Filename.concat path name in
+        match load_events_at_path_result ~base_path ~path with
+        | Error error -> Some (Unreadable_log error)
+        | Ok None -> Some (Unreadable_log (Log_read_failed
+            { path; detail = "discovered ask log disappeared before its owned read" }))
+        | Ok (Some events) ->
+            match List.find_map (function Keeper_ask.Asked ask -> Some ask.keeper_name
+                | Keeper_ask.Answered _ | Keeper_ask.Withdrawn _ -> None) events with
+            | None ->
+                if events = [] then None else Some (Unreadable_log (Log_decode_failed
+                    { path; line = 1; detail = "ask events have no canonical Asked owner" }))
+            | Some keeper_name ->
+                match validate_owner ~base_path ~path ~keeper_name events with
+                | Error error -> Some (Unreadable_log error)
+                | Ok events -> Some (Canonical_rows { keeper_name; rows = Keeper_ask.fold_events events })) names)
 
 let load_events ~base_path ~keeper_name =
   match load_events_result ~base_path ~keeper_name with
-  | Ok events -> events
+  | Ok (Some events) -> events
+  | Ok None -> []
   | Error msg ->
-      Log.Keeper.warn "keeper_ask_store: %s" msg;
+      Log.Keeper.warn "keeper_ask_store: %s" (read_error_to_string msg);
       []
 
 let rows ~base_path ~keeper_name =
@@ -152,8 +243,13 @@ let find_row rows_list ask_id =
     (fun (id, row) -> if String.equal id ask_id then Some row else None)
     rows_list
 
-let answer ~base_path ~keeper_name ~ask_id ~submissions ~responder ~now =
-  match find_row (rows ~base_path ~keeper_name) ask_id with
+let answer_with_interleaving ~before_append ~after_append
+    ~base_path ~keeper_name ~ask_id ~submissions ~responder ~now =
+  let ( let* ) = Result.bind in
+  let* snapshot = rows_result ~base_path ~keeper_name
+      |> Result.map_error (fun error -> Store_failed (read_error_to_string error)) in
+  let rows = match snapshot with Missing_log -> [] | Stored_rows rows -> rows in
+  match find_row rows ask_id with
   | None -> Error (Ask_not_found { ask_id })
   | Some (_, Keeper_ask.Answered_by { answers; responder; answered_at }) ->
       Error (Already_answered { answers; responder; answered_at })
@@ -166,12 +262,34 @@ let answer ~base_path ~keeper_name ~ask_id ~submissions ~responder ~now =
           let event =
             Keeper_ask.Answered { ask_id; answers; responder; answered_at = now }
           in
+          before_append ();
           match append_event ~base_path ~keeper_name event with
-          | Ok () -> Ok answers
+          | Ok () ->
+              after_append ();
+              (match rows_result ~base_path ~keeper_name with
+               | Error error -> Error (Answer_recorded_unconfirmed
+                   { detail = read_error_to_string error })
+               | Ok snapshot ->
+                   let rows = match snapshot with Missing_log -> [] | Stored_rows rows -> rows in
+                   (match find_row rows ask_id with
+                    | Some (_, Keeper_ask.Answered_by canonical)
+                      when canonical.answers = answers && canonical.responder = responder
+                        && canonical.answered_at = now -> Ok canonical.answers
+                    | Some (_, Keeper_ask.Answered_by { answers; responder; answered_at }) ->
+                        Error (Already_answered { answers; responder; answered_at })
+                    | None | Some (_, (Keeper_ask.Open | Keeper_ask.Withdrawn_because _)) ->
+                        Error (Answer_recorded_unconfirmed
+                          { detail = "committed append has no canonical answered row" })))
           | Error detail -> Error (Store_failed detail)))
 
+let answer = answer_with_interleaving ~before_append:(fun () -> ()) ~after_append:(fun () -> ())
+
 let withdraw ~base_path ~keeper_name ~ask_id ~reason ~now =
-  match find_row (rows ~base_path ~keeper_name) ask_id with
+  let ( let* ) = Result.bind in
+  let* snapshot = rows_result ~base_path ~keeper_name
+      |> Result.map_error (fun error -> Withdraw_store_failed (read_error_to_string error)) in
+  let rows = match snapshot with Missing_log -> [] | Stored_rows rows -> rows in
+  match find_row rows ask_id with
   | None -> Error (Withdraw_ask_not_found { ask_id })
   | Some (_, Keeper_ask.Answered_by { answered_at; _ }) ->
       Error (Withdraw_already_answered { answered_at })
@@ -182,3 +300,7 @@ let withdraw ~base_path ~keeper_name ~ask_id ~reason ~now =
       match append_event ~base_path ~keeper_name event with
       | Ok () -> Ok ()
       | Error detail -> Error (Withdraw_store_failed detail))
+
+module For_testing = struct
+  let answer_with_interleaving = answer_with_interleaving
+end

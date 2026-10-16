@@ -28,11 +28,15 @@ type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
   | Stimulus_connector_retry_later of Keeper_external_attention.read_error
   | Stimulus_connector_missing of string
+  | Stimulus_ask_retry_later of Keeper_ask_store.read_error
+  | Stimulus_ask_missing of string
+  | Stimulus_ask_not_answered of string
 
 type event_queue_intake_error =
   | Pending_selection_failed of string
   | Connector_read_failed of Keeper_external_attention.read_error
   | Connector_item_missing of string
+  | Ask_read_failed of Keeper_ask_store.read_error
 
 let event_queue_intake_error_to_string = function
   | Pending_selection_failed detail ->
@@ -41,17 +45,21 @@ let event_queue_intake_error_to_string = function
     "connector attention intake retry: " ^ Keeper_external_attention.read_error_to_string error
   | Connector_item_missing event_id ->
     "connector attention item missing: " ^ event_id
+  | Ask_read_failed error ->
+    "ask answer intake retry: " ^ Keeper_ask_store.read_error_to_string error
 ;;
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
   | Connector_read_failed _ -> "event_queue_connector_read_failed"
   | Connector_item_missing _ -> "event_queue_connector_item_missing"
+  | Ask_read_failed _ -> "event_queue_ask_read_failed"
 ;;
 
 let event_queue_intake_error_counts_as_cycle_failure = function
   | Pending_selection_failed _ -> true
-  | Connector_read_failed _ | Connector_item_missing _ -> false
+  | Connector_read_failed _ | Connector_item_missing _
+  | Ask_read_failed _ -> false
 ;;
 
 let classify_pending_board_event_result = function
@@ -193,6 +201,7 @@ let consume_single_heartbeat_stimulus
       ~(ctx : _ context)
       ~meta_after_triage
       ?connector_attention_items
+      ?ask_rows
       (stim : Keeper_event_queue.stimulus)
   =
   let class_str = Keeper_event_queue.payload_kind_label stim.payload in
@@ -242,42 +251,26 @@ let consume_single_heartbeat_stimulus
          Load it here and promote it to a pending observation, the same split
          Connector_attention makes — a wake carrying no answer is one the
          Keeper cannot act on, which is how this feature went unused. *)
-      let resolved =
-        List.assoc_opt
-          answered.ask_id
-          (Keeper_ask_store.rows
-             ~base_path:ctx.config.base_path
-             ~keeper_name:meta_after_triage.name)
-      in
-      let pending_events =
-        match resolved with
-        | Some
-            ( ask
-            , Keeper_ask.Answered_by { answers; responder; answered_at } ) ->
-          [ Keeper_world_observation.pending_board_event_of_ask_answer
-              ~meta:meta_after_triage
-              ~ask
-              ~answers
-              ~responder
-              ~answered_at
-          ]
-        | Some (_, Keeper_ask.Open)
-        | Some (_, Keeper_ask.Withdrawn_because _)
-        | None ->
-          (* The wake outlived what it pointed at, or the answer is not
-             recorded. Say so rather than injecting a row about nothing. *)
-          Log.Keeper.warn
-            "ask answer stimulus has no recorded answer ask_id=%s (keeper=%s)"
-            answered.ask_id
-            meta_after_triage.name;
-          []
-      in
-      Log.Keeper.info
-        "turn entry: ask answer delivered ask_id=%s rows=%d (keeper=%s)"
-        answered.ask_id
-        (List.length pending_events)
-        meta_after_triage.name;
-      Stimulus_consumed pending_events
+      let rows = match ask_rows with
+        | Some snapshot -> snapshot
+        | None -> Keeper_ask_store.rows_result
+            ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name in
+      (match rows with
+       | Error error -> Stimulus_ask_retry_later error
+       | Ok Keeper_ask_store.Missing_log -> Stimulus_ask_missing answered.ask_id
+       | Ok (Keeper_ask_store.Stored_rows rows) ->
+         match List.assoc_opt answered.ask_id rows with
+         | Some (ask, Keeper_ask.Answered_by { answers; responder; answered_at }) ->
+           Log.Keeper.info
+             "turn entry: ask answer delivered ask_id=%s (keeper=%s)"
+             answered.ask_id meta_after_triage.name;
+           Stimulus_consumed
+             [ Keeper_world_observation.pending_board_event_of_ask_answer
+                 ~meta:meta_after_triage ~ask ~answers ~responder ~answered_at ]
+         | Some (_, Keeper_ask.Open)
+         | Some (_, Keeper_ask.Withdrawn_because _) ->
+           Stimulus_ask_not_answered answered.ask_id
+         | None -> Stimulus_ask_missing answered.ask_id)
     | Keeper_event_queue.Bootstrap ->
       Log.Keeper.info
         "turn entry: bootstrap stimulus consumed (keeper=%s)"
@@ -387,7 +380,9 @@ let consume_single_heartbeat_stimulus
       Stimulus_consumed []
   in
   match intake_result with
-  | Stimulus_connector_retry_later _ | Stimulus_connector_missing _ -> intake_result
+  | Stimulus_connector_retry_later _ | Stimulus_connector_missing _
+  | Stimulus_ask_retry_later _ | Stimulus_ask_missing _
+  | Stimulus_ask_not_answered _ -> intake_result
   | Stimulus_consumed _ ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string StimulusConsumed)
@@ -833,6 +828,7 @@ let heartbeat_event_intake
        Index once, then select the first readable conversation and withdraw
        missing pointers in one linear pass without per-pointer reconciliation. *)
     let connector_snapshot = ref None in
+    let ask_snapshot = ref None in
     let prepare_connectors selections =
       let event_ids = List.filter_map
         (fun (selection : Keeper_event_queue_state.pending_selection) ->
@@ -929,11 +925,73 @@ let heartbeat_event_intake
                  match Hashtbl.find_opt items event_id with
                  | None -> [] | Some item -> [event_id, item])) !connector_snapshot
            in
+           let retain_ask error =
+             Log.Keeper.warn
+               "turn entry: retaining unavailable ask answer keeper=%s: %s"
+               keeper_name (event_queue_intake_error_to_string error);
+             let first_withdrawn = match first_withdrawn with
+               | None -> Some (selection, error)
+               | Some _ as kept -> kept
+             in
+             loop remaining observations_rev selections_rev first_withdrawn rest
+           in
+           let ack_terminal_ask detail =
+             (* The canonical Ask log is append-only, so a missing log, an
+                absent ask id, and an Open or Withdrawn resolution can never
+                gain the answer this pointer names: unlike a read failure,
+                no later state resolves them. Retaining such a source
+                reselects the same poison on every snapshot and reports an
+                intake error every heartbeat. Withdraw it with the same
+                typed terminal ACK as a Board source with no remaining
+                observation; answer recovery re-enqueues a fresh pointer if
+                a later answer is recorded. *)
+             (match
+                Keeper_registry_event_queue.ack_pending_result
+                  ~base_path
+                  keeper_name
+                  ~selection
+              with
+              | Ok () ->
+                Log.Keeper.info
+                  "turn entry: acknowledged terminal ask answer keeper=%s: %s"
+                  keeper_name
+                  detail;
+                loop remaining observations_rev selections_rev first_withdrawn rest
+              | Error message ->
+                let failure_detail =
+                  "failed to acknowledge terminal ask answer source ("
+                  ^ detail
+                  ^ "): "
+                  ^ message
+                in
+                ( List.rev observations_rev
+                , List.rev selections_rev
+                , first_withdrawn
+                , Some (selection, Pending_selection_failed failure_detail) ))
+           in
+           let ask_rows = match selection.source.payload with
+             | Keeper_event_queue.Ask_answered _ ->
+               let snapshot = match !ask_snapshot with
+                 | Some snapshot -> snapshot
+                 | None ->
+                   let snapshot = Keeper_ask_store.rows_result ~base_path ~keeper_name in
+                   ask_snapshot := Some snapshot;
+                   snapshot in
+               Some snapshot
+             | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _
+             | Keeper_event_queue.Bootstrap | Keeper_event_queue.Fusion_completed _
+             | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
+             | Keeper_event_queue.Hitl_resolved _ | Keeper_event_queue.Completion_authority_rejected _
+             | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
+             | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+             | Keeper_event_queue.Task_outcome _ -> None
+           in
            (match
               consume_single_heartbeat_stimulus
                 ~ctx
                 ~meta_after_triage
                 ?connector_attention_items
+                ?ask_rows
                 selection.source
             with
             | Stimulus_connector_missing event_id ->
@@ -959,6 +1017,11 @@ let heartbeat_event_intake
               let rest = List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
                 Option.is_none (connector_attention_event_id selection.source)) rest in
               loop remaining observations_rev selections_rev first_withdrawn rest
+            | Stimulus_ask_retry_later error -> retain_ask (Ask_read_failed error)
+            | Stimulus_ask_missing ask_id ->
+              ack_terminal_ask ("ask answer source missing: " ^ ask_id)
+            | Stimulus_ask_not_answered ask_id ->
+              ack_terminal_ask ("ask source has no recorded answer: " ^ ask_id)
             | Stimulus_consumed [] when is_board_source selection ->
               (* Permanent Board absence is terminal before dispatch. It is the
                  one safe empty-source ACK: the post id cannot become readable

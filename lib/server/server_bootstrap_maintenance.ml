@@ -810,8 +810,24 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           "composition completion recovery inspected=%d delivered=%d waiting=%d failures=%d"
           report.inspected report.delivered report.waiting (List.length report.failures)
     in
+    let reconcile_ask_answers () =
+      match Keeper_ask_answer_wake.reconcile ~base_path:config.base_path with
+      | Error error -> Log.Server.warn "ask answer recovery discovery unavailable: %s"
+          (Keeper_ask_store.read_error_to_string error)
+      | Ok report ->
+          List.iter (fun (failure : Keeper_ask_answer_wake.failure) ->
+            Log.Server.warn "ask answer recovery retained keeper=%s ask_id=%s error=%s"
+              (match failure.keeper_name with Some keeper -> keeper | None -> "<unconfirmed owner>")
+              (match failure.ask_id with Some ask_id -> ask_id | None -> "<store>")
+              (Keeper_ask_answer_wake.error_to_string failure.error)) report.failures;
+          if report.enqueued > 0 then Log.Server.info
+            "ask answer recovery inspected=%d enqueued=%d pending=%d already_delivered=%d failures=%d"
+            report.inspected report.enqueued report.already_pending report.already_delivered
+            (List.length report.failures)
+    in
     reconcile_goal_events ();
     reconcile_composition_completions ();
+    reconcile_ask_answers ();
     project_transition_outboxes Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
@@ -832,6 +848,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       reconcile_broadcast_mentions ();
       reconcile_goal_events ();
       reconcile_composition_completions ();
+      reconcile_ask_answers ();
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;

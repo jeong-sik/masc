@@ -83,7 +83,8 @@ let should_run_turn_after_event_intake
   &&
   match event_queue_intake_error with
   | None | Some (Stimulus_intake.Connector_read_failed _)
-  | Some (Stimulus_intake.Connector_item_missing _) -> true
+  | Some (Stimulus_intake.Connector_item_missing _)
+  | Some (Stimulus_intake.Ask_read_failed _) -> true
   | Some (Stimulus_intake.Pending_selection_failed _) -> false
 ;;
 
@@ -1945,6 +1946,9 @@ let run_heartbeat_loop
 ;;
 
 module For_testing = struct
+  let record_replay_owned_turn_started_reactions =
+    record_replay_owned_turn_started_reactions
+
   let provider_wait_interrupt = provider_wait_interrupt
   let retain_connector_attention_sources = retain_connector_attention_sources
   type deferred_lane_slot = Deferred_lane_slot.t

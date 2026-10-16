@@ -97,6 +97,12 @@ type row_quarantine_reason =
 
 val row_quarantine_reason_to_string : row_quarantine_reason -> string
 
+val decode_reaction_stimulus_reference :
+  Yojson.Safe.t -> (string * stimulus_kind, row_quarantine_reason) result
+(** Decode the exact source identity from a reaction payload using the same
+    typed decoder as [decode_current_row]. This alone does not establish
+    valid delivery evidence; callers must first validate the enclosing row. *)
+
 type current_row_metadata =
   { event_id : string
   ; stimulus_id : string

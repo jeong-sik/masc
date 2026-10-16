@@ -103,7 +103,9 @@ let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
       ~effect_disposition:Tool_result.Proven_pre_effect
       ~code:(request_error_code error)
       ~message:(request_error_message error)
-      (match error with Invalid_draft error -> [ "draft_error", Keeper_composition_draft.error_to_json error ] | _ -> [])
+      (match error with
+       | Invalid_draft error -> [ "draft_error", Keeper_composition_draft.error_to_json error ]
+       | Malformed _ | Invalid_package_id _ | Invalid_evidence _ | Frozen_surface_required -> [])
   | Ok request ->
     let identity =
       [ "source_sha256", `String Digestif.SHA256.(digest_string request.source_text |> to_hex)

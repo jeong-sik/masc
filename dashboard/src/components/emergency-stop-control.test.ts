@@ -1,5 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { act } from 'preact/test-utils'
+import { getByRole, queryByRole } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -65,7 +67,7 @@ describe('EmergencyStopControl', () => {
   it('delegates Emergency Stop to the shared namespace confirmation flow', async () => {
     render(html`<${EmergencyStopControl} />`, container)
     await flushUi()
-    const btn = container.querySelector('[data-testid="emergency-stop-control"]') as HTMLButtonElement
+    const btn = getByRole(container, 'button', { name: 'Emergency Stop' })
     btn.click()
     await flushUi()
     expect(pauseWorkspace).toHaveBeenCalledTimes(1)
@@ -103,20 +105,51 @@ describe('EmergencyStopControl', () => {
     render(html`<${EmergencyStopControl} />`, container)
     await flushUi()
 
-    // Resume is the only button rendered in the paused state.
-    const btn = container.querySelector('button') as HTMLButtonElement
+    const btn = getByRole(container, 'button', { name: 'Resume' })
     btn.click()
     await flushUi()
 
     expect(resumeWorkspace).toHaveBeenCalledTimes(1)
   })
 
-  it('renders nothing while the flow state is unknown', async () => {
-    flowState.value = 'unknown'
+  it.each([
+    ['unknown', 'Pause unavailable'],
+    ['initializing', 'Checking pause'],
+  ] as const)('keeps %s visible and blocks actions until state is known', async (state, label) => {
+    flowState.value = state
     render(html`<${EmergencyStopControl} />`, container)
     await flushUi()
 
-    expect(container.textContent).toBe('')
+    const button = getByRole(container, 'button', { name: label }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    button.click()
+    expect(pauseWorkspace).not.toHaveBeenCalled()
+    expect(resumeWorkspace).not.toHaveBeenCalled()
+    expect(queryByRole(container, 'button', { name: 'Emergency Stop' })).toBeNull()
+    expect(queryByRole(container, 'button', { name: 'Resume' })).toBeNull()
+  })
+
+  it('keeps the control mounted through authority withdrawal and recovery', async () => {
+    flowState.value = 'initializing'
+    await act(async () => { render(html`<${EmergencyStopControl} />`, container) })
+    const control = container.querySelector('[data-testid="emergency-stop-control"]')
+    expect(control).toBeTruthy()
+    for (const state of ['running', 'unknown', 'paused'] as const) {
+      flowState.value = state
+      await act(async () => { render(html`<${EmergencyStopControl} />`, container) })
+      expect(container.querySelector('[data-testid="emergency-stop-control"]')).toBe(control)
+    }
+    getByRole(container, 'button', { name: 'Resume' }).click()
+    expect(resumeWorkspace).toHaveBeenCalledTimes(1)
+    expect(pauseWorkspace).not.toHaveBeenCalled()
+  })
+
+  it.each(['unknown', 'initializing'] as const)('does not expose %s operator controls to a worker', async state => {
+    flowState.value = state
+    shellAuthSummary.value = { effective_role: 'worker' }
+    render(html`<${EmergencyStopControl} />`, container)
+    await flushUi()
+    expect(queryByRole(container, 'button')).toBeNull()
     expect(container.querySelector('[data-testid="emergency-stop-control"]')).toBeNull()
   })
 })

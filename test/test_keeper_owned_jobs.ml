@@ -1371,9 +1371,7 @@ let test_held_continuation_is_not_retried_until_restart () =
   let stub ~on_recovery_held ~context:_ candidate =
     let request_id = Journal.continuation_request_id candidate in
     calls := request_id :: !calls;
-    Option.iter
-      (fun observe -> observe ~request_id ~reason:"hold-proof stub holds every intake")
-      on_recovery_held;
+    on_recovery_held ~request_id ~reason:"hold-proof stub holds every intake";
     Error (Wake.Original_activation_unavailable Masc.Keeper_composition_draft.Draft_not_found) in
   let context =
     Eio.Switch.run @@ fun sw ->

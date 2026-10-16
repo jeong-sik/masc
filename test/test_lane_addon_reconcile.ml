@@ -1358,7 +1358,7 @@ let test_binding_inventory_issues_carry_failure_kind_tags () =
     write replaced "{}";
     Unix.unlink replaced;
     Fs_compat.mkdir_p replaced;
-    let inventory = Store.For_testing.binding_inventory ~root in
+    let inventory = Store.binding_inventory ~root in
     check bool "tagged issues still make the inventory incomplete" false inventory.complete;
     check int "both damaged records are reported" 2 (List.length inventory.issues);
     let detail_of name =

@@ -102,7 +102,6 @@ let describe = function
   | Command.Preset_show_missing_name -> "preset-show-missing-name"
   | Command.Preset_delete name -> "preset-delete:" ^ name
   | Command.Preset_delete_missing_name -> "preset-delete-missing-name"
-  | Command.Listen -> "listen"
   | Command.Unknown word -> "unknown:" ^ word
 
 let test_measurement_command () =

@@ -434,10 +434,13 @@ let test_a_drawn_tab_is_not_a_searchable_document () =
   let mapping text =
     (Markdown.render_document_with_spans ~palette:tagged ~width:80 text).mapping
   in
-  Alcotest.(check bool) "a drawn tab leaves the document incomplete" false
-    (mapping (fence ":4 0.6 3.6") = Markdown.Complete_document);
-  Alcotest.(check bool) "a score shown as source is a complete document" true
-    (mapping (fence ":4 0.6 (3.6") = Markdown.Complete_document)
+  List.iter (fun tag ->
+    let tagged_fence score = "```" ^ tag ^ "\n" ^ score ^ "\n```" in
+    Alcotest.(check bool) "a drawn tab leaves the document incomplete" false
+      (mapping (tagged_fence ":4 0.6 3.6") = Markdown.Complete_document);
+    Alcotest.(check bool) "a score shown as source is a complete document" true
+      (mapping (tagged_fence ":4 0.6 (3.6") = Markdown.Complete_document))
+    [ "alphatex"; "atex"; "ATex rhythm" ]
 
 let () =
   Alcotest.run "tui-markdown"

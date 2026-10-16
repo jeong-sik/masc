@@ -43,7 +43,8 @@ val diff_lexer_with : sub:(string -> segment list) -> string -> segment list
 
 val lexer_of_language : string -> (string -> segment list) option
 (** ["ocaml"|"ml"|"mli"], ["bash"|"sh"|"shell"|"zsh"], ["json"], and the
-    other tags the implementation names. A ["diff"] fence reads whole
+    other tags the implementation names. ["alphatex"] and ["atex"] both
+    select the alphaTex lexer. A ["diff"] fence reads whole
     lines; ["diff:<lang>"] additionally lexes added and removed rows'
     content with [<lang>]'s lexer. An unknown tag answers [None] and the
     caller keeps the plain span — a guess at the grammar is colouring

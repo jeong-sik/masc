@@ -761,7 +761,9 @@ let alphatex_rhythm_word tag =
 
 let is_alphatex_tag tag =
   let words = String.split_on_char ' ' (String.lowercase_ascii (String.trim tag)) in
-  match words with first :: _ -> String.equal first "alphatex" | [] -> false
+  match words with
+  | ("alphatex" | "atex") :: _ -> true
+  | _ :: _ | [] -> false
 
 let fence_header_label tag =
   if is_alphatex_tag tag then

@@ -1190,7 +1190,7 @@ let rec lexer_of_language (tag : string) =
       | "scala" | "php" | "dart" ->
           Some c_like_lexer
       | "python" | "py" -> Some python_lexer
-      | "alphatex" -> Some alphatex_lexer
+      | "alphatex" | "atex" -> Some alphatex_lexer
       | _ -> None)
 
 

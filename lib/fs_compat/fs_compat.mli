@@ -329,8 +329,17 @@ val load_file : string -> string
     atomic replacement; the path need not keep naming that descriptor. *)
 val load_file_opt : string -> string option
 
-(** Save string to file (overwrite). *)
+(** Save string to file (overwrite). A write, flush or close error is raised
+    as [Sys_error], on the Eio branch and the inline branch alike: both run
+    one writer. *)
 val save_file : string -> string -> unit
+
+(** The writer behind {!save_file} and every atomic writer, on an open
+    descriptor: writes, flushes, closes, and raises the first error. The
+    descriptor is closed whether or not it raises. Exposed so a test can hand
+    it a descriptor that cannot be written (opened read-only), which needs no
+    full disk and behaves the same on macOS and Linux. *)
+val write_all_and_close_for_testing : Unix.file_descr -> string -> unit
 
 (** Write content to path via temp file + rename.
     Returns [Error msg] on I/O failure instead of raising. *)

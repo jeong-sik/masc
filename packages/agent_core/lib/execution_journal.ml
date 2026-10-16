@@ -1422,7 +1422,12 @@ let persist_mutation journal (captured_state : journal_state) events =
      | Error error -> Error (Persistence_failure error))
 ;;
 
-let commit_mutation journal (captured_state : journal_state) mutation =
+let commit_mutation
+      ?(after_durable_append = fun () -> ())
+      journal
+      (captured_state : journal_state)
+      mutation
+  =
   let* persistence = persist_mutation journal captured_state mutation.events in
   let publish () =
     with_state_write journal (fun () ->
@@ -1442,7 +1447,9 @@ let commit_mutation journal (captured_state : journal_state) mutation =
        permanently behind its own store: every later direct write stages the
        already-committed sequence again and fails compare_committed. Mirror
        the store's publication region and protect the acquisition too. *)
-    Eio.Cancel.protect publish
+    Eio.Cancel.protect (fun () ->
+      after_durable_append ();
+      publish ())
 ;;
 
 let with_write journal f =
@@ -2101,7 +2108,7 @@ let stage : type value. batch -> value Transaction.t -> (batch * value, error) r
       (stage_abort_run ~causes batch.journal batch.staged_state ~run terminal)
 ;;
 
-let commit_batch_locked batch =
+let commit_batch_locked ?after_durable_append batch =
   if batch_length batch = 0
   then Error Empty_batch
   else (
@@ -2116,6 +2123,7 @@ let commit_batch_locked batch =
     else (
       let events = reverse_cooperatively batch.events_rev in
       commit_mutation
+        ?after_durable_append
         batch.journal
         batch.base_state
         { next_state = batch.staged_state; events; value = events }))
@@ -2131,14 +2139,30 @@ let commit_batch batch =
       commit_batch_locked batch)
 ;;
 
-let commit_durable_batch (writer : durable_writer) (batch : batch) =
+let commit_durable_batch_with_after_append
+      ~after_durable_append
+      (writer : durable_writer)
+      (batch : batch)
+  =
   if writer.journal != batch.journal
   then Error Durable_batch_owner_mismatch
   else
     with_writer_gate writer.journal (fun () ->
       let* () = validate_durable_writer_locked writer in
-      commit_batch_locked batch)
+      commit_batch_locked ~after_durable_append batch)
 ;;
+
+let commit_durable_batch writer batch =
+  commit_durable_batch_with_after_append
+    ~after_durable_append:(fun () -> ())
+    writer
+    batch
+;;
+
+module For_testing = struct
+  let with_state_lock journal f = with_read journal (fun _state -> f ())
+  let commit_durable_batch_after_append = commit_durable_batch_with_after_append
+end
 
 type durable_batch_reconciliation =
   | Applied of Event.t list

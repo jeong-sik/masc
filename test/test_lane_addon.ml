@@ -39,6 +39,8 @@ type fake = {
   principals : Lane_addon_call_context.principal list ref;
   controller : string option ref;
   admissions : Machine_controller_contract.admission option list ref;
+  start_gate : unit Eio.Promise.t * unit Eio.Promise.u;
+  teardown_gate : unit Eio.Promise.t * unit Eio.Promise.u;
   world : Fake.t;
   home : Fake.engine;
 }
@@ -55,11 +57,12 @@ let make_backend ?observe_step () =
   let home = Fake.docker "engine-a" in
   let state = { bindings=Hashtbl.create 4; calls=Hashtbl.create 4; stops=Hashtbl.create 4; modes=Hashtbl.create 4;
                 recovery=ref []; principals=ref []; controller=ref None; admissions=ref [];
+                start_gate = Eio.Promise.create (); teardown_gate = Eio.Promise.create ();
                 world = Fake.create home; home } in
   let proven ~engine work =
     Lane_addon_slot.proven (Fake.port state.world) ~expected:engine ~lift:Fun.id work in
   let backend : Runtime.For_testing.backend = {
-    start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_engine ~is_live_instance:_ ~on_created ->
+    start = (fun ~sw ~state_owner:_ ~instance_id ~(package : Types.package) ~binding ~on_engine ~is_live_instance:_ ~on_created ->
       match (Fake.port state.world).read_engine () with
       | Error (Lifecycle.Unreachable detail) -> Error (Lifecycle.Engine_unreachable detail)
       | Error (Lifecycle.Identity_unreadable detail) -> Error (Lifecycle.Worker_failed detail)
@@ -113,7 +116,13 @@ let make_backend ?observe_step () =
               if not !stopped then (stopped := true; Eio.Promise.resolve release ())))
       } in
       if package.id = "start-error" then Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
-      else begin
+      else if package.id = "start-gated" then begin
+        (* The worker's own teardown outlives the failure it reports, as a real
+           worker's container cleanup does. *)
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.await (fst state.teardown_gate));
+        Eio.Promise.await (fst state.start_gate);
+        Error (Masc.Lane_addon_lifecycle.Worker_failed "startup unavailable")
+      end else begin
         (match on_engine engine with
          | Ok () -> ()
          | Error detail -> fail ("engine persistence: " ^ detail));
@@ -258,6 +267,32 @@ let test_start_and_cleanup_failures_remain_optional () = with_fixture (fun env _
   await_phase clock config retry "failed";
   detach config retry;
   await_phase clock config retry "detached")
+
+(* A Detach that arrives while the start is still running must wait for the
+   cleanup the start's failure leaves behind. The start's state turns Failed
+   while its worker is still being torn down, and the Detach, woken at that
+   moment, used to report that failure as its own and leave the declaration to
+   be attached again. *)
+let test_detach_waits_for_a_start_that_fails_under_it () =
+  with_fixture (fun env sw config dir state ->
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "start-gated" in
+    await clock (fun () -> Hashtbl.mem state.modes id);
+    let outcome = Eio.Fiber.fork_promise ~sw (fun () ->
+      dispatch config Runtime.Detach ["instance_id", `String id]) in
+    Eio.Promise.resolve (snd state.start_gate) ();
+    await_phase clock config id "failed";
+    Eio.Time.sleep clock 0.05;
+    check bool "Detach is still waiting while the failed start winds down" true
+      (Option.is_none (Eio.Promise.peek outcome));
+    Eio.Promise.resolve (snd state.teardown_gate) ();
+    (match Eio.Promise.await_exn outcome with
+     | Ok _ -> ()
+     | Error message -> failf "Detach reported a failure although the cleanup then succeeded: %s" message);
+    (* The run fiber had already ended, so the released entry leaves the list. *)
+    await clock (fun () ->
+      List.for_all (fun value -> text "instance_id" value <> id)
+        (inspect config |> member "instances" |> Yojson.Safe.Util.to_list)))
 
 exception Cleanup_cut_short
 
@@ -1928,5 +1963,6 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;
   test_case "startup and cleanup failures stay local" `Quick test_start_and_cleanup_failures_remain_optional;
   test_case "a cleanup that is cut short can run again" `Quick test_a_cleanup_that_is_cut_short_can_run_again;
+  test_case "Detach waits for a start that fails under it" `Quick test_detach_waits_for_a_start_that_fails_under_it;
   test_case "evidence remains optional and durable across detach" `Quick test_evidence_is_optional_retained_and_delivery_is_only_acceptance;
 ]]

@@ -210,7 +210,7 @@ submission controls keep their serial admission contracts.
 Existing-file Edit-only Inline Skills can also prepare producer-owned resource
 claims. Shared source reads may overlap while target writes and write/read
 conflicts keep their order. See [file resource ordering](keeper-file-resource-ordering.md)
-for the physical directory contract and supported execution scope.
+for the physical entry and ancestry contract and supported execution scope.
 
 Nested composition references, effectful resource-aware
 jobs and fixed-condition latency measurements remain tracked in

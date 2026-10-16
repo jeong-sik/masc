@@ -27,6 +27,8 @@ type t =
   ; leaf : string
   ; source : directory
   ; source_leaf : string
+  ; target_object_scope : Scope.t
+  ; source_object_scope : Scope.t
   ; released : bool Atomic.t
   ; release_resources : unit -> unit
   }
@@ -54,6 +56,32 @@ let scope_identity resource =
   |> Result.map_error (function
     | Scope.Empty_namespace -> "filesystem resource namespace is empty"
     | Scope.Empty_key -> "filesystem resource identity is empty")
+;;
+
+(* Patch atomically replaces one lexical directory entry. Parent identity plus
+   leaf survives an earlier replacement and unifies directory aliases. Object
+   claims below additionally retain the backend's inode-based mutation lease
+   and unify filesystem spelling aliases without guessed case folding. *)
+let entry_identity ~parent leaf =
+  Scope.identity ~namespace:"filesystem-entry"
+    ~key:(Printf.sprintf "%Ld:%Ld:%s" parent.device parent.inode leaf)
+  |> Result.map_error (function
+    | Scope.Empty_namespace -> "filesystem entry namespace is empty"
+    | Scope.Empty_key -> "filesystem entry identity is empty")
+;;
+
+let object_scope ~access directory stat =
+  let resource = identity stat in
+  let* occupied = Scope.identity ~namespace:"filesystem-object"
+      ~key:(Printf.sprintf "%Ld:%Ld" resource.device resource.inode)
+    |> Result.map_error (function
+      | Scope.Empty_namespace -> "filesystem object namespace is empty"
+      | Scope.Empty_key -> "filesystem object identity is empty") in
+  let* ancestry = List.fold_right (fun (_, resource) accumulated ->
+    let* tail = accumulated in
+    let* resource = scope_identity resource in
+    Ok (resource :: tail)) directory.native_chain (Ok []) in
+  Ok (Scope.create ~access ~occupied ~ancestors:ancestry)
 ;;
 
 let rec split_leaf = function
@@ -93,7 +121,7 @@ let prepare ~sw ~config ~meta ~args ~confined =
       | [] -> parent
       | component :: rest -> descend (open_dir Eio.Path.(parent / component)) rest
     in
-    let inspect_directory ~access root components =
+    let inspect_directory ~access ~leaf root components =
       let capability = descend root components in
       match Eio.Path.native capability with
       | None -> Ok None
@@ -106,15 +134,15 @@ let prepare ~sw ~config ~meta ~args ~confined =
         let* actual = stat_directory capability in
         (match native_chain with
          | [] -> Error "prepared Edit has no native directory identity"
-         | (_, observed) :: rest ->
+         | (_, observed) :: _ ->
            if not (equal_identity actual observed) then
              Error "prepared Edit native parent differs from its pinned capability"
            else
-             let* occupied = scope_identity actual in
+             let* occupied = entry_identity ~parent:actual leaf in
              let* ancestry = List.fold_right (fun (_, resource) accumulated ->
                let* tail = accumulated in
                let* resource = scope_identity resource in
-               Ok (resource :: tail)) rest (Ok []) in
+               Ok (resource :: tail)) native_chain (Ok []) in
              Ok (Some { capability; components; identity = actual; native_chain
                       ; scope = Scope.create ~access ~occupied ~ancestors:ancestry }))
     in
@@ -123,15 +151,20 @@ let prepare ~sw ~config ~meta ~args ~confined =
       let relative = Keeper_alerting_path.confined_root_relative_path confined in
       let root = if String.equal relative "." then anchor else open_dir Eio.Path.(anchor / relative) in
       let* () = Keeper_alerting_path.verify_confined_root_capability confined root in
-      let* target = inspect_directory ~access:Scope.Write root parent_components in
-      let* source = inspect_directory ~access:Scope.Read root source_components in
+      let* target = inspect_directory ~access:Scope.Write ~leaf root parent_components in
+      let* source = inspect_directory ~access:Scope.Read ~leaf:source_leaf root source_components in
       match target, source with
       | Some target, Some source ->
-        let stat = Eio.Path.stat ~follow:true Eio.Path.(source.capability / source_leaf) in
-        if stat.kind <> `Regular_file then Ok None
-        else Ok (Some { owner = owner ~config ~meta; args; root
-                      ; root_path = Keeper_alerting_path.confined_root confined
-                      ; target; leaf; source; source_leaf; released; release_resources = release_partial })
+        let source_stat = Eio.Path.stat ~follow:true Eio.Path.(source.capability / source_leaf) in
+        if source_stat.kind <> `Regular_file then Ok None
+        else
+          let target_stat = Eio.Path.stat ~follow:false Eio.Path.(target.capability / leaf) in
+          let* target_object_scope = object_scope ~access:Scope.Write target target_stat in
+          let* source_object_scope = object_scope ~access:Scope.Read source source_stat in
+          Ok (Some { owner = owner ~config ~meta; args; root
+                   ; root_path = Keeper_alerting_path.confined_root confined
+                   ; target; leaf; source; source_leaf; target_object_scope; source_object_scope
+                   ; released; release_resources = release_partial })
       | None, _ | _, None -> Ok None
     in
     match
@@ -152,7 +185,10 @@ let prepare ~sw ~config ~meta ~args ~confined =
       Printexc.raise_with_backtrace error backtrace
 ;;
 
-let scopes prepared = [prepared.target.scope; prepared.source.scope]
+let scopes prepared =
+  [prepared.target.scope; prepared.source.scope
+  ; prepared.target_object_scope; prepared.source_object_scope]
+;;
 let release prepared = prepared.release_resources ()
 
 let with_parents ~config ~meta ~args ~confined prepared continue =

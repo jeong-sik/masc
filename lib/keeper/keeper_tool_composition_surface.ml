@@ -2731,7 +2731,7 @@ let make_tools_with_authority
           | None -> Ok None
           | Some prepared_edits ->
             match Keeper_prepared_inline_edit.scopes prepared_edits with
-            | [] -> invalid_arg "prepared Inline Edit plan has no directory footprint"
+            | [] -> invalid_arg "prepared Inline Edit plan has no file footprint"
             | scope :: additional_scopes ->
               let prepared = make_tool ~prepared_edits () in
               Ok (Some (Agent_core.Tool.scoped_call ~scope ~additional_scopes prepared.handler))

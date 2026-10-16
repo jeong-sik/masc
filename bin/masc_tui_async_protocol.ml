@@ -14,13 +14,14 @@ type http_read_requests = {
   hrr_approval: Masc_tui_operator_projection.Listing_order.ticket option;
   hrr_asks: Snapshot_read.request option;
   hrr_roster: Snapshot_read.request option;
+  hrr_surfaces: Surface_read_order.request;
 }
 
 type http_initial_identity_read = {
   hir_ticket: Http_refresh_order.ticket;
   hir_authority: workspace_authority;
   hir_identity: Masc.Tui_decode.server_identity;
-  hir_needs_roster: bool;
+  hir_needs: surface_needs;
   hir_acknowledge: http_read_requests option Eio.Promise.u;
 }
 
@@ -37,6 +38,7 @@ type early_approval_observation = {
    be sent as [Http_scoped_refresh_done] or applied as a verified bundle. *)
 type 'identity http_scoped_surface_readings = {
   http_refresh_ticket: Http_refresh_order.ticket;
+  http_surface_request: Surface_read_order.request;
   http_scoped_server_identity: 'identity;
   http_transport: (Masc.Tui_decode.transport_health, string) result option;
   http_approvals: approval_observation option;
@@ -223,6 +225,7 @@ type async_msg =
       (Masc.Tui_decode_asks.ask_followup, string) result
   | Http_keeper_roster_loaded of early_keeper_roster_observation
   | Http_progress_observed of http_progress_observation
+  | Http_surface_read_completed of Surface_read_order.request * async_msg
   | Http_initial_identity_read of http_initial_identity_read
   | Http_refresh_done of http_refresh_outcome
   | Http_refresh_failed of
@@ -826,7 +829,7 @@ let rec workspace_message_is_read = function
   | Voice_silent _
   | Voice_discarded _
   | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _
+  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _
   | Http_refresh_failed _
   (* Not a reply: the refresh that recovered the identity tells the loop to
      read the confirm queue again. It belongs to that refresh, which is
@@ -933,7 +936,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
     | Voice_config_loaded (_, _, _) | Voice_level _ | Voice_transcribed _
-    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _
+    | Voice_silent _ | Voice_discarded _ | Voice_failed _ | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _
     | Http_refresh_failed (_, _, _) | Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _) | Surface_composer_released
     | Http_scoped_refresh_done (_, _, _)
@@ -1070,7 +1073,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
   | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_level _
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
+  | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
   | Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _)
   | Surface_composer_released | Http_scoped_refresh_done (_, _, _)
   | Http_scoped_refresh_failed (_, _, _, _, _) | Board_post_refresh_done (_, _)

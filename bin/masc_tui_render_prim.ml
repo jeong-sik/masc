@@ -1443,6 +1443,14 @@ let connection_status_badge (status : Masc_tui_types.connection_status) =
    that has to survive a full row of key hints, because the surfaces it
    explains are the ones drawing nothing. *)
 let refresh_progress_badge (state : state) =
+  let foreground =
+    if state.workspace_identity <> Workspace_identity_match then ""
+    else match Surface_read_order.pending
+      ~needs:(surface_needs_of_surface state.view) state.http_surface_reads with
+      | [] -> ""
+      | source :: rest -> " · reading " ^ Surface_read_order.source_name source
+          ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))
+  in
   match state.http_refresh_progress with
   | Some (authority, progress) when authority = state.workspace_authority ->
       let _, _, failed, interrupted = Http_refresh_progress.counts progress in
@@ -1450,14 +1458,15 @@ let refresh_progress_badge (state : state) =
         (if failed = 0 then "" else Printf.sprintf " · %d read failed" failed)
         ^ (if interrupted = 0 then "" else Printf.sprintf " · %d interrupted" interrupted) in
       (match progress.Http_refresh_progress.phase with
-       | Http_refresh_progress.Finished _ -> failures
+       | Http_refresh_progress.Finished _ -> failures ^ foreground
        | Http_refresh_progress.In_flight ->
+           if foreground <> "" then failures ^ foreground else
            let pending = match Http_refresh_progress.pending_sources progress with
              | [] -> "finishing refresh"
              | source :: rest -> "reading " ^ Http_refresh_progress.source_name source
                  ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
            failures ^ " · " ^ pending)
-  | Some _ | None -> ""
+  | Some _ | None -> foreground
 
 let connection_badge (state : state) =
   let connection = connection_status_badge state.connection_status in

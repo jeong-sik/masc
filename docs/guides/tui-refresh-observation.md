@@ -73,6 +73,61 @@ their narrower meaning. The synchronous fallback has the total refresh clock but
 does not emit individual reader events. Scoped refreshes and independent side
 reads are outside this ledger.
 
+## Navigate while an unrelated full refresh is still running
+
+A ready, admitted workspace can start its existing navigation-delta read while
+the full refresh is collecting unrelated data. One scoped collector still runs
+at a time. Navigation during booting or unread authority keeps its existing wait;
+this change introduces neither a timer nor another collector for each row.
+
+| Boundary | Before | Source implementation |
+|---|---|---|
+| Navigate from a pending full refresh to Board or Work | Wait for the full pass before starting the new surface's request | Start the navigation delta under the running pass's current interval ticket |
+| Both passes requested the same dataset | Global dispatch order could discard the whole older bundle | Each dataset has an opaque producer owner; only the latest owner may apply that dataset |
+| Unrelated datasets in the original full pass | Retained with that full pass | Still apply independently; navigation does not retire the full interval |
+| Failed or refused collection settles | Collector-specific completion | One mailbox item delivers the result and releases only its own dataset owners |
+| Current surface is waiting | A coarse full-refresh reader label | Name its pending dataset first; retained full-reader failures remain visible |
+
+Questions, approvals and roster retain their existing independent source
+requests. The other datasets use `Surface_read_order`; Board listing and hearth
+census share one owner. Full and scoped collection keep their existing initial
+and final identity checks. Scoped results still require their dispatch workspace
+authority. Cold probe admission replaces the full pass's retired dataset request,
+and workspace withdrawal invalidates dataset owners. A late result or cleanup
+cannot take a successor's slot. Query inputs are captured before either worker
+yields. The synchronous path retains terminal application and performs no
+mailbox acknowledgement.
+
+`tui_surface_read_started` identifies navigation request id, monotonic start and
+whether a full pass was running. `tui_surface_read_applied` records the same
+dataset request id and start clock, monotonic application clock, and each applied
+source's received/failed outcome. A source whose owner was retired is excluded.
+These are UI state application observations, not physical request counts,
+successful operator actions or first paint. Empty source lists grant no usable
+screen claim. Existing full refresh clocks continue to describe the entire pass.
+
+The baseline for this unit is
+`b8b0f860f988ec99db3ff1c13bac96083b5b8655`. No native candidate comparison or
+performance result has been measured for this change. For a matched Before/After:
+
+1. Fix binary/backend identities, workspace, viewport and navigation inputs.
+   Keep an unrelated full reader pending and navigate to Board or Work.
+2. Record the actual destination GET start, its outcome and UI application. The
+   candidate must be able to start and apply it before the unrelated reader is
+   released; merely issuing a new global refresh does not satisfy this.
+3. For overlapping sources, keep a Usage full read pending, visit Board and then
+   Config. Deliver the newer accounts response before the original full one and
+   confirm the old response cannot replace it. Keep unrelated Usage results.
+4. Retain failed reads, workspace replacement, cancellation, superseded results
+   and unfinished attempts. Inspect actual frames separately at normal and
+   narrow widths. No screen wording, layout or row-order assertion test is added.
+
+The authored source scenarios cover overlapping owners, independent completion,
+duplicate completion and withdrawal. They have not been executed for this head.
+Waiting behind another scoped collector, per-reader admission within that
+collector, actual native responsiveness and the rest of the preparation and
+composition objective remain separate work.
+
 ## Admit the first matching workspace before the collection joins
 
 On an initial unread workspace, the existing initial health response is now

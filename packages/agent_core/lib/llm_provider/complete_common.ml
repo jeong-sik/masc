@@ -822,20 +822,34 @@ let serialize_final_http_request_unadmitted
     (serialize_http_request ~stream ~config ~messages ~tools)
 ;;
 
-let with_request_tools ~body run =
-  Http_request_observer.with_request_tools ~body ~inventory:(fun () ->
+let with_request_metadata ~body run =
+  Http_request_observer.with_request_metadata ~body ~metadata:(fun () ->
+    let open Http_request_observer in
+    let unavailable = {tool_inventory=Tools_unavailable;components=Components_unavailable} in
     match Yojson.Safe.from_string body with
-    | `Assoc fields ->
-      (match List.filter_map (fun (name,value) ->
+    | `Assoc fields as json ->
+      let tool_inventory = match List.filter_map (fun (name,value) ->
         if String.equal name "tools" then Some value else None) fields with
-       | [] -> Http_request_observer.No_tools_member
+       | [] -> No_tools_member
        | [`List entries as tools] ->
          let json = Yojson.Safe.to_string tools in
          Tools_member {wire_entries=List.length entries;json_bytes=String.length json;
            json_sha256=Digestif.SHA256.(digest_string json |> to_hex)}
-       | [_] | _ :: _ :: _ -> Tools_unavailable)
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Tools_unavailable
-    | exception Yojson.Json_error _ -> Tools_unavailable) run
+       | [_] | _ :: _ :: _ -> Tools_unavailable in
+      let components =
+        if not (String.equal (Yojson.Safe.to_string json) body) then Components_unavailable
+        else
+          let members = List.map (fun (name,value) ->
+            let json = Yojson.Safe.to_string value in
+            { name;
+              wire_bytes=String.length (Yojson.Safe.to_string (`Assoc [name,value])) - 2;
+              value_json_bytes=String.length json;
+              value_json_sha256=Digestif.SHA256.(digest_string json |> to_hex) }) fields in
+          let framing_bytes = match members with [] -> 2 | _ :: _ -> List.length members + 1 in
+          Json_object_members {members;framing_bytes} in
+      {tool_inventory;components}
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> unavailable
+    | exception Yojson.Json_error _ -> unavailable) run
 ;;
 
 let observe_pre_dispatch_serialization ?request_wire_observer observation =

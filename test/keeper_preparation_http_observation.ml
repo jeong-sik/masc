@@ -25,7 +25,7 @@ let tools_json = function
       "json_bytes",`Int json_bytes;"json_sha256",`String json_sha256]
 
 let phase_json = function
-  | Observe.Client_entered {mode;body_bytes;body_sha256;tool_inventory} ->
+  | Observe.Client_entered {mode;body_bytes;body_sha256;tool_inventory;_} ->
     [ "phase",`String "client_entered"
     ; "mode",`String (match mode with Synchronous -> "synchronous" | Streaming -> "streaming")
     ; "body_bytes",`Int body_bytes; "body_sha256",`String body_sha256

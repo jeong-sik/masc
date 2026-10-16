@@ -1182,21 +1182,22 @@ let test_post_observation_matches_actual_native_calls () =
     (match List.rev_map (fun (event : Observe.event) -> event.phase) !refusal_events with
      | [Client_entered _;Dispatch_entered;Response_headers_received {status=400};Client_finished Returned_error] -> ()
      | _ -> Alcotest.fail "refusal was not retained as actual headers plus failed client return");
-    let rejected_inventory = ref None in
+    let rejected_metadata = ref None in
     let failing = Observe.create (fun (event : Observe.event) -> match event.phase with
-      | Client_entered {tool_inventory;_} -> rejected_inventory := Some tool_inventory; Error ()
+      | Client_entered {tool_inventory;request_components;_} ->
+          rejected_metadata := Some (tool_inventory,request_components); Error ()
       | Response_headers_received _ -> failwith "synthetic observer store unavailable"
       | Dispatch_entered | Client_finished _ -> Ok ()) in
     (match Observe.with_observer failing (fun () ->
-        Observe.with_request_tools ~body:"observer-failure"
-          ~inventory:(fun () -> failwith "synthetic Tool metadata unavailable") (fun () ->
+        Observe.with_request_metadata ~body:"observer-failure"
+          ~metadata:(fun () -> failwith "synthetic request metadata unavailable") (fun () ->
         Http_client.with_post_stream ~net:env#net ~url ~headers:[] ~body:"observer-failure"
           ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader) ())) with
      | Ok response -> Alcotest.(check string) "observer failure did not rewrite response" "complete" response
      | Error _ -> Alcotest.fail "diagnostic observer failure blocked HTTP");
     Alcotest.(check int) "both unavailable deliveries are explicit" 2 (Observe.delivery_failure_count failing);
-    (match !rejected_inventory with Some (Some Tools_unavailable) -> ()
-     | _ -> Alcotest.fail "failed Tool metadata was converted to an empty inventory");
+    (match !rejected_metadata with Some (Some Tools_unavailable,Some Components_unavailable) -> ()
+     | _ -> Alcotest.fail "failed request metadata was converted to an empty observation");
     Eio.Switch.fail sw Exit
   with Exit -> ()
 ;;
@@ -1213,12 +1214,13 @@ let test_post_observers_are_owned_across_concurrent_fibers () =
         ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader) () with
       | Ok _ -> () | Error _ -> Alcotest.fail "concurrent observed POST failed" in
     Observe.with_observer outer (fun () ->
-      Observe.with_request_tools ~body:"outer-first" ~inventory:(fun () -> No_tools_member) (fun () ->
+      Observe.with_request_metadata ~body:"outer-first"
+        ~metadata:(fun () -> {tool_inventory=No_tools_member;components=Components_unavailable}) (fun () ->
       Eio.Fiber.both (fun () -> post "outer-first")
         (fun () -> Observe.with_observer inner (fun () -> post "inner")));
       post "outer-second");
-    Observe.with_request_tools ~body:"unbound"
-      ~inventory:(fun () -> Alcotest.fail "unbound HTTP evaluated Tool metadata") (fun () -> post "unbound");
+    Observe.with_request_metadata ~body:"unbound"
+      ~metadata:(fun () -> Alcotest.fail "unbound HTTP evaluated request metadata") (fun () -> post "unbound");
     let hashes events = List.filter_map (fun (event : Observe.event) -> match event.phase with
       | Client_entered {body_sha256;_} -> Some body_sha256
       | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) (List.rev !events) in
@@ -1232,6 +1234,12 @@ let test_post_observers_are_owned_across_concurrent_fibers () =
     (match inventories outer_events,inventories inner_events with
      | [Some No_tools_member;None],[None] -> ()
      | _ -> Alcotest.fail "Tool metadata escaped its exact body or request scope");
+    let components events = List.filter_map (fun (event : Observe.event) -> match event.phase with
+      | Client_entered {request_components;_} -> Some request_components
+      | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) (List.rev !events) in
+    (match components outer_events,components inner_events with
+     | [Some Components_unavailable;None],[None] -> ()
+     | _ -> Alcotest.fail "component metadata escaped its exact body or request scope");
     Eio.Switch.fail sw Exit
   with Exit -> ()
 ;;

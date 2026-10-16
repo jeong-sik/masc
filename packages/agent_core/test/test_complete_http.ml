@@ -5,11 +5,26 @@
 open Alcotest
 open Llm_provider
 
-let check_observed_tools ~body events =
+let check_observed_request_metadata ~body events =
   let entered = List.filter_map (fun (event : Http_request_observer.event) -> match event.phase with
-    | Client_entered {tool_inventory;_} -> Some tool_inventory
+    | Client_entered {tool_inventory;request_components;_} -> Some (tool_inventory,request_components)
     | Dispatch_entered | Response_headers_received _ | Client_finished _ -> None) !events in
-  let actual = match entered with [Some tools] -> tools | _ -> fail "one observed native request inventory required" in
+  let actual, components = match entered with
+    | [(Some tools,Some components)] -> tools,components
+    | _ -> fail "one observed native request metadata record required" in
+  (match Yojson.Safe.from_string body, components with
+   | `Assoc fields, Json_object_members {members;framing_bytes} ->
+       check (list string) "peer field occurrence order" (List.map fst fields)
+         (List.map (fun (member : Http_request_observer.request_member) -> member.name) members);
+       check int "component bytes account for the exact peer body" (String.length body)
+         (framing_bytes + List.fold_left (fun bytes (member : Http_request_observer.request_member) ->
+            bytes + member.wire_bytes) 0 members);
+       List.iter2 (fun (_,value) (member : Http_request_observer.request_member) ->
+         let json = Yojson.Safe.to_string value in
+         check int "actual peer value bytes" (String.length json) member.value_json_bytes;
+         check string "actual peer value digest" Digestif.SHA256.(digest_string json |> to_hex)
+           member.value_json_sha256) fields members
+   | _ -> fail "component observation was unavailable for an actual compact JSON request");
   match Yojson.Safe.Util.member "tools" (Yojson.Safe.from_string body),actual with
   | `Null, No_tools_member -> ()
   | (`List entries as tools), Tools_member {wire_entries;json_bytes;json_sha256} ->
@@ -436,7 +451,7 @@ let test_complete_request_wire_observer_sees_exact_sync_body () =
      | Ok _ -> ());
     (match !captured_body, !observed with
      | Some body, [ observation ] ->
-       check_observed_tools ~body http_events;
+       check_observed_request_metadata ~body http_events;
        check
          (option string)
          "capture id"
@@ -1983,7 +1998,7 @@ let test_complete_request_wire_observer_sees_exact_stream_body () =
      | Error _ -> fail "request observation changed the streaming provider result");
     (match !captured_body, !observed with
      | Some body, [ observation ] ->
-       check_observed_tools ~body http_events;
+       check_observed_request_metadata ~body http_events;
        check
          (option string)
          "capture id"
@@ -4438,7 +4453,7 @@ let test_vertex_native_transport () =
         check (option string) "native publisher method path"
           (Some ("/v1/projects/fixture/locations/global/publishers/google/models/fixture-gemini:"
             ^ if stream then "streamGenerateContent" else "generateContent")) !seen_path;
-        check_observed_tools ~body:(Option.get !seen_body) http_events;
+        check_observed_request_metadata ~body:(Option.get !seen_body) http_events;
         let body = Option.get !seen_body |> Yojson.Safe.from_string in
         check bool "native contents, not chat-completions messages" true
           (Yojson.Safe.Util.member "contents" body <> `Null

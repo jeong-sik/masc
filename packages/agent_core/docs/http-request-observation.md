@@ -37,6 +37,28 @@ wire entry even when it contains several function declarations. Schema content
 never crosses the observer API. Both sync and streaming completion paths bind
 their final serialized body; transport-only calls make no Tool inventory claim.
 
+`with_request_metadata` also carries structural attribution of the exact JSON
+body. For each top-level member, in original occurrence order, the event retains
+its name, encoded key/colon/value byte count, value byte count and value SHA256.
+It never exposes the value. The object's braces and commas have a separate
+`framing_bytes` count; these bytes plus every member's `wire_bytes` account for
+the full submitted body. Duplicate names remain separate occurrences.
+
+The serializer produces this decomposition only when compact Yojson re-encoding
+matches the final body byte-for-byte. Non-object, unparseable or non-matching
+bodies retain `Components_unavailable`, not an estimated decomposition. A missing
+exact-body binding remains unobserved. Ordinary metadata producer failure leaves
+both components and Tool inventory unavailable and does not rewrite HTTP results.
+No metadata producer runs for an unbound observer.
+
+This allows a consumer to compare the actual `messages`, `input`, `contents`,
+`system`, `tools` and configuration members without guessing from checkpoint
+size. These are protocol field names, not cross-provider semantic categories:
+OpenAI system messages may be inside `messages`, while other codecs have a
+separate system field. Equal digests across calls prove unchanged value encoding;
+they do not prove that a field is redundant or may be omitted. The current path
+does not change prompts, context reuse, request construction or retry policy.
+
 The interface contains no URL, headers, credentials, prompt, Tool arguments or
 response content. A submitted body is not a count of peer-acknowledged network
 bytes. A returned `Ok` is a client result, not a provider/parser/business-success

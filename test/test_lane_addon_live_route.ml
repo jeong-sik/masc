@@ -329,10 +329,10 @@ let test_dos_counter_moves_on_every_run () =
     (* A program that faults at its first instruction: the boot and every
        step after it run zero instructions, so [steps] stays at 0, and the
        count still rises on each attempt. *)
-    check bool "the faulting load reports the fault" true
+    check bool "the faulting load installs the machine and reports the fault" true
       (match dos_load ~dir fault_com with
-       | Error (Dos_lane.Guest_fault _) -> true
-       | Ok _ | Error _ -> false);
+       | Ok (_, Dos_lane.Boot_faulted _) -> true
+       | Ok (_, Dos_lane.Booted _) | Error _ -> false);
     let c = dos_rises "a load after an eject (the count is never reused)" c in
     let steps = dos_steps () in
     check bool "the faulting step reports the fault" true

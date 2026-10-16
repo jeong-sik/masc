@@ -1321,17 +1321,40 @@ let test_a_pass_to_an_impossible_name_is_refused () =
 ;;
 
 (* lea ax, ax: an instruction the emulator does not implement. The core
-   raises instead of misbehaving; the lane turns that into an error the
-   caller can read, and keeps the stopped machine loaded. *)
-let test_an_unimplemented_instruction_is_an_error () =
+   raises instead of misbehaving. A fault while the program boots is still a
+   load: the machine is installed and the loader holds the controller, so the
+   answer is a result whose [boot] says it faulted, not an error that reads as
+   "nothing was loaded". *)
+let boot_status result =
+  match member "boot" (Tool_result.data result) with
+  | Some boot -> boot
+  | None -> fail (Printf.sprintf "no boot in %s" (Tool_result.message result))
+;;
+
+let test_a_fault_while_booting_is_a_load () =
   with_workspace (fun base_path ->
     install_program ~base_path "fault.com" "\x8d\xc0";
     let loaded = load ~base_path "fault.com" in
-    check bool "the load reports the fault" false (is_completed loaded);
-    check bool "and says what happened" true
-      (contains "does not implement" (Tool_result.message loaded));
-    check bool "the stopped machine stays loaded" true
+    check bool "the load completes" true (is_completed loaded);
+    check bool "and its boot says it faulted" true
+      (member "status" (boot_status loaded) = Some (`String "faulted"));
+    check bool "with the core's reason" true
+      (match member "fault" (boot_status loaded) with
+       | Some (`String reason) -> reason <> ""
+       | _ -> false);
+    check (option string) "the loader holds the controller" (Some "dos-test") (controller loaded);
+    check bool "no autosave was written for a machine that faults again" true
+      (member "autosave" (Tool_result.data loaded) = None);
+    check bool "the stopped machine is loaded" true
       (is_completed (dispatch ~base_path "masc_dos_screen" [])))
+;;
+
+let test_a_clean_boot_says_so () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let loaded = load ~base_path "hello.com" in
+    check bool "the boot status is booted" true
+      (member "status" (boot_status loaded) = Some (`String "booted")))
 ;;
 
 (* The instructions before a fault still ran and may have repainted the
@@ -1343,7 +1366,8 @@ let test_a_fault_keeps_the_steps_that_ran () =
     install_program ~base_path "paint-then-fault.com"
       "\xb8\x00\xb8\x8e\xc0\x26\xc6\x06\x00\x00\x58\x8d\xc0";
     let loaded = load ~base_path "paint-then-fault.com" in
-    check bool "the load reports the fault" false (is_completed loaded);
+    check bool "the load completes" true (is_completed loaded);
+    check int "the answer counts the completed instructions" 3 (int_field "steps" loaded);
     match Dos_lane.screen () with
     | Error e -> fail (Dos_lane.error_to_string e)
     | Ok observation ->
@@ -2330,8 +2354,9 @@ let () =
             test_a_holder_departs_with_its_credential
         ; test_case "a pass is refused when the credentials do not list" `Quick
             test_a_pass_is_refused_when_the_credentials_do_not_list
-        ; test_case "unimplemented instruction" `Quick
-            test_an_unimplemented_instruction_is_an_error
+        ; test_case "a fault while booting is a load" `Quick
+            test_a_fault_while_booting_is_a_load
+        ; test_case "a clean boot says so" `Quick test_a_clean_boot_says_so
         ; test_case "a fault keeps the steps that ran" `Quick
             test_a_fault_keeps_the_steps_that_ran
         ; test_case "unknown key" `Quick test_unknown_key_is_refused

@@ -278,6 +278,26 @@ let of_lane_run ?(extra = []) ~base_path ~tool_name ~start_time
   | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e)
 ;;
 
+(* A load answers with the machine it installed. A guest fault during boot is
+   still a load: the machine exists and the caller holds the controller, so
+   [boot] says how far it got instead of an error that reads as "nothing was
+   loaded". *)
+let boot_fields = function
+  | Dos_lane.Booted _ -> [ ("boot", `Assoc [ ("status", `String "booted") ]) ]
+  | Dos_lane.Boot_faulted fault ->
+    [ ("boot", `Assoc [ ("status", `String "faulted"); ("fault", `String fault) ]) ]
+;;
+
+let of_lane_load ?(extra = []) ~base_path ~tool_name ~start_time
+    (result : (Dos_lane.observation * Dos_lane.boot, Dos_lane.error) result) =
+  match result with
+  | Ok (o, (Dos_lane.Booted ran as boot)) ->
+    of_lane_run ~base_path ~tool_name ~start_time ~extra:(boot_fields boot @ extra) (Ok (o, ran))
+  | Ok (o, (Dos_lane.Boot_faulted _ as boot)) ->
+    of_lane ~base_path ~tool_name ~start_time ~extra:(boot_fields boot @ extra) (Ok o)
+  | Error e -> of_lane ~base_path ~tool_name ~start_time (Error e)
+;;
+
 (* What a program wrote on earlier machines, one directory per inventory
    name. Keyed by the inventory name, not the executable: two games may both
    boot a MAIN.EXE. *)
@@ -704,7 +724,7 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
                   (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)))
        in
        after_announcing
-         (of_lane_run ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
+         (of_lane_load ~base_path ~extra:[ core_field ] ~tool_name ~start_time loaded))
 ;;
 
 (* masc_dos_meta — the linked core identity is a read-only lane fact. It does

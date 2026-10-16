@@ -151,6 +151,13 @@ type ran = {
   autosave : autosave;
 }
 
+(* How a load's boot ended. The machine is installed and the loader holds the
+   controller either way, so a guest fault during boot is a result, not an
+   error: an error tells the caller nothing was loaded. *)
+type boot =
+  | Booted of ran
+  | Boot_faulted of string
+
 (* How far the machine runs between two screen readings. Measured on ZZT: the
    repaint that follows a key finishes inside one of these. *)
 let settle_chunk = 50_000
@@ -974,7 +981,13 @@ let commit_load ~who prepared ~announce =
           let ran = advance st ~budget:boot_steps ~until_ready:true in
           ran_then_kept st ~who ran) in
         announce ();
-        booted)
+        (match booted with
+         | Ok (observation, ran) -> Ok (observation, Booted ran)
+         | Error (Guest_fault message) -> Ok (observe st, Boot_faulted message)
+         | Error
+             (( Activity_disabled | Activity_unobserved | No_machine | Invalid_request _
+              | Unreadable _ | Held_by _ | Unsaveable _ | Checkpoint_refused _ | Other_program _
+              | Autosave_exists _ ) as error) -> Error error))
 ;;
 
 let load ~who ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave ~program_name ~program_bytes ~files ~announce =

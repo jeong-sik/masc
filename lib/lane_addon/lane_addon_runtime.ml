@@ -112,7 +112,7 @@ type entry = {
   mutable state : Lifecycle.state; mutable engine : Lifecycle.engine option;
   mutable seq : int; mutable output : output;
   mutable connection : owned_connection option; mutable stopping : bool;
-  mutable cleanup_running : bool; mutable wake : unit Eio.Promise.t;
+  mutable cleanup_running : bool; changed : Eio.Condition.t; mutable wake : unit Eio.Promise.t;
   mutable resolver : unit Eio.Promise.u; mutable pending : observation_request;
   refresh_interest : Lane_addon_sources.refresh_interest;
   source_access : Lane_addon_sources.access;
@@ -494,6 +494,21 @@ let failed m e cause =
     if not e.stopping then
       e.state <- fail_state e (Lifecycle.Persistence_failed (Lifecycle.failure_to_string cause ^ "; binding persistence: " ^ error))
     else Log.Misc.error "Lane stopped binding persistence: %s" error
+(* A detached worker is settled once a cleanup attempt has ended, whichever
+   way. Its fiber may still be winding down or waiting for a retry; what the
+   declaration depends on is the verdict on the container. Detach waits for
+   this before it touches the declaration. *)
+let settled (e : entry) =
+  not e.cleanup_running
+  && (match e.state with
+      | Lifecycle.Detached _ | Lifecycle.Failed _ -> true
+      | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ -> false)
+let rec await_settled (e : entry) =
+  if settled e then
+    (match e.state with
+     | Lifecycle.Failed failed -> Error (Lifecycle.failed_to_string failed)
+     | Lifecycle.Detached _ | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ -> Ok ())
+  else (Eio.Condition.await_no_mutex e.changed; await_settled e)
 let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
   try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -556,6 +571,7 @@ let stop_entry ~sw ~backend m e =
             e.state <- fail_state e (Lifecycle.Persistence_failed ("cleanup state persistence: " ^ message)));
           wake_dependents m e;
           e.cleanup_running <- false;
+          Eio.Condition.broadcast e.changed;
           release_detached m e)
 let namespace e seq output =
   let prefix value = e.instance_id ^ "/" ^ string_of_int seq ^ "/" ^ value in
@@ -837,9 +853,11 @@ let run ~sw backend m e =
     | () -> e.running <- false; e.cancel_worker <- None;
         Eio.Cancel.protect (fun () -> finalize_actions m e);
         if e.stopping && not (is_detached e.state) then stop_entry ~sw ~backend m e;
+        Eio.Condition.broadcast e.changed;
         release_detached m e
     | exception exn -> e.running <- false; e.cancel_worker <- None;
         Eio.Cancel.protect (fun () -> finalize_actions m e);
+        Eio.Condition.broadcast e.changed;
         release_detached m e; raise exn)
 let backend ~store () = match !override with
   | Some backend -> backend
@@ -1201,18 +1219,35 @@ let fork_recovery ~sw m ~id ~on_failure work =
   | Eio.Cancel.Cancelled _ as exn ->
       Hashtbl.replace m.recovering id (on_failure (Printexc.to_string exn)); raise exn
   | exn -> Hashtbl.replace m.recovering id (on_failure (Printexc.to_string exn)); raise exn
-let historical_detach ~sw m fields =
+(* [wait] runs the work in the caller's fiber, so the caller can read how the
+   cleanup ended. *)
+let run_recovery ~sw ~wait m ~id ~on_failure work =
+  if wait then
+    (try work () with exn ->
+       Hashtbl.replace m.recovering id (on_failure (Printexc.to_string exn)); raise exn)
+  else fork_recovery ~sw m ~id ~on_failure work
+
+(* What a retained record's cleanup came to by the time the call returned. *)
+type detach_outcome =
+  | Already_detached
+  | In_progress  (* another cleanup of this record is still running *)
+  | Started      (* forked; its result is published later *)
+  | Finished of Lifecycle.state
+
+let historical_detach ~sw ?(wait = false) m fields =
   let* id = text fields "instance_id" in
   let* previous = lifecycle_of_fields fields in
   let writer = Option.value ~default:default_cleanup_writer (Eio.Fiber.get cleanup_writer_key) in
   match Hashtbl.find_opt m.recovering id with
-  | Some (Cleaning _ | Publishing_cleanup _) -> Ok (replace_state fields (Lifecycle.Detaching (failed_in fields)))
+  | Some (Cleaning _ | Publishing_cleanup _) ->
+      Ok (replace_state fields (Lifecycle.Detaching (failed_in fields)), In_progress)
   | Some (Cleanup_commit_failed (publication,_)) ->
       Hashtbl.replace m.recovering id (Publishing_cleanup publication);
-      fork_recovery ~sw m ~id ~on_failure:(fun detail -> Cleanup_commit_failed (publication,detail))
+      run_recovery ~sw ~wait m ~id ~on_failure:(fun detail -> Cleanup_commit_failed (publication,detail))
         (fun () -> publish_cleanup m ~id ~writer publication);
-      Ok (replace_state fields (Lifecycle.Detaching (failed_in fields)))
-  | None when is_detached previous -> Ok (`Assoc fields)
+      Ok (replace_state fields (Lifecycle.Detaching (failed_in fields)),
+          if wait then Finished publication.terminal_state else Started)
+  | None when is_detached previous -> Ok (`Assoc fields, Already_detached)
   | None | Some (Cleanup_request_failed _ | Cleanup_unconfirmed _) ->
     let* container_id = match List.assoc_opt "container_id" fields with
       | Some `Null -> Ok None
@@ -1252,7 +1287,8 @@ let historical_detach ~sw m fields =
       | Ok () -> Ok ()
       | Error message -> Hashtbl.replace m.recovering id (Cleanup_request_failed (fields,message)); Error message in
     let backend = backend ~store:m.store () in
-    fork_recovery ~sw m ~id ~on_failure:(fun detail -> Cleanup_unconfirmed (fields,detail)) (fun () ->
+    let finished = ref None in
+    run_recovery ~sw ~wait m ~id ~on_failure:(fun detail -> Cleanup_unconfirmed (fields,detail)) (fun () ->
       (* A record that names no engine never issued a create, so there is
          nothing to ask any engine; otherwise only the recorded engine can
          confirm the release. *)
@@ -1267,6 +1303,7 @@ let historical_detach ~sw m fields =
             |> Result.map (fun () -> Lifecycle.Released { engine; container_id }) in
       let state = match result with
         | Ok release -> Lifecycle.Detached release | Error failure -> failed_after fields failure in
+      finished := Some state;
       let terminal =
         if is_detached state && never_started ~seq ~has_container:(Option.is_some container_id)
         then None else Some (replace_state fields state) in
@@ -1290,7 +1327,8 @@ let historical_detach ~sw m fields =
        | exn ->
            Hashtbl.replace m.recovering id (Cleanup_commit_failed (publication,Printexc.to_string exn));
            raise exn));
-    Ok detaching
+    Ok (detaching, if not wait then Started else
+          match !finished with Some state -> Finished state | None -> In_progress)
 let configuration_json m ~access =
   match m.configuration_status with
   | None -> `Null
@@ -1590,7 +1628,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
   let promise, resolver = Eio.Promise.create () in
   let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
     state = Lifecycle.Attached; engine = None; seq = 0; output = {rows=[];coverage=[]}; connection = None;
-    stopping = false; cleanup_running = false; wake = promise; resolver; pending = Idle;
+    stopping = false; cleanup_running = false; changed = Eio.Condition.create (); wake = promise; resolver; pending = Idle;
     refresh_interest; source_access; visibility; last_committed_sources=None; unchanged_source_refreshes=0;
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
@@ -1752,20 +1790,29 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
 
 (* Explicit removal edits the desired configuration. Otherwise the next
    reconciliation would legitimately create the just-detached observer again. *)
-let remove_configuration_file ~directory (owner : configuration_owner) =
+(* Reads the directory and says which file removes this installation's
+   declaration, if any. Detach asks this before it stops anything, so a
+   declaration that changed or became invalid since it was applied is refused
+   while the worker still runs. *)
+let removable_declaration ~directory (owner : configuration_owner) =
   let snapshot = Lane_addon_config.load ~directory in
   if not snapshot.complete then Error "Lane configuration directory could not be read; removal was not applied"
   else
     let matches = List.filter (fun (d : Lane_addon_config.declaration) -> d.id = owner.id) snapshot.declarations in
     let conflicts = List.filter (fun (i : Lane_addon_config.issue) -> i.id = Some owner.id) snapshot.issues in
-    let path = match matches, conflicts with
-      | [d], [] when d.revision = owner.revision -> Ok (Some d.source_path)
-      | [_], [] -> Error "Lane configuration changed; refresh before removing its current installation"
-      | [], [] when List.mem owner.source_path snapshot.paths ->
-          Error "Lane declaration is invalid; correct or remove the declaration before detaching"
-      | [], [] -> Ok None
-      | _ -> Error "Lane configuration identity is ambiguous; remove its duplicate declarations" in
-    let* path = path in
+    match matches, conflicts with
+    | [d], [] when d.revision = owner.revision -> Ok (Some d.source_path)
+    | [_], [] -> Error "Lane configuration changed; refresh before removing its current installation"
+    | [], [] when List.mem owner.source_path snapshot.paths ->
+        Error "Lane declaration is invalid; correct or remove the declaration before detaching"
+    | [], [] -> Ok None
+    | _ -> Error "Lane configuration identity is ambiguous; remove its duplicate declarations"
+
+let check_configuration_removable ~directory owner =
+  Result.map (fun (_ : string option) -> ()) (removable_declaration ~directory owner)
+
+let remove_configuration_file ~directory (owner : configuration_owner) =
+    let* path = removable_declaration ~directory owner in
     match path with
     | None -> Ok ()
     | Some path ->
@@ -2226,25 +2273,45 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
       (* Each owned transition is recoverable from its binding record.
          Cancellation releases the serializer so a later pass can reconcile. *)
       Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+        let directory = configuration_directory config in
+        (* The declaration is what keeps the worker wanted. It is checked before
+           anything stops, so a change made since it was applied is refused with
+           the worker still running, and it is removed only after the cleanup is
+           confirmed. A cleanup that fails leaves the declaration in place and
+           returns the failure. *)
+        let check owner = runtime_result (offload (fun () -> check_configuration_removable ~directory owner)) in
+        let remove owner = runtime_result (offload (fun () -> remove_configuration_file ~directory owner)) in
         match Hashtbl.find_opt m.entries id with
         | None ->
             let* fields = persisted_binding m id in
             let* state = runtime_result (lifecycle_of_fields fields) in
             let* owner = runtime_result (configuration_of_fields fields) in
-            let* () = match state, owner with
+            let removing = match state, owner with
               | (Lifecycle.Detached _, _) | (Lifecycle.Attached, None) | (Lifecycle.Observing, None)
-              | (Lifecycle.Failed _, None) | (Lifecycle.Detaching _, None) -> Ok ()
+              | (Lifecycle.Failed _, None) | (Lifecycle.Detaching _, None) -> None
               | (Lifecycle.Attached, Some owner) | (Lifecycle.Observing, Some owner)
               | (Lifecycle.Failed _, Some owner) | (Lifecycle.Detaching _, Some owner) ->
                   let another_owner = List.exists (fun e -> match e.configuration with
                     | Some current -> current.id = owner.id | None -> false) (entries m) in
-                  if another_owner then Ok () else
-                    runtime_result (offload (fun () -> remove_configuration_file ~directory:(configuration_directory config) owner)) in
-            runtime_result (historical_detach ~sw m fields)
+                  if another_owner then None else Some owner in
+            let* () = match removing with None -> Ok () | Some owner -> check owner in
+            let* detaching, outcome = runtime_result (historical_detach ~sw ~wait:true m fields) in
+            let remove_declaration () = match removing with None -> Ok () | Some owner -> remove owner in
+            (match outcome with
+             | Already_detached | Finished (Lifecycle.Detached _) ->
+                 let* () = remove_declaration () in Ok detaching
+             | Finished (Lifecycle.Failed failed) ->
+                 Error (Runtime_failed (Lifecycle.failed_to_string failed))
+             | Finished (Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _) | Started ->
+                 Error (Runtime_failed "cleanup did not finish; the declaration was kept")
+             | In_progress ->
+                 Error (Request_rejected "cleanup of this instance is already in progress; repeat Detach once it ends"))
         | Some e ->
-            let* () = match e.configuration with None -> Ok () | Some owner ->
-              runtime_result (offload (fun () -> remove_configuration_file ~directory:(configuration_directory config) owner)) in
-            runtime_result (detach_entry ~sw m e)))
+            let* () = match e.configuration with None -> Ok () | Some owner -> check owner in
+            let* _ = runtime_result (detach_entry ~sw m e) in
+            let* () = runtime_result (await_settled e) in
+            let* () = match e.configuration with None -> Ok () | Some owner -> remove owner in
+            Ok (entry_json e)))
 
 let retain_configured_document_owner m (d : Lane_addon_config.declaration) visibility =
   match visibility with

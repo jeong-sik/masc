@@ -164,6 +164,9 @@ let attach config dir mode =
     "run_id", `String "world"; "binding", `Assoc ["sources", `List []]])
   |> text "instance_id"
 let detach config id = ignore (unwrap (dispatch config Runtime.Detach ["instance_id", `String id]))
+let detach_refused config id = match dispatch config Runtime.Detach ["instance_id", `String id] with
+  | Error _ -> ()
+  | Ok _ -> fail "a Detach whose cleanup is refused must report the failure"
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 let await_phase clock config id expected = await clock (fun () -> phase (instance config id) = expected)
@@ -248,7 +251,7 @@ let test_start_and_cleanup_failures_remain_optional () = with_fixture (fun env _
     (dispatch config Runtime.Observe ["instance_id", `String startup_error]));
   let retry = attach config dir "stop-retry" in
   await clock (fun () -> int "observation_seq" (instance config retry) = 1);
-  detach config retry;
+  detach_refused config retry;
   await_phase clock config retry "failed";
   detach config retry;
   await_phase clock config retry "detached")
@@ -357,7 +360,7 @@ let test_retained_record_is_released_only_by_its_recorded_engine () =
         :: ("lifecycle", Lifecycle.state_to_json Lifecycle.Attached)
         :: List.remove_assoc "lifecycle" (List.remove_assoc "phase" fields))));
     Fake.point_at state.world (Fake.docker "engine-b");
-    detach config id;
+    detach_refused config id;
     await_phase clock config id "failed";
     check string "another engine's silence is a mismatch, not a release" "engine_mismatch"
       (instance config id |> member "lifecycle" |> member "failed" |> member "cause" |> text "kind");
@@ -579,7 +582,7 @@ let test_capture_cannot_rewrite_detach_failure () =
     await clock (fun () -> int "observation_seq" (instance config id)=1);
     Runtime.notify_activity ~config ~activity:Lane_addon_sources.Tool_completed;
     Eio.Promise.await entered;
-    detach config id;
+    detach_refused config id;
     await_phase clock config id "failed";
     Eio.Promise.resolve release ();
     Eio.Promise.await returned;

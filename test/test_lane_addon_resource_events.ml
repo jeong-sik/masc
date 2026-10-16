@@ -121,6 +121,9 @@ let attach config dir mode =
     "run_id", `String "world"; "binding", `Assoc ["sources", `List []]])
   |> text "instance_id"
 let detach config id = ignore (unwrap (dispatch config Runtime.Detach ["instance_id", `String id]))
+let detach_refused config id = match dispatch config Runtime.Detach ["instance_id", `String id] with
+  | Error _ -> ()
+  | Ok _ -> fail "a Detach whose cleanup is refused must report the failure"
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001; loop ()) in loop ()
 let await_phase clock config id expected = await clock (fun () -> phase (instance config id) = expected)
@@ -199,7 +202,7 @@ let test_stop_refusal_publishes_incomplete_then_one_confirmation () =
     let clock = Eio.Stdenv.clock env in
     let id = attach config dir "stop-retry" in
     await clock (fun () -> int "observation_seq" (instance config id) = 1);
-    detach config id;
+    detach_refused config id;
     await_phase clock config id "failed";
     detach config id;
     await_phase clock config id "detached";
@@ -218,7 +221,7 @@ let test_detach_without_identity_publishes_unverified_cleanup () =
        entry reports itself stopped before detaching. *)
     await clock (fun () ->
       Result.is_error (dispatch config Runtime.Observe ["instance_id", `String id]));
-    detach config id;
+    detach_refused config id;
     await_phase clock config id "failed";
     check string "unverified phase recorded" "failed" (phase (instance config id));
     let events = resource_events sub in

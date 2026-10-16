@@ -1666,6 +1666,65 @@ let test_a_foreign_holder_makes_the_attempt_wait_for_the_holder_to_change () =
     check bool "the new incarnation holds the freed slot" true (Fake.holds state.home (Store.digest id));
     detach clock config id)
 
+(* Removing the declaration is what stops the observer from being applied
+   again. If it were removed before the worker's container was confirmed gone,
+   a cleanup that failed would leave a running container that nothing desires
+   and nothing retries. The declaration goes only after the release. *)
+let test_detach_keeps_the_declaration_when_cleanup_fails () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    state.cleanup_available := false;
+    let refused = Runtime.dispatch ~config ~operation:Runtime.Detach (`Assoc ["instance_id", `String id]) in
+    (match refused with
+     | Error message ->
+         check bool "the caller is told the cleanup failed" true
+           (String_util.contains_substring message "cleanup incomplete")
+     | Ok _ -> fail "a Detach whose cleanup failed must not report success");
+    check bool "the declaration is still there" true (Sys.file_exists path);
+    check string "the worker is failed with its cleanup cause" "cleanup_unconfirmed"
+      (failed_record (instance config id) |> member "cause" |> text "kind");
+    state.cleanup_available := true;
+    detach clock config id;
+    check bool "once the container is confirmed gone the declaration is removed" false (Sys.file_exists path);
+    check bool "the container is released" false (Fake.holds state.home (Store.digest id)))
+
+let test_detach_of_a_retained_record_keeps_the_declaration_when_cleanup_fails () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    write path (declaration ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    let captured = instance config id in
+    (* A host restart: the record says running and no live worker exists. The
+       container the first worker made is still on its engine. *)
+    write path (declaration ~enabled:false ~id:"observer" ~manifest ());
+    ignore (reconcile config directory);
+    await_detached clock config id;
+    ignore (Fake.add state.home ~id:(Store.digest id) ~name:(container_name id)
+      ~labels:["masc.lane.instance", id] ());
+    Runtime.For_testing.reset ();
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    unwrap (Store.save_binding store ~instance_id:id (still_attached captured));
+    write path (declaration ~id:"observer" ~manifest ());
+    state.cleanup_available := false;
+    check bool "a failed historical cleanup is reported" true
+      (Result.is_error (Runtime.dispatch ~config ~operation:Runtime.Detach (`Assoc ["instance_id", `String id])));
+    check bool "the declaration is still there" true (Sys.file_exists path);
+    check bool "the container is still there" true (Fake.holds state.home (Store.digest id));
+    state.cleanup_available := true;
+    ignore (dispatch config Runtime.Detach ["instance_id", `String id]);
+    check bool "after the confirmed release the declaration is removed" false (Sys.file_exists path);
+    check bool "the container is released" false (Fake.holds state.home (Store.digest id)))
+
 let test_binding_inventory_issues_carry_failure_kind_tags () =
   with_fixture (fun _ _ config _directory _packages _state ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1790,4 +1849,8 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_a_dead_predecessor_holding_the_slot_does_not_block_a_new_instance;
   test_case "a foreign holder makes the attempt wait for the holder to change" `Quick
     test_a_foreign_holder_makes_the_attempt_wait_for_the_holder_to_change;
+  test_case "Detach keeps the declaration when cleanup fails" `Quick
+    test_detach_keeps_the_declaration_when_cleanup_fails;
+  test_case "Detach of a retained record keeps the declaration when cleanup fails" `Quick
+    test_detach_of_a_retained_record_keeps_the_declaration_when_cleanup_fails;
 ]]

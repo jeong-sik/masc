@@ -34,3 +34,18 @@ schemas can increase the first request's bytes while eliminating a separate
 loader exchange. Several Tool loads may already share one exchange, so a lower
 Tool-call count alone does not establish fewer model POSTs or lower latency.
 Synthetic protocol evidence and real-model cohort measurements remain distinct.
+
+The native preparation driver writes `<receipt>.stages.jsonl` and emits
+`PREPARATION_STAGE` metadata before and after workspace/snapshot/owner setup,
+Keeper registration, Task claim, bundle construction, original job start/result
+collection, source admission and the actual Keeper cycle. Records carry epoch and
+process-local monotonic clocks; job indices identify fixture occurrences. A
+missing return record identifies an unfinished stage without inventing a timeout,
+retry or completion. Cancellation preserves that unfinished evidence and propagates.
+No model text, credential or request body is added to this journal.
+
+These observer writes are synchronous evidence I/O. Matched timing comparisons
+must use the same observer on both candidates and report its presence. The
+synthetic scenario checks the first actual POST's Tool names and the physical
+Tool-call ledger to establish that the Task's declared result Tool needed no
+loader exchange; the configured real-model cohort still requires measurement.

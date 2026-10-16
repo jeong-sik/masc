@@ -35,6 +35,7 @@ val execute_keeper_tool_descriptor_for_capability_surface_with_outcome
   -> ctx_work:working_context
   -> ?source_context:Keeper_tool_call_log_context.turn_context
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
+  -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
@@ -65,6 +66,7 @@ val execute_keeper_tool_call_for_capability_surface_with_outcome
   -> ctx_work:working_context
   -> ?source_context:Keeper_tool_call_log_context.turn_context
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
+  -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
@@ -93,6 +95,7 @@ module Compatibility : sig
     -> ctx_work:working_context
     -> ?source_context:Keeper_tool_call_log_context.turn_context
     -> ?owned_job_replay:Keeper_owned_job_invocation.replay
+    -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
     -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?sw:Eio.Switch.t
@@ -120,6 +123,7 @@ module Compatibility : sig
     -> ctx_work:working_context
     -> ?source_context:Keeper_tool_call_log_context.turn_context
     -> ?owned_job_replay:Keeper_owned_job_invocation.replay
+    -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
     -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?sw:Eio.Switch.t

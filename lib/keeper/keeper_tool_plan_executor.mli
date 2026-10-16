@@ -2,7 +2,7 @@
 
     The ordinary schedule follows explicit dependency layers and descriptor
     [Serial], [Concurrent], and [Terminal] declarations. Exact filesystem-owned
-    Inline Edit preparations additionally supply resource ordering at runtime;
+    Inline file preparations additionally supply resource ordering at runtime;
     display groups and tool names never do. Every node result retains the
     canonical {!Tool_result.disposition}. *)
 
@@ -187,7 +187,7 @@ val execute
     replayed launch leaf is the one exception: its dispatch re-derives the
     invocation identity recorded on the durable journal occurrence, never the
     resuming turn's ambient context, so the owned-job invocation binding
-    returns the same job. [prepared_edits] binds an exact instantiated Inline
+    returns the same job. [prepared_files] binds an exact instantiated Inline
     plan to its original node inputs and opaque directory capabilities. A
     mismatched node/input is refused before the handler; it never falls back
     under a claim for different resources. Its consumer retains authorization.
@@ -207,7 +207,7 @@ val execute_keeper
   -> ctx_snapshot:Keeper_types.working_context
   -> keeper_turn_id:(unit -> int option)
   -> ?source_context:Keeper_tool_call_log_context.turn_context
-  -> ?prepared_edits:Keeper_prepared_inline_edit.t
+  -> ?prepared_files:Keeper_prepared_inline_files.t
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
@@ -240,7 +240,7 @@ module Compatibility : sig
     -> ctx_snapshot:Keeper_types.working_context
     -> keeper_turn_id:(unit -> int option)
     -> ?source_context:Keeper_tool_call_log_context.turn_context
-    -> ?prepared_edits:Keeper_prepared_inline_edit.t
+    -> ?prepared_files:Keeper_prepared_inline_files.t
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?continuation_channel:Keeper_continuation_channel.t

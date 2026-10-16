@@ -34,7 +34,9 @@
     source context retain [keeper_turn_id] attribution without inventing a
     source Task. [owned_job_replay] carries only the original job source to
     the owned-job producer; physical metadata and ordinary call attribution
-    remain those of the current invocation. [prepared_edit] is the opaque
+    remain those of the current invocation. [prepared_read] selects the owned
+    capability Read consumer; it requires the exact canonical Read descriptor.
+    [prepared_edit] is the opaque
     existing-file preparation for this canonical Edit descriptor and exact
     translated input. Its consumer still checks current confinement and owner;
     it supplies no authorization or replay evidence. Omission uses ordinary
@@ -53,6 +55,7 @@ val make_keeper_tool_handler
   -> keeper_turn_id:(unit -> int option)
   -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
+  -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -91,6 +94,7 @@ val make_keeper_tool_handler_from_meta
   -> keeper_turn_id:(unit -> int option)
   -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
+  -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

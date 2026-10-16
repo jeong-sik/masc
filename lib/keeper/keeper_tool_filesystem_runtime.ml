@@ -13,7 +13,8 @@ type fs_write_mode = Keeper_tool_write_mode.t =
   | Append
   | Patch
 
-type prepared_edit = Keeper_prepared_edit.t
+type prepared_edit = Keeper_prepared_file.t
+type prepared_read = Keeper_prepared_file.t
 
 type edit_preparation_error =
   | Edit_path_refused of Keeper_alerting_path.path_refusal
@@ -88,7 +89,7 @@ let string_opt_nonempty name json =
    wrong one" — and by the same argument a scan that failed is a third answer
    and says so. *)
 let available_cwd_hint ~config ~meta =
-  let root = keeper_playground_root ~config ~meta in
+  let root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   match Keeper_playground_checkouts.discover ~root with
   | Ok (Keeper_playground_checkouts.Complete []) ->
     " no repository is materialized for this keeper yet, so the workspace root \
@@ -125,7 +126,7 @@ let available_cwd_hint ~config ~meta =
 
 let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd =
   match cwd with
-  | None -> Ok (keeper_default_read_root ~config ~meta)
+  | None -> Ok (Keeper_sandbox.host_root_abs_of_meta ~config meta)
   | Some raw_cwd ->
     (* File tools keep the logical projection for cwd: a keeper-visible
        relative cwd ("repos/<repo>") composed with a relative file_path is
@@ -249,7 +250,77 @@ let read_sandbox_raw_prefix ?turn_sandbox_factory ~config ~meta ~path ?cwd ~max_
     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) ()
 ;;
 
-let handle_read_file_with_outcome
+let prepared_read_confined ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args ~target =
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Endpoint_owned -> Ok None
+  | Shared_mount ->
+    let root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+    if not (Keeper_alerting_path.is_within_root_norm
+              ~root_norm:(Keeper_alerting_path.normalize_path_for_check_stripped root) target)
+    then Ok None
+    else
+      let* _ = read_line_window_of_args args in
+      Keeper_alerting_path.resolve_keeper_confined_path ~config ~sandbox_roots:[root]
+        ~endpoint:Keeper_alerting_path.Follow_referent ~raw_path:target
+      |> Result.map Option.some
+      |> Result.map_error (fun rejection ->
+        (Keeper_alerting_path.refusal_of_rejection rejection).message)
+;;
+
+let prepare_read ~sw ~config ~meta ~args =
+  let path = Safe_ops.json_string ~default:"" "path" args in
+  let* target = resolve_read_file_target ~config ~meta ~args ~raw_path:path
+    |> Result.map_error (fun (Read_path_error refusal) -> refusal.message) in
+  let* () = check_read_file_target ~config ~meta target
+    |> Result.map_error (fun (refusal : Keeper_alerting_path.path_refusal) -> refusal.message) in
+  let* confined = prepared_read_confined ~config ~meta ~args ~target:(read_file_target_path target) in
+  match confined with
+  | None -> Ok None
+  | Some confined ->
+    Keeper_prepared_file.prepare ~sw ~operation:Read ~config ~meta ~args ~confined
+;;
+
+let prepared_read_scopes = Keeper_prepared_file.scopes
+let release_prepared_read = Keeper_prepared_file.release
+
+let read_prepared_window ~config ~meta ~args ~target ~window ~max_bytes prepared =
+  let* confined = prepared_read_confined ~config ~meta ~args ~target in
+  match confined with
+  | None -> Error "prepared Read no longer belongs to the Keeper's shared-mount tree"
+  | Some confined ->
+    Keeper_prepared_file.with_parents ~operation:Read ~config ~meta ~args ~confined prepared
+      (fun ~parent_dir:_ ~parent_components:_ ~leaf:_ ~source_parent_dir ~source_leaf ->
+        Eio.Switch.run @@ fun sw ->
+        let file = Eio.Path.open_in ~sw Eio.Path.(source_parent_dir / source_leaf) in
+        if (Eio.File.stat file).kind <> `Regular_file then Error "prepared Read source is not a regular file"
+        else
+          let reader = Eio.Buf_read.of_flow ~max_size:read_file_max_max_bytes file in
+          let rec skip_lines remaining =
+            if remaining > 0 then begin
+              Eio.Buf_read.skip_while (fun c -> c <> '\n') reader;
+              match Eio.Buf_read.peek_char reader with
+              | None -> ()
+              | Some _ -> Eio.Buf_read.char '\n' reader; skip_lines (remaining - 1)
+            end
+          in
+          skip_lines (window.Keeper_tool_read_window.start_line - 1);
+          let output = Buffer.create (min max_bytes (Eio.Buf_read.buffered_bytes reader)) in
+          let rec take remaining =
+            if remaining > 0 then
+              match Eio.Buf_read.peek_char reader with
+              | None -> ()
+              | Some _ ->
+                let count = min remaining (Eio.Buf_read.buffered_bytes reader) in
+                Buffer.add_string output (Cstruct.to_string ~len:count (Eio.Buf_read.peek reader));
+                Eio.Buf_read.consume reader count;
+                take (remaining - count)
+          in
+          take max_bytes;
+          Ok (Buffer.contents output))
+;;
+
+let handle_read_file_with_preparation
+      ~prepared_read
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -324,7 +395,9 @@ let handle_read_file_with_outcome
                ; "content", `String slice.window_content
                ]
                @ optional_fields
-               @ [ "via", `String (Keeper_sandbox_read_runner.backend_via ~meta) ]))
+               @ [ "via", `String (match prepared_read with
+                    | None -> Keeper_sandbox_read_runner.backend_via ~meta
+                    | Some _ -> "owned_capability") ]))
     in
     let refused failure_class message =
       Read_refused
@@ -348,10 +421,19 @@ let handle_read_file_with_outcome
       | Error (refusal : Keeper_alerting_path.path_refusal) ->
         refused refusal.failure_class refusal.message
       | Ok () ->
-        (* RFC-0006 Phase B-2: every sandbox profile reads through its
-           backend read runner, so the backend's mount restrictions are the
-           load-bearing isolation. The host containment check above remains
-           as defense in depth. *)
+        (match prepared_read with
+         | Some prepared ->
+           (match read_prepared_window ~config ~meta ~args ~target ~window ~max_bytes prepared with
+            | Ok body -> payload_of_slice ~scan_complete:(String.length body < max_bytes) body
+            | Error detail -> refused Tool_result.Policy_rejection detail)
+         | None ->
+        (* Unprepared reads retain the sandbox backend and its mount
+           restrictions. Prepared shared-mount reads above instead retain
+           capabilities confined to this Keeper's own physical tree. *)
+        (* Default-cwd initialization belongs to ordinary execution, rather
+           than resolution that a resource preparation may also perform. *)
+        if Option.is_none cwd then
+          ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
         let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read () in
         (* The backend streams from [window.start_line], so the byte bound is
            the window's and every line of the file is reachable. *)
@@ -372,12 +454,25 @@ let handle_read_file_with_outcome
          | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
            refused Tool_result.Runtime_failure detail
          | Ok body ->
-           payload_of_slice ~scan_complete:(String.length body < max_bytes) body)
+           payload_of_slice ~scan_complete:(String.length body < max_bytes) body))
     in
     (match run_read () with
      | Read_succeeded json -> Keeper_tool_execution.success_data json
      | Read_refused { failure_class; payload } ->
        Keeper_tool_execution.failure ~class_:failure_class payload)
+;;
+
+let handle_read_file_with_outcome ~turn_sandbox_factory ~config ~meta ~args =
+  handle_read_file_with_preparation ~prepared_read:None ~turn_sandbox_factory ~config ~meta ~args
+;;
+
+let handle_prepared_read_file_with_outcome ~prepared_read ~config ~meta ~args =
+  match handle_read_file_with_preparation ~prepared_read:(Some prepared_read)
+      ~turn_sandbox_factory:None ~config ~meta ~args with
+  | result -> result
+  | exception (Eio.Io _ as error) ->
+    Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
+      (error_json (Printexc.to_string error))
 ;;
 
 (** Resolve a [path] when the tool caller omits [cwd]. The verifier
@@ -3050,7 +3145,7 @@ let handle_file_write_content_with_outcome
                 let with_parents consume =
                   match prepared_edit with
                   | Some prepared ->
-                    Keeper_prepared_edit.with_parents ~config ~meta ~args ~confined prepared consume
+                    Keeper_prepared_file.with_parents ~operation:Edit ~config ~meta ~args ~confined prepared consume
                   | None ->
                     with_confined_write_parent confined
                     @@ fun ~root_dir ~parent_dir ~parent_components ~missing_parents ~leaf ->
@@ -3179,8 +3274,8 @@ module For_testing = struct
   ;;
 end
 
-let prepared_edit_scopes = Keeper_prepared_edit.scopes
-let release_prepared_edit = Keeper_prepared_edit.release
+let prepared_edit_scopes = Keeper_prepared_file.scopes
+let release_prepared_edit = Keeper_prepared_file.release
 
 let edit_preparation_error_to_execution = function
   | Edit_path_refused refusal ->
@@ -3199,7 +3294,7 @@ let prepare_edit ~sw ~config ~(meta : Keeper_meta_contract.keeper_meta) ~args =
      | Error (refusal : Keeper_alerting_path.path_refusal) ->
        Error (Edit_path_refused refusal)
      | Ok confined ->
-       Keeper_prepared_edit.prepare ~sw ~config ~meta ~args ~confined
+       Keeper_prepared_file.prepare ~sw ~operation:Edit ~config ~meta ~args ~confined
        |> Result.map_error (fun message -> Edit_resource_unavailable message))
   | Endpoint_owned, _ | Shared_mount, (Ok (Overwrite | Append) | Error _) -> Ok None
 ;;

@@ -1,10 +1,12 @@
 module Plan = Keeper_tool_plan
 module FS = Keeper_tool_filesystem_runtime
 
+type operation = Read of FS.prepared_read | Edit of FS.prepared_edit
+
 type leaf =
   { node : Plan.node
   ; input : Yojson.Safe.t
-  ; edit : FS.prepared_edit
+  ; operation : operation
   }
 
 type t =
@@ -14,14 +16,29 @@ type t =
   }
 
 let eligible plan =
-  Plan.nodes plan <> [] && List.for_all (fun (node : Plan.node) ->
+  let nodes = Plan.nodes plan in
+  let is_edit (node : Plan.node) =
+    Option.fold ~none:false ~some:(fun descriptor ->
+      descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file)
+      (Plan.descriptor plan node.id)
+  in
+  List.exists is_edit nodes && List.for_all (fun (node : Plan.node) ->
     match Plan.descriptor plan node.id with
     | None -> false
     | Some descriptor ->
-      descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
-      && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial)
-    (Plan.nodes plan)
+      (descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
+       && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial)
+      || (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file
+          && descriptor.execution = Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent)) nodes
 ;;
+
+let release = function
+  | Read read -> FS.release_prepared_read read
+  | Edit edit -> FS.release_prepared_edit edit
+
+let operation_scopes = function
+  | Read read -> FS.prepared_read_scopes read
+  | Edit edit -> FS.prepared_edit_scopes edit
 
 let source_matches (meta : Keeper_meta_contract.keeper_meta)
     (source : Keeper_tool_call_log_context.turn_context) =
@@ -40,7 +57,7 @@ let prepare ~sw ~config ~meta ~source plan =
     | Error _ -> None
     | Ok inputs ->
       let acquired = ref [] in
-      let release () = List.iter FS.release_prepared_edit !acquired in
+      let release_acquired () = List.iter release !acquired in
       let rec collect leaves = function
         | [] -> Some {plan; source; leaves = List.rev leaves}
         | (node : Plan.node) :: rest ->
@@ -51,25 +68,34 @@ let prepare ~sw ~config ~meta ~source plan =
                 ~tool_name:node.tool_name descriptor ~input with
              | Error _ -> None
              | Ok args ->
-               match FS.prepare_edit ~sw ~config ~meta ~args with
+               let prepared =
+                 if descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file then
+                   FS.prepare_read ~sw ~config ~meta ~args
+                   |> Result.map (Option.map (fun read -> Read read))
+                 else FS.prepare_edit ~sw ~config ~meta ~args
+                   |> Result.map (Option.map (fun edit -> Edit edit))
+                   |> Result.map_error (fun error ->
+                     (FS.edit_preparation_error_to_execution error).raw_output)
+               in
+               match prepared with
                | Error _ | Ok None -> None
-               | Ok (Some edit) ->
-                 acquired := edit :: !acquired;
-                 collect ({node; input; edit} :: leaves) rest)
+               | Ok (Some operation) ->
+                 acquired := operation :: !acquired;
+                 collect ({node; input; operation} :: leaves) rest)
           | None, _ | _, None | _, Some (_, Plan.Checked_when_node_runs) -> None
       in
       (match collect [] (Plan.nodes plan) with
        | Some _ as prepared -> prepared
-       | None -> release (); None
+       | None -> release_acquired (); None
        | exception error ->
          let backtrace = Printexc.get_raw_backtrace () in
-         release ();
+         release_acquired ();
          Printexc.raise_with_backtrace error backtrace)
 ;;
 
 let plan t = t.plan
 let source t = t.source
-let scopes t = List.concat_map (fun leaf -> FS.prepared_edit_scopes leaf.edit) t.leaves
+let scopes t = List.concat_map (fun leaf -> operation_scopes leaf.operation) t.leaves
 
 let resource_dependencies ~plan t =
   if not (plan == t.plan) then None
@@ -78,13 +104,13 @@ let resource_dependencies ~plan t =
       List.map (fun node ->
         match List.find_opt (fun leaf -> leaf.node == node) t.leaves with
         | Some leaf -> leaf
-        | None -> invalid_arg "prepared Inline Edit lost its original node") nodes) in
+        | None -> invalid_arg "prepared Inline file lost its original node") nodes) in
     let rec collect earlier = function
       | [] -> []
       | leaf :: rest ->
-        let scopes = FS.prepared_edit_scopes leaf.edit in
+        let scopes = operation_scopes leaf.operation in
         let predecessors = List.filter_map (fun prior ->
-          let prior_scopes = FS.prepared_edit_scopes prior.edit in
+          let prior_scopes = operation_scopes prior.operation in
           if List.exists (fun scope ->
             List.exists (Agent_core.Tool_contract.Resource_scope.conflicts scope) prior_scopes) scopes
           then Some prior.node.Plan.id else None) earlier in
@@ -94,9 +120,9 @@ let resource_dependencies ~plan t =
 ;;
 
 let for_node ~plan ~node ~input t =
-  if not (plan == t.plan) then Error "prepared Inline Edit belongs to a different plan"
+  if not (plan == t.plan) then Error "prepared Inline file belongs to a different plan"
   else match List.find_opt (fun leaf -> leaf.node == node) t.leaves with
-    | Some leaf when Yojson.Safe.equal input leaf.input -> Ok leaf.edit
-    | Some _ -> Error "prepared Inline Edit model input changed"
-    | None -> Error "prepared Inline Edit node is outside its original plan"
+    | Some leaf when Yojson.Safe.equal input leaf.input -> Ok leaf.operation
+    | Some _ -> Error "prepared Inline file model input changed"
+    | None -> Error "prepared Inline file node is outside its original plan"
 ;;

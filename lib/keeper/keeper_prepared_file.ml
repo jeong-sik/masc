@@ -2,6 +2,8 @@ open Result.Syntax
 
 module Scope = Agent_core.Tool_contract.Resource_scope
 
+type operation = Read | Edit
+
 type identity = { device : int64; inode : int64 }
 type directory =
   { capability : Eio.Fs.dir_ty Eio.Path.t
@@ -19,7 +21,8 @@ type owner =
   }
 
 type t =
-  { owner : owner
+  { operation : operation
+  ; owner : owner
   ; args : Yojson.Safe.t
   ; root : Eio.Fs.dir_ty Eio.Path.t
   ; root_path : string
@@ -99,7 +102,7 @@ let rec ancestors path =
 let stat_directory path =
   let stat = Eio.Path.stat ~follow:true path in
   if stat.kind = `Directory then Ok (identity stat)
-  else Error "prepared Edit parent is no longer a directory"
+  else Error "prepared file parent is no longer a directory"
 ;;
 
 (* A directory opened with [Eio.Path.open_dir] is closed when its switch ends.
@@ -153,7 +156,8 @@ end = struct
   ;;
 end
 
-let prepare ~sw ~config ~meta ~args ~confined =
+let prepare ~sw ~operation ~config ~meta ~args ~confined =
+  let target_access = match operation with Read -> Scope.Read | Edit -> Scope.Write in
   match Fs_compat.get_fs_opt (),
         split_leaf (Keeper_alerting_path.confined_relative_components confined),
         split_leaf (Keeper_alerting_path.confined_endpoint_components confined) with
@@ -183,10 +187,10 @@ let prepare ~sw ~config ~meta ~args ~confined =
           Ok ((path, identity) :: tail)) (ancestors native) (Ok []) in
         let* actual = stat_directory capability in
         (match native_chain with
-         | [] -> Error "prepared Edit has no native directory identity"
+         | [] -> Error "prepared file has no native directory identity"
          | (_, observed) :: _ ->
            if not (equal_identity actual observed) then
-             Error "prepared Edit native parent differs from its pinned capability"
+             Error "prepared file native parent differs from its pinned capability"
            else
              let* occupied = entry_identity ~parent:actual leaf in
              let* ancestry = List.fold_right (fun (_, resource) accumulated ->
@@ -201,7 +205,7 @@ let prepare ~sw ~config ~meta ~args ~confined =
       let relative = Keeper_alerting_path.confined_root_relative_path confined in
       let root = if String.equal relative "." then anchor else open_dir Eio.Path.(anchor / relative) in
       let* () = Keeper_alerting_path.verify_confined_root_capability confined root in
-      let* target = inspect_directory ~access:Scope.Write ~leaf root parent_components in
+      let* target = inspect_directory ~access:target_access ~leaf root parent_components in
       let* source = inspect_directory ~access:Scope.Read ~leaf:source_leaf root source_components in
       match target, source with
       | Some target, Some source ->
@@ -209,9 +213,9 @@ let prepare ~sw ~config ~meta ~args ~confined =
         if source_stat.kind <> `Regular_file then Ok None
         else
           let target_stat = Eio.Path.stat ~follow:false Eio.Path.(target.capability / leaf) in
-          let* target_object_scope = object_scope ~access:Scope.Write target target_stat in
+          let* target_object_scope = object_scope ~access:target_access target target_stat in
           let* source_object_scope = object_scope ~access:Scope.Read source source_stat in
-          Ok (Some { owner = owner ~config ~meta; args; root
+          Ok (Some { operation; owner = owner ~config ~meta; args; root
                    ; root_path = Keeper_alerting_path.confined_root confined
                    ; target; leaf; source; source_leaf; target_object_scope; source_object_scope
                    ; released; release_resources = release_partial })
@@ -241,43 +245,53 @@ let scopes prepared =
 ;;
 let release prepared = prepared.release_resources ()
 
-let with_parents ~config ~meta ~args ~confined prepared continue =
-  if Atomic.get prepared.released then Error "prepared Edit resources were released"
+let with_parents ~operation ~config ~meta ~args ~confined prepared continue =
+  if Atomic.get prepared.released then Error "prepared file resources were released"
+  else if operation <> prepared.operation then Error "prepared file operation changed"
   else if not (equal_owner prepared.owner (owner ~config ~meta) && Yojson.Safe.equal args prepared.args)
-  then Error "prepared Edit belongs to a different owner or input"
+  then Error "prepared file belongs to a different owner or input"
   else if not (String.equal prepared.root_path (Keeper_alerting_path.confined_root confined)
                && split_leaf (Keeper_alerting_path.confined_relative_components confined)
-                  = Some (prepared.target.components, prepared.leaf)
-               && split_leaf (Keeper_alerting_path.confined_endpoint_components confined)
-                  = Some (prepared.source.components, prepared.source_leaf))
-  then Error "prepared Edit confined target or source changed"
+                  = Some (prepared.target.components, prepared.leaf))
+  then Error "prepared file confined target changed"
   else
+    let* source, source_leaf =
+      let endpoint = split_leaf (Keeper_alerting_path.confined_endpoint_components confined) in
+      if endpoint = Some (prepared.source.components, prepared.source_leaf) then
+        Ok (prepared.source, prepared.source_leaf)
+      else if operation = Read && endpoint = Some (prepared.target.components, prepared.leaf) then
+        (* A preceding atomic Edit may replace a symlink with the regular
+           entry the Read already claimed. That exact entry remains bound to
+           its pinned parent; a redirect to any other new source is refused. *)
+        Ok (prepared.target, prepared.leaf)
+      else Error "prepared file confined source changed"
+    in
     let validate directory =
       let* held = stat_directory directory.capability in
       let* current = stat_directory
           (List.fold_left (fun path component -> Eio.Path.(path / component))
              prepared.root directory.components) in
       if not (equal_identity directory.identity held && equal_identity held current) then
-        Error "prepared Edit parent binding changed before execution"
+        Error "prepared file parent binding changed before execution"
       else
         match Fs_compat.get_fs_opt () with
-        | None -> Error "prepared Edit filesystem is unavailable"
+        | None -> Error "prepared file filesystem is unavailable"
         | Some fs ->
           List.fold_left (fun result (path, expected) ->
             let* () = result in
             let* actual = stat_directory Eio.Path.(fs / path) in
             if equal_identity actual expected then Ok ()
-            else Error "prepared Edit physical ancestry changed before execution")
+            else Error "prepared file physical ancestry changed before execution")
             (Ok ()) directory.native_chain
     in
     let validation =
       try
         let* () = Keeper_alerting_path.verify_confined_root_capability confined prepared.root in
         let* () = validate prepared.target in
-        validate prepared.source
+        validate source
       with Eio.Io _ as error -> Error (Printexc.to_string error)
     in
     let* () = validation in
     continue ~parent_dir:prepared.target.capability ~parent_components:prepared.target.components
-      ~leaf:prepared.leaf ~source_parent_dir:prepared.source.capability ~source_leaf:prepared.source_leaf
+      ~leaf:prepared.leaf ~source_parent_dir:source.capability ~source_leaf
 ;;

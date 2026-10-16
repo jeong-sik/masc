@@ -45,7 +45,7 @@ let unscheduled_layer plan nodes =
 let predecessors dependencies node_id =
   match List.find_opt (fun (id, _) -> Keeper_tool_plan.Node_id.equal id node_id) dependencies with
   | Some (_, predecessors) -> predecessors
-  | None -> invalid_arg "prepared Inline Edit lost its resource ordering"
+  | None -> invalid_arg "prepared Inline file lost its resource ordering"
 ;;
 
 let prepared_layer plan dependencies nodes =
@@ -56,7 +56,7 @@ let prepared_layer plan dependencies nodes =
         let earlier = predecessors dependencies node.id in
         not (List.exists (fun (other : Keeper_tool_plan.node) ->
           List.exists (Keeper_tool_plan.Node_id.equal other.id) earlier) pending)) pending in
-      if ready = [] then invalid_arg "prepared Inline Edit resource ordering contains a cycle";
+      if ready = [] then invalid_arg "prepared Inline file resource ordering contains a cycle";
       Unscheduled_concurrent (List.map (fun node -> node, contract_exn plan node) ready)
       :: waves waiting
   in
@@ -556,7 +556,7 @@ let execute_with_tool_use_id
       ~run_id
       ~tool_use_id_for_node
       ~dispatch
-      ?prepared_edits
+      ?prepared_files
       ?launch_invocation_of
       ?admit_node
       ?dispatch_compiled
@@ -564,8 +564,8 @@ let execute_with_tool_use_id
       ?observe_node_result
       ()
   =
-  let resource_dependencies = Option.bind prepared_edits
-    (Keeper_prepared_inline_edit.resource_dependencies ~plan) in
+  let resource_dependencies = Option.bind prepared_files
+    (Keeper_prepared_inline_files.resource_dependencies ~plan) in
   let node_effect_disposition (result : node_result) =
     match result.result with
     | Tool_result.Deferred _ | Tool_result.Failed _ ->
@@ -595,7 +595,7 @@ let execute_with_tool_use_id
   (* Dynamic ready-wave runner: every node owns one fiber that starts when all
      of its dependencies have settled, instead of waiting for a static batch
      barrier. Ordinary serial and terminal nodes additionally follow the static
-     schedule order and run alone behind [Exclusive_gate]. Exact prepared Edit
+     schedule order and run alone behind [Exclusive_gate]. Exact prepared Read/Edit
      leaves instead wait for every earlier conflicting resource owner. A node whose
      dependency failed or was skipped never dispatches; under [Fail_fast] no
      new node dispatches once any node is blocked, while under
@@ -976,7 +976,7 @@ let execute_keeper_with_authority
       ~ctx_snapshot
       ~keeper_turn_id
       ?source_context
-      ?prepared_edits
+      ?prepared_files
       ?turn_sandbox_factory
       ?clock
       ?continuation_channel
@@ -1031,11 +1031,11 @@ let execute_keeper_with_authority
             ; trace_id = Some replay.invocation.trace_id
             ; tool_use_id = Some replay.tool_use_id } in
           Keeper_owned_job_invocation.replay_of_source source |> Result.map Option.some in
-    let prepared_edit = match prepared_edits with
+    let prepared_file = match prepared_files with
       | None -> Ok None
       | Some prepared ->
-        Keeper_prepared_inline_edit.for_node ~plan ~node ~input prepared |> Result.map Option.some in
-    match prepared_edit, replay_context with
+        Keeper_prepared_inline_files.for_node ~plan ~node ~input prepared |> Result.map Option.some in
+    match prepared_file, replay_context with
     | Error detail, _ ->
         dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect
           (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Policy_rejection
@@ -1046,8 +1046,13 @@ let execute_keeper_with_authority
           (Tool_result.make_err ~tool_name:node.tool_name ~class_:Tool_result.Policy_rejection
              ~effect_disposition:Tool_result.Effect_outcome_unknown
              ~start_time:(Tool_timing.start ()) detail)
-    | Ok prepared_edit, Ok owned_job_replay ->
-    let gate_context = match prepared_edit, gate_context with
+    | Ok prepared_file, Ok owned_job_replay ->
+    let prepared_read, prepared_edit = match prepared_file with
+      | None -> None, None
+      | Some (Keeper_prepared_inline_files.Read read) -> Some read, None
+      | Some (Keeper_prepared_inline_files.Edit edit) -> None, Some edit
+    in
+    let gate_context = match prepared_file, gate_context with
       | Some _, Some current ->
         let captured = current () in
         Some (fun () -> captured)
@@ -1082,6 +1087,7 @@ let execute_keeper_with_authority
         ~keeper_turn_id
         ~source_context:(fun () -> source_context)
         ?owned_job_replay
+        ?prepared_read
         ?prepared_edit
         ?turn_sandbox_factory
         ?clock
@@ -1165,7 +1171,7 @@ let execute_keeper_with_authority
     ~run_id
     ~tool_use_id_for_node
     ~dispatch:dispatch_admitted
-    ?prepared_edits
+    ?prepared_files
     ~launch_invocation_of
     ?admit_node
     ?dispatch_compiled

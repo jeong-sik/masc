@@ -46,6 +46,28 @@ val handle_read_file_with_outcome :
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
 
+type prepared_read
+
+val prepare_read :
+  sw:Eio.Switch.t -> config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta -> args:Yojson.Safe.t ->
+  (prepared_read option, string) result
+(** Prepare a regular file in the Keeper's own shared-mount tree. Other Read
+    roots/backends return [None] and keep their ordinary backend. No file bytes
+    are read during preparation. *)
+
+val prepared_read_scopes : prepared_read -> Agent_core.Tool_contract.Resource_scope.t list
+val release_prepared_read : prepared_read -> unit
+
+val handle_prepared_read_file_with_outcome :
+  prepared_read:prepared_read -> config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta -> args:Yojson.Safe.t ->
+  Keeper_tool_execution.t
+(** Read through the exact prepared owned-directory capabilities after owner,
+    input, backend and confinement revalidation. The file opens at execution,
+    so a preceding Edit is observed. No endpoint/Docker fallback is attempted
+    after accepting a preparation. *)
+
 val read_complete_sandbox_bytes :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->

@@ -842,6 +842,10 @@ let test_resolve_waits_for_domain_two_map_publication () =
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
+       (* Submit refuses until an install has completed. This first install
+          only makes the pending row below; the racing install is the one the
+          installer Domain runs after the snapshot is rewritten. *)
+       ignore (install_exn ~base_path);
        let id = submit ~base_path ~keeper_name:"queue-generation-race"
            ~input:(`Assoc [ "target", `String "publication" ]) in
        let snapshot =

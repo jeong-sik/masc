@@ -2731,6 +2731,7 @@
 (include stanzas/test_fs_compat_durable_append.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
+(include stanzas/test_retention_directory.inc)
 
 (include stanzas/test_fs_compat_save_file_mode.inc)
 

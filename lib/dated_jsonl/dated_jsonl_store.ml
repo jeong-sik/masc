@@ -76,12 +76,13 @@ type t =
   | Decision_audit
 [@@deriving enumerate]
 
-type location = { dir : string }
+type location = { dir : string; root : string; segments : string list }
 type root = Masc_dir of string
 
 let root_of_base_path ~base_path = Masc_dir (Common.masc_dir_from_base_path ~base_path)
 let root_of_masc_dir dir = Masc_dir dir
-let under (Masc_dir root) segments = { dir = List.fold_left Filename.concat root segments }
+let under (Masc_dir root) segments =
+  { dir = List.fold_left Filename.concat root segments; root; segments }
 let at root store = under root (Root.segments store)
 
 let keeper root ~keeper store =
@@ -175,6 +176,42 @@ let locations_on_disk (Masc_dir dir as root) store =
   | Decision_audit ->
     Fs_compat.subdirectory_names (Filename.concat dir decision_audit_dirname)
     |> List.map (fun keeper_dirname -> decision_audit root ~keeper_dirname)
+
+let with_retention_root (Masc_dir dir) f =
+  (* BasePath admission allows aliases, including macOS /var and /tmp.
+     Resolve that trusted base only; the runtime root and every descendant
+     are subsequently opened no-follow from held descriptors. *)
+  match Fs_compat.realpath (Filename.dirname dir) with
+  | base -> Fs_compat.Retention_directory.with_root
+      (Filename.concat base (Filename.basename dir)) f
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
+
+let with_retention_location location f =
+  match with_retention_root (Masc_dir location.root) (fun root ->
+    Fs_compat.Retention_directory.descend root location.segments f) with
+  | None -> 0
+  | Some result -> result
+
+let fold_retention_directories root held store ~f =
+  let module Directory = Fs_compat.Retention_directory in
+  let keepers f =
+    Directory.descend held [ Common.keepers_runtime_dirname ] (fun directory ->
+      Directory.fold_children directory ~init:0
+        ~f:(fun count name child -> count + f name child)) in
+  match store with
+  | Root store -> Directory.descend held (Root.segments store) (f (at root store))
+  | Keeper store -> keepers (fun name child ->
+      Directory.descend child [ Keeper.dirname store ] (f (keeper root ~keeper:name store)))
+  | Reaction_ledger -> keepers (fun name child ->
+      Directory.descend child
+        [ Common.keeper_runtime_store_dirname Common.Keeper_reaction_ledger ]
+        (fun ledger -> Directory.fold_children ledger ~init:0
+          ~f:(fun count generation directory ->
+            count + f (reaction_ledger root ~keeper:name ~generation) directory)))
+  | Decision_audit ->
+    Directory.descend held [ decision_audit_dirname ] (fun directory ->
+      Directory.fold_children directory ~init:0
+        ~f:(fun count name child -> count + f (decision_audit root ~keeper_dirname:name) child))
 
 type dated_path =
   { base_dir : string

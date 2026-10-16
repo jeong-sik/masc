@@ -105,6 +105,19 @@ val locations_on_disk : root -> t -> location list
     files of a keeper that is gone are still found. The reaction ledger
     also yields one per generation directory. *)
 
+val with_retention_root : root -> (Fs_compat.Retention_directory.t -> 'a) -> 'a option
+(** Admit the physical BasePath (allowing its configured aliases), then bind
+    the runtime-root entry without following it. No descendant is realpathed.
+    This per-pass admission does not replace the server's boot lease. *)
+
+val with_retention_location : location -> (Fs_compat.Retention_directory.t -> int) -> int
+
+val fold_retention_directories :
+  root -> Fs_compat.Retention_directory.t -> t ->
+  f:(location -> Fs_compat.Retention_directory.t -> int) -> int
+(** The same closed store geometry, traversed only through the held root.
+    Location paths are labels/lock keys; they never authorize traversal. *)
+
 (** A store's day file: [<dir>/YYYY-MM/DD.jsonl]. *)
 type dated_path =
   { base_dir : string  (** The store's directory. *)

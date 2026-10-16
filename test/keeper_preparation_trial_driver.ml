@@ -1,5 +1,6 @@
-(** Isolated explicit-cycle preparation harness. The local streaming peer is
-    scripted protocol input, not a model, and the CLI peer is not Docker. *)
+(** Isolated explicit-cycle preparation harness. The scripted streaming peer
+    and an explicitly configured HTTP Runtime are separate experiment inputs.
+    The owned-job CLI peer is synthetic in both cases. *)
 open Masc
 open Yojson.Safe.Util
 
@@ -42,20 +43,50 @@ let exact_keys expected value =
   require (List.sort String.compare keys = List.sort String.compare expected)
     ("unexpected or duplicated fields: " ^ String.concat "," keys)
 
+type runtime_mode = Synthetic_streaming | Configured_http of string
+
+let runtime_mode runtime = match string "mode" runtime with
+  | "synthetic_streaming" -> Synthetic_streaming
+  | "configured_http" -> Configured_http (string "configuration" runtime)
+  | _ -> failwith "unsupported preparation Runtime mode"
+
+let validate_http_configuration configuration =
+  let config = Runtime_toml.parse_string configuration |> get (fun _ ->
+    "explicit HTTP Runtime configuration did not parse") in
+  require (Option.is_some config.default_runtime_id) "explicit Runtime default is required";
+  require (config.keeper_assignments = [] && config.lane_decls = [])
+    "experiment must select its default Runtime without Keeper assignments or failover lanes";
+  List.iter (fun (provider : Runtime_schema.provider) ->
+    (match provider.transport with
+     | Runtime_schema.Http _ -> ()
+     | Runtime_schema.Cli _ -> failwith "configured preparation Runtime must use HTTP");
+    require (provider.headers = None || provider.headers = Some [])
+      "experiment authentication must use an environment credential, not inline headers";
+    match provider.credentials with
+    | None | Some (Runtime_schema.Env _) -> ()
+    | Some (Runtime_schema.File _ | Runtime_schema.Inline _) ->
+      failwith "experiment credentials must name an existing environment variable") config.providers
+;;
+
 let settings experiment =
-  exact_keys ["schema_version";"case";"pairs";"runtime";"synthetic_outcome"] experiment;
   require (integer "schema_version" experiment = 1) "unsupported experiment schema";
   require (string "case" experiment = "upstream_inline") "only upstream_inline is implemented";
   require (integer "pairs" experiment > 0) "pairs must be positive";
   let runtime = field "runtime" experiment in
-  exact_keys ["mode";"model_id";"max_context_tokens";"max_output_tokens"] runtime;
-  require (string "mode" runtime = "synthetic_streaming") "paid/real provider execution is not implemented";
-  let model = string "model_id" runtime in
-  require (String.trim model = model && model <> "") "model_id must be explicit and nonblank";
-  require (integer "max_context_tokens" runtime > 0 && integer "max_output_tokens" runtime > 0)
-    "model capability declarations must be positive";
-  require (List.mem (string "synthetic_outcome" experiment) ["success";"provider_refusal"])
-    "unsupported synthetic outcome";
+  (match runtime_mode runtime with
+   | Synthetic_streaming ->
+     exact_keys ["schema_version";"case";"pairs";"runtime";"synthetic_outcome"] experiment;
+     exact_keys ["mode";"model_id";"max_context_tokens";"max_output_tokens"] runtime;
+     let model = string "model_id" runtime in
+     require (String.trim model = model && model <> "") "model_id must be explicit and nonblank";
+     require (integer "max_context_tokens" runtime > 0 && integer "max_output_tokens" runtime > 0)
+       "model capability declarations must be positive";
+     require (List.mem (string "synthetic_outcome" experiment) ["success";"provider_refusal"])
+       "unsupported synthetic outcome"
+   | Configured_http configuration ->
+     exact_keys ["schema_version";"case";"pairs";"runtime"] experiment;
+     exact_keys ["mode";"configuration"] runtime;
+     validate_http_configuration configuration);
   runtime
 
 let source_document = {|---
@@ -335,15 +366,107 @@ let recipe fixture =
   `Assoc ["execution",`String "inline";"nodes",`List
     [`Assoc ["id",`String "arguments";"tool",`String "keeper_artifact_read";
       "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",field "selection_sha256" fixture]]];
-     `Assoc ["id",`String "selected";"skill_reference",field "skill_reference" fixture;
+     `Assoc ["id",`String "resolved_stdout";"skill_reference",field "skill_reference" fixture;
       "input",`Assoc ["kind",`String "object";"fields",`List
         [`Assoc ["name",`String "job_id";"value",output]]]]];
-    "exports",`List [`Assoc ["name",`String "stdout";"node",`String "selected";"pointer",`String "/stdout"]]]
+    "exports",`List [`Assoc ["name",`String "stdout";"node",`String "resolved_stdout";"pointer",`String "/stdout"]]]
 
 let reference value = match Tool_output.normalized_artifact_ref_of_json value with
   | Decoded_normalized_artifact_ref reference -> reference
   | Invalid_normalized_artifact_ref {detail} -> failwith detail
   | Not_normalized_artifact_ref -> failwith "normalized artifact reference required"
+
+let row_document ~base row = match field "output" row with
+  | `String bytes -> document ~base bytes
+  | value -> document ~base (blob_bytes base (reference value))
+
+let decode_evidence f =
+  try Some (f ()) with
+  | Failure _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+
+let original_turn_source ~fixture ~(turn : Turn_record.t) row =
+  field "task_id" row=field "task_id" fixture && field "trace_id" row=field "trace_id" fixture &&
+  field "keeper_turn_id" row=`Int turn.absolute_turn &&
+  match Tool_result.recorded_call_outcome row with
+  | Recorded_succeeded -> true
+  | Recorded_deferred | Recorded_failed | Recorded_unsettled | Recorded_malformed -> false
+
+let sdk_member ~fixture ~(turn : Turn_record.t) row =
+  original_turn_source ~fixture ~turn row &&
+  List.exists (fun id -> field "execution_id" row=`String (Ids.Execution_id.to_string id)) turn.execution_ids
+
+let exact_sdk_reply ~base ~raw_records parent =
+  let replies = List.filter_map (fun (record : Agent_core.Raw_trace.record) ->
+    match record.record_type, record.tool_use_id, record.tool_name, record.tool_error with
+    | Tool_execution_finished, Some id, Some name, Some false
+      when field "tool_use_id" parent=`String id && field "tool" parent=`String name -> record.tool_result
+    | (Run_started | Assistant_block | Tool_execution_started | Tool_execution_finished
+      | Native_tool_started | Native_tool_finished | Hook_invoked | Run_finished), _, _, _ -> None) raw_records in
+  match replies with
+  | [bytes] -> document ~base bytes
+  | [] | _ :: _ -> failwith "no unique original SDK run reply"
+
+let stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row =
+  if field "composition_node_id" row=`Null then
+    sdk_member ~fixture ~turn row && field "parent_tool_use_id" row=`Null
+  else
+    let parents = List.filter (fun parent -> sdk_member ~fixture ~turn parent &&
+      field "tool_use_id" parent=field "parent_tool_use_id" row) rows in
+    match parents with
+    | [parent] -> decode_evidence (fun () ->
+      let reply = exact_sdk_reply ~base ~raw_records parent in
+      require (field "composition_run_id" reply=field "composition_run_id" row)
+        "physical stdout belongs to a different composition";
+      let execution = document ~base (blob_bytes base (reference (field "execution_artifact" reply))) in
+      List.exists (fun node ->
+        field "node_id" node=field "composition_node_id" row &&
+        field "execution_id" node=field "execution_id" row &&
+        field "tool_name" node=field "tool" row &&
+        Yojson.Safe.equal (field "input" node) (field "input" row)) (field "nodes" execution |> to_list)) = Some true
+    | [] | _ :: _ -> false
+
+let full_stdout_reads ~base ~fixture ~turn ~raw_records rows =
+  List.filter (fun row ->
+    original_turn_source ~fixture ~turn row && field "tool" row=`String "keeper_artifact_read" &&
+    field "sha256" (field "input" row)=field "expected_stdout_sha256" fixture &&
+    decode_evidence (fun () ->
+      let page = row_document ~base row in
+      field "offset" page=`Int 0 && field "eof" page=`Bool true &&
+      sha (string "content" page)=string "expected_stdout_sha256" fixture) = Some true &&
+    stdout_execution_owned ~base ~fixture ~turn ~raw_records rows row) rows
+
+let nested_execution_proven ~base ~fixture ~turn ~skill_reference
+    ~(scope : Keeper_skill_activation_ledger.nested_composition_scope) ~raw_records rows stdout_rows =
+  let parents = List.filter (fun row ->
+    sdk_member ~fixture ~turn row &&
+    field "tool" row=`String Keeper_composition_draft.run_tool_name &&
+    field "tool_use_id" row=`String scope.Keeper_skill_activation_ledger.parent_tool_use_id) rows in
+  match parents with
+  | [parent] -> decode_evidence (fun () ->
+    let run = exact_sdk_reply ~base ~raw_records parent in
+    require (field "composition_run_id" run=`String scope.composition_run_id) "activation run mismatch";
+    let execution = document ~base (blob_bytes base (reference (field "execution_artifact" run))) in
+    let draft_sha = string "sha256" (field "input" parent) in
+    let draft = Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base) ~sha256:draft_sha
+      |> get Tool_blob_store.fetch_error_to_string
+      |> function Some bytes when sha bytes=draft_sha -> document ~base bytes
+        | Some _ | None -> failwith "original prepared manifest unavailable" in
+    List.exists (fun call ->
+      field "alias" call=`String scope.alias &&
+      Yojson.Safe.equal (field "reference" call) (Skill_reference.to_yojson skill_reference) &&
+      field "kind" (field "arguments" call)=`String "upstream" &&
+      let child_scope = field "scope" call in
+      let nodes = field "nodes" execution |> to_list in
+      let arguments = List.filter (fun node -> field "node_id" node=field "argument_node" child_scope) nodes in
+      List.exists (fun node -> field "input" node=`Assoc ["job_id",field "selected_job_id" fixture]) arguments &&
+      List.exists (fun mapping -> field "source" mapping=`String "consume" &&
+        List.exists (fun node -> field "node_id" node=field "expanded" mapping &&
+          List.exists (fun row -> field "execution_id" row=field "execution_id" node &&
+            field "composition_run_id" row=`String scope.composition_run_id &&
+            field "parent_tool_use_id" row=`String scope.parent_tool_use_id) stdout_rows) nodes)
+        (field "node_mapping" child_scope |> to_list)) (field "nested_calls" draft |> to_list))
+      = Some true
+  | [] | _ :: _ -> false
 
 let tool_content ~id request =
   let messages = field "messages" request |> to_list in
@@ -471,7 +594,7 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
             | Prepare -> Keeper_composition_draft.prepare_tool_name,recipe fixture
             | Run -> Keeper_composition_draft.run_tool_name,`Assoc ["sha256",`String (needed !draft_sha)]
             | Finish | Finished -> failwith "final step cannot dispatch a tool" in
-          let id = "preparation-" ^ step_name step in
+          let id = Printf.sprintf "call-%d-%s" request_number (step_name step) in
           if List.mem name actual_tools then (
             awaiting := Some (step,id);
             call name args id)
@@ -495,7 +618,7 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
       add_event "synthetic_provider_error" ["detail",`String (Printexc.to_string error)]));
   Printf.sprintf "http://127.0.0.1:%d" port,final_answer,observed_requests
 
-let initialize_runtime ~base ~endpoint runtime =
+let initialize_synthetic_runtime ~base ~endpoint runtime =
   let model = string "model_id" runtime in
   let catalog_path = Filename.concat base "model-catalog.toml" in
   write catalog_path (Printf.sprintf
@@ -505,6 +628,14 @@ let initialize_runtime ~base ~endpoint runtime =
   write (config_path base) (Printf.sprintf
     "[runtime]\ndefault = \"preparation_fixture.sample\"\n[providers.preparation_fixture]\nprotocol = \"openai-compatible-http\"\nendpoint = %S\n[models.sample]\napi-name = %S\nmax-context = %d\nstreaming = true\n[preparation_fixture.sample]\n%s"
     endpoint model (integer "max_context_tokens" runtime) skills_config);
+  ()
+
+let initialize_runtime ~base ~endpoint runtime =
+  (match runtime_mode runtime with
+   | Synthetic_streaming -> initialize_synthetic_runtime ~base ~endpoint runtime
+   | Configured_http configuration ->
+     validate_http_configuration configuration;
+     write (config_path base) (configuration ^ "\n" ^ skills_config));
   match Runtime.init_default_degraded_report ~config_path:(config_path base) with
   | Ok Runtime.Initialized -> ()
   | Ok (Runtime.Initialized_degraded _) -> failwith "isolated runtime initialized degraded"
@@ -518,8 +649,11 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   let config = Workspace.default_config base in
   let attempt_dir = Filename.dirname receipt in
   let events = ref [] in
-  let endpoint,final_answer,requests = start_provider ~sw ~env ~base ~attempt_dir ~counter
-      ~experiment ~fixture ~strategy events in
+  let runtime = settings experiment in
+  let endpoint,final_answer,requests = match runtime_mode runtime with
+    | Synthetic_streaming -> start_provider ~sw ~env ~base ~attempt_dir ~counter
+        ~experiment ~fixture ~strategy events
+    | Configured_http _ -> "configured_http", ref None, ref [] in
   initialize_runtime ~base ~endpoint (settings experiment);
   let workspace,_,reference = publish_snapshot ~base in
   Eio.Switch.on_release sw (fun () -> Skill_catalog_snapshot_service.retire ~workspace);
@@ -613,6 +747,15 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     | [Dated_jsonl.Parsed value] -> value,(Turn_record.of_json value |> get Fun.id)
     | [] | _ :: _ -> failwith "one canonical TurnRecord was not available" in
   json (Filename.concat attempt_dir "turn-record.json") turn_json;
+  let raw_records = match turn.raw_trace_run_ref with
+    | None -> []
+    | Some run ->
+      let original : Agent_core.Raw_trace.run_ref =
+        {worker_run_id=run.worker_run_id;path=run.path;start_seq=run.start_seq;end_seq=run.end_seq;
+         agent_name=run.agent_name;session_id=Some run.session_id} in
+      Agent_core.Raw_trace_query.read_run original |> get Agent_core.Error.to_string in
+  json (Filename.concat attempt_dir "exact-run-records.json")
+    (`List (List.map Agent_core.Raw_trace.record_to_yojson raw_records));
   let evidence = match Ledger.event_queue_reaction_evidence_result ~base_path:base ~keeper_name:keeper ~stimulus_id
       |> get Ledger.event_queue_reaction_evidence_error_to_string with
     | Evidence_complete evidence -> evidence
@@ -705,22 +848,26 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
      "final_text",(match accepted_answer with None -> `Null | Some text -> `String text);
      "checkpoint_last_assistant",(match checkpoint_last_assistant with None -> `Null | Some text -> `String text);
      "checkpoint_retention",`String "internal final thoughts are excluded by the production replay contract"]);
-  let final = match !final_answer,accepted_answer with
-    | Some expected,Some actual ->
-      require (actual=expected) "actual exact-run Keeper final answer differs from verified output";
+  let final = match accepted_answer with
+    | Some actual ->
+      (match !final_answer with
+       | Some expected -> require (actual=expected)
+           "actual exact-run Keeper final answer differs from scripted response"
+       | None -> ());
       let answer = Yojson.Safe.from_string actual in
       require (field "job_id" answer=field "selected_job_id" fixture &&
         field "stdout_sha256" answer=field "expected_stdout_sha256" fixture) "independent objective check failed";
       Some answer
-    | None,(None | Some _) | Some _,None -> None in
+    | None -> None in
   let activation_ledger = Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id
       |> get Keeper_skill_activation_ledger.store_error_to_string in
   let activations = match activation_ledger with
     | None -> [] | Some ledger -> Keeper_skill_activation_ledger.activations ledger in
   json (Filename.concat attempt_dir "skill-activations.json")
     (`List (List.map Keeper_skill_activation_ledger.activation_to_yojson activations));
+  let stdout_rows = full_stdout_reads ~base ~fixture ~turn ~raw_records rows in
   let compliant = match strategy,activations with
-    | Direct,[] -> true
+    | Direct,[] -> List.exists (fun row -> field "composition_node_id" row=`Null) stdout_rows
     | Direct,_ :: _ | Exact_skill,[] -> false
     | Exact_skill,[(activation : Keeper_skill_activation_ledger.activation)] ->
       let module A = Keeper_skill_activation_ledger in
@@ -729,13 +876,14 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
       Ids.Turn_ref.equal activation.turn_ref turn.turn_ref &&
       (match activation.invocation with
        | A.Nested_composition_invocation {origin=A.Task_composition {task_ids};scope;_} ->
-         scope.parent_tool_use_id="preparation-run" && scope.alias="selected" &&
+         nested_execution_proven ~base ~fixture ~turn ~skill_reference:reference ~scope ~raw_records rows stdout_rows &&
          List.exists (fun id -> Keeper_id.Task_id.to_string id=string "task_id" fixture)
            (A.task_id_set_to_list task_ids)
        | A.Instruction_invocation _ | A.Composition_invocation _
        | A.Nested_composition_invocation {origin=A.Session_composition;_} -> false)
     | Exact_skill,_ :: _ :: _ -> false in
-  let correct = Option.is_some final && evidence.event_queue_ack_seen && outcome.stimuli_acked &&
+  let correct = Option.is_some final && stdout_rows<>[] &&
+      evidence.event_queue_ack_seen && outcome.stimuli_acked &&
       turn.trace_id=string "trace_id" fixture &&
       turn.finish_reason=Some (Keeper_execution_receipt.stop_reason_to_string Runtime_agent.Completed) &&
       pending base=[] in
@@ -760,12 +908,24 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
         | Some epoch -> `Assoc ["state",`String "observed";"epoch",`Float epoch]
         | None -> unknown "current production Board source does not own a Turn_started reaction");
       "first_useful_leaf",useful;"verified_outcome_observed",now counter] in
+  let synthetic = match runtime_mode runtime with Synthetic_streaming -> true | Configured_http _ -> false in
   json receipt (`Assoc ["schema_version",`Int 1;"outcome",`String outcome_name;
-    "scope",`String "synthetic_isolated_keeper_explicit_cycle_preparation";
+    "scope",`String (if synthetic then "synthetic_isolated_keeper_explicit_cycle_preparation"
+      else "configured_http_isolated_keeper_explicit_cycle_preparation");
     "strategy",`String (strategy_name strategy);"strategy_compliant",`Bool compliant;
     "fixture_sha256",`String (sha (read (fixture_path base)));"input",field "selection" fixture;
     "skill_reference",field "skill_reference" fixture;"runtime",settings experiment;
-    "transport_endpoint",`String endpoint;"provider_requests",`Int (List.length !requests);
+    "transport_endpoint",(if synthetic then `String endpoint else `Null);
+    "provider_requests",(if synthetic then `Int (List.length !requests) else `Null);
+    "configured_runtime_sha256",(match runtime_mode runtime with
+      | Synthetic_streaming -> `Null | Configured_http configuration -> `String (sha configuration));
+    "verified_stdout_read_execution_ids",`List (List.map (field "execution_id") stdout_rows);
+    "provider_metrics",`Assoc ["selected_model",field "selected_model" turn_json;
+      "reported_usage",`Assoc (List.map (fun name -> name,field name turn_json)
+        ["input_tokens";"cache_creation_input_tokens";"cache_read_input_tokens";
+         "output_tokens";"usage_scope"]);
+      "request_count_scope",`String (if synthetic then "synthetic peer received requests" else "unobserved");
+      "total_serialized_input_bytes",`Null;"response_reported_model",`Null];
     "first_offered_tools_sha256",(match List.rev !requests with
       | first :: _ -> `String (sha (Yojson.Safe.to_string (field "tools" first)))
       | [] -> `Null);"backend_calls_after_ready",`Int 0;
@@ -774,9 +934,11 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     "turn_ref",`String (Ids.Turn_ref.to_string turn.turn_ref);
     "remaining_queue",`Int (List.length (pending base));
     "claims",`List (List.map (fun value -> `String value)
-      ["synthetic provider protocol only";"synthetic Docker CLI only";
-       "no real model semantic or speedup evidence";"no fleet scheduling latency measurement";
-       "Request_wire_observer is not a complete body recorder"])]);
+      ((if synthetic then ["synthetic provider protocol only"]
+        else ["configured HTTP transport is not proof of real-model identity";
+          "complete provider request count/input bytes and first offered inventory are unobserved"])
+       @ ["synthetic Docker CLI only";"no speedup or fleet scheduling latency claim";
+          "Request_wire_observer is not a complete body recorder"]))]);
   require correct "actual Keeper cycle did not satisfy the original objective"
 
 let with_environment values operation =
@@ -790,7 +952,7 @@ let main () =
   and strategy = ref "" and prompt_root = ref "" in
   Arg.parse
     ["--mode",Arg.Set_string mode,"setup or run";"--base",Arg.Set_string base,"fresh isolated canonical base";
-     "--experiment",Arg.Set_string experiment_path,"explicit synthetic experiment JSON";
+     "--experiment",Arg.Set_string experiment_path,"explicit experiment JSON";
      "--receipt",Arg.Set_string receipt,"receipt outside restored base";
      "--strategy",Arg.Set_string strategy,"direct or exact_skill";
      "--prompt-root",Arg.Set_string prompt_root,"frozen keeper prompt directory"]

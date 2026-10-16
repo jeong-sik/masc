@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in synthetic, matched Keeper explicit-cycle preparation harness.
+"""Opt-in Keeper explicit-cycle preparation harness.
 
 The driver owns Runtime/SDK/tools. This coordinator never interprets or executes
 model tool calls. It preallocates the full denominator before fixture setup.
@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import time
+import tomllib
 
 
 def save(path: Path, value: object) -> None:
@@ -47,17 +48,30 @@ def digest(path: Path) -> str:
 
 
 def validate(experiment: dict) -> None:
-    if set(experiment) != {"schema_version", "case", "pairs", "runtime", "synthetic_outcome"}:
-        raise ValueError("closed experiment fields required")
     if experiment["schema_version"] != 1 or experiment["case"] != "upstream_inline":
         raise ValueError("only schema 1 upstream_inline is implemented")
     if type(experiment["pairs"]) is not int or experiment["pairs"] <= 0:
         raise ValueError("pairs must be an explicit positive integer")
     runtime = experiment["runtime"]
+    if runtime["mode"] == "configured_http":
+        if set(experiment) != {"schema_version", "case", "pairs", "runtime"} or set(runtime) != {"mode", "configuration"}:
+            raise ValueError("closed configured HTTP experiment fields required")
+        # Before persisting any input, refuse credential values. The native
+        # Runtime parser owns the actual configuration/protocol contract.
+        configuration = tomllib.loads(runtime["configuration"])
+        for provider in configuration.get("providers", {}).values():
+            credential = provider.get("credentials")
+            if credential is not None and (set(credential) != {"type", "key"} or credential["type"] != "env"):
+                raise ValueError("experiment credentials must name an existing environment variable")
+            if provider.get("headers"):
+                raise ValueError("experiment authentication must not persist inline headers")
+        return
+    if set(experiment) != {"schema_version", "case", "pairs", "runtime", "synthetic_outcome"}:
+        raise ValueError("closed synthetic experiment fields required")
     if set(runtime) != {"mode", "model_id", "max_context_tokens", "max_output_tokens"}:
         raise ValueError("explicit closed synthetic model capabilities required")
     if runtime["mode"] != "synthetic_streaming":
-        raise ValueError("real/paid Runtime execution is not authorized or implemented")
+        raise ValueError("unsupported preparation Runtime mode")
     model = runtime["model_id"]
     if not isinstance(model, str) or not model or model != model.strip():
         raise ValueError("model_id must be explicit and nonblank")
@@ -143,6 +157,7 @@ def invoke(driver: Path, experiment_path: Path, prompts: Path, base: Path,
 def run(args) -> None:
     experiment = load(args.experiment)
     validate(experiment)
+    synthetic = experiment["runtime"]["mode"] == "synthetic_streaming"
     if len(args.source_head) != 40 or any(c not in "0123456789abcdef" for c in args.source_head):
         raise ValueError("--source-head requires an explicit 40-character commit identity")
     driver, prompts, output = args.driver.resolve(strict=True), args.prompts.resolve(strict=True), args.output.resolve()
@@ -174,14 +189,16 @@ def run(args) -> None:
             shutil.copy2(source, frozen_prompts / source.name)
     prompts = frozen_prompts
     prompt_files = {path.name: digest(path) for path in prompts.iterdir()}
-    manifest = {"schema_version": 1, "scope": "synthetic_isolated_keeper_explicit_cycle_preparation",
+    manifest = {"schema_version": 1, "scope": ("synthetic_isolated_keeper_explicit_cycle_preparation" if synthetic
+                                              else "configured_http_isolated_keeper_explicit_cycle_preparation"),
                 "source_head_supplied": args.source_head, "source_head_is_build_proof": False,
                 "driver_sha256": digest(driver), "keeper_prompt_sha256": digest(prompts / "keeper.md"),
                 "experiment_sha256": digest(experiment_path), "expected_attempts": attempts,
                 "prompt_files": prompt_files,
-                "claims": {"real_model": False, "speedup": False, "fleet_latency": False,
+                "claims": {"real_model": False if synthetic else None, "speedup": False, "fleet_latency": False,
                            "synthetic_docker_cli": True, "same_canonical_fixture_base": True}}
     save(output / "manifest.json", manifest)
+    matching = []
     for pair in range(experiment["pairs"]):
         pair_root = output / f"pair-{pair:04d}"
         base, snapshot = pair_root / "base", pair_root / "snapshot"
@@ -207,6 +224,8 @@ def run(args) -> None:
         paired = [result for attempt, result in zip(attempts, results) if attempt["pair"] == pair]
         completed = [result for result in paired if result["outcome"] == "correct"]
         if len(completed) == 2:
+            matching.append({"pair": pair, "first_offered_inventory_observed":
+                             all(result.get("first_offered_tools_sha256") is not None for result in completed)})
             for key in ("fixture_sha256", "skill_reference", "input", "runtime", "first_offered_tools_sha256"):
                 if completed[0][key] != completed[1][key]:
                     for attempt, result in zip(attempts, results):
@@ -220,8 +239,10 @@ def run(args) -> None:
     fixtures = [result.get("fixture_sha256") for result in results if result["outcome"] == "correct"]
     save(output / "summary.json", {"expected": len(attempts), "outcomes": counts,
          "strategy_compliant": sum(result.get("strategy_compliant") is True for result in results),
-         "attempts": results, "synthetic_only": True, "latency_percentiles": None,
-         "speedup": None, "reason": "functional protocol samples, no real model performance evidence",
+         "attempts": results, "synthetic_only": synthetic, "latency_percentiles": None,
+         "speedup": None, "matching": matching,
+         "reason": ("functional protocol samples, no real model performance evidence" if synthetic else
+                    "configured HTTP identity, first offered inventory and complete request metrics need independent evidence"),
          "fixture_hashes": fixtures})
 
 

@@ -4,10 +4,13 @@ import argparse
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import subprocess
 import sys
 import tempfile
+import threading
 
 
 def read(path):
@@ -17,6 +20,86 @@ def read(path):
 def require(value, detail):
     if not value:
         raise AssertionError(detail)
+
+
+def configured_http_refusal(args, root, head):
+    """A separate HTTP peer exercises operator Runtime binding, without a model."""
+    output = root / "configured-http-refusal"
+    requests = []
+
+    class Refusal(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            active = []
+            for strategy in ("direct", "exact_skill"):
+                directory = output / "pair-0000" / strategy
+                receipt = directory / "attempt.json"
+                if receipt.exists() and not (directory / "process.json").exists():
+                    value = read(receipt)
+                    if value.get("mode") == "run":
+                        active.append(strategy)
+            requests.append({"model": body.get("model"), "stream": body.get("stream"),
+                             "messages_present": bool(body.get("messages")), "active": active,
+                             "auth_matches_fixture": self.headers.get("Authorization") == "Bearer isolated-http-fixture"})
+            response = b'{"error":{"type":"invalid_request_error","message":"Declared external fixture refusal"}}'
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Refusal)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        experiment = root / "configured-http-experiment.json"
+        configuration = f'''[runtime]
+default = "preparation_http.sample"
+[providers.preparation_http]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:{server.server_port}"
+credentials = {{ type = "env", key = "OPENAI_API_KEY" }}
+[models.sample]
+api-name = "preparation-http-refusal-fixture"
+max-context = 128000
+tools-support = true
+streaming = true
+[models.sample.capabilities]
+max-output-tokens = 4096
+[preparation_http.sample]
+'''
+        experiment.write_text(json.dumps({"schema_version": 1, "case": "upstream_inline", "pairs": 1,
+            "runtime": {"mode": "configured_http", "configuration": configuration}}) + "\n", encoding="utf-8")
+        environment = dict(os.environ, OPENAI_API_KEY="isolated-http-fixture")
+        code = subprocess.run([sys.executable, str(args.coordinator.resolve()),
+            "--driver", str(args.driver.resolve()), "--source-head", head,
+            "--experiment", str(experiment), "--prompts", str(args.prompts.resolve()),
+            "--output", str(output)], env=environment, check=False).returncode
+        require(code == 0, f"HTTP refusal coordinator failed; evidence: {root}")
+        summary, manifest = read(output / "summary.json"), read(output / "manifest.json")
+        require(summary["expected"] == 2 and summary["outcomes"] == {
+            "correct": 0, "explicit_failure": 2, "unfinished": 0},
+            f"external HTTP refusals disappeared from denominator: {summary}")
+        require(summary["synthetic_only"] is False and manifest["claims"]["real_model"] is None and
+                summary["speedup"] is None, "configured transport was relabelled as real-model proof")
+        require({arm for request in requests for arm in request["active"]} == {"direct", "exact_skill"},
+                "both actual configured Runtime arms must cross the external HTTP boundary")
+        require(all(request["model"] == "preparation-http-refusal-fixture" and request["stream"] is True and
+                    request["messages_present"] and request["auth_matches_fixture"] for request in requests),
+                "Runtime did not bind the explicit model/streaming/environment credential")
+        for attempt in manifest["expected_attempts"]:
+            require(read((output / attempt["path"]).parent / "process.json")["returncode"] != 0,
+                    "HTTP refusal was converted to success")
+        print("PREPARATION_CONFIGURED_HTTP_REFUSAL_PASS " + json.dumps({
+            "expected": 2, "explicit_failure": 2, "unfinished": 0,
+            "external_fixture_requests": requests, "real_model": False, "speedup": None}))
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
 
 
 def main():
@@ -113,6 +196,33 @@ def main():
         require(len(activations) == (0 if entry["strategy"] == "direct" else 1),
                 "actual exact Skill admission differs from assigned arm")
         calls = read(directory / "tool-calls.json")
+        stdout_ids = receipt["verified_stdout_read_execution_ids"]
+        require(stdout_ids, "the final digest needs an actual complete stdout read")
+        stdout_rows = [row for row in calls if row.get("execution_id") in stdout_ids]
+        require(all(row["tool"] == "keeper_artifact_read" and
+                    row["input"]["sha256"] == receipt["objective"]["stdout_sha256"] and
+                    row["keeper_turn_id"] == turn["absolute_turn"] for row in stdout_rows),
+                "copied result metadata must not stand in for physical stdout reading")
+        if entry["strategy"] == "direct":
+            require(set(stdout_ids) <= set(turn["execution_ids"]) and
+                    all(row.get("composition_node_id") is None for row in stdout_rows),
+                    "direct stdout read escaped the exact SDK turn")
+        else:
+            parents = [row for row in calls if row["tool"] == "keeper_composition_run" and
+                       row.get("execution_id") in turn["execution_ids"]]
+            require(len(parents) == 1, "nested stdout needs its unique original SDK parent")
+            nodes = read(directory / "actual-composition-execution.json")["nodes"]
+            require(all(row["parent_tool_use_id"] == parents[0]["tool_use_id"] and
+                        any(node["node_id"] == row["composition_node_id"] and
+                            node["execution_id"] == row["execution_id"] and
+                            node["tool_name"] == row["tool"] and node["input"] == row["input"]
+                            for node in nodes) for row in stdout_rows),
+                    "nested physical stdout lost its canonical execution/SDK parent join")
+            require(not (set(stdout_ids) & set(turn["execution_ids"])),
+                    "this fixture must exercise child IDs outside the outer SDK trajectory")
+        raw_records = read(directory / "exact-run-records.json")
+        require(raw_records and all(record["worker_run_id"] == turn["raw_trace_run_ref"]["worker_run_id"]
+                                    for record in raw_records), "tool evidence escaped the exact SDK run")
         useful_rows = [row for row in calls if row.get("execution_id") == useful["execution_id"]]
         require(len(useful_rows) == 1 and useful_rows[0]["tool"] == "keeper_artifact_read",
                 "successful useful action was fabricated from an outer completion")
@@ -135,6 +245,7 @@ def main():
     print("PREPARATION_FUNCTIONAL_PASS " + json.dumps({"case": "upstream_inline", "expected": 2,
         "correct": 2, "unfinished": 0, "real_model": False, "speedup": None,
         "evidence": str(root), "summary_sha256": hashlib.sha256((output / "summary.json").read_bytes()).hexdigest()}))
+    configured_http_refusal(args, root, head)
 
 
 if __name__ == "__main__":

@@ -295,7 +295,8 @@ review changes to both base and head before landing. A confirmed non-native
 branch chain still lands parent first. Use
 [merge-guard](../../scripts/review/merge-guard.sh) and the current
 [CI and review workflow](../CI-REVIEW-WORKFLOW.md) for admission. Ordinary stacks
-use source review, plus a merge-compile success record for the exact merge head;
+use source review, plus a merge-compile advisory record for the exact merge head
+(freshness + success status; refusal pending convention adoption);
 release heads require completed full CI. Fork contributors
 hand integration to a maintainer. Source approval does not claim unobserved
 build success or runtime behavior.

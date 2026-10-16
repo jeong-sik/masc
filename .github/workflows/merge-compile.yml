@@ -2,6 +2,12 @@ name: Merge compile
 
 run-name: Merge compile on ${{ inputs.sha }} for PR #${{ inputs.pr }} by ${{ github.actor }}
 
+# Third-party actions float on major tags house-wide (every workflow does);
+# pinning four of them here while the rest of the repo floats would attest
+# nothing. The gate's decisive inputs are pinned instead: the head tree by
+# SHA, the executing toolchain byte-identical to main (see below), and the
+# OCaml dependency graph by masc.opam.locked. No os-packages input is
+# passed, so no apt install runs in this workflow at all.
 on:
   workflow_dispatch:
     inputs:
@@ -10,9 +16,14 @@ on:
         required: true
         type: string
       pr:
-        description: PR number the head belongs to (naming only)
+        description: PR number the head belongs to; 0 means a bare reachable SHA with no PR (live-proof dispatch)
         required: true
         type: string
+      trust-head-toolchain:
+        description: Skip the toolchain-identity check (toolchain PRs only; recorded in the settled status and receipt)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -44,8 +55,8 @@ jobs:
           sha = os.environ['SHA']
           if not re.fullmatch(r'[0-9a-f]{40}', sha):
               raise SystemExit('sha must be an exact 40-hex head')
-          if not re.fullmatch(r'[1-9][0-9]*', os.environ['PR']):
-              raise SystemExit('pr must be a PR number')
+          if not re.fullmatch(r'(0|[1-9][0-9]*)', os.environ['PR']):
+              raise SystemExit('pr must be a PR number or 0 for a bare-SHA proof')
           # Pin pending BEFORE building, so a failing build still leaves the
           # guard holding until the always()-settle resolves it. An invalid
           # dispatch never pins: no status is written for a bogus SHA.
@@ -69,9 +80,17 @@ jobs:
       # raw SHA fetch, so this is the fork-safe way to reach the head. The
       # next step binds the tree to the dispatched SHA so a head that moved
       # between dispatch and checkout is re-dispatched, not mis-certified.
+      # pr=0 is the bare-SHA live proof (main tip, no PR): reachable SHAs
+      # fetch directly.
       - uses: actions/checkout@v7
+        if: inputs.pr != '0'
         with:
           ref: refs/pull/${{ inputs.pr }}/head
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        if: inputs.pr == '0'
+        with:
+          ref: ${{ inputs.sha }}
           persist-credentials: false
 
       - name: Bind the tree to the exact head
@@ -80,7 +99,27 @@ jobs:
         run: |
           set -euo pipefail
           head="$(git rev-parse HEAD)"
-          [ "$head" = "$SHA" ] || { echo "pull/${{ inputs.pr }}/head is $head, not the dispatched $SHA; re-dispatch on the current head" >&2; exit 1; }
+          [ "$head" = "$SHA" ] || { echo "checked-out $head is not the dispatched $SHA; re-dispatch on the current head" >&2; exit 1; }
+
+      # The composite actions and their scripts below execute from THIS
+      # checkout. Byte-compare every executed path against main's tip so a
+      # head can never ship the toolchain that certifies it: .github/actions
+      # (all three composite actions plus install.sh) and the two scripts
+      # they invoke. Build inputs (*.opam, dune-project, sources) stay the
+      # head's on purpose — the toolchain cache key already folds their
+      # hashes in. A toolchain PR fails here by design; it re-dispatches
+      # with trust-head-toolchain=true, which the settle step records.
+      - name: Prove the toolchain matches main
+        if: inputs.trust-head-toolchain != true
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          if ! git diff --quiet origin/main HEAD -- .github/actions scripts/opam-pin-external-deps.sh scripts/ci/opam-cache-freshness.sh; then
+            echo 'toolchain differs from main:' >&2
+            git diff --name-only origin/main HEAD -- .github/actions scripts/opam-pin-external-deps.sh scripts/ci/opam-cache-freshness.sh >&2
+            echo 'land the toolchain change first, or re-dispatch with trust-head-toolchain=true (recorded override)' >&2
+            exit 1
+          fi
 
       - name: Identify build inputs
         id: inputs
@@ -140,12 +179,13 @@ jobs:
           restore-keys: |
             ${{ steps.inputs.outputs.dune }}-
 
-      # The toolchain above is head-supplied code (.github/actions,
-      # scripts) running before the build it is about to certify. The
-      # receipt lives outside the tree, so legitimately nothing in the
-      # workspace is new or modified; refuse rather than certify a tree
-      # the setup steps mutated. On a receipt hit nothing runs here, so
-      # this passes trivially and costs nothing.
+      # The toolchain above is byte-identical to main's (proven two steps
+      # up, unless the recorded override was passed), but it still runs
+      # before the build it is about to certify. The receipt lives outside
+      # the tree, so legitimately nothing in the workspace is new or
+      # modified; refuse rather than certify a tree the setup steps
+      # mutated. On a receipt hit nothing runs here, so this passes
+      # trivially and costs nothing.
       - name: Prove the tree still matches the head
         env:
           SHA: ${{ inputs.sha }}
@@ -182,9 +222,11 @@ jobs:
         env:
           RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
           BUILD_STATUS: ${{ job.status }}
+          TOOLCHAIN_OVERRIDE: ${{ inputs.trust-head-toolchain }}
         run: |
           {
             echo "Checked merge-head SHA: ${{ inputs.sha }} (PR #${{ inputs.pr }})"
+            [ "$TOOLCHAIN_OVERRIDE" = true ] && echo 'Toolchain: HEAD SUPPLIED (operator override trust-head-toolchain=true)' || echo 'Toolchain: byte-identical to main'
             if [ "$RECEIPT_HIT" = true ]; then
               echo 'Build skipped: non-documentation inputs already built successfully.'
               echo "Previously built SHA: $(cat "${{ runner.temp }}/.ci-main-build-receipt")"
@@ -210,6 +252,7 @@ jobs:
           SHA: ${{ inputs.sha }}
           PR: ${{ inputs.pr }}
           COMPILE_RESULT: ${{ needs.compile.result }}
+          TOOLCHAIN_OVERRIDE: ${{ inputs.trust-head-toolchain }}
         run: |
           python3 - <<'PY'
           import json, os, re, urllib.request
@@ -220,15 +263,21 @@ jobs:
           # Fail closed: anything but a successful compile job settles red,
           # including cancellation and infra failure. Re-dispatch replaces it.
           passed = os.environ['COMPILE_RESULT'] == 'success'
+          override = os.environ['TOOLCHAIN_OVERRIDE'] == 'true'
           receipt = {'schema_version': 1, 'sha': sha, 'pr': os.environ['PR'],
                      'actor': os.environ['GITHUB_ACTOR'], 'compile': os.environ['COMPILE_RESULT'],
                      'checks_passed': passed, 'run_id': os.environ['GITHUB_RUN_ID'],
-                     'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}
+                     'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+                     'toolchain_override': override}
           Path('merge-compile-results.json').write_text(json.dumps(receipt, indent=2) + '\n')
           state = 'success' if passed else 'failure'
+          if passed and override:
+              description = 'Four executables built (head toolchain override)'
+          else:
+              description = 'Four executables built' if passed else 'Merge compile failed'
           body = json.dumps({
               'state': state, 'context': 'merge-compile',
-              'description': ('Four executables built' if passed else 'Merge compile failed'),
+              'description': description,
               'target_url': os.environ['RUN_URL'],
           }).encode()
           request = urllib.request.Request(

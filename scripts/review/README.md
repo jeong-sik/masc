@@ -46,8 +46,9 @@ reviews or structured decision. It rechecks stack membership and included
 head/base identities before admission. Check output names the validated
 merge target: a native stack can land into another feature branch, whose PR
 is outside this stack scope. That is not main integration. For an ordinary head
-it reads only the merge-compile commit status — a missing, pending or failed
-record refuses — and never dispatches CI itself. External coding agents use this read-only check before submitting a native
+it additionally reads the merge-compile verdict — target freshness plus the
+commit status — as advisory `ADVISORY #N: ...` lines, and never dispatches CI
+itself. External coding agents use this read-only check before submitting a native
 stack via `PUT /repos/O/R/pulls/TOP_PR/merge-async`; for a non-native PR, use
 `gh pr merge --match-head-commit SHA`. The asynchronous receipt labels only the preflight target, since GitHub accepts
 only the selected head SHA as a precondition; its accepted destination remains

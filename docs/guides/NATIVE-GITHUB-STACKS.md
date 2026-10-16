@@ -77,9 +77,11 @@ gh workflow run merge-compile.yml --ref main -f sha=TOP_PR_CURRENT_HEAD -f pr=TO
 ```
 
 Use `scripts/review/merge-guard.sh --check --repo OWNER/REPO --pr NUMBER --head SHA`
-to check the included scope. The guard also requires the top head's
-`merge-compile` success status and refuses a missing, pending or failed
-record, so merge only after the status reads success. To inspect the read-only identity snapshot directly:
+to check the included scope. The guard also reports the top head's
+merge-compile verdict — freshness against `stack.base` plus the
+`merge-compile` success status — as `ADVISORY #N: ...` until convention
+adoption turns the refusal on, so merge only after the head is fresh with a
+success status. To inspect the read-only identity snapshot directly:
 
 ```bash
 python3 scripts/review/stack-scope.py OWNER/REPO TOP_PR_NUMBER TOP_PR_CURRENT_HEAD

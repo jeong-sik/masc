@@ -1179,10 +1179,11 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
       Error
         (Spawn_failed
            (Printf.sprintf
-              "CLI capacity busy: no Antigravity spawn slot within %.1fs (limit %.1fs, %d active); retry shortly"
+              "CLI capacity busy: no Antigravity spawn slot within %.1fs (limit %.1fs, %d active, %d waiting); retry shortly"
               waited_s
               limit_s
-              (Runtime_cli_spawn_gate.active_cli_spawns ())))
+              (Runtime_cli_spawn_gate.active_cli_spawns ())
+              (Runtime_cli_spawn_gate.waiting_cli_spawns ())))
     | Eio.Time.Timeout as exn -> raise exn
     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
     | Eio.Cancel.Cancelled _ as exn -> raise exn

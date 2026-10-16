@@ -51,6 +51,13 @@ let with_cli_spawn_slot ~clock ?(wait_timeout_s = max_slot_wait_s) f =
    | Ok () ->
      (* Acquire returned: the slot is held. Release cannot suspend, so
         the finally arm is total. *)
+     let waited = Unix.gettimeofday () -. started in
+     if Float.compare waited 1.0 > 0
+     then
+       Log.Runtime_agent.debug
+         "CLI spawn slot acquired after %.1fs (%d still waiting)"
+         waited
+         (waiting_cli_spawns ());
      Atomic.incr active;
      Fun.protect
        ~finally:(fun () ->

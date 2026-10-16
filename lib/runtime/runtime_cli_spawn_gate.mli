@@ -28,10 +28,19 @@
     Deadlock contract: a turn holding a slot must never synchronously wait
     for another gated turn, and the gate is not reentrant — a fiber that
     re-enters while holding a slot waits for itself until [Slot_timeout].
-    The wait budget ({!max_slot_wait_s}) converts any such wedge — or 8
-    turns stuck in unbounded tool phases — into a typed refusal instead
-    of a hang. The waiter gauges below tell saturation (tune the bound)
-    apart from a wedge (investigate the stuck turns). *)
+    Every gate wait ends after {!max_slot_wait_s} at the latest, so any
+    wait cycle containing a gate wait dissolves at the first expiry: the
+    nested caller receives the typed refusal as its tool result and the
+    outer turn proceeds to release. A cycle with no gate wait in it —
+    pure tool-to-tool nesting — predates the gate and is outside its
+    scope, as is the deliberate unbounded tool phase itself (the owner
+    retains cancellation authority there): holders release on tool
+    return or owner cancel, and saturation in between degrades to typed
+    "retry shortly" refusals, never to a hang. Releasing the slot during
+    tool phases would break the fd bound the gate exists for — the child
+    keeps its descriptors while it waits on tools — so the slot spans
+    the whole turn by design. The waiter gauges below tell saturation
+    (tune the bound) apart from a wedge (investigate the stuck turns). *)
 
 val max_concurrent_cli_spawns : int
 (** [8]. Worst enforced case is 8 x {!child_fd_ceiling} = 128k files

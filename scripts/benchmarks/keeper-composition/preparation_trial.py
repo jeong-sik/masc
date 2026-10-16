@@ -48,8 +48,8 @@ def digest(path: Path) -> str:
 
 
 def validate(experiment: dict) -> None:
-    if experiment["schema_version"] != 1 or experiment["case"] != "upstream_inline":
-        raise ValueError("only schema 1 upstream_inline is implemented")
+    if experiment["schema_version"] != 1 or experiment["case"] not in ("upstream_inline", "named_inline"):
+        raise ValueError("schema 1 upstream_inline or named_inline required")
     if type(experiment["pairs"]) is not int or experiment["pairs"] <= 0:
         raise ValueError("pairs must be an explicit positive integer")
     runtime = experiment["runtime"]
@@ -226,7 +226,7 @@ def run(args) -> None:
         if len(completed) == 2:
             matching.append({"pair": pair, "first_offered_inventory_observed":
                              all(result.get("first_offered_tools_sha256") is not None for result in completed)})
-            for key in ("fixture_sha256", "skill_reference", "input", "runtime", "first_offered_tools_sha256",
+            for key in ("case", "fixture_sha256", "skill_reference", "input", "runtime", "first_offered_tools_sha256",
                         "common_instruction_sha256"):
                 if completed[0][key] != completed[1][key]:
                     for attempt, result in zip(attempts, results):
@@ -238,7 +238,7 @@ def run(args) -> None:
     if sum(counts.values()) != len(attempts):
         raise ValueError("unknown outcome cannot disappear from denominator")
     fixtures = [result.get("fixture_sha256") for result in results if result["outcome"] == "correct"]
-    save(output / "summary.json", {"expected": len(attempts), "outcomes": counts,
+    save(output / "summary.json", {"case": experiment["case"], "expected": len(attempts), "outcomes": counts,
          "strategy_compliant": sum(result.get("strategy_compliant") is True for result in results),
          "attempts": results, "synthetic_only": synthetic, "latency_percentiles": None,
          "speedup": None, "matching": matching,

@@ -1,6 +1,6 @@
 # Isolated preparation harness
 
-This opt-in harness authors one paired `upstream_inline` case. Select either a
+This opt-in harness supports paired `upstream_inline` and `named_inline` cases. Select either a
 scripted loopback streaming peer or an explicitly configured HTTP Runtime. Both
 use the existing synthetic owned-job CLI peer. Configured transport alone does
 not establish real model identity, Docker isolation, fleet scheduling, installed
@@ -16,7 +16,8 @@ build receipt.
 The synthetic experiment JSON has exactly these fields:
 
 - `schema_version`: `1`.
-- `case`: `"upstream_inline"`. Other cases are not implemented.
+- `case`: `"upstream_inline"` for a newly authored task plan, or `"named_inline"`
+  for direct reuse of an already published named Inline Skill.
 - `pairs`: an explicit positive integer.
 - `runtime`: exactly `mode="synthetic_streaming"`, a nonblank `model_id`, and
   positive `max_context_tokens` / `max_output_tokens`. These are explicit
@@ -119,11 +120,21 @@ and actual descriptor execution modes; there is no forced serial control policy.
 This one case has data dependencies and makes no concurrency-overlap claim.
 
 Both arms first read the original selection artifact. The direct arm then reads
-the selected original job result and its stdout. The Skill arm authors a transient
+the selected original job result and its stdout. In `upstream_inline`, the Skill arm authors a transient
 prepare/run whose explicit output template binds the child argument from another
 actual selection read. That extra read and prepare/run cost remain inside its
 clock. The child uses the exact published Inline Skill. Publication outside the
 clock is the declared starting condition, not hidden authoring work.
+
+In `named_inline`, the Skill arm instead calls the existing named Tool with the
+selected `job_id`. Its Tool name comes from the frozen executable Skill catalog;
+no transient prepare/run or upstream child is required. The Skill document,
+output contract and strict objective stay the same. A named invocation joins its
+exact Task Skill activation, revision, turn, Runtime, original SDK call/input and
+physical complete stdout leaf. A valid named call in an `upstream_inline`
+experiment still fails that experiment's assigned strategy. Keep that original
+outcome and run a separate named case; do not retroactively change compliance or
+combine the two cases into a speed comparison.
 
 Success requires an actual physical full stdout read in this original turn,
 the independently checked complete stdout digest, the actual
@@ -147,7 +158,7 @@ complete node evidence through `execution_artifact`. Physical ownership and
 resolved upstream arguments join the corresponding node facts in either
 representation. Neither representation substitutes for the original SDK
 reply, manifest hash, execution ID, Task/trace/turn or exact Skill activation.
-`Completed` alone is insufficient. Exact Skill compliance joins the activation
+`Completed` alone is insufficient. Upstream Skill compliance joins the activation
 to the original SDK parent reply, immutable prepared manifest, resolved child
 argument and physical stdout execution. Model-generated tool-use IDs and child
 aliases need not match the scripted peer. There are no latency percentiles or
@@ -217,6 +228,8 @@ driver dependency and explicit synthetic model/capability inputs. It launches
 this coordinator with one real matched pair, then checks every denominator,
 physical first-leaf/Task/trace/ACK join, same common input/inventory, actual exact
 Skill activation, resolved child argument, persisted final digest and backend0.
+It also runs a separate named-reuse pair through the actual named Skill Tool,
+checking its activation and original physical leaf/SDK parent without prepare/run.
 It also crosses an independently hosted loopback HTTP refusal through the
 configured Runtime branch for both arms, checks the fixture environment
 credential binding, and retains both refusals as explicit failures. That server

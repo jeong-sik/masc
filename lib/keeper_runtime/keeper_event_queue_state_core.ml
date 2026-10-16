@@ -96,6 +96,7 @@ type pending_selection =
   ; admitted_revision : int64
   ; checkpoint_retentions : int
   ; repetition_scope : Keeper_execution_scope_id.t option
+  ; first_admitted_at : float option
   }
 
 type scope_binding_error =
@@ -373,11 +374,13 @@ let accounted_stimuli state =
       state.transition_outbox
 ;;
 
-let project_accepted_transfer (transfer : accepted_transfer) state =
+let project_accepted_transfer ?admitted_at (transfer : accepted_transfer) state =
   let same_operation (candidate : accepted_transfer) =
     String.equal candidate.operator_operation_id transfer.operator_operation_id
   in
-  match List.find_opt same_operation state.accepted_transfer_projections with
+  if Option.fold ~none:false ~some:(fun time -> not (Float.is_finite time)) admitted_at
+  then Error "event queue admission time must be finite"
+  else match List.find_opt same_operation state.accepted_transfer_projections with
   | Some existing when existing = transfer -> Ok (state, Transfer_already_projected)
   | Some _ -> Error "target transfer operation ID conflicts with its durable projection"
   | None ->
@@ -396,6 +399,7 @@ let project_accepted_transfer (transfer : accepted_transfer) state =
                    ; admitted_revision = state.revision
                    ; checkpoint_retentions = 0
                    ; repetition_scope = None
+                   ; first_admitted_at = admitted_at
                    }
                  ]
            ; accepted_transfer_projections =
@@ -455,7 +459,7 @@ let mark_transition_projected ~transition_id ~retain_previous state =
     Error (Printf.sprintf "event queue transition not found: %s" transition_id)
   | _ :: _ :: _ -> Error "event queue state has multiple unprojected transitions"
 ;;
-let with_pending pending state =
+let reconcile_pending ~first_admitted_at pending state =
   let rec take_matching source skipped = function
     | [] -> None, List.rev skipped
     | entry :: rest
@@ -472,7 +476,7 @@ let with_pending pending state =
         match existing with
         | Some entry -> entry
         | None -> { source; admitted_revision = state.revision; checkpoint_retentions = 0
-                 ; repetition_scope = None }
+                 ; repetition_scope = None; first_admitted_at }
       in
       reconcile available (entry :: acc) rest
   in
@@ -487,6 +491,14 @@ let with_pending pending state =
     |> reconcile state.pending_entries []
   in
   { state with pending_entries }
+;;
+
+let with_pending pending state = reconcile_pending ~first_admitted_at:None pending state
+
+let with_pending_at ~admitted_at pending state =
+  if not (Float.is_finite admitted_at)
+  then Error "event queue admission time must be finite"
+  else Ok (reconcile_pending ~first_admitted_at:(Some admitted_at) pending state)
 ;;
 
 let with_revision revision state = { state with revision }
@@ -631,6 +643,7 @@ let reprioritize_pending
         ; admitted_revision = next_revision
         ; checkpoint_retentions = selection.checkpoint_retentions
         ; repetition_scope = selection.repetition_scope
+        ; first_admitted_at = selection.first_admitted_at
         }
       in
       let pending_entries =

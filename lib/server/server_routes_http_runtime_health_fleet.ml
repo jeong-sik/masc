@@ -354,12 +354,17 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
       else if storage_degraded then "degraded"
       else "ok"
     in
-    (* The producer's timestamp can predate durable intake by hours. No queue
-       entry records its first admission, so source age never proves a stall. *)
+    (* Carry the canonical observation; residence is diagnostic, not a health
+       verdict or a source-age-derived stall threshold. *)
     let queue_residence = Keeper_event_queue_persistence.(
-      queue_residence_to_yojson
-        (Unknown (if source_unavailable || not counts_complete
-                  then Queue_observation_incomplete else First_admission_not_recorded))) in
+      let residence =
+        if source_unavailable || not counts_complete then Unknown Queue_observation_incomplete
+        else match List.assoc_opt "queue_residence" fields with
+          | None -> Unknown First_admission_not_recorded
+          | Some json -> (match queue_residence_of_yojson json with
+              | Some residence -> residence
+              | None -> Unknown Queue_observation_incomplete)
+      in queue_residence_to_yojson residence) in
     let work_status, work_state =
       if source_unavailable || not counts_complete
       then "unavailable", "unknown"

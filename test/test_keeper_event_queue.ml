@@ -1791,7 +1791,7 @@ let () =
         before_observation (read_file runnable_snapshot);
       let residence = match json_field "queue_residence" json with
         | Some value -> value | None -> Alcotest.fail "queue residence missing" in
-      Alcotest.(check string) "first admission was not recorded" "first_admission_not_recorded"
+      Alcotest.(check string) "observation predates recorded admissions" "clock_observation_invalid"
         (string_field "reason" residence);
       Alcotest.(check bool) "residence is explicitly unknown, never source age" true
         (json_field "oldest_age_seconds" residence = Some `Null

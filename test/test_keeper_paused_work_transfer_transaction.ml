@@ -672,11 +672,11 @@ let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let base_path = config.Workspace.base_path in
     let old_selection : State.pending_selection =
-      { source = request.source
-      ; admitted_revision = request.source_incarnation
-      ; checkpoint_retentions = 0
-      ; repetition_scope = None
-      }
+      Persistence.pending_selections_result ~base_path ~keeper_name:from_keeper
+      |> require_ok "read exact pending selection"
+      |> List.find (fun (selection : State.pending_selection) ->
+        selection.source = request.source
+        && Int64.equal selection.admitted_revision request.source_incarnation)
     in
     Persistence.ack_pending_result
       ~base_path

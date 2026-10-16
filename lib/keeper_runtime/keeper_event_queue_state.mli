@@ -127,6 +127,7 @@ type pending_selection =
   ; admitted_revision : int64
   ; checkpoint_retentions : int
   ; repetition_scope : Keeper_execution_scope_id.t option
+  ; first_admitted_at : float option
   }
 (** One exact durable queue entry. [admitted_revision] records the durable
     transform that admitted the snapshot; entries admitted by the same
@@ -135,6 +136,9 @@ type pending_selection =
 (** [repetition_scope = None] means no durable binding has been recorded. It
     does not assert that the source has never been observed by a model. A
     binding identifies work; it does not by itself authorize Fresh or Resume. *)
+(** [first_admitted_at] is first durable queue admission epoch time; [None]
+    means no clock was recorded. Source timestamps cannot supply it. It remains
+    diagnostic only and survives retention, deferral and reprioritization. *)
 
 type scope_binding_error =
   | Empty_scope_batch
@@ -194,6 +198,9 @@ val transition_outbox : t -> outbox_entry list
 val accepted_transfer_projections : t -> accepted_transfer list
 
 val with_pending : Keeper_event_queue.t -> t -> t
+val with_pending_at : admitted_at:float -> Keeper_event_queue.t -> t -> (t, string) result
+(** Stamp only newly inserted entries with a finite observed admission clock.
+    Never invent an admission time for an already pending unknown entry. *)
 val with_revision : int64 -> t -> t
 
 val peek_when :
@@ -354,7 +361,7 @@ val accepted_pending_transfer_replay :
     operation ID and exact source-bearing transition. *)
 
 val project_accepted_transfer :
-  accepted_transfer -> t -> (t * transfer_projection_result, string) result
+  ?admitted_at:float -> accepted_transfer -> t -> (t * transfer_projection_result, string) result
 (** Atomically account for one exact target-side transfer projection and
     enqueue its source only on the first projection. The durable accounting
     survives target consumption, so receipt replay cannot enqueue the same

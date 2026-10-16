@@ -745,6 +745,29 @@ let all =
         ]
       ~category:Sandbox
       "MicroVM guest CPU count"
+  ; (* Read at each guest boot, from a file that is read once at server start:
+       a change takes a restart, so this row says so. It raises only for a value
+       the operator set, like the two rows above. Its unset default is the
+       host's resolver, and a host whose resolver a guest cannot use must not
+       stop the config from loading: that is the file the operator sets the key
+       in. The guest boot refuses instead, naming this key. *)
+    setting
+      ~reload_class:Process_restart
+      ~effective:
+        (Reader
+           (fun () ->
+              (match Env_config_sandbox.Runtime.microvm_dns_effective () with
+              | Ok shown -> shown
+              | Error detail -> raise (Env_config_core.Config_error detail))))
+      ~env_name:"MASC_KEEPER_MICROVM_DNS"
+      ~exposure:(Toml_and_env "sandbox.microvm_dns")
+      ~value_kind:String
+      ~default:"(the host's first resolver)"
+      ~consumers:[ "Keeper_turn_sandbox_runtime microvm boot" ]
+      ~category:Sandbox
+      "Nameserver (an IP address) handed to a microVM guest on the default network. \
+       Blank copies the host's first resolver; a guest is refused when that resolver \
+       is zone-scoped, link-local, loopback or multicast"
   ; setting
       ~effective:
         (Reader

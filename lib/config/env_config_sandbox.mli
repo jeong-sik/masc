@@ -60,13 +60,66 @@ module Runtime : sig
       VM shutdown: measured at 63-67s, against a Cleanup_rm bucket of 10s and
       an Io bucket of 30s that were both sized for docker. *)
 
-  val microvm_dns : unit -> string
-  (** Nameserver handed to a microvm guest on the default network.
+  (** Why a text cannot be a guest's nameserver. Each case is an address that
+      means something on the host and nothing inside the guest. *)
+  type nameserver_refusal =
+    | Not_an_address
+    | Zone_scoped
+        (** [fe80::1%en0]: the zone names an interface of the host, and the
+            guest has no such interface. *)
+    | Unspecified
+        (** [::], [0.0.0.0], or anything in [0.0.0.0/8]. *)
+    | Loopback
+        (** Inside the guest this is the guest itself. *)
+    | Link_local
+        (** [fe80::/10] or [169.254.0.0/16]: reachable only over the link the
+            host is attached to. *)
+    | Multicast
 
-      Defaults to the host's first [/etc/resolv.conf] nameserver so a guest
-      resolves the way the host does; [MASC_KEEPER_MICROVM_DNS] overrides it.
-      Empty -- an unreadable resolv.conf, or an explicit empty override --
-      passes no [--dns]. *)
+  val nameserver_of_string : string -> (Ipaddr.t, nameserver_refusal) result
+  (** The address in [text] once surrounding blanks are dropped, or the reason
+      it cannot be handed to a guest. Nothing else is accepted: a host name is
+      [Not_an_address], because the guest would have to resolve it with the
+      resolver it is being given. *)
+
+  val nameserver_refusal_to_string : nameserver_refusal -> string
+  (** A phrase that completes "<text> ...", for the operator. *)
+
+  val first_nameserver_of : string -> string option
+  (** The first [nameserver] line of a resolv.conf's text. Blanks and tabs
+      separate the fields, and anything after the address is ignored. *)
+
+  val microvm_dns_from :
+    configured:string -> host:string option -> (Ipaddr.t, string) result
+  (** The resolution rule behind {!microvm_dns}, with both inputs given.
+      [configured] counts as unset when blank, and then [host] -- the host's
+      first resolver -- decides. A [configured] value that is set and is not
+      a usable address is [Error], never replaced by [host]: the operator
+      named a resolver, and booting on another would say nothing. A [host]
+      resolver the guest cannot use, or none at all, is [Error] naming
+      [sandbox.microvm_dns] as the way out. *)
+
+  val microvm_dns : unit -> (Ipaddr.t, string) result
+  (** The nameserver a microvm guest on the default network is booted with:
+      [MASC_KEEPER_MICROVM_DNS], which [runtime.toml] [sandbox.microvm_dns]
+      seeds, else the host's first [/etc/resolv.conf] nameserver, through
+      {!microvm_dns_from}. runtime.toml is read once at boot, so a change to
+      the key takes a server restart. *)
+
+  val microvm_dns_effective_from :
+    configured:string -> host:string option -> (string, string) result
+  (** What the settings surface shows for the setting. [Error] only for a
+      [configured] value that is set and is not a usable address: that is the
+      operator's input, and the surface reports it as a configuration error.
+      An unset value shows the host's resolver, or [unusable: ...] when the
+      host's cannot be used by a guest. It is not [Error] then: the surface
+      is read for every setting before runtime.toml is applied, and a host
+      whose resolver a guest cannot use must still let the file that names
+      the fix load. The guest's boot refuses instead, through {!microvm_dns}. *)
+
+  val microvm_dns_effective : unit -> (string, string) result
+  (** {!microvm_dns_effective_from} over the process setting and the host's
+      resolv.conf. *)
 
   val microvm_memory_default : string
   val microvm_cpus_default : int

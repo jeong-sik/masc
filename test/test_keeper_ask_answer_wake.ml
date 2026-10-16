@@ -408,7 +408,7 @@ let test_durable_write_failure_is_recovered_from_the_answer_record () =
   (match Keeper_event_queue_persistence.For_testing.enqueue_stimulus_once_with_confirmation
       ~base_path ~keeper_name:"alpha"
       ~already_delivered:(fun () -> Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-        ~base_path ~keeper_name:"alpha" ~since:source.arrived_at ~post_id:source.post_id
+        ~base_path ~keeper_name:"alpha" ~not_before:source.arrived_at ~post_id:source.post_id
         ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
         |> Result.map_error Keeper_reaction_ledger.strict_delivery_evidence_error_to_string)
       ~confirm_snapshot:(fun _path _state -> Error "injected durable snapshot confirmation failure") source with

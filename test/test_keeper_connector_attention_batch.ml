@@ -530,7 +530,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
            ~event_queue_intake_error:intake.event_queue_intake_error) in
     let assert_no_delivery () =
       (match Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-          ~base_path ~keeper_name ~since:0. ~post_id:stimulus.post_id
+          ~base_path ~keeper_name ~not_before:0. ~post_id:stimulus.post_id
           ~stimulus_kind:Keeper_reaction_ledger.Ask_answered with
        | Ok seen -> check bool "failed canonical source has no positive delivery proof" false seen
        | Error error -> fail (Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error));

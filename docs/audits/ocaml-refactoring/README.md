@@ -69,7 +69,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 ## Current queue
 
-The queue now contains **25 concrete candidates**: 24 from the first semantic pass and A1 from a focused Agent Core follow-up. Four are implemented as PRs with independent source review: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result; `A1` in [#43386](https://github.com/jeong-sik/masc/pull/43386) separates stream error projection from diagnostic file I/O. Other `next` items remain queued; this ordering does not waive their coverage.
+The queue now contains **25 concrete candidates**: 24 from the first semantic pass and A1 from a focused Agent Core follow-up. Five are implemented as PRs; their source-review evidence is recorded on each PR: `S1` in [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves separate Librarian failure-policy axes; `D2` in [#43374](https://github.com/jeong-sik/masc/pull/43374) returns an explicit Goal commit result; `A1` in [#43386](https://github.com/jeong-sik/masc/pull/43386) separates stream error projection from diagnostic file I/O; `D1` in [#43399](https://github.com/jeong-sik/masc/pull/43399) returns the committed Task verification obligation together with its public result. Other `next` items remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -80,7 +80,7 @@ The queue now contains **25 concrete candidates**: 24 from the first semantic pa
 | [K5](#k5) | later | candidate | Separate approval restart replay decisions from recovery effects |
 | [K6](#k6) | investigate | candidate | Make Agent Core committed-batch scanning an explicit returned state |
 | [K7](#k7) | later | candidate | Separate Memory receipt reconciliation selection from its durable plan |
-| [D1](#d1) | next | candidate | Return an explicit task commit receipt instead of a cross-scope notification ref |
+| [D1](#d1) | next | in review | Return an explicit task commit receipt instead of a cross-scope notification ref |
 | [D2](#d2) | next | in review | Make Goal upsert a typed immutable transaction decision |
 | [D3](#d3) | later | candidate | Isolate the Goal document codec and schema rejection contract |
 | [D4](#d4) | investigate | candidate | Audit and retain typed Goal publication outcomes across the backend adapter |
@@ -305,6 +305,8 @@ Consumers: [lib/workspace/workspace_task.ml](../../../lib/workspace/workspace_ta
 Scenarios: [test/test_task_transition_broadcast.ml](../../../test/test_task_transition_broadcast.ml), [test/test_verification.ml](../../../test/test_verification.ml), [test/test_workspace.ml](../../../test/test_workspace.ml). **Not executed in this audit.**
 
 Ordering rationale: The current code explicitly documents commit-sensitive projection failures, and test_submit_schedules_review_after_log_failure plus test_raw_workspace_submission_notifies_once exercise the user-visible continuity. A typed receipt makes the commit/notification relation reviewable without moving I/O or changing task policy.
+
+Implementation: [#43399](https://github.com/jeong-sik/masc/pull/43399) replaces the cross-scope ref with a function-local `Noop | Committed { submission; result }` receipt. A committed late projection error remains a public error while retaining the existing outside-lock supersede deletion and notification. Cancellation still escapes without that finalization; this is not a durable replay guarantee. Three real-request-store scenarios cover late observer failure, precommit revision exhaustion and an explicitly raised cancellation exception. Two changed OCaml files passed syntax parsing; scenarios remain unexecuted.
 
 ### D2
 
@@ -784,4 +786,5 @@ These are reasons not to perform a blanket rewrite, not whole-module correctness
 - Round 3: D2 implemented in [#43374](https://github.com/jeong-sik/masc/pull/43374). Focused source review corrected the initial no-op proposal: every accepted existing upsert commits even when fields are unchanged. Rejection and commit results are explicit; current RFC implementation references were updated. Syntax parsing passed and two public-store scenarios were added but not executed.
 - Round 4: expanded Agent Core inspection across 17 explicitly scoped source/test reads in [#43377](https://github.com/jeong-sik/masc/pull/43377). Added A1 for the hidden diagnostic file effect in stream-error conversion and retained three existing ownership boundaries. This expands the queue to 25 candidates; it does not complete Agent Core coverage.
 - Round 5 implementation: A1 was rechecked against main `857c8647ce7cc7305d6aa081d1aa24ac5b93f05e`, implemented and independently source-reviewed in [#43386](https://github.com/jeong-sik/masc/pull/43386). The focused read corrected a tentative public-API concern: the projection owner was already private.
+- Round 5 implementation continued: D1 implemented in [#43399](https://github.com/jeong-sik/masc/pull/43399), preserving committed verification obligations across ordinary projection errors without changing cancellation or lock ownership. The existing compensation comment was corrected to distinguish returned cleanup errors from raised exceptions.
 - No local Dune build, CI polling, behavior execution, formal GitHub approval, merge or runtime proof is supplied by this inventory.

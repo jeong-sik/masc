@@ -627,15 +627,78 @@ let test_shared_exact_reference_retains_every_task_id () =
       ~package_id:"guide"
       ~name:"guide"
   in
-  let resolve task_id =
-    match Selection.resolve_for_task ~snapshot:skill_snapshot ~task_id [ reference ] with
-    | Ok selection -> selection
-    | Error error -> fail (Selection.error_to_string error)
-  in
-  let merged = Selection.merge [ resolve "task-a"; resolve "task-b" ] in
+  let merged = match Selection.resolve_observations ~snapshot:skill_snapshot
+      ~current_task:Inputs.No_current_task ~held_task_skills:
+        [{Inputs.held_task_id="task-a";held_skills=[reference;reference]};
+         {Inputs.held_task_id="task-b";held_skills=[reference]}] with
+    | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
   check int "one exact selection" 1 (List.length merged.selected);
   check (list string) "all Task ids retained" [ "task-a"; "task-b" ]
     (one_selected merged).task_ids
+;;
+
+let test_task_binding_reuses_only_exact_frozen_inputs () =
+  let skill_config = config (source_row ~id:"only" ~path:"skills") in
+  let first = snapshot skill_config
+      [["lane",composition_document ~name:"lane" ~node_id:"original"]] in
+  let source_id = match skill_config.sources with
+    | [source] -> source.id | _ -> fail "one original Skill source" in
+  let reference = exact_reference first ~source_id ~package_id:"lane" ~name:"lane" in
+  let held_task_skills =
+    [{Inputs.held_task_id="task-a";held_skills=[reference]};
+     {Inputs.held_task_id="task-b";held_skills=[reference]}] in
+  let selection = match Selection.resolve_observations ~snapshot:first
+      ~current_task:Inputs.No_current_task ~held_task_skills with
+    | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let bind ~snapshot descriptors selection =
+    match Selection.with_descriptors ~snapshot ~descriptors selection with
+    | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
+  let bound = bind ~snapshot:first descriptors selection in
+  check int "the shared exact Skill remains one executable composition" 1
+    (List.length (Selection.partition bound).compositions);
+  let reused = bind ~snapshot:first (List.map Fun.id descriptors) bound in
+  check bool "the prompt and execution keep one immutable binding without reprojecting" true (bound == reused);
+  check (list string) "reuse keeps all exact Task provenance" ["task-a";"task-b"] (one_selected reused).task_ids;
+  let surfaces = Selection.exact_task_surfaces ~snapshot:first ~tool_deny:[]
+      ~sandbox_profile:Masc.Keeper_types_profile.Docker ~skill_names:None ~selection:reused
+      ~current_task:Inputs.No_current_task ~held_task_skills in
+  check (list string) "both original Task prompt surfaces survive reuse" ["task-a";"task-b"]
+    (List.map fst surfaces);
+  let without_lane = List.filter (fun (descriptor : Masc.Keeper_tool_descriptor.t) ->
+    not (List.mem "keeper_lane_status" (Masc.Keeper_tool_descriptor.keeper_model_names descriptor))) descriptors in
+  check bool "the fixture really changes Tool authority" true (List.length without_lane < List.length descriptors);
+  let changed_tools = bind ~snapshot:first without_lane bound in
+  check int "changed authority cannot retain the old executable composition" 0
+    (List.length (Selection.partition changed_tools).compositions);
+  check bool "changed Tool authority retains its actual projection diagnostic" true
+    (Option.is_some (one_selected changed_tools).diagnostic);
+  let mixed_binding = Selection.merge [selection;changed_tools] in
+  check bool "bound and unbound projections cannot share a reuse proof" true
+    (Option.is_none mixed_binding.projection_snapshot);
+  let rebound_mixed = bind ~snapshot:first without_lane mixed_binding in
+  check int "unbound selection cannot smuggle a missing Tool through merged authority" 0
+    (List.length (Selection.partition rebound_mixed).compositions);
+  let later = snapshot skill_config
+      [["lane",composition_document ~name:"lane" ~node_id:"later"]] in
+  let changed_source = bind ~snapshot:later descriptors bound in
+  check int "same Tool objects do not hide a changed frozen source" 0 (List.length changed_source.selected);
+  check int "the original pin becomes explicitly unavailable against the new source" 1
+    (List.length changed_source.unprojectable);
+  let later_reference = exact_reference later ~source_id ~package_id:"lane" ~name:"lane" in
+  let later_selection = match Selection.resolve_for_task ~snapshot:later ~task_id:"task-later" [later_reference] with
+    | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
+  let mixed = Selection.merge [bound;later_selection] in
+  check bool "mixed source selections have no single reusable projection input" true
+    (Option.is_none mixed.projection_snapshot);
+  let restored = bind ~snapshot:first descriptors mixed in
+  check int "mixed sources reproject instead of borrowing the first binding" 1 (List.length restored.selected);
+  check int "the later revision cannot be offered from the original snapshot" 1 (List.length restored.unprojectable);
+  let unreadable = Snapshot.config_unreadable ~detail:"source unavailable after the original selection" in
+  check bool "matching Tool authority cannot hide an unreadable replacement snapshot" true
+    (match Selection.with_descriptors ~snapshot:unreadable ~descriptors bound with
+     | Error (Selection.Skill_config_unreadable _) -> true
+     | Error _ | Ok _ -> false)
 ;;
 
 let run_skill_tool tool input =
@@ -1453,6 +1516,8 @@ let () =
             test_malformed_exact_composition_is_frozen_instruction
         ; test_case "shared exact ref retains all Task ids" `Quick
             test_shared_exact_reference_retains_every_task_id
+        ; test_case "Task binding reuses only exact frozen source and Tool authority" `Quick
+            test_task_binding_reuses_only_exact_frozen_inputs
         ; test_case "exact ref consumer rejects name fallback" `Quick
             test_exact_reference_consumer_rejects_name_fallback
         ; test_case "resolved body remains frozen" `Quick

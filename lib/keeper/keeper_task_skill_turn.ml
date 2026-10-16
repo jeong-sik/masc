@@ -33,6 +33,7 @@ type t =
   { selected : selected list
   ; unprojectable : unprojectable list
   ; descriptor_authority : Keeper_tool_descriptor.t list option
+  ; projection_snapshot : Skill_catalog_snapshot.t option
   }
 
 type partition =
@@ -129,7 +130,8 @@ let unreadable_pin_error ~snapshot ~reference = function
    into an unreadable source or entry stops setup above instead. *)
 let resolve_with_task_ids ?descriptors ~snapshot ~task_ids references =
   let rec loop resolved unprojectable = function
-    | [] -> Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable; descriptor_authority = descriptors }
+    | [] -> Ok { selected = List.rev resolved; unprojectable = List.rev unprojectable;
+        descriptor_authority = descriptors; projection_snapshot = Some snapshot }
     | reference :: rest ->
       (match Skill_catalog_snapshot.resolve_reference snapshot reference with
        | Error resolution ->
@@ -175,7 +177,7 @@ let resolve_for_task ~snapshot ~task_id references =
   resolve_with_task_ids ~snapshot ~task_ids:[ task_id ] references
 ;;
 
-let empty = { selected = []; unprojectable = []; descriptor_authority = None }
+let empty = { selected = []; unprojectable = []; descriptor_authority = None; projection_snapshot = None }
 
 (* One row per exact reference, carrying every Task id that pinned it. *)
 let merge_rows ~reference ~task_ids ~with_task_ids rows =
@@ -200,14 +202,29 @@ let merge_rows ~reference ~task_ids ~with_task_ids rows =
   List.fold_left add [] rows
 ;;
 
+let same_descriptors first next =
+  first == next || (List.length first=List.length next && List.for_all2 ( == ) first next)
+
+let same_descriptor_binding first next = match first,next with
+  | None,None -> true
+  | Some first,Some next -> same_descriptors first next
+  | None,Some _ | Some _,None -> false
+
 let merge selections =
   let descriptor_authority = List.fold_left (fun authority selection ->
     match authority, selection.descriptor_authority with
     | None, other | other, None -> other
-    | Some first, Some next when List.length first = List.length next
-        && List.for_all2 ( == ) first next -> authority
+    | Some first, Some next when same_descriptors first next -> authority
     | Some _, Some _ -> invalid_arg "Task selections have different frozen Tool authority") None selections in
+  let projection_snapshot = match selections with
+    | ({projection_snapshot=Some first;_} as original) :: rest
+      when List.for_all (fun selection ->
+        same_descriptor_binding original.descriptor_authority selection.descriptor_authority
+        && match selection.projection_snapshot with
+           | Some next -> first == next | None -> false) rest -> Some first
+    | [] | _ :: _ -> None in
   { descriptor_authority
+  ; projection_snapshot
   ; selected =
       merge_rows
         ~reference:(fun (row : selected) -> row.reference)
@@ -223,7 +240,7 @@ let merge selections =
   }
 ;;
 
-let resolve_observations ~snapshot ~current_task ~held_task_skills =
+let resolve_observations_with_authority ~descriptor_authority ~snapshot ~current_task ~held_task_skills =
   let current =
     match current_task with
     | Keeper_world_observation_inputs.Current_task task
@@ -238,34 +255,48 @@ let resolve_observations ~snapshot ~current_task ~held_task_skills =
          entry.held_task_id, entry.held_skills)
       held_task_skills
   in
+  let requests = current @ held
+    |> List.concat_map (fun (task_id,references) ->
+        List.map (fun reference -> reference,[task_id]) references)
+    |> merge_rows ~reference:fst ~task_ids:snd
+        ~with_task_ids:(fun (reference,_) task_ids -> reference,task_ids) in
   let rec loop selections = function
-    | [] -> Ok (merge (List.rev selections))
-    | (task_id, references) :: rest ->
-      (match resolve_for_task ~snapshot ~task_id references with
+    | [] -> Ok {(merge (List.rev selections)) with descriptor_authority;projection_snapshot=Some snapshot}
+    | (reference, task_ids) :: rest ->
+      (match resolve_with_task_ids ?descriptors:descriptor_authority ~snapshot ~task_ids [reference] with
        | Error _ as error -> error
        | Ok selection -> loop (selection :: selections) rest)
   in
-  loop [] (current @ held)
+  loop [] requests
 ;;
+
+let resolve_observations ~snapshot ~current_task ~held_task_skills =
+  resolve_observations_with_authority ~descriptor_authority:None
+    ~snapshot ~current_task ~held_task_skills
 
 let descriptors selection = selection.descriptor_authority
 
 let with_descriptors ~descriptors ~snapshot selection =
-  let requests = List.map (fun (row : selected) -> row.reference,row.task_ids) selection.selected
-    @ List.map (fun (row : unprojectable) -> row.reference,row.task_ids) selection.unprojectable in
-  let rec loop selections = function
-    | [] -> Ok { (merge (List.rev selections)) with descriptor_authority = Some descriptors }
-    | (reference, task_ids) :: rest ->
-        Result.bind (resolve_with_task_ids ~descriptors ~snapshot ~task_ids [reference])
-          (fun selected -> loop (selected :: selections) rest) in
-  loop [] requests
+  match selection.projection_snapshot, selection.descriptor_authority with
+  | Some original, Some bound when original == snapshot && same_descriptors bound descriptors ->
+      Ok selection
+  | None, _ | _, None | Some _, Some _ ->
+    let requests = List.map (fun (row : selected) -> row.reference,row.task_ids) selection.selected
+      @ List.map (fun (row : unprojectable) -> row.reference,row.task_ids) selection.unprojectable in
+    let rec loop selections = function
+      | [] -> Ok { (merge (List.rev selections)) with descriptor_authority = Some descriptors;
+          projection_snapshot = Some snapshot }
+      | (reference, task_ids) :: rest ->
+          Result.bind (resolve_with_task_ids ~descriptors ~snapshot ~task_ids [reference])
+            (fun selected -> loop (selected :: selections) rest) in
+    loop [] requests
 
 let resolve_live_observations ~config ~keeper_name ~snapshot ~current_task ~held_task_skills =
   let exports = (Keeper_lane_addon_runtime.snapshot ~config ~keeper_name).exports in
   let descriptors = Keeper_tool_descriptor.all_descriptors ()
     @ List.map Keeper_lane_addon_descriptor.create exports in
-  Result.bind (resolve_observations ~snapshot ~current_task ~held_task_skills)
-    (with_descriptors ~descriptors ~snapshot)
+  resolve_observations_with_authority ~descriptor_authority:(Some descriptors)
+    ~snapshot ~current_task ~held_task_skills
 ;;
 
 let unavailable_reason_code = function

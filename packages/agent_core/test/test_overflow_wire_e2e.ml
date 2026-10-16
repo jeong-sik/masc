@@ -113,22 +113,26 @@ let test_attribution_end_to_end () =
   | other -> Alcotest.failf "expected Api ContextOverflow, got %s" (Error.to_string other)
 ;;
 
-(* A terminal empty turn belongs to the run's acceptance, not overflow routing. *)
+(* --- Negative control: a non-overflow finish_reason on an empty turn must not
+       reach the overflow arm. It lands in EmptyCompletion, which #32497 split
+       out of ProviderUnavailable on 2026-09-02; what this guards is that the
+       overflow routing does not swallow it, not which of the two it is. --- *)
 let test_non_overflow_control () =
   let body = empty_completion_body ~finish_reason:"stop" in
-  let response = match Glm.parse_response_result body with
-    | Ok response -> response
-    | Error error -> Alcotest.fail (Parse.parse_error_to_string error)
-  in
-  let stop_reason = response.Types.stop_reason in
+  let stop_reason = empty_completion_stop_reason "glm" (Glm.parse_response_result body) in
   Alcotest.check
     stop_reason_testable
     "non-overflow finish_reason parses as EndTurn"
     Types.EndTurn
     stop_reason;
-  Alcotest.(check int) "no content invented" 0 (List.length response.content);
-  Alcotest.(check bool) "not an overflow" true
-    (Option.is_none (Retry.overflow_of_empty_completion ~stop_reason ~message:"e2e"))
+  match
+    Attribution.core_error_of_http_error (Http.empty_completion_error ~stop_reason)
+  with
+  | Error.Provider (Llm_provider.Error.EmptyCompletion _) -> ()
+  | other ->
+    Alcotest.failf
+      "expected EmptyCompletion for non-overflow empty turn, got %s"
+      (Error.to_string other)
 ;;
 
 let () =

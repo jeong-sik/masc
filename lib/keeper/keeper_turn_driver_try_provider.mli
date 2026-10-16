@@ -431,10 +431,19 @@ type try_provider_ctx =
 
 val apply_accept :
   runtime_id:string ->
-  tool_results_saved_in_attempt:bool ->
   accept:(Agent_core.Types.api_response -> bool) ->
   Runtime_agent.run_result ->
   (Runtime_agent.run_result, Agent_core.Error.t) result
+
+val complete_saved_tool_terminal :
+  tool_results_saved_in_attempt:bool ->
+  checkpoint:Agent_core.Checkpoint.t option ->
+  (Runtime_agent.run_result, Agent_core.Error.t) result ->
+  (Runtime_agent.run_result, Agent_core.Error.t) result
+(** Keeper-owned normalization of a typed empty [EndTurn] failure after this
+    attempt saved tool results. A checkpoint is required; all other outcomes
+    retain their original classification. The synthetic terminal has no
+    provider response identity, usage, telemetry or cooperative-yield witness. *)
 
 val observe_checkpoint_stage :
   checkpoint_progress Atomic.t -> Agent_core.Agent.checkpoint_stage -> unit
@@ -818,7 +827,6 @@ module For_testing : sig
 
   val apply_accept :
     runtime_id:string ->
-    tool_results_saved_in_attempt:bool ->
     accept:(Agent_core.Types.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result

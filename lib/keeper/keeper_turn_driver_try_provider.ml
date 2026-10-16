@@ -582,7 +582,6 @@ let accept_rejected_error ~runtime_id ~(response : Agent_core.Types.api_response
 
 let apply_accept
       ~runtime_id
-      ~tool_results_saved_in_attempt
       ~accept
       (run_result : Runtime_agent.run_result)
   =
@@ -599,15 +598,45 @@ let apply_accept
     Ok run_result
   | Runtime_agent.Completed ->
     if accept run_result.response
-       || (tool_results_saved_in_attempt
-           && run_result.response.content = []
-           && run_result.response.stop_reason = Agent_core.Types.EndTurn)
     then Ok run_result
     else
       Error
         (accept_rejected_error
            ~runtime_id
            ~response:run_result.response)
+
+let complete_saved_tool_terminal ~tool_results_saved_in_attempt ~checkpoint result =
+  match result, tool_results_saved_in_attempt, checkpoint with
+  | ( Error
+        (Agent_core.Error.Provider
+           (Llm_provider.Error.EmptyCompletion
+              { stop_reason = Agent_core.Types.EndTurn; _ }))
+    , true
+    , Some (checkpoint : Agent_core.Checkpoint.t) ) ->
+    (* The shared SDK still rejects empty completions. Only this Keeper owns
+       proof that its tool results were saved in this attempt. The failure
+       carries no provider response id or usage; do not invent either. *)
+    Ok
+      { Runtime_agent.response =
+          { Agent_core.Types.id = ""
+          ; model = checkpoint.model
+          ; content = []
+          ; stop_reason = Agent_core.Types.EndTurn
+          ; usage = None
+          ; telemetry = None
+          }
+      ; checkpoint = Some checkpoint
+      ; cooperative_boundary = None
+      ; session_id = checkpoint.session_id
+      ; session_resumed = None
+      ; turns = checkpoint.turn_count
+      ; trace_ref = None
+      ; run_validation = None
+      ; runtime_observation = None
+      ; stop_reason = Runtime_agent.Completed
+      }
+  | (Ok _ | Error _), _, _ -> result
+;;
 
 (** Run a single provider attempt within the runtime.
 
@@ -2299,14 +2328,18 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                       ctx.runtime_id
                 }))
     in
+    let checkpoint_after =
+      Keeper_turn_driver_helpers.checkpoint_after_attempt
+        ?agent_before_attempt ?session_id:ctx.session_id ?working_context:ctx.checkpoint_sidecar
+        ?agent_ref:ctx.agent_ref
+        !attempt_agent_ref
+    in
     let result =
       match result with
       | Ok run_result ->
         (match
            apply_accept
              ~runtime_id:ctx.error_runtime_id
-             ~tool_results_saved_in_attempt:
-               (tool_result_save_count ctx.checkpoint_progress > tool_result_saves_before)
              ~accept:ctx.accept
              run_result
          with
@@ -2326,7 +2359,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
              ~runtime_id:ctx.runtime_id
              run_result.response;
            rejected)
-      | Error _ as err -> err
+      | Error _ as err ->
+        complete_saved_tool_terminal
+          ~tool_results_saved_in_attempt:
+            (tool_result_save_count ctx.checkpoint_progress > tool_result_saves_before)
+          ~checkpoint:checkpoint_after
+          err
     in
     (match ctx.on_runtime_observation, result with
      | Some emit, Ok run_result ->
@@ -2344,12 +2382,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
          config
        |> emit
      | None, _ -> ());
-    let checkpoint_after =
-      Keeper_turn_driver_helpers.checkpoint_after_attempt
-        ?agent_before_attempt ?session_id:ctx.session_id ?working_context:ctx.checkpoint_sidecar
-        ?agent_ref:ctx.agent_ref
-        !attempt_agent_ref
-    in
     result, checkpoint_after, None
 ;;
 

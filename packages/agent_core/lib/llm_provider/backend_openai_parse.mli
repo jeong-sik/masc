@@ -39,8 +39,8 @@ type empty_completion =
     that is neither an object nor a string. It is not the provider reporting
     anything.
 
-    [Empty_completion] preserves the identity of other all-empty stops.
-    An empty [EndTurn] stays [Ok] for the run owner's history-aware acceptance. *)
+    [Empty_completion] is a fail-closed all-empty 200 that would otherwise have
+    parsed as [Ok content=[]] and stormed downstream. *)
 type parse_error =
   | Provider_error of
       { message : string
@@ -58,7 +58,7 @@ val parse_error_to_string : parse_error -> string
     [Yojson.Safe.t]).  [Ok api_response] on success; [Error (Provider_error _)]
     when the provider reported an error; [Error (Unreadable_response _)] when
     the body cannot be read; [Error (Empty_completion _)] when the completion has no
-    thinking/text/tool_calls and did not stop at [EndTurn]. Blank text WITH tool_calls stays [Ok]
+    thinking/text/tool_calls (agent-core boundary). Blank text WITH tool_calls stays [Ok]
     (content is non-empty). Use when the caller already holds the parsed JSON to
     avoid re-parsing.
 

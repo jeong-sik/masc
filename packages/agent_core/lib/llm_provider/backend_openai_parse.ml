@@ -7,9 +7,10 @@
 
 open Types
 
-(* An empty terminal EndTurn remains a typed response: only the run owner can
-   decide whether earlier tool results completed the work. Other empty stops
-   retain their typed failure so overflow/truncation attribution is preserved. *)
+(* agent-core boundary: a blank-content 200 must not be accepted as [Ok content=[]] (a
+   silent empty turn that storms downstream). The parser fails closed with a
+   typed [Empty_completion] carrying the response identity so a consumer can
+   attribute the empty turn to a runtime binding instead of retrying blindly. *)
 type empty_completion =
   { id : string
   ; model : string
@@ -446,16 +447,16 @@ let parse_openai_response_result_json_raw
      | None -> Error (unreadable_response "malformed_openai_response:error_not_object_or_string"))
 ;;
 
-(* A terminal EndTurn, including an empty one, belongs to the consumer's
-   run-history-aware acceptance. Other all-empty stops retain their typed
-   failure. Blank text with tool calls has nonempty content and stays [Ok]. *)
+(* agent-core boundary fail-closed wrapper: an all-empty completion (no thinking, no text,
+   no tool_calls) becomes a typed [Empty_completion] instead of [Ok content=[]]
+   — the silent empty turn that stormed downstream. Blank text WITH tool_calls
+   has content=[ToolUse ..] (content <> []) and stays [Ok]. *)
 let parse_openai_response_result_json
       ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
       raw_json
   =
   match parse_openai_response_result_json_raw ~content_inline_reasoning raw_json with
   | Error _ as error -> error
-  | Ok ({ stop_reason = EndTurn; _ } : Types.api_response) as terminal -> terminal
   | Ok ({ content = []; id; model; stop_reason; usage; telemetry } : Types.api_response)
     -> Error (Empty_completion { id; model; stop_reason; usage; telemetry })
   | Ok resp -> Ok resp

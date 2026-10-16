@@ -1697,10 +1697,13 @@ let test_parse_edge_shapes_for_text_and_telemetry () =
   (match invalid_fence.content with
    | [ Text "```json\nnot-json\n```" ] -> ()
    | _ -> Alcotest.fail "invalid JSON fence should keep original text");
-  (* A terminal empty response stays a response for the run owner's acceptance.
-     Whitespace reasoning and ignored content do not invent a text block. *)
+  (* Every content block is malformed (dropped) and whitespace-only
+     reasoning_content yields no Thinking block, so the completion is
+     all-empty and now fails closed as [Empty_completion] (agent-core boundary) instead
+     of the old [Ok content=[]]. The fail-closed payload still carries the
+     stop_reason. *)
   let no_text =
-    parse_ok
+    parse_empty
       (response_json
          ~content:
            (`List
@@ -1712,7 +1715,6 @@ let test_parse_edge_shapes_for_text_and_telemetry () =
    | EndTurn -> ()
    | _ ->
      Alcotest.fail "empty completion should preserve the stop finish_reason as EndTurn");
-  Alcotest.(check int) "no invented text" 0 (List.length no_text.content);
   (* Malformed object content also parses to no blocks, but the fail-closed
      [Empty_completion] payload still surfaces stop_reason and telemetry. *)
   let telemetry =

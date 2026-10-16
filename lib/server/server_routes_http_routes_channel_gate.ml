@@ -409,22 +409,21 @@ let keeper_exists state keeper_name =
     ~config:(Mcp_server.workspace_config state)
     keeper_name
 
-let respond_keeper_tool_json ?config ?(project = Fun.id) ~sw ~clock state request reqd ~tool_name ~args =
+let keeper_tool_response ~(config : Workspace.config) ~project ~sw ~clock state ~tool_name ~args =
   match
-    Keeper_tool_surface.dispatch (gate_keeper_ctx ?config ~sw ~clock state) ~name:tool_name ~args
+    Keeper_tool_surface.dispatch (gate_keeper_ctx ~config ~sw ~clock state) ~name:tool_name ~args
   with
   | Some (Tool_result.Completed output) -> (
       try
         (* Both Keeper read tools already produce structured data. Rendering
            it to text and parsing it again only repeats work on every read. *)
         let json = project output.data in
-        respond_json_value_with_cors ~status:`OK request reqd json
+        `OK, json
       with
       | Yojson.Json_error err ->
           Log.Misc.error "channel_gate %s projection failed: %s"
             tool_name err;
-          respond_json_value_with_cors ~status:`Internal_server_error request reqd
-            (Channel_gate.error_json "internal error") )
+          `Internal_server_error, Channel_gate.error_json "internal error" )
   | Some ((Tool_result.Failed _ | Tool_result.Deferred _) as result) ->
       (* Not-found is decided by the typed existence precheck at the route
          (see [handle_gate_keeper_status_by_name]); an error out of the tool
@@ -433,11 +432,28 @@ let respond_keeper_tool_json ?config ?(project = Fun.id) ~sw ~clock state reques
          producer spellings of "keeper not found" by accident
          (RFC-0371 B4). *)
       let err = Tool_result.message result in
-      respond_json_value_with_cors ~status:`Bad_gateway request reqd
-        (Channel_gate.error_json err)
+      `Bad_gateway, Channel_gate.error_json err
   | None ->
-      respond_json_value_with_cors ~status:`Service_unavailable request reqd
-        (Channel_gate.error_json "keeper dispatch unavailable")
+      `Service_unavailable, Channel_gate.error_json "keeper dispatch unavailable"
+
+let respond_keeper_tool_json ?config ?(project = Fun.id) ~sw ~clock state request reqd ~tool_name ~args =
+  let config = match config with
+    | Some config -> config
+    | None -> Mcp_server.workspace_config state in
+  (* The only callers dispatch Keeper list/status reads. Metadata, history,
+     ledger projection and JSON encoding belong off the HTTP scheduler;
+     writing the completed response stays on the request's own domain. *)
+  let status, body =
+    Server_dashboard_http_runtime_support.run_dashboard_compute
+      ~mode:Server_dashboard_http_runtime_support.Offloaded_readonly
+      ~sw ~clock ~config
+      (fun ~config ~sw ->
+        let status, json =
+          keeper_tool_response ~config ~project ~sw ~clock state ~tool_name ~args
+        in
+        status, Yojson.Safe.to_string json)
+  in
+  respond_json_with_cors ~status request reqd body
 
 (* Upper bound on rows in one keeper-list response, and the default. One
    constant so the two cannot drift: before masc#29077 the default was 100

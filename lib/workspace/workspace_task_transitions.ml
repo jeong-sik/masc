@@ -96,6 +96,14 @@ let transition_task_outcome_r
       ()
   : transition_outcome Masc_domain.masc_result
   =
+  let module Transaction = struct
+    type t =
+      | Noop of transition_outcome
+      | Committed of
+          { submission : verification_submission option
+          ; result : transition_outcome Masc_domain.masc_result
+          }
+  end in
   (* The workspace API owns the task FSM, while persistence of the
      verification request remains behind the neutral hook registry. The
      caller may provide an explicit adapter, but omitting it must still use
@@ -115,9 +123,8 @@ let transition_task_outcome_r
           ~verification_id
           ~claim
   in
-  (* Compensation is not a caller's choice. Its result type is [unit], so a
-     failed cleanup is logged by the adapter but cannot hide the original
-     commit failure, and no caller ever had a reason to supply its own. *)
+  (* Compensation is not a caller's choice. Returned cleanup errors are
+     logged; raised exceptions follow the surrounding transition policy. *)
   let compensate_verification_request ~verification_id =
     (match
            (Atomic.get Workspace_hooks.verification_delete_request_fn)
@@ -145,8 +152,7 @@ let transition_task_outcome_r
     | Ok _, Ok _ -> Ok ()
   in
   let lock_path = backlog_lock_path config in
-  let committed_verification_submission = ref None in
-  let result =
+  let transaction =
     with_file_lock_r config lock_path (fun () ->
     try
       match read_backlog_r config with
@@ -357,14 +363,14 @@ let transition_task_outcome_r
         if new_status = task.task_status && set_current = None
         then
 (* Idempotent no-op: status unchanged, skip write/events. Match None explicitly so set_current=Some is never silently dropped. *)
-          Ok
+          Ok (Transaction.Noop
             { message =
                 Printf.sprintf
                   "%s already %s (no-op)"
                   task_id
                   (task_status_to_string task.task_status)
             ; noop = true
-            }
+            })
         else (
           let backlog_update =
             Workspace_task_transition_executor.build_backlog_update
@@ -413,10 +419,9 @@ let transition_task_outcome_r
               | Some (_, verification_id, _) ->
                 compensate_verification_request ~verification_id);
              raise exn);
-          (match pending_verification with
-           | None -> ()
+          let submission = match pending_verification with
+           | None -> None
            | Some (assignee, verification_id, claim) ->
-             committed_verification_submission :=
                Some
                  { task = { task with task_status = new_status }
                  ; assignee
@@ -432,113 +437,129 @@ let transition_task_outcome_r
                       | Masc_domain.InProgress _
                       | Masc_domain.Done _
                       | Masc_domain.Cancelled _ -> None)
-                 });
-          let run_post_commit label f =
-            try f () with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn ->
-              Log.TaskState.error
-                "task transition committed but projection failed task_id=%s agent=%s action=%s label=%s detail=%s"
-                task_id agent_name action_s label (Printexc.to_string exn)
+                 }
           in
-          (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
-             commit so agents that cache the task don't emit stale broadcasts
-             referencing the old status. *)
-          run_post_commit "task_cache" (fun () ->
-          Task_cache_invariant.clear_stale_agent_task config
-            ~cause:Task_cache_invariant.After_commit
-            ~agent_name ~task_id ~status:new_status
-            ~module_name:"transition_task_r");
-          run_post_commit "agent_state" (fun () ->
-          update_local_agent_state config ~agent_name (fun agent ->
-            match set_current with
-            | Some _ -> { agent with status = Busy; current_task = Some task_id }
-            | None ->
-              if agent.current_task = Some task_id
-              then { agent with status = Active; current_task = None }
-              else agent));
-          run_post_commit "transition_log" (fun () ->
-          log_event
-            config
-            (transition_log_event
-               ~agent_name
-               ~task_id
-               ~from_status:task.task_status
-               ~to_status:new_status
-               ~action:action_s
-               ?assignee:(Masc_domain.task_assignee_of_status task.task_status)
-               ?notes:(trim_opt (Some notes))
-               ?reason:stated_reason
-               ?handoff_context:backlog_update.persisted_handoff_context
-               ()));
-          (* Post-commit projection, isolated like the terminal hook below. The
-             backlog write already committed, so letting [broadcast] escape here
-             would report a committed transition as [IoError] and skip both the
-             activity event and [task_terminal_committed_fn] — the author would
-             never be woken about a cancellation that did happen, which is the
-             failure this change exists to remove. [Eio.Cancel.Cancelled] still
-             propagates: a cancelled fiber must not be resumed. *)
-          (match
-             transition_broadcast_content ~new_status ~task_id ~stated_reason
-           with
-           | None -> ()
-           | Some content ->
-             (try
-                match broadcast ~audience:System_record config ~from_agent:agent_name ~content with
-                | Ok _ -> ()
-                | Error error ->
+          (* A projection error changes the public result, not the committed
+             submission. Cancellation still escapes without a receipt. *)
+          let result =
+            try
+              let run_post_commit label f =
+                try f () with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn ->
                   Log.TaskState.error
-                    "task transition committed but broadcast was not persisted task_id=%s agent=%s action=%s detail=%s"
-                    task_id
-                    agent_name
-                    action_s
-                    (broadcast_error_to_string error)
-              with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn ->
-                Log.TaskState.error
-                  "task transition committed but broadcast failed task_id=%s \
-                   agent=%s action=%s detail=%s"
-                  task_id
-                  agent_name
-                  action_s
-                  (Printexc.to_string exn)));
-          run_post_commit "activity" (fun () ->
-          (match new_status with
-           | Masc_domain.Claimed _ ->
-             emit_task_activity config ~agent_name ~task_id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
-               ~payload:(`Assoc [ "task_id", `String task_id ])
-           | Masc_domain.InProgress _ ->
-             emit_task_activity config ~agent_name ~task_id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Started)
-               ~payload:(`Assoc [ "task_id", `String task_id ])
-           | Masc_domain.Done _ ->
-             emit_task_activity config ~agent_name ~task_id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Done)
-               ~payload:(`Assoc [ "task_id", `String task_id; ("notes", if notes = "" then `Null else `String notes) ])
-           | Masc_domain.Cancelled _ ->
-             emit_task_activity
-               config
-               ~agent_name
-               ~task_id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Cancelled)
-               ~payload:
-                 (`Assoc
-                     [ "task_id", `String task_id
-                     ; ( "reason"
-                       , match stated_reason with
-                         | None -> `Null
-                         | Some reason -> `String reason )
-                     ])
-           | Masc_domain.Todo ->
-             emit_task_activity
-               config
-               ~agent_name
-               ~task_id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
-               ~payload:
-                 (`Assoc
+                    "task transition committed but projection failed task_id=%s agent=%s action=%s label=%s detail=%s"
+                    task_id agent_name action_s label (Printexc.to_string exn)
+              in
+              (* RFC-0221 §3.3: clear stale agent task-cache entries AFTER the
+                 commit so agents that cache the task don't emit stale broadcasts
+                 referencing the old status. *)
+              run_post_commit "task_cache" (fun () ->
+              Task_cache_invariant.clear_stale_agent_task config
+                ~cause:Task_cache_invariant.After_commit
+                ~agent_name ~task_id ~status:new_status
+                ~module_name:"transition_task_r");
+              run_post_commit "agent_state" (fun () ->
+              update_local_agent_state config ~agent_name (fun agent ->
+                match set_current with
+                | Some _ -> { agent with status = Busy; current_task = Some task_id }
+                | None ->
+                  if agent.current_task = Some task_id
+                  then { agent with status = Active; current_task = None }
+                  else agent));
+              run_post_commit "transition_log" (fun () ->
+              log_event
+                config
+                (transition_log_event
+                   ~agent_name
+                   ~task_id
+                   ~from_status:task.task_status
+                   ~to_status:new_status
+                   ~action:action_s
+                   ?assignee:(Masc_domain.task_assignee_of_status task.task_status)
+                   ?notes:(trim_opt (Some notes))
+                   ?reason:stated_reason
+                   ?handoff_context:backlog_update.persisted_handoff_context
+                   ()));
+              (* Post-commit projection, isolated like the terminal hook below. The
+                 backlog write already committed, so letting [broadcast] escape here
+                 would report a committed transition as [IoError] and skip both the
+                 activity event and [task_terminal_committed_fn] — the author would
+                 never be woken about a cancellation that did happen, which is the
+                 failure this change exists to remove. [Eio.Cancel.Cancelled] still
+                 propagates: a cancelled fiber must not be resumed. *)
+              (match
+                 transition_broadcast_content ~new_status ~task_id ~stated_reason
+               with
+               | None -> ()
+               | Some content ->
+                 (try
+                    match broadcast ~audience:System_record config ~from_agent:agent_name ~content with
+                    | Ok _ -> ()
+                    | Error error ->
+                      Log.TaskState.error
+                        "task transition committed but broadcast was not persisted task_id=%s agent=%s action=%s detail=%s"
+                        task_id
+                        agent_name
+                        action_s
+                        (broadcast_error_to_string error)
+                  with
+                  | Eio.Cancel.Cancelled _ as exn -> raise exn
+                  | exn ->
+                    Log.TaskState.error
+                      "task transition committed but broadcast failed task_id=%s \
+                       agent=%s action=%s detail=%s"
+                      task_id
+                      agent_name
+                      action_s
+                      (Printexc.to_string exn)));
+              run_post_commit "activity" (fun () ->
+              (match new_status with
+               | Masc_domain.Claimed _ ->
+                 emit_task_activity config ~agent_name ~task_id
+                   ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
+                   ~payload:(`Assoc [ "task_id", `String task_id ])
+               | Masc_domain.InProgress _ ->
+                 emit_task_activity config ~agent_name ~task_id
+                   ~kind:(Event_kind.Task.to_string Event_kind.Task.Started)
+                   ~payload:(`Assoc [ "task_id", `String task_id ])
+               | Masc_domain.Done _ ->
+                 emit_task_activity config ~agent_name ~task_id
+                   ~kind:(Event_kind.Task.to_string Event_kind.Task.Done)
+                   ~payload:(`Assoc [ "task_id", `String task_id; ("notes", if notes = "" then `Null else `String notes) ])
+               | Masc_domain.Cancelled _ ->
+                 emit_task_activity
+                   config
+                   ~agent_name
+                   ~task_id
+                   ~kind:(Event_kind.Task.to_string Event_kind.Task.Cancelled)
+                   ~payload:
+                     (`Assoc
+                         [ "task_id", `String task_id
+                         ; ( "reason"
+                           , match stated_reason with
+                             | None -> `Null
+                             | Some reason -> `String reason )
+                         ])
+               | Masc_domain.Todo ->
+                 emit_task_activity
+                   config
+                   ~agent_name
+                   ~task_id
+                   ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
+                   ~payload:
+                     (`Assoc
+                         ([ "task_id", `String task_id ]
+                          @
+                          match handoff_context with
+                          | Some handoff_context ->
+                            [ ( "handoff_context"
+                              , Masc_domain.task_handoff_context_to_yojson handoff_context )
+                            ]
+                          | None -> []))
+               | Masc_domain.AwaitingVerification _ ->
+                 let payload =
+                   `Assoc
                      ([ "task_id", `String task_id ]
                       @
                       match handoff_context with
@@ -546,191 +567,190 @@ let transition_task_outcome_r
                         [ ( "handoff_context"
                           , Masc_domain.task_handoff_context_to_yojson handoff_context )
                         ]
-                      | None -> []))
-           | Masc_domain.AwaitingVerification _ ->
-             let payload =
-               `Assoc
-                 ([ "task_id", `String task_id ]
-                  @
-                  match handoff_context with
-                  | Some handoff_context ->
-                    [ ( "handoff_context"
-                      , Masc_domain.task_handoff_context_to_yojson handoff_context )
-                    ]
-                  | None -> [])
-             in
-             emit_task_activity
-               config
-               ~agent_name
-               ~task_id
-               ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
-               ~payload));
-             (match new_status with
-              | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
-                (try
-                   (Atomic.get Workspace_hooks.verification_submitted_fn)
-                     config
-                     ~task:{ task with task_status = new_status }
-                     ~assignee
-                     ~verification_id
-                 with
-                 | Eio.Cancel.Cancelled _ as exn -> raise exn
-                 | exn ->
-                   Log.TaskState.error
-                     "verification authority scheduling degraded after submit commit \
-                      task_id=%s verification_id=%s detail=%s"
-                     task_id
-                     verification_id
-                     (Printexc.to_string exn))
-              | Masc_domain.Todo
-              | Masc_domain.Claimed _
-              | Masc_domain.InProgress _
-              | Masc_domain.Done _
-              | Masc_domain.Cancelled _ -> ());
-          (* RFC-0323 G-3: completion side effects key off the RESULT (Done), not
-             the action — a verdict-produced completion arrives through
-             [decide_verdict] and never as an agent action, so keying off the
-             action would record no duration for it. The value measures the last
-             status phase (started_at for in_progress, submitted_at for
-             awaiting_verification). *)
-          let completes_task =
-            Masc_domain.task_status_is_done new_status
-            && not (Masc_domain.task_status_is_done task.task_status)
+                      | None -> [])
+                 in
+                 emit_task_activity
+                   config
+                   ~agent_name
+                   ~task_id
+                   ~kind:(Event_kind.Task.to_string Event_kind.Task.Submit_for_verification)
+                   ~payload));
+                 (match new_status with
+                  | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+                    (try
+                       (Atomic.get Workspace_hooks.verification_submitted_fn)
+                         config
+                         ~task:{ task with task_status = new_status }
+                         ~assignee
+                         ~verification_id
+                     with
+                     | Eio.Cancel.Cancelled _ as exn -> raise exn
+                     | exn ->
+                       Log.TaskState.error
+                         "verification authority scheduling degraded after submit commit \
+                          task_id=%s verification_id=%s detail=%s"
+                         task_id
+                         verification_id
+                         (Printexc.to_string exn))
+                  | Masc_domain.Todo
+                  | Masc_domain.Claimed _
+                  | Masc_domain.InProgress _
+                  | Masc_domain.Done _
+                  | Masc_domain.Cancelled _ -> ());
+              (* RFC-0323 G-3: completion side effects key off the RESULT (Done), not
+                 the action — a verdict-produced completion arrives through
+                 [decide_verdict] and never as an agent action, so keying off the
+                 action would record no duration for it. The value measures the last
+                 status phase (started_at for in_progress, submitted_at for
+                 awaiting_verification). *)
+              let completes_task =
+                Masc_domain.task_status_is_done new_status
+                && not (Masc_domain.task_status_is_done task.task_status)
+              in
+              let became_terminal =
+                Masc_domain.task_status_is_terminal new_status
+                && not (Masc_domain.task_status_is_terminal task.task_status)
+              in
+              if became_terminal
+              then (
+                let delivery =
+                  try
+                    (Atomic.get Workspace_hooks.task_terminal_committed_fn)
+                      config
+                      ~agent_name
+                      ~task_id
+                  with
+                  | Eio.Cancel.Cancelled _ as exn -> raise exn
+                  | exn ->
+                    Workspace_hooks.Task_terminal_delivery_degraded
+                      { kind = "hook_exception"; detail = Printexc.to_string exn }
+                in
+                match delivery with
+                | Workspace_hooks.Task_terminal_delivered -> ()
+                | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
+                  Log.TaskState.error
+                    "task terminal commit succeeded but reconciliation delivery degraded \
+                     task_id=%s agent=%s kind=%s detail=%s"
+                    task_id
+                    agent_name
+                    kind
+                    detail);
+              let phase_duration_ms () =
+                task_duration_ms_since ~now:now_ts task.task_status
+              in
+              let duration_ms =
+                if completes_task
+                then phase_duration_ms ()
+                else (
+                  match action with
+                  | Masc_domain.Cancel -> phase_duration_ms ()
+                  | Masc_domain.Done_action
+                  | Masc_domain.Claim
+                  | Masc_domain.Start
+                  | Masc_domain.Release
+                  | Masc_domain.Submit_for_verification -> None)
+              in
+              observe_task_transition
+                config
+                ~agent_name
+                ~task_id
+                ~transition:action
+                ~details:
+                  (task_transition_details
+                     ~from_status:task.task_status
+                     ~to_status:new_status
+                     ?notes:(if notes = "" then None else Some notes)
+                     ?reason:(if reason = "" then None else Some reason)
+                     ?duration_ms
+                     ());
+              (* RFC-0323 G-3: done hooks (relation/hebbian) fire for every transition
+                 that PRODUCES Done, including a Done produced by an approval verdict.
+                 The completer is the Done record's assignee — never the actor, which
+                 for a verdict is a completion authority rather than an agent. *)
+              (match new_status with
+               | Masc_domain.Done { assignee; _ } ->
+                 if completes_task
+                 then
+                   Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee
+               | Masc_domain.Todo
+               | Masc_domain.Claimed _
+               | Masc_domain.InProgress _
+               | Masc_domain.AwaitingVerification _
+               | Masc_domain.Cancelled _ -> ());
+              (match action with
+               | Masc_domain.Cancel ->
+                 Workspace_task_cleanup.run_cancel_hooks config ~agent_name
+               | Masc_domain.Done_action
+               | Masc_domain.Release
+               | Masc_domain.Claim
+               | Masc_domain.Start
+               | Masc_domain.Submit_for_verification -> ());
+              Ok
+                { message =
+                    Printf.sprintf
+                      "%s %s → %s"
+                      task_id
+                      (task_status_to_string task.task_status)
+                      (task_status_to_string new_status)
+                ; noop = false
+                }
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | e ->
+              Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))
           in
-          let became_terminal =
-            Masc_domain.task_status_is_terminal new_status
-            && not (Masc_domain.task_status_is_terminal task.task_status)
-          in
-          if became_terminal
-          then (
-            let delivery =
-              try
-                (Atomic.get Workspace_hooks.task_terminal_committed_fn)
-                  config
-                  ~agent_name
-                  ~task_id
-              with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn ->
-                Workspace_hooks.Task_terminal_delivery_degraded
-                  { kind = "hook_exception"; detail = Printexc.to_string exn }
-            in
-            match delivery with
-            | Workspace_hooks.Task_terminal_delivered -> ()
-            | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
-              Log.TaskState.error
-                "task terminal commit succeeded but reconciliation delivery degraded \
-                 task_id=%s agent=%s kind=%s detail=%s"
-                task_id
-                agent_name
-                kind
-                detail);
-          let phase_duration_ms () =
-            task_duration_ms_since ~now:now_ts task.task_status
-          in
-          let duration_ms =
-            if completes_task
-            then phase_duration_ms ()
-            else (
-              match action with
-              | Masc_domain.Cancel -> phase_duration_ms ()
-              | Masc_domain.Done_action
-              | Masc_domain.Claim
-              | Masc_domain.Start
-              | Masc_domain.Release
-              | Masc_domain.Submit_for_verification -> None)
-          in
-          observe_task_transition
-            config
-            ~agent_name
-            ~task_id
-            ~transition:action
-            ~details:
-              (task_transition_details
-                 ~from_status:task.task_status
-                 ~to_status:new_status
-                 ?notes:(if notes = "" then None else Some notes)
-                 ?reason:(if reason = "" then None else Some reason)
-                 ?duration_ms
-                 ());
-          (* RFC-0323 G-3: done hooks (relation/hebbian) fire for every transition
-             that PRODUCES Done, including a Done produced by an approval verdict.
-             The completer is the Done record's assignee — never the actor, which
-             for a verdict is a completion authority rather than an agent. *)
-          (match new_status with
-           | Masc_domain.Done { assignee; _ } ->
-             if completes_task
-             then
-               Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee
-           | Masc_domain.Todo
-           | Masc_domain.Claimed _
-           | Masc_domain.InProgress _
-           | Masc_domain.AwaitingVerification _
-           | Masc_domain.Cancelled _ -> ());
-          (match action with
-           | Masc_domain.Cancel ->
-             Workspace_task_cleanup.run_cancel_hooks config ~agent_name
-           | Masc_domain.Done_action
-           | Masc_domain.Release
-           | Masc_domain.Claim
-           | Masc_domain.Start
-           | Masc_domain.Submit_for_verification -> ());
-          Ok
-            { message =
-                Printf.sprintf
-                  "%s %s → %s"
-                  task_id
-                  (task_status_to_string task.task_status)
-                  (task_status_to_string new_status)
-            ; noop = false
-            })
+          Ok (Transaction.Committed { submission; result }))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
     |> Workspace_task_verification.flatten_lock_result
   in
-  (match !committed_verification_submission with
-   | None -> ()
-   | Some { task; assignee; verification_id; claim; superseded_verification_id }
-     ->
-     (* Order matters: remove the superseded record before announcing the new
-        one, so no reader woken by the notification can see two open requests
-        for one task. A failed removal leaves a request no task points at --
-        visible in the dashboard, refused by [decide_verdict] on the id -- which
-        is why it degrades rather than failing the committed transition. *)
-     (match superseded_verification_id with
-      | None -> ()
-      | Some superseded ->
-        (match
-           (Atomic.get Workspace_hooks.verification_delete_request_fn) config
-             ~verification_id:superseded
-         with
-         | Ok () -> ()
-         | Error detail ->
-           Log.TaskState.error
-             "verification supersede delete degraded after commit task_id=%s \
-              superseded=%s replaced_by=%s detail=%s"
-             task_id
-             superseded
-             verification_id
-             detail));
-     (try
-        (Atomic.get Workspace_hooks.verification_notify_submit_fn)
-          config
-          ~task
-          ~assignee
-          ~verification_id
-          ~claim
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.TaskState.error
-          "verification submit notification degraded after commit task_id=%s verification_id=%s detail=%s"
-          task_id
-          verification_id
-          (Printexc.to_string exn)));
-  result
+  match transaction with
+  | Error _ as error -> error
+  | Ok (Transaction.Noop outcome) -> Ok outcome
+  | Ok (Transaction.Committed { submission; result }) ->
+    (match submission with
+     | None -> ()
+     | Some { task; assignee; verification_id; claim; superseded_verification_id }
+       ->
+       (* Order matters: remove the superseded record before announcing the new
+          one, so no reader woken by the notification can see two open requests
+          for one task. A failed removal leaves a request no task points at --
+          visible in the dashboard, refused by [decide_verdict] on the id -- which
+          is why it degrades rather than failing the committed transition. *)
+       (match superseded_verification_id with
+        | None -> ()
+        | Some superseded ->
+          (match
+             (Atomic.get Workspace_hooks.verification_delete_request_fn) config
+               ~verification_id:superseded
+           with
+           | Ok () -> ()
+           | Error detail ->
+             Log.TaskState.error
+               "verification supersede delete degraded after commit task_id=%s \
+                superseded=%s replaced_by=%s detail=%s"
+               task_id
+               superseded
+               verification_id
+               detail));
+       (try
+          (Atomic.get Workspace_hooks.verification_notify_submit_fn)
+            config
+            ~task
+            ~assignee
+            ~verification_id
+            ~claim
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.TaskState.error
+            "verification submit notification degraded after commit task_id=%s verification_id=%s detail=%s"
+            task_id
+            verification_id
+            (Printexc.to_string exn)));
+    result
 ;;
 
 let transition_task_r

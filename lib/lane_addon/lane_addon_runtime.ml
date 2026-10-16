@@ -504,6 +504,11 @@ let failed m e cause =
    this before it touches the declaration. *)
 let settled (e : entry) =
   not e.cleanup_running
+  (* A start that is still running owns the create it has not resolved, the
+     same rule [stop_entry] follows. When that start fails, the state turns
+     Failed before the run fiber ends and before the cleanup is forked, so the
+     state alone would let a waiting Detach report a failure of its own. *)
+  && not (e.running && Option.is_none e.connection)
   && (match e.state with
       | Lifecycle.Detached _ | Lifecycle.Failed _ -> true
       | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ -> false)

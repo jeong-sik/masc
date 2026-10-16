@@ -1400,6 +1400,17 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let second_ready = pending () in
   check int "completed second job is discovered without another event" 1 (List.length second_ready.ready);
   check int "second ready wait has readable original authority" 0 (List.length second_ready.failures);
+  (* An outbox flush racing after an early obligation write while the record is
+     still Waiting_for_owned_jobs retires that pre-settlement obligation, yet
+     settle_waiting_request_as_failed re-establishes the obligation inside the
+     store transition lock before overwriting the terminal record. *)
+  Keeper_composition_completion_outbox.prepare_terminal ~base_path:fixture.base_path
+    ~keeper_name:keeper ~request_id:second_entry.request_id
+    |> Result.map_error Keeper_composition_completion_outbox.error_to_string
+    |> require "pre-settlement obligation write while waiting";
+  let raced_reconcile = Masc.Keeper_composition_completion_wake.reconcile
+      ~base_path:fixture.base_path |> require "outbox flush racing before refusal settlement" in
+  check int "racing flush before settlement delivers 0" 0 raced_reconcile.delivered;
   (* The node contract changes after admission: the sealed tool contract can
      never be re-admitted, so the next pulse must refuse permanently. *)
   write_profile true;

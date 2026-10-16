@@ -2272,7 +2272,7 @@ let waiting_settlement_rejection_to_string = function
   | Settle_persistence_failed reason ->
     "settled record persistence failed: " ^ reason
 
-let settle_waiting_request_as_failed ~base_path ~caller ~request_id ~body ?data () =
+let settle_waiting_request_as_failed ~base_path ~caller ~request_id ~body ?data ?before_persist () =
   match resolve_access_identity ~base_path ~caller with
   | Error rejection -> Error (Settle_access_rejected rejection)
   | Ok (base_path, caller) ->
@@ -2311,13 +2311,21 @@ let settle_waiting_request_as_failed ~base_path ~caller ~request_id ~body ?data 
                          with
                          | None -> Error Settle_invalid_request_id
                          | Some terminal_path ->
-                           (match
-                              persist_entry ~ops:production_request_ops ~source_path:terminal_path settled
-                              |> observe_persist_error ~operation:"waiting_refusal_settlement" settled
-                            with
-                            | Ok () -> Ok ()
-                            | Error error ->
-                              Error (Settle_persistence_failed (persist_error_to_string error))))
+                           let pre_ok =
+                             match before_persist with
+                             | None -> Ok ()
+                             | Some f -> f entry
+                           in
+                           (match pre_ok with
+                            | Error reason -> Error (Settle_persistence_failed reason)
+                            | Ok () ->
+                              (match
+                                 persist_entry ~ops:production_request_ops ~source_path:terminal_path settled
+                                 |> observe_persist_error ~operation:"waiting_refusal_settlement" settled
+                               with
+                               | Ok () -> Ok ()
+                               | Error error ->
+                                 Error (Settle_persistence_failed (persist_error_to_string error)))))
                       | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
                         Error (Settle_already_settled entry.status)
                       | Queued | Running | Cancelling _ ->

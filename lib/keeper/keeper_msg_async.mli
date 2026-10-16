@@ -486,6 +486,7 @@ val settle_waiting_request_as_failed :
   request_id:string ->
   body:string ->
   ?data:Yojson.Safe.t ->
+  ?before_persist:(entry -> (unit, string) result) ->
   unit ->
   (unit, waiting_settlement_rejection) result
 (** Supersede exactly one canonical [Waiting_for_owned_jobs] terminal record

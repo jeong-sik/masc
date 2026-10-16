@@ -155,7 +155,12 @@ let settle_permanent_refusal supervisor candidate refusal =
   | Ok () ->
     (match
        Keeper_msg_async.settle_waiting_request_as_failed ~base_path ~caller:source.keeper_name
-         ~request_id ~body:(refusal_message refusal) ~data:(refusal_data refusal) ()
+         ~request_id ~body:(refusal_message refusal) ~data:(refusal_data refusal)
+         ~before_persist:(fun _ ->
+           Keeper_composition_completion_outbox.prepare_terminal
+             ~base_path ~keeper_name:source.keeper_name ~request_id
+           |> Result.map_error Keeper_composition_completion_outbox.error_to_string)
+         ()
      with
      | Error error ->
        (* The delivery obligation stays pending; while the canonical record

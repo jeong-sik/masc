@@ -149,7 +149,7 @@ let prepare_terminal ~base_path ~keeper_name ~request_id =
   | Ok proof ->
     let entry = Async.durable_terminal_entry proof in
     (match entry.status with
-     | Async.Waiting_for_owned_jobs _ ->
+     | Async.Waiting_for_owned_jobs _ | Async.Done { ok = false; _ } ->
        let base_path = entry.base_path in
        (match read ~base_path (filename request_id) with
         | Ok (Some obligation)
@@ -206,8 +206,8 @@ let flush ~base_path ~deliver =
             let* tool = composition_tool entry in
             match entry.status with
             | Async.Waiting_for_owned_jobs _ ->
-              let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name
-                  ~request_id:entry.request_id in
+              let* () = acknowledge_waiting ~base_path ~keeper_name:obligation.keeper_name
+                  ~request_id:entry.request_id ~composition_tool:tool in
               Ok Retired
             | Queued | Running | Cancelling _ | Lost _ | Cancelled _
             | Persistence_failed _ | Done _ ->

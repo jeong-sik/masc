@@ -4,6 +4,11 @@
  (libraries alcotest masc masc.keeper_approval masc.keeper_checkpoint_ref masc_test_deps eio_main))
 
 (test
+ (name test_keeper_gate_workspace_alias)
+ (modules test_keeper_gate_workspace_alias)
+ (libraries alcotest masc masc.keeper_approval masc_test_deps eio_main))
+
+(test
  (name test_keeper_native_continuation_projection)
  (modules test_keeper_native_continuation_projection)
  (libraries alcotest masc masc.keeper_approval masc_test_deps))

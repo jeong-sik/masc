@@ -1776,9 +1776,11 @@ and async_submission_result
                Option.iter (fun bound -> Keeper_composition_nested_run.restore_admissions original
                  ~find_activation:(fun ~invocation ~tool_name ~scope ~reference ->
                    Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) bound;
-               Keeper_composition_nested_run.check_original_admissions original
-                 ~child_history:(Journal.worker_child_admission worker)
-               |> Result.map_error (fun (rejection : Executor.admission_rejection) -> rejection.detail) in
+               (match Keeper_composition_nested_run.check_original_admissions original
+                   ~child_history:(Journal.worker_child_admission worker) with
+                | Keeper_composition_nested_run.Original_admitted -> Ok ()
+                | Keeper_composition_nested_run.Original_authority_held rejection ->
+                    Error rejection.detail) in
              (match authority with
               | Error reason -> Keeper_msg_async.worker_interrupted ~reason
               | Ok () ->

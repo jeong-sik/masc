@@ -713,7 +713,7 @@ let%test "parse_openai_response_result end_turn finish_reason" =
   | Error _ -> false
 ;;
 
-let%test "parse_openai_response_result null content fails closed (agent-core boundary)" =
+let%test "parse_openai_response_result preserves null-content terminal" =
   let json_str =
     Yojson.Safe.to_string
       (`Assoc
@@ -728,14 +728,15 @@ let%test "parse_openai_response_result null content fails closed (agent-core bou
                 ] )
           ])
   in
-  (* A 200 with null content and no tool_calls/reasoning is an all-empty
-     completion: it now fails closed as [Empty_completion] instead of the old
-     [Ok content=[]] that stormed downstream. *)
+  (* The run owner decides whether earlier saved tool results make this
+     terminal a completion. The codec preserves its response identity. *)
   match parse_openai_response_result json_str with
-  | Error (Backend_openai_parse.Empty_completion e) -> e.stop_reason = EndTurn
+  | Ok response ->
+    response.stop_reason = EndTurn && response.content = []
+    && response.id = "c1" && response.model = "m"
+  | Error (Backend_openai_parse.Empty_completion _)
   | Error (Backend_openai_parse.Provider_error _)
-  | Error (Backend_openai_parse.Unreadable_response _)
-  | Ok _ -> false
+  | Error (Backend_openai_parse.Unreadable_response _) -> false
 ;;
 
 let%test "parse_openai_response_result blank content with tool_calls stays Ok (agent-core boundary)" =

@@ -228,5 +228,10 @@ uses a valid no-outer-exports Skill run and verifies that already completed
 physical work, source ACKs, clocks and usage
 remain available when the final response violates the JSON contract; both
 attempts remain explicit failures in the denominator.
+That case submits the fresh recipe through `keeper_composition_run` without a
+separate prepare. Its original SDK input is joined to the returned sealed draft,
+run artifact, invocation turn and exact child mappings before accepting physical
+stdout evidence. The normal pair retains separate prepare/run, exercising both
+sources without inventing a latency comparison between these synthetic cases.
 It is not a no-argument invocation of the parameterized driver. Authoring this
 alias is not evidence that it has executed.

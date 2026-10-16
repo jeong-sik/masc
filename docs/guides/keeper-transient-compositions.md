@@ -4,6 +4,22 @@ Use `keeper_composition_prepare` to check a task-specific plan before executing 
 The draft is local to the preparing Keeper; it does not publish a shared Skill.
 The tools are discoverable through the Keeper tool search surface.
 
+When the plan is ready to execute, submit the same prepare input as
+`keeper_composition_run.recipe` in one call:
+
+```json
+{"recipe":{"execution":"inline","nodes":[{"id":"lane","tool":"keeper_lane_status"}],"exports":[{"name":"profile","node":"lane","pointer":"/profile"}]}}
+```
+
+The server validates and durably freezes the recipe, binds the original SDK
+invocation, then uses the same inline or async executor and leaf permissions.
+The result retains both `draft` and `run_artifact` references. This avoids a
+required model roundtrip between preparation and execution; it makes no fixed
+latency promise. Use separate prepare when inspection is useful. Supply exactly
+one of `recipe` or `sha256`; a fresh recipe cannot include `resume_run_id`.
+To continue an async run created from a recipe, use its returned draft digest
+and original run ID in the ordinary continuation form below.
+
 ```json
 {
   "execution": "inline",

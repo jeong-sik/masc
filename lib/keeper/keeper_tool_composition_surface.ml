@@ -2788,34 +2788,19 @@ let make_tools_with_authority
       let prepare = make Draft.prepare_schema ~artifact_projection:Tool_output.Inline_with_reference
         ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
         (fun ~start_time _execution_env input ->
-          match input with
-          | `Assoc fields ->
-            let mode = match List.assoc_opt "execution" fields with
-              | Some (`String "inline") -> Some Catalog.Inline
-              | Some (`String "async") -> Some Catalog.Async
-              | Some _ | None -> None in
-            (match mode with
-             | None -> rejection ~tool_name:Draft.prepare_tool_name ~start_time
-                 (Draft.Malformed_draft "execution must be inline or async")
-             | Some execution ->
-               match Draft.prepare ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name
-                       ~execution (`Assoc (List.remove_assoc "execution" fields)) with
-               | Error error -> rejection ~tool_name:Draft.prepare_tool_name ~start_time error
-               | Ok draft ->
-                 Tool_result.make_ok ~tool_name:Draft.prepare_tool_name ~start_time ~data:(Keeper_composition_draft_preview.preview draft) ()
-                 |> Tool_result.with_retained_artifacts [ Draft.reference draft ])
-          | _ -> rejection ~tool_name:Draft.prepare_tool_name ~start_time (Draft.Malformed_draft "expected object")) in
+          match Draft.prepare_request ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name input with
+          | Error error -> rejection ~tool_name:Draft.prepare_tool_name ~start_time error
+          | Ok draft ->
+            Tool_result.make_ok ~tool_name:Draft.prepare_tool_name ~start_time ~data:(Keeper_composition_draft_preview.preview draft) ()
+            |> Tool_result.with_retained_artifacts [ Draft.reference draft ]) in
       let run = make Draft.run_schema ~artifact_projection:Tool_output.Inline_with_structured_diagnostic
         ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
         (fun ~start_time execution_env input ->
-          match Agent_core.Tool.Execution_env.invocation execution_env,
-                (match input with `Assoc fields -> List.assoc_opt "sha256" fields | _ -> None) with
-          | None, _ -> Tool_result.runtime_err ~tool_name:Draft.run_tool_name ~start_time
+          match Agent_core.Tool.Execution_env.invocation execution_env with
+          | None -> Tool_result.runtime_err ~tool_name:Draft.run_tool_name ~start_time
               "composition run requires Agent-Core invocation identity"
-          | Some _, (None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _)) ->
-            rejection ~tool_name:Draft.run_tool_name ~start_time (Draft.Malformed_draft "expected draft sha256")
-          | Some parent_invocation, Some (`String sha256) ->
-            match Draft.load ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name ~sha256 with
+          | Some parent_invocation ->
+            match Draft.resolve_run_request ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name input with
             | Error error -> rejection ~tool_name:Draft.run_tool_name ~start_time error
             | Ok draft ->
               let plan = Draft.plan draft in

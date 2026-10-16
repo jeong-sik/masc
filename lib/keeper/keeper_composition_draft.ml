@@ -142,7 +142,17 @@ let prepare_schema : Masc_domain.tool_schema =
   { Tool_schemas_composition_control.prepare_schema with input_schema }
 ;;
 
-let run_schema = Tool_schemas_composition_control.run_schema
+let run_schema : Masc_domain.tool_schema =
+  let schema = Tool_schemas_composition_control.run_schema in
+  let input_schema = match schema.input_schema with
+    | `Assoc fields ->
+      let properties = match List.assoc_opt "properties" fields with
+        | Some (`Assoc properties) -> properties
+        | _ -> invalid_arg "run schema has no properties" in
+      `Assoc (("properties", `Assoc (("recipe", prepare_schema.input_schema)
+        :: List.remove_assoc "recipe" properties)) :: List.remove_assoc "properties" fields)
+    | _ -> invalid_arg "run schema is not an object" in
+  { schema with input_schema }
 ;;
 
 let map_nested_error result =
@@ -346,6 +356,44 @@ let load_with ~compile_plan ~admission_check ~base_path ~capability_surface ~kee
 
 let load ~base_path ~capability_surface ~keeper_name ~sha256 =
   load_with ~compile_plan:validate_plan ~admission_check:Exact_surface ~base_path ~capability_surface ~keeper_name ~sha256
+;;
+
+let validate_request (schema : Masc_domain.tool_schema) input =
+  let* () = match input with
+    | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names = List.length (List.sort_uniq String.compare names) then Ok ()
+      else Error (Malformed_draft "duplicate request field")
+    | _ -> Ok () in
+  match Tool_input_contract.check_arguments ~schema:(Some schema.input_schema)
+      ~name:schema.name ~args:input with
+  | Ok _ -> Ok ()
+  | Error rejected -> Error (Malformed_draft rejected.message)
+;;
+
+let prepare_request ~base_path ~capability_surface ~keeper_name input =
+  let* () = validate_request prepare_schema input in
+  match input with
+  | `Assoc fields ->
+    let* execution = match List.assoc_opt "execution" fields with
+      | Some (`String "inline") -> Ok Catalog.Inline
+      | Some (`String "async") -> Ok Catalog.Async
+      | Some _ | None -> Error (Malformed_draft "execution must be inline or async") in
+    prepare ~base_path ~capability_surface ~keeper_name ~execution
+      (`Assoc (List.remove_assoc "execution" fields))
+  | _ -> Error (Malformed_draft "expected prepare object")
+;;
+
+let resolve_run_request ~base_path ~capability_surface ~keeper_name input =
+  let* () = validate_request run_schema input in
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "sha256" fields, List.assoc_opt "recipe" fields with
+     | Some (`String sha256), None -> load ~base_path ~capability_surface ~keeper_name ~sha256
+     | None, Some recipe -> prepare_request ~base_path ~capability_surface ~keeper_name recipe
+     | Some _, Some _ | None, None | Some _, None ->
+       Error (Malformed_draft "expected exactly one of draft sha256 or recipe"))
+  | _ -> Error (Malformed_draft "expected run object")
 ;;
 
 let load_continuation_with ~compile_plan ~base_path ~capability_surface continuation =

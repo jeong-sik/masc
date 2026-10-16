@@ -487,7 +487,8 @@ pointer = "/profile"
 |}
 ;;
 
-let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Masc.Keeper_tool_composition_catalog.Inline) ~reject_child () =
+let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Masc.Keeper_tool_composition_catalog.Inline)
+    ?(single_call=false) ~reject_child () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let eio_snapshot = Eio_context.snapshot_state () in
@@ -527,14 +528,16 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
   Call_log.set_turn_context ~cell ~agent_name:"fixture" ~task_id:"task-nested" ~turn:1 ~trace_id:"trace-nested-public" ();
   let tools = Tools.make_tools ~capability_surface:surface ~config ~meta ~publication_recovery ~ctx_snapshot
       ~record_nested_composition_activation:record ~nested_activation_context:recorder ~turn_ctx_cell:cell () in
-  let invoke id name input =
+  let execute id name input =
     let tool = List.find_map (fun (tool, _, _) -> if tool.Agent_core.Tool.schema.name = name then Some tool else None) tools
       |> function Some value -> value | None -> fail ("public control absent: " ^ name) in
     let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:id ~turn:1
         ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1; execution_mode = Agent_core.Tool_contract.Serial }
         ~completion:Agent_core.Tool_contract.Continue_after_success in
-    let success, content = match Agent_core.Tool.execute ~invocation tool input with
-      | Ok output -> true, output.content | Error error -> false, error.Agent_core.Types.message in
+    match Agent_core.Tool.execute ~invocation tool input with
+    | Ok output -> true, output.content | Error error -> false, error.Agent_core.Types.message in
+  let invoke id name input =
+    let success,content = execute id name input in
     let structured =
       match Tool_output.decode_from_agent_core content with
       | Tool_output.Decoded reference -> read_document ~base_path reference
@@ -565,13 +568,37 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
   let recipe = request ~exports:[ exported "answer" "left" "/profile" ] scopes in
   let input = match recipe with `Assoc fields -> `Assoc (("execution", `String (Masc.Keeper_tool_composition_catalog.execution_mode_to_string execution)) :: fields)
     | _ -> fail "recipe object" in
-  let prepare_success, _, prepared = invoke "prepare-nested" Draft.prepare_tool_name input in
-  check bool "public prepare accepts nested grammar" true prepare_success;
-  check int "preparation is not activation" 0 !calls;
   let open Yojson.Safe.Util in
-  let draft_reference = prepared |> member "draft" |> decode_reference in
+  let prepared = if single_call then (
+    List.iteri (fun index rejected_input ->
+      let accepted,_ = execute ("invalid-recipe-" ^ string_of_int index) Draft.run_tool_name rejected_input in
+      check bool "ambiguous or continuing recipe is refused" false accepted;
+      check int "refused recipe admits no child" 0 !calls)
+      [ `Assoc ["recipe",input;"sha256",`String (String.make 64 '0')]
+      ; `Assoc ["recipe",input;"resume_run_id",`String "019c0000-0000-7000-8000-000000000000"]
+      ; `Assoc ["recipe",input;"recipe",input]
+      ; `Assoc ["recipe",(match input with `Assoc fields ->
+          `Assoc (("execution",`String "unknown") :: List.remove_assoc "execution" fields)
+          | _ -> fail "fixture input object")]
+      ; `Assoc ["recipe",`Assoc ["execution",`String (Masc.Keeper_tool_composition_catalog.execution_mode_to_string execution);
+          "nodes",`List [nested ~args:(`Assoc ["unexpected",`Bool true]) "bad" reference]]] ];
+    None)
+    else (
+      let prepare_success,_,prepared = invoke "prepare-nested" Draft.prepare_tool_name input in
+      check bool "public prepare accepts nested grammar" true prepare_success;
+      check int "preparation is not activation" 0 !calls;
+      Some prepared) in
+  let run_input = match prepared with
+    | Some prepared -> `Assoc ["sha256",`String (prepared |> member "draft" |> decode_reference).sha256]
+    | None -> `Assoc ["recipe",input] in
   let success, accepted_content, accepted = invoke "run-nested" Draft.run_tool_name
-      (`Assoc [ "sha256", `String draft_reference.sha256 ]) in
+      run_input in
+  let draft_reference = accepted |> member "draft" |> decode_reference in
+  let frozen_draft = read_document ~base_path draft_reference in
+  check bool "frozen draft retains the original recipe" true
+    (Yojson.Safe.equal (frozen_draft |> member "recipe") recipe);
+  check string "frozen draft retains its preparing Keeper" "fixture"
+    (frozen_draft |> member "keeper" |> to_string);
   let success,result_content,result = match execution with
     | Masc.Keeper_tool_composition_catalog.Inline -> success,accepted_content,accepted
     | Masc.Keeper_tool_composition_catalog.Async ->
@@ -602,7 +629,7 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
   let run_id = run_binding |> member "composition_run_id" |> to_string in
   check string "public acceptance retains pre-dispatch run" run_id (accepted |> member "composition_run_id" |> to_string);
   check bool "run binding retains all exact child mappings" true
-    (Yojson.Safe.equal (run_binding |> member "nested_calls") (prepared |> member "nested_calls"));
+    (Yojson.Safe.equal (run_binding |> member "nested_calls") (frozen_draft |> member "nested_calls"));
   check bool "usable selected answer survives independent admission failure" true
     (result |> member "exports" |> member "answer" |> member "available" |> to_bool);
   let child_scopes = result |> member "nested_scopes" |> to_list in
@@ -815,6 +842,7 @@ let () = run "exact inline composition compiler"
         ; test_case "public prepare/run admits exact children once and delivers through parent" `Quick
             (test_public_nested_prepare_run_records_only_admitted_children ~reject_child:false)
         ; test_case "public admission failure keeps independent exports and blocked scopes" `Quick
-            (test_public_nested_prepare_run_records_only_admitted_children ~reject_child:true)
+            (test_public_nested_prepare_run_records_only_admitted_children ~single_call:true ~reject_child:true)
         ; test_case "async parent binds original runtime and exact child results" `Quick
-            (test_public_nested_prepare_run_records_only_admitted_children ~execution:Masc.Keeper_tool_composition_catalog.Async ~reject_child:false) ] ]
+            (test_public_nested_prepare_run_records_only_admitted_children ~single_call:true
+              ~execution:Masc.Keeper_tool_composition_catalog.Async ~reject_child:false) ] ]

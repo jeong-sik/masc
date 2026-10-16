@@ -42,7 +42,7 @@ import { CopyIdButton } from './common/copy-id-button'
 import { formatElapsedCompact } from '../lib/format-time'
 import { unacknowledgedCount } from './common/error-notification-state'
 import { ErrorPanel } from './common/error-panel'
-import { Bell } from 'lucide-preact'
+import { Bug } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
 import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
 import { RouteLink } from './common/route-link'
@@ -693,8 +693,8 @@ export function ErrorCounterBadge() {
   const count = unacknowledgedCount.value
   const open = errorPanelOpen.value
   const label = count > 0
-    ? `${count} unacknowledged dashboard errors`
-    : 'No dashboard errors'
+    ? `오류 콘솔 · 미확인 대시보드 오류 ${count}건`
+    : '오류 콘솔 · 대시보드 오류 없음'
 
   return html`
     <div class="v2-shell-panel relative" role="status">
@@ -707,7 +707,8 @@ export function ErrorCounterBadge() {
         aria-expanded=${open}
         aria-haspopup="true"
       >
-        <${Bell} size=${14} />
+        <${Bug} size=${14} aria-hidden="true" />
+        <span>오류 콘솔</span>
         ${count > 0 ? html`
           <span class="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[var(--color-status-err)] text-2xs font-semibold text-white tabular-nums">${count > 99 ? '99+' : count}</span>
         ` : null}

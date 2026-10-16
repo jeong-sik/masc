@@ -23,7 +23,7 @@ describe('computeBeaconView', () => {
       ready: false,
     }))
     expect(view.state).toBe('red')
-    expect(view.label).toContain('disconnected')
+    expect(view.title).toContain('closed')
   })
 
   it('returns yellow when the socket is connected but handshake is not ready', () => {
@@ -31,7 +31,7 @@ describe('computeBeaconView', () => {
       ready: false,
     }))
     expect(view.state).toBe('yellow')
-    expect(view.label).toBe('Client WS · handshaking')
+    expect(view.title).toContain('waiting for dashboard/hello')
   })
 
   it('returns yellow when ready but no event has ever arrived', () => {
@@ -40,7 +40,6 @@ describe('computeBeaconView', () => {
       eventCount60s: 0,
     }))
     expect(view.state).toBe('yellow')
-    expect(view.label).toContain('silent')
     expect(view.title).toContain('has not received route events yet')
     expect(view.title).not.toContain(String(Math.floor(NOW / 1000)))
   })
@@ -61,8 +60,9 @@ describe('computeBeaconView', () => {
       lastPongLatencyMs: 41,
     }))
     expect(view.state).toBe('green')
-    expect(view.label).toContain('heartbeat')
-    expect(view.label).toContain('41ms')
+    expect(view.title).toContain('heartbeat')
+    expect(view.title).toContain('41ms')
+    expect(view.label).not.toContain('41ms')
   })
 
   it('returns green when ready and an event arrived within the threshold', () => {
@@ -71,7 +71,8 @@ describe('computeBeaconView', () => {
       eventCount60s: 12,
     }))
     expect(view.state).toBe('green')
-    expect(view.label).toContain('12 deltas / 60s')
+    expect(view.label).not.toContain('deltas')
+    expect(view.title).toContain('12 deltas / 60s')
     expect(view.title).toContain('Client WS is active')
   })
 

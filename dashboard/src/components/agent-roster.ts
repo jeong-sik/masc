@@ -71,11 +71,12 @@ import {
   KEEPER_TRANSIENT_LABEL_KO,
 } from '../lib/keeper-operational-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
+import { FLEET_KEEPER_FILTERS, fleetKeeperFilterFromRoute } from '../lib/fleet-keeper-filter'
 import { FL_TONE_LABEL, PHASE_LABEL_KO, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
-import { hashForRoute, navigate } from '../router'
+import { hashForRoute, navigate, route } from '../router'
 import { finishGlowFor, keeperFinishes, keeperTurns, runningTurnFor, subscribeKeeperTurnsRefresh } from './keeper-turns-state'
 import { operatorSnapshot } from '../operator-store'
 import { FleetAsideActions, FleetQueueSection, FleetRotationSection } from './fleet-aside-extras'
@@ -823,6 +824,7 @@ function answeringElapsed(startedAtUnix: number): string {
 
 export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFilterMode } = {}) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const fleetFilter = fleetKeeperFilterFromRoute(route.value.params.filter)
   // The "answering now" badge polls the Owner's running-turn projection;
   // keeper snapshots cannot answer it (the slot is process memory).
   useEffect(() => subscribeKeeperTurnsRefresh(), [])
@@ -931,7 +933,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ),
     [scopedAgents, keeperRuntimeLookup, compositeByKeeperKey],
   )
-  const filtered = useMemo(() => scopedAgents.slice()
+  const filtered = useMemo(() => scopedAgents.filter(agent => {
+      if (fleetFilter === null) return true
+      const keeper = findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
+      return keeper != null && FLEET_KEEPER_FILTERS[fleetFilter].matches(keeper)
+    })
     .sort((a: Agent, b: Agent) => {
       // Transient sits between active and paused on the sort
       // axis — the prototype groups "what is currently moving" above the
@@ -954,7 +960,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       if (aOrder !== bOrder) return aOrder - bOrder
       return a.name.localeCompare(b.name)
     }),
-    [scopedAgents, bandByAgent, keeperRuntimeLookup],
+    [scopedAgents, bandByAgent, keeperRuntimeLookup, fleetFilter],
   )
 
   const counts = countAgentsByStatus(scopedAgents, runtimeKeeperList, compositeByKeeperKey)
@@ -1358,6 +1364,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         <div class="fl-meta"><span class="live">● live</span><span>${namespaceName}</span></div>
         <span class="sr-only">정상 rows ${healthNormal} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 중지 rows ${healthOffline}</span>
       </header>
+
+      ${fleetFilter !== null ? html`
+        <div class="fl-route-filter" role="status">
+          <span>${FLEET_KEEPER_FILTERS[fleetFilter].label} · ${filtered.length}</span>
+          <button type="button" onClick=${() => navigate('monitoring', { section: 'agents', view: 'keepers' })}>전체 Keeper 보기</button>
+        </div>
+      ` : null}
 
       ${showExecutionFallbackState
         ? html`

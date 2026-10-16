@@ -39,8 +39,17 @@
     "retry shortly" refusals, never to a hang. Releasing the slot during
     tool phases would break the fd bound the gate exists for — the child
     keeps its descriptors while it waits on tools — so the slot spans
-    the whole turn by design. The waiter gauges below tell saturation
-    (tune the bound) apart from a wedge (investigate the stuck turns). *)
+    the whole turn by design. Owner cancellation reaches every gated
+    turn at its suspension points (protocol reads, sleeps, the slot
+    wait itself): keeper turns race an abort promise
+    ([Keeper_antigravity_runtime], [Switch.run] plus [Watched_work.run]
+    over [abort_turn]), and fusion, verification, and capability-probe
+    turns all run under an [Eio.Switch] their lane can fail
+    ([Fusion_official_client], [Runtime_verification_antigravity],
+    [Keeper_capability_probe]). A tool callback doing unbounded pure
+    compute would delay delivery, as before this gate existed. The
+    waiter gauges below tell saturation (tune the bound) apart from a
+    wedge (investigate the stuck turns). *)
 
 val max_concurrent_cli_spawns : int
 (** [8]. Worst enforced case is 8 x {!child_fd_ceiling} = 128k files

@@ -56,7 +56,7 @@ type error =
   | Conflicting_plan_field of { path : string list; field : string }
   | Plan_json_syntax of { name : string; detail : string }
   | Plan_json_rejected of { name : string; error : Keeper_tool_plan_request.error }
-  | Async_tool_not_statically_read_only of
+  | Async_leaf_not_admitted of
       { name : string
       ; node_id : Plan.Node_id.t
       ; tool_name : string
@@ -742,10 +742,13 @@ let parse_composition ~descriptors ~index value =
     | Async ->
       (match Plan.nodes plan |> List.find_map (fun (node : Plan.node) ->
          match Plan.descriptor plan node.id with
-         | Some descriptor when Keeper_tool_descriptor.readonly_static_hint descriptor = Some true -> None
-         | Some _ | None -> Some node) with
+         | Some descriptor ->
+           (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
+            | Read_only_ordinary_leaf | Owned_job_launch_leaf -> None
+            | Direct_only -> Some node)
+         | None -> Some node) with
        | None -> Ok ()
-       | Some node -> Error (Async_tool_not_statically_read_only
+       | Some node -> Error (Async_leaf_not_admitted
            { name; node_id = node.id; tool_name = node.tool_name })) in
   Ok { name; description; execution; params; plan; loading }
 ;;
@@ -813,9 +816,9 @@ let error_to_string = function
     Printf.sprintf "composition %S has invalid plan_json: %s" name detail
   | Plan_json_rejected { name; error } ->
     Printf.sprintf "composition %S plan_json rejected: %s" name (Keeper_tool_plan_request.error_message error)
-  | Async_tool_not_statically_read_only { name; node_id; tool_name } ->
+  | Async_leaf_not_admitted { name; node_id; tool_name } ->
     Printf.sprintf
-      "async composition %S node %S tool %S is not statically read-only"
+      "async composition %S node %S tool %S has no admitted readonly or durable owned-job contract"
       name
       (node_id_to_string node_id)
       tool_name

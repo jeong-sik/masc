@@ -555,9 +555,9 @@ let descriptor
      read-only hint. The batch planner (Agent_core Agent_tool_batch_plan)
      fans an ordinary [Concurrent] run out onto sibling Eio fibers, so an
      effectful tool admitted by mistake would execute its side effect
-     concurrently with no ordering guarantee. The hint is the same typed
-     declaration the composition catalog uses for its Async admission
-     check (Async_tool_not_statically_read_only); no string heuristics. *)
+     concurrently with no ordering guarantee. Async catalog admission also
+     accepts the durable owned-job producer; that effectful launch retains
+     its Serial execution contract. *)
   (match execution, policy.readonly_hint with
    | Ordinary Concurrent, Some true -> ()
    | Ordinary Concurrent, (Some false | None) ->

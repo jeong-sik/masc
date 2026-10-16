@@ -235,9 +235,14 @@ read verifies durable producer membership as well as the canonical request sourc
 A generic worker that copied the context has no named-run membership.
 
 Named async execution freezes its instantiated ordinary plan before acceptance
-and journals its original Skill, invocation, Task and recorder selection. Named async Skills retain their existing static read-only admission. Completed
-independent nodes are reused; a pending owned result rechecks only its original
-read occurrence. Maintenance
+and journals its original Skill, invocation, Task and recorder selection. Its
+leaves admit statically read-only ordinary Tools and the isolated owned-job
+launch producer. Launch retains its Serial effectful contract and durable
+invocation ownership. A named async Skill can launch a job, await its original
+result and consume the complete output without a separate caller launch.
+Completed nodes, including a settled launch, are reused; a pending owned result
+rechecks only its original read occurrence. An unfinished effectful attempt
+without proven replay authority remains refused. Maintenance
 uses the existing continuation pulse and current capability admission to resume
 that logical run. The first public binding remains unchanged when a successor
 worker takes ownership. Reads validate every predecessor and the current journal
@@ -269,9 +274,9 @@ release that same source for another attempt. Partial acceptance, reconciliation
 or fork uncertainty retains the reservation and the actual request ID when
 known. Canonical named membership and journal ownership decide acceptance;
 an incomplete phase-log tail cannot conceal an intact, accepted original source.
-Missing or corrupt source authority stays unresolved. These producer receipts
-precede compiler support for async child Skill nodes; they do not enable that
-syntax or change named Skills' static read-only admission.
+Missing or corrupt source authority stays unresolved. Exact async child Skill
+nodes use these same producer receipts through the
+[nested Composition compiler](keeper-nested-compositions.md).
 
 Broker entry is fail-closed by decision. `begin_submit` writes the durable
 `Submitting {request_id = None}` phase before the broker records admission, and
@@ -304,9 +309,8 @@ manifest. A generic reader does not declare every child-specific export name.
 Failure stays failed and retains canonical diagnostics, partial outputs and
 artifact references. A missing or changed original source refuses the read.
 
-This is explicit submit-then-read composition. Exact async Skill child nodes in
-`keeper_composition_prepare` still require compiler support; their syntax is not
-admitted by this layer. A binding identifies the original admitted logical run,
+Explicit submit-then-read composition and exact async Skill child nodes in
+`keeper_composition_prepare` share the original admitted logical run. A binding identifies that run,
 including its canonically bound suspended successors. The current request codec
 is v5 and the execution journal codec is v3; unknown versions are refused.
 Finish or explicitly resolve pending v2 runs on their original runtime, preserve
@@ -327,6 +331,15 @@ instead of publishing stale Lost failure. An actual broker cancellation retains 
 no child continuation. Authored scenarios are not execution evidence until
 the selected head's run completes, and their component intervals do not measure
 whole-task preparation improvement or installed runtime/UI behavior.
+
+A public prepare/run scenario also uses an exact async Skill child that launches
+its own isolated job. After the child and parent release their workers, it
+changes the current Task/runtime and resumes both original continuations. It
+checks retained launch and submission occurrences, original Task attribution,
+complete stdout, one create/start and no backend calls after canonical output.
+The Docker CLI is synthetic; the authored scenario needs an actual selected
+execution before it establishes behavior and does not prove physical process
+loss during that launch or a whole-task preparation speedup.
 
 `test_keeper_tool_dispatch_runtime` exercises the actual public SDK bundle and
 canonical broker records: acknowledgement replay preserves original IDs without

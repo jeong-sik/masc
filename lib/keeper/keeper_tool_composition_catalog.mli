@@ -67,7 +67,7 @@ type error =
   | Conflicting_plan_field of { path : string list; field : string }
   | Plan_json_syntax of { name : string; detail : string }
   | Plan_json_rejected of { name : string; error : Keeper_tool_plan_request.error }
-  | Async_tool_not_statically_read_only of
+  | Async_leaf_not_admitted of
       { name : string
       ; node_id : Keeper_tool_plan.Node_id.t
       ; tool_name : string
@@ -157,8 +157,8 @@ type entry = private
             document. Every declared name is referenced by some node input
             ([kind = "param"]) and vice versa — both directions are load
             errors. All params are required. Async entries bind params at
-            submission: the broker never replays a worker closure after a
-            crash, so the bound plan lives exactly as long as the run. *)
+            submission and retain that exact bound plan in the original
+            immutable source used by continuation. *)
   ; plan : Keeper_tool_plan.t
   ; loading : Tool_definition_toml.loading
         (** [defer_loading = true] in the composition block: the tool is held

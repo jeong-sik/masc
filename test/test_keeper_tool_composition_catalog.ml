@@ -193,7 +193,7 @@ value = {}
   | Error _ | Ok _ -> fail "composition execution mode was inferred"
 ;;
 
-let test_catalog_accepts_async_only_for_statically_read_only_tools () =
+let test_catalog_accepts_async_readonly_tools () =
   let catalog =
     match Catalog.parse (one_node_async_composition "lane-background") with
     | Ok catalog -> catalog
@@ -227,7 +227,7 @@ value = { title = "not admitted", content = "effectful async" }
   in
   match Catalog.parse document with
   | Error
-      (Catalog.Async_tool_not_statically_read_only
+      (Catalog.Async_leaf_not_admitted
         { name = "write-background"; node_id; tool_name = "keeper_memory_write" }) ->
     check string "rejected node" "write" (Plan.Node_id.to_string node_id)
   | Error _ | Ok _ -> fail "effectful async composition was admitted"
@@ -1327,7 +1327,7 @@ let () =
         ; test_case
             "accepts async statically read-only plan"
             `Quick
-            test_catalog_accepts_async_only_for_statically_read_only_tools
+            test_catalog_accepts_async_readonly_tools
         ; test_case
             "rejects async effectful tool"
             `Quick

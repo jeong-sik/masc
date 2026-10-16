@@ -96,6 +96,7 @@ import {
 } from './tool-call-output-store'
 import { _resetKeeperStreamBuffersForTests, applyKeeperOperationTurnEvent } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
+import type { KeeperChatHistoryMessage } from './api/keeper'
 import type { ToolCallEntry } from './api/dashboard'
 import type { KeeperStatusDetail } from './types'
 
@@ -1426,6 +1427,128 @@ describe('restored chat operation outcome', () => {
       assistantDraft: { text: 'partial authored answer', rawText: 'partial authored answer', delivery: 'streaming',
         streamState: 'streaming', timestamp: '2026-10-11T00:00:00Z', traceSteps: [{ kind: 'think', text: 'exposed reasoning' }] } })
   }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    let reject!: (reason: Error) => void
+    const promise = new Promise<T>((accept, refuse) => { resolve = accept; reject = refuse })
+    return { promise, resolve, reject }
+  }
+
+  function historyMessage(id: string, content = id, ts = 1): KeeperChatHistoryMessage {
+    return { id, role: 'user', content, ts,
+      delivery_provenance: null, delivery_provenance_status: 'absent' }
+  }
+
+  it('retries first hydration after its replacement operation-history read fails', async () => {
+    const original = deferred<KeeperChatHistoryMessage[]>()
+    const replacement = deferred<KeeperChatHistoryMessage[]>()
+    const replacementStarted = deferred<void>()
+    fetchKeeperChatHistory.mockReturnValueOnce(original.promise).mockImplementationOnce(() => {
+      replacementStarted.resolve(undefined)
+      return replacement.promise
+    })
+    const initialHydration = hydrateKeeperChatHistory('echo')
+    storeDraft()
+    fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: {
+      kind: 'succeeded', completedAt: 2, outcomeRef: 'result',
+    } })
+    const reconciliation = hydrateTrackedKeeperChatOperations('echo')
+    await replacementStarted.promise
+    replacement.reject(new Error('replacement history unavailable'))
+    await reconciliation
+    original.resolve([historyMessage('stale-original', 'stale')])
+    await initialHydration
+
+    expect(keeperChatHistoryHydration.value.echo).toBe('failed')
+    expect(keeperChatHistoryErrors.value.echo).toContain('replacement history unavailable')
+    expect(keeperHydrating.value.echo).toBe(false)
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'stale-original')).toBe(false)
+    expect(fetchKeeperToolCalls).not.toHaveBeenCalled()
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft?.delivery).toBe('delivered')
+
+    fetchKeeperChatHistory.mockResolvedValueOnce([historyMessage('retry-history', 'retry', 3)])
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(3)
+    expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+    expect(keeperChatHistoryErrors.value.echo).toBeNull()
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'retry-history')).toBe(true)
+  })
+
+  async function startReplacement(force = false) {
+    const original = deferred<KeeperChatHistoryMessage[]>()
+    const replacement = deferred<KeeperChatHistoryMessage[]>()
+    const replacementStarted = deferred<void>()
+    fetchKeeperChatHistory.mockReturnValueOnce(original.promise).mockImplementationOnce(() => {
+      replacementStarted.resolve(undefined)
+      return replacement.promise
+    })
+    const hydration = hydrateKeeperChatHistory('echo', { force })
+    storeDraft()
+    fetchKeeperChatOperation.mockResolvedValue({ operationId: 'restored-op', state: {
+      kind: 'succeeded', completedAt: 2, outcomeRef: 'result',
+    } })
+    const reconciliation = hydrateTrackedKeeperChatOperations('echo')
+    await replacementStarted.promise
+    return { original, replacement, hydration, reconciliation }
+  }
+
+  it('keeps previously hydrated membership and the failure banner after replacement failure', async () => {
+    fetchKeeperChatHistory.mockResolvedValueOnce([historyMessage('known-history', 'known')])
+    await hydrateKeeperChatHistory('echo')
+    const { original, replacement, hydration, reconciliation } = await startReplacement(true)
+    replacement.reject(new Error('replacement refresh failed'))
+    await reconciliation
+    original.reject(new Error('superseded refresh failed'))
+    await hydration
+
+    expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+    expect(keeperChatHistoryErrors.value.echo).toContain('replacement refresh failed')
+    expect(keeperHydrating.value.echo).toBe(false)
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'known-history')).toBe(true)
+    expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(1)
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not let a superseded reconciliation failure settle a newer hydration owner', async () => {
+    const { original, replacement, hydration, reconciliation } = await startReplacement()
+    const latest = deferred<KeeperChatHistoryMessage[]>()
+    fetchKeeperChatHistory.mockReturnValueOnce(latest.promise)
+    const latestHydration = hydrateKeeperChatHistory('echo', { force: true })
+    replacement.reject(new Error('superseded reconciliation failed'))
+    await reconciliation
+    original.resolve([historyMessage('stale-first-history', 'stale')])
+    await hydration
+
+    expect(keeperHydrating.value.echo).toBe(true)
+    expect(keeperChatHistoryHydration.value.echo).toBeUndefined()
+    expect(keeperChatHistoryErrors.value.echo).toBeUndefined()
+    expect(fetchKeeperToolCalls).not.toHaveBeenCalled()
+    latest.resolve([historyMessage('latest-history', 'latest', 3)])
+    await latestHydration
+    expect(keeperHydrating.value.echo).toBe(false)
+    expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+    expect(keeperChatHistoryErrors.value.echo).toBeNull()
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'latest-history')).toBe(true)
+    expect(keeperThreads.value.echo?.some(entry => entry.id === 'stale-first-history')).toBe(false)
+  })
+
+  it('settles successful empty replacement history before its canonical operation arrives', async () => {
+    const { original, replacement, hydration, reconciliation } = await startReplacement()
+    replacement.resolve([])
+    await reconciliation
+    original.reject(new Error('superseded first hydration failed'))
+    await hydration
+
+    expect(keeperChatHistoryHydration.value.echo).toBe('hydrated')
+    expect(keeperChatHistoryErrors.value.echo).toBeNull()
+    expect(keeperHydrating.value.echo).toBe(false)
+    expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(1)
+    expect(requiredFixture(trackedKeeperChatOperationsForKeeper('echo')[0]).assistantDraft?.delivery).toBe('delivered')
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+  })
 
   it.each([false, true])('restores durable quarantine into canonical history (continuation=%s)', async continuation => {
     const provenance = toolCallDeliveryProvenance(operationDeliveryProvenance('restored-op', 'terminal_result'), 'execution', 0)

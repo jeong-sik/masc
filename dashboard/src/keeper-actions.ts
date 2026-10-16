@@ -392,6 +392,18 @@ async function fetchAndMergeKeeperChatHistory(keeperName: string, request: objec
   }
 }
 
+function recordKeeperChatHistoryFailure(keeperName: string, err: unknown): void {
+  // Keep prior successful membership so inactive Keepers still receive appends.
+  // A failed first read must release membership so an ordinary mount can retry.
+  if (keeperChatHistoryHydration.value[keeperName] !== 'hydrated') {
+    hydratedChatKeepers.delete(keeperName)
+    setRecordValue(keeperChatHistoryHydration, keeperName, 'failed')
+  }
+  const message = err instanceof Error ? err.message : `Failed to load chat history for ${keeperName}`
+  console.warn(`[keeper] chat history hydration failed for ${keeperName}:`, message)
+  setRecordValue(keeperChatHistoryErrors, keeperName, `이전 대화 불러오기 실패: ${message}`)
+}
+
 /** Merge the server-persisted chat transcript
  *  (`GET /api/v1/keepers/:name/chat/history`, backed by
  *  `.masc/keeper_chat/<name>.jsonl`) into the in-memory thread.
@@ -420,21 +432,7 @@ export async function hydrateKeeperChatHistory(
     setRecordValue(keeperChatHistoryErrors, keeperName, null)
   } catch (err) {
     if (chatHistoryHydrationRequests.get(keeperName) !== request) return
-    // A failed first read may retry on mount. A failed refresh must retain
-    // prior successful membership so inactive Keepers still receive appends.
-    if (keeperChatHistoryHydration.value[keeperName] !== 'hydrated') {
-      hydratedChatKeepers.delete(keeperName)
-    }
-    // A failed first hydration is settled, not pending: the error banner
-    // explains the empty transcript. Keep an earlier success as-is so a
-    // failed forced re-hydration does not demote an authoritative history.
-    if (keeperChatHistoryHydration.value[keeperName] !== 'hydrated') {
-      setRecordValue(keeperChatHistoryHydration, keeperName, 'failed')
-    }
-    const message = err instanceof Error ? err.message : `Failed to load chat history for ${keeperName}`
-    console.warn(`[keeper] chat history hydration failed for ${keeperName}:`, message)
-    const historyError = `이전 대화 불러오기 실패: ${message}`
-    setRecordValue(keeperChatHistoryErrors, keeperName, historyError)
+    recordKeeperChatHistoryFailure(keeperName, err)
   } finally {
     if (chatHistoryHydrationRequests.get(keeperName) === request) {
       chatHistoryHydrationRequests.delete(keeperName)
@@ -536,19 +534,24 @@ async function reconcileOperationFromServerHistory(
     // canonical turn so the transcript is not left unmerged this session.
     if (!canonical && !displacedHydration) return false
     mergeServerHistoryEntries(keeperName, historyEntries)
+    if (displacedHydration) {
+      // This owner observed and merged a successful replacement read, even
+      // when the operation's canonical turn has not reached history yet.
+      void hydrateKeeperToolOutputs(keeperName)
+      setRecordValue(keeperChatHistoryHydration, keeperName, 'hydrated')
+      setRecordValue(keeperChatHistoryErrors, keeperName, null)
+    }
     if (!canonical) return false
     removeThreadEntries(keeperName, [localUserId, localAssistantId])
     return true
+  } catch (err) {
+    if (chatHistoryHydrationRequests.get(keeperName) !== request) return false
+    if (displacedHydration) recordKeeperChatHistoryFailure(keeperName, err)
+    throw err
   } finally {
     if (chatHistoryHydrationRequests.get(keeperName) === request) {
       chatHistoryHydrationRequests.delete(keeperName)
       setRecordValue(keeperHydrating, keeperName, false)
-      if (displacedHydration) {
-        // Settle the status signals the superseded hydration would have set.
-        void hydrateKeeperToolOutputs(keeperName)
-        setRecordValue(keeperChatHistoryHydration, keeperName, 'hydrated')
-        setRecordValue(keeperChatHistoryErrors, keeperName, null)
-      }
     }
   }
 }

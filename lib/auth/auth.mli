@@ -22,10 +22,19 @@ module Credential_index_expiry_for_testing : sig
 
   val ttl_sec : float
 
-  val expires_at : stamped_at:float -> dir_changed_at:float option -> float
+  val unreadable_retry_sec : float
+  (** How long an index that left out a credential file it could not read
+      serves, however far off the TTL and the time step are. *)
+
+  val expires_at :
+    stamped_at:float
+    -> dir_changed_at:float option
+    -> has_unreadable:bool
+    -> float
   (** When a token index stamped at [stamped_at] stops serving, given the
-      agents directory's last change time ([None] when it does not exist).
-      The production rule itself; no cache or clock is read or changed. *)
+      agents directory's last change time ([None] when it does not exist) and
+      whether the rebuild left out a file it could not read. The production
+      rule itself; no cache or clock is read or changed. *)
 end
 
 (** {1 Token Generation} *)

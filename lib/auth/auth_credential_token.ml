@@ -197,21 +197,24 @@ let credential_matches_live_disk config (cred : agent_credential) =
     && constant_time_string_equal current.token cred.token
 ;;
 
-let fresh_matches_for_token_hash config token_hash matches =
+(* The matches for [token_hash] that still hold on disk, with the index they
+   were answered from. A match that changed on disk sends the lookup to a fresh
+   index, and the miss reported with it is judged against that one. *)
+let fresh_matches_for_token_hash config index token_hash matches =
   if List.for_all (credential_matches_live_disk config) matches
-  then Ok matches
+  then Ok (matches, index)
   else (
     invalidate_credential_index_cache config;
     let open Result.Syntax in
-    let* idx = credential_token_index config in
+    let* fresh = credential_token_index config in
     (* DET-OK: exact token-hash cache miss means there are no indexed
        credential candidates; this does not infer state from ambiguous input. *)
-    match Hashtbl.find_opt idx token_hash with
+    match Hashtbl.find_opt fresh.by_token token_hash with
     | Some matches ->
       if List.for_all (credential_matches_live_disk config) matches
-      then Ok matches
+      then Ok (matches, fresh)
       else Error (Auth (Auth_error.InvalidToken "Credential changed during token lookup"))
-    | None -> Ok [])
+    | None -> Ok ([], fresh))
 ;;
 
 (** Find credential by raw token (hash lookup + expiry check).
@@ -230,12 +233,17 @@ let find_static_credential_by_token config ~token : (agent_credential, masc_erro
   let open Result.Syntax in
   let token_hash = sha256_hash token in
   let* idx = credential_token_index config in
-  let* matches =
-    Hashtbl.find_opt idx token_hash |> Option.value ~default:[]
-    |> fresh_matches_for_token_hash config token_hash
+  let* matches, answered_from =
+    Hashtbl.find_opt idx.by_token token_hash |> Option.value ~default:[]
+    |> fresh_matches_for_token_hash config idx token_hash
   in
   match matches with
-  | [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
+  | [] ->
+    (* A bearer the index does not hold may sit in a file it could not read:
+       that is a read failure to retry, not a token to refuse. *)
+    (match unreadable_credentials_error answered_from with
+     | Some read_failure -> Error read_failure
+     | None -> Error (Auth (Auth_error.InvalidToken "Token mismatch")))
   | first :: rest ->
     (match check_credential_collisions ~token_hash_prefix:(token_hash_prefix_of token_hash) first rest with
      | Error e -> Error e

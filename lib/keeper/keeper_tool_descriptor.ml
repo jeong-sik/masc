@@ -50,7 +50,7 @@ type tool_kind =
 type prepared_leaf_admission =
   | Read_only_ordinary_leaf
   | Owned_job_launch_leaf
-  | Owned_file_edit_leaf
+  | Owned_file_mutation_leaf
   | Direct_only
 
 let tool_kind_to_string = function
@@ -3395,7 +3395,8 @@ let readonly_for_input d ~input = d.policy.readonly_of_input input
 let prepared_leaf_admission descriptor =
   match descriptor.execution with
   | Terminal -> Direct_only
-  | Ordinary Serial when descriptor.runtime_handler = Tool_edit_file -> Owned_file_edit_leaf
+  | Ordinary Serial when descriptor.runtime_handler = Tool_edit_file
+      || descriptor.runtime_handler = Tool_write_file -> Owned_file_mutation_leaf
   | Ordinary (Serial | Concurrent) ->
     (match readonly_static_hint descriptor with
      | Some true -> Read_only_ordinary_leaf

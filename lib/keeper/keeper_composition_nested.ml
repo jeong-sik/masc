@@ -333,7 +333,7 @@ let rec validate_leaves ~execution ?(parameterized=false) plan =
       match Plan.contract plan node.id with
       | Some {target=Plan.Descriptor_target descriptor;_} -> (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
           | Read_only_ordinary_leaf | Owned_job_launch_leaf -> Ok ()
-          | Owned_file_edit_leaf ->
+          | Owned_file_mutation_leaf ->
             (match execution with
              | Catalog.Inline -> Ok ()
              | Catalog.Async -> Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name }))

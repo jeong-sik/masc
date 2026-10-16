@@ -120,7 +120,8 @@ let batch env config meta recovery inputs =
   dispatch env [tool] calls
 ;;
 
-let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) env sw config meta recovery operation =
+let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) ?(with_write = false)
+    env sw config meta recovery operation =
   Masc_test_deps.with_process_env "MASC_BASE_PATH" (Some config.Workspace.base_path) @@ fun () ->
   Config_dir_resolver.reset ();
   Eio.Switch.on_release sw Config_dir_resolver.reset;
@@ -148,6 +149,10 @@ let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) env sw conf
     match Keeper_tool_descriptor.find_id "agent.read_file" with
     | Some read -> [descriptor; read]
     | None -> fail "canonical public Read descriptor is absent" in
+  let descriptors = if not with_write then descriptors else
+    match Keeper_tool_descriptor.find_id "agent.write_file" with
+    | Some write -> descriptors @ [write]
+    | None -> fail "canonical public Write descriptor is absent" in
   let snapshot = match snapshot with
     | Some snapshot -> snapshot
     | None -> Skill_catalog_snapshot.config_unreadable ~detail:"tool-only fixture has no shared Skill source" in
@@ -277,6 +282,47 @@ let recipe_patch_input source before after =
 let recipe_dynamic_edit id source before after =
   `Assoc ["id", `String id; "tool", `String "Edit";
           "input", recipe_patch_input source before after]
+;;
+
+let test_inline_recipe_writes_original_upstream_bytes () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle ~with_read:true ~with_write:true env sw config meta recovery
+  @@ fun meta task_id _cell causal bundle ->
+  let source = Filename.concat root "source.txt" in
+  let target = Filename.concat root "new-directory/report.txt" in
+  let original = "  진행 결과\n\n원래 공백과 마지막 줄바꿈을 보존합니다.\n" in
+  write source original;
+  let value kind fields = `Assoc (("kind", `String kind) :: fields) in
+  let field name input = `Assoc ["name", `String name; "value", input] in
+  let nodes =
+    [ recipe_read "source" source
+    ; `Assoc ["id", `String "save"; "tool", `String "Write";
+        "input", value "object" ["fields", `List
+          [field "file_path" (value "literal" ["value", `String target]);
+           field "content" (value "output" ["node", `String "source"; "pointer", `String "/content"])]]]
+    ; `Assoc ["id", `String "verify"; "tool", `String "Read";
+        "after", `List [`String "save"]; "args", `Assoc ["file_path", `String target]]
+    ]
+  in
+  let authorized = ref 0 in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr authorized;
+      check bool "the original write boundary precedes directory/file creation" false (Sys.file_exists target))
+    (fun () -> dispatch env bundle.tools [recipe_call ~id:"recipe-write" nodes]) in
+  check int "one public recipe executes the original Read/Write/Read flow" 1 (List.length rows);
+  check int "original file write authorization is reached exactly once" 1 !authorized;
+  check string "original upstream bytes land in the new file" original (read target);
+  check string "source bytes remain unchanged" original (read source);
+  let leaves = physical_leaves meta in
+  check int "all original physical leaf receipts are retained" 3 (List.length leaves);
+  List.iter (fun row ->
+    check string "file flow retains the original Task" task_id
+      Yojson.Safe.Util.(member "task_id" row |> to_string);
+    check string "file flow retains the original parent invocation" "recipe-write"
+      Yojson.Safe.Util.(member "parent_tool_use_id" row |> to_string)) leaves;
+  check int "all three results reach the original Gate aggregate" 3
+    Yojson.Safe.Util.(member "completed_tool_calls"
+      (Keeper_gate_causal_context.snapshot causal).snapshot |> to_list |> List.length)
 ;;
 
 let test_recipe_edits_overlap_with_original_source ?(dynamic = false) ~nested () =
@@ -1127,6 +1173,8 @@ let () = run "prepared actual file resources"
       test_case "public conflicting patches consume predecessor bytes" `Quick test_public_conflicting_edits_keep_current_bytes;
       test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial];
     "task recipes and original file producers", [
+      test_case "one inline recipe writes original upstream bytes and verifies through Read" `Quick
+        test_inline_recipe_writes_original_upstream_bytes;
       test_case "one recipe overlaps independent Edits with original Task and Gate receipts" `Quick
         (test_recipe_edits_overlap_with_original_source ~dynamic:false ~nested:false);
       test_case "fixed exact child Skills overlap through the original recipe" `Quick

@@ -69,12 +69,13 @@ type tool_kind =
 type prepared_leaf_admission =
   | Read_only_ordinary_leaf
   | Owned_job_launch_leaf
-  | Owned_file_edit_leaf
+  | Owned_file_mutation_leaf
   | Direct_only
-(** Prepared leaves retain their original producer's ownership. File Edit is
-    available to inline drafts; durable async plans still require read-only
-    leaves or the owned-job producer's replayable launch contract. Edit and job
-    launch retain their Serial effectful descriptor contracts. *)
+(** Prepared leaves retain their original producer's ownership. File Edit and
+    Write are available to inline drafts; durable async plans still require
+    read-only leaves or the owned-job producer's replayable launch contract.
+    File mutations and job launch retain their Serial effectful descriptor
+    contracts. A file mutation admission is not a prepared resource claim. *)
 
 (** Descriptor-owned output contract for typed composition. [Opaque_output]
     cannot be referenced by another plan node. [Json_output] carries a schema

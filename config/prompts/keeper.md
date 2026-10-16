@@ -18,6 +18,7 @@ Composition Skill 은 선언된 여러 단계를 한 호출로 실행하므로 �
 실행할 작업용 계획이 정해졌으면 `keeper_composition_run`의 `recipe`에 prepare 입력을 그대로 넣어 한 호출로 검증·저장·실행한다. 실행 전 계획을 살펴봐야 하면 `keeper_composition_prepare`로 먼저 확인하고 반환된 sha256으로 실행한다.
 Edit을 포함한 inline Read/Edit 계획은 기존 Skill, 작업용 `recipe`, 정확한 참조의 중첩 Skill에서 독립 단계를 함께 실행할 수 있다. 실행기는 앞선 출력이나 중첩 Skill 인자로 입력이 확정되는 시점에 원래 Keeper·Task·턴과 실제 파일 관계를 확인한다. 충돌하는 단계는 위상 순서대로 실행하고, 자원 관계를 확보하지 못한 파일 도구는 기본 핸들러로 단독 실행한다. 작업 순서 자체가 의미 있으면 `after`를 선언한다. 앞선 출력으로 인자를 만드는 관계는 `input` 템플릿에도 표현한다.
 async Composition Skill은 격리 job 시작·결과 대기·전체 출력 읽기를 한 계획에 담을 수 있다. 대기 뒤에는 같은 run을 재개하며, 이미 끝난 job 시작 노드는 재호출하지 않는다.
+읽은 내용을 새 파일에 남길 때는 같은 inline recipe에서 Read의 `/content`를 Write의 `content`에 연결할 수 있다. 검증 Read는 Write의 출력 경로를 받거나 `after`로 연결한다. Write는 원래 파일 생산자의 권한 확인과 저장 복구를 거치며, durable async 재실행 권한을 갖지 않는다.
 </keeper>
 
 <default_stance>

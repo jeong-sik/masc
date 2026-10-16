@@ -95,3 +95,8 @@ val pending_deliveries : base_path:string -> (pending_deliveries, error) result
 val retire_delivery_marker : record -> (unit, error) result
 (** Cleanup only for an acknowledged canonical owner. Cleanup uncertainty
     cannot permit another launch or delivery. *)
+val source_absent :
+  base_path:string -> keeper_name:string -> source:source -> (bool, error) result
+(** Prove whether every owned-job authority directory and pending completion
+    marker under [base_path] is readable and none carries [(keeper_name, source)].
+    Any missing, unreadable or corrupt job journal returns [Error], never [Ok true]. *)

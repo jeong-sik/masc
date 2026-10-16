@@ -242,8 +242,18 @@ let handle ~config ~meta ~owned_job_replay ~source_context ~continuation_channel
             | Ok invocation ->
            let reservation = match owned_job_replay with
              | Some replay ->
-                 Invocation.reserve_existing ~base_path:config.base_path ~keeper_name:meta.name
-                   replay ~argv ~inputs |> Result.map (fun prior -> Some (Invocation.Existing prior))
+                 (match Invocation.reserve_existing ~base_path:config.base_path ~keeper_name:meta.name
+                     replay ~argv ~inputs with
+                  | Ok prior -> Ok (Some (Invocation.Existing prior))
+                  | Error ({cause=Store.Missing;_} as missing) ->
+                      (match Store.source_absent ~base_path:config.base_path ~keeper_name:meta.name
+                          ~source:(Invocation.replay_source replay), invocation with
+                       | Ok true, Some invocation ->
+                           Invocation.reserve ~base_path:config.base_path ~keeper_name:meta.name
+                             ~invocation ~source ~argv ~inputs |> Result.map Option.some
+                       | Ok true, None | Ok false, _ -> Error missing
+                       | Error cause, _ -> Error {job_id=None;cause})
+                  | Error error -> Error error)
              | None ->
                  (match invocation with
                   | None -> Ok None

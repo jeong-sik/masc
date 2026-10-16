@@ -3531,6 +3531,94 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     (Journal.completion_pending ~base_path:fixture.base_path entry |> require "actual completed membership");
   ignore (Wake.reconcile ~base_path:fixture.base_path |> require "actual completion recovery");
   check int "only final public success notifies the original run" 1 (List.length (pending_completions fixture));
+  let pre_reserve_run_id = Plan.Composition_run_id.fresh () in
+  let pre_reserve_invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"run-interrupted-before-reserve" ~turn:41
+      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Agent_core.Tool_contract.Serial}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let pre_reserve_run_ref = Draft.record_invocation ~base_path:fixture.base_path
+      ~composition_run_id:pre_reserve_run_id ~invocation:pre_reserve_invocation draft
+    |> require "pre-reserve interrupted launch run artifact" in
+  let pre_reserve_source : Journal.source =
+    { source with composition_run_id = pre_reserve_run_id
+    ; run_reference = pre_reserve_run_ref
+    ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id pre_reserve_invocation } in
+  let pre_reserve_journal = Journal.prepare ~base_path:fixture.base_path pre_reserve_source
+      |> require "pre-reserve interrupted launch journal" in
+  let pre_reserve_context = Some
+      [ "composition_tool", `String Draft.run_tool_name
+      ; "parent_tool_use_id", `String pre_reserve_source.parent_tool_use_id
+      ; "source_turn", `Int 41
+      ; "composition_run_id", `String (Plan.Composition_run_id.to_string pre_reserve_run_id)
+      ; "draft_reference", Tool_output.normalized_artifact_ref_to_json pre_reserve_source.draft_reference
+      ; "run_artifact", Tool_output.normalized_artifact_ref_to_json pre_reserve_source.run_reference
+      ; "source_task_id", `String "task-A" ] in
+  let pre_worker = ref None in
+  let pre_settled, notify_pre_settled = Eio.Promise.create () in
+  let pre_trace = Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id in
+  let pre_first = Async.submit_worker_with_request_id ?request_context:pre_reserve_context
+      ~background_sw:(Async.server_background_switch () |> require "pre-reserve worker switch")
+      ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+      ~on_accepted:(fun request_id ->
+        match Outbox.prepare ~base_path:fixture.base_path ~keeper_name:keeper
+            ~request_id ~composition_tool:Draft.run_tool_name with
+        | Error error -> Error (Outbox.error_to_string error)
+        | Ok () -> Journal.bind_request pre_reserve_journal ~request_id
+            |> Result.map (fun worker -> pre_worker := Some worker)
+            |> Result.map_error Journal.error_to_string)
+      ~on_worker_settled:(fun settlement ->
+        Wake.on_worker_settled ~base_path:fixture.base_path
+          ~composition_tool:Draft.run_tool_name settlement;
+        Eio.Promise.resolve notify_pre_settled settlement)
+      ~f:(fun ~request_id:_ _request_sw ->
+        let worker = Option.get !pre_worker in
+        Journal.validate_plan worker ~plan:(Draft.plan draft)
+        |> Result.map_error Journal.error_to_string |> require "pre-reserve plan validation";
+        ignore (Journal.begin_attempt worker
+            ~node_id:(Plan.Node_id.make "launch" |> require "launch node")
+            ~tool_name:"keeper_job_start"
+            ~input:(`Assoc ["argv", `List [`String "fixture-program"]])
+            ~execution_id:(Ids.Execution_id.generate ())
+            ~tool_use_id:"pre-reserve-launch-leaf" ~readonly:false
+            ~launch_invocation:{trace_id=pre_trace;
+              turn_ref=Ids.Turn_ref.make ~trace_id:pre_trace ~absolute_turn:41;
+              keeper_turn_id} ()
+          |> Result.map_error Journal.error_to_string |> require "pre-reserve attempting record");
+        Async.worker_interrupted ~reason:"interrupted before Invocation.reserve") ()
+    |> require "pre-reserve request accepted" in
+  ignore (Eio.Promise.await pre_settled);
+  check_lost "pre-reserve interrupted launch" (terminal pre_first.request_id);
+  Call_log.set_turn_context ~cell:fixture.cell ~agent_name:keeper ~task_id:"task-C"
+    ~turn:64 ~keeper_turn_id:99
+    ~trace_id:(Keeper_id.Trace_id.to_string final_meta.runtime.trace_id) ();
+  let tools = Surface.make_tools ~capability_surface ~config ~meta:final_meta ~publication_recovery
+      ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"pre-reserve launch resume")
+      ~turn_ctx_cell:fixture.cell ~clock:(Eio.Stdenv.clock env) () in
+  let tool = List.find_map (fun (tool,_,_) ->
+      if tool.Agent_core.Tool.schema.name = Draft.run_tool_name then Some tool else None) tools
+    |> Option.get in
+  let pre_resume_inv = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"public-pre-reserve-resume" ~turn:64
+      ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let pre_output = Agent_core.Tool.execute ~invocation:pre_resume_inv tool
+      (`Assoc ["sha256",`String reference.sha256;"resume_run_id",
+        `String (Plan.Composition_run_id.to_string pre_reserve_run_id)])
+    |> require "pre-reserve public launch resume accepted" in
+  let pre_ack = result_document ~base_path:fixture.base_path pre_output.content in
+  let pre_entry = terminal (pre_ack |> member "request_id" |> to_string) in
+  let pre_data = match pre_entry.status with
+    | Async.Done {ok=true;data=Some data;_} -> data
+    | Async.Done {ok=false;_} | Async.Done {ok=true;data=None;_}
+    | Async.Queued | Async.Running | Async.Cancelling _ | Async.Cancelled _ | Async.Lost _
+    | Async.Persistence_failed _ | Async.Waiting_for_dependencies _ ->
+        fail "pre-reserve public resume did not complete" in
+  let pre_job_id = pre_data |> member "actions" |> to_list
+      |> List.find (fun action -> action |> member "node_id" |> to_string = "launch")
+      |> member "result" |> member "data" |> member "job_id" |> to_string in
+  let pre_job = load fixture pre_job_id in
+  check (option string) "pre-reserve resume preserves original Task A" (Some "task-A") pre_job.source.task_id;
+  check (option int) "pre-reserve resume preserves original K" keeper_turn_id pre_job.source.keeper_turn_id;
   Printf.printf "OWNED_INTERRUPTED_LAUNCH_PUBLIC_RESUME job=%s originalK=%s refusals=5 create=1 start=1 source_preserved=true\n%!"
     id (match keeper_turn_id with None -> "none" | Some value -> string_of_int value)
 

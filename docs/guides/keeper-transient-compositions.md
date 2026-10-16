@@ -91,7 +91,11 @@ attempt, or a failure whose effect outcome is unknown — replays instead of
 refusing the whole run: the durable occurrence recorded the exact invocation
 identity and complete original source (Task, trace, TurnRef, tool-use ID and
 optional Keeper turn). The resuming owner passes that source to an Existing-only
-invocation transaction. It can observe only the original job; a missing,
+invocation transaction. If the invocation binding was never written and every
+owned-job journal and pending completion marker is readable without carrying
+that exact original source, the interrupted attempt never reached the backend,
+so the resuming owner reserves the original invocation once and completes the
+initial launch; otherwise it can observe only the original job, and a missing,
 unreadable or different binding cannot reserve a replacement.
 
 A first interrupted launch can recover through `resume_run_id` without inventing

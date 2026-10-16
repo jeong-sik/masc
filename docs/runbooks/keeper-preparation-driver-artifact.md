@@ -20,8 +20,9 @@ gh workflow run linux-x64-probe.yml --repo jeong-sik/masc \
 The target refuses a missing or noncanonical commit identity. Checkout pins that
 identity, verifies the actual source before and after the one explicit Dune
 target, and packages the executable, coordinator, harness guide and prompts from
-that same source. No feature branch is merged into the CI branch. Other manual
-targets retain their existing checkout behavior.
+that same source. No feature branch is merged into the CI branch. The macOS
+runtime target also accepts an explicit candidate as described below; other
+manual targets retain their existing checkout behavior.
 
 At a work boundary, inspect the completed run and its actual build step. Download
 the `preparation-driver-macos-arm64-<candidate>-attempt-<n>` artifact to a new
@@ -57,3 +58,29 @@ new private output directory. Build completion is separate from a successful
 harness run, real provider identity, paired preparation metrics, independent PR
 approval, release verification and visible Ask Question behavior. Preserve
 failures and unfinished attempts in the denominator.
+
+## Build the same candidate for Ask Question observation
+
+The driver does not contain the TUI or establish visible Ask Question behavior.
+Use the existing four-companion macOS runtime probe with the same candidate SHA:
+
+```sh
+gh workflow run linux-x64-probe.yml --repo jeong-sik/masc \
+  --ref "$CI_WORKFLOW_BRANCH" \
+  -f target=macos-arm64 -f candidate_sha="$CANDIDATE_SHA"
+```
+
+When `candidate_sha` is empty, this target selects the immutable workflow head,
+preserving its ordinary manual-probe behavior. An explicit candidate selects
+that source without merging it into the CI stack. The target builds only the
+existing four companions and uses the existing relocatable runtime packager.
+It checks both server and TUI embedded build identities against the selected
+source. `probe.json` separates actual candidate commit/tree from workflow head
+and run/attempt; artifact names contain the candidate commit.
+
+Read the actual completed run, payload hashes and embedded identities before
+using this archive in a new private base. Run the candidate with an isolated
+connection and record its actual Ask source, TUI answer/delivery decision and
+final visible frame. Build/identity output alone does not prove this scenario.
+Keep the operator's installed binaries, live base and Keeper configuration
+unchanged during the candidate observation.

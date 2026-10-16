@@ -533,17 +533,11 @@ let entry_matches_source source (entry : Async.entry) = decode (fun () ->
   require (task_fields = (match source.source_task_id with None -> [] | Some task -> [`String task])) "source task identity mismatch")
 
 let canonical_queued journal request_id =
-  match Async.read_durable_active_inventory ~base_path:journal.base_path with
-  | Error _ -> Error (Queued_request_rejected "canonical active inventory unavailable")
-  | Ok inventory ->
-    if List.exists (fun (error : Async.active_inventory_record_error) -> error.request_id = Some request_id) inventory.record_errors
-    then Error (Queued_request_rejected "canonical request unreadable or invalid")
-    else match List.filter (fun (entry : Async.entry) -> String.equal entry.request_id request_id) inventory.entries with
-      | [entry] when entry.status = Async.Queued ->
-        Result.map_error (fun detail -> Queued_request_rejected detail) (entry_matches_source journal.immutable_source entry)
-      | [_] -> Error (Queued_request_rejected "canonical request is not Queued")
-      | [] -> Error (Queued_request_rejected "canonical Queued request absent")
-      | _ -> Error (Queued_request_rejected "ambiguous canonical request")
+  let* proof = Async.load_canonical_durable_queued ~base_path:journal.base_path
+      ~caller:journal.immutable_source.keeper_name request_id
+    |> Result.map_error (fun error -> Queued_request_rejected (Async.canonical_queued_error_to_string error)) in
+  Result.map_error (fun detail -> Queued_request_rejected detail)
+    (entry_matches_source journal.immutable_source (Async.durable_queued_entry proof))
 
 let bind_request journal ~request_id =
   let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in

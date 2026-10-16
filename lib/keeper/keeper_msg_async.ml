@@ -19,6 +19,18 @@ let ( let* ) = Result.bind
 include Keeper_msg_async_types
 open Keeper_msg_async_record
 
+type durable_queued_proof = { queued_entry : entry }
+
+type canonical_queued_error =
+  | Canonical_queued_absent
+  | Canonical_queued_unreadable of string
+  | Canonical_queued_access_rejected of access_rejection
+  | Canonical_queued_runtime_nonqueued of request_status
+  | Canonical_queued_publication_ambiguous of request_status
+  | Canonical_queued_runtime_conflict
+  | Canonical_queued_not_queued of request_status
+  | Canonical_queued_noncanonical_location of request_status
+
 let worker_cancel_source_to_string = function
   | Operator_request -> "operator"
   | Runtime_cancellation -> "runtime"
@@ -32,6 +44,31 @@ let access_rejection_to_json = Keeper_msg_async_record.access_rejection_to_json
 let submit_error_to_json = Keeper_msg_async_record.submit_error_to_json
 let submit_outcome_to_json = Keeper_msg_async_record.submit_outcome_to_json
 let cancel_result_to_json = Keeper_msg_async_record.cancel_result_to_json
+
+let durable_queued_entry proof = proof.queued_entry
+
+let canonical_queued_error_to_string = function
+  | Canonical_queued_absent -> "canonical queued request record is absent"
+  | Canonical_queued_unreadable reason ->
+    "canonical queued request record is unreadable: " ^ reason
+  | Canonical_queued_access_rejected rejection ->
+    "canonical queued request access rejected: "
+    ^ Yojson.Safe.to_string (access_rejection_to_json rejection)
+  | Canonical_queued_runtime_nonqueued status ->
+    Printf.sprintf "canonical queued proof rejected process-local status=%s"
+      (status_to_string status)
+  | Canonical_queued_publication_ambiguous status ->
+    Printf.sprintf "canonical queued proof rejected process-local terminal publication status=%s"
+      (status_to_string status)
+  | Canonical_queued_runtime_conflict ->
+    "process-local queued request differs from the canonical durable record"
+  | Canonical_queued_not_queued status ->
+    Printf.sprintf "canonical request record is not queued status=%s"
+      (status_to_string status)
+  | Canonical_queued_noncanonical_location status ->
+    Printf.sprintf "queued request record is outside the canonical active partition status=%s"
+      (status_to_string status)
+;;
 
 module Request_key = struct
   type t =
@@ -2088,6 +2125,50 @@ let load_canonical_durable_terminal ~base_path ~caller request_id =
                   | Active_location ->
                     Error
                       (Canonical_terminal_noncanonical_location entry.status))))
+;;
+
+let queued_proof_of_record ~caller ~location ~local (entry : entry) =
+  match owner_rejection ~caller entry with
+  | Some rejection -> Error (Canonical_queued_access_rejected rejection)
+  | None ->
+    match entry.status with
+    | Running | Cancelling _ | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
+      Error (Canonical_queued_not_queued entry.status)
+    | Queued ->
+      match location with
+      | Terminal_location -> Error (Canonical_queued_noncanonical_location entry.status)
+      | Active_location ->
+        match local with
+        | None -> Ok { queued_entry = entry }
+        | Some local ->
+          match local.status with
+          | Running | Cancelling _ -> Error (Canonical_queued_runtime_nonqueued local.status)
+          | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
+            Error (Canonical_queued_publication_ambiguous local.status)
+          | Queued ->
+            if same_entry_record local entry then Ok { queued_entry = entry }
+            else Error Canonical_queued_runtime_conflict
+;;
+
+let load_canonical_durable_queued ~base_path ~caller request_id =
+  let* base_path, caller =
+    resolve_access_identity ~base_path ~caller
+    |> Result.map_error (fun rejection -> Canonical_queued_access_rejected rejection)
+  in
+  if not (is_safe_request_id request_id)
+  then Error (Canonical_queued_access_rejected Invalid_request_id)
+  else
+    with_store_transition_lock ~base_path ~request_id (fun () ->
+      (* Canonical disk authority takes precedence over any cached reservation.
+         The existing decoder also refuses unreadable/conflicting partitions. *)
+      match load_record_canonical_located ~base_path ~request_id with
+      | Located_absent -> Error Canonical_queued_absent
+      | Located_unreadable reason -> Error (Canonical_queued_unreadable reason)
+      | Located_rejected rejection -> Error (Canonical_queued_access_rejected rejection)
+      | Located (entry, location) ->
+        let key = request_key ~base_path ~submitted_by:caller ~request_id in
+        let local = Eio.Mutex.use_ro mu (fun () -> Request_table.find_opt pending key) in
+        queued_proof_of_record ~caller ~location ~local entry)
 ;;
 
 (** List only this caller lane; cross-lane rows are intentionally omitted. *)

@@ -421,6 +421,33 @@ let test_private_jsonl_rows_reads_complete_rows_and_reports_torn_tail () =
   | _ -> fail "a missing store must read as Rows_missing"
 ;;
 
+(* A rows read copies the store into its buffer and out of it once. It used to
+   grow a 64 KB buffer by doubling and allocate a fresh chunk for every read:
+   about four times the store on the major heap per read. The chat event
+   journals it serves are tens of MB, read once a page. *)
+let row_store_bytes = 4 * 1024 * 1024
+
+let test_private_jsonl_rows_read_allocates_about_twice_the_store () =
+  let row = String.make 199 'x' ^ "\n" in
+  let store =
+    String.concat "" (List.init (row_store_bytes / String.length row) (fun _ -> row))
+  in
+  with_temp_jsonl store @@ fun path ->
+  Gc.full_major ();
+  let before = (Gc.quick_stat ()).Gc.major_words in
+  let read = Fs_compat.read_private_jsonl_rows_locked_result path in
+  let allocated_bytes =
+    ((Gc.quick_stat ()).Gc.major_words -. before) *. float_of_int (Sys.word_size / 8)
+  in
+  (match read with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows; _ }) ->
+     check bool "the store reads back" true (String.equal store rows)
+   | _ -> fail "the store did not read as rows");
+  let times = allocated_bytes /. float_of_int (String.length store) in
+  if times > 2.5 then failf "one read put %.1f times the store on the major heap" times
+;;
+
 let test_private_jsonl_slice_rejects_incomplete_tail () =
   with_temp_jsonl "{\"row\":1}" @@ fun path ->
   match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
@@ -1518,6 +1545,10 @@ let () =
             "private JSONL rows read keeps complete rows and reports a torn tail"
             `Quick
             test_private_jsonl_rows_reads_complete_rows_and_reports_torn_tail
+        ; test_case
+            "private JSONL rows read allocates about twice the store"
+            `Quick
+            test_private_jsonl_rows_read_allocates_about_twice_the_store
         ; test_case
             "private JSONL tail returns bounded complete rows with omission"
             `Quick

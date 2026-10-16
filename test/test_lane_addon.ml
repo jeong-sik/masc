@@ -124,7 +124,8 @@ let make_backend ?observe_step () =
           (Eio.Promise.await released; Error (Masc.Lane_addon_lifecycle.Worker_failed "initialization stopped"))
         else Ok connection
       end);
-    image_ready = (fun ~package:_ -> Ok ());
+    image_ready = (fun ~package ->
+      if package.id = "image-missing" then Error "image fixture/image is not on this host" else Ok ());
     acquire = (fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~runtime:_ ~state_owner:_ ~instance_id ~engine ~container_id ->
@@ -507,6 +508,29 @@ binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","it
     await clock (fun () -> Hashtbl.mem state.modes id);
     check bool "worker startup receives the exact validated installation binding" true
       (Hashtbl.find_opt state.bindings id=Some (`Assoc ["sources",`List [];"limit",`Int 2]));
+    detach config id;
+    await_phase clock config id "detached")
+
+let test_direct_attach_looks_for_the_image_first () =
+  with_fixture (fun env _sw config dir state ->
+    let attach_missing () = Lane_addon_runtime.dispatch
+      ~access:Lane_addon_sources.Operator_configuration ~config ~operation:Runtime.Attach
+      (`Assoc ["manifest_path", `String (manifest dir "image-missing");
+               "run_id", `String "world"; "binding", `Assoc ["sources", `List []]]) in
+    (match attach_missing () with
+     | Error (Lane_addon_runtime.Runtime_failed _) -> ()
+     | Error (Request_rejected detail) -> failf "a missing image is not a rejected request: %s" detail
+     | Ok _ -> fail "direct attach created an instance although the image is missing");
+    check Alcotest.int "a missing image starts no worker" 0 (Hashtbl.length state.modes);
+    check Alcotest.int "a missing image leaves no instance behind" 0
+      (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+    (* The same refusal on every attempt: nothing accumulates between them. *)
+    ignore (attach_missing ());
+    check Alcotest.int "a repeated attempt still leaves no instance" 0
+      (inspect config |> member "instances" |> Yojson.Safe.Util.to_list |> List.length);
+    let clock = Eio.Stdenv.clock env in
+    let id = attach config dir "good" in
+    await clock (fun () -> int "observation_seq" (instance config id) = 1);
     detach config id;
     await_phase clock config id "detached")
 
@@ -1868,6 +1892,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
     test_file_activity_preserves_explicit_observation;
   test_case "direct attach enforces package binding before worker startup" `Quick
     test_direct_attach_validates_package_binding;
+  test_case "direct attach looks for the image before it creates an instance" `Quick
+    test_direct_attach_looks_for_the_image_first;
   test_case "missing targets refuse while storage failures remain faults" `Quick
     test_request_refusals_preserve_runtime_failure_distinction;
   test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;

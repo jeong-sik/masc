@@ -704,7 +704,7 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
            (assoc_string "error" json)
            "invalid_structured_response");
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure");
-      assert (String_util.contains_substring (assoc_string "detail" json) "JSON parse error")))
+      assert (String_util.contains_substring (assoc_string "detail" json) "Structured output parse error")))
 
 let test_run_vision_invalid_structured_response_is_typed () =
   with_temp_runtime_toml single_vision_runtime_toml (fun () ->

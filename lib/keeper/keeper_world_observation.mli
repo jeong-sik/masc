@@ -47,6 +47,7 @@ type pending_board_event_kind =
           asker has nowhere else to read it mid-cycle, and a wake with no
           content is a wake it cannot act on. *)
   | Composition_completed
+  | Owned_job_completed of Keeper_event_queue.owned_job_completion
       (** A turn this Keeper asked another Keeper to run has ended. Like
           {!Fusion_completed} the row carries the answer itself, because the
           asker has nowhere else to read it mid-cycle. *)
@@ -437,6 +438,13 @@ val pending_board_event_of_external_attention :
     [Error unavailable] means the board read for [Board_signal] /
     [Board_attention] answered no row: the post was swept or the queued id
     does not parse. Reading again gives the same answer. *)
+(** An original job result is admitted only with its exact canonical owner.
+    Source read failure is returned for retention, never consumed as Board absence. *)
+val pending_board_event_of_owned_job_completion :
+  base_path:string -> keeper_name:string -> arrived_at:float ->
+  Keeper_event_queue.owned_job_completion ->
+  (pending_board_event, Keeper_owned_job_store.error) result
+
 val pending_board_event_of_stimulus :
   base_path:string ->
   meta:Keeper_meta_contract.keeper_meta ->

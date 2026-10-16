@@ -70,8 +70,8 @@ observed result with its exact exit code; consumers decide how to handle it.
 An unavailable or corrupt owner journal is a refusal, not a pending result.
 
 Use this result read as a leaf of a prepared async Composition. Its dependent
-nodes wait while independent branches may complete. After `keeper_job_status`
-has committed the outputs, pass the same draft sha256 and original
+nodes wait while independent branches may complete. After the completion
+notification or `keeper_job_status` confirms complete outputs, pass the same draft sha256 and original
 `composition_run_id` as `resume_run_id` to `keeper_composition_run`. The previous
 worker must have canonically settled before another worker owns that run.
 The journal retains the exact producer-owned job wait separately from the
@@ -80,12 +80,40 @@ its original execution ID and tool-use ID. Completed siblings reuse their full
 saved results, while dependents consume the original job's complete outputs.
 Ordinary Deferred, unknown effects and launch/status/cancel calls receive no
 retry authorization from this receipt. A direct pending result read lets the
-Keeper continue other work instead of parking it without a completion wake.
+Keeper continue other work while the original job remains pending.
+
+The server reconciles pending jobs on startup and its existing maintenance
+pulse. Each job has its own lifecycle fiber; a blocked backend does not hold
+the shared maintenance pulse or newly pending jobs. Separate original jobs
+perform their recovery I/O concurrently. An
+unconfirmed create/start is observed, never replayed. Complete results already
+in the owner journal need no backend operation to recover delivery.
+
+Each owner freezes the submission's continuation channel. Once complete output
+or before-start cancellation is committed, a durable `Owned_job_completed`
+notification carries the original job ID, source task/turn and channel to the
+submitting Keeper. Its next prompt reads the exact canonical result and output
+references. A missing channel is explicit `Unrouted`; it does not choose the
+Keeper's current conversation. Stdout and stderr are normalized `_blob`
+references in that order; `/artifacts/0/_blob/sha256` selects stdout for
+`keeper_artifact_read`.
+
+Pending discovery is committed before the owner and backend effects. Delivery
+is acknowledged in that same owner only after durable queue enqueue, then its
+discovery marker is retired. Failed enqueue, an interrupted acknowledgement or
+unreadable authority leaves recovery evidence. Queue consumption before the
+producer acknowledgement does not recreate the notification. Maintenance
+validates the full committed prefix and exact job owner before recovering an
+incomplete final append under the journal lock; complete
+malformed rows remain a refusal, and missing owners are never created. If the canonical
+result cannot be read at intake, the source stays pending and its error remains
+visible; independent sources can continue. These notifications let the Keeper
+resume an original Composition explicitly; they do not start another worker
+automatically.
 
 Start, status and cancel use serial admission and return while the isolated
-program runs. Shared mutable workspace claims, remote Docker bind authority,
-automatic job-completion reconciliation/wakes and effectful draft admission
-remain separate contracts. This explicit result-read continuation does not
+program runs. Shared mutable workspace claims, remote Docker bind authority
+and effectful draft admission remain separate contracts. This result-read continuation does not
 automatically resume a plan when a container exits. Those remaining contracts are tracked in
 [issue #42799](https://github.com/jeong-sik/masc/issues/42799).
 

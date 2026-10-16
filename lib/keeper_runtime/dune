@@ -9,6 +9,7 @@
   (names nofile_stubs))
  (modules
   keeper_event_queue_schema
+  keeper_owned_job_identity
   keeper_terminal_reason
   keeper_runtime_config
   keeper_disk_pressure
@@ -46,6 +47,7 @@
   masc.keeper_execution_scope
   masc.keeper_toml
   masc.masc_types
+  masc_random_id
   masc.tool_types
   masc.config_dir_resolver
   masc.fs_compat

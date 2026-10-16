@@ -20,6 +20,11 @@ let observe (record : Store.record) observation =
   let preserve detail = Result.map (fun record -> Unconfirmed record) (note record detail) in
   let settle phase = save record ~phase ~cancel_requested:record.cancel_requested
       ~outputs:record.outputs ~detail:None |> Result.map (fun record -> Confirmed record) in
+  let absent_outputs_evidence container_id =
+    Printf.sprintf
+      "exact owned container %s absent after confirmed launch; original outputs unrecoverable"
+      container_id
+  in
   match record.phase, observation with
   | Store.Create_requested, Backend.Created id -> settle (Store.Created id)
   | Store.Start_requested expected, Backend.Running id when id = expected ->
@@ -36,6 +41,20 @@ let observe (record : Store.record) observation =
   | Store.Cancelled_unconfirmed_launch, Backend.Absent -> Ok (Confirmed record)
   | Store.Cancelled_unconfirmed_launch, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
       preserve "same-label container after a cancelled launch is an orphan; cancellation evidence is retained"
+  | (Store.Running container_id | Store.Exited {container_id; _}), Backend.Absent ->
+      (match record.outputs with
+       | Some _ ->
+           preserve "saved backend job is absent; launch intent is retained, no relaunch"
+       | None ->
+           (* Exact inventory absence after a confirmed Running or Exited phase:
+              the original container is gone, so its outputs (and, for Running,
+              its final exit code) can never be observed. Close the result as
+              Outputs_unavailable instead of Waiting forever. *)
+           let evidence = absent_outputs_evidence container_id in
+           Result.map (fun record -> Confirmed record)
+             (save record ~phase:record.phase ~cancel_requested:record.cancel_requested
+                ~outputs:(Some (Store.Outputs_unavailable {evidence}))
+                ~detail:(Some evidence)))
   | _, Backend.Unconfirmed detail -> preserve detail
   | _, Backend.Absent -> preserve "saved backend job is absent; launch intent is retained, no relaunch"
   | _, (Backend.Created _ | Backend.Running _ | Backend.Stopped _) ->
@@ -53,7 +72,7 @@ let collect (record : Store.record) =
        | Error error -> note record (Backend.error_to_string error)
        | Ok logs ->
            save record ~phase:record.phase ~cancel_requested:record.cancel_requested
-             ~outputs:(Some (logs.stdout,logs.stderr)) ~detail:None)
+             ~outputs:(Some (Store.Outputs_complete (logs.stdout, logs.stderr))) ~detail:None)
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
     | Store.Running _ | Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), _
   | Store.Exited _, Some _ -> Ok record
@@ -152,8 +171,8 @@ let failure ?job_id ~effect_disposition class_ message =
 let finish ~tool_name ~start_time ~job_id = function
   | Ok (record : Store.record) ->
       let retained_artifacts = match record.outputs with
-        | None -> []
-        | Some (stdout, stderr) -> [stdout; stderr] in
+        | Some (Store.Outputs_complete (stdout, stderr)) -> [stdout; stderr]
+        | Some (Store.Outputs_unavailable _) | None -> [] in
       let result = Tool_result.make_ok ~tool_name ~start_time
           ~data:(Store.result_json record) ()
         |> Tool_result.with_retained_artifacts retained_artifacts in
@@ -170,7 +189,7 @@ let finish ~tool_name ~start_time ~job_id = function
   | Error error -> failure ~job_id ~effect_disposition:Tool_result.Effect_outcome_unknown
       Tool_result.Runtime_failure (Store.error_to_string error)
 
-let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name ~args =
+let handle ~config ~meta ~source_context ~continuation_channel ~tool_use_id ~turn_ref ~trace_id ~name ~args =
   let start_time = Tool_timing.start () in
   let invalid message = failure ~effect_disposition:Tool_result.Proven_pre_effect
       Tool_result.Policy_rejection message in
@@ -201,7 +220,10 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
                                  base_path;workspace_host_path=paths.workspace;argv} in
              let* preparation = Backend.prepare ~config ~meta ~docker_config_path:paths.cli_config_dir spec
                  |> Result.map_error (fun error -> Store.Invalid_authority (Backend.error_to_string error)) in
-             Store.create ~base_path ~keeper_name:meta.name ~job_id ~source ~preparation ~inputs in
+             let completion_channel = match continuation_channel with
+               | Some channel -> channel
+               | None -> Keeper_continuation_channel.unrouted "job invocation did not capture an originating channel" in
+             Store.create ~base_path ~keeper_name:meta.name ~job_id ~source ~completion_channel ~preparation ~inputs in
            let start_new job_id = match prepare job_id with
              | Error error -> failure ~job_id ~effect_disposition:Tool_result.Proven_pre_effect
                  Tool_result.Runtime_failure (Store.error_to_string error)
@@ -239,13 +261,10 @@ let handle ~config ~meta ~source_context ~tool_use_id ~turn_ref ~trace_id ~name 
             | Error error -> failure ~job_id ~effect_disposition:Tool_result.Proven_pre_effect
                 Tool_result.Policy_rejection (Store.error_to_string error)
             | Ok record ->
-                match record.phase, record.outputs with
-                | Store.Exited _, Some _ | (Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), None ->
-                    finish ~tool_name:name ~start_time ~job_id (Ok record)
-                | (Store.Prepared | Store.Create_requested | Store.Created _
-                  | Store.Start_requested _ | Store.Running _), _
-                | Store.Exited _, None | (Store.Cancelled_before_start _ | Store.Cancelled_unconfirmed_launch), Some _ ->
-                    Keeper_tool_execution.deferred_owned_job_result ~job_id (Store.result_json record)))
+                if Store.result_ready record then
+                  finish ~tool_name:name ~start_time ~job_id (Ok record)
+                else
+                  Keeper_tool_execution.deferred_owned_job_result ~job_id (Store.result_json record)))
   | Some {action=(Tool_schemas_owned_job.Status | Tool_schemas_owned_job.Cancel) as action;_} ->
       (match job_argument args with
        | Error detail -> invalid detail

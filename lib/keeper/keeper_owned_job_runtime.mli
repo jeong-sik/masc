@@ -7,5 +7,11 @@
 val handle :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   source_context:Keeper_tool_call_log_context.turn_context option ->
+  continuation_channel:Keeper_continuation_channel.t option ->
   tool_use_id:string option -> turn_ref:Ids.Turn_ref.t option -> trace_id:string option ->
   name:string -> args:Yojson.Safe.t -> Keeper_tool_execution.t
+
+val reconcile : Keeper_owned_job_store.record ->
+  (Keeper_owned_job_store.record, Keeper_owned_job_store.error) result
+(** Uses only the original frozen backend and durable intents. A completion
+    recovery pulse has no authority to prepare a replacement or replay launch. *)

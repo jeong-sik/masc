@@ -529,6 +529,7 @@ let handle_in_process ctx descriptor args =
          ~args)
   | Tool_keeper_job_dispatch ->
     Some (Keeper_owned_job_runtime.handle ~config:ctx.config ~meta:ctx.meta
+      ~continuation_channel:ctx.continuation_channel
       ~source_context:ctx.source_context ~tool_use_id:ctx.tool_use_id
       ~turn_ref:ctx.turn_ref ~trace_id:ctx.trace_id ~name ~args)
   | Tool_keeper_spawn_dispatch ->

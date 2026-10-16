@@ -1,0 +1,17 @@
+(** Recover the original job's complete result, then durably enqueue one typed
+    notification before acknowledging its canonical owner. *)
+type t
+val create : config:Workspace.config -> t
+val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_owned_job_store.error) result
+(** Server startup/maintenance entrypoint. Reserve independent lifecycle fibers
+    for pending jobs; the pulse does not wait for backend I/O. A live worker is
+    reserved once until it settles or is cancelled. No timer or timeout is added.
+    Single-domain Eio caller; the reservation set is not effect authority. *)
+
+type report =
+  { inspected : int; waiting : int; delivered : int; retired : int
+  ; failures : (string * Keeper_owned_job_store.error) list }
+val reconcile : config:Workspace.config -> (report, Keeper_owned_job_store.error) result
+(** Structured one-round entrypoint using the same recovery workers. Waits for
+    the selected round. Only pending discovery markers are read. No current
+    task/channel, TTL, process registry or replacement job is used. *)

@@ -87,6 +87,7 @@ type projected_source_kind =
   | Source_workspace_message
   | Source_delegate_completed
   | Source_composition_completed
+  | Source_owned_job_completed
 
 type projected_disposition_witness =
   { transition_id : string

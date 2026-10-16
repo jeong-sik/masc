@@ -810,6 +810,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
           "composition completion recovery inspected=%d delivered=%d waiting=%d failures=%d"
           report.inspected report.delivered report.waiting (List.length report.failures)
     in
+    let owned_job_completions = Keeper_owned_job_completion_wake.create ~config in
+    let reconcile_owned_job_completions () =
+      match Keeper_owned_job_completion_wake.pulse ~sw owned_job_completions with
+      | Error error -> Log.Server.warn "owned job completion discovery unavailable: %s"
+          (Keeper_owned_job_store.error_to_string error)
+      | Ok () -> ()
+    in
     let reconcile_ask_answers () =
       match Keeper_ask_answer_wake.reconcile ~base_path:config.base_path with
       | Error error -> Log.Server.warn "ask answer recovery discovery unavailable: %s"
@@ -827,6 +834,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     in
     reconcile_goal_events ();
     reconcile_composition_completions ();
+    reconcile_owned_job_completions ();
     reconcile_ask_answers ();
     project_transition_outboxes Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
@@ -848,6 +856,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       reconcile_broadcast_mentions ();
       reconcile_goal_events ();
       reconcile_composition_completions ();
+      reconcile_owned_job_completions ();
       reconcile_ask_answers ();
       (try
          let stale_sids = Sse.cleanup_stale () in

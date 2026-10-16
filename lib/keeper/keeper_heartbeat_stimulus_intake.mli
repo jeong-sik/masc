@@ -38,6 +38,7 @@ type stimulus_intake_result =
   | Stimulus_ask_retry_later of Keeper_ask_store.read_error
   | Stimulus_ask_missing of string (** Missing Ask ID. *)
   | Stimulus_ask_not_answered of string (** Open or withdrawn Ask ID. *)
+  | Stimulus_job_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
 
 (** Pure boundary for one rendered Board event. A read that answered no row
     is consumed as an empty event. *)
@@ -47,7 +48,9 @@ val classify_pending_board_event_result
 
 (** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
     [stim] into zero-or-one pending board events. On [Error unavailable] it
-    logs and counts the read and returns [Stimulus_consumed []]. *)
+    logs and counts the read and returns [Stimulus_consumed []]. Original job
+    completions instead require the canonical owner and return
+    [Stimulus_job_unavailable] for retention on any source read failure. *)
 val pending_board_events_of_stimulus_result
   :  base_path:string
   -> meta_after_triage:keeper_meta
@@ -59,6 +62,7 @@ type event_queue_intake_error =
   | Connector_read_failed of Keeper_external_attention.read_error
   | Connector_item_missing of string (** Missing event ID, not a whole-store failure. *)
   | Ask_read_failed of Keeper_ask_store.read_error
+  | Job_result_unavailable of Keeper_owned_job_identity.Job_id.t * Keeper_owned_job_store.error
 
 (** Map one durable event-queue payload to its typed turn trigger. A payload
     with no dedicated trigger returns [None]; completion-authority rejection
@@ -70,7 +74,7 @@ val event_queue_intake_error_to_string : event_queue_intake_error -> string
 val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 
 (** Only durable selection corruption/read failures count as a crashed cycle.
-    Connector and unread-Ask source reads are retry conditions: they retain
+    Connector, unread-Ask and job result source reads are retry conditions: they retain
     the exact source without advancing Keeper failure state. A missing or
     unanswered Ask source is not a retry: the heartbeat loop acknowledges it
     as terminal, so it never surfaces here. A Board read that answers no row

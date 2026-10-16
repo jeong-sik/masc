@@ -32,6 +32,7 @@ type pending_board_event_kind =
           asker has nowhere else to read it mid-cycle, and a wake with no
           content is a wake it cannot act on. *)
   | Composition_completed
+  | Owned_job_completed of Keeper_event_queue.owned_job_completion
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
@@ -69,11 +70,13 @@ let same_board_event_identity (left : pending_board_event) (right : pending_boar
      | ( ( Board_post_created | Board_post_updated | Board_comment_added _
          | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
          | Delegate_completed _ | Ask_answered_row _ | Composition_completed
+         | Owned_job_completed _
          | Schedule_due _ | External_attention _ | Completion_authority_rejected _
          | Task_outcome _ | Task_cancelled _ )
        , ( Board_post_created | Board_post_updated | Board_comment_added _
          | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
          | Delegate_completed _ | Ask_answered_row _ | Composition_completed
+         | Owned_job_completed _
          | Schedule_due _ | External_attention _ | Completion_authority_rejected _
          | Task_outcome _ | Task_cancelled _ ) ) -> left.event_kind = right.event_kind
 ;;
@@ -96,6 +99,7 @@ let is_board_activity_event (event : pending_board_event) =
      that renders the row, so leaving it out would wake the Keeper with an
      empty pending-events list. *)
   | Composition_completed
+  | Owned_job_completed _
   (* Same again: this block renders the row's title and preview, and the
      answer is the whole point of the wake. *)
   | Ask_answered_row _
@@ -118,6 +122,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed _
   | Composition_completed
+  | Owned_job_completed _
   | Ask_answered_row _
   | External_attention _
   | Completion_authority_rejected _
@@ -136,6 +141,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed _
   | Composition_completed
+  | Owned_job_completed _
   | Ask_answered_row _
   | Schedule_due _
   | External_attention _
@@ -156,6 +162,7 @@ let is_task_outcome_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed _
   | Composition_completed
+  | Owned_job_completed _
   | Ask_answered_row _
   | Schedule_due _
   | External_attention _
@@ -171,6 +178,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Task_cancelled _ -> true
   | Delegate_completed _
   | Composition_completed
+  | Owned_job_completed _
   | Ask_answered_row _
   | Board_post_created
   | Board_post_updated
@@ -770,6 +778,25 @@ let pending_board_event_of_composition_completion
   }
 ;;
 
+let pending_board_event_of_owned_job_completion ~base_path ~keeper_name ~arrived_at completion =
+  let result = Keeper_owned_job_completion_result.read ~base_path ~keeper_name completion in
+  Result.map (fun () ->
+    { event_kind = Owned_job_completed completion
+    ; post_id = Keeper_event_queue.owned_job_completion_post_id completion
+    ; author = keeper_name
+    ; title = "job " ^ Keeper_owned_job_identity.Job_id.to_string completion.Keeper_event_queue.oj_job_id
+    ; preview = Yojson.Safe.to_string (Keeper_owned_job_completion_result.to_json result)
+    ; hearth = None
+    ; post_kind = Board.System_post
+    ; updated_at = arrived_at
+    ; explicit_mention = false
+    ; matched_targets = []
+    ; replies_after_own_comment = None
+    ; latest_external_author = None
+    ; latest_external_preview = None })
+    (Keeper_owned_job_completion_result.check result)
+;;
+
 (* The answer to a turn this Keeper asked another Keeper to run. It arrives as
    a just-arrived board event for the same reason a Fusion result does: the
    asker is mid-cycle and reads its pending events, not a request store. The
@@ -1209,6 +1236,8 @@ let pending_board_event_of_stimulus
      [Keeper_ask_store], which the keeper reads with masc_ask_status, so
      nothing is injected here and the text lives in one place. *)
   | Keeper_event_queue.Ask_answered _
+  (* Job authority has its own typed retry contract in stimulus intake. *)
+  | Keeper_event_queue.Owned_job_completed _
   | Keeper_event_queue.Workspace_message _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to

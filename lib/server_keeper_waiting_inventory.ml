@@ -32,6 +32,7 @@ type wake_producer =
   | Keeper_workspace_message
   | Keeper_delegate
   | Keeper_composition
+  | Keeper_job
   | Read_model_reader
 
 type waiting_row =
@@ -113,6 +114,7 @@ let wake_producer_to_string = function
   | Keeper_task_cancellation -> "keeper_task_cancellation"
   | Completion_authority -> "completion_authority"
   | Keeper_composition -> "keeper_composition"
+  | Keeper_job -> "keeper_job"
   | Keeper_workspace_message -> "keeper_workspace_message"
   | Keeper_delegate -> "keeper_delegate"
   | Read_model_reader -> "read_model_reader"
@@ -134,6 +136,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Workspace_message _ -> Keeper_workspace_message
   | Delegate_completed _ -> Keeper_delegate
   | Composition_completed _ -> Keeper_composition
+  | Owned_job_completed _ -> Keeper_job
 ;;
 
 let unix_iso_json = function
@@ -198,6 +201,10 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
   | Delegate_completed dc ->
     [ "delegate_operation_id", `String dc.dc_operation_id
     ]
+  | Owned_job_completed completion ->
+    [ "job_id", `String (Keeper_owned_job_identity.Job_id.to_string completion.oj_job_id)
+    ; "source", Keeper_owned_job_identity.source_to_json completion.oj_source
+    ; "channel", Keeper_continuation_channel.to_yojson completion.oj_channel ]
   | Composition_completed cc ->
     [ "composition_request_id", `String cc.cc_request_id
     ; "composition_tool", `String cc.cc_tool
@@ -266,6 +273,8 @@ let queue_payload_what : Keeper_event_queue.stimulus_payload -> string = functio
        Printf.sprintf "%s가 답 없이 끝냄 · %s" dc.dc_keeper dc.dc_operation_id
      | Delegate_failed _ ->
        Printf.sprintf "%s가 끝내지 못함 · %s" dc.dc_keeper dc.dc_operation_id)
+  | Owned_job_completed completion ->
+    "실행 결과 도착 · " ^ Keeper_owned_job_identity.Job_id.to_string completion.oj_job_id
   | Composition_completed cc ->
     (match cc.cc_terminal with
      | Composition_succeeded ->
@@ -320,7 +329,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
          | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
          | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
          | Keeper_event_queue.Task_outcome _ -> None)
       selections
   in
@@ -341,7 +350,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
          | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
          | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
          | Keeper_event_queue.Task_outcome _ -> None)
       connector_selections
     |> List.sort String.compare
@@ -364,7 +373,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
        | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
        | Connector_attention _ | Hitl_resolved _ | Ask_answered _
        | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
-       | Workspace_message _ | Delegate_completed _ | Composition_completed _ -> ())
+       | Workspace_message _ | Delegate_completed _ | Composition_completed _ | Owned_job_completed _ -> ())
     selections;
   let schedule_group wake_schedule_id =
     match Hashtbl.find_opt schedule_members wake_schedule_id with
@@ -418,7 +427,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
         | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
         | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
         | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-        | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+        | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
         | Keeper_event_queue.Task_outcome _ -> None
       in
       (match grouped_schedule with
@@ -512,7 +521,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
        | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
        | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
        | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _
+       | Keeper_event_queue.Delegate_completed _ | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Owned_job_completed _
        | Keeper_event_queue.Task_outcome _ | Connector_attention _ -> go
            (queue_index + 1)
            (row

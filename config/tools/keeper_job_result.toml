@@ -4,9 +4,12 @@ Read the original isolated job's durable result without contacting its backend o
 a command. Returns Deferred until a confirmed exit and complete stdout/stderr artifacts \
 have been committed, or cancellation before start has been committed. A nonzero exit remains \
 an observed result with its exact exit_code. This read-only tool can be a prepared Composition \
-leaf: after keeper_job_status has collected the result, resume the same composition_run_id \
+leaf: after the completion wake or keeper_job_status confirms a complete result, resume the same composition_run_id \
 to read this same job and continue its dependent nodes. Completed siblings are retained. \
-This tool does not poll, reconcile the backend, or arrange an automatic completion wake."""
+On a completed exit, artifacts contains stdout then stderr as normalized {_blob: {...}} \
+references; use /artifacts/0/_blob/sha256 to pass stdout to keeper_artifact_read. \
+The original job's owner reconciles and delivers completion through the existing maintenance \
+pulse. This result read itself performs no backend operation; Composition resumption remains explicit."""
 additional_properties = false
 defer_loading = true
 

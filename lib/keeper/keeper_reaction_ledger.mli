@@ -26,6 +26,7 @@ type stimulus_kind =
   | Workspace_message
   | Delegate_completed
   | Composition_completed
+  | Owned_job_completed
       (** A committed workspace message named this Keeper. *)
 
 type reaction_kind =

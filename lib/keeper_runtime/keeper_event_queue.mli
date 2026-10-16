@@ -152,6 +152,9 @@ type stimulus_payload =
           back. Measured over 2026-08-18..26: 22 submissions, 12 reads, and a
           result sat unread for a median of 21.9s against a median 2.7ms of
           work -- one waited 47 minutes. Mirrors [Delegate_completed]. *)
+  | Owned_job_completed of owned_job_completion
+      (** The original job has a complete canonical result. Only identity and
+          original source/channel are carried; full output stays in its journal. *)
   | Task_outcome of task_outcome
       (** A completion authority approved this Keeper's submitted evidence —
           the approval twin of [Completion_authority_rejected]. Pointer-only:
@@ -216,6 +219,12 @@ and composition_completion = {
     composition tool returned, so the submitter matches the result to its own
     request and reads it with [keeper_composition_status]; [cc_tool] names
     which composition finished, because a Keeper can have several in flight. *)
+
+and owned_job_completion =
+  { oj_job_id : Keeper_owned_job_identity.Job_id.t
+  ; oj_source : Keeper_owned_job_identity.source
+  ; oj_channel : Keeper_continuation_channel.t
+  }
 
 and composition_terminal =
   | Composition_succeeded
@@ -337,6 +346,7 @@ val delegate_completion_post_id : delegate_completion -> post_id
     operation id alone is a complete key. *)
 
 val composition_completion_post_id : composition_completion -> post_id
+val owned_job_completion_post_id : owned_job_completion -> post_id
 (** Dedup/correlation id for [Composition_completed]:
     ["keeper-composition:<request_id>"]. One async request settles once, so
     the request id alone is a complete key. *)

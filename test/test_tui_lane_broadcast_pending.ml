@@ -107,10 +107,11 @@ let test_torn_tail_recovery () = fixture (fun path ->
   check string "torn pre-send admission can start a fresh request" "next"
     (Pending.prepare ~path ~scope ~credential (request "next") |> require |> id);
   append "{malformed}\n";
+  append "{\"event\":\"pending\"";
   let before=In_channel.with_open_bin path In_channel.input_all in
   check bool "complete malformed event still refuses sends" true
     (Result.is_error (Pending.prepare ~path ~scope ~credential (request "other")));
-  check string "complete malformed evidence is unchanged" before
+  check string "complete malformed evidence and torn suffix are unchanged" before
     (In_channel.with_open_bin path In_channel.input_all))
 
 let () = run "Durable TUI Broadcast identity" ["recovery",[

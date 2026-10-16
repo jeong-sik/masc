@@ -775,9 +775,29 @@ let test_release_closes_the_pinned_directories () =
   check int "release closes every pinned descriptor" before after
 ;;
 
-let mixed_read_content (row : Agent_core.Agent_tools.tool_execution_result) =
+(* A Skill with a Read node carries artifact references, so its settlement
+   reaches the model as a tool-result manifest marker (the same projection
+   test_keeper_owned_jobs.ml resolves in [result_document]), not as inline
+   JSON. Resolve the marker to the structured document before reading it. *)
+let mixed_settlement_document ~base_path (row : Agent_core.Agent_tools.tool_execution_result) =
+  match Tool_output.decode_from_agent_core row.content with
+  | Tool_output.Not_marker -> Yojson.Safe.from_string row.content
+  | Tool_output.Invalid_marker { detail } -> fail detail
+  | Tool_output.Decoded reference ->
+    (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:reference.sha256 with
+     | Ok (Some bytes) ->
+       check int "marker names the exact durable bytes" reference.bytes (String.length bytes);
+       let json = Yojson.Safe.from_string bytes in
+       (match Tool_output.artifact_manifest_of_json json with
+        | Tool_output.Decoded_artifact_manifest manifest -> manifest.structured_content
+        | Tool_output.Invalid_artifact_manifest { detail } -> fail detail
+        | Tool_output.Not_artifact_manifest -> json)
+     | Ok None | Error _ -> fail "mixed Skill settlement artifact unavailable")
+;;
+
+let mixed_read_content ~base_path (row : Agent_core.Agent_tools.tool_execution_result) =
   let open Yojson.Safe.Util in
-  let actions = Yojson.Safe.from_string row.content |> member "actions" |> to_list in
+  let actions = mixed_settlement_document ~base_path row |> member "actions" |> to_list in
   let read = List.find (fun action -> member "node_id" action = `String "read") actions in
   member "result" read |> member "data" |> member "content" |> to_string
 ;;
@@ -802,7 +822,7 @@ let test_mixed_skills_share_read_claims_while_writes_overlap () =
   check int "both real mixed Skill write boundaries overlap" 2 !entered;
   List.iter (fun row ->
     check string "shared Read returned its actual source" "read-only shared bytes"
-      (mixed_read_content row)) rows;
+      (mixed_read_content ~base_path:config.Workspace.base_path row)) rows;
   check string "left committed" "after" (read left);
   check string "right committed" "after" (read right);
   check string "shared source stayed unchanged" "read-only shared bytes" (read source)
@@ -820,7 +840,8 @@ let test_mixed_read_observes_preceding_edit ~symlink () =
   let rows = dispatch env bundle.tools (inline_calls bundle [public_args path "before" "after"]) in
   match rows with
   | [row] ->
-    check string "Read consumed the earlier atomic replacement" "after" (mixed_read_content row);
+    check string "Read consumed the earlier atomic replacement" "after"
+      (mixed_read_content ~base_path:config.Workspace.base_path row);
     check string "actual replacement bytes" "after" (read path);
     check string "other source entry stayed unchanged" "before" (read original)
   | _ -> fail "one mixed Skill did not return one settlement"

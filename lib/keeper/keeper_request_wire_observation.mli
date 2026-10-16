@@ -1,5 +1,5 @@
 (** Keeper_request_wire_observation — the serialized request body size AGENT_CORE
-    sent for one keeper turn.
+    prepared for one Keeper request attempt.
 
     AGENT_CORE's provider-specific serialization observer measures every request
     just before dispatch. Nothing MASC already computes substitutes: the
@@ -8,8 +8,10 @@
     [last_input_tokens] is a different unit from a byte count.
 
     AGENT_CORE invokes this observer after provider-specific serialization and
-    after every stream-field injection, so [body_bytes] is the exact count on
-    the wire. The observation is diagnostic: AGENT_CORE reports a raising
+    after every stream-field injection, so [body_bytes] describes the exact
+    prepared body. It does not prove transport entry or peer acknowledgement;
+    native HTTP observations retain those distinct boundaries. The observation
+    is diagnostic: AGENT_CORE reports a raising
     callback as typed failure evidence and does not rewrite the provider
     result. Whether the provider accepts that body is the provider's verdict,
     delivered as a typed refusal at the provider-attempt result boundary. *)

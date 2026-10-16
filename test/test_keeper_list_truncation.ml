@@ -541,6 +541,46 @@ let test_shared_roster_omits_currency () =
               (List.for_all (fun row -> Result.is_error row.Tui_decode.kr_candle_account_revision) rows)
           | _ -> fail "private currency omission broke the public roster")) [false; true]
 
+let with_empty_roster_cache f =
+  Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+  Fun.protect
+    ~finally:Keeper_tool_surface.For_testing.reset_keeper_list_cache f
+
+let test_another_list_query_does_not_repeat_completed_work () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    let calls = ref 0 in
+    let result = read ~key:"detailed" ~ttl_s:3600. (fun () ->
+      incr calls;
+      ignore (read ~key:"names" ~ttl_s:3600. (fun () -> `String "names"));
+      `String "detailed") in
+    check int "one roster computation despite another query's publication" 1 !calls;
+    check string "the requested result is returned" "detailed"
+      (Yojson.Safe.Util.to_string result);
+    let cached = read ~key:"names" ~ttl_s:3600.
+        (fun () -> fail "the newer cache publication was overwritten") in
+    check string "the competing publication is retained" "names"
+      (Yojson.Safe.Util.to_string cached))
+
+let test_explicit_invalidation_repeats_the_obsolete_read () =
+  with_empty_roster_cache (fun () ->
+    let read = Keeper_tool_surface.For_testing.cached_keeper_list_data in
+    let calls = ref 0 in
+    let result = read ~key:"detailed" ~ttl_s:3600. (fun () ->
+      incr calls;
+      if !calls = 1 then (
+        Keeper_tool_surface.For_testing.invalidate_keeper_list_cache ();
+        ignore (read ~key:"names" ~ttl_s:3600. (fun () -> `String "new names"));
+        `String "obsolete")
+      else `String "current") in
+    check int "explicit invalidation forces a fresh computation" 2 !calls;
+    check string "obsolete work cannot escape through a competing publication" "current"
+      (Yojson.Safe.Util.to_string result);
+    let cached = read ~key:"detailed" ~ttl_s:3600.
+        (fun () -> fail "the fresh result was not published") in
+    check string "fresh result is cached" "current"
+      (Yojson.Safe.Util.to_string cached))
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
@@ -572,6 +612,12 @@ let () =
         ; test_case "missing is not clear" `Quick test_missing_current_failure_is_not_clear
         ; test_case "fenced empty turn row carries its signature" `Quick
             test_fenced_empty_turn_row_carries_its_signature
+        ] )
+    ; ( "cache publication"
+      , [ test_case "a competing query does not repeat completed work" `Quick
+            test_another_list_query_does_not_repeat_completed_work
+        ; test_case "explicit invalidation rejects obsolete work" `Quick
+            test_explicit_invalidation_repeats_the_obsolete_read
         ] )
     ; ( "lifecycle"
       , [ test_case "detailed row carries lifecycle phase" `Quick

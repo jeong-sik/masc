@@ -36,11 +36,20 @@ let tool_result_of_handler_error = function
 ;;
 
 type json_cache = {
+  generation : int;
   key : string option;
   value : Yojson.Safe.t option;
   expires_at : float;
 }
-let empty_json_cache () = { key = None; value = None; expires_at = 0.0 }
+(* Only explicit invalidation changes this identity. Publishing another
+   reader's key must not make a completed roster read start over. *)
+let json_cache_generation = Atomic.make 0
+let empty_json_cache () =
+  { generation = Atomic.fetch_and_add json_cache_generation 1
+  ; key = None
+  ; value = None
+  ; expires_at = 0.0
+  }
 let keeper_list_cache = Atomic.make (empty_json_cache ())
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
@@ -84,6 +93,7 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
       let value = compute () in
       let next =
         {
+          generation = cache.generation;
           key = Some key;
           value = Some value;
           expires_at = Time_compat.now () +. ttl_s;
@@ -93,7 +103,9 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
       else begin
         Otel_metric_store.inc_counter
           Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
-        cached_json_by_key cache_ref ~key ~ttl_s compute
+        let current = Atomic.get cache_ref in
+        if Int.equal cache.generation current.generation then value
+        else cached_json_by_key cache_ref ~key ~ttl_s compute
       end
 
 module For_testing = struct

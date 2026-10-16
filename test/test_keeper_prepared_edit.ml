@@ -523,6 +523,61 @@ let test_disjoint_actual_edits_overlap () =
       (schedule.execution_mode = Agent_core.Tool_contract.Concurrent)) rows
 ;;
 
+let test_shared_source_edits_overlap ~in_skill () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = if in_skill then Some (publish_edit_skills ~two_nodes:true sw config) else None in
+  public_bundle ?snapshot env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let source = Filename.concat root "shared-source/original" in
+  let left = Filename.concat root "target-left/file" and right = Filename.concat root "target-right/file" in
+  write source "shared-before";
+  List.iter (fun target ->
+    Fs_compat.mkdir_p (Filename.dirname target);
+    Unix.symlink "../shared-source/original" target) [left; right];
+  let both, resolve_both = Eio.Promise.create () in
+  let entered = ref 0 in
+  let calls = if in_skill then inline_calls bundle
+      [two_patch_args left "shared-before" "left-after" right "shared-before" "right-after"]
+    else public_calls [public_args left "shared-before" "left-after";
+                       public_args right "shared-before" "right-after"] in
+  let rows = FS.For_testing.with_before_write_authorization (fun () ->
+      incr entered;
+      if !entered = 2 then Eio.Promise.resolve resolve_both ();
+      Eio.Promise.await both)
+    (fun () -> dispatch env bundle.Keeper_tools_agent_core.tools calls) in
+  check int "both actual edits share source reads while overlapping target writes" 2 !entered;
+  check int "original public calls complete" (if in_skill then 1 else 2) (List.length rows);
+  check string "left target receives its own replacement" "left-after" (read left);
+  check string "right target receives its own replacement" "right-after" (read right);
+  check string "shared original bytes are not modified" "shared-before" (read source);
+  List.iter (fun target ->
+    check bool "atomic replacement replaces the lexical symlink entry" true
+      ((Unix.lstat target).st_kind = Unix.S_REG)) [left; right];
+  if not in_skill then List.iter (fun (row : Agent_core.Agent_tools.tool_execution_result) ->
+    check int "public mixed-resource calls share one actual wave" 2
+      (Agent_core.Tool_contract.Invocation.schedule row.invocation).batch_size) rows
+;;
+
+let test_source_write_precedes_later_alias_read () =
+  fixture @@ fun env sw config meta recovery root ->
+  public_bundle env sw config meta recovery @@ fun _meta _task _cell _causal bundle ->
+  let source = Filename.concat root "ordered-source/original" in
+  let target = Filename.concat root "ordered-target/file" in
+  write source "first";
+  Fs_compat.mkdir_p (Filename.dirname target);
+  Unix.symlink "../ordered-source/original" target;
+  let rows = dispatch env bundle.Keeper_tools_agent_core.tools
+      (public_calls [public_args source "first" "second";
+                     public_args target "second" "third"]) in
+  check string "source write commits its original result" "second" (read source);
+  check string "later alias read consumes the newly replaced source" "third" (read target);
+  match rows with
+  | [first; second] ->
+    let wave row = (Agent_core.Tool_contract.Invocation.schedule
+        row.Agent_core.Agent_tools.invocation).batch_index in
+    check bool "write/read overlap keeps the original ordering edge" true (wave first < wave second)
+  | [] | [_] | _ :: _ :: _ :: _ -> fail "ordered write/read results changed"
+;;
+
 let test_successive_patches_use_current_source () =
   fixture @@ fun env _sw config meta recovery root ->
   let path = Filename.concat root "same/file" in
@@ -664,11 +719,17 @@ let () = run "prepared actual Edit resources"
     test_case "caller cancellation releases prepared Edit" `Quick test_cancelled_prepared_edit_releases_for_a_later_call;
     test_case "untransferred preparation releases without an effect" `Quick test_untransferred_preparation_releases_without_effect];
     "actual public bundle and SDK", [
+      test_case "public Edits overlap while sharing the resolved source" `Quick
+        (test_shared_source_edits_overlap ~in_skill:false);
+      test_case "source write precedes a later alias read" `Quick
+        test_source_write_precedes_later_alias_read;
       test_case "public Edit keeps handler observers bridge and source while overlapping" `Quick
         test_public_edits_overlap_through_handler_and_bridge;
       test_case "public conflicting patches consume predecessor bytes" `Quick test_public_conflicting_edits_keep_current_bytes;
       test_case "public Edit with unavailable source stays Serial" `Quick test_public_edits_without_source_stay_serial];
     "published Inline Skills and actual Edit", [
+      test_case "one published Skill overlaps Edits sharing the resolved source" `Quick
+        (test_shared_source_edits_overlap ~in_skill:true);
       test_case "one published Skill overlaps its independent real Edits" `Quick
         test_one_inline_overlaps_its_disjoint_edits;
       test_case "one published Skill orders physical aliases" `Quick

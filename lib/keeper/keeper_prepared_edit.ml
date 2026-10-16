@@ -93,7 +93,7 @@ let prepare ~sw ~config ~meta ~args ~confined =
       | [] -> parent
       | component :: rest -> descend (open_dir Eio.Path.(parent / component)) rest
     in
-    let inspect_directory root components =
+    let inspect_directory ~access root components =
       let capability = descend root components in
       match Eio.Path.native capability with
       | None -> Ok None
@@ -116,15 +116,15 @@ let prepare ~sw ~config ~meta ~args ~confined =
                let* resource = scope_identity resource in
                Ok (resource :: tail)) rest (Ok []) in
              Ok (Some { capability; components; identity = actual; native_chain
-                      ; scope = Scope.create ~access:Scope.Write ~occupied ~ancestors:ancestry }))
+                      ; scope = Scope.create ~access ~occupied ~ancestors:ancestry }))
     in
     let inspect () =
       let anchor = open_dir Eio.Path.(fs / Keeper_alerting_path.confined_anchor_root confined) in
       let relative = Keeper_alerting_path.confined_root_relative_path confined in
       let root = if String.equal relative "." then anchor else open_dir Eio.Path.(anchor / relative) in
       let* () = Keeper_alerting_path.verify_confined_root_capability confined root in
-      let* target = inspect_directory root parent_components in
-      let* source = inspect_directory root source_components in
+      let* target = inspect_directory ~access:Scope.Write root parent_components in
+      let* source = inspect_directory ~access:Scope.Read root source_components in
       match target, source with
       | Some target, Some source ->
         let stat = Eio.Path.stat ~follow:true Eio.Path.(source.capability / source_leaf) in

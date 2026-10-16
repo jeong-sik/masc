@@ -16,8 +16,10 @@ val prepare
     allowed roots and aliases cannot mint unrelated scheduling resources. *)
 
 val scopes : t -> Agent_core.Tool_contract.Resource_scope.t list
-(** Conservative occupied target/source directories. A shared ancestor alone
-    permits siblings; equal or ancestor/descendant directories conflict. *)
+(** The replacement target directory carries [Write]; the resolved source
+    directory carries [Read]. Claims retain complete physical ancestry.
+    Shared source reads may overlap; a write to an equal, ancestor or descendant
+    directory still conflicts. A shared ancestor alone permits siblings. *)
 
 val release : t -> unit
 (** Release a preparation that an aggregate producer cannot transfer. Safe to

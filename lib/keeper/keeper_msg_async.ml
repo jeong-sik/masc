@@ -980,19 +980,25 @@ let rollback_rejected_record_file_unlocked ~ops ~ownership_root path =
     Error error
 ;;
 
-let mark_lost_after_recovery ?source_path (entry : entry) =
+let status_after_worker_absence ~reason = function
+  | Cancelling {reason;cancelled_by} -> Cancelled {reason;cancelled_by}
+  | Queued | Running -> Lost {reason}
+  | (Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ | Done _) as terminal -> terminal
+
+let settle_unowned_record_after_recovery ?source_path (entry : entry) =
   let reason =
     "keeper_msg request was accepted but no live worker owns it; the server may have \
      restarted or evicted the request before terminal result"
   in
-  let lost =
-    { entry with status = Lost { reason }; completed_at = Some (Time_compat.now ()) }
+  let settled =
+    { entry with status = status_after_worker_absence ~reason entry.status;
+      completed_at = Some (Time_compat.now ()) }
   in
   match
-    persist_entry ~ops:production_request_ops ?source_path lost
-    |> observe_persist_error ~operation:"recovery" lost
+    persist_entry ~ops:production_request_ops ?source_path settled
+    |> observe_persist_error ~operation:"recovery" settled
   with
-  | Ok () -> Ok lost
+  | Ok () -> Ok settled
   | Error error -> Error (persist_error_to_string error)
 ;;
 
@@ -1192,8 +1198,17 @@ let recover_record_path ~base_path ~request_id path report =
            request_id
        then report
        else (
-         match mark_lost_after_recovery ~source_path:path entry with
-         | Ok _ -> { report with lost = report.lost + 1 }
+         match settle_unowned_record_after_recovery ~source_path:path entry with
+         | Ok settled ->
+           (match settled.status with
+            | Cancelled _ | Done _ | Persistence_failed _ | Waiting_for_owned_jobs _ ->
+              { report with finalized = report.finalized + 1 }
+            | Lost _ -> { report with lost = report.lost + 1 }
+            | Queued | Running | Cancelling _ ->
+              { (record_error ~store:Active_store ~path ~request_id
+                   ~keeper_name:entry.keeper_name
+                   (Recovery_persistence_failed "worker absence did not settle the request") report) with
+                failed = report.failed + 1 })
          | Error reason ->
            { (record_error
                 ~store:Active_store
@@ -1614,6 +1629,21 @@ let set_status ~ops ?(preserve_terminal = false) key status =
                | Done _ )
            ; _
            } as entry) ->
+        (* A closed worker scope cannot consume a pending cancellation,
+           including when signalling failed and the worker returned normally.
+           The exact durable intent wins over any ordinary terminal outcome;
+           persistence failure remains explicit. *)
+        let status = match entry.status with
+          | Cancelling {reason;cancelled_by} ->
+            (match status with
+             | Lost _ | Cancelled _ | Waiting_for_owned_jobs _ | Done _ -> Cancelled {reason;cancelled_by}
+             | Queued | Running | Cancelling _ | Persistence_failed _ -> status)
+          | Queued | Running | Lost _ | Cancelled _ | Persistence_failed _
+          | Waiting_for_owned_jobs _ | Done _ ->
+            (match status with
+             | Lost {reason} -> status_after_worker_absence ~reason entry.status
+             | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
+             | Waiting_for_owned_jobs _ | Done _ -> status) in
         let completed_at =
           match status with
           | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_owned_jobs _ ->
@@ -2048,8 +2078,8 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
             | Some cause -> background_start_failed (Printexc.to_string cause))
         | exception exn ->
           (* The request is already persisted and no worker scope was
-             admitted, so this Lost status is the only record that it will
-             never run. Write it on the cancelled path too, before the
+             admitted. Settle Lost or its exact pending cancellation before
+             leaving; no worker remains to consume that intent. Write on the cancelled path too, before the
              exception leaves -- [set_status_protected] completes while
              unwinding. *)
           let backtrace = Printexc.get_raw_backtrace () in

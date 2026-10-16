@@ -115,7 +115,6 @@ let submit_error_to_json = function
     `Assoc
       [ "error", `String "request_background_start_failed"
       ; "request_id", `String request_id
-      ; "status", `String "lost"
       ; "message", `String reason
       ]
 ;;

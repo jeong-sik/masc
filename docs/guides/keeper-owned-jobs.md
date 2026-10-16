@@ -118,6 +118,24 @@ publication retain their exact whole-surface check. Async acceptance pins the
 original owner/generation/full node snapshot; Task, run, parent, waiting
 occurrences and completed siblings remain original. Server discovery-to-intake
 wiring is still a separate controller step.
+If a resumed request durably owns the journal but its worker is canonically
+`Lost`, recovery follows the journal's exact predecessor bindings to the
+original `waiting_for_owned_jobs` record. Its saved node snapshot must match
+that original job set. Completed nodes are retained; unfinished nodes must
+prove read-only replay. Repeated Lost successors retain this lineage. The
+sealed candidate pins the current terminal entry, full node snapshot and each
+canonical predecessor used as proof; a changed predecessor refuses readiness
+and admission. Cancellation and unknown effects do not grant continuation, and
+an empty process registry never proves loss. This recovers the original result
+read without another program create/start. It does not itself install server
+scheduling or establish a real process-restart measurement.
+Worker-fork failure and exclusive startup recovery preserve a durable
+`Cancelling` intent as exact `Cancelled`, including its original reason and
+actor. If signalling the live worker fails and it returns Done or an original
+job wait, settlement still preserves that exact cancellation intent as
+`Cancelled` (cancellation intent wins; completed node outputs produced before
+the worker returned remain recorded in the execution journal). Persistence
+failure remains explicit. These boundaries cannot restore continuation permission.
 The journal retains the exact producer-owned job wait separately from the
 provider-facing body. Only this exact read-only leaf may be rechecked; it keeps
 its original execution ID and tool-use ID. Completed siblings reuse their full

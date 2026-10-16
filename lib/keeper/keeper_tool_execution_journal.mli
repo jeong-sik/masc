@@ -17,8 +17,10 @@ type t
 type worker
 type attempt
 type continuation
-(** Exact suspended owner captured from its canonical Waiting record and
-    matching journal nodes. It grants no execution authority by itself. *)
+(** Exact suspended owner captured from its canonical terminal record and
+    matching journal nodes. A Lost successor additionally requires its exact
+    prior owned-job wait and replay-proven read-only nodes. It grants no
+    execution authority by itself. *)
 
 type completed =
   { execution_id : Ids.Execution_id.t
@@ -69,8 +71,12 @@ val source : t -> source
 val waiting_continuation : t -> (continuation option, error) result
 (** Read only canonical current-owner terminal proof and exact journal state.
     [None] means no bound request, an active worker, or a settled worker that
-    is not waiting for owned jobs. Unavailable or inconsistent evidence is
-    [Error]. A later owner change makes the captured value stale. *)
+    has no original owned-job wait. A current [Lost] owner may recover that
+    wait through the journal's exact predecessor bindings and canonical
+    terminal records, including repeated Lost successors. Unfinished nodes
+    must prove read-only replay; cancellation and unknown effects do not grant
+    continuation. Unavailable or inconsistent evidence is [Error]. A later
+    owner change makes the captured value stale. *)
 
 val continuation_base_path : continuation -> string
 (** Canonical workspace where the sealed owner and node snapshot were read.

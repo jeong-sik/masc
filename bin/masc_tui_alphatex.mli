@@ -1,6 +1,6 @@
 (** alphaTex → ASCII tablature.
 
-    The TUI draws a [\`\`\`alphatex] fence as a guitar tab when
+    The TUI draws an [\`\`\`alphatex] or [\`\`\`atex] fence as a guitar tab when
     {!Masc_tui_alphatex_score.read} reads its text as a score. The tuning
     names the lines, the highest string first. A note that carried technique
     markup keeps its fret and gets a [*] after it.

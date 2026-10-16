@@ -75,6 +75,8 @@ def _write_trace(base, trace_id, activations):
             for index, activation in enumerate(activations, start=1)
         ],
         "transition_rejections": [],
+        "async_result_deliveries": [],
+        "async_actions": [],
     }
     with open(os.path.join(d, "skill-activation-events.jsonl"), "wb") as fh:
         fh.write(log_fixture.event_log(ledger))

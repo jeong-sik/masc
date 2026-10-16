@@ -1798,6 +1798,55 @@ let test_restore_refusals_and_listing () =
     | _ -> fail "no checkpoints list")
 ;;
 
+(* A manual save cannot take a slot the lane writes itself. Saving under the
+   autosave name replaced the campaign every load and restore offers back,
+   with no confirmation. *)
+let test_a_save_cannot_take_the_autosave_slot () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    let autosave = Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        "checkpoints" in
+    let before = Digest.file (Filename.concat autosave "autosave.ckpt") in
+    List.iter
+      (fun slot ->
+        let refused = save_as ~base_path slot in
+        (match refused with
+         | Tool_result.Failed
+             { Tool_result.class_ = Tool_result.Workflow_rejection
+             ; effect_disposition = Tool_result.Proven_pre_effect
+             ; _
+             } -> ()
+         | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+           fail (slot ^ ": not a refusal that declares no effect"));
+        check string (slot ^ " left the autosave as it was") before
+          (Digest.file (Filename.concat autosave "autosave.ckpt")))
+      [ "autosave"; "AUTOSAVE"; "autosave-prev"; "Autosave-Prev" ];
+    check bool "autosave-prev was not created" false
+      (Sys.file_exists (Filename.concat autosave "autosave-prev.ckpt")))
+;;
+
+(* Reusing a name replaces that checkpoint; the answer says what it held, so a
+   caller who reused "quick" for a different game finds out. *)
+let test_a_save_reports_what_it_replaced () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~agent:"liu-bei" ~base_path "echo.com";
+    let first = save_as ~base_path "mid" in
+    check bool "a new name replaces nothing" true (member "replaced" (Tool_result.data first) = None);
+    ignore (press_as ~base_path "dos-test" "a");
+    let second = save_as ~agent:"cao-cao" ~base_path "mid" in
+    check bool "the save completes" true (is_completed second);
+    match member "replaced" (Tool_result.data second) with
+    | Some replaced ->
+      check bool "it names the program" true
+        (member "program" replaced = Some (`String "echo.com"));
+      check bool "and who saved it" true (member "saved_by" replaced = Some (`String "dos-test"));
+      check bool "and its step count" true
+        (match member "steps" replaced with Some (`Int n) -> n > 0 | _ -> false)
+    | None -> fail "the second save did not say what it replaced")
+;;
+
 (* ---------- autosave ---------- *)
 
 let autosave_field result =
@@ -2378,6 +2427,9 @@ let () =
         ; test_case "autosave after a step" `Quick test_autosave_written_after_a_successful_step
         ; test_case "every tool that moves the guest autosaves" `Quick
             test_every_tool_that_moves_the_guest_autosaves
+        ; test_case "a save cannot take the autosave slot" `Quick
+            test_a_save_cannot_take_the_autosave_slot
+        ; test_case "a save reports what it replaced" `Quick test_a_save_reports_what_it_replaced
         ; test_case "a consented load moves the previous incarnation's autosave" `Quick
             test_a_consented_load_moves_the_previous_incarnations_autosave
         ; test_case "a load over an autosave is refused" `Quick

@@ -158,6 +158,13 @@ type boot =
   | Booted of ran
   | Boot_faulted of string
 
+(* What a manual save found in its slot. Reads like [autosave_lookup]: a file
+   that is there and will not read is its own answer. *)
+type replaced =
+  | Fresh_slot
+  | Replaced of autosave_status
+  | Replaced_unreadable of string
+
 (* How far the machine runs between two screen readings. Measured on ZZT: the
    repaint that follows a key finishes inside one of these. *)
 let settle_chunk = 50_000
@@ -609,6 +616,28 @@ let autosave_prev_slot =
   | Error message -> failwith message
 ;;
 
+(* A slot name is either one the lane writes itself or one a caller chose. A
+   manual save may only take the second kind: [masc_dos_save slot=autosave]
+   used to replace the file every load and restore offers back, with no
+   confirmation. Names are compared without case because a case-folding
+   filesystem maps "AUTOSAVE" onto autosave.ckpt. *)
+type named_slot = Machine_checkpoint.slot
+
+type slot =
+  | Named of named_slot
+  | Current_autosave
+  | Previous_autosave
+
+let classify_slot slot =
+  let name = String.lowercase_ascii (Machine_checkpoint.slot_to_string slot) in
+  if String.equal name (Machine_checkpoint.slot_to_string autosave_slot) then Current_autosave
+  else if String.equal name (Machine_checkpoint.slot_to_string autosave_prev_slot) then
+    Previous_autosave
+  else Named slot
+;;
+
+let named_slot_to_string = Machine_checkpoint.slot_to_string
+
 let checkpoint_meta st ~who : Yojson.Safe.t =
   `Assoc
     [ ("program", `String st.program)
@@ -756,9 +785,9 @@ let meta_of_json json =
    a restore reads it with, so what this names is what a restore would find.
    A file that is there but will not read is its own answer: reporting it as
    "nothing there" would hide it until the next run replaced it. *)
-let lookup_autosave ~dir =
+let lookup_slot ~dir slot =
   match
-    Machine_checkpoint.read_meta ~dir autosave_slot ~machine:Machine_checkpoint.Dos
+    Machine_checkpoint.read_meta ~dir slot ~machine:Machine_checkpoint.Dos
       ~format:checkpoint_format
   with
   | Error (Machine_checkpoint.No_slot _) -> No_autosave
@@ -778,6 +807,9 @@ let lookup_autosave ~dir =
          ; saved_by = m.saved_by
          ; saved_at = modified
          })
+;;
+
+let lookup_autosave ~dir = lookup_slot ~dir autosave_slot
 ;;
 
 (* Every call that ran the guest ends here. The guest has moved whatever the
@@ -1268,10 +1300,18 @@ let type_text ~who ~text ~steps ~until_ready =
 
 let save ~who ~dir ~slot =
   with_machine (fun st ->
+    (* Read under the lock, so what is reported replaced is what the write
+       replaces and not what was there a moment before. *)
+    let replaced =
+      match lookup_slot ~dir slot with
+      | No_autosave -> Fresh_slot
+      | Autosave status -> Replaced status
+      | Autosave_unreadable reason -> Replaced_unreadable reason
+    in
     match write_checkpoint st ~who ~dir ~slot with
     | Ok () ->
       note_activity ~who ("save " ^ Machine_checkpoint.slot_to_string slot);
-      Ok (observe st)
+      Ok (observe st, replaced)
     | Error e -> Error e)
 ;;
 

@@ -1660,7 +1660,10 @@ status: reference
 
 **슬롯 (Slot)**
 : 기계 체크포인트에 붙이는 이름. 영문자·숫자·`_`·`-` 로 1~64자이고, 경로가 될 수
-  없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓴다.
+  없다. Keeper 끼리 같은 이름 공간을 쓴다. 같은 이름에 다시 저장하면 덮어쓰고, DOS Lane 은
+  덮어쓴 체크포인트가 무엇이었는지(프로그램, 실행한 명령어 수, 저장한 사람, 시각)를
+  `masc_dos_save` 응답의 `replaced` 로 알려 준다. `autosave`·`autosave-prev` 는 Lane 이
+  직접 쓰는 이름이라 `masc_dos_save` 로는 저장할 수 없다(대소문자 구분 없이 거절한다).
   → [Machine_checkpoint.slot_of_string](../../lib/machine_checkpoint/machine_checkpoint.mli)
 
 **자동 저장 (Autosave)**

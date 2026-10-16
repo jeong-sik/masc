@@ -25,6 +25,7 @@ let rejected name = function
   | Error error -> failf "%s: unexpected %s" name (Dos_lane.error_to_string error)
   | Ok _ -> fail (name ^ " ran while off")
 let slot = match Machine_checkpoint.slot_of_string "retained" with Ok slot -> slot | Error error -> fail error
+let named = match Dos_lane.classify_slot slot with Dos_lane.Named named -> named | _ -> fail "retained is a name a caller chose"
 let test_off_retains () = with_machine @@ fun directory saves checkpoints load ->
   let before = require (Dos_lane.capture_with_identity ()) in
   current := Machine_configuration.Disabled;
@@ -41,7 +42,7 @@ let test_off_retains () = with_machine @@ fun directory saves checkpoints load -
   check int "same steps" before.observation.steps after.observation.steps;
   check (option string) "controller retained" before.observation.controller after.observation.controller;
   ignore (require (Dos_lane.peek ~address:0 ~length:1));
-  ignore (require (Dos_lane.save ~who ~dir:checkpoints ~slot));
+  ignore (require (Dos_lane.save ~who ~dir:checkpoints ~slot:named));
   check bool "checkpoint retained" true (Sys.file_exists (Machine_checkpoint.path ~dir:checkpoints slot));
   ignore (require (Dos_lane.checkpoints ~dir:checkpoints));
   ignore (require (Dos_lane.pass ~who ~to_:None ~announce:ignore));

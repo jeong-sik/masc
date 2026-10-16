@@ -207,22 +207,15 @@ let rec mkdir_p dir =
   end
 ;;
 
+(* Fs_compat.save_file_atomic writes a sibling temp file, fsyncs it, renames it
+   over the slot and fsyncs the directory. A bare rename could leave an empty
+   or partial checkpoint after a crash, and that file is the only copy of a
+   campaign after a restart. *)
 let write ~dir slot header ~meta ~machine_bytes =
   let contents = encode header ~meta ~machine_bytes in
-  match
-    mkdir_p dir;
-    let tmp, oc = Filename.open_temp_file ~temp_dir:dir ~mode:[ Open_binary ] ".ckpt-" ".tmp" in
-    Fun.protect
-      ~finally:(fun () ->
-        close_out_noerr oc;
-        if Sys.file_exists tmp then Sys.remove tmp)
-      (fun () ->
-        output_string oc contents;
-        close_out oc;
-        Sys.rename tmp (path ~dir slot))
-  with
-  | () -> Ok ()
+  match mkdir_p dir with
   | exception Sys_error message -> Error message
+  | () -> Fs_compat.save_file_atomic (path ~dir slot) contents
 ;;
 
 let read_file file = In_channel.with_open_bin file In_channel.input_all

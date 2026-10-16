@@ -5,4 +5,4 @@
  (public_name masc.machine_checkpoint)
  (wrapped false)
  (modules machine_checkpoint)
- (libraries masc.masc_compression yojson unix))
+ (libraries masc.masc_compression fs_compat yojson unix))

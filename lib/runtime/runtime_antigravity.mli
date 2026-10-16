@@ -63,6 +63,13 @@ val default_config : cwd:string -> model:string -> config
 val default_timeout_s : float
 (** Native default for official-client admission and idle liveness. *)
 
+val tool_step_idle_timeout_s : float
+(** Backstop idle bound for CLI event silence inside a tool step (2h).
+    Silence there is the protocol, so this must stay far above any
+    plausible healthy tool: it exists only so a wedged tool cannot hold
+    its CLI spawn slot forever (#43259). Expiry fails the turn with
+    typed [Timeout]. *)
+
 type conversation_mode =
   | Start
   | Resume of { conversation_id : string }
@@ -208,3 +215,9 @@ val run_turn :
 
     [home_dir], when present, replaces inherited [HOME] and removes inherited
     XDG directory overrides before spawning the official client. *)
+
+module For_testing : sig
+  val tool_step_timeout_s : config -> float option
+  (** Phase mapping for tool steps: pins that the phase carries the
+      [tool_step_idle_timeout_s] backstop instead of no bound. *)
+end

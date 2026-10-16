@@ -106,18 +106,22 @@ let default_config ~cwd ~model =
    said last. agy narrates a trajectory one step at a time and writes nothing
    while a tool step runs: the step's output arrives in its DONE (or ERROR)
    update. Silence inside a tool step is the protocol, not a client that has
-   gone away, and an idle deadline there would measure how long the tool took,
-   which [timeout_s] must not cap. The owner retains cancellation authority
-   while this phase has no idle timer. *)
+   gone away, so the model-turn bound ([timeout_s], 300s) must not cap it —
+   but the phase still needs a backstop, or a wedged tool holds its CLI
+   spawn slot forever (#43259): 2h of total event silence is past any
+   plausible healthy tool, and the kill is a typed, visible Timeout rather
+   than a hang. The owner retains cancellation authority throughout. *)
 type read_phase =
   | Awaiting_admission
   | Model_turn
   | Tool_step_running
 
+let tool_step_idle_timeout_s = 7200.0
+
 let timeout_s_for_phase config = function
   | Awaiting_admission -> Some config.admission_timeout_s
   | Model_turn -> config.timeout_s
-  | Tool_step_running -> None
+  | Tool_step_running -> Some tool_step_idle_timeout_s
 ;;
 
 type conversation_mode =
@@ -1272,3 +1276,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ?on_prompt_sent 
     let stderr = redact_stderr_tail stderr in
     Error (Process_exited (if stderr = "" then exit else exit ^ ": " ^ stderr))
 ;;
+
+module For_testing = struct
+  let tool_step_timeout_s config = timeout_s_for_phase config Tool_step_running
+end

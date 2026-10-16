@@ -33,9 +33,12 @@
     nested caller receives the typed refusal as its tool result and the
     outer turn proceeds to release. A cycle with no gate wait in it —
     pure tool-to-tool nesting — predates the gate and is outside its
-    scope, as is the deliberate unbounded tool phase itself (the owner
-    retains cancellation authority there): holders release on tool
-    return or owner cancel, and saturation in between degrades to typed
+    scope. Tool phases additionally carry a 2h idle backstop
+    ([Runtime_antigravity.tool_step_idle_timeout_s]): silence there is
+    the protocol, so the bound sits far above any plausible healthy
+    tool and only a wedged one trips it, failing typed [Timeout].
+    Holders therefore release on tool return, owner cancel, or the
+    backstop at the latest, and saturation in between degrades to typed
     "retry shortly" refusals, never to a hang. Releasing the slot during
     tool phases would break the fd bound the gate exists for — the child
     keeps its descriptors while it waits on tools — so the slot spans

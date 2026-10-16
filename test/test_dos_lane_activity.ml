@@ -41,7 +41,7 @@ let test_off_retains () = with_machine @@ fun directory saves checkpoints load -
   check string "same machine" before.incarnation after.incarnation;
   check int "same steps" before.observation.steps after.observation.steps;
   check (option string) "controller retained" before.observation.controller after.observation.controller;
-  ignore (require (Dos_lane.peek ~address:0 ~length:1));
+  ignore (require (Dos_lane.peek ~address:(match Dos_lane.address_of_int 0 with Ok a -> a | Error e -> fail (Dos_lane.error_to_string e)) ~length:1));
   ignore (require (Dos_lane.save ~who ~dir:checkpoints ~slot:named));
   check bool "checkpoint retained" true (Sys.file_exists (Machine_checkpoint.path ~dir:checkpoints slot));
   ignore (require (Dos_lane.checkpoints ~dir:checkpoints));

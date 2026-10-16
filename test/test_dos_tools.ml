@@ -68,6 +68,17 @@ let bool_field name result =
 
 let is_completed result = Tool_result.failure_class result = None
 
+let refused_before_any_effect name result =
+  match result with
+  | Tool_result.Failed
+      { Tool_result.class_ = Tool_result.Workflow_rejection
+      ; effect_disposition = Tool_result.Proven_pre_effect
+      ; _
+      } -> ()
+  | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+    fail (name ^ " is not a refusal that declares no effect")
+;;
+
 let contains needle haystack =
   let n = String.length needle and h = String.length haystack in
   let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
@@ -1414,6 +1425,33 @@ let test_peek_reads_the_text_page () =
     check string "the first two cells" "48074907" (string_field "hex" result))
 ;;
 
+(* The address is hex digits and nothing else. It used to become -1 on any
+   other text and fail as "got -1", with a comment claiming decimal parsed. *)
+let test_peek_takes_hex_digits_only () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    let peek text =
+      dispatch ~base_path "masc_dos_peek" [ ("address", `String text); ("length", `Int 1) ]
+    in
+    List.iter
+      (fun text -> check bool (Printf.sprintf "%S reads" text) true (is_completed (peek text)))
+      [ "b8000"; "0xB8000"; " 0XB8000 "; "0"; "fffff"; "000b8000" ];
+    check string "a number is hex: 255 is 0x255" "00255" (string_field "address" (peek "255"));
+    List.iter
+      (fun text -> refused_before_any_effect (Printf.sprintf "%S" text) (peek text))
+      [ ""; "0x"; "-1"; "b_8000"; "12 34"; "zz"; "100000"; "123456789"; "1.5" ])
+;;
+
+let test_peek_refuses_before_looking_for_a_machine () =
+  with_workspace (fun base_path ->
+    refused_before_any_effect "an address that is not hex"
+      (dispatch ~base_path "masc_dos_peek" [ ("address", `String "-1") ]);
+    check bool "the refusal names what was written" true
+      (contains "-1"
+         (Tool_result.message (dispatch ~base_path "masc_dos_peek" [ ("address", `String "-1") ]))))
+;;
+
 (* Ask the catalog, not the facade. The gate that decides whether a tool call
    counts as a read looks the flag up in Tool_catalog, and Tool_misc writes it
    there when it registers each name -- so a classification that never reaches
@@ -1949,17 +1987,6 @@ let test_a_consented_load_moves_the_previous_incarnations_autosave () =
       steps_before_restart (steps_in_slot ~base_path "autosave-prev"))
 ;;
 
-let refused_before_any_effect name result =
-  match result with
-  | Tool_result.Failed
-      { Tool_result.class_ = Tool_result.Workflow_rejection
-      ; effect_disposition = Tool_result.Proven_pre_effect
-      ; _
-      } -> ()
-  | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
-    fail (name ^ " is not a refusal that declares no effect")
-;;
-
 (* [masc_dos_load] over an autosave: the second load of a campaign used to
    displace it into autosave-prev and the third overwrite that, so the
    campaign was gone without anyone having asked for that. *)
@@ -2427,6 +2454,9 @@ let () =
         ; test_case "autosave after a step" `Quick test_autosave_written_after_a_successful_step
         ; test_case "every tool that moves the guest autosaves" `Quick
             test_every_tool_that_moves_the_guest_autosaves
+        ; test_case "peek takes hex digits only" `Quick test_peek_takes_hex_digits_only
+        ; test_case "peek refuses before looking for a machine" `Quick
+            test_peek_refuses_before_looking_for_a_machine
         ; test_case "a save cannot take the autosave slot" `Quick
             test_a_save_cannot_take_the_autosave_slot
         ; test_case "a save reports what it replaced" `Quick test_a_save_reports_what_it_replaced

@@ -90,11 +90,17 @@ type checkout_identity = {
 }
 
 val checkout_identity :
-  local_path:string -> (checkout_identity, string) result
+  ?timeout_sec:float -> local_path:string -> unit -> (checkout_identity, string) result
 (** [checkout_identity ~local_path] answers both questions in one
     read-only, bounded git invocation ([--path-format=absolute]).
     Errors mirror [worktree_root]: not a repository, timeout, or
     unexpected output shape. *)
+
+val common_dir :
+  ?timeout_sec:float -> local_path:string -> unit -> (string, string) result
+(** Read the absolute Git common directory, including for a bare repository or
+    an origin pointing at a Git directory. Read-only and bounded by the same
+    inspection contract as {!checkout_identity}. *)
 
 val origin_head_branch : local_path:string -> (string, string) result
 (** [origin_head_branch ~local_path] returns the branch named by

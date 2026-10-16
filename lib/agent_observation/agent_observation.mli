@@ -65,13 +65,18 @@ module Unattributed : sig
 
       RFC-0378 §5.1: attribution failure is a fact kind, not a store
       location — the reason rides the fact as a queryable field.
-      RFC-keeper-workspace-root-only 2a owns this vocabulary's evolution
-      once attribution moves to git observation. *)
+      Reasons distinguish unavailable Git observations, unknown origins and
+      conflicting catalog identities at the write boundary. *)
 
   type reason =
     | Blank_remote_url
     | Unparseable_remote_url of string
-    | Unregistered_repo_id of string
+    | Checkout_unavailable
+    | Origin_missing
+    | Origin_lookup_timed_out
+    | Origin_lookup_failed
+    | Unregistered_origin
+    | Ambiguous_origin
     | Unregistered_path
     | Repository_catalog_unavailable
     | Unmintable of Code_address.invalid
@@ -85,9 +90,9 @@ end
 type addressed =
   { address : Code_address.t
   ; checkout : string option
-        (** Projection metadata: which checkout the write was observed in.
-            Never part of the join key. [None] until attribution measures
-            it (workspace-root-only 2b). *)
+        (** Measured checkout root, including the operator checkout. Never
+            part of the join key. [None] means the producer has no measured
+            checkout. *)
   }
 
 type unaddressed =

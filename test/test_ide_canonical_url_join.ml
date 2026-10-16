@@ -1,544 +1,293 @@
-(** RFC-0128 §6.3 integration test — sandbox keeper write at one
-    clone of a repository joins, via canonical URL slug, with an IDE
-    read at a different clone of the same upstream.
-
-    Setup:
-      base_dir/
-        .masc/config/repositories.toml
-          [repository.sandbox]   url=https://github.com/owner/repo
-                                 local_path = base_dir/sandbox/repos/repo
-          [repository.worktree]  url=git@github.com:owner/repo.git
-                                 local_path = base_dir/workspace/repo
-        sandbox/repos/repo/lib/foo.ml
-        workspace/repo/lib/foo.ml
-
-    Invariant: when the keeper "writes" inside the sandbox clone, the
-    record must be retrievable when the IDE reads from the working
-    tree clone — both must resolve to the same codebase slug and thus
-    the same store. The repo URLs use different transports (HTTPS vs SSH)
-    on purpose to also exercise the normalisation join test from
-    {!Ide_paths.canonical_url_of_remote}. *)
-
+(** IDE write/read joins measured from real Git checkouts, independent of layout. *)
 open Alcotest
-open Repo_manager_types
 
 let rec rm_rf path =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then (
-      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+  if Sys.file_exists path then
+    if Sys.is_directory path then (
+      Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
       Unix.rmdir path)
     else Sys.remove path
 ;;
 
-let with_temp_base_dir f =
-  let path = Filename.temp_file "rfc0128-join" "" in
+let with_base f =
+  let path = Filename.temp_file "ide-attribution-" "" in
   Sys.remove path;
   Unix.mkdir path 0o755;
+  let path = Unix.realpath path in
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
 
 let rec mkdir_p path =
-  if path = "" || path = "/" || (Sys.file_exists path && Sys.is_directory path)
-  then ()
-  else (
-    mkdir_p (Filename.dirname path);
-    try Unix.mkdir path 0o755 with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  if not (Sys.file_exists path) then (mkdir_p (Filename.dirname path); Unix.mkdir path 0o755)
 ;;
 
 let touch path =
   mkdir_p (Filename.dirname path);
-  let oc = open_out path in
-  close_out oc
+  close_out (open_out path)
 ;;
 
-let attribution_to_string = function
-  | Agent_observation.Addressed { address; _ } ->
-    "Addressed " ^ Agent_observation.Code_address.codebase address
-  | Agent_observation.Unaddressed { reason; _ } ->
-    "Unaddressed " ^ Agent_observation.Unattributed.reason_to_string reason
+let git path args =
+  let cmd = String.concat " " (List.map Filename.quote ("git" :: "-C" :: path :: args)) in
+  if Sys.command (cmd ^ " >/dev/null 2>&1") <> 0 then failf "Git fixture failed: %s" cmd
 ;;
 
-let addressed_or_fail label = function
-  | Agent_observation.Addressed { address; _ } -> address
-  | Agent_observation.Unaddressed _ as got ->
-    failf "%s: expected Addressed, got %s" label (attribution_to_string got)
-;;
-
-let test_sandbox_write_joins_with_worktree_read () =
-  with_temp_base_dir (fun base_dir ->
-    (* 1. Build two clones of the same upstream. *)
-    let sandbox_root = Filename.concat base_dir "sandbox/repos/repo" in
-    let workspace_root = Filename.concat base_dir "workspace/repo" in
-    mkdir_p sandbox_root;
-    mkdir_p workspace_root;
-    touch (Filename.concat sandbox_root "lib/foo.ml");
-    touch (Filename.concat workspace_root "lib/foo.ml");
-    (* 2. Register both in repositories.toml. Different transports on
-       purpose so the canonical_url normalisation is also tested in
-       the join path. *)
-    let repo_https =
-      { id = "sandbox"
-      ; name = "sandbox"
-      ; url = "https://github.com/owner/repo"
-      ; local_path = sandbox_root
-      ; aliases = []
-      ; default_branch = "main"
-      ; keepers = []
-      ; status = Active
-      ; auto_sync = false
-      ; sync_interval = 0
-      ; created_at = Int64.zero
-      ; updated_at = Int64.zero
-      }
-    in
-    let repo_ssh =
-      { repo_https with
-        id = "worktree"
-      ; name = "worktree"
-      ; url = "git@github.com:owner/repo.git"
-      ; local_path = workspace_root
-      }
-    in
-    (match Repo_store.save_all ~base_path:base_dir [ repo_https; repo_ssh ] with
-     | Ok () -> ()
-     | Error msg -> failf "save_all: %s" msg);
-    (* 3. resolve_write_attribution at a sandbox path. *)
-    let sandbox_file = Filename.concat sandbox_root "lib/foo.ml" in
-    let sandbox_address =
-      addressed_or_fail
-        "sandbox"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:sandbox_file)
-    in
-    let worktree_file = Filename.concat workspace_root "lib/foo.ml" in
-    let worktree_address =
-      addressed_or_fail
-        "worktree"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:worktree_file)
-    in
-    (* 4. Invariant — both mint the same codebase slug. *)
-    check
-      string
-      "join invariant — same slug"
-      (Agent_observation.Code_address.codebase sandbox_address)
-      (Agent_observation.Code_address.codebase worktree_address);
-    (* 5. The address path is the repo-relative remainder in both cases. *)
-    check
-      string
-      "sandbox rel_path stripped"
-      "lib/foo.ml"
-      (Agent_observation.Code_address.path sandbox_address);
-    check
-      string
-      "worktree rel_path stripped"
-      "lib/foo.ml"
-      (Agent_observation.Code_address.path worktree_address))
-;;
-
-let test_unregistered_path_fails_with_typed_reason () =
-  with_temp_base_dir (fun base_dir ->
-    (match Repo_store.save_all ~base_path:base_dir [] with
-     | Ok () -> ()
-     | Error msg -> failf "save_all: %s" msg);
-    let elsewhere = Filename.concat base_dir "elsewhere/foo.ml" in
-    match
-      Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-        ~base_dir
-        ~file_path:elsewhere
-    with
-    | Agent_observation.Unaddressed
-        { reason = Agent_observation.Unattributed.Unregistered_path; attempted_path } ->
-      check string "attempted path passes through unchanged" elsewhere attempted_path
-    | got ->
-      failf
-        "expected Unaddressed Unregistered_path, got %s"
-        (attribution_to_string got))
-;;
-
-let test_blank_url_lands_in_no_canonical_url () =
-  with_temp_base_dir (fun base_dir ->
-    let local = Filename.concat base_dir "blank/repo" in
-    mkdir_p local;
-    let repo =
-      { id = "blank"
-      ; name = "blank"
-      ; url = "" (* registered but no URL *)
-      ; local_path = local
-      ; aliases = []
-      ; default_branch = "main"
-      ; keepers = []
-      ; status = Active
-      ; auto_sync = false
-      ; sync_interval = 0
-      ; created_at = Int64.zero
-      ; updated_at = Int64.zero
-      }
-    in
-    (match Repo_store.save_all ~base_path:base_dir [ repo ] with
-     | Ok () -> ()
-     | Error msg -> failf "save_all: %s" msg);
-    let file = Filename.concat local "lib/foo.ml" in
-    match
-      Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-        ~base_dir
-        ~file_path:file
-    with
-    | Agent_observation.Unaddressed
-        { reason = Agent_observation.Unattributed.Blank_remote_url; _ } ->
-      ()
-    | got ->
-      failf
-        "expected Unaddressed Blank_remote_url for blank-URL repo, got %s"
-        (attribution_to_string got))
-;;
-
-(* RFC-0128 PR-6 — sandbox playground path resolution. Keeper writes
-   inside the sandbox land at [<base>/.masc/playground/<keeper>/repos/
-   <repo_id>/<rel>], which is NOT a registered repo prefix. The
-   resolver should still produce the same codebase slug as a write
-   in the working-tree clone. *)
-let test_sandbox_playground_path_joins_with_worktree () =
-  with_temp_base_dir (fun base_dir ->
-    (* Only register the working-tree clone; the sandbox playground
-       has no entry in repositories.toml, which mirrors the real
-       operating environment. *)
-    let worktree = Filename.concat base_dir "workspace/repo" in
-    mkdir_p worktree;
-    touch (Filename.concat worktree "lib/foo.ml");
-    let repo =
-      { id = "masc"
-      ; name = "masc"
-      ; url = "https://github.com/owner/repo"
-      ; local_path = worktree
-      ; aliases = []
-      ; default_branch = "main"
-      ; keepers = []
-      ; status = Active
-      ; auto_sync = false
-      ; sync_interval = 0
-      ; created_at = Int64.zero
-      ; updated_at = Int64.zero
-      }
-    in
-    (match Repo_store.save_all ~base_path:base_dir [ repo ] with
-     | Ok () -> ()
-     | Error msg -> failf "save_all: %s" msg);
-    let sandbox_file =
-      Filename.concat
-        base_dir
-        ".masc/playground/alpha/repos/masc/lib/foo.ml"
-    in
-    let worktree_file = Filename.concat worktree "lib/foo.ml" in
-    let sandbox_address =
-      addressed_or_fail
-        "sandbox playground"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:sandbox_file)
-    in
-    let worktree_address =
-      addressed_or_fail
-        "worktree"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:worktree_file)
-    in
-    check
-      string
-      "sandbox / working-tree join via canonical_url"
-      (Agent_observation.Code_address.codebase sandbox_address)
-      (Agent_observation.Code_address.codebase worktree_address);
-    check
-      string
-      "sandbox rel stripped to repo-relative"
-      "lib/foo.ml"
-      (Agent_observation.Code_address.path sandbox_address);
-    check
-      string
-      "worktree rel stripped"
-      "lib/foo.ml"
-      (Agent_observation.Code_address.path worktree_address))
-;;
-
-let test_docker_playground_path_also_resolves () =
-  with_temp_base_dir (fun base_dir ->
-    let worktree = Filename.concat base_dir "workspace/repo" in
-    mkdir_p worktree;
-    let repo =
-      { id = "masc"
-      ; name = "masc"
-      ; url = "https://github.com/owner/repo"
-      ; local_path = worktree
-      ; aliases = []
-      ; default_branch = "main"
-      ; keepers = []
-      ; status = Active
-      ; auto_sync = false
-      ; sync_interval = 0
-      ; created_at = Int64.zero
-      ; updated_at = Int64.zero
-      }
-    in
-    (match Repo_store.save_all ~base_path:base_dir [ repo ] with
-     | Ok () -> ()
-     | Error msg -> failf "save_all: %s" msg);
-    let docker_file =
-      Filename.concat
-        base_dir
-        ".masc/playground/docker/pi_glutton/repos/masc/lib/foo.ml"
-    in
-    let address =
-      addressed_or_fail
-        "docker sandbox"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:docker_file)
-    in
-    check
-      string
-      "docker sandbox rel"
-      "lib/foo.ml"
-      (Agent_observation.Code_address.path address))
-;;
-
-(* #28968 / RFC-0378 §5.1 — a write inside a linked git worktree must
-   fold to the same Code_address as the main-tree write, with the
-   measured checkout root carried as [checkout] projection metadata.
-   The mechanism is git's own answer (toplevel + common dir), so the
-   fixtures build real repositories: [git init] + [git worktree add],
-   exactly like test_repo_git.ml. Temp paths are realpath-ed first —
-   git prints resolved paths and macOS tempdirs live behind
-   /var -> /private/var (the #28932 symlink trap). *)
-
-let run_or_fail ~cwd argv =
-  let cmd = String.concat " " (List.map Filename.quote argv) in
-  let full =
-    Printf.sprintf "cd %s && %s >/dev/null 2>&1" (Filename.quote cwd) cmd
-  in
-  if Sys.command full <> 0 then failf "fixture command failed: %s" cmd
-;;
-
-let init_git_repo path =
+let init ?origin path =
   mkdir_p path;
-  run_or_fail ~cwd:path [ "git"; "init"; "-b"; "main" ];
-  run_or_fail ~cwd:path [ "git"; "config"; "user.email"; "test@example.com" ];
-  run_or_fail ~cwd:path [ "git"; "config"; "user.name"; "Test User" ];
-  run_or_fail ~cwd:path
-    [ "git"; "commit"; "--allow-empty"; "-m"; "initial" ]
+  git path [ "init"; "-b"; "main" ];
+  git path [ "-c"; "user.name=Fixture"; "-c"; "user.email=fixture@example.invalid"
+           ; "-c"; "commit.gpgsign=false"; "-c"; "core.hooksPath=/dev/null"
+           ; "commit"; "--allow-empty"; "-m"; "fixture" ];
+  Option.iter (fun url -> git path [ "remote"; "add"; "origin"; url ]) origin;
+  touch (Filename.concat path "lib/foo.ml")
 ;;
 
-let register_repo ~base_dir ~id ~local_path =
-  let repo =
-    { id
-    ; name = id
-    ; url = "https://github.com/owner/repo"
-    ; local_path
-    ; aliases = []
-    ; default_branch = "main"
-    ; keepers = []
-    ; status = Active
-    ; auto_sync = false
-    ; sync_interval = 0
-    ; created_at = Int64.zero
-    ; updated_at = Int64.zero
-    }
-  in
-  match Repo_store.save_all ~base_path:base_dir [ repo ] with
+let url = "https://github.com/owner/repo.git"
+let other_url = "https://github.com/other/project.git"
+
+let repo ?(remote = url) id local_path : Repo_manager_types.repository =
+  { id; name = id; url = remote; local_path; aliases = []; default_branch = "main"
+  ; keepers = []; status = Repo_manager_types.Active; auto_sync = false; sync_interval = 0
+  ; created_at = 0L; updated_at = 0L }
+;;
+
+let save base repositories =
+  match Repo_store.save_all ~base_path:base repositories with
   | Ok () -> ()
-  | Error msg -> failf "save_all: %s" msg
+  | Error error -> failf "catalog fixture: %s" error
 ;;
 
-let addressed_record_or_fail label = function
+let resolve base file_path =
+  Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution ~base_dir:base ~file_path
+;;
+
+let addressed = function
   | Agent_observation.Addressed record -> record
-  | Agent_observation.Unaddressed _ as got ->
-    failf "%s: expected Addressed, got %s" label (attribution_to_string got)
+  | Agent_observation.Unaddressed { reason; _ } ->
+    failf "expected address, got %s" (Agent_observation.Unattributed.reason_to_string reason)
 ;;
 
-let with_real_base_dir f =
-  with_temp_base_dir (fun base_dir -> f (Unix.realpath base_dir))
+let check_address ~slug ~path result =
+  let record = addressed result in
+  check string "catalog-owned codebase" slug (Agent_observation.Code_address.codebase record.address);
+  check string "measured repo-relative path" path (Agent_observation.Code_address.path record.address);
+  record
 ;;
 
-let test_worktree_checkout_folds_to_main_tree_address () =
-  with_real_base_dir (fun base_dir ->
-    let repo_root = Filename.concat base_dir "workspace/repo" in
-    init_git_repo repo_root;
-    touch (Filename.concat repo_root "lib/foo.ml");
-    run_or_fail ~cwd:repo_root
-      [ "git"; "worktree"; "add"; ".worktrees/task-9" ];
-    let worktree_dir = Filename.concat repo_root ".worktrees/task-9" in
-    touch (Filename.concat worktree_dir "lib/foo.ml");
-    register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
-    let main_record =
-      addressed_record_or_fail
-        "main tree"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:(Filename.concat repo_root "lib/foo.ml"))
-    in
-    let worktree_record =
-      addressed_record_or_fail
-        "worktree"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:(Filename.concat worktree_dir "lib/foo.ml"))
-    in
-    check
-      string
-      "worktree write folds to the main-tree path"
-      (Agent_observation.Code_address.path main_record.Agent_observation.address)
-      (Agent_observation.Code_address.path worktree_record.Agent_observation.address);
-    check
-      string
-      "same codebase slug"
-      (Agent_observation.Code_address.codebase main_record.Agent_observation.address)
-      (Agent_observation.Code_address.codebase worktree_record.Agent_observation.address);
-    check
-      (option string)
-      "worktree write carries the measured checkout root"
-      (Some (Unix.realpath worktree_dir))
-      worktree_record.Agent_observation.checkout;
-    check
-      (option string)
-      "main-tree write carries no checkout"
-      None
-      main_record.Agent_observation.checkout)
+let check_reason expected attempted = function
+  | Agent_observation.Addressed _ -> fail "unexpected attribution"
+  | Agent_observation.Unaddressed { reason; attempted_path } ->
+    check string "typed failure" expected (Agent_observation.Unattributed.reason_to_string reason);
+    check string "original attempted path" attempted attempted_path
 ;;
 
-let test_out_of_convention_worktree_folds_too () =
-  with_real_base_dir (fun base_dir ->
-    let repo_root = Filename.concat base_dir "workspace/repo" in
-    init_git_repo repo_root;
-    (* No [.worktrees/] convention anywhere: git, not a path shape,
-       decides what is a checkout (RFC-keeper-workspace-root-only
-       §3.2). *)
-    run_or_fail ~cwd:repo_root [ "git"; "worktree"; "add"; "tmp/anywhere" ];
-    let worktree_dir = Filename.concat repo_root "tmp/anywhere" in
-    touch (Filename.concat worktree_dir "lib/foo.ml");
-    register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
-    let record =
-      addressed_record_or_fail
-        "out-of-convention worktree"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:(Filename.concat worktree_dir "lib/foo.ml"))
-    in
-    check
-      string
-      "convention-free worktree folds to the repo-relative path"
-      "lib/foo.ml"
-      (Agent_observation.Code_address.path record.Agent_observation.address);
-    check
-      (option string)
-      "checkout carries the measured root"
-      (Some (Unix.realpath worktree_dir))
-      record.Agent_observation.checkout)
+let setup base =
+  let operator = Filename.concat base "workspace/operator" in
+  init ~origin:url operator;
+  save base [ repo "catalog-id" operator ];
+  operator
 ;;
 
-let test_nested_foreign_clone_does_not_fold () =
-  with_real_base_dir (fun base_dir ->
-    let repo_root = Filename.concat base_dir "workspace/repo" in
-    init_git_repo repo_root;
-    (* A different repository nested inside the matched tree: its
-       common dir is its own [.git], not the matched repo's, so the
-       fold must not fire and today's attribution stands. *)
-    let foreign = Filename.concat repo_root "vendor/other" in
-    init_git_repo foreign;
-    touch (Filename.concat foreign "lib/foo.ml");
-    register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
-    let record =
-      addressed_record_or_fail
-        "nested foreign clone"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:(Filename.concat foreign "lib/foo.ml"))
-    in
-    check
-      string
-      "foreign clone keeps its literal path under the matched repo"
-      "vendor/other/lib/foo.ml"
-      (Agent_observation.Code_address.path record.Agent_observation.address);
-    check
-      (option string)
-      "foreign clone claims no checkout"
-      None
-      record.Agent_observation.checkout)
+let test_distinct_clones_join () =
+  with_base (fun base ->
+    let operator = setup base in
+    let clone = Filename.concat base ".masc/playground/keeper/work/renamed-clone" in
+    init ~origin:"git@github.com:owner/repo.git" clone;
+    let op = check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml"
+               (resolve base (Filename.concat operator "lib/foo.ml")) in
+    let copy = check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml"
+                 (resolve base (Filename.concat clone "lib/foo.ml")) in
+    check bool "same read/write join key" true (Agent_observation.Code_address.equal op.address copy.address);
+    check (option string) "operator root is measured too" (Some operator) op.checkout;
+    check (option string) "clone root is projection only" (Some clone) copy.checkout)
 ;;
 
-let test_plain_subdir_stays_literal () =
-  with_real_base_dir (fun base_dir ->
-    let repo_root = Filename.concat base_dir "workspace/repo" in
-    init_git_repo repo_root;
-    (* A plain directory that merely LOOKS like the worktree
-       convention: git says it is part of the main checkout, so the
-       literal address is the correct one. *)
-    touch (Filename.concat repo_root ".worktrees/notes/lib/foo.ml");
-    register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
-    let record =
-      addressed_record_or_fail
-        "plain subdir"
-        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
-           ~base_dir
-           ~file_path:
-             (Filename.concat repo_root ".worktrees/notes/lib/foo.ml"))
-    in
-    check
-      string
-      "plain subdir keeps its literal path"
-      ".worktrees/notes/lib/foo.ml"
-      (Agent_observation.Code_address.path record.Agent_observation.address);
-    check
-      (option string)
-      "plain subdir claims no checkout"
-      None
-      record.Agent_observation.checkout)
+let test_misleading_dirname () =
+  with_base (fun base ->
+    let operator = setup base in
+    let other = Filename.concat base "workspace/other" in
+    init ~origin:other_url other;
+    save base [ repo "catalog-id" operator; repo ~remote:other_url "other-id" other ];
+    let clone = Filename.concat base ".masc/playground/keeper/repos/catalog-id" in
+    init ~origin:other_url clone;
+    ignore (check_address ~slug:"github.com_other_project" ~path:"lib/foo.ml"
+              (resolve base (Filename.concat clone "lib/foo.ml"))))
+;;
+
+let test_arbitrary_layout () =
+  with_base (fun base ->
+    ignore (setup base);
+    List.iter (fun rel ->
+      let clone = Filename.concat base rel in
+      init ~origin:url clone;
+      ignore (check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml"
+                (resolve base (Filename.concat clone "lib/foo.ml"))))
+      [ "elsewhere/deep/clone"; ".masc/playground/docker/k/repos/not-the-id" ])
+;;
+
+let local_origin origin_of =
+  with_base (fun base ->
+    let operator = setup base in
+    let clone = Filename.concat base "copy" in
+    init ~origin:(origin_of operator) clone;
+    ignore (check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml"
+              (resolve base (Filename.concat clone "lib/foo.ml"))))
+;;
+
+let test_remote_change () =
+  with_base (fun base ->
+    let operator = setup base in
+    let other = Filename.concat base "workspace/other" in
+    init ~origin:other_url other;
+    save base [ repo "one" operator; repo ~remote:other_url "two" other ];
+    let file = Filename.concat operator "lib/foo.ml" in
+    ignore (check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml" (resolve base file));
+    git operator [ "remote"; "set-url"; "origin"; other_url ];
+    ignore (check_address ~slug:"github.com_other_project" ~path:"lib/foo.ml" (resolve base file));
+    git operator [ "remote"; "remove"; "origin" ];
+    check_reason "origin_missing" file (resolve base file))
+;;
+
+let test_nested_foreign ~registered () =
+  with_base (fun base ->
+    let operator = setup base in
+    let nested = Filename.concat operator "vendor/foreign" in
+    init ~origin:other_url nested;
+    if registered then save base [ repo "one" operator; repo ~remote:other_url "two" nested ];
+    let file = Filename.concat nested "lib/foo.ml" in
+    if registered then
+      ignore (check_address ~slug:"github.com_other_project" ~path:"lib/foo.ml" (resolve base file))
+    else check_reason "unregistered_origin" file (resolve base file))
+;;
+
+let test_local_origin_nested_foreign () =
+  with_base (fun base ->
+    let operator = setup base in
+    let nested = Filename.concat operator "vendor/foreign" in
+    init ~origin:other_url nested;
+    let clone = Filename.concat base "copy" in
+    init ~origin:nested clone;
+    let file = Filename.concat clone "lib/foo.ml" in
+    check_reason "unregistered_origin" file (resolve base file))
+;;
+
+let test_local_origin_outside_linked_worktree () =
+  with_base (fun base ->
+    let operator = setup base in
+    let linked = Filename.concat base "outside/linked" in
+    mkdir_p (Filename.dirname linked);
+    git operator [ "worktree"; "add"; "-b"; "local-origin"; linked ];
+    let clone = Filename.concat base "copy" in
+    init ~origin:linked clone;
+    ignore (check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml"
+              (resolve base (Filename.concat clone "lib/foo.ml")));
+    save base [ repo "one" operator; repo ~remote:other_url "two" linked ];
+    let file = Filename.concat clone "lib/foo.ml" in
+    check_reason "ambiguous_origin" file (resolve base file))
+;;
+
+let test_local_origin_unavailable_catalog_checkout () =
+  with_base (fun base ->
+    let operator = setup base in
+    let unavailable = Filename.concat base "unavailable" in
+    mkdir_p unavailable;
+    let clone = Filename.concat base "copy" in
+    init ~origin:operator clone;
+    let file = Filename.concat clone "lib/foo.ml" in
+    List.iter (fun repositories ->
+      save base repositories;
+      check_reason "checkout_unavailable" file (resolve base file))
+      [ [ repo "known" operator; repo ~remote:other_url "unknown" unavailable ]
+      ; [ repo ~remote:other_url "unknown" unavailable; repo "known" operator ] ])
+;;
+
+let test_worktrees () =
+  with_base (fun base ->
+    let operator = setup base in
+    List.iteri (fun index rel ->
+      let clone = Filename.concat base rel in
+      git operator [ "worktree"; "add"; "-b"; Printf.sprintf "fixture-%d" index; clone ];
+      touch (Filename.concat clone "lib/foo.ml");
+      let record = check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml"
+                     (resolve base (Filename.concat clone "lib/foo.ml")) in
+      check (option string) "measured worktree projection" (Some clone) record.checkout)
+      [ "workspace/operator/.worktrees/task"; "anywhere/task" ];
+    touch (Filename.concat operator ".worktrees/plain/lib/foo.ml");
+    let record = check_address ~slug:"github.com_owner_repo" ~path:".worktrees/plain/lib/foo.ml"
+                   (resolve base (Filename.concat operator ".worktrees/plain/lib/foo.ml")) in
+    check (option string) "plain subdir belongs to measured operator root" (Some operator) record.checkout)
+;;
+
+let test_conflicting_catalog () =
+  with_base (fun base ->
+    let operator = setup base in
+    save base [ repo "one" operator; repo ~remote:other_url "two" operator ];
+    let clone = Filename.concat base "copy" in
+    init ~origin:operator clone;
+    let file = Filename.concat clone "lib/foo.ml" in
+    check_reason "ambiguous_origin" file (resolve base file))
+;;
+
+let test_duplicate_identity () =
+  with_base (fun base ->
+    let operator = setup base in
+    save base [ repo "one" operator; repo ~remote:"git@github.com:owner/repo.git" "two" operator ];
+    let clone = Filename.concat base "copy" in
+    init ~origin:operator clone;
+    ignore (check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml"
+              (resolve base (Filename.concat clone "lib/foo.ml"))))
+;;
+
+let test_no_checkout_or_origin () =
+  with_base (fun base ->
+    let operator = setup base in
+    let plain = Filename.concat base "plain" in
+    touch (Filename.concat plain "lib/foo.ml");
+    save base [ repo "plain" plain; repo "one" operator ];
+    let file = Filename.concat plain "lib/foo.ml" in
+    check_reason "checkout_unavailable" file (resolve base file);
+    init plain;
+    check_reason "origin_missing" file (resolve base file))
+;;
+
+let test_catalog_failure () =
+  with_base (fun base ->
+    let operator = setup base in
+    let file = Filename.concat operator "lib/foo.ml" in
+    let path = Filename.concat base ".masc/config/repositories.toml" in
+    let output = open_out path in
+    output_string output "repository = \"broken\"\n";
+    close_out output;
+    check_reason "repository_catalog_unavailable" file (resolve base file))
+;;
+
+let test_deleted_leaf_and_dots () =
+  with_base (fun base ->
+    let operator = setup base in
+    Sys.remove (Filename.concat operator "lib/foo.ml");
+    ignore (check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml"
+              (resolve base (Filename.concat operator "lib/../lib/foo.ml"))))
 ;;
 
 let () =
-  run
-    "ide_canonical_url_join"
-    [ ( "RFC-0128 §6.3"
-      , [ test_case
-            "sandbox write joins with working-tree read"
-            `Quick
-            test_sandbox_write_joins_with_worktree_read
-        ; test_case
-            "unregistered path fails with its typed reason"
-            `Quick
-            test_unregistered_path_fails_with_typed_reason
-        ; test_case
-            "blank URL fails as Blank_remote_url"
-            `Quick
-            test_blank_url_lands_in_no_canonical_url
-        ; test_case
-            "sandbox playground path joins with working-tree (PR-6)"
-            `Quick
-            test_sandbox_playground_path_joins_with_worktree
-        ; test_case
-            "docker playground path resolves via repo_id (PR-6)"
-            `Quick
-            test_docker_playground_path_also_resolves
-        ; test_case
-            "worktree checkout folds to main-tree address (#28968)"
-            `Quick
-            test_worktree_checkout_folds_to_main_tree_address
-        ; test_case
-            "out-of-convention worktree folds too (#28968)"
-            `Quick
-            test_out_of_convention_worktree_folds_too
-        ; test_case
-            "nested foreign clone does not fold (#28968)"
-            `Quick
-            test_nested_foreign_clone_does_not_fold
-        ; test_case
-            "plain look-alike subdir keeps its literal address (#28968)"
-            `Quick
-            test_plain_subdir_stays_literal
-        ] )
-    ]
-;;
+  run "IDE measured attribution"
+    [ "write/read journey",
+      [ test_case "renamed clone joins operator read" `Quick test_distinct_clones_join
+      ; test_case "dirname never overrides actual origin" `Quick test_misleading_dirname
+      ; test_case "arbitrary and Docker layouts" `Quick test_arbitrary_layout
+      ; test_case "absolute local origin" `Quick (fun () -> local_origin Fun.id)
+      ; test_case "relative local origin uses checkout root" `Quick (fun () -> local_origin (fun _ -> "../workspace/operator"))
+      ; test_case "file URI local origin" `Quick (fun () -> local_origin (fun path -> "file://" ^ path))
+      ; test_case "Git-directory local origin" `Quick (fun () -> local_origin (fun path -> Filename.concat path ".git"))
+      ; test_case "remote change and removal are fresh" `Quick test_remote_change
+      ; test_case "unregistered nested foreign repository" `Quick (test_nested_foreign ~registered:false)
+      ; test_case "registered nested foreign repository" `Quick (test_nested_foreign ~registered:true)
+      ; test_case "local nested foreign origin cannot inherit outer repo" `Quick test_local_origin_nested_foreign
+      ; test_case "local outside linked-worktree origin and conflicting identity" `Quick test_local_origin_outside_linked_worktree
+      ; test_case "unavailable local candidate never grants known identity" `Quick test_local_origin_unavailable_catalog_checkout
+      ; test_case "worktrees fold without naming convention" `Quick test_worktrees
+      ; test_case "conflicting local catalog identities" `Quick test_conflicting_catalog
+      ; test_case "duplicate catalog rows retain one identity" `Quick test_duplicate_identity
+      ; test_case "missing checkout and missing origin stay explicit" `Quick test_no_checkout_or_origin
+      ; test_case "invalid catalog stays explicit" `Quick test_catalog_failure
+      ; test_case "deleted leaf and dot segments" `Quick test_deleted_leaf_and_dots
+      ] ]

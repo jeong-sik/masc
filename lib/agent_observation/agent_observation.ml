@@ -211,13 +211,18 @@ end
 (* Typed reasons a write's file path failed attribution to a codebase.
    RFC-0378 §5.1: attribution failure is a fact kind, not a store
    location — the reason rides the fact as a queryable field.
-   RFC-keeper-workspace-root-only 2a owns this vocabulary's evolution
-   once attribution moves to git observation. *)
+   Reasons distinguish unavailable Git observations, unknown origins and
+   conflicting catalog identities at the write boundary. *)
 module Unattributed = struct
   type reason =
     | Blank_remote_url
     | Unparseable_remote_url of string
-    | Unregistered_repo_id of string
+    | Checkout_unavailable
+    | Origin_missing
+    | Origin_lookup_timed_out
+    | Origin_lookup_failed
+    | Unregistered_origin
+    | Ambiguous_origin
     | Unregistered_path
     | Repository_catalog_unavailable
     | Unmintable of Code_address.invalid
@@ -229,7 +234,12 @@ module Unattributed = struct
   let reason_to_string = function
     | Blank_remote_url -> "blank_remote_url"
     | Unparseable_remote_url _ -> "unparseable_remote_url"
-    | Unregistered_repo_id _ -> "unregistered_repo_id"
+    | Checkout_unavailable -> "checkout_unavailable"
+    | Origin_missing -> "origin_missing"
+    | Origin_lookup_timed_out -> "origin_lookup_timed_out"
+    | Origin_lookup_failed -> "origin_lookup_failed"
+    | Unregistered_origin -> "unregistered_origin"
+    | Ambiguous_origin -> "ambiguous_origin"
     | Unregistered_path -> "unregistered_path"
     | Repository_catalog_unavailable -> "repository_catalog_unavailable"
     | Unmintable _ -> "unmintable_address"
@@ -239,9 +249,7 @@ end
 type addressed =
   { address : Code_address.t
   ; checkout : string option
-    (* Projection metadata: which checkout the write was observed in.
-       Never part of the join key. [None] until attribution measures it
-       (workspace-root-only 2b). *)
+    (* Measured checkout root. Projection only, never part of the join key. *)
   }
 
 type unaddressed =

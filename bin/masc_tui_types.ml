@@ -12241,6 +12241,11 @@ let merge_paged_history ~(paged : msg_entry list) ~(fresh : msg_entry list) =
        Float.compare left.me_at right.me_at)
     (held @ fresh)
 
+(* Older pages precede held rows on a display-clock tie. The held copy of an
+   overlapping identity retains the observations already enriched on screen. *)
+let prepend_older_history_page ~older ~held =
+  merge_paged_history ~paged:older ~fresh:held
+
 let set_msg_scroll (state : state) rows =
   (* Every caller is a reader's move: a scroll key, the wheel, End, Ctrl-E,
      sending, switching Keeper or leaving the pane. A /find still running

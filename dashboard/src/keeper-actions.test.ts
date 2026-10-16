@@ -1255,6 +1255,43 @@ describe('loadFullKeeperHistory', () => {
     ])
   })
 
+  it('retires old-file rows when the replacement tail and next page are empty while keeping independent live state', async () => {
+    fetchKeeperChatHistoryPage
+      .mockResolvedValueOnce({
+        messages: [row('old-file-row', 100), { id: 'old-file-failure', role: 'request_failure', content: 'failed request', ts: 101 }],
+        hasMore: true, nextCursor: 'old-file-position',
+      })
+      .mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/chat/history/page', status: 409, detail: 'Conversation changed' }))
+      .mockResolvedValueOnce({ messages: [], hasMore: false, nextCursor: null })
+    fetchKeeperChatHistory.mockResolvedValueOnce([])
+    await loadFullKeeperHistory('echo')
+    appendThreadEntry('echo', { id: 'queued-local', role: 'user', source: 'direct_user', label: '나', text: 'queued input', delivery: 'queued' })
+    appendThreadEntry('echo', { id: 'streaming-local', role: 'assistant', source: 'direct_assistant', label: 'echo', text: 'live output', delivery: 'streaming' })
+    appendThreadEntry('echo', { id: 'autonomous-record', role: 'assistant', source: 'autonomous_turn', label: 'echo', text: 'independent checkpoint', delivery: 'history' })
+
+    await loadFullKeeperHistory('echo')
+
+    expect(keeperChatHistoryPages.value.echo).toBeUndefined()
+    expect(keeperThreads.value.echo?.map(entry => entry.id).sort()).toEqual(['autonomous-record', 'queued-local', 'streaming-local'])
+    expect(keeperChatHistoryErrors.value.echo).toContain('Conversation changed')
+    await loadFullKeeperHistory('echo')
+    expect(keeperThreads.value.echo?.map(entry => entry.id).sort()).toEqual(['autonomous-record', 'queued-local', 'streaming-local'])
+    expect(keeperThreads.value.echo?.find(entry => entry.id === 'queued-local')?.delivery).toBe('queued')
+    expect(keeperThreads.value.echo?.find(entry => entry.id === 'streaming-local')?.delivery).toBe('streaming')
+    expect(fetchKeeperChatHistoryPage.mock.calls.at(-1)).toEqual(['echo', undefined])
+  })
+
+  it('keeps independent in-flight rows exactly once when a nonempty older page arrives', async () => {
+    appendThreadEntry('echo', { id: 'queued-local', role: 'user', source: 'direct_user', label: '나', text: 'queued input', delivery: 'queued' })
+    appendThreadEntry('echo', { id: 'streaming-local', role: 'assistant', source: 'direct_assistant', label: 'echo', text: 'live output', delivery: 'streaming' })
+    fetchKeeperChatHistoryPage.mockResolvedValueOnce({ messages: [row('older-canonical', 100)], hasMore: false, nextCursor: null })
+
+    await loadFullKeeperHistory('echo')
+
+    expect(keeperThreads.value.echo?.map(entry => entry.id)).toEqual(['older-canonical', 'queued-local', 'streaming-local'])
+    expect(keeperThreads.value.echo?.map(entry => entry.delivery)).toEqual(['history', 'queued', 'streaming'])
+  })
+
   it('ignores an empty name and shares one pending request per keeper', async () => {
     let resolve!: (value: unknown) => void
     fetchKeeperChatHistoryPage.mockReturnValueOnce(new Promise(done => { resolve = done }))

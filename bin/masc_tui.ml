@@ -19487,7 +19487,7 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
                is prepended here. [chat_timeline] then recomputes the one
                displayed-time projection across that complete window; scroll
                pins retain row identity rather than this cache position. *)
-            state.msg_loaded <- merge_paged_history ~paged:state.msg_loaded ~fresh:rows;
+            state.msg_loaded <- prepend_older_history_page ~older:rows ~held:state.msg_loaded;
             (* Loaded rows arrive here too: a held turn whose rows only an
                older page carries gets its calls' outcome and duration the
                same way a refreshed page gives them. *)

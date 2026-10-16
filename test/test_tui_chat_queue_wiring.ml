@@ -147,6 +147,19 @@ let test_an_empty_refresh_keeps_the_transcript () =
     (ats (Tui_types.merge_paged_history ~paged ~fresh:[]))
 ;;
 
+let test_older_pages_keep_append_order_on_equal_clocks () =
+  let earlier = {(entry_at ~id:"earlier" 100.) with me_text = "earlier append"} in
+  let later = {(entry_at ~id:"later" 100.) with me_text = "later held append"} in
+  let overlap = {(entry_at ~id:"overlap" 100.) with me_text = "held enriched observation"} in
+  let older = [earlier; {overlap with me_text = "older page observation"}] in
+  let loaded = Tui_types.prepend_older_history_page ~older ~held:[later; overlap] in
+  let rows = Tui_types.chat_timeline ~loaded ~session:[] ~queued_request_ids:[]
+    |> Tui_types.chat_timeline_rows in
+  check (list string) "equal-clock page batches retain append order and held overlap"
+    ["earlier append"; "later held append"; "held enriched observation"]
+    (List.map (fun row -> row.Tui_types.me_text) rows)
+;;
+
 let test_visible_clock_stays_monotonic_inside_one_causal_turn () =
   let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let loaded =
@@ -6215,6 +6228,8 @@ let () =
             test_a_row_the_window_evicted_stays_visible
         ; test_case "an empty refresh keeps the transcript" `Quick
             test_an_empty_refresh_keeps_the_transcript
+        ; test_case "older equal-clock pages retain append order and held observations" `Quick
+            test_older_pages_keep_append_order_on_equal_clocks
         ; test_case "visible clock stays monotonic inside one turn" `Quick
             test_visible_clock_stays_monotonic_inside_one_causal_turn
         ; test_case "Journal interleaves one request by displayed time" `Quick

@@ -65,6 +65,7 @@ import {
   clearActiveStream,
   finalizeAssistantEntry,
   mergeServerHistoryEntries,
+  retireKeeperChatHistory,
   normalizeKeeperProbeResult,
   normalizeKeeperRecoverResult,
   normalizeStatusDetail,
@@ -1062,16 +1063,18 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
     const pageIds = new Set(pageEntries.map(entry => entry.id))
     mergeServerHistoryEntries(keeperName, [
       ...pageEntries,
-      ...existing.filter(entry => !pageIds.has(entry.id)),
+      // Retain canonical tail rows alongside the page. Independent live rows
+      // stay in the merge's local partition; promoting them into its canonical
+      // input would duplicate an in-flight user entry, even on an empty page.
+      ...existing.filter(entry => !pageIds.has(entry.id)
+        && (entry.delivery === 'history' || entry.delivery === 'request_failure')),
     ])
     setRecordValue(keeperChatHistoryErrors, keeperName, null)
   } catch (err) {
     if (err instanceof ApiRequestError && err.status === 409) {
       // The physical transcript changed. Retire its cursor and reload the tail;
       // the next explicit older read starts a new server-owned page walk.
-      const pages = { ...keeperChatHistoryPages.value }
-      delete pages[keeperName]
-      keeperChatHistoryPages.value = pages
+      retireKeeperChatHistory(keeperName)
       await hydrateKeeperChatHistory(keeperName, { force: true })
     }
     setRecordValue(keeperChatHistoryErrors, keeperName,

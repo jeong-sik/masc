@@ -621,6 +621,29 @@ describe('fetchKeeperChatOperation', () => {
 })
 
 describe('editQueuedKeeperChatOperation', () => {
+  function echoEditedInput(userBlocks: Record<string, unknown>[]) {
+    const input = {
+      schema: 'masc.keeper_chat_operation.input.v1',
+      message: 'before', user_blocks: userBlocks,
+      attachments: userBlocks.filter(block => typeof block.attachment_id === 'string')
+        .map(block => ({ id: block.attachment_id, type: block.type, name: `${block.type}.bin`,
+          mime_type: block.type === 'audio' ? 'audio/wav' : 'text/plain',
+          size: 11, data: 'ZXhhY3QgYnl0ZXM=' })),
+      turn_instructions: 'retain instructions', surface_context: { kind: 'dashboard' },
+    }
+    const fetchMock = vi.fn().mockImplementation(async (_url, init) =>
+      new Response(JSON.stringify({
+        schema: 'masc.keeper_chat_operation.v1', operation_id: 'kmsg-edit-blocks',
+        sequence: '7', created_at: 42, state: 'Queued', input: JSON.parse(init.body).input,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const operation = {
+      operationId: 'kmsg-edit-blocks', sequence: '7', createdAt: 42,
+      input: { message: input.message, wire: input }, state: { kind: 'queued' as const },
+    }
+    return { input, operation, fetchMock }
+  }
+
   it('preserves authored message and text block bytes, and rejects blank edits', async () => {
     const originalInput = {
       schema: 'masc.keeper_chat_operation.input.v1',
@@ -656,6 +679,64 @@ describe('editQueuedKeeperChatOperation', () => {
     await expect(editQueuedKeeperChatOperation('echo', operation, '  \n'))
       .rejects.toThrow('must not be blank')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('edits text in place among native image, document and audio carriers', async () => {
+    const blocks = [
+      { type: 'image', url: 'https://images.example/exact.png' },
+      { type: 'text', text: 'before' },
+      { type: 'document', attachment_id: 'document' },
+      { type: 'audio', attachment_id: 'audio' },
+    ]
+    const { input, operation, fetchMock } = echoEditedInput(blocks)
+    const result = await editQueuedKeeperChatOperation('echo', operation, 'after')
+    const expected = [blocks[0], { type: 'text', text: 'after' }, blocks[2], blocks[3]]
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body).input).toEqual({
+      ...input, message: 'after', user_blocks: expected,
+    })
+    expect(result.input?.wire.user_blocks).toEqual(expected)
+    expect(input.user_blocks).toEqual(blocks)
+  })
+
+  it('preserves separate text positions and supports editing a reconstructed operation again', async () => {
+    const blocks = [
+      { type: 'text', text: 'before image' },
+      { type: 'image', file_id: 'provider-image' },
+      { type: 'text', text: 'after image' },
+    ]
+    const { operation, fetchMock } = echoEditedInput(blocks)
+    const result = await editQueuedKeeperChatOperation('echo', operation, ['changed before', 'after image'])
+    expect(result.input?.message).toBe('changed before\n\nafter image')
+    expect(result.input?.wire.user_blocks).toEqual([
+      { type: 'text', text: 'changed before' }, blocks[1], blocks[2],
+    ])
+    const reloaded = JSON.parse(JSON.stringify(result))
+    const editedAgain = await editQueuedKeeperChatOperation('echo', reloaded, ['changed before', 'changed after'])
+    expect(editedAgain.input?.wire.user_blocks).toEqual([
+      { type: 'text', text: 'changed before' }, blocks[1], { type: 'text', text: 'changed after' },
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('requires explicit nonblank edits for every authored text block before sending', async () => {
+    const { operation, fetchMock } = echoEditedInput([
+      { type: 'text', text: 'first' }, { type: 'image', file_id: 'image' },
+      { type: 'text', text: 'last' },
+    ])
+    await expect(editQueuedKeeperChatOperation('echo', operation, 'flat replacement'))
+      .rejects.toThrow('separate edit')
+    await expect(editQueuedKeeperChatOperation('echo', operation, ['only one']))
+      .rejects.toThrow('count must be preserved')
+    await expect(editQueuedKeeperChatOperation('echo', operation, ['first', ' \n']))
+      .rejects.toThrow('must not be blank')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('adds text before an unchanged media-only sequence', async () => {
+    const blocks = [{ type: 'image', url: 'https://images.example/exact.png' }]
+    const { operation } = echoEditedInput(blocks)
+    const result = await editQueuedKeeperChatOperation('echo', operation, 'new text')
+    expect(result.input?.wire.user_blocks).toEqual([{ type: 'text', text: 'new text' }, ...blocks])
   })
 })
 

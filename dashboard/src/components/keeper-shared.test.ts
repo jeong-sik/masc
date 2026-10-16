@@ -882,6 +882,42 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-keeper-operation-control-panel]')).toBeNull()
   })
 
+  it('edits each text around media and cancels without changing the queued operation', async () => {
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
+    const operation = {
+      operationId: 'kmsg-multimodal', sequence: '8', createdAt: 42,
+      input: { message: 'before image\n\nafter image', wire: {
+        schema: 'masc.keeper_chat_operation.input.v1', message: 'before image\n\nafter image',
+        user_blocks: [{ type: 'text', text: 'before image' },
+          { type: 'image', file_id: 'image' }, { type: 'text', text: 'after image' }],
+        attachments: [], turn_instructions: null, surface_context: null,
+      } }, state: { kind: 'queued' as const },
+    }
+    listQueuedKeeperChatOperations.mockResolvedValue([operation])
+    editQueuedKeeperChatOperation.mockResolvedValue(operation)
+    const prompt = vi.fn()
+      .mockReturnValueOnce('changed before').mockReturnValueOnce(null)
+      .mockReturnValueOnce('changed before').mockReturnValueOnce('changed after')
+    Object.defineProperty(window, 'prompt', { configurable: true, value: prompt })
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`, container)
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]') as HTMLButtonElement)
+    await waitFor(() => {
+      expect(container.querySelector('[data-operator-chat-operation="kmsg-multimodal"]')).not.toBeNull()
+    })
+    const row = container.querySelector('[data-operator-chat-operation="kmsg-multimodal"]') as HTMLElement
+    const edit = Array.from(row.querySelectorAll('button')).find(button => button.textContent === '수정') as HTMLButtonElement
+    fireEvent.click(edit)
+    expect(editQueuedKeeperChatOperation).not.toHaveBeenCalled()
+    expect(prompt.mock.calls[0]?.[1]).toBe('before image')
+    expect(prompt.mock.calls[1]?.[1]).toBe('after image')
+    fireEvent.click(edit)
+    await waitFor(() => {
+      expect(editQueuedKeeperChatOperation).toHaveBeenCalledExactlyOnceWith(
+        'sangsu', operation, ['changed before', 'changed after'],
+      )
+    })
+  })
+
 
   it('calls interruptKeeperTurn when the busy toolbar interrupt button is clicked', async () => {
     mockedToolsData.value = {

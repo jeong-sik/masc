@@ -6,10 +6,14 @@
 
 ### Upgrade notes
 
-- `/health`: the scheduler lag percentiles and threshold counts moved under `.scheduler.lag` (#43176). Scripts that read them at the `.scheduler` top level must read `.scheduler.lag`. The repository comparison script was updated in #43199. This changes a response field location for any external reader, so it is a Breaking candidate pending the operator's call; the fragments carry no Breaking marker.
+- `/health`: the scheduler lag percentiles and threshold counts moved under `.scheduler.lag` (#43176). Scripts that read them at the `.scheduler` top level must read `.scheduler.lag`. The repository comparison script was updated in #43199. The old key is gone and a reader gets `null` without an error, so a monitoring script that compares a lag threshold silently reads "no lag". See Breaking.
 - Wiki search (`masc_wiki_search`, `keeper_wiki_search`) orders results by BM25 and searches only the title, summary, tags and body of pages whose header reads. The matching rule is unchanged, but a query no longer matches the `author` or `source` line (#43178). No configuration change.
 - Local developer switches: run `scripts/opam-pin-external-deps.sh --install` once to pin `eio_posix` (#43255).
 - Board MIDI playback needs `midi_soundfont` under `[tui]` in runtime.toml (#43166).
+
+### Breaking
+
+- `/health` scheduler lag moved from `.scheduler.<field>` to `.scheduler.lag.<field>` (#43176). A reader of the old path receives `null`, not an error. The fragments carry no Breaking marker; this entry is the release lead's disclosure, and the operator can reclassify it.
 
 ### Experimental
 
@@ -86,6 +90,7 @@ The user-facing features under Added below have no recorded execution evidence i
 
 - Full regression run 38850227393 (head 9b6212a69409, TARGET_SUITES empty) failed. The release lead attributed it, from a quoted log reading, to an environment candidate: `Unix.ENOMEM` from `io_uring_queue_init` in `test_tui_chat_search_projection` under the parallel full run. It is a candidate, not a confirmed cause.
 - Full run 38855354535 (9b6212a69409) and full run 38859872654 (ff7738ca82, the cut base) completed successfully.
+- Shared workspace memory log (#43175): whether the JSONL log rotates or compacts, whether it is wired into a live path, and whether the per-Keeper reader cursor resumes after a downgrade to 0.56.0 and an upgrade back are unconfirmed. Treat it as Experimental.
 - Commits merged to main after ff7738ca82 belong to v0.58 unless they fix a release-blocking defect.
 
 ## [0.56.0] - 2026-10-14

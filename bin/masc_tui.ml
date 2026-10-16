@@ -11529,13 +11529,18 @@ let apply_planning_load state = function
            state.planning_cursor <- cursor;
            state.planning_mode <- Planning_detail goal_id)
   | Error err ->
-      state.goal_action_pending <- None;
+      state.goal_action_pending <- (match state.goal_action_pending with
+        | Some (Goal_action_armed _) | None -> None
+        | Some (Goal_drop_reason _) as draft -> draft);
       (* A failed observation supplies no replacement goal list. Keep the
          snapshot, selected goal and viewport until a successful replacement
          reconciles them; workspace source replacement still clears it. *)
       Log.Transport.info "tui_planning_refresh_failed=%s"
         (Yojson.Safe.to_string (`Assoc
           [ "retained", `Bool (Option.is_some state.planning)
+          ; "draft_retained", `Bool (match state.goal_action_pending with
+              | Some (Goal_drop_reason _) -> true
+              | Some (Goal_action_armed _) | None -> false)
           ; "snapshot_generated_at", (match state.planning with
               | None -> `Null | Some snapshot -> `String snapshot.pl_generated_at)
           ; "observed_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ())) ]));

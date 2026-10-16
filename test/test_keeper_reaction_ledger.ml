@@ -847,6 +847,58 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
     fail "matching invalid row was projected as complete evidence"
 ;;
 
+let test_valid_replay_survives_damaged_event_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "damaged-replay-keeper" in
+  let stimulus = board_stimulus ~post_id:"post-damaged-replay" () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc
+      [ "schema", `String Keeper_reaction_ledger.schema
+      ; "record_kind", `String "reaction"
+      ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
+      ; "keeper_name", `String keeper_name
+      ; "recorded_at_unix", `Float 1235.0
+      ; "stimulus_id", `String stimulus_id
+      ; "reaction", `Assoc [ "kind", `String "unknown_custom" ]
+      ]);
+  let read () =
+    match Keeper_reaction_ledger.event_queue_reaction_evidence_result
+            ~base_path ~keeper_name ~stimulus_id with
+    | Ok (Keeper_reaction_ledger.Evidence_quarantined { evidence; _ }) -> evidence
+    | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+      fail "damaged row must remain visible after replay"
+    | Error error ->
+      fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  in
+  let damaged = read () in
+  check bool "damaged reaction is not a turn start" false damaged.turn_started_seen;
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name stimulus;
+  let check_replayed evidence =
+    check bool "valid replay starts the turn" true evidence.Keeper_reaction_ledger.turn_started_seen;
+    check int "stimulus and valid event count once" 2 evidence.matched_record_count;
+    check int "damaged event remains quarantined" 1 evidence.quarantined_record_count
+  in
+  check_replayed (read ());
+  check_replayed (read ());
+  (* Asking for a new occurrence rebuilds the cache from the ledger, so both
+     the incremental and full-read paths must reach the same evidence. *)
+  let other = board_stimulus ~post_id:"post-rebuild-after-replay" () in
+  let other_id = Keeper_reaction_ledger.stimulus_id_of_event_queue other in
+  (match Keeper_reaction_ledger.event_queue_reaction_evidence_result
+           ~base_path ~keeper_name ~stimulus_id:other_id with
+   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+     check int "unrelated occurrence has no rows" 0 evidence.matched_record_count
+   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+     fail "damaged occurrence must not quarantine an unrelated occurrence"
+   | Error error ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error));
+  check_replayed (read ())
+;;
+
 (* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
    payload is unrepresentable — the prior [test_malformed_typed_payload_degrades_summary]
    covered a parse-error path that can no longer occur and was removed. *)
@@ -1672,7 +1724,9 @@ let () =
   run
     "keeper_reaction_ledger"
     [ ( "ledger"
-      , [ test_case "pruned evidence is invalidated and can return" `Quick
+      , [ test_case "valid replay survives a damaged event identity" `Quick
+            test_valid_replay_survives_damaged_event_identity
+        ; test_case "pruned evidence is invalidated and can return" `Quick
             test_evidence_prune_invalidates_and_readmission_survives
         ; test_case "same-length replacement invalidates evidence" `Quick
             test_evidence_same_length_replacement_invalidates

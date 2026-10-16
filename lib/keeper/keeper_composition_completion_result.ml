@@ -59,6 +59,7 @@ let selected_fields (entry : Async.entry) =
   | Async.Done { data = Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _); _ }
   | Async.Done { data = None; _ }
   | Async.Lost _ | Async.Cancelled _ | Async.Persistence_failed _
+  | Async.Waiting_for_owned_jobs _
   | Async.Queued | Async.Running | Async.Cancelling _ -> []
 ;;
 

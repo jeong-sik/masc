@@ -376,6 +376,7 @@ let observe_async_run_settlement
       | Keeper_msg_async.Queued
       | Keeper_msg_async.Running
       | Keeper_msg_async.Cancelling _ -> None
+      | Keeper_msg_async.Waiting_for_owned_jobs _ -> None
     in
     Option.iter
       (fun (success, output_text) ->
@@ -657,7 +658,25 @@ let async_worker_result
          ~execution
          ~result)
     skill_reference;
-  result
+  let waiting_job_ids = match journal,execution with
+    | Some _, Error {Executor.cause=Executor.Tool_did_not_complete
+        {deferred_kind=Some (Keeper_tool_execution.Owned_job_result_wait _);_};settled;_} ->
+      let rec collect reversed = function
+        | [] -> Some (List.rev reversed)
+        | (node : Executor.node_result) :: rest ->
+          (match node.result,node.deferred_kind,node.output_validation_error with
+           | Tool_result.Completed _,_,None -> collect reversed rest
+           | Tool_result.Deferred _,Some (Keeper_tool_execution.Owned_job_result_wait id),None ->
+             collect (id :: reversed) rest
+           | _ -> None) in
+      collect [] settled
+    | (None | Some _), (Ok _ | Error _) -> None in
+  match waiting_job_ids with
+  | None -> Keeper_msg_async.worker_finished result
+  | Some job_ids ->
+    (match Keeper_msg_async.worker_waiting_for_owned_jobs ~job_ids result with
+     | Ok outcome -> outcome
+     | Error _ -> Keeper_msg_async.worker_finished result)
 ;;
 
 let result_from_json ~tool_name ~start_time ~class_ ~ok data =
@@ -735,7 +754,7 @@ let async_submission_result
       data
   | Ok background_sw ->
     (match
-       Keeper_msg_async.submit_with_request_id
+       Keeper_msg_async.submit_worker_with_request_id
          ?request_context
          ~on_accepted:(fun request_id ->
            Result.bind
@@ -775,10 +794,11 @@ let async_submission_result
          ~f:(fun ~request_id request_sw ->
            match journal, Atomic.get journal_worker with
            | Some _, None ->
-             Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
+             Keeper_msg_async.worker_finished
+               (Tool_result.make_err ~tool_name ~start_time:(Tool_timing.start ())
                ~class_:Tool_result.Runtime_failure
                ~effect_disposition:Tool_result.Proven_pre_effect
-               "prepared composition worker has no accepted journal binding"
+               "prepared composition worker has no accepted journal binding")
            | (None | Some _), worker ->
            async_worker_result
              ~composition_execution:Catalog.Async

@@ -14,6 +14,11 @@ type request_status =
       { attempted_status : string
       ; reason : string
       }
+  | Waiting_for_owned_jobs of
+      { job_ids : Keeper_owned_job_identity.Job_id.t list
+      ; body : string
+      ; data : Yojson.Safe.t option
+      }
   | Done of
       { ok : bool
       ; body : string

@@ -5,7 +5,11 @@ Read the status and structured result of one async Keeper composition.
 Use the exact request id when a completion references its result or when more
 detail is needed. A completion that already carries usable selected exports
 does not require another status read. Submission and cancellation requests are
-distinct from completed and cancelled states."""
+distinct from completed and cancelled states.
+
+waiting_for_owned_jobs names the original job_ids and retained execution result.
+Wait for their completion notification, then resume the same prepared draft and
+composition_run_id. The released attempt is waiting and has not failed."""
 additional_properties = false
 
 

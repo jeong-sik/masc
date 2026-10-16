@@ -20,6 +20,13 @@ val acknowledge : base_path:string -> keeper_name:string -> request_id:string ->
 (** Retire only after durable delivery succeeds. A failed removal leaves the
     same request identity available for reconciliation. *)
 
+val acknowledge_waiting :
+  base_path:string -> keeper_name:string -> request_id:string -> composition_tool:string ->
+  (unit, error) result
+(** Retire a notification obligation only after exact canonical proof of a
+    released owned-job waiting attempt and its immutable producer identity.
+    It emits no composition terminal and grants no job replay permission. *)
+
 type report =
   { inspected : int
   ; waiting : int
@@ -34,4 +41,5 @@ val flush :
 (** Reconcile only this pending partition. Read exact canonical terminal
     proof before delivery; never execute or restart a request worker. Active
     requests keep their obligation. Malformed/unreadable records stay visible
-    in [failures] and remain on disk. *)
+    in [failures] and remain on disk. Canonically released owned-job waiting
+    attempts retire their attempt notification without calling [deliver]. *)

@@ -8368,7 +8368,8 @@ let test_async_composition_binds_params_into_durable_status () =
              { status =
                  ( Masc.Keeper_msg_async.Lost _
                  | Masc.Keeper_msg_async.Cancelled _
-                 | Masc.Keeper_msg_async.Persistence_failed _ )
+                 | Masc.Keeper_msg_async.Persistence_failed _
+                 | Masc.Keeper_msg_async.Waiting_for_owned_jobs _ )
              ; _
              } ->
            fail "async read-only composition did not complete"

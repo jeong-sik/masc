@@ -442,7 +442,7 @@ let with_conditional_compute ~first ~refinement check_evidence =
     ; preset = preset.name
     ; web_tools = false
     ; roster = Fusion_types.preset_roster
-    ; depth = Fusion_depth.Top
+    ; depth = Fusion_types.Fusion_depth.Top
     ; trigger = Fusion_types.Explicit_tool_call
     }
   in

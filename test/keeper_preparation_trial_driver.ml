@@ -81,7 +81,7 @@ let settings experiment =
      require (String.trim model = model && model <> "") "model_id must be explicit and nonblank";
      require (integer "max_context_tokens" runtime > 0 && integer "max_output_tokens" runtime > 0)
        "model capability declarations must be positive";
-     require (List.mem (string "synthetic_outcome" experiment) ["success";"provider_refusal"])
+     require (List.mem (string "synthetic_outcome" experiment) ["success";"provider_refusal";"malformed_final"])
        "unsupported synthetic outcome"
    | Configured_http configuration ->
      exact_keys ["schema_version";"case";"pairs";"runtime"] experiment;
@@ -356,6 +356,40 @@ let strategy_of_string = function
   | "direct" -> Direct | "exact_skill" -> Exact_skill
   | name -> failwith ("unsupported strategy: " ^ name)
 
+type objective_validation =
+  | Verified_json of Yojson.Safe.t
+  | Missing_final
+  | Malformed_json
+  | Wrong_shape
+  | Wrong_original_job
+  | Wrong_stdout_digest
+  | Scripted_wire_mismatch
+
+let validate_objective ~fixture ~scripted = function
+  | None -> Missing_final
+  | Some actual when (match scripted with Some expected -> expected<>actual | None -> false) -> Scripted_wire_mismatch
+  | Some actual ->
+    match Yojson.Safe.from_string actual with
+    | `Assoc fields as answer ->
+      if List.sort String.compare (List.map fst fields)<>["job_id";"stdout_sha256"] then Wrong_shape
+      else (match List.assoc_opt "job_id" fields,List.assoc_opt "stdout_sha256" fields with
+        | Some (`String job_id),Some (`String digest) ->
+          if job_id<>string "selected_job_id" fixture then Wrong_original_job
+          else if digest<>string "expected_stdout_sha256" fixture then Wrong_stdout_digest
+          else Verified_json answer
+        | _ -> Wrong_shape)
+    | _ -> Wrong_shape
+    | exception Yojson.Json_error _ -> Malformed_json
+
+let objective_validation_json = function
+  | Verified_json _ -> `String "verified"
+  | Missing_final -> `String "missing_final"
+  | Malformed_json -> `String "malformed_json"
+  | Wrong_shape -> `String "wrong_shape"
+  | Wrong_original_job -> `String "wrong_original_job"
+  | Wrong_stdout_digest -> `String "wrong_stdout_digest"
+  | Scripted_wire_mismatch -> `String "scripted_wire_mismatch"
+
 type step = Select | Direct_result | Direct_stdout | Prepare | Run | Finish | Finished
 let step_name = function
   | Select -> "select" | Direct_result -> "direct-result" | Direct_stdout -> "direct-stdout"
@@ -582,6 +616,8 @@ let start_provider ~sw ~env ~base ~attempt_dir ~counter ~experiment ~fixture ~st
           let digest = sha body in
           require (digest = string "expected_stdout_sha256" fixture) "actual selected stdout digest differs";
           let answer = Yojson.Safe.to_string (`Assoc ["job_id",`String job_id;"stdout_sha256",`String digest]) in
+          let answer = if string "synthetic_outcome" experiment="malformed_final"
+            then "Result: " ^ answer else answer in
           final_answer := Some answer;
           next_step := Finished;
           sse ~model ~finish:"stop" ~delta:(`Assoc ["role",`String "assistant";"content",`String answer])
@@ -662,7 +698,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
   require (sha (read (Filename.concat base ".agents/skills/preparation-stdout/SKILL.md")) =
       string "skill_document_sha256" fixture) "Skill source bytes changed";
   let common_instruction =
-    "Complete the addressed task using the original artifacts. Read the selection artifact first. Return JSON with job_id and the SHA-256 of its complete stdout. Do not declare the Task complete or modify any source." in
+    "Complete this read-only task using the completed original artifacts. Read the selection artifact first and the complete selected stdout. Return exactly one JSON object with only job_id and stdout_sha256; no prose or Markdown. The artifact address is its SHA-256 and the harness independently checks the returned full bytes. Do not execute new programs, declare the Task complete, or modify any source." in
   let assignment = match strategy with
     | Direct -> "Assigned strategy: direct. Use ordinary keeper_job_result and keeper_artifact_read for the selected original job."
     | Exact_skill -> "Assigned strategy: exact_skill. Prepare and run the exact Inline Skill through an explicit upstream input template; use the offered exact reference." in
@@ -738,6 +774,10 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
       ~on_deferred_runtime_consumed:(fun () -> ())
       ~settle_deferred_runtime_lane:(function None -> () | Some _ -> failwith "unexpected runtime failover") in
   let cycle_returned = now counter in
+  let previous = load receipt |> to_assoc |> List.remove_assoc "timing" in
+  json receipt (`Assoc (("timing",`Assoc ["admission",admission;
+    "cycle_entered",cycle_entered;"cycle_returned",cycle_returned])::
+    ("common_instruction_sha256",`String (sha common_instruction))::previous));
   let batch = Calls.read_after ~keeper_name:keeper ~after:frontier ~project:Option.some |> get index_error in
   let rows = List.map (fun (row : Yojson.Safe.t Keeper_tool_call_index.positioned) -> row.value) batch.rows in
   json (Filename.concat attempt_dir "tool-calls.json") (`List rows);
@@ -848,17 +888,11 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
      "final_text",(match accepted_answer with None -> `Null | Some text -> `String text);
      "checkpoint_last_assistant",(match checkpoint_last_assistant with None -> `Null | Some text -> `String text);
      "checkpoint_retention",`String "internal final thoughts are excluded by the production replay contract"]);
-  let final = match accepted_answer with
-    | Some actual ->
-      (match !final_answer with
-       | Some expected -> require (actual=expected)
-           "actual exact-run Keeper final answer differs from scripted response"
-       | None -> ());
-      let answer = Yojson.Safe.from_string actual in
-      require (field "job_id" answer=field "selected_job_id" fixture &&
-        field "stdout_sha256" answer=field "expected_stdout_sha256" fixture) "independent objective check failed";
-      Some answer
-    | None -> None in
+  let objective_validation = validate_objective ~fixture ~scripted:!final_answer accepted_answer in
+  let final = match objective_validation with
+    | Verified_json value -> Some value
+    | Missing_final | Malformed_json | Wrong_shape | Wrong_original_job
+    | Wrong_stdout_digest | Scripted_wire_mismatch -> None in
   let activation_ledger = Keeper_skill_activation_ledger.load_existing ~config ~trace_id:meta.runtime.trace_id
       |> get Keeper_skill_activation_ledger.store_error_to_string in
   let activations = match activation_ledger with
@@ -887,32 +921,21 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
       turn.trace_id=string "trace_id" fixture &&
       turn.finish_reason=Some (Keeper_execution_receipt.stop_reason_to_string Runtime_agent.Completed) &&
       pending base=[] in
-  require (not (Sys.file_exists (Filename.concat base "daemon.json")))
-    "measured work unexpectedly called the synthetic backend after complete outputs";
-  List.iter (fun job ->
-    let record = Jobs.load ~base_path:base ~keeper_name:keeper
-        (Jobs.Job_id.of_string (string "job_id" job) |> get Fun.id) |> get store_error in
-    require (Yojson.Safe.equal (Jobs.source_to_json record.source) (field "source" job))
-      "trial changed an original job source";
-    let stdout = match record.outputs with
-      | Some (Jobs.Outputs_complete (stdout,_)) -> stdout
-      | Some (Jobs.Outputs_unavailable {evidence}) ->
-        failwith ("trial original output is unavailable: " ^ evidence)
-      | None -> failwith "trial lost original complete output" in
-    require (sha (blob_bytes base stdout)=string "stdout_sha256" job) "trial changed an original output")
-    (field "jobs" fixture |> to_list);
-  let outcome_name = if correct then "correct" else "explicit_failure" in
-  let timing = `Assoc ["admission",admission;"cycle_entered",cycle_entered;"cycle_returned",cycle_returned;
+  let timing = ["admission",admission;"cycle_entered",cycle_entered;"cycle_returned",cycle_returned;
       "intake_turn_entry",intake_turn_entry;
       "replay_turn_started",(match evidence.turn_started_recorded_at with
         | Some epoch -> `Assoc ["state",`String "observed";"epoch",`Float epoch]
         | None -> unknown "current production Board source does not own a Turn_started reaction");
-      "first_useful_leaf",useful;"verified_outcome_observed",now counter] in
+      "first_useful_leaf",useful;"evidence_collected",now counter] in
+  let backend_calls = if Sys.file_exists (Filename.concat base "daemon.json") then
+      decode_evidence (fun () -> load (Filename.concat base "daemon.json") |> field "calls" |> to_list |> List.length)
+    else Some 0 in
   let synthetic = match runtime_mode runtime with Synthetic_streaming -> true | Configured_http _ -> false in
-  json receipt (`Assoc ["schema_version",`Int 1;"outcome",`String outcome_name;
+  let observations = ["schema_version",`Int 1;
     "scope",`String (if synthetic then "synthetic_isolated_keeper_explicit_cycle_preparation"
       else "configured_http_isolated_keeper_explicit_cycle_preparation");
     "strategy",`String (strategy_name strategy);"strategy_compliant",`Bool compliant;
+    "common_instruction_sha256",`String (sha common_instruction);
     "fixture_sha256",`String (sha (read (fixture_path base)));"input",field "selection" fixture;
     "skill_reference",field "skill_reference" fixture;"runtime",settings experiment;
     "transport_endpoint",(if synthetic then `String endpoint else `Null);
@@ -928,8 +951,9 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
       "total_serialized_input_bytes",`Null;"response_reported_model",`Null];
     "first_offered_tools_sha256",(match List.rev !requests with
       | first :: _ -> `String (sha (Yojson.Safe.to_string (field "tools" first)))
-      | [] -> `Null);"backend_calls_after_ready",`Int 0;
-    "timing",timing;"objective",(match final with None -> `Null | Some value -> value);
+       | [] -> `Null);"backend_calls_after_ready",(match backend_calls with Some count -> `Int count | None -> `Null);
+    "timing",`Assoc timing;"objective",(match final with None -> `Null | Some value -> value);
+    "objective_validation",objective_validation_json objective_validation;
     "source_ack",`Bool evidence.event_queue_ack_seen;
     "turn_ref",`String (Ids.Turn_ref.to_string turn.turn_ref);
     "remaining_queue",`Int (List.length (pending base));
@@ -938,7 +962,28 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
         else ["configured HTTP transport is not proof of real-model identity";
           "complete provider request count/input bytes and first offered inventory are unobserved"])
        @ ["synthetic Docker CLI only";"no speedup or fleet scheduling latency claim";
-          "Request_wire_observer is not a complete body recorder"]))]);
+          "Request_wire_observer is not a complete body recorder"]))] in
+  (* Preserve measured evidence before any independent boundary check can
+     reject the attempt. The outer failure path retains these fields. *)
+  json receipt (`Assoc (("outcome",`String "unfinished")::observations));
+  require (backend_calls=Some 0)
+    "measured work unexpectedly called the synthetic backend after complete outputs";
+  List.iter (fun job ->
+    let record = Jobs.load ~base_path:base ~keeper_name:keeper
+        (Jobs.Job_id.of_string (string "job_id" job) |> get Fun.id) |> get store_error in
+    require (Yojson.Safe.equal (Jobs.source_to_json record.source) (field "source" job))
+      "trial changed an original job source";
+    let stdout = match record.outputs with
+      | Some (Jobs.Outputs_complete (stdout,_)) -> stdout
+      | Some (Jobs.Outputs_unavailable {evidence}) ->
+        failwith ("trial original output is unavailable: " ^ evidence)
+      | None -> failwith "trial lost original complete output" in
+    require (sha (blob_bytes base stdout)=string "stdout_sha256" job) "trial changed an original output")
+    (field "jobs" fixture |> to_list);
+  let outcome_name = if correct then "correct" else "explicit_failure" in
+  json receipt (`Assoc (("outcome",`String outcome_name)::
+    ("timing",`Assoc (timing @ ["validation_finished",now counter]))::
+    List.remove_assoc "timing" observations));
   require correct "actual Keeper cycle did not satisfy the original objective"
 
 let with_environment values operation =

@@ -102,6 +102,48 @@ max-output-tokens = 4096
         worker.join()
 
 
+def malformed_final_evidence(args, root, head):
+    experiment = root / "malformed-final-experiment.json"
+    experiment.write_text(json.dumps({"schema_version": 1, "case": "upstream_inline", "pairs": 1,
+        "runtime": {"mode": "synthetic_streaming", "model_id": args.model_id,
+                    "max_context_tokens": args.max_context_tokens, "max_output_tokens": args.max_output_tokens},
+        "synthetic_outcome": "malformed_final"}) + "\n", encoding="utf-8")
+    output = root / "malformed-final"
+    code = subprocess.run([sys.executable, str(args.coordinator.resolve()),
+        "--driver", str(args.driver.resolve()), "--source-head", head,
+        "--experiment", str(experiment), "--prompts", str(args.prompts.resolve()),
+        "--output", str(output)], check=False).returncode
+    require(code == 0, f"malformed-final coordinator failed; evidence: {root}")
+    summary, manifest = read(output / "summary.json"), read(output / "manifest.json")
+    require(summary["expected"] == 2 and summary["outcomes"] == {
+        "correct": 0, "explicit_failure": 2, "unfinished": 0},
+        "a prose final containing the correct JSON must remain a failed attempt")
+    instructions = []
+    for entry in manifest["expected_attempts"]:
+        receipt = read(output / entry["path"])
+        timing = receipt["timing"]
+        require(receipt["objective_validation"] == "malformed_json" and receipt["objective"] is None,
+                "invalid final was extracted or quietly accepted")
+        require(receipt["source_ack"] is True and receipt["strategy_compliant"] is True and
+                receipt["verified_stdout_read_execution_ids"] and receipt["backend_calls_after_ready"] == 0,
+                "failure lost independently verified original source and physical work")
+        require(timing["first_useful_leaf"]["state"] == "observed" and
+                timing["cycle_returned"]["monotonic_ns"] >= timing["cycle_entered"]["monotonic_ns"] and
+                timing["validation_finished"]["monotonic_ns"] >= timing["cycle_returned"]["monotonic_ns"],
+                "failed attempt lost its actual measurement clocks")
+        turn = read((output / entry["path"]).parent / "turn-record.json")
+        usage = receipt["provider_metrics"]["reported_usage"]
+        require(receipt["provider_requests"] > 1 and all(
+                usage[key] == turn.get(key) for key in ("input_tokens", "output_tokens",
+                    "cache_creation_input_tokens", "cache_read_input_tokens", "usage_scope")),
+                "failed attempt lost observed provider metrics or relabelled their scope")
+        instructions.append(receipt["common_instruction_sha256"])
+    require(instructions[0] == instructions[1], "failed pair used different common instructions")
+    print("PREPARATION_MALFORMED_FINAL_PASS " + json.dumps({
+        "expected": 2, "explicit_failure": 2, "unfinished": 0, "retained_measurements": True,
+        "real_model": False, "speedup": None}))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--driver", type=Path, required=True)
@@ -238,7 +280,8 @@ def main():
             "synthetic_only": True, "strategy": receipt["strategy"], "source": admission,
             "intake_turn_entry": intake, "useful": useful, "objective": receipt["objective"], "turn_ref": receipt["turn_ref"],
             "backend_calls_after_ready": 0, "driver_sha256": manifest["driver_sha256"]}, ensure_ascii=False))
-    for field in ("fixture_sha256", "skill_reference", "input", "runtime", "first_offered_tools_sha256", "objective"):
+    for field in ("fixture_sha256", "skill_reference", "input", "runtime", "first_offered_tools_sha256",
+                  "common_instruction_sha256", "objective"):
         require(receipts[0][field] == receipts[1][field], "paired common identity differs: " + field)
     require(receipts[0]["timing"]["admission"]["stimulus_id"] != receipts[1]["timing"]["admission"]["stimulus_id"],
             "second arm reused first arm's measured source")
@@ -246,6 +289,7 @@ def main():
         "correct": 2, "unfinished": 0, "real_model": False, "speedup": None,
         "evidence": str(root), "summary_sha256": hashlib.sha256((output / "summary.json").read_bytes()).hexdigest()}))
     configured_http_refusal(args, root, head)
+    malformed_final_evidence(args, root, head)
 
 
 if __name__ == "__main__":

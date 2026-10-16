@@ -684,33 +684,27 @@ let empty_event_queue_reaction_evidence_accumulator () =
 ;;
 
 let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
-  let is_replay =
-    match string_field "event_id" row with
-    | Some event_id
-      when not (String.equal event_id "")
-           && Event_id_set.mem event_id accumulator.seen_event_ids -> true
-    | Some event_id when not (String.equal event_id "") ->
+  match decode_current_row ~keeper_name row with
+  | Error reason ->
+    accumulator.quarantined_record_count
+      <- accumulator.quarantined_record_count + 1;
+    (match accumulator.first_matching_quarantine_reason with
+     | Some _ -> ()
+     | None -> accumulator.first_matching_quarantine_reason <- Some reason)
+  | Ok current_row ->
+    let metadata =
+      match current_row with
+      | Current_stimulus { metadata; _ }
+      | Current_reaction { metadata; _ } -> metadata
+    in
+    if Event_id_set.mem metadata.event_id accumulator.seen_event_ids
+    then ()
+    else (
+      (* Only a decoded record owns an event identity. A damaged append must
+         remain visible without shadowing a later valid replay of that event. *)
       accumulator.seen_event_ids
-        <- Event_id_set.add event_id accumulator.seen_event_ids;
-      false
-    | Some _ | None -> false
-  in
-  if not is_replay
-  then
-    match decode_current_row ~keeper_name row with
-    | Error reason ->
-      accumulator.quarantined_record_count
-        <- accumulator.quarantined_record_count + 1;
-      (match accumulator.first_matching_quarantine_reason with
-       | Some _ -> ()
-       | None -> accumulator.first_matching_quarantine_reason <- Some reason)
-    | Ok current_row ->
+        <- Event_id_set.add metadata.event_id accumulator.seen_event_ids;
       accumulator.matched_record_count <- accumulator.matched_record_count + 1;
-      let metadata =
-        match current_row with
-        | Current_stimulus { metadata; _ }
-        | Current_reaction { metadata; _ } -> metadata
-      in
       let recorded_at = Some metadata.recorded_at in
       accumulator.latest_recorded_at
         <- max_recorded_at accumulator.latest_recorded_at recorded_at;
@@ -736,7 +730,7 @@ let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
          accumulator.event_queue_cancelled_recorded_at
            <- max_recorded_at
                 accumulator.event_queue_cancelled_recorded_at
-                recorded_at)
+                recorded_at))
 ;;
 
 let event_queue_reaction_evidence_of_accumulator

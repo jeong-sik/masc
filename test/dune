@@ -2576,6 +2576,7 @@
 (include stanzas/test_play_credential_transaction.inc)
 (include stanzas/test_dos_tools.inc)
 (include stanzas/test_dos_lane_autosave.inc)
+(include stanzas/test_dos_lane_image.inc)
 
 (include stanzas/test_machine_checkpoint.inc)
 

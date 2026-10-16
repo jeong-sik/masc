@@ -820,6 +820,75 @@ let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
+(* ---------- program images ---------- *)
+
+(* The core's loaders raise [Invalid_argument] on an image they cannot place:
+   a header shorter than its fixed part, a header or relocation table that
+   runs past the file, a payload past the end of memory. An exception out of
+   [prepare_load] reaches the caller as a crash, not as the caller's mistake.
+   [image_of_bytes] checks those conditions first and returns the image as a
+   value only when the loader can take it. The bounds below are the loaders'
+   own (ocaml-dos Dos_dos.load_com and load_exe); the property test in
+   test_dos_lane_image runs both side by side, so a pin bump that moves them
+   turns it red. *)
+
+(* The machine's address space: 20 address lines. *)
+let memory_bytes = 0x100000
+let last_address = memory_bytes - 1
+
+(* Both loaders put the image no lower than segment 0x1000 plus the 256-byte
+   PSP. *)
+let image_floor = 0x10100
+
+(* A COM image shares its 64 KiB segment with the 256-byte PSP, and the loader
+   plants the 2-byte return word at PSP:FFFE. An image that reaches it loses
+   its last bytes to that word and cannot address its own tail. *)
+let max_com_bytes = 0x10000 - 0x100 - 2
+
+(* The fixed MZ header, through the relocation table offset at 0x18. *)
+let mz_fixed_header_bytes = 0x1C
+let mz_reloc_entry_bytes = 4
+
+let max_exe_payload_bytes = memory_bytes - image_floor
+
+type image =
+  | Com of string
+  | Exe of string
+
+let u16_at image offset = Char.code image.[offset] lor (Char.code image.[offset + 1] lsl 8)
+
+let image_of_bytes ~program_name image =
+  let refuse fmt = Printf.ksprintf (fun message -> Error (Invalid_request message)) fmt in
+  let size = String.length image in
+  if size = 0 then refuse "%s is empty" program_name
+  else if not (is_mz image) then
+    if size > max_com_bytes then
+      refuse "%s is %d bytes, more than a COM image holds (%d)" program_name size max_com_bytes
+    else Ok (Com image)
+  else if size < mz_fixed_header_bytes then
+    refuse "%s is an MZ executable cut short: %d bytes, and its fixed header is %d" program_name
+      size mz_fixed_header_bytes
+  else begin
+    let header_bytes = u16_at image 0x08 * 16 in
+    let reloc_count = u16_at image 0x06 and reloc_offset = u16_at image 0x18 in
+    if header_bytes > size then
+      refuse "%s is an MZ executable cut short: its header is %d bytes and the file is %d"
+        program_name header_bytes size
+    else if reloc_count > 0 && reloc_offset + (reloc_count * mz_reloc_entry_bytes) > size then
+      refuse "%s is an MZ executable cut short: its relocation table ends at byte %d and the file is %d"
+        program_name (reloc_offset + (reloc_count * mz_reloc_entry_bytes)) size
+    else if size - header_bytes > max_exe_payload_bytes then
+      refuse "%s holds %d bytes of program, more than fit in memory (%d)" program_name
+        (size - header_bytes) max_exe_payload_bytes
+    else Ok (Exe image)
+  end
+;;
+
+let load_image machine = function
+  | Com image -> Dos_machine.load_com machine image
+  | Exe image -> Dos_machine.load_exe machine image
+;;
+
 type prepared_load = {
   load_machine : (Dos_machine.t * (string, string) Hashtbl.t) option ref;
   load_program : string;
@@ -850,10 +919,9 @@ let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave ~program_name 
   (* Guest writes raise this counter. A load must not install a save overlay
      read across a concurrent run of the old machine. *)
   let load_change_count = locked (fun () -> !change_count) in
+  let* image = image_of_bytes ~program_name program_bytes in
   let* files = with_saves ~saves_dir files in
-  if String.length program_bytes = 0 then
-    Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
-  else match dos_name_collision files with
+  match dos_name_collision files with
   | Some (earlier, later) ->
       Error (Invalid_request (Printf.sprintf
         "%s and %s are one name to DOS; the guest can only see one" earlier later))
@@ -861,8 +929,7 @@ let prepare_load ~ledger_dir ~saves_dir ~checkpoint_dir ~autosave ~program_name 
       let* () = check_autosave_consent ~checkpoint_dir autosave in
       let m = Dos_machine.create () in
       List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
-      if is_mz program_bytes then Dos_machine.load_exe m program_bytes
-      else Dos_machine.load_com m program_bytes;
+      load_image m image;
       let kept = Hashtbl.create (List.length files) in
       List.iter (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents) files;
       Ok {load_machine=ref (Some (m, kept)); load_program=program_name;
@@ -1312,8 +1379,8 @@ let checkpoints ~dir =
 
 let peek ~address ~length =
   with_machine (fun st ->
-    if address < 0 || address > 0xFFFFF then
-      Error (Invalid_request (Printf.sprintf "address must be 0..0xFFFFF, got %d" address))
+    if address < 0 || address > last_address then
+      Error (Invalid_request (Printf.sprintf "address must be 0..0x%X, got %d" last_address address))
     else if length < 1 || length > peek_max_bytes then
       Error
         (Invalid_request
@@ -1322,7 +1389,7 @@ let peek ~address ~length =
       let b = Buffer.create (length * 2) in
       for i = 0 to length - 1 do
         Buffer.add_string b
-          (Printf.sprintf "%02x" (Dos_machine.mem_read st.m ((address + i) land 0xFFFFF)))
+          (Printf.sprintf "%02x" (Dos_machine.mem_read st.m ((address + i) land last_address)))
       done;
       Ok (Buffer.contents b)
     end)

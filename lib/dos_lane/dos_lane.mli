@@ -219,6 +219,24 @@ val escapes : string -> bool
     such names, and a file the guest creates under one is never written to
     the saves directory. *)
 
+type image
+(** A program image the loaders can place: an MZ signature makes it an EXE,
+    anything else a COM, by the image's own bytes and not the file name. *)
+
+val image_of_bytes : program_name:string -> string -> (image, error) result
+(** Checks what the core's loaders would otherwise meet as an exception: an
+    empty image, an MZ header or relocation table that runs past the file, a
+    payload that does not fit in memory, a COM larger than its segment.
+    Anything refused is [Invalid_request] naming [program_name]. *)
+
+val max_com_bytes : int
+(** The largest COM image: 64 KiB less the PSP and the return word the loader
+    plants at the top of the segment. *)
+
+val max_exe_payload_bytes : int
+(** The most program an MZ image may carry after its header: the memory above
+    the lowest place the loader puts an image. *)
+
 type prepared_load
 (** In-memory validated guest and save snapshot. No open file handles; discarded
     preparations are reclaimed normally. An admitted commit attempt consumes the guest. *)

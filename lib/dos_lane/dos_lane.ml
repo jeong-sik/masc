@@ -876,10 +876,25 @@ let is_mz image =
    runs past the file, a payload past the end of memory. An exception out of
    [prepare_load] reaches the caller as a crash, not as the caller's mistake.
    [image_of_bytes] checks those conditions first and returns the image as a
-   value only when the loader can take it. The bounds below are the loaders'
-   own (ocaml-dos Dos_dos.load_com and load_exe); the property test in
-   test_dos_lane_image runs both side by side, so a pin bump that moves them
-   turns it red. *)
+   value only when the loader can take it.
+
+   For an MZ image the check is exactly the loader's: refused if and only if
+   [Dos_dos.load_exe] would raise. Two refusals are stricter than the loader
+   (ocaml-dos 323609dd, Dos_dos.load_com and load_exe), on purpose:
+
+   - A COM image of more than [max_com_bytes]. [load_com] copies any size up
+     to the end of memory, but it then writes the 2-byte return word at
+     PSP:FFFE, which lies inside such an image, and points SP there. The
+     program is placed with its tail overwritten and its stack on top of it.
+     DOS itself refuses a COM that does not fit its segment.
+   - The signature "ZM", which DOS also accepts for an EXE. [load_exe] takes
+     only "MZ", so a ZM file would be loaded as a COM and run its header as
+     code.
+
+   test_dos_lane_image runs the real loader beside the check: it compares
+   them on seeded MZ images and at the memory edge, and it shows the two
+   stricter facts above with the loader itself, so a pin bump that moves any
+   of them turns it red. *)
 
 (* The machine's address space: 20 address lines. *)
 let memory_bytes = 0x100000
@@ -889,10 +904,10 @@ let last_address = memory_bytes - 1
    PSP. *)
 let image_floor = 0x10100
 
-(* A COM image shares its 64 KiB segment with the 256-byte PSP, and the loader
-   plants the 2-byte return word at PSP:FFFE. An image that reaches it loses
-   its last bytes to that word and cannot address its own tail. *)
-let max_com_bytes = 0x10000 - 0x100 - 2
+(* The image starts at PSP:0100 and the return word sits at PSP:FFFE, so the
+   largest image that leaves the word outside it ends at offset 0xFEFE: 65,278
+   bytes. *)
+let max_com_bytes = 0xFFFE - 0x100
 
 (* The fixed MZ header, through the relocation table offset at 0x18. *)
 let mz_fixed_header_bytes = 0x1C
@@ -904,12 +919,19 @@ type image =
   | Com of string
   | Exe of string
 
+let is_zm image =
+  String.length image >= 2 && Char.equal image.[0] 'Z' && Char.equal image.[1] 'M'
+;;
+
 let u16_at image offset = Char.code image.[offset] lor (Char.code image.[offset + 1] lsl 8)
 
 let image_of_bytes ~program_name image =
   let refuse fmt = Printf.ksprintf (fun message -> Error (Invalid_request message)) fmt in
   let size = String.length image in
   if size = 0 then refuse "%s is empty" program_name
+  else if is_zm image then
+    refuse "%s starts with ZM, a DOS executable signature this machine does not load (it takes MZ)"
+      program_name
   else if not (is_mz image) then
     if size > max_com_bytes then
       refuse "%s is %d bytes, more than a COM image holds (%d)" program_name size max_com_bytes

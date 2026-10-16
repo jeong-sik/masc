@@ -235,12 +235,17 @@ type image
 val image_of_bytes : program_name:string -> string -> (image, error) result
 (** Checks what the core's loaders would otherwise meet as an exception: an
     empty image, an MZ header or relocation table that runs past the file, a
-    payload that does not fit in memory, a COM larger than its segment.
-    Anything refused is [Invalid_request] naming [program_name]. *)
+    payload that does not fit in memory. For an MZ image that is exactly when
+    the loader raises. It also refuses two images the loader would accept and
+    damage: a COM longer than {!max_com_bytes}, whose tail the loader
+    overwrites with a return word, and the signature ZM, which the loader
+    would run as a COM. Anything refused is [Invalid_request] naming
+    [program_name]. *)
 
 val max_com_bytes : int
-(** The largest COM image: 64 KiB less the PSP and the return word the loader
-    plants at the top of the segment. *)
+(** 65,278: the largest COM image that leaves the return word the loader
+    plants at PSP:FFFE outside it. The loader itself accepts more and
+    overwrites the tail. *)
 
 val max_exe_payload_bytes : int
 (** The most program an MZ image may carry after its header: the memory above

@@ -24,7 +24,15 @@ type mount = { source : string; destination : string }
     [control_timeout_sec] bounds each engine control command and cancels its
     switch so the child is killed and reaped. A host sampling declaration
     requires [sampling_handler]; disabled packages refuse a supplied callback.
-    Both mismatches fail before container creation. *)
+    Both mismatches fail before container creation.
+
+    [on_engine] receives the engine identity before the first create and must
+    persist it; an error stops the start before any create. [is_live_instance]
+    says which worker incarnations are live in the calling process. A
+    persistent slot held by a container of a dead incarnation of the same
+    installation is removed before create; any other holder is refused with
+    [Slot_foreign] and left alone. The default treats every incarnation as
+    live, so nothing is removed. *)
 val start :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
@@ -37,6 +45,7 @@ val start :
   ?docker_command:string ->
   ?container_command:string ->
   ?on_engine:(Lane_addon_lifecycle.engine -> (unit, string) result) ->
+  ?is_live_instance:(string -> bool) ->
   ?on_created:(t -> unit) ->
   ?artifact_store:Lane_addon_store.t ->
   ?sampling_handler:Lane_addon_sampling.t ->
@@ -90,6 +99,15 @@ val start_failure : error -> Lane_addon_lifecycle.failure
 val cleanup_failure : error -> Lane_addon_lifecycle.failure
 (** The typed failure the runtime records for a failed start, or a cleanup
     that cannot be confirmed. *)
+
+(** True when the container that made [start] or a cleanup refuse with
+    [Slot_foreign] is gone or no longer carries those labels. False also when
+    that cannot be read. *)
+val holder_changed :
+  clock:_ Eio.Time.clock -> control_timeout_sec:float ->
+  mgr:_ Eio.Process.mgr -> runtime:Lane_addon_types.runtime ->
+  ?docker_command:string -> ?container_command:string ->
+  Lane_addon_lifecycle.holder -> bool
 
 (** The identity of the engine the control command currently reaches. The exit
     status of [docker info] (or [container system status]) alone separates

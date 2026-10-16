@@ -2,11 +2,26 @@
 type mount = { source : string; destination : string }
 type lookup = Name of string | Id of string
 
+val instance_label : string
+val state_owner_label : string
+
+type run_state = Created | Running | Paused | Restarting | Removing | Exited | Dead
+
+(** A container as its inspection reports it. [name] is the bare name. The
+    labels are read as given; a missing label is [None], never a default. *)
+type held = {
+  container_id : string;
+  name : string;
+  instance : string option;
+  state_owner : string option;
+  run_state : run_state;
+}
+
 val owned_name : Lane_addon_types.runtime -> string -> string
 val valid_id : string -> bool
 val mount_argument : Lane_addon_types.runtime -> mount -> (string, string) result
 val create_arguments :
-  Lane_addon_types.package -> name:string -> instance_id:string -> image:string ->
+  Lane_addon_types.package -> name:string -> instance_id:string -> state_owner:string option -> image:string ->
   package_mount:string -> mounts:string list -> state_mounts:string list -> string list
 val start_arguments : Lane_addon_types.runtime -> string -> string list
 val inspect_arguments : Lane_addon_types.runtime -> string -> string list
@@ -16,9 +31,8 @@ val listed_id : Lane_addon_types.runtime -> lookup -> string -> (string option, 
 val verify_container :
   Lane_addon_types.runtime -> name:string -> resources:Lane_addon_types.resources ->
   image_digest:string option -> string -> (string, string) result
-val verify_owner :
-  Lane_addon_types.runtime -> instance_id:string -> name:string option -> id:string ->
-  string -> (unit, string) result
+val held_of_inspect : Lane_addon_types.runtime -> string -> (held, string) result
+(** Refuses a container whose state word is not documented. *)
 val info_arguments : Lane_addon_types.runtime -> string list
 (** The engine identity command. Its exit status alone decides reachability. *)
 val engine_of_info :

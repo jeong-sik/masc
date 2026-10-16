@@ -28,7 +28,7 @@ let container_name ?(runtime = Lane_addon_types.Docker) owner =
   | Lane_addon_types.Docker -> volume_name owner ^ "-writer"
   | Apple_container -> Digestif.SHA256.(to_hex (digest_string ("writer:" ^ identity owner)))
 
-let label = "masc.lane.state.owner"
+let label = Lane_addon_engine.state_owner_label
 let ( let* ) = Result.bind
 
 let inspect ~runtime ~run owner =

@@ -3,6 +3,20 @@ open Lane_addon_types
 type mount = { source : string; destination : string }
 type lookup = Name of string | Id of string
 
+(* Every container this host creates carries the worker incarnation that made
+   it; a container for persistent state also carries the state owner. *)
+let instance_label = "masc.lane.instance"
+let state_owner_label = "masc.lane.state.owner"
+
+type run_state = Created | Running | Paused | Restarting | Removing | Exited | Dead
+type held = {
+  container_id : string;
+  name : string;
+  instance : string option;
+  state_owner : string option;
+  run_state : run_state;
+}
+
 let ( let* ) = Result.bind
 let digest value = Digestif.SHA256.(to_hex (digest_string value))
 let owned_name runtime instance_id = match runtime with
@@ -24,8 +38,11 @@ let mount_argument runtime ({ source; destination } : mount) =
     | Docker -> Printf.sprintf "type=bind,src=%s,dst=%s,readonly" source destination
     | Apple_container -> Printf.sprintf "type=bind,source=%s,target=%s,readonly" source destination)
 
-let create_arguments package ~name ~instance_id ~image ~package_mount ~mounts ~state_mounts =
-  let common = ["--name"; name; "--label"; "masc.lane.instance=" ^ instance_id] in
+let create_arguments package ~name ~instance_id ~state_owner ~image ~package_mount ~mounts ~state_mounts =
+  let common = ["--name"; name; "--label"; instance_label ^ "=" ^ instance_id]
+    @ (match state_owner with
+       | None -> []
+       | Some owner -> ["--label"; state_owner_label ^ "=" ^ owner]) in
   let controls = match package.runtime with
     | Docker ->
         let memory = Int64.to_string package.resources.memory_bytes in
@@ -130,20 +147,48 @@ let verify_container runtime ~name ~resources ~image_digest raw =
              | _ -> Error "Apple container image digest differs from the inspected local image")
        | _ -> Error "Apple container identity or resource settings are absent")
 
-let verify_owner runtime ~instance_id ~name ~id raw =
+let label_value labels key = match Option.bind labels (member key) with
+  | None | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ -> Error ("label " ^ key ^ " is not text")
+
+(* Docker documents exactly these container states. Any other word is an
+   engine this code has not been taught, and is refused rather than guessed. *)
+let docker_run_state = function
+  | "created" -> Ok Created | "running" -> Ok Running | "paused" -> Ok Paused
+  | "restarting" -> Ok Restarting | "removing" -> Ok Removing | "exited" -> Ok Exited
+  | "dead" -> Ok Dead
+  | other -> Error ("unrecognized container state: " ^ other)
+
+(* The Apple runtime reports a stopped container as stopped. *)
+let apple_run_state = function
+  | "running" -> Ok Running | "stopped" -> Ok Exited | "stopping" -> Ok Removing
+  | other -> Error ("unrecognized container state: " ^ other)
+
+let held_of_inspect runtime raw =
   let* entry = one raw in
-  let actual, actual_name, labels = match runtime with
-    | Docker -> member "Id" entry, member "Name" entry, path ["Config"; "Labels"] entry
-    | Apple_container -> member "id" entry, path ["configuration"; "id"] entry,
-        path ["configuration"; "labels"] entry in
-  let name_matches = match name with
-    | None -> true
-    | Some expected -> actual_name = Some (`String (match runtime with Docker -> "/" ^ expected | Apple_container -> expected)) in
-  if actual = Some (`String id) && name_matches
-     && (match runtime with Docker -> true | Apple_container -> actual_name = Some (`String id))
-     && Option.bind labels (member "masc.lane.instance") = Some (`String instance_id)
-  then Ok ()
-  else Error "container identity and masc.lane.instance label must match the persisted binding"
+  match runtime with
+  | Docker ->
+      (match member "Id" entry, member "Name" entry, path ["State"; "Status"] entry with
+       | Some (`String id), Some (`String name), Some (`String status)
+         when valid_id id && String.length name > 1 && name.[0] = '/' ->
+           let labels = path ["Config"; "Labels"] entry in
+           let* instance = label_value labels instance_label in
+           let* state_owner = label_value labels state_owner_label in
+           let* run_state = docker_run_state status in
+           Ok { container_id = id; name = String.sub name 1 (String.length name - 1);
+                instance; state_owner; run_state }
+       | _ -> Error "container identity, name or state is absent")
+  | Apple_container ->
+      (match member "id" entry, path ["configuration"; "id"] entry, member "status" entry with
+       | Some (`String id), Some (`String configured), Some (`String status)
+         when String.equal id configured ->
+           let labels = path ["configuration"; "labels"] entry in
+           let* instance = label_value labels instance_label in
+           let* state_owner = label_value labels state_owner_label in
+           let* run_state = apple_run_state status in
+           Ok { container_id = id; name = id; instance; state_owner; run_state }
+       | _ -> Error "container identity, name or state is absent")
 
 (* The identity command is the same structural probe for reachability: it
    either exits 0 with an identity or it does not. Neither outcome is read out
@@ -217,7 +262,7 @@ let verify_volume runtime ~name ~owner raw =
     | Apple_container -> member "id" entry, path ["configuration"; "labels"] entry in
   if actual = Some (`String name)
      && (match runtime with Docker -> true | Apple_container -> path ["configuration"; "name"] entry = Some (`String name))
-     && Option.bind labels (member "masc.lane.state.owner") = Some (`String owner)
+     && Option.bind labels (member state_owner_label) = Some (`String owner)
   then Ok () else Error "persistent state volume belongs to a different owner"
 let state_mount runtime name = match runtime with
   | Docker -> "type=volume,src=" ^ name ^ ",dst=/state,volume-nocopy"

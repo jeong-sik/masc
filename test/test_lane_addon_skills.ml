@@ -85,7 +85,7 @@ let worker_tool_definition name =
       | Error message -> fail message
 
 let backend fixture : Lane.For_testing.backend = {
-  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Lane_addon_types.package) ~binding:_ ~on_engine ~on_created ->
+  start = (fun ~sw:_ ~state_owner:_ ~instance_id ~(package : Lane_addon_types.package) ~binding:_ ~on_engine ~is_live_instance:_ ~on_created ->
     incr fixture.starts;
     let stopped = ref false in
     let exported = List.map worker_tool_definition package.exported_tools in

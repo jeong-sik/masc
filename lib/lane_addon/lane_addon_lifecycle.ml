@@ -30,9 +30,17 @@ type observed_engine =
   | Other_engine of engine
   | Unreadable_engine of string
 
+type holder = {
+  container_id : string;
+  instance : string option;
+  state_owner : string option;
+}
+
 type failure =
   | Engine_unreachable of string
   | Engine_mismatch of { recorded : engine; observed : observed_engine }
+  | Slot_foreign of holder
+  | Slot_predecessor_unremovable of { instance_id : string; detail : string }
   | Worker_failed of string
   | Cleanup_unconfirmed of string
   | Persistence_failed of string
@@ -49,7 +57,7 @@ type state =
   | Failed of failed
   | Detaching of failed option
   | Detached of release
-type condition = Engine_reachable | Engine_is of engine
+type condition = Engine_reachable | Engine_is of engine | Holder_changes of holder
 type heal = Retry | Wait_until of condition
 
 let ( let* ) = Result.bind
@@ -59,6 +67,8 @@ let ( let* ) = Result.bind
 let heal = function
   | Engine_unreachable _ -> Wait_until Engine_reachable
   | Engine_mismatch { recorded; _ } -> Wait_until (Engine_is recorded)
+  | Slot_foreign holder -> Wait_until (Holder_changes holder)
+  | Slot_predecessor_unremovable _ -> Retry
   | Worker_failed _ -> Retry
   | Cleanup_unconfirmed _ -> Retry
   | Persistence_failed _ -> Retry
@@ -76,8 +86,16 @@ let observed_to_string = function
   | Other_engine engine -> engine_to_string engine
   | Unreadable_engine detail -> "an engine whose identity cannot be read (" ^ detail ^ ")"
 
+let holder_to_string { container_id; instance; state_owner } =
+  let label name = function None -> "no " ^ name ^ " label" | Some value -> name ^ " " ^ value in
+  "container " ^ container_id ^ " (" ^ label "instance" instance ^ ", " ^ label "state owner" state_owner ^ ")"
+
 let failure_to_string = function
   | Engine_unreachable detail -> "container engine is unreachable: " ^ detail
+  | Slot_foreign holder ->
+      "the worker's container slot is held by " ^ holder_to_string holder ^ ", which is not a dead predecessor of this worker"
+  | Slot_predecessor_unremovable { instance_id; detail } ->
+      "the worker's container slot is held by the dead predecessor " ^ instance_id ^ ", which could not be removed: " ^ detail
   | Engine_mismatch { recorded; observed } ->
       "the container engine is not the one that holds this worker: recorded "
       ^ engine_to_string recorded ^ ", reached " ^ observed_to_string observed
@@ -89,8 +107,9 @@ let failure_to_string = function
 
 let failure_detail = function
   | Cleanup_unconfirmed detail -> detail
-  | (Engine_unreachable _ | Engine_mismatch _ | Worker_failed _ | Persistence_failed _
-    | Previous_process | Effect_outcome_unknown _) as failure -> failure_to_string failure
+  | (Engine_unreachable _ | Engine_mismatch _ | Slot_foreign _ | Slot_predecessor_unremovable _
+    | Worker_failed _ | Persistence_failed _ | Previous_process | Effect_outcome_unknown _) as failure ->
+      failure_to_string failure
 
 let failed_to_string { cause; first } = match first with
   | None -> failure_to_string cause
@@ -100,8 +119,17 @@ let observed_to_json = function
   | Other_engine engine -> `Assoc ["kind", `String "other"; "engine", engine_to_json engine]
   | Unreadable_engine detail -> `Assoc ["kind", `String "unreadable"; "detail", `String detail]
 
+let optional_string = function None -> `Null | Some value -> `String value
+let holder_to_json { container_id; instance; state_owner } =
+  `Assoc ["container_id", `String container_id; "instance", optional_string instance;
+          "state_owner", optional_string state_owner]
+
 let failure_to_json = function
   | Engine_unreachable detail -> `Assoc ["kind", `String "engine_unreachable"; "detail", `String detail]
+  | Slot_foreign holder -> `Assoc ["kind", `String "slot_foreign"; "holder", holder_to_json holder]
+  | Slot_predecessor_unremovable { instance_id; detail } ->
+      `Assoc ["kind", `String "slot_predecessor_unremovable"; "instance_id", `String instance_id;
+              "detail", `String detail]
   | Engine_mismatch { recorded; observed } ->
       `Assoc ["kind", `String "engine_mismatch"; "recorded", engine_to_json recorded;
               "observed", observed_to_json observed]
@@ -123,10 +151,31 @@ let observed_of_json = function
        | _ -> Error "invalid observed container engine")
   | _ -> Error "invalid observed container engine"
 
+let optional_string_of_json = function
+  | `Null -> Ok None
+  | `String value when String.trim value <> "" -> Ok (Some value)
+  | _ -> Error "invalid container label"
+
+let holder_of_json = function
+  | `Assoc fields ->
+      (match sorted fields with
+       | ["container_id", `String container_id; "instance", instance; "state_owner", state_owner]
+         when String.trim container_id <> "" ->
+           let* instance = optional_string_of_json instance in
+           let* state_owner = optional_string_of_json state_owner in
+           Ok { container_id; instance; state_owner }
+       | _ -> Error "invalid slot holder")
+  | _ -> Error "invalid slot holder"
+
 let failure_of_json = function
   | `Assoc fields ->
       (match sorted fields with
        | ["detail", `String detail; "kind", `String "engine_unreachable"] -> Ok (Engine_unreachable detail)
+       | ["holder", holder; "kind", `String "slot_foreign"] ->
+           let* holder = holder_of_json holder in Ok (Slot_foreign holder)
+       | ["detail", `String detail; "instance_id", `String instance_id;
+          "kind", `String "slot_predecessor_unremovable"] ->
+           Ok (Slot_predecessor_unremovable { instance_id; detail })
        | ["kind", `String "engine_mismatch"; "observed", observed; "recorded", recorded] ->
            let* recorded = engine_of_json recorded in
            let* observed = observed_of_json observed in

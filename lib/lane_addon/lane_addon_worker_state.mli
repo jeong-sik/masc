@@ -5,6 +5,9 @@ type owner
 val create_owner : workspace_root:string -> installation_id:string ->
   package_id:string -> (owner, string) result
 val belongs_to : owner -> package_id:string -> bool
+val identity : owner -> string
+(** The text of the [masc.lane.state.owner] label on this owner's volume and
+    on every container created for it. *)
 val volume_name : ?runtime:Lane_addon_types.runtime -> owner -> string
 val container_name : ?runtime:Lane_addon_types.runtime -> owner -> string
 val ensure :

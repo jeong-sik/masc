@@ -25,6 +25,15 @@ type observed_engine =
   | Other_engine of engine
   | Unreadable_engine of string
 
+(** The container that holds a worker slot, as its labels name it. [instance]
+    is the worker incarnation that created it and [state_owner] the persistent
+    state owner it was created for; either is [None] when the label is absent. *)
+type holder = {
+  container_id : string;
+  instance : string option;
+  state_owner : string option;
+}
+
 (** Why a worker or its cleanup cannot proceed. The variant, not the text,
     decides whether the runtime retries ({!heal}); the string is for people. *)
 type failure =
@@ -32,6 +41,12 @@ type failure =
   | Engine_mismatch of { recorded : engine; observed : observed_engine }
       (** The command reached an engine other than the one that holds the
           container, so its answer says nothing about that container. *)
+  | Slot_foreign of holder
+      (** The slot's container is not this worker's and is not a dead
+          predecessor of it: another owner, or an instance still live in this
+          process. It is never removed. *)
+  | Slot_predecessor_unremovable of { instance_id : string; detail : string }
+      (** A dead predecessor holds the slot and its removal was not confirmed. *)
   | Worker_failed of string
   | Cleanup_unconfirmed of string
   | Persistence_failed of string
@@ -63,7 +78,12 @@ type state =
   | Detached of release
 
 (** What a waiting failure needs before another attempt is worth making. *)
-type condition = Engine_reachable | Engine_is of engine
+type condition =
+  | Engine_reachable
+  | Engine_is of engine
+  | Holder_changes of holder
+      (** The container that holds the slot is gone or no longer carries the
+          labels it had. *)
 
 type heal =
   | Retry  (** Another attempt can succeed without anything else changing. *)

@@ -142,9 +142,6 @@ let read_engine_with ~run runtime =
   | Error error -> Error (Lane_addon_lifecycle.Unreachable (error_to_string error))
   | Ok raw -> Engine.engine_of_info runtime raw
 
-let port_of_run ~run runtime =
-  { Lane_addon_slot.read_engine = (fun () -> read_engine_with ~run runtime) }
-
 let read_engine ~clock ~control_timeout_sec ~mgr ~runtime
     ?(docker_command="docker") ?(container_command="container") () =
   if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
@@ -186,11 +183,6 @@ let verify_absent ~runtime ~run id =
   | Some _ -> Error (engine_error runtime ~operation:"verify removal"
       ("container remains visible after removal: " ^ id))
 
-let find_named_container ~runtime ~run name =
-  let* raw = run ~operation:"resolve owned container" (Engine.list_arguments runtime (Engine.Name name)) in
-  Engine.listed_id runtime (Engine.Name name) raw
-  |> Result.map_error (engine_error runtime ~operation:"resolve owned container")
-
 let remove_container ~runtime ~run id =
   (* Exact deletion does not delete a persistent named state volume. *)
   let removal = run ~operation:"remove" (Engine.remove_arguments runtime id) in
@@ -199,10 +191,25 @@ let remove_container ~runtime ~run id =
   | Error verify_error ->
       (match removal with Error error -> Error error | Ok _ -> Error verify_error)
 
-let inspect_owned_container ~runtime ~run ~instance_id ~name id =
-  let* raw = run ~operation:"recover inspect" (Engine.inspect_arguments runtime id) in
-  Engine.verify_owner runtime ~instance_id ~name ~id raw
-  |> Result.map_error (engine_error runtime ~operation:"recover ownership")
+(* The slot procedures run over these four engine commands. Their errors are
+   text for the operator; what an absence or a holder means is decided in
+   [Lane_addon_slot]. *)
+let slot_port ~run runtime : Lane_addon_slot.port =
+  let text error = error_to_string error in
+  { read_engine = (fun () -> read_engine_with ~run runtime);
+    find = (fun lookup ->
+      let* raw = run ~operation:"find container" (Engine.list_arguments runtime lookup)
+        |> Result.map_error text in
+      Engine.listed_id runtime lookup raw);
+    inspect = (fun id ->
+      let* raw = run ~operation:"inspect container" (Engine.inspect_arguments runtime id)
+        |> Result.map_error text in
+      Engine.held_of_inspect runtime raw);
+    remove = (fun id -> remove_container ~runtime ~run id |> Result.map_error text) }
+
+let slot_name ~runtime ~instance_id = function
+  | None -> Engine.owned_name runtime instance_id
+  | Some owner -> Lane_addon_worker_state.container_name ~runtime owner
 
 let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ~engine ?(runtime = Docker) ?state_owner
     ?(docker_command = "docker") ?(container_command = "container") () =
@@ -214,28 +221,23 @@ let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ~en
   else
     let command = command_for runtime ~docker_command ~container_command in
     let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
+    let port = slot_port ~run runtime in
+    let mine = Option.map Lane_addon_worker_state.identity state_owner in
+    let lookup = match container_id with
+      | Some id -> Engine.Id id
+      | None -> Engine.Name (slot_name ~runtime ~instance_id state_owner) in
     (* "No such container" says nothing unless the engine that answered is the
        one that holds the container. *)
-    Lane_addon_slot.proven (port_of_run ~run runtime) ~expected:engine
-      ~lift:(fun failure -> Lifecycle failure) (fun () ->
-    let* found, name = match container_id with
-      | None ->
-          let name = match state_owner with
-            | None -> Engine.owned_name runtime instance_id
-            | Some owner -> Lane_addon_worker_state.container_name ~runtime owner in
-          let* id = find_named_container ~runtime ~run name in
-          Ok (id, Some name)
-      | Some id ->
-          let* raw = run ~operation:"recover existence" (Engine.list_arguments runtime (Engine.Id id)) in
-          let* visible = Engine.listed_id runtime (Engine.Id id) raw
-            |> Result.map_error (engine_error runtime ~operation:"recover existence") in
-          Ok (visible, None)
-    in
-    match found with
-    | None -> Ok ()
-    | Some id ->
-        let* () = inspect_owned_container ~runtime ~run ~instance_id ~name id in
-        remove_container ~runtime ~run id)
+    Lane_addon_slot.proven port ~expected:engine ~lift:(fun failure -> Lifecycle failure) (fun () ->
+      Lane_addon_slot.release port ~lookup ~instance_id ~mine
+      |> Result.map_error (fun failure -> Lifecycle failure))
+
+let holder_changed ~clock ~control_timeout_sec ~mgr ~runtime
+    ?(docker_command = "docker") ?(container_command = "container") holder =
+  Float.is_finite control_timeout_sec && control_timeout_sec > 0.
+  && (let command = command_for runtime ~docker_command ~container_command in
+      let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
+      Lane_addon_slot.holder_changed (slot_port ~run runtime) holder)
 
 let stop t =
   (* Never take the observation mutex: an unresponsive observation is a
@@ -250,7 +252,7 @@ let stop t =
     Ok ()
 
 let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?state_owner ?(mounts = [])
-    ?(docker_command = "docker") ?(container_command = "container") ?(on_engine = fun _ -> Ok ()) ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
+    ?(docker_command = "docker") ?(container_command = "container") ?(on_engine = fun _ -> Ok ()) ?(is_live_instance = fun _ -> true) ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
   let* () = if Float.is_finite control_timeout_sec && control_timeout_sec > 0. then Ok ()
@@ -287,9 +289,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
      identifies a container when the process dies before receiving create's
      stdout or persisting [on_created]. Domain labels are checked before any
      recovered container is removed. *)
-  let name = match state_owner with
-            | None -> Engine.owned_name runtime instance_id
-            | Some owner -> Lane_addon_worker_state.container_name ~runtime owner in
+  let name = slot_name ~runtime ~instance_id state_owner in
   let run = run_control ~clock ~timeout_sec:control_timeout_sec ~mgr ~runtime ~command in
   (* No create is attempted against an engine that cannot name itself. *)
   let* engine = read_engine_with ~run runtime
@@ -312,7 +312,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
   let* () = on_engine engine
     |> Result.map_error (fun detail ->
       Lifecycle (Lane_addon_lifecycle.Persistence_failed ("engine identity persistence: " ^ detail))) in
-  let port = port_of_run ~run runtime in
+  let port = slot_port ~run runtime in
+  let mine = Option.map Lane_addon_worker_state.identity state_owner in
   let identity = ref None in
   let cleanup_finished = ref false in
   let cleanup () =
@@ -362,8 +363,14 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
             ~run:(fun ~operation args -> run ~operation args |> Result.map_error error_to_string)
           |> Result.map (fun mount -> ["--mount"; mount])
           |> Result.map_error (engine_error runtime ~operation:"persistent state") in
+    (* The slot's name is the only thing a create can collide on. A dead
+       predecessor of this installation is removed first; any other holder is
+       refused by name and never touched. *)
+    let* () = Lane_addon_slot.claim port ~name ~instance_id ~mine ~is_live_instance
+      |> Result.map_error (fun failure -> Lifecycle failure) in
     run ~operation:"create"
-      (Engine.create_arguments package ~name ~instance_id ~image:package.image ~package_mount ~mounts:mounted ~state_mounts:state_mount) in
+      (Engine.create_arguments package ~name ~instance_id ~state_owner:mine ~image:package.image
+         ~package_mount ~mounts:mounted ~state_mounts:state_mount) in
   let* created = match Lane_addon_slot.proven port ~expected:engine
       ~lift:(fun failure -> Lifecycle failure) create_on_engine with
     | Ok value -> Ok value

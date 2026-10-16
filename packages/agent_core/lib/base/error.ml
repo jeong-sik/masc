@@ -109,6 +109,11 @@ type config_error =
 (** Serialization / deserialization errors. *)
 type serialization_error =
   | JsonParseError of { detail : string }
+  | StructuredOutputParseError of
+      { detail : string
+      ; raw_preview : string
+      ; raw_len : int
+      }
   | VersionMismatch of
       { expected : int
       ; got : int
@@ -284,6 +289,8 @@ let config_error_to_string = function
 
 let serialization_error_to_string = function
   | JsonParseError r -> Printf.sprintf "JSON parse error: %s" r.detail
+  | StructuredOutputParseError r ->
+    Printf.sprintf "Structured output parse error (response bytes: %d)" r.raw_len
   | VersionMismatch r ->
     Printf.sprintf "Version mismatch: expected %d, got %d" r.expected r.got
   | UnknownVariant r -> Printf.sprintf "Unknown %s variant: %s" r.type_name r.value
@@ -311,6 +318,33 @@ let to_string = function
   | Orchestration err -> orchestration_error_to_string err
   | Internal msg | Internal_carried { message = msg; _ } ->
     Printf.sprintf "Internal error: %s" msg
+;;
+
+(* Resource boundary for diagnostic evidence, not a limit on model output or
+   Keeper execution. Keep the original response length even when retaining only
+   a prefix. Stop before a UTF-8 character crossing the byte boundary. *)
+let structured_evidence_max_bytes = 4096
+
+let bounded_structured_evidence text =
+  if String.length text <= structured_evidence_max_bytes then text
+  else
+    let rec prefix_end offset =
+      let decoded = String.get_utf_8_uchar text offset in
+      let next = offset + Uchar.utf_decode_length decoded in
+      if next > structured_evidence_max_bytes then offset
+      else if next = structured_evidence_max_bytes then next
+      else prefix_end next
+    in
+    String.sub text 0 (prefix_end 0)
+;;
+
+let structured_output_parse_error ~detail ~raw =
+  Serialization
+    (StructuredOutputParseError
+       { detail = bounded_structured_evidence detail
+       ; raw_preview = bounded_structured_evidence raw
+       ; raw_len = String.length raw
+       })
 ;;
 
 (* ── Retryability ─────────────────────────────────────────────────── *)

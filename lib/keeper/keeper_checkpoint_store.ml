@@ -286,6 +286,8 @@ let classify_core_error (e : Agent_core.Error.t) : checkpoint_load_error =
       Io_error (sprintf "file %s failed on %s: %s" r.op r.path r.detail)
   | Io (ValidationFailed r) -> Store_error r.detail
   | Serialization (JsonParseError r) -> Parse_error r.detail
+  | Serialization (StructuredOutputParseError _) ->
+      Parse_error (Agent_core.Error.to_string e)
   | Serialization (VersionMismatch r) when r.got < r.expected ->
       Superseded_version { expected = r.expected; got = r.got }
   (* Only a writer that bumped [checkpoint_version] reaches this arm; a codec

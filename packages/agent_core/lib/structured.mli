@@ -48,6 +48,14 @@ val extract_response_json
   -> api_response
   -> (Yojson.Safe.t, Error.t) result
 
+(** Parse an already received response with a typed schema. Post-response JSON
+    and schema failures retain bounded private model-output evidence in
+    {!Error.StructuredOutputParseError}. No public text projection includes it. *)
+val extract_response
+  :  schema:'a schema
+  -> api_response
+  -> ('a, Error.t) result
+
 (** Agent-level extractor form of {!extract_response_json}. *)
 val response_json_extractor
   :  ?shape:response_json_shape
@@ -57,8 +65,9 @@ val response_json_extractor
 (** Build an {!extractor} from a typed schema.
 
     This is the Agent-level counterpart to {!extract}: it parses the response
-    text as JSON, accepts fenced JSON, and delegates shape validation to
-    [schema.parse]. *)
+    text as JSON and delegates shape validation to [schema.parse]. Its string
+    error projection omits private output evidence; use {!extract_response}
+    when the caller needs the typed failure. *)
 val schema_extractor : 'a schema -> 'a extractor
 
 val json_extractor : (Yojson.Safe.t -> 'a) -> 'a extractor

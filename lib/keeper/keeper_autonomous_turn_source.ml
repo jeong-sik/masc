@@ -446,6 +446,7 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                     | Agent_core.Error.Config _
                     | Agent_core.Error.Serialization
                         (Agent_core.Error.JsonParseError _
+                        | Agent_core.Error.StructuredOutputParseError _
                         | Agent_core.Error.UnknownVariant _)
                     | Agent_core.Error.Io _
                     | Agent_core.Error.Orchestration _

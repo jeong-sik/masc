@@ -33,53 +33,51 @@ let parse_json_string text =
   | Yojson.Json_error detail -> Error detail
 ;;
 
-let parse_schema_text_json schema json =
+let parse_schema_text_json ~raw schema json =
   try
     schema.parse json
-    |> Result.map_error (fun e -> Error.Serialization (JsonParseError { detail = e }))
+    |> Result.map_error (fun detail -> Error.structured_output_parse_error ~detail ~raw)
   with
-  | Yojson.Json_error detail -> Error (Error.Serialization (JsonParseError { detail }))
+  | Yojson.Json_error detail | Yojson.Safe.Util.Type_error (detail, _) ->
+    Error (Error.structured_output_parse_error ~detail ~raw)
 ;;
 
 type response_json_shape =
   | Any_json
   | Object_json
 
-let text_json_of_response (response : api_response) =
-  response |> Types.visible_text_of_response |> String.trim
-;;
-
 let extract_response_json ?(shape = Any_json) (response : api_response)
   : (Yojson.Safe.t, Error.t) result
   =
-  let text = text_json_of_response response in
+  let raw = Types.visible_text_of_response response in
+  let text = String.trim raw in
   if text = ""
   then
     Error
-      (Error.Serialization
-         (JsonParseError
-            { detail = "structured output response did not contain text JSON" }))
+      (Error.structured_output_parse_error
+         ~detail:"structured output response did not contain text JSON"
+         ~raw)
   else
     let* json =
       parse_json_string text
-      |> Result.map_error (fun detail -> Error.Serialization (JsonParseError { detail }))
+      |> Result.map_error (fun detail -> Error.structured_output_parse_error ~detail ~raw)
     in
     match shape, json with
     | Any_json, _ -> Ok json
     | Object_json, `Assoc _ -> Ok json
     | Object_json, _ ->
       Error
-        (Error.Serialization
-           (JsonParseError
-              { detail = "structured output response JSON was not an object" }))
+        (Error.structured_output_parse_error
+           ~detail:"structured output response JSON was not an object"
+           ~raw)
 ;;
 
 (** Extract structured output from the response text JSON. *)
-let extract_text_json ~(schema : _ schema) (response : api_response)
+let extract_response ~(schema : _ schema) (response : api_response)
   : ('a, Error.t) result
   =
   let* json = extract_response_json response in
-  parse_schema_text_json schema json
+  parse_schema_text_json ~raw:(Types.visible_text_of_response response) schema json
 ;;
 
 (* [provider] is required here on purpose: the optional label on the shared
@@ -122,7 +120,7 @@ let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
     Llm_provider.Complete.complete ~sw ~net ~config:provider_cfg ~messages ~tools:[] ()
     |> Result.map_error (core_error_of_http_error ~provider)
   in
-  extract_text_json ~schema response
+  extract_response ~schema response
 ;;
 
 (* ── Extractors ────────────────────────────────────────────────── *)
@@ -131,7 +129,7 @@ let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
 type 'a extractor = api_response -> ('a, string) result
 
 let schema_extractor (schema : 'a schema) : 'a extractor =
-  fun response -> extract_text_json ~schema response |> Result.map_error Error.to_string
+  fun response -> extract_response ~schema response |> Result.map_error Error.to_string
 ;;
 
 let response_json_extractor ?shape () : Yojson.Safe.t extractor =
@@ -213,7 +211,7 @@ let extract_stream
       ()
     |> Result.map_error (core_error_of_http_error ~provider)
   in
-  let* value = extract_text_json ~schema response in
+  let* value = extract_response ~schema response in
   Ok (value, response)
 ;;
 

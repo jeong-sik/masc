@@ -331,10 +331,79 @@ let test_schema_extractor_parser_json_error () =
 
 (* --- Runner --- *)
 
+let check_private_evidence ~raw = function
+  | Error (Error.Serialization (StructuredOutputParseError evidence) as error) ->
+    Alcotest.(check int) "original response byte count" (String.length raw) evidence.raw_len;
+    Alcotest.(check bool) "preview is bounded" true (String.length evidence.raw_preview <= 4096);
+    Alcotest.(check string) "preview preserves the original prefix"
+      (String.sub raw 0 (String.length evidence.raw_preview)) evidence.raw_preview;
+    Alcotest.(check string) "public message contains no private fragments"
+      (Printf.sprintf "Structured output parse error (response bytes: %d)" (String.length raw))
+      (Error.to_string error);
+    Alcotest.(check bool) "parse failure remains nonretryable" false (Error.is_retryable error)
+  | Error ((Api _ | Provider _ | Agent _ | Mcp _ | Config _
+           | Serialization (JsonParseError _ | VersionMismatch _ | UnknownVariant _)
+           | Io _ | Orchestration _ | Internal _ | Internal_carried _) as error) ->
+    Alcotest.failf "expected structured evidence, got %s" (Error.to_string error)
+  | Ok _ -> Alcotest.fail "invalid response was accepted"
+;;
+
+let test_malformed_response_retains_original_evidence () =
+  let raw = " \n```json\n{\"secret\":\"private-model-output\"}\n``` \n" in
+  Structured.extract_response_json (make_response [Text raw])
+  |> check_private_evidence ~raw
+;;
+
+let test_schema_refusal_retains_response_without_public_detail () =
+  let raw = " {\"name\":123,\"secret\":\"private-model-output\"} " in
+  let schema : unit Structured.schema =
+    { params = []; parse = (fun _ -> Error ("private-schema-detail:" ^ raw)) }
+  in
+  Structured.extract_response ~schema (make_response [Text raw])
+  |> check_private_evidence ~raw
+;;
+
+let test_schema_type_exception_retains_response () =
+  let raw = {|{"name":123}|} in
+  let schema : string Structured.schema =
+    { params = []; parse = (fun json -> Ok Yojson.Safe.Util.(json |> member "name" |> to_string)) }
+  in
+  Structured.extract_response ~schema (make_response [Text raw])
+  |> check_private_evidence ~raw
+;;
+
+let test_response_shape_failure_retains_response () =
+  let raw = " [1,2,3] \n" in
+  Structured.extract_response_json ~shape:Structured.Object_json (make_response [Text raw])
+  |> check_private_evidence ~raw
+;;
+
+let test_long_response_evidence_keeps_utf8_boundary () =
+  let raw = String.make 4095 'x' ^ "한글-private-model-output" ^ String.make 10000 'y' in
+  let error = Error.structured_output_parse_error ~detail:raw ~raw in
+  check_private_evidence ~raw (Error error);
+  match error with
+  | Error.Serialization (StructuredOutputParseError evidence) ->
+    Alcotest.(check int) "no split UTF-8 character" 4095 (String.length evidence.raw_preview);
+    Alcotest.(check bool) "valid UTF-8 preview" true (String.is_valid_utf_8 evidence.raw_preview);
+    Alcotest.(check bool) "private diagnostic is also bounded" true (String.length evidence.detail <= 4096)
+  | Api _ | Provider _ | Agent _ | Mcp _ | Config _
+  | Serialization (JsonParseError _ | VersionMismatch _ | UnknownVariant _)
+  | Io _ | Orchestration _ | Internal _ | Internal_carried _ ->
+    Alcotest.fail "wrong evidence constructor"
+;;
+
 let () =
   Alcotest.run
     "structured"
-    [ ( "schema_to_json_schema"
+    [ ( "private failure evidence"
+      , [ Alcotest.test_case "malformed response" `Quick test_malformed_response_retains_original_evidence
+        ; Alcotest.test_case "schema refusal" `Quick test_schema_refusal_retains_response_without_public_detail
+        ; Alcotest.test_case "schema type exception" `Quick test_schema_type_exception_retains_response
+        ; Alcotest.test_case "object shape" `Quick test_response_shape_failure_retains_response
+        ; Alcotest.test_case "bounded UTF-8 evidence" `Quick test_long_response_evidence_keeps_utf8_boundary
+        ] )
+    ; ( "schema_to_json_schema"
       , [ Alcotest.test_case "structure" `Quick test_schema_to_json_structure
         ; Alcotest.test_case "optional params" `Quick test_schema_optional_params
         ; Alcotest.test_case

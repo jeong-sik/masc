@@ -704,6 +704,20 @@ let test_timeout_projection_without_phase_reports_null () =
      | Some `Null -> true
      | Some _ | None -> false)
 
+let test_structured_error_projection_omits_private_model_output () =
+  let raw = "private-model-output-api-key-value" in
+  let error = Agent_core.Error.structured_output_parse_error ~detail:raw ~raw in
+  let projection = Error_json.agent_failed_error_projection error in
+  check (option string) "structured error kind" (Some "structured_output_parse_error")
+    (string_of_field (member "variant" projection.error_detail));
+  check (option int) "original bytes remain observable" (Some (String.length raw))
+    (int_of_field (member "raw_len" projection.error_detail));
+  check bool "preview omitted" true (member "raw_preview" projection.error_detail = None);
+  check bool "private parser detail omitted" true (member "detail" projection.error_detail = None);
+  check bool "whole public projection omits model output" false
+    (Agent_core_strings.contains_substring
+       ~haystack:(Yojson.Safe.to_string projection.error_detail) ~needle:raw)
+
 let () =
   run "keeper_execution_join"
     [ ( "join_table"
@@ -719,7 +733,9 @@ let () =
             test_abandoned_join_is_released_with_invocation
         ] )
     ; ( "bridge_stamping"
-      , [ test_case "tool_called carries tool_use_id" `Quick
+      , [ test_case "structured failures omit private model evidence" `Quick
+            test_structured_error_projection_omits_private_model_output
+        ; test_case "tool_called carries tool_use_id" `Quick
             test_tool_called_carries_tool_use_id
         ; test_case "tool_completed stamps execution_id" `Quick
             test_tool_completed_stamps_execution_id

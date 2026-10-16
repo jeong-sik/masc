@@ -300,6 +300,10 @@ let core_config_error_fields = function
 let core_serialization_error_fields = function
   | Agent_core.Error.JsonParseError { detail } ->
     [ "variant", `String "json_parse_error"; "detail", `String detail ]
+  | Agent_core.Error.StructuredOutputParseError { detail = _; raw_preview = _; raw_len } ->
+    [ "variant", `String "structured_output_parse_error"
+    ; "raw_len", `Int raw_len
+    ]
   | Agent_core.Error.VersionMismatch { expected; got } ->
     [ "variant", `String "version_mismatch"; "expected", `Int expected; "got", `Int got ]
   | Agent_core.Error.UnknownVariant { type_name; value } ->

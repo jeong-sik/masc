@@ -66,6 +66,30 @@ let response_policy_for_turn ~turn_kind ~input_speaker
   | ((Direct | Autonomous), Keeper_input_speaker.Person _, _, _) -> Require_progress
 ;;
 
+(* The wake text cannot tell whether this turn may end in silence: the policy
+   above decides that from pending inputs, answered Asks and a HITL
+   resolution. The line it selects is appended to the wake input, so the model
+   reads the decision the accept check applies. Silence still has to arrive as
+   a blank text block or no content: a thinking-only reply on a thinking HTTP
+   lane is not a quiet final (#41925). A render failure is placed in the line
+   rather than dropped, because a missing line reads as an absent condition. *)
+let with_completion_clause ~input_speaker ~response_policy user_message =
+  match (input_speaker : Keeper_input_speaker.t) with
+  | Host_prompt (Autonomous_wake _) ->
+    let key =
+      match (response_policy : Keeper_tooling.Response.completion_policy) with
+      | Allow_quiet_final -> Prompt_names.keeper_wake_completion_quiet_final_allowed
+      | Require_progress -> Prompt_names.keeper_wake_completion_progress_required
+    in
+    let clause =
+      match Prompt_registry.render_prompt_template key [] with
+      | Ok text -> text
+      | Error detail -> key ^ ": " ^ detail
+    in
+    user_message ^ "\n\n" ^ clause
+  | Host_prompt Official_client_resume | Person _ -> user_message
+;;
+
 (* Accept lets a quiet final through; finalization must agree or the turn
    settles a typed no-progress error after the runtime already accepted the
    response. The quiet fallback below is the one place a quiet final becomes
@@ -809,6 +833,7 @@ module For_testing = struct
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
   let response_policy_for_turn = response_policy_for_turn
+  let with_completion_clause = with_completion_clause
   let normalize_final_response_text = normalize_final_response_text
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
@@ -954,7 +979,10 @@ let run_turn
          })
       runtime_retry_deferral
   in
-  let user_message = Keeper_run_prompt.sanitize_user_message user_message in
+  let user_message =
+    Keeper_run_prompt.sanitize_user_message user_message
+    |> with_completion_clause ~input_speaker ~response_policy
+  in
   Masc_runtime_events.emit_turn_start ();
   (* Cancel-safe cleanup (#9747): [Eio_guard.protect] already uses
      [Eio.Switch.on_release], so cleanup runs under cooperative cancellation

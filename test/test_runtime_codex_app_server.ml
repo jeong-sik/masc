@@ -4180,7 +4180,7 @@ let production_keeper_meta ~base_path ~trace_id =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
-let run_production_keeper_turn_with_projection ~write_cost_ledger ~after_turn
+let run_production_keeper_turn_as ~input_speaker ~turn_kind ~write_cost_ledger ~after_turn
     ~dynamic_context_for_tools
     ~http_requests ~base_path ~trace_id
     ~user_message ~cli_path ~model ~turn_instructions =
@@ -4303,9 +4303,8 @@ candidates = ["projection.http", "codex.codex"]
                                            "--- Turn-specific instructions ---\n" ^ ti)
                                     })
                                 ~user_message
-                                ~input_speaker:
-                                  (Keeper_input_speaker.Person Keeper_input_speaker.Owner)
-                                ~turn_kind:Turn_record.Direct
+                                ~input_speaker
+                                ~turn_kind
                                 ~skill_snapshot:
                                   (Skill_catalog_snapshot.config_unreadable
                                      ~detail:"test fixture has no Skill publication")
@@ -4316,6 +4315,12 @@ candidates = ["projection.http", "codex.codex"]
                                  still the published one. *)
                               after_turn settlement;
                               settlement.Keeper_agent_run.result))))))
+;;
+
+let run_production_keeper_turn_with_projection =
+  run_production_keeper_turn_as
+    ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+    ~turn_kind:Turn_record.Direct
 ;;
 
 let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace_id
@@ -7676,6 +7681,61 @@ let run_cost_ledger_turn ?(after_turn = ignore) ~base_path ~trace_id ~cli_path (
    turns, 2026-09-23..25). Its occupancy is the estimate with no cache split
    and no output, not a request of zero input; the spend is still the
    thread count. *)
+(* The production Keeper turn appends the clause its response policy chose to
+   an autonomous wake input. Without a world observation the policy requires
+   progress, so the Codex turn input ends with that clause. *)
+let test_production_wake_input_carries_the_completion_clause () =
+  let base_path = temp_workspace "masc-codex-production-wake-clause-" in
+  let capture_path = Filename.concat base_path "codex-requests.jsonl" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~capture_path
+         [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+         (fun cli_path ->
+            (match
+               run_production_keeper_turn_as
+                 ~input_speaker:
+                   (Keeper_input_speaker.Host_prompt
+                      (Keeper_input_speaker.Autonomous_wake { answered_asks = [] }))
+                 ~turn_kind:Turn_record.Autonomous
+                 ~write_cost_ledger:false
+                 ~after_turn:ignore
+                 ~dynamic_context_for_tools:None
+                 ~http_requests:None
+                 ~base_path
+                 ~trace_id:"codex-production-wake-clause"
+                 ~user_message:"Autonomous wake."
+                 ~cli_path
+                 ~model:"gpt-fixture"
+                 ~turn_instructions:None
+             with
+             | Ok _ -> ()
+             | Error error -> fail (Agent_core.Error.to_string error));
+            let clause =
+              match
+                Prompt_registry.render_prompt_template
+                  Prompt_names.keeper_wake_completion_progress_required
+                  []
+              with
+              | Ok text -> text
+              | Error detail -> failf "the clause should render: %s" detail
+            in
+            let open Yojson.Safe.Util in
+            let turn_input =
+              In_channel.with_open_bin capture_path In_channel.input_all
+              |> String.split_on_char '\n'
+              |> List.filter (fun line -> line <> "")
+              |> List.map Yojson.Safe.from_string
+              |> List.find (fun json -> member "method" json = `String "turn/start")
+              |> member "params" |> member "input" |> to_list
+              |> List.filter_map (fun item -> member "text" item |> to_string_option)
+              |> String.concat "\n"
+            in
+            check bool "the Codex turn input ends with the clause" true
+              (String.ends_with ~suffix:clause turn_input)))
+;;
+
 let test_production_keeper_takes_a_compaction_estimate_as_occupancy () =
   let base_path = temp_workspace "masc-codex-production-estimate-" in
   Fun.protect
@@ -9064,6 +9124,10 @@ let () =
             "production Keeper records the newest Codex request context"
             `Quick
             test_production_keeper_records_newest_codex_request_context
+        ; test_case
+            "production wake input carries the completion clause"
+            `Quick
+            test_production_wake_input_carries_the_completion_clause
         ; test_case
             "production Keeper takes a compaction estimate as occupancy"
             `Quick

@@ -1670,6 +1670,105 @@ let test_response_policy_non_autonomous_input_requires_progress () =
        ~observation:(Some observation)
        ~hitl_resolution:None)
 
+(* The wake input closes with the line the accept policy selects, so the model
+   reads the same decision the accept check applies. Compared against the
+   rendered slot, not its wording. *)
+let rendered_clause key =
+  match Prompt_registry.render_prompt_template key [] with
+  | Ok text -> text
+  | Error detail -> Alcotest.failf "clause %s should render: %s" key detail
+
+let test_wake_input_closes_with_the_policy_clause () =
+  let wake = "wake" in
+  let allowed =
+    rendered_clause Prompt_names.keeper_wake_completion_quiet_final_allowed
+  in
+  let required =
+    rendered_clause Prompt_names.keeper_wake_completion_progress_required
+  in
+  let clause_for observation =
+    let response_policy =
+      policy_for_turn
+        ~turn_kind:Turn_record.Autonomous
+        ~speaker:autonomous_wake_speaker
+        ~observation:(Some observation)
+        ~hitl_resolution:None
+    in
+    Masc.Keeper_agent_run.For_testing.with_completion_clause
+      ~input_speaker:autonomous_wake_speaker
+      ~response_policy
+      wake
+  in
+  Alcotest.(check string)
+    "a wake that may end quietly says so"
+    (wake ^ "\n\n" ^ allowed)
+    (clause_for (wake_observation ~pending_messages:[] ~pending_board_events:[]));
+  Alcotest.(check string)
+    "a wake with a delivered board event says it must answer"
+    (wake ^ "\n\n" ^ required)
+    (clause_for
+       (wake_observation
+          ~pending_messages:[]
+          ~pending_board_events:
+            [ board_event Masc.Keeper_world_observation.Board_post_created ]));
+  Alcotest.(check bool) "the two clauses differ" false (String.equal allowed required);
+  let empty = wake_observation ~pending_messages:[] ~pending_board_events:[] in
+  let clause_with ~speaker ~hitl_resolution =
+    Masc.Keeper_agent_run.For_testing.with_completion_clause
+      ~input_speaker:speaker
+      ~response_policy:
+        (policy_for_turn
+           ~turn_kind:Turn_record.Autonomous
+           ~speaker
+           ~observation:(Some empty)
+           ~hitl_resolution)
+      wake
+  in
+  Alcotest.(check string)
+    "a wake quoting an answered Ask says it must answer"
+    (wake ^ "\n\n" ^ required)
+    (clause_with
+       ~speaker:
+         (Masc.Keeper_input_speaker.Host_prompt
+            (Masc.Keeper_input_speaker.Autonomous_wake
+               { answered_asks = [ Masc.Keeper_input_speaker.Owner ] }))
+       ~hitl_resolution:None);
+  let dashboard_channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"thread-test" with
+    | Ok channel -> channel
+    | Error detail -> Alcotest.failf "dashboard channel should construct: %s" detail
+  in
+  Alcotest.(check string)
+    "a wake carrying a Gate answer says it must answer"
+    (wake ^ "\n\n" ^ required)
+    (clause_with
+       ~speaker:autonomous_wake_speaker
+       ~hitl_resolution:
+         (Some
+            { Keeper_event_queue.approval_id = "approval-test"
+            ; decision = Keeper_event_queue.Hitl_approved
+            ; channel = dashboard_channel
+            }))
+
+let test_non_wake_input_carries_no_clause () =
+  let message = "operator request" in
+  Alcotest.(check string)
+    "a person's message is left as written"
+    message
+    (Masc.Keeper_agent_run.For_testing.with_completion_clause
+       ~input_speaker:(Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner)
+       ~response_policy:Keeper_tooling.Response.Require_progress
+       message);
+  Alcotest.(check string)
+    "an official-client resume cue is left as written"
+    message
+    (Masc.Keeper_agent_run.For_testing.with_completion_clause
+       ~input_speaker:
+         (Masc.Keeper_input_speaker.Host_prompt
+            Masc.Keeper_input_speaker.Official_client_resume)
+       ~response_policy:Keeper_tooling.Response.Require_progress
+       message)
+
 let test_max_tokens_text_is_rejected_for_checkpoint_continuation () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -2286,6 +2385,14 @@ let () =
             "non-autonomous input requires progress"
             `Quick
             test_response_policy_non_autonomous_input_requires_progress;
+          Alcotest.test_case
+            "wake input closes with the policy clause"
+            `Quick
+            test_wake_input_closes_with_the_policy_clause;
+          Alcotest.test_case
+            "non-wake input carries no clause"
+            `Quick
+            test_non_wake_input_carries_no_clause;
           Alcotest.test_case
             "MaxTokens text uses checkpoint continuation"
             `Quick

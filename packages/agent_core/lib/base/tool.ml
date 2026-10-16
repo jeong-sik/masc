@@ -21,9 +21,20 @@ end
 
 type execution_env_tool_handler = Execution_env.t -> Yojson.Safe.t -> Types.tool_result
 
+type scoped_call =
+  { scopes : Tool_contract.Resource_scope.t list
+  ; handler : execution_env_tool_handler
+  }
+
+let scoped_call ~scope ?(additional_scopes = []) handler =
+  { scopes = scope :: additional_scopes; handler }
+;;
+
 type ordinary_admission =
   | Static of Tool_contract.execution_mode
   | Concurrent_when of (Yojson.Safe.t -> bool)
+  | Resource_scoped of
+      (sw:Eio.Switch.t -> Yojson.Safe.t -> (scoped_call option, Types.tool_error) result)
 
 type call_effect = Read_only | Effect_possible
 
@@ -31,20 +42,28 @@ type descriptor =
   | Ordinary_descriptor of
       { admission : ordinary_admission
       ; call_effect : Yojson.Safe.t -> call_effect
+      ; prepared_for : execution_env_tool_handler option
       }
   | Terminal_descriptor of Tool_contract.failure_effect_disposition
 
 let ordinary_descriptor ?(call_effect = fun _ -> Effect_possible) execution_mode =
-  Ordinary_descriptor { admission = Static execution_mode; call_effect }
+  Ordinary_descriptor { admission = Static execution_mode; call_effect; prepared_for = None }
 
 (* One predicate, one fact: an input it proves read-only is both admitted
    concurrently and certified read-only for retry. *)
 let ordinary_descriptor_concurrent_when proves_read_only =
   Ordinary_descriptor
     { admission = Concurrent_when proves_read_only
+    ; prepared_for = None
     ; call_effect =
         (fun input -> if proves_read_only input then Read_only else Effect_possible)
     }
+;;
+
+let ordinary_descriptor_scoped ~prepare =
+  Ordinary_descriptor
+    { admission = Resource_scoped prepare; call_effect = (fun _ -> Effect_possible)
+    ; prepared_for = None }
 ;;
 
 let terminal_descriptor failure_effect = Terminal_descriptor failure_effect
@@ -54,6 +73,7 @@ let descriptor_execution_mode descriptor ~input =
   | Ordinary_descriptor { admission = Static execution_mode; _ } -> execution_mode
   | Ordinary_descriptor { admission = Concurrent_when proves_read_only; _ } ->
     if proves_read_only input then Tool_contract.Concurrent else Tool_contract.Serial
+  | Ordinary_descriptor { admission = Resource_scoped _; _ } -> Tool_contract.Serial
   | Terminal_descriptor _ -> Tool_contract.Serial
 ;;
 
@@ -68,6 +88,59 @@ type t =
   ; descriptor : descriptor option
   ; handler : execution_env_tool_handler
   }
+
+type prepared_call =
+  { input : Yojson.Safe.t
+  ; handler : execution_env_tool_handler
+  ; scopes : Tool_contract.Resource_scope.t list option
+  }
+
+let prepare_call ~sw (tool : t) ~input =
+  match tool.descriptor with
+  | Some (Ordinary_descriptor { admission = Resource_scoped prepare; prepared_for; _ }) ->
+    (match prepared_for with
+     | Some expected when expected == tool.handler ->
+       (match prepare ~sw input with
+        | Ok (Some scoped) -> { input; handler = scoped.handler; scopes = Some scoped.scopes }
+        | Ok None -> { input; handler = tool.handler; scopes = None }
+        | Error error -> { input; handler = (fun _ _ -> Error error); scopes = None })
+     | Some _ | None -> { input; handler = tool.handler; scopes = None })
+  | Some (Ordinary_descriptor { admission = (Static _ | Concurrent_when _); _ })
+  | Some (Terminal_descriptor _) | None ->
+    { input; handler = tool.handler; scopes = None }
+;;
+
+let prepared_call_scopes (call : prepared_call) = call.scopes
+
+let has_scoped_admission (tool : t) =
+  match tool.descriptor with
+  | Some (Ordinary_descriptor { admission = Resource_scoped _; prepared_for; _ }) ->
+    (match prepared_for with Some expected -> expected == tool.handler | None -> false)
+  | Some (Ordinary_descriptor { admission = (Static _ | Concurrent_when _); _ })
+  | Some (Terminal_descriptor _) | None -> false
+;;
+
+let map_handler wrap (tool : t) =
+  let handler = wrap tool.handler in
+  let descriptor = match tool.descriptor with
+    | Some (Ordinary_descriptor ({ admission = Resource_scoped prepare; _ } as ordinary))
+      when has_scoped_admission tool ->
+      let prepare ~sw input =
+        Result.map
+          (Option.map (fun (scoped : scoped_call) -> { scoped with handler = wrap scoped.handler }))
+          (prepare ~sw input)
+      in
+      Some (Ordinary_descriptor
+        { ordinary with admission = Resource_scoped prepare; prepared_for = Some handler })
+    | Some (Ordinary_descriptor { admission = (Static _ | Concurrent_when _ | Resource_scoped _); _ })
+    | Some (Terminal_descriptor _) | None -> tool.descriptor
+  in
+  { tool with handler; descriptor }
+;;
+
+let execute_prepared ?context ?invocation (call : prepared_call) =
+  call.handler (Execution_env.create ?context ?invocation ()) call.input
+;;
 
 (* ── Handler adapters ─────────────────────────────────────────────
    Where the schema comes from and what the handler reads are independent
@@ -101,6 +174,11 @@ let requiring_context (handler : context_tool_handler) execution_env input =
     (schema source, handler kind) combination is this function applied to the
     schema constructor and the handler adapter for that combination. *)
 let of_schema ?descriptor (schema : tool_schema) (handler : execution_env_tool_handler) =
+  let descriptor = match descriptor with
+    | Some (Ordinary_descriptor ({ admission = Resource_scoped _; _ } as ordinary)) ->
+      Some (Ordinary_descriptor { ordinary with prepared_for = Some handler })
+    | Some (Ordinary_descriptor { admission = (Static _ | Concurrent_when _); _ })
+    | Some (Terminal_descriptor _) | None -> descriptor in
   { schema; descriptor; handler }
 ;;
 
@@ -115,7 +193,7 @@ let create ?descriptor ?strict ~name ~description ~parameters handler =
 ;;
 
 (** Execute a tool with its explicit execution resources. *)
-let execute ?context ?invocation tool input =
+let execute ?context ?invocation (tool : t) input =
   tool.handler (Execution_env.create ?context ?invocation ()) input
 ;;
 
@@ -150,6 +228,8 @@ let descriptor_to_yojson = function
           | Ordinary_descriptor { admission = Concurrent_when _; _ } -> `String "concurrent_when_read_only"
           | Ordinary_descriptor { admission = Static execution_mode; _ } ->
             Tool_contract.execution_mode_to_yojson execution_mode
+          | Ordinary_descriptor { admission = Resource_scoped _; _ } ->
+            `String "resource_scoped"
           | Terminal_descriptor _ ->
             Tool_contract.execution_mode_to_yojson Tool_contract.Serial )
       ; ( "completion"
@@ -233,5 +313,22 @@ let with_defaults (defaults : (string * Yojson.Safe.t) list) (tool : t) : t =
     | other -> other
   in
   let handler execution_env input = tool.handler execution_env (inject_defaults input) in
-  { tool with handler }
+  let descriptor =
+    match tool.descriptor with
+    | Some (Ordinary_descriptor ({ admission = Resource_scoped prepare; _ } as ordinary))
+      when has_scoped_admission tool ->
+      let prepare ~sw input =
+        match prepare ~sw (inject_defaults input) with
+        | Ok (Some scoped) ->
+          Ok (Some { scoped with handler =
+            (fun env input -> scoped.handler env (inject_defaults input)) })
+        | Ok None -> Ok None
+        | Error error -> Error error
+      in
+      Some (Ordinary_descriptor
+        { ordinary with admission = Resource_scoped prepare; prepared_for = Some handler })
+    | Some (Ordinary_descriptor { admission = (Static _ | Concurrent_when _ | Resource_scoped _); _ })
+    | Some (Terminal_descriptor _) | None -> tool.descriptor
+  in
+  { tool with handler; descriptor }
 ;;

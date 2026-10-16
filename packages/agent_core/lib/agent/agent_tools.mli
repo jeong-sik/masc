@@ -231,9 +231,22 @@ val find_and_execute_tool
     the sole tool-effect authority: AGENT_CORE durably opens the exact invocation and
     commits an attempt before the handler, atomically settles the exact result,
     and replays a settled result without rerunning observers or the handler.
+    Restored unattempted occurrences preserve their original invocation schedule
+    only when current completion agrees, and still require current preparation
+    and the current pre-execution gate. Persisted identity is not permission.
     Legacy [journal] Tool_called/Tool_completed projections are suppressed on
     this path. A durability failure dominates hook and observer failures because
     effect-outcome truth must not be hidden.
+
+    Descriptor-owned resource preparation runs only after terminal-mix
+    admission and public schema validation, before tool effects. An opaque
+    prepared call carries its exact input and handler through the same
+    PreToolUse, durable invocation, and observer boundaries. Within a scoped
+    region, every earlier conflicting occupied resource is an ordering edge;
+    disjoint ready calls may overlap. Read-only concurrent regions and ordinary
+    Serial calls remain barriers around scoped effects. Preparation resources
+    remain live through execution and observers and close on cancellation or
+    failure. Calls without scoped descriptors keep their existing path.
 
     On success, returns one [tool_execution_result] per [ToolUse] block in the
     same relative order as the input. On failure, [completed_results] retains

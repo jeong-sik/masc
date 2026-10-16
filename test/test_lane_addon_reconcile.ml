@@ -1772,6 +1772,56 @@ let test_a_dead_servers_containers_are_swept_once_the_engine_answers () =
     check bool "the live worker's container is untouched" true (Fake.holds state.home (Store.digest id));
     detach clock config id)
 
+(* Whether a refused container is looked at again is [Lifecycle.heal]'s call
+   on the refusal. A removal the engine refused can succeed later; a holder
+   that is not this server's predecessor stays what it is. *)
+let test_a_sweep_that_could_not_remove_is_run_again () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    let dead_name = Lane_addon_engine.owned_name Types.Docker "dead-server-instance" in
+    ignore (Fake.add state.home ~id:"dead-server-container" ~name:dead_name
+      ~labels:["masc.lane.instance", "dead-server-instance"; Lane_addon_engine.scope_label, Fake.scope_of_world] ());
+    Fake.refuse_removal state.home "dead-server-container";
+    ignore (reconcile config directory);
+    check int "the first beat sweeps" 1 !(state.sweeps);
+    check bool "the refused container is still there" true (Fake.holds state.home "dead-server-container");
+    ignore (reconcile config directory);
+    check int "a removal that failed is swept again on the next beat" 2 !(state.sweeps);
+    Fake.allow_removal state.home "dead-server-container";
+    ignore (reconcile config directory);
+    check int "and again once more" 3 !(state.sweeps);
+    check bool "the container is removed when the engine allows it" false
+      (Fake.holds state.home "dead-server-container");
+    ignore (reconcile config directory);
+    ignore (reconcile config directory);
+    check int "a sweep with nothing left to retry is not repeated" 3 !(state.sweeps);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    detach clock config id)
+
+let test_a_sweep_that_refused_a_foreign_container_is_not_repeated () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    write (Filename.concat directory "observer.toml") (declaration ~id:"observer" ~manifest ());
+    (* In this server's scope but not named for any incarnation of its own. *)
+    ignore (Fake.add state.home ~id:"foreign-container" ~name:"someone-elses-name"
+      ~labels:[Lane_addon_engine.scope_label, Fake.scope_of_world] ());
+    ignore (reconcile config directory);
+    check int "the first beat sweeps" 1 !(state.sweeps);
+    for _ = 1 to 4 do ignore (reconcile config directory) done;
+    check int "four more beats do not sweep again" 1 !(state.sweeps);
+    check bool "the foreign container is untouched" true (Fake.holds state.home "foreign-container");
+    check bool "the refusal was a foreign holder" true
+      (List.exists (fun (item : Lane_addon_slot.sweep_item) -> match item.verdict with
+         | Lane_addon_slot.Refused (Lifecycle.Slot_foreign _) -> item.container_id = "foreign-container"
+         | Lane_addon_slot.Refused _ | Lane_addon_slot.Removed | Lane_addon_slot.Live -> false) !(state.swept));
+    let id = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config id;
+    detach clock config id)
+
 let test_binding_inventory_issues_carry_failure_kind_tags () =
   with_fixture (fun _ _ config _directory _packages _state ->
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -1898,6 +1948,10 @@ let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension"
     test_a_foreign_holder_makes_the_attempt_wait_for_the_holder_to_change;
   test_case "a dead server's containers are swept once the engine answers" `Quick
     test_a_dead_servers_containers_are_swept_once_the_engine_answers;
+  test_case "a sweep that could not remove is run again" `Quick
+    test_a_sweep_that_could_not_remove_is_run_again;
+  test_case "a sweep that refused a foreign container is not repeated" `Quick
+    test_a_sweep_that_refused_a_foreign_container_is_not_repeated;
   test_case "Detach keeps the declaration when cleanup fails" `Quick
     test_detach_keeps_the_declaration_when_cleanup_fails;
   test_case "Detach of a retained record keeps the declaration when cleanup fails" `Quick

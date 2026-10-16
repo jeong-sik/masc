@@ -53,10 +53,53 @@ let resume ?on_recovery_held ~context continuation =
   let* persisted = Keeper_meta_store.read_meta_file_path_read_only
       ~ownership_root:config.base_path metadata_path
     |> Result.map_error (fun error -> Metadata_unavailable error) in
-  let* persisted = match persisted with Some meta -> Ok meta | None -> Error Metadata_missing in
-  let* () = if persisted.name = source.keeper_name then Ok () else Error Metadata_owner_mismatch in
-  let* meta = Keeper_meta_contract.effective_meta_of_profile_defaults defaults persisted
-    |> Result.map_error (fun detail -> Profile_rejected detail) in
+  let* meta, owner_metadata_refusal =
+    match persisted with
+    | Some persisted when persisted.name = source.keeper_name ->
+      let* meta = Keeper_meta_contract.effective_meta_of_profile_defaults defaults persisted
+        |> Result.map_error (fun detail -> Profile_rejected detail) in
+      Ok (meta, None)
+    | None | Some _ ->
+      let refusal = match persisted with
+        | None -> Keeper_tool_composition_surface.Owner_metadata_missing
+        | Some _ -> Keeper_tool_composition_surface.Owner_metadata_mismatch in
+      let trace_id =
+        match source.producer with
+        | Journal.Named {activation=Some bound;_} ->
+          Keeper_skill_activation_recorder.bound_trace_id bound
+        | Journal.Prepared | Journal.Named {activation=None;_} ->
+          (match Keeper_id.Trace_id.of_string ("refusal-" ^ source.keeper_name) with
+           | Ok tid -> tid
+           | Error _ -> Keeper_id.Trace_id.generate ()) in
+      let placeholder : Keeper_meta_contract.keeper_meta =
+        { id = None; name = source.keeper_name; instructions = ""
+        ; sandbox_profile = Keeper_types_profile.Docker; sandbox_image = None
+        ; network_mode = Keeper_types_profile.Network_none; microvm_backend = None
+        ; microvm_memory = None; microvm_cpus = None; mention_targets = []
+        ; board_interests = []; created_at = ""; updated_at = ""
+        ; max_context_override = None; paused = false; latched_reason = None
+        ; input_policy = Keeper_input_policy.default
+        ; activation_mode = Keeper_activation_mode.default; current_task_id = None
+        ; telemetry_feedback_enabled = None; telemetry_feedback_window_hours = None
+        ; always_allow = None; voice_always_allow = None
+        ; runtime =
+            { usage =
+                { total_turns = 0; total_input_tokens = 0; total_output_tokens = 0
+                ; total_tokens = 0; total_cost_usd = 0.0; last_turn_ts = 0.0
+                ; last_input_tokens = 0; last_output_tokens = 0; last_total_tokens = 0
+                ; last_usage_reported_at = None; last_latency_ms = 0 }
+            ; usage_cursor = None; last_usage_resolution = None
+            ; proactive_rt =
+                { count_total = 0; last_ts = 0.0; visible_count_total = 0
+                ; last_visible_ts = 0.0
+                ; last_outcome = Keeper_meta_contract.Proactive_never_started
+                ; last_reason = ""; last_preview = "" }
+            ; trace_id; last_runtime_attempt = None; message_scope_ack_id = None }
+        ; keeper_id = None; agent_core_env = [] } in
+      let* meta = Keeper_meta_contract.effective_meta_of_profile_defaults defaults placeholder
+        |> Result.map_error (fun detail -> Profile_rejected detail) in
+      Ok (meta, Some refusal)
+  in
   let* () = if meta.paused then Error Keeper_paused else Ok () in
   let* snapshot = current_snapshot ~base_path:config.base_path in
   let* nested_activation = Keeper_composition_draft.load_nested_activation ~base_path:config.base_path source
@@ -93,7 +136,7 @@ let resume ?on_recovery_held ~context continuation =
       ~completion:Agent_core.Tool_contract.Continue_after_success in
   let publication_recovery : Keeper_publication_recovery_availability.turn_context =
     {provider=context.publication_recovery_provider;keeper_name=source.keeper_name} in
-  Ok (Keeper_tool_composition_surface.resume_continuation ?on_recovery_held ~capability_surface ~continuation
+  Ok (Keeper_tool_composition_surface.resume_continuation ?on_recovery_held ?owner_metadata_refusal ~capability_surface ~continuation
       ~config ~meta ~publication_recovery
       ~ctx_snapshot:(Keeper_context_runtime.create ~eio:true ~system_prompt:meta.instructions)
       ~turn_context ~invocation

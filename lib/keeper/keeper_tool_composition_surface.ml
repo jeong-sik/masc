@@ -7,14 +7,26 @@ open Keeper_tool_composition_projection
 
 let ( let* ) = Result.bind
 
+type owner_metadata_refusal =
+  | Owner_metadata_missing
+  | Owner_metadata_mismatch
+
 type continuation_refusal =
   | Current_leaf_denied of Keeper_composition_draft.continuation_refusal
   | Original_producer_absent of Skill_reference.t
+  | Original_producer_changed of Skill_reference.t
+  | Original_owner_metadata_refused of owner_metadata_refusal
 
 let continuation_refusal_to_json = function
   | Current_leaf_denied refusal -> Keeper_composition_draft.continuation_refusal_to_json refusal
   | Original_producer_absent reference -> `Assoc
       ["kind",`String "original_producer_absent";"skill_reference",Skill_reference.to_yojson reference]
+  | Original_producer_changed reference -> `Assoc
+      ["kind",`String "original_producer_changed";"skill_reference",Skill_reference.to_yojson reference]
+  | Original_owner_metadata_refused Owner_metadata_missing -> `Assoc
+      ["kind",`String "owner_metadata_missing"]
+  | Original_owner_metadata_refused Owner_metadata_mismatch -> `Assoc
+      ["kind",`String "owner_metadata_mismatch"]
 
 let validate_original_producer_activation ~config (source : Journal.source) =
   match source.producer with
@@ -2087,7 +2099,7 @@ and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
 
 
 
-let resume_continuation_with ?on_recovery_held ?on_refusal_accepted ?observe_refusal_settlement
+let resume_continuation_with ?on_recovery_held ?owner_metadata_refusal ?on_refusal_accepted ?observe_refusal_settlement
     ~capability_surface ~continuation ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) ~publication_recovery ~ctx_snapshot
     ~(turn_context : Keeper_tool_call_log_context.turn_context) ~invocation ?clock () =
@@ -2163,13 +2175,19 @@ let resume_continuation_with ?on_recovery_held ?on_refusal_accepted ?observe_ref
              ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
              ~data:rejection.data rejection.detail
          | Ok () ->
-           let refusal = match refusal,skill_reference with
-             | Some refusal,(None | Some _) -> Some refusal
-             | None,Some reference when not producer_admitted && Draft.nested_calls draft = []
-                 && Keeper_capability_surface.exact_skill_absence_proven capability_surface reference ->
-               Some (Original_producer_absent reference)
-             | None,(None | Some _) -> None in
-           if not producer_admitted && Option.is_none refusal then refuse_journal Journal.Source_conflict
+           let refusal = match owner_metadata_refusal,refusal,skill_reference with
+             | Some metadata_refusal,_,_ when Draft.nested_calls draft = [] ->
+               Some (Original_owner_metadata_refused metadata_refusal)
+             | (None | Some _),Some refusal,(None | Some _) -> Some refusal
+             | None,None,Some reference when not producer_admitted && Draft.nested_calls draft = [] ->
+               if Keeper_capability_surface.exact_skill_absence_proven capability_surface reference then
+                 Some (Original_producer_absent reference)
+               else if Keeper_capability_surface.exact_skill_present_proven capability_surface reference then
+                 Some (Original_producer_changed reference)
+               else None
+             | (None | Some _),None,(None | Some _) -> None in
+           if (Option.is_some owner_metadata_refusal || not producer_admitted) && Option.is_none refusal then
+             refuse_journal Journal.Source_conflict
            else match (match refusal with None -> Ok () | Some _ -> validate_original_producer_activation ~config source) with
            | Error detail -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
                ~effect_disposition:Tool_result.Proven_pre_effect detail
@@ -2192,9 +2210,9 @@ let resume_continuation_with ?on_recovery_held ?on_refusal_accepted ?observe_ref
     )
 ;;
 
-let resume_continuation ?on_recovery_held ~capability_surface ~continuation ~config ~meta
+let resume_continuation ?on_recovery_held ?owner_metadata_refusal ~capability_surface ~continuation ~config ~meta
     ~publication_recovery ~ctx_snapshot ~turn_context ~invocation ?clock () =
-  resume_continuation_with ?on_recovery_held ~capability_surface ~continuation ~config ~meta
+  resume_continuation_with ?on_recovery_held ?owner_metadata_refusal ~capability_surface ~continuation ~config ~meta
     ~publication_recovery ~ctx_snapshot ~turn_context ~invocation ?clock ()
 ;;
 
@@ -2204,10 +2222,10 @@ module For_testing = struct
     | Hold_original_authority of string
   let continuation_recovery_of_result = continuation_recovery_of_result
   let combine_recovery = combine_recovery
-  let resume_continuation ~after_refusal_binding ~after_refusal_settled
+  let resume_continuation ?owner_metadata_refusal ~after_refusal_binding ~after_refusal_settled
       ~capability_surface ~continuation ~config ~meta ~publication_recovery
       ~ctx_snapshot ~turn_context ~invocation ?clock () =
-    resume_continuation_with
+    resume_continuation_with ?owner_metadata_refusal
       ~on_refusal_accepted:(fun request_id -> after_refusal_binding ~request_id; Ok ())
       ~observe_refusal_settlement:(fun _settlement -> after_refusal_settled ())
       ~capability_surface ~continuation ~config ~meta ~publication_recovery

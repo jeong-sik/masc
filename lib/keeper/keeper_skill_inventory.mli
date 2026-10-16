@@ -60,5 +60,11 @@ val items : t -> skill_inventory_item list
 val exact_absence_proven : t -> Skill_reference.t -> bool
 (** True only for an exact reference absent from a completely readable,
     decoded source scan. Missing/unreadable/unresolved sources and rejected
-    candidates never prove producer absence. *)
+    candidates never prove producer absence: one malformed or unreadable
+    sibling Skill in the same source blocks absence proof for every producer
+    in that source. *)
+
+val exact_reference_valid_proven : t -> Skill_reference.t -> bool
+(** True when the exact reference is present as a valid, diagnostic-free item
+    in a completely readable, decoded source scan of its source. *)
 val invalid_error_to_yojson : invalid_error -> Yojson.Safe.t

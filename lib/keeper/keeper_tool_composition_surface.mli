@@ -76,8 +76,13 @@ val instruction_skill_schema_tool :
 (** Handler-free [keeper_skill] schema with the same exact Available
     description used by the executable tool. *)
 
+type owner_metadata_refusal =
+  | Owner_metadata_missing
+  | Owner_metadata_mismatch
+
 val resume_continuation
   :  ?on_recovery_held:(request_id:string -> reason:string -> unit)
+  -> ?owner_metadata_refusal:owner_metadata_refusal
   -> capability_surface:Keeper_capability_surface.t
   -> continuation:Keeper_tool_execution_journal.continuation
   -> config:Workspace.config
@@ -232,6 +237,7 @@ module For_testing : sig
     Tool_result.result -> recovery_decision
   val combine_recovery : recovery_decision -> recovery_decision -> recovery_decision
   val resume_continuation :
+    ?owner_metadata_refusal:owner_metadata_refusal ->
     after_refusal_binding:(request_id:string -> unit) ->
     after_refusal_settled:(unit -> unit) ->
     capability_surface:Keeper_capability_surface.t ->

@@ -131,6 +131,32 @@ let exact_absence_proven inventory (reference : Skill_reference.t) =
       | Invalid invalid -> same_source invalid.source_id) inventory.items)
 ;;
 
+let exact_reference_valid_proven inventory (reference : Skill_reference.t) =
+  let snapshot = inventory.snapshot in
+  match Skill_catalog_snapshot.config_state snapshot with
+  | Config_rejected _ | Config_unreadable _ -> false
+  | Configured _ ->
+    let same_source source_id =
+      Skill_source_config.equal_source_id source_id reference.identity.source_id in
+    let complete = List.exists (fun (scan : Skill_catalog_snapshot.source_scan) ->
+      same_source scan.source.source.id &&
+      match scan.observation with
+      | Source_ready _ -> List.for_all (function
+          | Skill_catalog_snapshot.Candidate_document _ -> true
+          | Candidate_unreadable _ -> false) scan.candidates
+      | Source_missing _ | Source_not_directory _ | Source_unavailable _ | Source_unresolved _ -> false)
+        (Skill_catalog_snapshot.sources snapshot) in
+    complete
+    && not (List.exists (fun (rejection : Skill_catalog_snapshot.rejection) ->
+      same_source rejection.source_id) (Skill_catalog_snapshot.rejections snapshot))
+    && not (List.exists (function
+      | Valid valid -> same_source valid.reference.identity.source_id && valid.diagnostics <> []
+      | Invalid invalid -> same_source invalid.source_id) inventory.items)
+    && List.exists (function
+      | Valid valid -> valid.diagnostics = [] && Skill_reference.equal reference valid.reference
+      | Invalid _ -> false) inventory.items
+;;
+
 let snapshot_rejection_to_yojson = function
   | Skill_catalog_snapshot.Document_rejected diagnostics ->
     `Assoc

@@ -1538,6 +1538,68 @@ let test_named_producer_skill_loss_settles_run_and_ends_parent () =
   check bool "refused child supplies no successful downstream export" true
     (completed |> member "exports" |> member "child_result" |> member "available" = `Bool false)
 
+let test_named_producer_switched_to_inline_settles_run_and_ends_parent () =
+  with_fixture @@ fun env _initialize fixture ->
+  with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
+  with_parked_named_producer env fixture @@ fun parked ->
+  let module Async = Masc.Keeper_msg_async in
+  let module Wake = Masc.Keeper_composition_continuation_wake in
+  control fixture (`Assoc ["state",`String "exited"]);
+  ignore (with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"collect-before-producer-switch"
+      ~turn:52 "keeper_job_status" (argument parked.job_id)));
+  let skill_md = Filename.concat fixture.base_path ".agents/skills/named-result-child/SKILL.md" in
+  let inline_md = String.concat "execution = "inline""
+      (Astring.String.cuts ~sep:"execution = "async"" (read skill_md)) in
+  write skill_md inline_md;
+  let inline_surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
+  let settled = resume_parked_continuation env fixture inline_surface parked.child_continuation in
+  check bool "present-but-changed producer accepts a refusal successor" true (Tool_result.is_success settled);
+  let refused_ok,refusal_data,refusal_entry = await_composition env fixture (Tool_result.data settled) in
+  check bool "switched-to-inline producer settles as a durable terminal failure" false refused_ok;
+  check_json "terminal failure carries proven original producer change"
+    (`String "original_producer_changed") (refusal_data |> member "kind");
+  check bool "refusal settles under a new physical request" true
+    (refusal_entry.request_id <> parked.binding.request_id);
+  let discovery = Journal.pending_continuations
+      ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+      ~base_path:fixture.base_path |> require "post-change-refusal discovery" in
+  check int "changed producer markers retire after settlement" 2 discovery.retired;
+  check int "parent dependency becomes the only ready candidate" 1 (List.length discovery.ready);
+  (* Also verify deleted Keeper metadata settles the parent via Wake.resume *)
+  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
+  Fs_compat.mkdir_p (Filename.dirname declaration);
+  write declaration "[keeper]
+activation_mode = "manual"
+sandbox_profile = "docker"
+sandbox_image = "base"
+network_mode = "inherit"
+instructions = "Refusal fixture"
+";
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+      |> require "refusal fixture workspace" in
+  Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
+  ignore (Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}));
+  let metadata_path = Filename.concat (Workspace.keepers_runtime_dir parked.config)
+      (Masc.Keeper_runtime_root_entry.keeper_basename ~keeper_name:keeper Metadata) in
+  if Sys.file_exists metadata_path then Unix.unlink metadata_path;
+  let context : _ Masc.Keeper_types_profile.context =
+    {config=parked.config;agent_name="continuation-refusal-fixture";
+     sw=Async.server_background_switch () |> require "continuation refusal switch";
+     clock=Eio.Stdenv.clock env;proc_mgr=Some (Eio.Stdenv.process_mgr env);net=None;
+     publication_recovery_provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider} in
+  let meta_refused = Wake.resume ~context parked.parent_continuation |> require "deleted metadata settles parent" in
+  check bool "deleted keeper metadata accepts a refusal successor" true (Tool_result.is_success meta_refused);
+  let parent_ok,parent_data,_ = await_composition env fixture (Tool_result.data meta_refused) in
+  check bool "parent ends as terminal failure when keeper metadata is missing" false parent_ok;
+  check_json "parent refusal records owner_metadata_missing"
+    (`String "owner_metadata_missing") (parent_data |> member "kind");
+  let after_parent = Journal.pending_continuations
+      ~read_composition_result:Masc.Keeper_composition_dependency_result.readiness
+      ~base_path:fixture.base_path |> require "post-metadata-refusal discovery" in
+  check int "all ready candidates are retired after metadata refusal" 0 (List.length after_parent.ready)
+
 let test_temporary_keeper_refusal_keeps_named_run_open () =
   with_fixture @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
@@ -4898,6 +4960,8 @@ let () = match Array.to_list Sys.argv with
           (test_named_async_result_parent ~child_fails:true)
       ; test_case "permanent producer skill loss settles the run and ends its parent" `Quick
           test_named_producer_skill_loss_settles_run_and_ends_parent
+      ; test_case "producer switched to inline and deleted keeper metadata settle as terminal failures" `Quick
+          test_named_producer_switched_to_inline_settles_run_and_ends_parent
       ; test_case "temporary keeper refusal keeps the named run resumable" `Quick
           test_temporary_keeper_refusal_keeps_named_run_open
       ; test_case "historical output contract refuses current canonical resume" `Quick test_historical_output_contract_refuses_current_resume

@@ -1369,6 +1369,98 @@ let test_quiet_final_does_not_extend_past_end_turn () =
     true
     (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
 
+(* A Muse turn whose model wrote no message settles with [content = []].
+   When the wake allows silence, that is the same choice as a blank text
+   block. *)
+let test_no_content_final_passes_when_policy_allows () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.quiet-no-content"
+      ~accept:
+        (Keeper_tooling.Response.accepts_response
+           ~policy:Keeper_tooling.Response.Allow_quiet_final)
+      (run_result ~content:[] ())
+  in
+  match result with
+  | Ok kept ->
+    Alcotest.(check string) "session preserved" "session-test" kept.session_id
+  | Error err ->
+    Alcotest.failf
+      "a completed turn with no content should pass when the policy allows it: %s"
+      (Agent_core.Error.to_string err)
+
+let test_no_content_final_rejected_when_policy_requires_progress () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.require-progress-no-content"
+      ~accept:
+        (Keeper_tooling.Response.accepts_response
+           ~policy:Keeper_tooling.Response.Require_progress)
+      (run_result ~content:[] ())
+  in
+  let _err, reason_kind, _reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "no content without a quiet policy stays no-progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
+
+let test_thinking_only_final_is_not_quiet () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.quiet-thinking-only"
+      ~accept:
+        (Keeper_tooling.Response.accepts_response
+           ~policy:Keeper_tooling.Response.Allow_quiet_final)
+      (run_result
+         ~content:[ Agent_core.Types.Thinking { signature = None; content = "hidden" } ]
+         ())
+  in
+  let _err, reason_kind, _reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "a thinking-only final is not a quiet final"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress)
+
+let test_finalization_settles_no_content_quiet_final () =
+  let finalize ~policy =
+    Masc.Keeper_agent_run.For_testing.normalize_final_response_text
+      ~response_policy:policy
+      ~keeper_name:"keeper-test"
+      ~runtime_id:"runtime.quiet-no-content"
+      ~run_result:(run_result ~content:[] ())
+      ~text:""
+      ~tool_names:[]
+      ()
+  in
+  (match finalize ~policy:Keeper_tooling.Response.Allow_quiet_final with
+   | Ok text -> Alcotest.(check string) "settles as an empty reply" "" text
+   | Error err ->
+     Alcotest.failf
+       "an accepted no-content final must also settle: %s"
+       (Agent_core.Error.to_string err));
+  match finalize ~policy:Keeper_tooling.Response.Require_progress with
+  | Ok _ -> Alcotest.fail "no content under Require_progress must not settle"
+  | Error _ -> ()
+
+let test_quiet_final_shape_names_the_settled_form () =
+  let shape ?stop_reason content =
+    Keeper_tooling.Response.quiet_final_shape
+      ~policy:Keeper_tooling.Response.Allow_quiet_final
+      (response ~content ?stop_reason ())
+  in
+  Alcotest.(check bool)
+    "blank text"
+    true
+    (shape [ Agent_core.Types.Text " " ] = Some Keeper_tooling.Response.Quiet_blank_text);
+  Alcotest.(check bool)
+    "no content"
+    true
+    (shape [] = Some Keeper_tooling.Response.Quiet_no_content);
+  Alcotest.(check bool)
+    "no content cut by max tokens"
+    true
+    (shape ~stop_reason:Agent_core.Types.MaxTokens [] = None)
+
 let wake_observation
     ~pending_messages
     ~pending_board_events
@@ -2154,6 +2246,26 @@ let () =
             "quiet final does not extend past an EndTurn stop"
             `Quick
             test_quiet_final_does_not_extend_past_end_turn;
+          Alcotest.test_case
+            "no-content final passes when the turn policy allows it"
+            `Quick
+            test_no_content_final_passes_when_policy_allows;
+          Alcotest.test_case
+            "no-content final rejected when the turn policy requires progress"
+            `Quick
+            test_no_content_final_rejected_when_policy_requires_progress;
+          Alcotest.test_case
+            "thinking-only final is not a quiet final"
+            `Quick
+            test_thinking_only_final_is_not_quiet;
+          Alcotest.test_case
+            "finalization settles an accepted no-content final"
+            `Quick
+            test_finalization_settles_no_content_quiet_final;
+          Alcotest.test_case
+            "quiet final shape names the settled form"
+            `Quick
+            test_quiet_final_shape_names_the_settled_form;
           Alcotest.test_case
             "autonomous wake without input allows a quiet final"
             `Quick

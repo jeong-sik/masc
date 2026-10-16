@@ -830,7 +830,37 @@ type turn_state =
   ; last_call_usage : Msp.token_usage option
     (** The newest reported call's own counts. A view gap after it means a
         later call may be missing, so the gap clears it. *)
+  ; message_gap : bool
+    (** A view gap for this session arrived during this turn, so an agent
+        message may have been dropped. Turn-local, unlike [observed_usage]. *)
   }
+
+(* A turn that completes with no completed agent message is how the host
+   says the model wrote nothing, and MASC may settle that as a quiet final.
+   The reading holds only when MASC saw the whole turn: a view gap can drop
+   the message's [item/completed], and an agent message still open at the
+   terminal never delivered its text. MSP offers no way to re-read dropped
+   events, so such a turn fails instead of settling as silence. *)
+let unobserved_final_message state =
+  match state.final_text with
+  | Some _ -> None
+  | None ->
+    let open_message =
+      List.exists
+        (fun (_, kind) ->
+           match (kind : Msp.item_kind) with
+           | Msp.Agent_message -> true
+           | Msp.User_message | Msp.Reasoning | Msp.Tool_call | Msp.User_shell
+           | Msp.Subagent | Msp.Workflow | Msp.Reminder_child | Msp.Compaction
+           | Msp.Unrecognized_item_kind _ -> false)
+        state.open_items
+    in
+    (match state.message_gap, open_message with
+     | false, false -> None
+     | true, _ ->
+       Some "a view gap may have dropped the final agent message before the turn completed"
+     | false, true -> Some "the turn completed while an agent message was still open")
+;;
 
 (* Per-completion counts are turn-local, never the session's cumulative
    counters. Preserve unknown cache splits across the sum. *)
@@ -1009,7 +1039,13 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
        continue state
      | Msp.View_gap { session_id = sid; _ } ->
        if gap_applies ~session_id sid
-       then continue { state with observed_usage = Usage_gap; last_call_usage = None }
+       then
+         continue
+           { state with
+             observed_usage = Usage_gap
+           ; last_call_usage = None
+           ; message_gap = true
+           }
        else continue state
      (* The session's selection is what MASC asked for; the model a call ran
         on is what the host names here. They differ only when the host ran
@@ -1052,7 +1088,10 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
        let usage = terminal_usage ~observed:state.observed_usage ~terminal:usage in
        Option.iter (fun usage -> emit (Usage_reported { session_id; turn_id; usage })) usage;
        (match terminal with
-        | Msp.Terminal_completed -> Ok (state, usage)
+        | Msp.Terminal_completed ->
+          (match unobserved_final_message state with
+           | None -> Ok (state, usage)
+           | Some detail -> protocol_error "turn/completed" detail)
         | Msp.Terminal_failed { kind = Msp.Auth_required; message; _ } ->
           Error (Auth_required message)
         | Msp.Terminal_failed
@@ -1324,6 +1363,7 @@ let run_protocol
         ; usage_cursors = []
         ; observed_usage = !observed_usage
         ; last_call_usage = None
+        ; message_gap = false
         ; tool_calls = 0
         ; approvals = 0
         ; pending_decisions = []

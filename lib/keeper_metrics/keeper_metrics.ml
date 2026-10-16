@@ -201,7 +201,7 @@ type t =
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
   | TurnBoundaryFailures        (* counter: a turn-boundary line (a turn's end line, or a restart line from a turn or a clear) was not built or not written *)
   | HistoryFragmentFailures     (* counter: a history line (a turn's message or tool observation) was not built or not written *)
-  | QuietFinals                 (* counter: autonomous wake settled with an explicit blank final and no tool progress *)
+  | QuietFinals                 (* counter: autonomous wake settled with a quiet final (blank text or no content) and no tool progress *)
   | WorkingStateNotCarried      (* counter: an official client left the Librarian working state out, because carried in front of the range it would have displaced atoms it does not cover *)
   | WorkspaceMemoryBriefingBytes (* gauge: briefing summary bytes observed at the keeper turn boundary *)
   | WorkspaceMemoryLedgerClaims  (* gauge: classified ledger claim count observed at the keeper turn boundary *)

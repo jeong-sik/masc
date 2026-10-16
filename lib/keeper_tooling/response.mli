@@ -37,10 +37,27 @@ val response_has_text_or_tool_progress : Agent_core.Types.api_response -> bool
 
 type completion_policy = Require_progress | Allow_quiet_final
 
+(** How a model's chosen silence reaches MASC. Some hosts send a blank text
+    block. Muse completes the turn with no content block at all: a turn whose
+    model wrote no message settles with [content = []]. *)
+type quiet_final_shape =
+  | Quiet_blank_text
+  | Quiet_no_content
+
+val quiet_final_shape
+  :  policy:completion_policy
+  -> Agent_core.Types.api_response
+  -> quiet_final_shape option
+(** [Some] when [policy] allows silence, the provider ended with [EndTurn], and
+    the response is a blank text final or carries no content block. Hidden
+    reasoning, interrupted output and provider failures are not this choice.
+    No prose is interpreted. *)
+
+val quiet_final_shape_label : quiet_final_shape -> string
+(** The metric label value for a quiet final's shape. *)
+
 val is_quiet_final : policy:completion_policy -> Agent_core.Types.api_response -> bool
-(** An explicitly present blank text final with [EndTurn] may close a host wake
-    without an update. Missing content, hidden reasoning, interrupted output
-    and provider failures are not this choice. No prose is interpreted. *)
+(** [true] exactly when {!quiet_final_shape} is [Some _]. *)
 
 val accepts_response : policy:completion_policy -> Agent_core.Types.api_response -> bool
 (** The normal progress contract, plus {!is_quiet_final} when the caller's

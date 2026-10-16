@@ -18033,7 +18033,19 @@ let rec apply_async_message state ~base_path ~http_refresh_inflight
               "turn_finished_at", clock observed.af_turn_finished_at;
               "queue_settled_at", clock observed.af_queue_settled_at;
               "queue_cancelled_at", clock observed.af_queue_cancelled_at;
-              "evidence_complete", `Bool observed.af_evidence_complete] in
+              "evidence_complete", `Bool observed.af_evidence_complete]
+              @ (match observed.af_tool_actions with
+                | Masc.Tui_decode_asks.Ask_tools_unavailable -> ["tool_evidence_current", `Bool false]
+                | Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current} ->
+                    ["tool_evidence_current", `Bool at_evidence_current;
+                     "observed_tool_results", `Int at_count;
+                     "first_tool_result_recorded_at", clock at_first_recorded_at]
+                    @ (match at_latest with
+                      | None -> []
+                      | Some action -> ["latest_execution_id", `String action.ata_execution_id;
+                          "latest_trace_id", `String action.ata_trace_id;
+                          "latest_keeper_turn_id", `Int action.ata_keeper_turn_id;
+                          "latest_tool_result_recorded_at", `Float action.ata_recorded_at])) in
         Log.Transport.info "tui_ask_followup=%s" (Yojson.Safe.to_string (`Assoc
           (["keeper", `String submission.as_keeper_name; "ask_id", `String submission.as_ask_id;
             "admitted_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ()))] @ facts))))

@@ -76,6 +76,23 @@ type ask_answer_delivery =
   | Ask_wake_pending of string
       (** The answer is recorded; automatic delivery recovery remains due. *)
 
+type ask_tool_action = {
+  ata_execution_id : string;
+  ata_trace_id : string;
+  ata_keeper_turn_id : int;
+  ata_tool : string;
+  ata_recorded_at : float;
+}
+
+type ask_tool_actions =
+  | Ask_tools_unavailable
+  | Ask_tools_observed of {
+      at_count : int;
+      at_first_recorded_at : float option;
+      at_latest : ask_tool_action option;
+      at_evidence_current : bool;
+    }
+
 type ask_followup = {
   af_answered_at : float;
   af_stimulus_id : string;
@@ -84,6 +101,7 @@ type ask_followup = {
   af_queue_settled_at : float option;
   af_queue_cancelled_at : float option;
   af_evidence_complete : bool;
+  af_tool_actions : ask_tool_actions;
 }
 
 val decode_ask_followup :

@@ -1321,7 +1321,10 @@ let test_answer_followup_retains_current_source_observations () =
     (Option.is_none (begin_ask_followup_read state));
   let observed : Decode.ask_followup = {af_answered_at=200.;af_stimulus_id="original-source";
     af_turn_started_at=Some 201.;af_turn_finished_at=None;af_queue_settled_at=None;
-    af_queue_cancelled_at=None;af_evidence_complete=true} in
+    af_queue_cancelled_at=None;af_evidence_complete=true;
+    af_tool_actions=Decode.Ask_tools_observed {at_count=1;at_first_recorded_at=Some 202.;
+      at_latest=Some {ata_execution_id="original-tool";ata_trace_id="original-trace";
+        ata_keeper_turn_id=17;ata_tool="Read";ata_recorded_at=202.};at_evidence_current=true}} in
   ignore (take_ask_followup state request owner (Ok observed));
   Alcotest.(check bool) "original observation survives without releasing the POST gate" true
     (current_ask_followup state=Some observed && state.ask_submit_inflight);
@@ -1333,10 +1336,14 @@ let test_answer_followup_retains_current_source_observations () =
     (current_ask_followup state=Some observed && Option.is_some state.ask_followup_error);
   let request, owner = begin_read () in
   ignore (take_ask_followup state request owner
-    (Ok {observed with af_turn_started_at=None;af_evidence_complete=false}));
+    (Ok {observed with af_turn_started_at=None;af_evidence_complete=false;
+      af_tool_actions=Decode.Ask_tools_unavailable}));
   Alcotest.(check bool) "missing observations cannot undo a positive fact" true
     (Option.exists (fun value -> value.Decode.af_turn_started_at=Some 201.
-       && not value.af_evidence_complete) (current_ask_followup state));
+       && not value.af_evidence_complete
+       && (match value.af_tool_actions with
+          | Decode.Ask_tools_observed {at_count=1;at_evidence_current=false;_} -> true
+          | Decode.Ask_tools_observed _ | Decode.Ask_tools_unavailable -> false)) (current_ask_followup state));
   let retired, old_owner = begin_read () in
   let second = submission "new-answer" in
   begin_ask_submission_state ~submission:second state;

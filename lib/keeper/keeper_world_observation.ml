@@ -26,7 +26,10 @@ type pending_board_event_kind =
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
   | Delegate_completed of Keeper_event_queue.delegate_terminal
-  | Ask_answered_row of { answered_by : Keeper_input_speaker.person }
+  | Ask_answered_row of {
+      answered_by : Keeper_input_speaker.person;
+      answer_source_id : string option;
+    }
       (** A human answered a question this Keeper asked. Like
           {!Composition_completed} the row carries the answer itself: the
           asker has nowhere else to read it mid-cycle, and a wake with no
@@ -1013,7 +1016,8 @@ let pending_board_event_of_ask_answer
   let body = String.concat " · " (List.map (ask_answer_line ask) answers) in
   { event_kind =
       Ask_answered_row
-        { answered_by = Keeper_input_speaker.of_ask_responder responder }
+        { answered_by = Keeper_input_speaker.of_ask_responder responder
+        ; answer_source_id = Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at }
   ; post_id = "keeper-ask:" ^ ask.Keeper_ask.ask_id
   ; author = who
   ; title =

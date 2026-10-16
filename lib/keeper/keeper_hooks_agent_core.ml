@@ -865,6 +865,7 @@ let make_hooks
              ~batch_size:schedule.batch_size
              ~execution_mode:schedule.execution_mode
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
+             ~answer_source_ids:tctx.answer_source_ids
              ?turn:invocation_turn ?keeper_turn_id:tctx.keeper_turn_id
              ?task_id:tctx.task_id
              ?sandbox_profile:tctx.sandbox_profile
@@ -1110,6 +1111,7 @@ let make_hooks
                 ~execution_mode:schedule.execution_mode
                 ~turn
                 ?trace_id:tctx.trace_id ?session_id:tctx.session_id
+                ~answer_source_ids:tctx.answer_source_ids
                 ?keeper_turn_id:tctx.keeper_turn_id
                 ?task_id:tctx.task_id
                 ~result_bytes:(String.length error)

@@ -22,6 +22,7 @@ type turn_context =
   ; sandbox_roots : string list option
   ; network_mode : string option
   ; runtime_profile : string option
+  ; answer_source_ids : string list
   }
 
 let empty_turn_context =
@@ -41,6 +42,7 @@ let empty_turn_context =
   ; sandbox_roots = None
   ; network_mode = None
   ; runtime_profile = None
+  ; answer_source_ids = []
   }
 ;;
 
@@ -66,6 +68,7 @@ let set_turn_context
       ?sandbox_roots
       ?network_mode
       ?runtime_profile
+      ?(answer_source_ids = [])
       ()
   =
   cell
@@ -85,6 +88,7 @@ let set_turn_context
      ; sandbox_roots
      ; network_mode
      ; runtime_profile
+     ; answer_source_ids
      }
 ;;
 

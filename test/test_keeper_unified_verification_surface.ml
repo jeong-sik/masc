@@ -1115,7 +1115,7 @@ let test_answered_ask_survives_later_turns_and_checkpoint_reload () = Eio_main.r
   let answer = "2026-10-17 토요일 14:00–17:00 / 은빛정류장 전시실\n무료" in
   let answered : WO.pending_board_event =
     { sample_board_event with
-      event_kind = WO.Ask_answered_row { answered_by = Masc.Keeper_input_speaker.Owner }
+      event_kind = WO.Ask_answered_row { answered_by = Masc.Keeper_input_speaker.Owner; answer_source_id = None }
     ; post_id = "keeper-ask:schedule"
     ; author = "operator"
     ; title = "확정 정보"
@@ -1163,7 +1163,7 @@ let test_autonomous_wake_speaker_names_each_answer () =
   let module S = Masc.Keeper_input_speaker in
   let answered ~post_id ~preview answered_by : WO.pending_board_event =
     { sample_board_event with
-      event_kind = WO.Ask_answered_row { answered_by }
+      event_kind = WO.Ask_answered_row { answered_by; answer_source_id = None }
     ; post_id
     ; preview
     ; post_kind = Masc.Board.System_post

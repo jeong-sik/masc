@@ -8301,7 +8301,16 @@ let take_ask_followup (state : state) request submission
                     (* Missing observations cannot undo an already observed
                        positive fact from the same immutable answer source. *)
                     let retain fresh old = match fresh with Some _ -> fresh | None -> old in
+                    let af_tool_actions = match observed.af_tool_actions, prior.af_tool_actions with
+                      | Masc.Tui_decode_asks.Ask_tools_unavailable, Ask_tools_observed old ->
+                          Masc.Tui_decode_asks.Ask_tools_observed {old with at_evidence_current=false}
+                      | Ask_tools_observed fresh, Ask_tools_observed old when fresh.at_count<old.at_count ->
+                          Ask_tools_observed {old with at_evidence_current=false}
+                      | Ask_tools_observed fresh, (Ask_tools_observed _ | Ask_tools_unavailable) ->
+                          Ask_tools_observed fresh
+                      | Ask_tools_unavailable, Ask_tools_unavailable -> Ask_tools_unavailable in
                     {observed with
+                      af_tool_actions;
                       af_turn_started_at=retain observed.af_turn_started_at prior.af_turn_started_at;
                       af_turn_finished_at=retain observed.af_turn_finished_at prior.af_turn_finished_at;
                       af_queue_settled_at=retain observed.af_queue_settled_at prior.af_queue_settled_at;

@@ -195,6 +195,10 @@ val fold_events : event list -> (string * (ask * resolution)) list
 
 val open_asks : event list -> ask list
 
+val answer_source_id : ask_id:string -> answered_at:float -> string option
+(** Exact input identity of one canonical first answer. Invalid identities or
+    non-finite clocks return [None]. Contains no question/answer content. *)
+
 (** {1 Labels and codecs} *)
 
 val event_to_json : event -> Yojson.Safe.t

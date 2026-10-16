@@ -625,10 +625,90 @@ let test_followup_queue_settlement_does_not_invent_a_turn () =
      && Yojson.Safe.Util.member "turn_finished_at" observed = `Null)
 ;;
 
+let test_followup_matches_committed_answer_input_tool_rows () =
+  with_persistence @@ fun config ensure_keeper ->
+  Eio.Switch.run @@ fun sw ->
+  Keeper_tool_call_log.reset_for_testing ();
+  Eio.Switch.on_release sw (fun () ->
+    Option.iter (fun store -> Keeper_tool_call_index.forget_for_ledger
+        ~ledger_dir:(Dated_jsonl.base_dir store)) (Keeper_tool_call_log.store ());
+    Keeper_tool_call_log.reset_for_testing ());
+  let base_path = config.Workspace.base_path and keeper_name = "alpha" in
+  ensure_keeper keeper_name;
+  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"tool-source" () in
+  let answers, answered_at, resolution = match Keeper_ask_store.rows_result ~base_path ~keeper_name with
+    | Ok (Keeper_ask_store.Stored_rows rows) ->
+        (match snd (List.assoc ask.ask_id rows) with
+         | Keeper_ask.Answered_by ({answers;answered_at;_} as answer) ->
+             answers, answered_at, Keeper_ask.Answered_by answer
+         | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> fail "answer was not canonical")
+    | Ok Missing_log -> fail "canonical answer disappeared"
+    | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
+  let row = Keeper_world_observation.pending_board_event_of_ask_answer
+      ~meta ~ask ~answers ~responder ~answered_at in
+  let source = match row.event_kind with
+    | Keeper_world_observation.Ask_answered_row {answer_source_id=Some source;_} -> source
+    | Ask_answered_row {answer_source_id=None;_}
+    | Board_post_created | Board_post_updated | Board_comment_added _
+    | Board_reaction_changed _ | Board_vote_cast _ | Fusion_completed
+    | Delegate_completed _ | Composition_completed | Owned_job_completed _
+    | Schedule_due _ | External_attention _ | Completion_authority_rejected _
+    | Task_outcome _ | Task_cancelled _ -> fail "canonical answer input did not retain its exact source" in
+  let other_source = Keeper_ask.answer_source_id ~ask_id:ask.ask_id ~answered_at:(answered_at+.1.)
+      |> Option.get in
+  Keeper_tool_call_log.init ~base_path ();
+  let observe () = match Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution with
+    | Ok value -> value | Error detail -> fail detail in
+  let actions () = match (observe ()).tool_actions with
+    | Ok actions -> actions | Error detail -> fail detail in
+  check int "an initialized ledger does not invent a Tool result" 0 (actions ()).observed_count;
+  let original = Keeper_tool_call_log.create_turn_ctx_cell ()
+  and interleaved = Keeper_tool_call_log.create_turn_ctx_cell () in
+  Keeper_tool_call_log.set_turn_context ~cell:original ~trace_id:"original-trace"
+    ~keeper_turn_id:17 ~answer_source_ids:[source] ();
+  Keeper_tool_call_log.set_turn_context ~cell:interleaved ~trace_id:"other-trace"
+    ~keeper_turn_id:18 ~answer_source_ids:[other_source] ();
+  let emit ~cell ~keeper_name ~execution_id ~wire_outcome =
+    let context = Keeper_tool_call_log_context.get_turn_context_record ~cell () in
+    Keeper_tool_call_log.log_call ~keeper_name ~tool_name:"Read"
+      ~input:(`Assoc []) ~output_text:"private result" ~duration_ms:1. ~wire_outcome
+      ~execution_id:(Ids.Execution_id.of_string execution_id)
+      ?trace_id:context.trace_id ?keeper_turn_id:context.keeper_turn_id
+      ~answer_source_ids:context.answer_source_ids ~on_committed:(fun () -> ()) () in
+  emit ~cell:original ~keeper_name ~execution_id:"original-tool" ~wire_outcome:Tool_result.Ok;
+  emit ~cell:interleaved ~keeper_name ~execution_id:"other-answer-time" ~wire_outcome:Tool_result.Ok;
+  emit ~cell:original ~keeper_name:"beta" ~execution_id:"other-keeper" ~wire_outcome:Tool_result.Ok;
+  let observed = actions () in
+  check int "only the original canonical answer input supplies a Tool result" 1 observed.observed_count;
+  (match observed.latest with
+   | Some action ->
+       check string "the physical invocation survives interleaved context" "original-tool" action.execution_id;
+       check string "the original input turn remains exact" "original-trace" action.trace_id;
+       check int "the original Keeper turn remains exact" 17 action.keeper_turn_id
+   | None -> fail "physical Tool identity was lost");
+  emit ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error;
+  check int "observed errors are results, not proof of successful effects" 2 (actions ()).observed_count;
+  check int "observing Tool rows does not enqueue an answer again" 0
+    (List.length (pending_asks ~base_path ~keeper_name));
+  emit ~cell:original ~keeper_name ~execution_id:"failed-tool" ~wire_outcome:Tool_result.Error;
+  check bool "duplicate execution evidence cannot become a confident count" true
+    (Result.is_error (observe ()).tool_actions);
+  let path = Keeper_tool_call_log.current_log_path () |> Option.get in
+  Fs_compat.save_file path "";
+  emit ~cell:interleaved ~keeper_name ~execution_id:"replacement-unrelated" ~wire_outcome:Tool_result.Ok;
+  check int "ledger shrink rebuilds source membership instead of inheriting stale offsets" 0
+    (actions ()).observed_count;
+  Keeper_tool_call_log.init ~base_path:(Filename.concat base_path "other-workspace") ();
+  check bool "another workspace cannot supply a Tool observation" true
+    (Result.is_error (observe ()).tool_actions)
+;;
+
 let () =
   run "keeper_ask_answer_wake"
     [ ( "wake"
-      , [ test_case "queue settlement does not invent a turn" `Quick
+      , [ test_case "Tool followup binds exact canonical answer inputs and committed rows" `Quick
+            test_followup_matches_committed_answer_input_tool_rows
+        ; test_case "queue settlement does not invent a turn" `Quick
             test_followup_queue_settlement_does_not_invent_a_turn
         ; test_case "followup reads exact source without waking" `Quick
             test_followup_reads_exact_source_without_waking

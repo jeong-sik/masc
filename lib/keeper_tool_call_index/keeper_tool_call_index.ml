@@ -10,7 +10,7 @@ let ( let* ) = Result.bind
 (* Bumped when the schema below changes. A file that does not carry this
    number is deleted and rebuilt: the index is derived, so there is nothing
    to migrate. *)
-let schema_version = 7
+let schema_version = 8
 
 let database_path ~ledger_dir = Filename.concat ledger_dir "read-index.sqlite3"
 
@@ -57,6 +57,13 @@ BEGIN
   DELETE FROM execution_identities
     WHERE keeper_name = OLD.keeper_name AND execution_id = OLD.execution_id AND row_count = 0;
 END;
+CREATE TABLE IF NOT EXISTS answer_sources (
+  source_id TEXT NOT NULL,
+  ledger_path TEXT NOT NULL,
+  ledger_offset INTEGER NOT NULL,
+  PRIMARY KEY (source_id, ledger_path, ledger_offset),
+  FOREIGN KEY (ledger_path, ledger_offset) REFERENCES rows(ledger_path, ledger_offset) ON DELETE CASCADE
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS cursors (
   ledger_path TEXT PRIMARY KEY NOT NULL,
   boundary INTEGER NOT NULL CHECK (boundary >= 0),
@@ -248,6 +255,7 @@ let configure db =
   (* INSERT OR REPLACE deletes a prior indexed row. Its delete trigger must
      run too, so the derived identity witness counts retained rows exactly. *)
   let* () = exec db ~operation:"enable identity replacement triggers" "PRAGMA recursive_triggers=ON" in
+  let* () = exec db ~operation:"enable derived source ownership" "PRAGMA foreign_keys=ON" in
   let* () = exec db ~operation:"create index schema" schema_sql in
   exec
     db
@@ -368,6 +376,20 @@ let execution_id_of_row = function
   | _ -> None
 ;;
 
+let answer_source_ids_of_row = function
+  | `Assoc fields ->
+      (match List.filter (fun (key, _) -> key = "answer_source_ids") fields with
+       | [] -> Some []
+       | [_, `List values] ->
+           let rec strings acc = function
+             | [] -> Some (List.sort_uniq String.compare acc)
+             | `String value :: rest when value <> "" -> strings (value :: acc) rest
+             | _ -> None in
+           strings [] values
+       | _ -> None)
+  | _ -> None
+;;
+
 let ts_of_row json =
   match json with
   | `Assoc fields ->
@@ -415,7 +437,7 @@ let indexable line =
               Some (Agent_observation.Code_address.codebase addressed.address),
               Some (Agent_observation.Code_address.path addressed.address), invalid)
        in
-       Ok (Some (keeper, ts, execution_id_of_row json, codebase, file_path, observation_invalid))
+       Ok (Some (keeper, ts, execution_id_of_row json, codebase, file_path, observation_invalid, answer_source_ids_of_row json))
      | _ -> Ok None)
 ;;
 
@@ -423,6 +445,10 @@ let insert_sql =
   "INSERT OR REPLACE INTO rows (ledger_path, ledger_offset, ledger_length, ts, \
    keeper_name, execution_id, codebase, file_path, observation_invalid) \
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+;;
+
+let insert_answer_source_sql =
+  "INSERT INTO answer_sources (source_id, ledger_path, ledger_offset) VALUES (?, ?, ?)"
 ;;
 
 let cursor_sql =
@@ -640,6 +666,7 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
       let captured_prefix = ref (if from = held.boundary then Some held.prefix_digest else None) in
       let* boundary =
         with_stmt store.db ~operation:"insert row" insert_sql (fun insert ->
+        with_stmt store.db ~operation:"insert answer source" insert_answer_source_sql (fun insert_source ->
           before_scan ~path;
           let pending, boundary =
             fold_indexed_lines
@@ -651,7 +678,7 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
                 let* row = indexable line in
                 match row with
                 | None -> Ok ()
-                | Some (keeper, ts, execution_id, codebase, file_path, observation_invalid) ->
+                | Some (keeper, ts, execution_id, codebase, file_path, observation_invalid, answer_sources) ->
                   ignore (Sqlite3.reset insert : Sqlite3.Rc.t);
                   let* () = bind_all store.db ~operation:"bind row" insert
                       [ Sqlite3.Data.TEXT path
@@ -665,10 +692,20 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
                       ; (match codebase with Some value -> Sqlite3.Data.TEXT value | None -> Sqlite3.Data.NULL)
                       ; (match file_path with Some value -> Sqlite3.Data.TEXT value | None -> Sqlite3.Data.NULL)
                       ; Sqlite3.Data.INT (if observation_invalid then 1L else 0L) ] in
-                  step_done store.db ~operation:"insert row" insert)
+                  let* () = step_done store.db ~operation:"insert row" insert in
+                  match answer_sources with
+                  | None -> Ok ()
+                  | Some sources -> List.fold_left (fun acc source ->
+                      let* () = acc in
+                      ignore (Sqlite3.reset insert_source : Sqlite3.Rc.t);
+                      let* () = bind_all store.db ~operation:"bind answer source" insert_source
+                          [Sqlite3.Data.TEXT source; Sqlite3.Data.TEXT path;
+                           Sqlite3.Data.INT (Int64.of_int offset)] in
+                      step_done store.db ~operation:"insert answer source" insert_source)
+                      (Ok ()) sources)
           in
           let* () = pending in
-          Ok boundary)
+          Ok boundary))
       in
       let prefix_digest = !scan_digest in
       let* () =
@@ -827,8 +864,8 @@ let compare_execution_location
   | order -> order
 ;;
 
-let select_execution_locations store ~keeper_name ~execution_ids =
-  with_stmt store.db ~operation:"select execution rows" select_execution_sql
+let select_identity_locations ~sql store ~keeper_name ~identities =
+  with_stmt store.db ~operation:"select execution rows" sql
     (fun stmt ->
       let rec collect acc =
         match Sqlite3.step stmt with
@@ -857,7 +894,7 @@ let select_execution_locations store ~keeper_name ~execution_ids =
                 [ Sqlite3.Data.TEXT keeper_name; Sqlite3.Data.TEXT execution_id ] in
             let* locations = collect [] in
             Ok (List.sort compare_execution_location locations :: batches))
-          (Ok []) (List.sort_uniq String.compare execution_ids)
+          (Ok []) (List.sort_uniq String.compare identities)
       in
       Ok (List.concat (List.rev batches)))
 ;;
@@ -940,7 +977,7 @@ let by_execution_ids ~store ~keeper_name ~execution_ids =
   | [] -> Ok []
   | _ ->
     with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
-      let* locations = select_execution_locations index ~keeper_name ~execution_ids in
+      let* locations = select_identity_locations ~sql:select_execution_sql index ~keeper_name ~identities:execution_ids in
       rows_of_locations locations)
 ;;
 
@@ -985,6 +1022,33 @@ let addressed_rows ~store ~codebase ?keeper_name ~limit ~offset () =
             (Agent_observation.Code_address.codebase addressed.address) -> Ok ()
         | Some _ | None -> Error "indexed observation no longer matches its codebase") (Ok ()) rows in
       Ok rows)
+;;
+
+let select_answer_source_sql =
+  "SELECT r.ledger_path, r.ledger_offset, r.ledger_length, r.keeper_name, r.ts, r.execution_id \
+   FROM answer_sources s JOIN rows r ON r.ledger_path = s.ledger_path AND r.ledger_offset = s.ledger_offset \
+   WHERE r.keeper_name = ? AND s.source_id = ?"
+;;
+
+let fold_by_answer_source ~store ~keeper_name ~source_id ~init ~f =
+  if String.equal source_id "" then Error "answer source identity is empty"
+  else
+    let* folded = with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
+    let* locations = select_identity_locations ~sql:select_answer_source_sql index
+        ~keeper_name ~identities:[source_id] in
+    let accumulated = ref (Ok init) in
+    let source_matches = ref true in
+    let* _ = map_locations ~f:(fun _ row ->
+      (match answer_source_ids_of_row row with
+       | Some sources when List.mem source_id sources ->
+           accumulated := (let* value = !accumulated in f value row)
+       | Some _ | None -> source_matches := false);
+      None) locations in
+    if !source_matches then Ok !accumulated
+    else Error "indexed answer source no longer matches its ledger row") in
+    (* A caller's semantic refusal does not mean SQLite is stale. Preserve the
+       valid derived index instead of rebuilding the entire ledger on each poll. *)
+    folded
 ;;
 
 let select_frontier store ~keeper_name =

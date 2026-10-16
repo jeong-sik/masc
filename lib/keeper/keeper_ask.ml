@@ -4,6 +4,10 @@ let ( let* ) = Result.bind
 
 let is_blank s = String.trim s = ""
 
+let answer_source_id ~ask_id ~answered_at =
+  if is_blank ask_id || not (Float.is_finite answered_at) then None
+  else Some (Yojson.Safe.to_string (`List [`String ask_id; `Float answered_at]))
+
 (* {1 Choices} *)
 
 type invalid_choice =

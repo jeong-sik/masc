@@ -31,6 +31,9 @@ type turn_context =
   ; sandbox_roots : string list option
   ; network_mode : string option
   ; runtime_profile : string option
+  ; answer_source_ids : string list
+      (** Canonical answer input identities owned by this run. This is neither
+          model-use proof nor a causal claim about a later Tool effect. *)
   }
 
 type cell
@@ -57,6 +60,7 @@ val set_turn_context :
   ?sandbox_roots:string list ->
   ?network_mode:string ->
   ?runtime_profile:string ->
+  ?answer_source_ids:string list ->
   unit ->
   unit
 

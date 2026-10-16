@@ -110,6 +110,7 @@ val set_turn_context :
   ?sandbox_roots:string list ->
   ?network_mode:string ->
   ?runtime_profile:string ->
+  ?answer_source_ids:string list ->
   unit ->
   unit
 (** [set_turn_context ~cell ...] stores the current effective turn policy
@@ -259,6 +260,7 @@ val failed_commit_deliveries : commit_observer -> int
     effect into failure/retry. A consumer with failures must retain a coverage
     gap. Cancellation propagates; committed rows retain their original truth. *)
 
+val record_kind_of_string : string -> record_kind option
 val log_call :
   keeper_name:string ->
   tool_name:string ->
@@ -304,6 +306,7 @@ val log_call :
   ?sandbox_roots:string list ->
   ?network_mode:string ->
   ?runtime_profile:string ->
+  ?answer_source_ids:string list ->
   ?result_bytes:int ->
   ?truncated_to:int ->
   ?input_fingerprint:string ->

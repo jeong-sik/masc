@@ -184,6 +184,23 @@ let decode_asks_snapshot ~expected_base_path ~expected_masc_root json =
   let* asn_rows = ask_map_results decode_ask_row row_items in
   Ok { asn_keeper; asn_open_count; asn_rows }
 
+type ask_tool_action = {
+  ata_execution_id : string;
+  ata_trace_id : string;
+  ata_keeper_turn_id : int;
+  ata_tool : string;
+  ata_recorded_at : float;
+}
+
+type ask_tool_actions =
+  | Ask_tools_unavailable
+  | Ask_tools_observed of {
+      at_count : int;
+      at_first_recorded_at : float option;
+      at_latest : ask_tool_action option;
+      at_evidence_current : bool;
+    }
+
 type ask_followup = {
   af_answered_at : float;
   af_stimulus_id : string;
@@ -192,6 +209,7 @@ type ask_followup = {
   af_queue_settled_at : float option;
   af_queue_cancelled_at : float option;
   af_evidence_complete : bool;
+  af_tool_actions : ask_tool_actions;
 }
 
 let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~ask_id json =
@@ -234,8 +252,41 @@ let decode_ask_followup ~expected_base_path ~expected_masc_root ~keeper_name ~as
         let* af_evidence_complete = match complete with
           | `Bool value -> Ok value
           | _ -> Error "answer follow-up evidence completeness is invalid" in
+        let* actions = single progress "tool_actions" in
+        let* action_state = string actions "state" in
+        let* af_tool_actions = match action_state with
+          | "unavailable" -> Ok Ask_tools_unavailable
+          | "observed" ->
+              let* count = single actions "observed_count" in
+              let* at_count = match count with
+                | `Int value when value>=0 -> Ok value
+                | _ -> Error "answer Tool observation count is invalid" in
+              let* first = single actions "first_recorded_at" in
+              let* at_first_recorded_at = match first with
+                | `Null -> Ok None | value -> finite value |> Result.map Option.some in
+              let* latest = single actions "latest" in
+              let* at_latest = match latest with
+                | `Null -> Ok None
+                | value ->
+                    let nonempty key = let* text = string value key in
+                      if text="" then Error ("empty Tool observation " ^ key) else Ok text in
+                    let* ata_execution_id = nonempty "execution_id" in
+                    let* ata_trace_id = nonempty "trace_id" in
+                    let* ata_tool = nonempty "tool" in
+                    let* turn = single value "keeper_turn_id" in
+                    let* ata_keeper_turn_id = match turn with
+                      | `Int n when n>0 -> Ok n | _ -> Error "answer Tool turn identity is invalid" in
+                    let* recorded = single value "recorded_at" in
+                    let* ata_recorded_at = finite recorded in
+                    Ok (Some {ata_execution_id;ata_trace_id;ata_keeper_turn_id;ata_tool;ata_recorded_at}) in
+              (match at_count, at_first_recorded_at, at_latest with
+               | 0, None, None -> Ok (Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current=true})
+               | n, Some first, Some last when n>0 && first<=last.ata_recorded_at ->
+                   Ok (Ask_tools_observed {at_count;at_first_recorded_at;at_latest;at_evidence_current=true})
+               | _ -> Error "answer Tool count and observation clocks disagree")
+          | _ -> Error "unknown answer Tool observation state" in
         Ok {af_answered_at;af_stimulus_id;af_turn_started_at;af_turn_finished_at;
-            af_queue_settled_at;af_queue_cancelled_at;af_evidence_complete}
+            af_queue_settled_at;af_queue_cancelled_at;af_evidence_complete;af_tool_actions}
     | _ -> Error "unknown answer follow-up state"
 
 type ask_answer_delivery =

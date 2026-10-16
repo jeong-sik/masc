@@ -445,6 +445,7 @@ let seed_tool_calls_from_ledger
 let prepare_agent_setup
       ?preview
       ?observation_token
+      ?(answer_source_ids = [])
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -1133,6 +1134,7 @@ let prepare_agent_setup
     ; meta
     ; profile_defaults
     ; turn_ctx_cell
+    ; answer_source_ids
     ; final_agent_core_turn_ordinal_ref
     ; receipt_agent_core_turn_count_ref
     ; receipt_model_used_ref

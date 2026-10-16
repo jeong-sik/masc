@@ -39,7 +39,10 @@ type pending_board_event_kind =
           preview cut. Carrying the payload mirrors {!Task_outcome}'s
           payload-carrying shape and the {!Ask_answered_row} rule that the
           row carries the answer itself. *)
-  | Ask_answered_row of { answered_by : Keeper_input_speaker.person }
+  | Ask_answered_row of {
+      answered_by : Keeper_input_speaker.person;
+      answer_source_id : string option;
+    }
       (** A human answered a question this Keeper asked. [answered_by] is
           fixed from the answer's responder when the row is made, so the
           conversation can say who answered without reading the row text. Like

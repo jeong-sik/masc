@@ -54,12 +54,36 @@
     gets one step per pass. A loop blocked inside Eio leaves the run queue,
     and the request runs until it blocks in turn.
 
-    Usage: masc-http-probe --url URL [--token-file PATH] [--trials N]
-    [--agent NAME] [--mimic-tui-loop] *)
+    While a frame is due every pass the loop does not wait at all: it asks
+    the terminal with a zero timeout and yields, and the request is back to
+    one step per pass. [--frame-due] is that loop. [--io-slice-ms] gives the
+    request a short Eio wait every pass instead; [--io-domain] sends it from
+    [Masc_tui_io_domain], the domain the TUI's requests run on. Measured
+    2026-10-16 against the live server, three trials each:
+
+    {v
+    work per pass  answer    frame due      1 ms slice    request domain
+    5 ms           87 B      86-152 ms      6-13 ms       10-20 ms
+                   161 KB    308-389 ms     6-13 ms       5 ms
+                   1.66 MB   2639-2703 ms   61-86 ms      15-20 ms
+    20 ms          87 B      321-602 ms     21-46 ms      20 ms
+                   161 KB    1223-1504 ms   21-43 ms      20 ms
+                   1.66 MB   timed out      169-212 ms    20-80 ms
+    50 ms          87 B      802-1503 ms    52-103 ms     50 ms
+                   161 KB    3053-3765 ms   51-103 ms     50 ms
+                   1.66 MB   timed out      408-625 ms    50 ms
+    v}
+
+    A slice still pays a pass for every socket buffer of a large body. The
+    request domain never waits for a pass; the caller resumes at the next
+    one, which is why its readings sit at the work per pass.
+
+    Usage: see [usage] below. *)
 
 let usage =
   "masc-http-probe --url URL [--token-file PATH] [--trials N] [--agent NAME] \
-   [--mimic-tui-loop] [--loop-work-ms MS] [--eio-wait] [--eio-stdin]"
+   [--mimic-tui-loop] [--loop-work-ms MS] [--eio-wait] [--eio-stdin] \
+   [--frame-due] [--io-slice-ms MS] [--io-domain]"
 
 type args = {
   url : string;
@@ -70,6 +94,9 @@ type args = {
   loop_work_ms : float;
   wait_through_eio : bool;
   wait_on_eio_stdin : bool;
+  frame_due : bool;
+  io_slice_ms : float;
+  io_domain : bool;
 }
 
 (* The TUI sends this header on every request; the probe is only a control if
@@ -95,6 +122,17 @@ let parse_args argv =
           rest
     | "--eio-wait" :: rest ->
         walk { acc with mimic_tui_loop = true; wait_through_eio = true } rest
+    | "--frame-due" :: rest ->
+        walk { acc with mimic_tui_loop = true; frame_due = true } rest
+    | "--io-domain" :: rest -> walk { acc with io_domain = true } rest
+    | "--io-slice-ms" :: value :: rest -> (
+        match float_of_string_opt value with
+        | Some slice when slice >= 0.0 ->
+            walk { acc with mimic_tui_loop = true; frame_due = true; io_slice_ms = slice } rest
+        | Some _ | None ->
+            Error
+              (Printf.sprintf "--io-slice-ms wants a non-negative number, got %S"
+                 value))
     | "--loop-work-ms" :: value :: rest -> (
         match float_of_string_opt value with
         | Some work when work >= 0.0 ->
@@ -118,7 +156,10 @@ let parse_args argv =
         mimic_tui_loop = false;
         loop_work_ms = 0.0;
         wait_through_eio = false;
-        wait_on_eio_stdin = false
+        wait_on_eio_stdin = false;
+        frame_due = false;
+        io_slice_ms = 0.0;
+        io_domain = false
       }
       (List.tl (Array.to_list argv))
   with
@@ -139,13 +180,14 @@ let headers ~agent ~token =
 
 let ms_of_ns ns = Int64.to_float ns /. 1e6
 
-let trials ~env ~args ~token =
+let trials ~env ~args ~token ~send =
   let clock = Eio.Stdenv.clock env in
   let headers = headers ~agent:args.agent ~token in
   for trial = 1 to args.trials do
     let started = Mtime_clock.elapsed_ns () in
     let result =
-      Masc_http_client.get_sync ~clock ~timeout_sec ~url:args.url ~headers ()
+      send (fun () ->
+        Masc_http_client.get_sync ~clock ~timeout_sec ~url:args.url ~headers ())
     in
     let elapsed = Int64.sub (Mtime_clock.elapsed_ns ()) started in
     match result with
@@ -217,11 +259,26 @@ let wait_on_eio_stdin_for ~clock ~stdin ~buffer =
       | exception End_of_file -> Eio.Time.sleep clock tui_input_wait_seconds)
     (fun () -> Eio.Time.sleep clock tui_input_wait_seconds)
 
+(* The TUI's loop while a frame is due: [Render_schedule.input_timeout_seconds]
+   answers 0 for a pending Force or Input, and for a Background whose 16 ms
+   window has already passed, which is every pass once a frame costs more
+   than the window. A zero wait asks the kernel without blocking
+   ([Masc_tui_input_reader.terminal_has_bytes ~remaining:0.0]), so the only
+   scheduling point left in the pass is the yield. This is the shape RFC-0429
+   §3.0 left open: "while the render schedule keeps asking for frames the
+   wait is zero ... one step per pass again". *)
+let frame_due_wait ~clock ~io_slice_ms =
+  if io_slice_ms > 0.0 then Eio.Time.sleep clock (io_slice_ms /. 1000.0)
+  else
+    let _readable, _, _ = Unix.select [ Unix.stdin ] [] [] 0.0 in
+    ()
+
 let spin_like_the_tui ~finished ~work_ms ~wait_through_eio ~wait_on_eio_stdin
-    ~clock ~stdin =
+    ~frame_due ~io_slice_ms ~clock ~stdin =
   let buffer = Cstruct.create 1024 in
   while not !finished do
-    if wait_on_eio_stdin then wait_on_eio_stdin_for ~clock ~stdin ~buffer
+    if frame_due then frame_due_wait ~clock ~io_slice_ms
+    else if wait_on_eio_stdin then wait_on_eio_stdin_for ~clock ~stdin ~buffer
     else if wait_through_eio then wait_through_eio_for ~clock
     else begin
       (* The waiting is the point; which descriptor came back is not read. *)
@@ -234,22 +291,29 @@ let spin_like_the_tui ~finished ~work_ms ~wait_through_eio ~wait_on_eio_stdin
     Eio.Fiber.yield ()
   done
 
-let run ~env ~args ~token =
-  if not args.mimic_tui_loop then trials ~env ~args ~token
-  else begin
-    let finished = ref false in
-    Eio.Fiber.both
-      (fun () ->
-        Fun.protect
-          ~finally:(fun () -> finished := true)
-          (fun () -> trials ~env ~args ~token))
-      (fun () ->
-        spin_like_the_tui ~finished ~work_ms:args.loop_work_ms
-          ~wait_through_eio:args.wait_through_eio
-          ~wait_on_eio_stdin:args.wait_on_eio_stdin
-          ~clock:(Eio.Stdenv.clock env)
-          ~stdin:(Eio.Stdenv.stdin env))
-  end
+let run ~env ~sw ~args ~token =
+  let measure send =
+    if not args.mimic_tui_loop then trials ~env ~args ~token ~send
+    else begin
+      let finished = ref false in
+      Eio.Fiber.both
+        (fun () ->
+          Fun.protect
+            ~finally:(fun () -> finished := true)
+            (fun () -> trials ~env ~args ~token ~send))
+        (fun () ->
+          spin_like_the_tui ~finished ~work_ms:args.loop_work_ms
+            ~wait_through_eio:args.wait_through_eio
+            ~wait_on_eio_stdin:args.wait_on_eio_stdin
+            ~frame_due:args.frame_due ~io_slice_ms:args.io_slice_ms
+            ~clock:(Eio.Stdenv.clock env)
+            ~stdin:(Eio.Stdenv.stdin env))
+    end
+  in
+  if args.io_domain then
+    let domain = Masc_tui_io_domain.start ~sw ~env in
+    measure (fun work -> Masc_tui_io_domain.run domain work)
+  else measure (fun work -> work ())
 
 let () =
   match parse_args Sys.argv with
@@ -271,7 +335,7 @@ let () =
           Eio_context.set_env env;
           Eio_context.set_switch sw;
           Eio_context.set_clock (Eio.Stdenv.clock env);
-          run ~env ~args ~token;
+          run ~env ~sw ~args ~token;
           (* The pool parks its connection on this switch and keeps it warm,
              so the switch has no reason to finish and returning here would
              hang. The readings are already printed and flushed. *)

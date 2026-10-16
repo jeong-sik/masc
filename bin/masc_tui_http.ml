@@ -5,25 +5,14 @@ let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 (* A request, a mailbox wait or a loop gap at least this long is written to
    the TUI log with two clocks (RFC-0429 §3.0): elapsed time and process CPU
    time. A request that took ten seconds of elapsed and none of CPU was
-   waiting on something. This is measurement, not a fix: the stall it exists
-   to place has been placed since -- #33772 timed it as the main loop's own
-   iteration cost, paid once per step of a reply -- and the fix, which is
-   render and I/O sharing one domain, is not here.
+   waiting on something. The requests run on a domain of their own
+   ([Masc_tui_io_domain]), so the elapsed time is the server's answer plus
+   the wait for the drawing loop's next pass, when the asking fiber resumes.
 
-   This threshold was written believing the cadence's routine polls would
-   stay under it and out of the log. They do not. Measured over the live
-   TUI logs on this host, 2026-09-07: 43 of the 72 lines are the three
-   requests that ride every tick -- /gate/keepers 29 (median 2972 ms),
-   /keepers/turns 12 (median 1298 ms), /keepers/tool-approvals 2. Which is
-   the same finding from the other side: the loop is what slows a request,
-   and a poll issued by that loop is slowed by it too. Raising the number
-   would only hide the majority case, so it stays and the premise is
-   written down as measured rather than as assumed.
-
-   Elapsed is [Mtime_clock.elapsed_ns], which no NTP step moves. The stall
-   being chased is around ten seconds, and a wall clock corrected by that
-   much would either invent it or hide it — the one thing this log must not
-   do. [Masc_tui_esc_interrupt] takes the same clock for the same reason. *)
+   Elapsed is [Mtime_clock.elapsed_ns], which no NTP step moves. A stall
+   worth a line is seconds long, and a wall clock corrected by that much
+   would either invent one or hide it — the one thing this log must not do.
+   [Masc_tui_esc_interrupt] takes the same clock for the same reason. *)
 let slow_report_ns = 1_000_000_000L
 let ms_of_ns ns = Int64.to_float ns /. 1e6
 
@@ -356,6 +345,58 @@ let percent_encode_query_value value =
 
 let request_clock () = Eio_context.get_clock_opt ()
 
+(* The domain this file's requests run on ([Masc_tui_io_domain]).
+   [Masc_tui.run_with_eio_context] starts it before the TUI sends anything. *)
+let io_domain : Masc_tui_io_domain.t option Atomic.t = Atomic.make None
+
+let start_io_domain ~sw ~env =
+  Atomic.set io_domain (Some (Masc_tui_io_domain.start ~sw ~env))
+
+let io_domain_not_started =
+  "masc-tui: a request was sent before its request domain started (a \
+   bootstrap-order bug)"
+
+let on_io_domain send =
+  match Atomic.get io_domain with
+  | Some domain -> Masc_tui_io_domain.run domain send
+  | None -> Error io_domain_not_started
+
+(* The library's request/response calls, sent from the request domain. The
+   module keeps the library's name so that every call in this file goes
+   there, the next one written included: no call site here can reach the
+   drawing domain's pool by naming the library. Streams are the library's
+   own, for the reason [Masc_tui_io_domain] gives. *)
+module Masc_http_client = struct
+  include Masc_http_client
+
+  let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
+    on_io_domain (fun () ->
+      Masc_http_client.get_sync ?clock ?timeout_sec ?max_body_bytes ~url
+        ~headers ())
+
+  let get_response_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
+    on_io_domain (fun () ->
+      Masc_http_client.get_response_sync ?clock ?timeout_sec ?max_body_bytes
+        ~url ~headers ())
+
+  let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
+    on_io_domain (fun () ->
+      Masc_http_client.post_sync ?clock ?timeout_sec ~url ~headers ~body ())
+
+  let post_response_sync ?clock ?timeout_sec ~url ~headers ~body () =
+    on_io_domain (fun () ->
+      Masc_http_client.post_response_sync ?clock ?timeout_sec ~url ~headers
+        ~body ())
+
+  let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
+    on_io_domain (fun () ->
+      Masc_http_client.patch_sync ?clock ?timeout_sec ~url ~headers ~body ())
+
+  let delete_sync ?clock ?timeout_sec ~url ~headers () =
+    on_io_domain (fun () ->
+      Masc_http_client.delete_sync ?clock ?timeout_sec ~url ~headers ())
+end
+
 (** Send an HTTP GET request and return the structured status/body pair. *)
 (* A 401 answered with the bearer this client held is worth one more try when
    the bearer can be replaced -- it expired while the TUI was open, or another
@@ -543,7 +584,7 @@ let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, s
    A changed DOS answer is about 1.2 MB of JSON around 921 KB of pixels.
    Parsing it and decoding the base64 are pure work, so they run on a system
    thread and the UI domain keeps drawing and reading keys meanwhile; the
-   request itself stays on the fiber, where the Eio client runs.
+   request itself goes to the request domain like every other.
 
    The same decode validates the spectator's activity feed: a malformed
    feed is a failed read, not a successful empty activity list. *)
@@ -2392,16 +2433,16 @@ let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : 
     upload. *)
 let upload_artifact ~(host : string) ~(port : int) ~(bytes : string)
     : (string, string) result =
+  let url = url_of ~host ~port ~path:"/api/v1/artifacts" in
   match
     with_credential_refresh @@ fun () ->
-    Masc_tui_board_upload.post_artifact_raw ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~headers:(auth_headers ())
-      ~host ~port ~bytes ()
+    Masc_http_client.post_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url
+      ~headers:(("Content-Type", "application/octet-stream") :: auth_headers ())
+      ~body:bytes ()
   with
   | Error detail ->
-      Error
-        (Masc.Tui_decode.http_transport_error ~verb:"POST"
-           ~url:(url_of ~host ~port ~path:"/api/v1/artifacts") ~detail)
+      Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail)
   | Ok (status_code, body) -> (
       match decode_json ~allow_empty:false ~status_code:status_code ~body with
       | Error _ as error -> error

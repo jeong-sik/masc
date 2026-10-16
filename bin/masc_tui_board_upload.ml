@@ -5,8 +5,9 @@
     [POST /api/v1/artifacts] and the returned content address becomes the
     post payload's [attachments] entry.
 
-    A library of its own so the transport and the sequencing can be driven
-    without the executable around them. *)
+    A library of its own so the sequencing can be driven without the
+    executable around it. The POST itself is [Masc_tui_http.upload_artifact]'s,
+    which sends it the way the TUI sends every request. *)
 
 (** The largest file that can be attached: what the artifact store serves,
     which is also what the upload route accepts. *)
@@ -28,23 +29,6 @@ let uploaded_sha256 json =
                 ^ Tool_output.invalid_sha256_to_string invalid))
       | Some _ | None -> Error "artifact upload response did not name a sha256")
   | _ -> Error "artifact upload response was not a JSON object"
-;;
-
-let host_for_url host =
-  if String.contains host ':' && not (String.starts_with ~prefix:"[" host) then
-    "[" ^ host ^ "]"
-  else host
-;;
-
-(** The raw POST: [bytes] as the body. Returns the status and body
-    uninterpreted; what a refusal means is the caller's to say. *)
-let post_artifact_raw ?clock ~timeout_sec ~headers ~host ~port ~bytes () =
-  let url =
-    Printf.sprintf "http://%s:%d/api/v1/artifacts" (host_for_url host) port
-  in
-  Masc_http_client.post_sync ?clock ~timeout_sec ~url
-    ~headers:(("Content-Type", "application/octet-stream") :: headers)
-    ~body:bytes ()
 ;;
 
 let size_text bytes =

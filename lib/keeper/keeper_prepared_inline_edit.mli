@@ -1,5 +1,5 @@
 (** Producer-owned resource binding for an exact instantiated Edit-only plan.
-    These directory claims authorize neither effects nor replay. *)
+    These entry claims authorize neither effects nor replay. *)
 type t
 
 val eligible : Keeper_tool_plan.t -> bool
@@ -30,7 +30,8 @@ val resource_dependencies
 (** Earlier conflicting prepared leaves in dependency-layer order. Only the
     exact immutable plan has this ordering; [None] means a different plan.
     Disjoint siblings share no ordering edge. These edges grant neither
-    authorization nor replay and do not replace the plan's dependencies. *)
+    authorization nor replay and do not replace the plan's dependencies.
+    Shared source reads do not conflict; overlapping target writes still do. *)
 
 val for_node
   : plan:Keeper_tool_plan.t

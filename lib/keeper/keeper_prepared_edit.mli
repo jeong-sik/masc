@@ -16,8 +16,13 @@ val prepare
     allowed roots and aliases cannot mint unrelated scheduling resources. *)
 
 val scopes : t -> Agent_core.Tool_contract.Resource_scope.t list
-(** Conservative occupied target/source directories. A shared ancestor alone
-    permits siblings; equal or ancestor/descendant directories conflict. *)
+(** The lexical replacement entry carries [Write]; the resolved source entry
+    carries [Read]. Each entry is identified by its physical parent and leaf,
+    and retains its parent and complete physical ancestry. Different entries
+    may overlap even in the same or nested directories. Additional target
+    [Write] and source [Read] object claims retain the backend's inode-based
+    mutation ordering for hard links and filesystem spelling aliases. Entry
+    claims keep successive atomic replacements ordered after inode changes. *)
 
 val release : t -> unit
 (** Release a preparation that an aggregate producer cannot transfer. Safe to

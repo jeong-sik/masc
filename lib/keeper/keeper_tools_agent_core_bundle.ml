@@ -522,7 +522,7 @@ let make_tool_bundle_for_descriptors_with_policy
                           match Keeper_tool_filesystem_runtime.prepared_edit_scopes prepared_edit with
                           | scope :: additional_scopes ->
                             Ok (Some (Agent_core.Tool.scoped_call ~scope ~additional_scopes handler))
-                          | [] -> invalid_arg "prepared Edit producer returned no directory footprint")
+                          | [] -> invalid_arg "prepared Edit producer returned no file footprint")
                  in
                  Some (Agent_core.Tool.ordinary_descriptor_scoped
                    ~call_effect:(Agent_core.Tool.call_effect ordinary) ~prepare)

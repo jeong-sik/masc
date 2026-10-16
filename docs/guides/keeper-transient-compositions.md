@@ -4,9 +4,11 @@ Use `keeper_composition_prepare` to check a task-specific plan before executing 
 The draft is local to the preparing Keeper; it does not publish a shared Skill.
 The tools are discoverable through the Keeper tool search surface.
 
-An ordinary Tool node places its arguments in a tagged `input` template:
-`{"id":"lane","tool":"keeper_lane_status","input":{"kind":"literal","value":{}}}`.
-`args` belongs to fixed Skill child arguments, not ordinary Tool nodes.
+An ordinary Tool node accepts fixed arguments as an object:
+`{"id":"lane","tool":"keeper_lane_status","args":{}}`.
+Use tagged `input` for output-dependent templates. Fixed `args` normalizes to
+the existing literal input AST; the canonical encoded plan still uses `input`.
+Supplying both forms or non-object `args` is rejected before execution.
 Represent a Skill child with its exact `skill_reference`; its callable Tool
 name does not make it an ordinary node Tool. Both fixed `args` and a resolved
 tagged child `input` must match the Skill's parameter object schema.

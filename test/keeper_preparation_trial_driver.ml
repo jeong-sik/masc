@@ -401,7 +401,7 @@ let recipe ~projection fixture =
   let output = `Assoc ["kind",`String "output";"node",`String "arguments";"pointer",`String "/content"] in
   `Assoc ["execution",`String "inline";"nodes",`List
     [`Assoc ["id",`String "arguments";"tool",`String "keeper_artifact_read";
-      "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",field "selection_sha256" fixture]]];
+      "args",`Assoc ["sha256",field "selection_sha256" fixture]];
      `Assoc ["id",`String "resolved_stdout";"skill_reference",field "skill_reference" fixture;
       "input",`Assoc ["kind",`String "object";"fields",`List
         [`Assoc ["name",`String "job_id";"value",output]]]]];

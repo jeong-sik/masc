@@ -581,7 +581,12 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
           `Assoc (("execution",`String "unknown") :: List.remove_assoc "execution" fields)
           | _ -> fail "fixture input object")]
       ; `Assoc ["recipe",`Assoc ["execution",`String (Masc.Keeper_tool_composition_catalog.execution_mode_to_string execution);
-          "nodes",`List [nested ~args:(`Assoc ["unexpected",`Bool true]) "bad" reference]]] ];
+          "nodes",`List [nested ~args:(`Assoc ["unexpected",`Bool true]) "bad" reference]]]
+      ; `Assoc ["recipe",`Assoc ["execution",`String "inline";"nodes",`List
+          [`Assoc ["id",`String "bad";"tool",`String "keeper_lane_status";
+            "args",`Assoc [];"input",`Assoc ["kind",`String "literal";"value",`Assoc []]]]]]
+      ; `Assoc ["recipe",`Assoc ["execution",`String "inline";"nodes",`List
+          [`Assoc ["id",`String "bad";"tool",`String "keeper_lane_status";"args",`String "not an object"]]]] ];
     None)
     else (
       let prepare_success,_,prepared = invoke "prepare-nested" Draft.prepare_tool_name input in

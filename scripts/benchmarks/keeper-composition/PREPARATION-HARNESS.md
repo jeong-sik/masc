@@ -233,5 +233,8 @@ separate prepare. Its original SDK input is joined to the returned sealed draft,
 run artifact, invocation turn and exact child mappings before accepting physical
 stdout evidence. The normal pair retains separate prepare/run, exercising both
 sources without inventing a latency comparison between these synthetic cases.
+Both recipes pass the selection reader's fixed arguments through ordinary
+`args`, while the child keeps its tagged upstream input. The same public
+compiler normalizes the ordinary object and revalidates the frozen draft.
 It is not a no-argument invocation of the parameterized driver. Authoring this
 alias is not evidence that it has executed.

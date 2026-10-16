@@ -160,30 +160,43 @@ let bios_of_source = function
   | None_available -> false
 ;;
 
-(* A cart is a path that exists, or a name (with or without .rom/.dsk) in
-   carts/. A .dsk image resolves the same way and loads into the drive — the
-   inventory holds game media, whatever the medium is. *)
+(* A cart is a name in carts/, with or without .rom/.dsk. It is never a path:
+   the worker's filesystem holds more than game media, and a name that cannot
+   leave carts/ leaves no traversal to reason about. Only a regular file is a
+   cartridge; a directory, or a link that points nowhere, is not. *)
+let is_inventory_name name =
+  name <> ""
+  && (not (String.starts_with ~prefix:"." name))
+  && not (String.exists (function '/' | '\000' -> true | _ -> false) name)
+;;
+
 let resolve_cart ~base_path name =
   let trimmed = String.trim name in
-  if Sys.file_exists trimmed && not (Sys.is_directory trimmed) then Ok trimmed
+  if not (is_inventory_name trimmed) then
+    Error
+      (Printf.sprintf
+         "cart %S is not an inventory name: pass a file name from masc_msx_meta \
+          include_inventory=true, not a path"
+         trimmed)
   else begin
     let dir = carts_dir ~base_path in
     let candidates =
       [ trimmed; trimmed ^ ".rom"; trimmed ^ ".ROM"; trimmed ^ ".dsk"; trimmed ^ ".DSK" ]
     in
-    match
-      List.find_opt
-        (fun c -> Sys.file_exists (Filename.concat dir c))
-        candidates
-    with
+    let is_file candidate =
+      match Unix.stat (Filename.concat dir candidate) with
+      | stats -> stats.Unix.st_kind = Unix.S_REG
+      | exception Unix.Unix_error _ -> false
+    in
+    match List.find_opt is_file candidates with
     | Some c -> Ok (Filename.concat dir c)
     | None ->
       Error
         (match carts_available ~base_path with
          | Ok [] ->
            Printf.sprintf
-             "unknown cartridge %S and the inventory %s is empty: put ROM or .dsk images \
-              there or pass a path"
+             "unknown cartridge %S and the inventory %s is empty: an operator puts ROM or \
+              .dsk images in the Add-on volume"
              trimmed dir
          | Ok names ->
            Printf.sprintf "unknown cartridge %S; available: %s" trimmed

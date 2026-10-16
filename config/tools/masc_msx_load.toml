@@ -18,7 +18,7 @@ defer_loading = true
 [[params]]
 name = "cart"
 type = "string"
-description = "A name from carts_available (with or without its extension) or a path to an image. A cartridge is a 16/32KB plain cart or a MegaROM (the mapper is guessed from the image, e.g. KOEI 256KB titles); a name ending in .dsk is a raw floppy image and goes into drive A: instead of the slot. Omit to boot the BIOS alone and see the inventory."
+description = "A file name from the inventory (masc_msx_meta with include_inventory=true), with or without its extension; a path is refused. A cartridge is a 16/32KB plain cart or a MegaROM (the mapper is guessed from the image, e.g. KOEI 256KB titles); a name ending in .dsk is a raw floppy image and goes into drive A: instead of the slot."
 
 [[params]]
 name = "roms_dir"

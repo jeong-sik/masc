@@ -606,7 +606,10 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
          or by an unchanged observation, and the scan read the rest. A file
          that reads the same before that proof and after the scan took no
          write in between, which is the evidence the unchanged-file cache
-         rests on. Any other file has its exact prefix read again. *)
+         rests on. Every write sets mtime and ctime and no call sets ctime
+         back, so a write this misses keeps the size and lands in the same
+         clock tick as the change [before] already shows; the interface
+         states that limit. Any other file has its exact prefix read again. *)
       let* () =
         if before.st_dev = after.st_dev && before.st_ino = after.st_ino
            && boundary <= after.st_size

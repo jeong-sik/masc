@@ -413,18 +413,19 @@ let respond_keeper_tool_json ?config ?(project = Fun.id) ~sw ~clock state reques
   match
     Keeper_tool_surface.dispatch (gate_keeper_ctx ?config ~sw ~clock state) ~name:tool_name ~args
   with
-  | Some result when Tool_result.is_success result -> (
-      let body = Tool_result.message result in
+  | Some (Tool_result.Completed output) -> (
       try
-        let json = Yojson.Safe.from_string body |> project in
+        (* Both Keeper read tools already produce structured data. Rendering
+           it to text and parsing it again only repeats work on every read. *)
+        let json = project output.data in
         respond_json_value_with_cors ~status:`OK request reqd json
       with
       | Yojson.Json_error err ->
-          Log.Misc.error "channel_gate %s returned invalid json: %s"
+          Log.Misc.error "channel_gate %s projection failed: %s"
             tool_name err;
           respond_json_value_with_cors ~status:`Internal_server_error request reqd
             (Channel_gate.error_json "internal error") )
-  | Some result ->
+  | Some ((Tool_result.Failed _ | Tool_result.Deferred _) as result) ->
       (* Not-found is decided by the typed existence precheck at the route
          (see [handle_gate_keeper_status_by_name]); an error out of the tool
          dispatch itself is a backend failure, not a 404. The substring

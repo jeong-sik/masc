@@ -1535,31 +1535,31 @@ let fetch_keeper_chat_events ~(host : string) ~(port : int)
 (* Rows per older page. A page is parsed, decoded and folded on the UI's own
    domain in one run, and at the server's full window (400 rows, about 400 KB)
    that was about 18 ms with a key held down; a quarter of it is about a
-   quarter of the stall. A server that does not know [limit] ignores it and
-   answers the full window, which the pane takes as it always did. *)
+   quarter of the stall. The opaque cursor preserves the exact append position
+   independently of the requested page size. *)
 let history_page_limit = 100
 
 let fetch_keeper_chat_history_page ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(before : float) :
-    (Masc_tui_keeper_chat_history.page, string) result =
+    ~(keeper_name : string) ~(cursor : string option) :
+    (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result =
   let path =
-    (* %.17g rather than %h: both round-trip through float_of_string, but the
-       hex form carries a '+' in its exponent, which a query string reads as a
-       space. 17 significant digits is the shortest width that is exact for
-       every double. *)
-    Printf.sprintf "/api/v1/keepers/%s/chat/history/page?before=%.17g&limit=%d"
-      (percent_encode_path_segment keeper_name)
-      before history_page_limit
+    Printf.sprintf "/api/v1/keepers/%s/chat/history/page?limit=%d%s"
+      (percent_encode_path_segment keeper_name) history_page_limit
+      (match cursor with
+       | None -> ""
+       | Some value -> "&cursor=" ^ percent_encode_path_segment value)
   in
   match http_get ~host ~port ~path with
-  | Error detail -> Error detail
+  | Error detail -> Error (Masc_tui_keeper_chat_history.Page_read_failed detail)
+  | Ok (409, _) -> Error Masc_tui_keeper_chat_history.Page_stale
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (named_refusal "chat history page" ~status ~body)
+      Error (Masc_tui_keeper_chat_history.Page_read_failed (named_refusal "chat history page" ~status ~body))
   | Ok (_, body) -> (
       match Yojson.Safe.from_string body with
       | json -> Masc_tui_keeper_chat_history.page_of_json json
+          |> Result.map_error (fun detail -> Masc_tui_keeper_chat_history.Page_read_failed detail)
       | exception Yojson.Json_error detail ->
-          Error ("chat history page was not JSON: " ^ detail))
+          Error (Masc_tui_keeper_chat_history.Page_read_failed ("chat history page was not JSON: " ^ detail)))
 
 let fetch_keeper_memory_input ~host ~port ~keeper_name =
   let path = Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
@@ -1637,8 +1637,8 @@ let fetch_keeper_context_inspector ~(host : string) ~(port : int)
     | Some record ->
         let key = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
         (match fetch_keeper_chat_history_page ~host ~port ~keeper_name
-                 ~before:(Unix.gettimeofday ()) with
-            | Error detail -> Error detail
+                 ~cursor:None with
+            | Error error -> Error (Masc_tui_keeper_chat_history.page_error_to_string error)
             | Ok page ->
                 let parts =
                   List.filter_map

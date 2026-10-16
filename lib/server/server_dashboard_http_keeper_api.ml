@@ -615,59 +615,30 @@ let keeper_chat_history_json config name =
   attach_keeper_chat_skill_activations ~config rows
 ;;
 
-(* Direct-conversation rows older than [before], one [Keeper_chat_store] window
-   at a time. Separate from [keeper_chat_history_json] rather than a mode of it,
-   because the two answer different questions:
-
-   - /chat/history is the transcript: the tail window plus every autonomous turn
-     the retention root still holds ([Keeper_raw_trace_retention.history_limit]).
-   - this is the walk backwards through direct rows the tail window evicted.
-     Autonomous turns are excluded on purpose -- they are bounded by retention,
-     not by this window, so the first transcript fetch already carried every one
-     that exists. Repeating them per page would duplicate rows the client holds.
-
-   [next_before] is the cursor for the following page, computed here so the
-   caller does not reimplement the rule: the oldest [ts] among the returned
-   rows, or [null] for an empty page. The fold tolerates a row carrying no [ts]
-   by skipping it, which today cannot happen -- [Keeper_chat_store.parse_line]
-   maps an absent [ts] to [Some 0.0] rather than [None] (see the store's own
-   [quiet_line_ts], which maps the same absence to [None]). That disagreement
-   is tracked separately; this fold is written against the documented type so
-   it stays correct when the store's decoder is repaired.
-
-   Uncached: pages are user-initiated and [load_page] is already bounded I/O
-   (binary-search probes plus one window slice). A cache keyed by cursor would
-   add entries per click without a measured hot path asking for it. *)
-let keeper_chat_history_page_json ?max_total config name ~before =
+(* Exact pages keep every role in file append order. The role-based transcript
+   tail remains separate; a timestamp cannot represent a position after clock
+   regression or among rows stamped at the same instant. *)
+let keeper_chat_history_page_json ?max_total config name ~cursor =
   let base_dir = (config : Workspace.config).base_path in
-  let { Keeper_chat_store.messages; has_more } =
-    Keeper_chat_store.load_page ~base_dir ~keeper_name:name ?before ?max_total ()
+  let ( let* ) = Result.bind in
+  let* { Keeper_chat_store.history_messages; next_cursor } =
+    Keeper_chat_store.load_history_page_result ~base_dir ~keeper_name:name
+      ?cursor ?max_total ()
   in
   let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
-  let next_before =
-    List.fold_left
-      (fun acc ({ ts; _ } : Keeper_chat_store.chat_message) ->
-        match acc with
-        | None -> Some ts
-        | Some a -> Some (Float.min a ts))
-      None
-      messages
-  in
-  (* The page route's only client is the TUI, which never reads
-     [stream_contract]; leaving it out saves about a quarter of the page's
-     bytes on the parse-decode-fold path the UI runs per key held (#42200).
-     The transcript route above keeps it for the dashboard. *)
   let messages =
     Keeper_chat_store.to_json_array ~omit_stream_contract:true ~base_dir
-      ?trace_block_by_turn_ref messages
+      ?trace_block_by_turn_ref history_messages
     |> attach_keeper_chat_skill_activations ~config
   in
-  `Assoc
-    [ "schema", `String "masc.keeper_chat_history.page.v1"
+  Ok (`Assoc
+    [ "schema", `String "masc.keeper_chat_history.page.v2"
     ; "messages", messages
-    ; "has_more", `Bool has_more
-    ; "next_before", (match next_before with Some t -> `Float t | None -> `Null)
-    ]
+    ; "has_more", `Bool (Option.is_some next_cursor)
+    ; "next_cursor", (match next_cursor with
+        | Some cursor -> `String (Keeper_chat_history_page.cursor_to_string cursor)
+        | None -> `Null)
+    ])
 ;;
 
 let cached_keeper_chat_history_json config name =
@@ -891,34 +862,35 @@ let handle_keeper_get_subroutes state req request reqd =
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else (
-      (* Absent [before] means the newest window -- the same rows /chat/history
-         serves, minus the autonomous turns. Present but unparseable is a client
-         bug, not a request for the newest page, so it is rejected rather than
-         silently treated as absent. *)
-      match Server_utils.query_param req "before", Server_utils.query_param req "limit" with
-      | Some raw, _ when float_of_string_opt (String.trim raw) = None ->
+      let module Page = Keeper_chat_history_page in
+      let parsed_cursor =
+        match Server_utils.query_param req "cursor" with
+        | None -> Ok None
+        | Some raw -> Page.cursor_of_string raw |> Result.map Option.some
+      in
+      let limit_raw = Server_utils.query_param req "limit" in
+      match parsed_cursor, limit_raw with
+      | Error error, _ ->
         Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-          (error_json "before must be a unix-seconds float")
+          (error_json (Page.error_to_string error))
       | _, Some raw when int_of_string_opt (String.trim raw) = None ->
-        (* The same rule as [before]: a limit that does not parse is a client
-           bug, not a request for the default window. *)
         Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
           (error_json "limit must be an integer")
-      | before_raw, limit_raw ->
-        let before =
-          Option.bind before_raw (fun raw -> float_of_string_opt (String.trim raw))
-        in
-        let max_total =
-          Option.bind limit_raw (fun raw -> int_of_string_opt (String.trim raw))
-        in
+      | Ok cursor, limit_raw ->
+        let max_total = Option.bind limit_raw (fun raw -> int_of_string_opt (String.trim raw)) in
         let config = Mcp_server.workspace_config state in
-        (* The window read, its parse and the page's JSON are one job on the
-           domain pool, as the cached whole-history read below already is. *)
-        let page =
-          Domain_pool_ref.submit_io_or_inline (fun () ->
-            keeper_chat_history_page_json ?max_total config name ~before)
-        in
-        Server_auth.respond_json_value_with_cors ~status:`OK request reqd page)
+        let page = Domain_pool_ref.submit_io_or_inline (fun () ->
+          keeper_chat_history_page_json ?max_total config name ~cursor) in
+        (match page with
+         | Ok page -> Server_auth.respond_json_value_with_cors ~status:`OK request reqd page
+         | Error error ->
+           let status = match error with
+             | Page.Invalid_cursor _ -> `Bad_request
+             | Page.Stale_cursor -> `Conflict
+             | Page.Invalid_row _ | Page.Row_exceeds_window | Page.Io_error _ -> `Internal_server_error
+           in
+           Server_auth.respond_json_value_with_cors ~status request reqd
+             (error_json (Page.error_to_string error))))
   else if ends_with "/chat/history" then
     let name = extract_name "/chat/history" in
     if name = "" then

@@ -1267,20 +1267,20 @@ let page json =
   | Ok page -> page
   | Error detail -> failf "expected a page, got %s" detail
 
-let page_envelope ?(has_more = true) ?next_before rows =
+let page_envelope ?(has_more = true) ?next_cursor rows =
   `Assoc
-    ([ "schema", `String "masc.keeper_chat_history.page.v1"
+    ([ "schema", `String "masc.keeper_chat_history.page.v2"
      ; "messages", `List rows
      ; "has_more", `Bool has_more
      ]
-     @ (match next_before with
-        | None -> [ "next_before", `Null ]
-        | Some ts -> [ "next_before", `Float ts ]))
+     @ (match next_cursor with
+        | None -> [ "next_cursor", `Null ]
+        | Some cursor -> [ "next_cursor", `String cursor ]))
 
 let test_a_page_decodes_its_rows_and_cursor () =
   let p =
     page
-      (page_envelope ~has_more:true ~next_before:12.5
+      (page_envelope ~has_more:true ~next_cursor:"opaque-position"
          [ row ~ts:20.0 ~role:"user" "older question"
          ; row ~ts:21.0 ~role:"assistant" "older answer"
          ])
@@ -1289,22 +1289,25 @@ let test_a_page_decodes_its_rows_and_cursor () =
     [ "older question"; "older answer" ]
     (List.map (fun r -> r.History.text) p.History.decoded.History.rows);
   check bool "more remain" true p.History.has_more;
-  check (option (float 0.0)) "and the cursor for them" (Some 12.5)
-    p.History.next_before
+  check (option string) "and the cursor for them" (Some "opaque-position")
+    p.History.next_cursor
 
 let test_the_top_of_the_conversation_says_so () =
   let p = page (page_envelope ~has_more:false [ row ~role:"user" "first ever" ]) in
   check bool "nothing older" false p.History.has_more;
-  check (option (float 0.0)) "and no cursor to ask with" None
-    p.History.next_before
+  check (option string) "and no cursor to ask with" None
+    p.History.next_cursor
 
-let test_a_missing_has_more_reads_as_no_more () =
-  (* Guessing true would leave the pane offering a page the server never
-     promised, and every request for it would come back empty. *)
-  let p =
-    page (`Assoc [ "messages", `List [ row ~role:"user" "only row" ] ])
-  in
-  check bool "absence is not a promise of more" false p.History.has_more
+let test_an_incomplete_page_is_refused () =
+  match History.page_of_json (`Assoc [ "messages", `List [row ~role:"user" "only row"] ]) with
+  | Error _ -> ()
+  | Ok _ -> fail "an incomplete envelope must not assert page exhaustion"
+
+let test_an_unreadable_page_row_preserves_the_cursor () =
+  match History.page_of_json (page_envelope ~has_more:true ~next_cursor:"held-cursor"
+    [row ~role:"user" "valid row"; `Assoc ["content", `String "missing id and role"]]) with
+  | Error _ -> ()
+  | Ok _ -> fail "an unreadable row must not advance an exact page cursor"
 
 let test_tool_rows_fold_in_a_page_as_they_do_in_the_transcript () =
   let p =
@@ -1941,8 +1944,10 @@ let () =
             test_a_page_decodes_its_rows_and_cursor
         ; test_case "the top of the conversation says so" `Quick
             test_the_top_of_the_conversation_says_so
-        ; test_case "a missing has_more reads as no more" `Quick
-            test_a_missing_has_more_reads_as_no_more
+        ; test_case "an incomplete page envelope is refused" `Quick
+            test_an_incomplete_page_is_refused
+        ; test_case "an unreadable page row refuses the cursor" `Quick
+            test_an_unreadable_page_row_preserves_the_cursor
         ; test_case "tool rows fold in a page too" `Quick
             test_tool_rows_fold_in_a_page_as_they_do_in_the_transcript
         ; test_case "a non-object page is an error" `Quick

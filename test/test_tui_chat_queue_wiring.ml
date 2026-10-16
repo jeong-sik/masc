@@ -147,19 +147,6 @@ let test_an_empty_refresh_keeps_the_transcript () =
     (ats (Tui_types.merge_paged_history ~paged ~fresh:[]))
 ;;
 
-let test_oldest_at_reports_the_cursor () =
-  check
-    (option (float 0.001))
-    "oldest of the held rows"
-    (Some 100.)
-    (Tui_types.oldest_at [ entry_at 300.; entry_at 100.; entry_at 200. ]);
-  check
-    (option (float 0.001))
-    "nothing to page back from"
-    None
-    (Tui_types.oldest_at [])
-;;
-
 let test_visible_clock_stays_monotonic_inside_one_causal_turn () =
   let user = Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }) in
   let loaded =
@@ -6228,8 +6215,6 @@ let () =
             test_a_row_the_window_evicted_stays_visible
         ; test_case "an empty refresh keeps the transcript" `Quick
             test_an_empty_refresh_keeps_the_transcript
-        ; test_case "oldest_at reports the cursor" `Quick
-            test_oldest_at_reports_the_cursor
         ; test_case "visible clock stays monotonic inside one turn" `Quick
             test_visible_clock_stays_monotonic_inside_one_causal_turn
         ; test_case "Journal interleaves one request by displayed time" `Quick

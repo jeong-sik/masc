@@ -11,7 +11,7 @@ import {
   sameDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import { callMcpTool } from './api/mcp'
-import { currentStoredTokenRevision, runOperatorAction } from './api/core'
+import { ApiRequestError, currentStoredTokenRevision, runOperatorAction } from './api/core'
 import {
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
@@ -1037,7 +1037,7 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
   chatHistoryPageRequests.add(keeperName)
   setRecordValue(keeperHydrating, keeperName, true)
   try {
-    const page = await fetchKeeperChatHistoryPage(keeperName, previous?.nextBefore ?? undefined)
+    const page = await fetchKeeperChatHistoryPage(keeperName, previous?.nextCursor ?? undefined)
     const existing = keeperThreads.value[keeperName] ?? []
     const existingById = new Map(existing.map(entry => [entry.id, entry]))
     // Pages carry canonical content and identity but omit stream lifecycle
@@ -1055,7 +1055,7 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
       ...keeperChatHistoryPages.value,
       [keeperName]: {
         entries: [...retained.values()],
-        nextBefore: page.nextBefore,
+        nextCursor: page.nextCursor,
         hasMore: page.hasMore,
       },
     }
@@ -1066,6 +1066,14 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
     ])
     setRecordValue(keeperChatHistoryErrors, keeperName, null)
   } catch (err) {
+    if (err instanceof ApiRequestError && err.status === 409) {
+      // The physical transcript changed. Retire its cursor and reload the tail;
+      // the next explicit older read starts a new server-owned page walk.
+      const pages = { ...keeperChatHistoryPages.value }
+      delete pages[keeperName]
+      keeperChatHistoryPages.value = pages
+      await hydrateKeeperChatHistory(keeperName, { force: true })
+    }
     setRecordValue(keeperChatHistoryErrors, keeperName,
       err instanceof Error ? err.message : '이전 대화를 불러오지 못했습니다')
   } finally {

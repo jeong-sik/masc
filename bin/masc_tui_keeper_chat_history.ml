@@ -1726,33 +1726,35 @@ let rows_of_json (payload : Yojson.Safe.t) =
 type page =
   { decoded : decoded
   ; has_more : bool
-  ; next_before : float option
+  ; next_cursor : string option
   }
+
+type page_error = Page_stale | Page_read_failed of string
+let page_error_to_string = function
+  | Page_stale -> "Conversation history changed; the next older read starts from its newest page."
+  | Page_read_failed detail -> detail
 
 let page_of_json (payload : Yojson.Safe.t) =
   match payload with
-  | `Assoc fields -> (
-      match assoc_opt "messages" fields with
-      | Some (`List _ as messages) -> (
-          match rows_of_json messages with
-          | Error _ as error -> error
-          | Ok decoded ->
-              Ok
-                { decoded
-                ; (* A missing flag reads as "no more". Guessing true would
-                     leave the pane offering a page the server never promised,
-                     and every request for it would come back empty. *)
-                  has_more =
-                    (match assoc_opt "has_more" fields with
-                     | Some (`Bool value) -> value
-                     | Some _ | None -> false)
-                ; next_before =
-                    (match assoc_opt "next_before" fields with
-                     | Some (`Float value) -> Some value
-                     | Some (`Int value) -> Some (float_of_int value)
-                     | Some _ | None -> None)
-                })
-      | Some _ | None ->
-          Error "keeper chat page has no messages array")
+  | `Assoc fields ->
+    (match assoc_opt "schema" fields, assoc_opt "messages" fields,
+           assoc_opt "has_more" fields, assoc_opt "next_cursor" fields with
+     | Some (`String "masc.keeper_chat_history.page.v2"), Some (`List _ as messages),
+       Some (`Bool has_more), Some cursor_json ->
+       let cursor = match cursor_json with
+         | `Null -> Ok None
+         | `String value when String.trim value <> "" -> Ok (Some value)
+         | _ -> Error "keeper chat page has an invalid cursor"
+       in
+       let ( let* ) = Result.bind in
+       let* next_cursor = cursor in
+       if has_more <> Option.is_some next_cursor
+       then Error "keeper chat page cursor disagrees with has_more"
+       else
+         let* decoded = rows_of_json messages in
+         if decoded.dropped <> 0
+         then Error "keeper chat page contains unreadable rows; cursor was not advanced"
+         else Ok { decoded; has_more; next_cursor }
+     | _ -> Error "keeper chat page has an unknown or incomplete v2 envelope")
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-      Error "keeper chat page did not come back as an object"
+    Error "keeper chat page did not come back as an object"

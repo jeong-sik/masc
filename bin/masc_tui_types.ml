@@ -604,7 +604,7 @@ type keeper_chat_page = {
   kcp_history_dropped : int;
   kcp_memory_error : string option;
   kcp_memory_dropped : int;
-  kcp_older_cursor : float option;
+  kcp_older_cursor : string option;
   kcp_older_exist : bool;
   kcp_older_error : string option;
 }
@@ -7859,12 +7859,12 @@ type state = {
   mutable msg_scroll: int;
   (* Where the next older page starts, and whether one exists. Both come from
      the server rather than being derived here: it owns the rule for what
-     "older than this" means across rows that share a timestamp. None with
+     a file prefix means independently of display timestamps. None with
      [msg_older_exist] true means the pane has not learned a cursor yet. *)
-  mutable msg_older_cursor: float option;
+  mutable msg_older_cursor: string option;
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
-  mutable msg_older_resume: (string * float) option;
+  mutable msg_older_resume: (string * string option) option;
   mutable msg_older_error: string option;
   (* Presentation-only defaults come from the CLI and can be changed in the
      pane without mutating the transcript. *)
@@ -8202,9 +8202,9 @@ let suspend_workspace_readings state =
   state.msg_history_inflight <- None;
   if state.msg_older_loading then
     state.msg_older_resume <-
-      (match state.msg_target_keeper_name, state.msg_older_cursor with
-       | Some keeper, Some before -> Some (keeper, before)
-       | _ -> None);
+      (match state.msg_target_keeper_name with
+       | Some keeper -> Some (keeper, state.msg_older_cursor)
+       | None -> None);
   state.msg_older_loading <- false;
   state.msg_journal_inflight <- [];
   state.context_inspector_loading <- false;
@@ -11845,6 +11845,22 @@ let restore_keeper_chat_page (state : state) keeper_name =
       state.msg_older_error <- None
 ;;
 
+(* A refused physical cursor invalidates that transcript's retained rows,
+   including the copy restored on a Keeper revisit. Memory has its own store. *)
+let retire_keeper_chat_history (state : state) keeper_name =
+  state.msg_loaded_pages <- List.remove_assoc keeper_name state.msg_loaded_pages;
+  if state.msg_loaded_keeper = Some keeper_name then (
+    retire_keeper_message_search state;
+    state.msg_loaded <-
+      List.filter (fun entry -> entry.me_role = Message_memory) state.msg_loaded;
+    state.msg_loaded_error <- None;
+    state.msg_loaded_dropped <- 0;
+    state.msg_older_cursor <- None;
+    state.msg_older_exist <- true;
+    state.msg_older_loading <- false;
+    state.msg_older_resume <- None)
+;;
+
 (* The local queue releases a request when its POST starts, before the Keeper
    starts running it. Keep promoted requests while their POST is pending,
    then accepted, still-waiting requests until RUN_STARTED. An admission's
@@ -12193,15 +12209,6 @@ let chat_rows_for (state : state) keeper_name =
    forgotten at one of the dozen keys that scroll. Leaving the bottom takes the
    pin; returning to it releases the pin, which is also the gesture for going
    back to following the turn. *)
-(* The oldest moment among these rows, or nothing when there are none. *)
-let oldest_at (entries : msg_entry list) =
-  List.fold_left
-    (fun oldest (entry : msg_entry) ->
-      match oldest with
-      | None -> Some entry.me_at
-      | Some at -> Some (Float.min at entry.me_at))
-    None entries
-
 (* A refresh brings what is new at the bottom; it does not own the top.
 
    Rows the operator paged back to are older than anything the fresh window

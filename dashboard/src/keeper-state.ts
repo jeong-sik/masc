@@ -49,7 +49,7 @@ export const keeperHydrating = signal<Record<string, boolean>>({})
 // Pages the operator explicitly requested survive tail refreshes and live appends.
 export const keeperChatHistoryPages = signal<Record<string, {
   entries: KeeperConversationEntry[]
-  nextBefore: number | null
+  nextCursor: string | null
   hasMore: boolean
 }>>({})
 // First chat-history hydration outcome per keeper. Absent means the first

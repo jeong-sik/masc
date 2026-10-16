@@ -5,6 +5,7 @@ import { asString, isRecord } from '../components/common/normalize'
 import type { KeeperConversationAttachment, KeeperUserInputBlock } from '../types'
 import {
   apiRequestErrorFromResponse,
+  ApiRequestError,
   jsonHeaders,
   post,
   fetchControlPlane,
@@ -1038,31 +1039,34 @@ export async function fetchKeeperChatHistory(
 export interface KeeperChatHistoryPage {
   messages: KeeperChatHistoryMessage[]
   hasMore: boolean
-  nextBefore: number | null
+  nextCursor: string | null
 }
 
 /** Walk direct conversation using the server-issued cursor. */
 export async function fetchKeeperChatHistoryPage(
   name: string,
-  before?: number,
+  cursor?: string,
 ): Promise<KeeperChatHistoryPage> {
-  const query = before === undefined ? '' : `?before=${encodeURIComponent(String(before))}`
+  const query = cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`
+  const path = `/api/v1/keepers/${encodeURIComponent(name)}/chat/history/page${query}`
   const { response, data } = await fetchJsonWithTimeout(
-    `/api/v1/keepers/${encodeURIComponent(name)}/chat/history/page${query}`,
+    path,
     { headers: jsonHeaders() },
     DEFAULT_GET_TIMEOUT_MS,
   )
   if (!response.ok) {
-    throw new Error(`fetchKeeperChatHistoryPage: HTTP ${response.status} ${response.statusText}`)
+    throw new ApiRequestError({ method: 'GET', path, status: response.status,
+      statusText: response.statusText,
+      detail: isRecord(data) && typeof data.error === 'string' ? data.error : undefined })
   }
   if (!isRecord(data)
-    || data.schema !== 'masc.keeper_chat_history.page.v1'
+    || data.schema !== 'masc.keeper_chat_history.page.v2'
     || !Array.isArray(data.messages)
     || typeof data.has_more !== 'boolean'
-    || !(data.next_before === null
-      || (typeof data.next_before === 'number' && Number.isFinite(data.next_before)))
-    || (data.has_more && data.next_before === null)
-    || (before !== undefined && data.next_before !== null && data.next_before >= before)) {
+    || !(data.next_cursor === null
+      || (typeof data.next_cursor === 'string' && data.next_cursor.trim() !== ''))
+    || (data.has_more !== (data.next_cursor !== null))
+    || (cursor !== undefined && data.has_more && data.next_cursor === cursor)) {
     throw new Error('fetchKeeperChatHistoryPage: invalid history page or cursor')
   }
   const { safeParseKeeperChatHistoryMessage } = await import('./schemas/keeper-chat-history')
@@ -1074,7 +1078,7 @@ export async function fetchKeeperChatHistoryPage(
     if (message === null) throw new Error('fetchKeeperChatHistoryPage: invalid history page row')
     messages.push(message)
   }
-  return { messages, hasMore: data.has_more, nextBefore: data.next_before }
+  return { messages, hasMore: data.has_more, nextCursor: data.next_cursor }
 }
 
 // --- Keeper observability API ---

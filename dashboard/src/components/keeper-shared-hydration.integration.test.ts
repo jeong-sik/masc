@@ -167,11 +167,11 @@ describe('KeeperConversationPanel hydration wiring', () => {
       .mockRejectedValueOnce(new Error('Page temporarily unavailable'))
       .mockResolvedValueOnce({
         messages: [{ id: 'middle', role: 'user', content: 'Earlier dialogue', ts: 500 }],
-        nextBefore: 500, hasMore: true,
+        nextCursor: 'position-500', hasMore: true,
       })
       .mockResolvedValueOnce({
         messages: [{ id: 'old', role: 'user', content: 'Oldest dialogue', ts: 100 }],
-        nextBefore: 100, hasMore: false,
+        nextCursor: null, hasMore: false,
       })
     render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`, container)
     const olderButton = () => Array.from(container.querySelectorAll('button'))
@@ -188,7 +188,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
     expect(container.textContent).toContain('Earlier dialogue')
     expect(olderButton()).toBeUndefined()
     expect(fetchKeeperChatHistoryPage.mock.calls).toEqual([
-      ['sangsu', undefined], ['sangsu', undefined], ['sangsu', 500],
+      ['sangsu', undefined], ['sangsu', undefined], ['sangsu', 'position-500'],
     ])
   })
 

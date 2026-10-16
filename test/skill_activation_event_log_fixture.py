@@ -66,9 +66,9 @@ def event_rows(ledger: dict[str, Any]) -> list[dict[str, Any]]:
         rejection_row(rejection) for rejection in ledger["transition_rejections"]
     )
     rows.extend({"kind": "async_result_delivered", "delivery": delivery}
-                for delivery in ledger["async_result_deliveries"])
+                for delivery in ledger.get("async_result_deliveries", []))
     rows.extend({"kind": "async_action_observed", "action": action}
-                for action in ledger["async_actions"])
+                for action in ledger.get("async_actions", []))
     return rows
 
 

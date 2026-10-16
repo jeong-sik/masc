@@ -10,6 +10,7 @@ type request =
   ; tool_use_id : string
   ; turn : int
   ; source_task_id : string option
+  ; origin : Journal.named_origin
   ; skill_reference : Skill_reference.t
   ; tool_name : string
   ; plan : Plan.t
@@ -61,7 +62,7 @@ let equal left right = Yojson.Safe.equal (Yojson.Safe.sort left) (Yojson.Safe.so
 let nonblank value = String.trim value <> "" && String.equal value (String.trim value)
 let option_string = function None -> `Null | Some value -> `String value
 
-let request ~keeper_name ~trace_id ~physical_turn_ref ~invocation ~source_task_id ~skill_reference ~tool_name ~plan =
+let request ~keeper_name ~trace_id ~physical_turn_ref ~invocation ~source_task_id ~origin ~skill_reference ~tool_name ~plan =
   let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
   let turn = Agent_core.Tool_contract.Invocation.turn invocation in
   let* () =
@@ -73,7 +74,7 @@ let request ~keeper_name ~trace_id ~physical_turn_ref ~invocation ~source_task_i
   let* plan_json = Keeper_tool_plan_request.to_yojson plan
     |> Result.map_error (fun (Keeper_tool_plan_request.Unsubstituted_param { name }) ->
       Invalid_request ("unbound named parameter " ^ name)) in
-  Ok {keeper_name;trace_id;physical_turn_ref;tool_use_id;turn;source_task_id;skill_reference;tool_name;plan;plan_json}
+  Ok {keeper_name;trace_id;physical_turn_ref;tool_use_id;turn;source_task_id;origin;skill_reference;tool_name;plan;plan_json}
 
 let identity_json request = `Assoc
     ["keeper_name",`String request.keeper_name;
@@ -84,7 +85,8 @@ let identity_json request = `Assoc
 let request_json request = `Assoc
     ["skill_reference",Skill_reference.to_yojson request.skill_reference;
      "composition_tool",`String request.tool_name;
-     "source_task_id",option_string request.source_task_id;"bound_plan",request.plan_json]
+     "source_task_id",option_string request.source_task_id;"bound_plan",request.plan_json;
+     "origin",Journal.named_origin_to_yojson request.origin]
 
 let phase_json = function
   | Prepared -> `Assoc ["kind",`String "prepared"]
@@ -204,8 +206,9 @@ let check_source request source =
     && source.source_turn = request.turn && source.source_task_id = request.source_task_id
     && match source.producer with
        | Journal.Prepared -> false
-       | Journal.Named {tool_name;skill_reference;activation} ->
+       | Journal.Named {tool_name;skill_reference;activation;origin} ->
          String.equal tool_name request.tool_name && Skill_reference.equal skill_reference request.skill_reference
+         && equal (Journal.named_origin_to_yojson origin) (Journal.named_origin_to_yojson request.origin)
          && Option.fold ~none:false ~some:(fun context ->
            Ids.Turn_ref.equal request.physical_turn_ref
              (Keeper_skill_activation_recorder.bound_turn_ref context)

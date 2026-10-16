@@ -45,14 +45,20 @@ val restore_admissions : t ->
     the original ledger. Absent children remain unstarted; lookup failures
     refuse admission without creating an activation. *)
 
+type original_admission =
+  | Original_admitted
+  | Original_authority_held of Keeper_tool_plan_executor.admission_rejection
+
 val check_original_admissions : t ->
   child_history:(node_ids:Keeper_tool_plan.Node_id.t list ->
     (Keeper_tool_execution_journal.child_admission_history,
      Keeper_tool_execution_journal.error) result) ->
-  (unit, Keeper_tool_plan_executor.admission_rejection) result
+  original_admission
 (** Require exact original activation for a child whose journal nodes prove
     prior admission or an unfinished attempt. Run this before acceptance and
-    again before result reuse. Missing authority does not become fresh work. *)
+    again before result reuse. Missing authority does not become fresh work.
+    This boundary reads original evidence; a held result is recoverable and
+    never proves a permanent current-policy rejection. *)
 
 val evidence_to_json : t -> plan:Keeper_tool_plan.t ->
   execution:(Keeper_tool_plan_executor.node_result list,

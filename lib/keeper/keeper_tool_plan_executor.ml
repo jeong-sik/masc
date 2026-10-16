@@ -182,8 +182,11 @@ type cause =
 type failure =
   { settled : node_result list
   ; cause : cause
+  ; additional_causes : cause list
   ; effect_disposition : Tool_result.failure_effect_disposition
   }
+
+let failure_causes failure = failure.cause :: failure.additional_causes
 
 type dispatch =
   ?launch_replay:Keeper_tool_execution_journal.recheck_launch
@@ -399,9 +402,11 @@ let execute_one
              ?truncated_to:stored.truncated_to stored.result, None
          | Ok ((Keeper_tool_execution_journal.Dispatch
               | Keeper_tool_execution_journal.Recheck_result _
-              | Keeper_tool_execution_journal.Recheck_launch _) as replay) ->
+              | Keeper_tool_execution_journal.Recheck_launch _
+              | Keeper_tool_execution_journal.Recheck_child_submission _) as replay) ->
            let execution_id, tool_use_id = match replay with
-             | Keeper_tool_execution_journal.Recheck_result stored ->
+             | Keeper_tool_execution_journal.Recheck_result stored
+             | Keeper_tool_execution_journal.Recheck_child_submission stored ->
                  stored.execution_id, stored.tool_use_id
              | Keeper_tool_execution_journal.Recheck_launch stored ->
                  stored.execution_id, stored.tool_use_id
@@ -417,6 +422,7 @@ let execute_one
                  Some stored.invocation, Some stored
              | Keeper_tool_execution_journal.Dispatch
              | Keeper_tool_execution_journal.Recheck_result _
+             | Keeper_tool_execution_journal.Recheck_child_submission _
              | Keeper_tool_execution_journal.Reuse_completed _ ->
                  if launch_leaf then
                    (match launch_invocation_of with
@@ -813,8 +819,9 @@ let execute_with_tool_use_id
     in
     (match ordered_causes with
      | [] -> Ok settled
-     | (_, cause) :: _ ->
-       Error { settled; cause; effect_disposition = aggregate_effect_disposition settled })
+     | (_, cause) :: rest ->
+       Error { settled; cause; additional_causes=List.map snd rest;
+         effect_disposition = aggregate_effect_disposition settled })
   in
   let batches = schedule plan in
   let journal_admission = match journal with
@@ -823,7 +830,7 @@ let execute_with_tool_use_id
   in
   match journal_admission with
   | Error error -> Error
-      { settled = []; cause = Run_journal_rejected error
+      { settled = []; cause = Run_journal_rejected error; additional_causes=[]
       ; effect_disposition = Tool_result.Effect_outcome_unknown }
   | Ok () ->
   match Keeper_tool_plan.prepare_inputs plan with
@@ -847,6 +854,7 @@ let execute_with_tool_use_id
      | Some (scheduled : scheduled_node) ->
        Error
          { settled = []
+         ; additional_causes = []
          ; cause =
              Plan_execution_failed { node_id; schedule = scheduled.schedule; error }
          ; effect_disposition = Tool_result.Proven_pre_effect
@@ -956,6 +964,7 @@ let execute_keeper_with_authority
   then
     Error
       { settled = []
+      ; additional_causes = []
       ; cause =
           Outer_completion_mismatch
             { expected = expected_completion; actual = actual_completion }

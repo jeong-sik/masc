@@ -2,6 +2,7 @@
 open Keeper_msg_async_types
 
 val record_schema_version : int
+val persistence_target_to_string : persistence_target -> string
 val status_to_string : request_status -> string
 val is_terminal_status : request_status -> bool
 val access_rejection_to_json : access_rejection -> Yojson.Safe.t

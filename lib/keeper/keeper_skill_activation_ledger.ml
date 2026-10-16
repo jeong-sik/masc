@@ -612,8 +612,10 @@ let recorded_part (activation : activation) =
   { activation with delivery = None; actions = [] }
 ;;
 
+let activation_frame_to_yojson activation = activation_to_yojson (recorded_part activation)
+
 let activation_frame_sha256 activation =
-  Digestif.SHA256.(digest_string (Yojson.Safe.to_string (activation_to_yojson (recorded_part activation))) |> to_hex)
+  Digestif.SHA256.(digest_string (Yojson.Safe.to_string (activation_frame_to_yojson activation)) |> to_hex)
 ;;
 
 let async_evidence_for_activation ledger (activation : activation) =

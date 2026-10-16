@@ -60,7 +60,8 @@ let readiness ~base_path ~keeper_name binding =
   observe ~after_owner_read:(fun _ -> ()) ~base_path ~keeper_name binding
   |> Result.map (function Pending -> Waiting | Terminal _ -> Ready)
 
-let handle_with ~after_owner_read ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~args =
+let read_with ~after_owner_read ~before_manifest_publication
+    ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~args =
   let failure detail = Keeper_tool_execution.failure
       ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail in
   let decoded =
@@ -68,11 +69,12 @@ let handle_with ~after_owner_read ~(config : Workspace.config) ~(meta : Keeper_m
       ~required:["binding"] ~optional:[] args in
     Dependency.composition_of_json (List.assoc "binding" fields) in
   match decoded with
-  | Error detail -> failure detail
+  | Error detail -> Error (failure detail)
   | Ok binding ->
     let publish result =
       let references = Tool_output.normalized_artifact_refs_in_json (Tool_result.data result) in
       let result = Tool_result.with_retained_artifacts references result in
+      before_manifest_publication ();
       match Tool_bridge.attach_artifact_manifest
           ~projection:Tool_output.Inline_with_structured_diagnostic ~base_path:config.base_path result with
       | Ok result ->
@@ -82,11 +84,11 @@ let handle_with ~after_owner_read ~(config : Workspace.config) ~(meta : Keeper_m
         (* Failed Tool_result values have no retention field. Preserve the
            validated references in the execution carrier that crosses SDK
            projection and the per-call retention hook. *)
-        Keeper_tool_execution.with_retained_artifacts (manifest @ references) execution
-      | Error error -> Keeper_tool_execution.failure_data
+        Ok (Keeper_tool_execution.with_retained_artifacts (manifest @ references) execution)
+      | Error error -> Error (Keeper_tool_execution.failure_data
           ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
           ~message:("canonical composition result remains available; reader manifest publication failed: " ^ error.message)
-          (`Assoc ["binding", Dependency.composition_to_json binding]) in
+          (`Assoc ["binding", Dependency.composition_to_json binding])) in
     let terminal_failure entry detail =
       Tool_result.make_err ~tool_name:Tool_schemas_composition_control.result_schema.name
         ~start_time:(Tool_timing.start ()) ~class_:Tool_result.Runtime_failure
@@ -94,11 +96,11 @@ let handle_with ~after_owner_read ~(config : Workspace.config) ~(meta : Keeper_m
         ~data:(`Assoc ["binding", Dependency.composition_to_json binding;
                        "request", Async.entry_to_json entry]) detail |> publish in
     match observe ~after_owner_read ~base_path:config.base_path ~keeper_name:meta.name binding with
-    | Error detail -> failure detail
+    | Error detail -> Error (failure detail)
     | Ok Pending ->
-      Keeper_tool_execution.deferred_composition_result ~binding
+      Ok (Keeper_tool_execution.deferred_composition_result ~binding
         (`Assoc ["binding", Dependency.composition_to_json binding;
-                 "status", `String "waiting_for_composition_result"])
+                 "status", `String "waiting_for_composition_result"]))
     | Ok (Terminal entry) ->
       match entry.status with
       | Async.Done {ok = true; data = Some (`Assoc fields as data); body = _} ->
@@ -120,7 +122,7 @@ let handle_with ~after_owner_read ~(config : Workspace.config) ~(meta : Keeper_m
                 ~data:(`Assoc ["binding", Dependency.composition_to_json binding; "result", data;
                   "result_artifact",Tool_output.normalized_artifact_ref_to_json reference]) () |> publish
             | exception Sys_error detail ->
-              failure ("canonical child result is retained; result artifact publication failed: " ^ detail))
+              Error (failure ("canonical child result is retained; result artifact publication failed: " ^ detail)))
            | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
              terminal_failure entry "successful composition has no matching canonical structured result")
       | Async.Done {ok = false; body; data = _} -> terminal_failure entry ("original composition failed: " ^ body)
@@ -130,10 +132,15 @@ let handle_with ~after_owner_read ~(config : Workspace.config) ~(meta : Keeper_m
       | Cancelled {reason; cancelled_by = _} -> terminal_failure entry ("original composition was cancelled: " ^ reason)
       | Persistence_failed {reason; attempted_status = _} -> terminal_failure entry ("composition result publication failed: " ^ reason)
       | Queued | Running | Cancelling _ | Waiting_for_dependencies _ ->
-        failure "canonical terminal proof unexpectedly contains a pending composition"
+        Error (failure "canonical terminal proof unexpectedly contains a pending composition")
 
-let handle = handle_with ~after_owner_read:(fun _ -> ())
+let read = read_with ~after_owner_read:(fun _ -> ()) ~before_manifest_publication:(fun () -> ())
+
+let execution = function Ok execution | Error execution -> execution
+let handle ~config ~meta ~args = read ~config ~meta ~args |> execution
 
 module For_testing = struct
-  let handle = handle_with
+  let read = read_with
+  let handle ~after_owner_read ~config ~meta ~args =
+    read_with ~after_owner_read ~before_manifest_publication:(fun () -> ()) ~config ~meta ~args |> execution
 end

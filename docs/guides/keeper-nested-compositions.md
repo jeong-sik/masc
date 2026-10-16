@@ -1,4 +1,4 @@
-# Prepare and run exact inline Skill children
+# Prepare and run exact Skill children
 
 The source Skill detail views in Dashboard and TUI show retained async result
 handoffs and later action facts alongside the original activation. Inline result
@@ -10,7 +10,8 @@ completion verdict. Original and receiving turns/runtimes remain visible.
 This display implementation needs installed runtime/UI verification separately.
 
 `Keeper_composition_nested.compile` expands an exact, turn-frozen inline Skill
-into the existing typed plan. The source `keeper_composition_prepare` schema now
+into the existing typed plan and lowers an async Skill into native submission
+and canonical result nodes. An async child requires an async parent. The source `keeper_composition_prepare` schema now
 accepts this node alternative for task-specific inline drafts. Prepare freezes
 the original recipe, flattened plan, exact child references, normalized arguments,
 leaf/export mappings and tool contracts in one owned immutable manifest. Run
@@ -59,13 +60,47 @@ evidence retains the exact child reference, fixed arguments, bound plan and
 recursive contracts. Copying that private evidence into a public request does
 not create a compiler capability.
 
-This internal representation does not yet enable async children in public
-prepare/run. The executor requires an actual canonical parent journal attempt
-and an original child producer; absent authority refuses before effects, never
-through an ordinary tool-name fallback. The compiler's existing async-child
-refusal stays until the original Nested receipt, accepted-child parent owner
-transition and canonical result-wait journal path are connected. Private
-contract tests are not evidence that an end-to-end async child has executed.
+An async parent can prepare and run a fixed async child through the same exact
+reference grammar. Its original Nested activation seals the child producer;
+submission records an immutable parent-occurrence-to-child-source join before
+broker entry. The protected acceptance callback commits the real child membership
+and child journal binding before retaining acceptance in the parent journal.
+The result node reads only that accepted binding through the canonical result
+reader. Pending children release the parent worker; whole-child failures and
+cancellations stay failures, and successful named exports are validated against
+the frozen result schema before any consumer can use them.
+
+A Lost parent whose child acceptance was committed can recover that original
+acknowledgement with its original occurrence IDs, even before its first result
+wait. This does not authorize replay of an unproven effectful tool. A failed
+acceptance callback remains distinct from a later worker-publication failure;
+both retain their real evidence. Missing, changed or copied child authority
+cannot create replacement acceptance. These are source guarantees until an
+exact-head execution receipt proves the selected scenario; installed runtime,
+visible UI and whole-task speedup remain separate evidence.
+
+An owned worker retains `Lost` when its execution journal rejects
+plan admission or a node attempt, or when settlement/observation cannot commit.
+Those infrastructure failures do not establish a whole-child failure. The
+canonical child reader's actual terminal failure still settles the parent as
+failed. Fault scenarios cover the original activation before and after restore,
+the frozen draft before executor admission, and the parent journal before
+submission settlement and result-node lookup. Each restores the original bytes
+and resumes the same accepted child; these fixtures require execution evidence.
+The canonical reader distinguishes a valid observation (including an actual
+failed child) from unavailable observation/publication in its typed result.
+Native result nodes retain the latter without inferring meaning from an error
+class or message. The producer also retains its actual committed child acceptance
+before projecting its acknowledgement, so an acknowledgement-manifest failure
+does not erase the first parent's accepted child. Separate real store faults
+exercise acknowledgement and successful child-result publication, while a
+canonical failed-child scenario verifies that actual failure remains terminal.
+The executor retains every actual node cause in planned order. Its first cause
+still controls the displayed error; physical interruption examines the complete
+cause set. A lower pending sibling therefore cannot hide a higher publication or
+settlement failure. The process-loss fixture includes an independently pending
+lower node alongside the original native child, including faults after a higher
+node's tool completed but before its observation committed.
 
 Call `keeper_composition_prepare` with `execution: "inline"` or `"async"`, the ordinary outer
 `nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of
@@ -104,9 +139,9 @@ not schedule a replacement, and public manual resume refuses before accepting
 another request. The original Task, occurrences and retained results stay in
 the same journal. Declared read-only unfinished work still permits the existing
 manual resume; this refusal does not add a retry budget or a new runtime setting.
-This retention is not accepted-child acknowledgement recovery: that still needs
-the exact child admission proof and a parent owner transition before async
-children can be compiled.
+Native child acknowledgement recovery additionally requires its immutable
+submission intent, committed parent acceptance and exact canonical child
+membership. Other unproven effectful attempts retain the refusal above.
 
 A child output is its declared named export. `/profile` selects export `profile`;
 `/document/items/0` selects within export `document`. RFC 6901 escaping applies to
@@ -114,8 +149,9 @@ export names too. The compiler maps the export to its exact leaf producer and
 revalidates the combined pointer against that producer's schema. Whole-child root
 output and undeclared exports are explicit errors.
 
-Every dependency on a child, including a reference to its exported output, waits
-on all its leaves. A failing sibling therefore blocks a downstream consumer even
+Every dependency on an inline child, including a reference to its exported output,
+waits on all its leaves. An async child uses its canonical whole-result barrier.
+A failing sibling therefore blocks a downstream consumer even
 when the selected producer succeeded. Under `continue_independent`, unrelated
 branches still run and successful selected exports remain available with the
 aggregate failure. Child and parent failure policies must agree in this first
@@ -126,10 +162,10 @@ parent IDs and child IDs are renamed, so an arbitrary user ID that resembles a
 child path cannot collide. Each compiled call retains its exact reference, bound
 arguments and source-to-expanded leaf mapping for later durable evidence.
 
-Async children are refused as `async_child_requires_suspension`. An async request
-receipt is not a child result. Connecting that child requires durable suspension,
-completion correlation and resumption, rather than flattening a worker as a normal
-inline leaf. Expanded leaves admit static read-only ordinary Tool contracts and
+Inline parents refuse async children as `async_child_requires_suspension`.
+Async parents use the native submission and result operands described above;
+an async request receipt is not a child result. Named async Skills retain their
+static read-only admission contract. Expanded inline leaves admit static read-only ordinary Tool contracts and
 the isolated owned-job launch producer with its Serial durable ownership.
 General resource-aware effect admission remains a separate implementation unit.
 
@@ -304,7 +340,7 @@ ID reuse, official native starts, duplicate and contradictory facts, sibling
 receipts, corrupt-ledger recovery and a real canonical lock around an in-flight
 attempt reset. It retains the original child activation and checks zero backend
 redispatch after the result. Record an actual run/head before calling these cases
-passed. Named async children, dynamic child input, general resource admission,
+passed. Dynamic child input, general resource admission,
 installed runtime/UI and matched whole-task timings remain
 separate work.
 
@@ -332,3 +368,28 @@ retained discovery and the production detail projection. Its elapsed read and
 projection time is a separate measurement from prepare/run latency or an HTTP
 network request. Source and an actual run/head establish this data path; installed
 UI display and matched whole-task performance still require separate evidence.
+
+## Continuation failure classification
+
+Original child activation checks return either admitted authority or held
+original authority. Missing, unreadable or conflicting receipts cannot prove
+that the logical run failed or that a new child may start. Journal ownership
+changes, unproven replay and failed observation commits retain the original
+run rather than finalizing a competing owner or discarding unknown effects.
+
+A producer-proven pre-effect policy or workflow rejection is different: the
+worker publishes its failed result instead of turning that rejection into a
+new Lost attempt. All parallel failure causes participate; one unavailable
+accepted child or uncertain authority still holds the run. Original child
+source reads remain runtime failures when the immutable evidence cannot be
+read, rather than being relabeled as permanent policy decisions.
+
+The automatic continuation controller retains a process-local hold for the
+exact physical owner that reports unavailable original authority. Later pulses
+still discover canonical state but do not submit another attempt for that same
+owner. Repair the original evidence and explicitly resume the run with its
+existing `resume_run_id`; a successor owner is eligible for normal intake. A
+new controller can also retry through all original admission checks. This hold
+is a scheduling hint, not durable effect or completion authority: the physical
+request may remain Lost, and unknown effects never become a logical failure
+merely to stop automatic retries.

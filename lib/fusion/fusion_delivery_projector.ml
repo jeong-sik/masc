@@ -71,7 +71,8 @@ let failure_of_status : Keeper_msg_async.request_status -> Fusion_sink.delivery_
   | Keeper_msg_async.Cancelled { reason; cancelled_by } ->
     Some (Fusion_sink.Cancelled { reason; cancelled_by })
   | Keeper_msg_async.Persistence_failed { attempted_status; reason } ->
-    Some (Fusion_sink.Persistence_failed { attempted_status; reason })
+    Some (Fusion_sink.Persistence_failed
+      { attempted_status=Keeper_msg_async.persistence_target_to_string attempted_status; reason })
   | Keeper_msg_async.Done { ok = true; _ }
   | Keeper_msg_async.Waiting_for_dependencies _
   | Keeper_msg_async.Queued

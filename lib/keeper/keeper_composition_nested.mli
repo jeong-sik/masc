@@ -1,13 +1,20 @@
-(** Compile exact frozen inline Skill calls into one descriptor-owned DAG.
+(** Compile exact frozen Skill calls into one typed DAG.
     No Skill source is reread and no Tool is dispatched. This first compiler
     binds fixed arguments; output-dependent child arguments require a runtime
     parameter-contract barrier and are outside this grammar. *)
+
+type scope =
+  | Inline of (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t) list
+  | Async of
+      { submission : Keeper_tool_plan.Node_id.t
+      ; result : Keeper_tool_plan.Node_id.t
+      }
 
 type call = private
   { alias : Keeper_tool_plan.Node_id.t
   ; reference : Skill_reference.t
   ; args : Yojson.Safe.t
-  ; node_mapping : (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t) list
+  ; scope : scope
   ; exports : Keeper_tool_plan.export list
   }
 
@@ -42,8 +49,9 @@ val input_schema : Yojson.Safe.t
     addressed by [/export-name/subpath]. *)
 
 val compile :
+  execution:Keeper_tool_composition_catalog.execution_mode ->
   capability_surface:Keeper_capability_surface.t -> Yojson.Safe.t -> (t, error) result
-(** Resolve only exact admitted model-visible inline compositions. Child and
+(** Resolve only exact admitted model-visible compositions. Child and
     parent failure policies must agree. Every reference or [after] dependency
     on a child waits for its complete expanded scope, so a successful exported
     branch cannot conceal a sibling failure. Final graph, descriptor authority,
@@ -51,8 +59,8 @@ val compile :
 
     When there are children, every node ID is the canonical JSON encoding of
     a path ([parent-id] or [child-alias; child-node-id]); arbitrary delimiter
-    characters in IDs cannot collide. Child policy disagreement and async
-    children are explicit refusals, rather than silent semantic changes. *)
+    characters in IDs cannot collide. Async children require an async parent;
+    their submission and whole-result barrier remain distinct typed targets. *)
 
 val plan : t -> Keeper_tool_plan.t
 val calls : t -> call list

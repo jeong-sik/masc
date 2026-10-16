@@ -42,6 +42,7 @@ val error_to_string : error -> string
 val request :
   keeper_name:string -> trace_id:Keeper_id.Trace_id.t -> physical_turn_ref:Ids.Turn_ref.t ->
   invocation:Agent_core.Tool_contract.Invocation.t -> source_task_id:string option ->
+  origin:Keeper_tool_execution_journal.named_origin ->
   skill_reference:Skill_reference.t -> tool_name:string ->
   plan:Keeper_tool_plan.t -> (request, error) result
 (** The original physical frame is supplied by the sealed activation recorder;

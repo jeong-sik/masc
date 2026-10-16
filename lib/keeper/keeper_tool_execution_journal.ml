@@ -8,12 +8,24 @@ module Nodes = Map.Make (String)
 
 let ( let* ) = Result.bind
 
+type nested_origin =
+  { parent_run_id : Plan.Composition_run_id.t
+  ; parent_node_id : Plan.Node_id.t
+  ; parent_execution_id : Ids.Execution_id.t
+  ; parent_occurrence_tool_use_id : string
+  ; result_node_id : Plan.Node_id.t
+  ; args : Yojson.Safe.t
+  ; activation : Keeper_skill_activation_ledger.activation
+  }
+type named_origin = Standalone | Nested of nested_origin
+
 type producer =
   | Prepared
   | Named of
       { tool_name : string
       ; skill_reference : Skill_reference.t
       ; activation : Keeper_skill_activation_recorder.bound_context option
+      ; origin : named_origin
       }
 
 type source =
@@ -47,6 +59,7 @@ type replay =
   | Reuse_completed of completed
   | Recheck_result of recheck
   | Recheck_launch of recheck_launch
+  | Recheck_child_submission of recheck
 
 type error =
   | Invalid_source of string
@@ -152,12 +165,49 @@ let reference_of_json json =
   | Ok reference -> reference
   | Error error -> refuse (Tool_output.make_error_to_string error)
 
+let named_origin_to_yojson = function
+  | Standalone -> `Assoc ["kind",`String "standalone"]
+  | Nested origin -> `Assoc
+      ["kind",`String "nested";
+       "parent_run_id",`String (Plan.Composition_run_id.to_string origin.parent_run_id);
+       "parent_node_id",`String (Plan.Node_id.to_string origin.parent_node_id);
+       "parent_execution_id",Ids.Execution_id.to_yojson origin.parent_execution_id;
+       "parent_occurrence_tool_use_id",`String origin.parent_occurrence_tool_use_id;
+       "result_node_id",`String (Plan.Node_id.to_string origin.result_node_id);
+       "args",origin.args;
+       "activation",Keeper_skill_activation_ledger.activation_frame_to_yojson origin.activation]
+
+let named_origin_of_json ~activation json =
+  match json with
+  | `Assoc [("kind",`String "standalone")] -> Standalone
+  | `Assoc _ ->
+    let fields = object_fields ["kind";"parent_run_id";"parent_node_id";"parent_execution_id";
+        "parent_occurrence_tool_use_id";"result_node_id";"args";"activation"] json in
+    require (field "kind" fields = `String "nested") "unknown named producer origin";
+    let bound = match activation with Some context -> context | None -> refuse "nested producer has no original frame" in
+    let parent_run_id = match Plan.Composition_run_id.of_string (string (field "parent_run_id" fields)) with
+      | Ok id -> id | Error _ -> refuse "invalid nested parent run" in
+    let node name = match Plan.Node_id.make (string (field name fields)) with
+      | Ok id -> id | Error _ -> refuse "invalid nested parent node" in
+    let parent_execution_id = match Ids.Execution_id.of_yojson (field "parent_execution_id" fields) with
+      | Ok id -> id | Error detail -> refuse detail in
+    let receipt = match Keeper_skill_activation_ledger.activation_of_yojson
+        ~expected_trace_id:(Keeper_skill_activation_recorder.bound_trace_id bound) (field "activation" fields) with
+      | Ok receipt -> receipt | Error _ -> refuse "invalid original nested activation receipt" in
+    let origin = Nested {parent_run_id;parent_node_id=node "parent_node_id";parent_execution_id;
+      parent_occurrence_tool_use_id=string (field "parent_occurrence_tool_use_id" fields);
+      result_node_id=node "result_node_id";args=field "args" fields;activation=receipt} in
+    require (canonical_equal json (named_origin_to_yojson origin)) "noncanonical nested producer origin";
+    origin
+  | _ -> refuse "named producer origin is not an object"
+
 let producer_json = function
   | Prepared -> `Assoc ["kind",`String "prepared"]
-  | Named {tool_name;skill_reference;activation} -> `Assoc
+  | Named {tool_name;skill_reference;activation;origin} -> `Assoc
       ["kind",`String "named";"tool_name",`String tool_name;
        "skill_reference",Skill_reference.to_yojson skill_reference;
-       "activation",option_json Keeper_skill_activation_recorder.bound_context_to_yojson activation]
+       "activation",option_json Keeper_skill_activation_recorder.bound_context_to_yojson activation;
+       "origin",named_origin_to_yojson origin]
 
 let producer_of_json json =
   match json with
@@ -165,14 +215,15 @@ let producer_of_json json =
     (match List.assoc_opt "kind" fields with
      | Some (`String "prepared") -> ignore (object_fields ["kind"] json); Prepared
      | Some (`String "named") ->
-       let fields = object_fields ["kind";"tool_name";"skill_reference";"activation"] json in
+       let fields = object_fields ["kind";"tool_name";"skill_reference";"activation";"origin"] json in
        let skill_reference = match Skill_reference.of_yojson (field "skill_reference" fields) with
          | Ok reference -> reference | Error _ -> refuse "invalid exact named Skill reference" in
        let activation = optional (fun json ->
          match Keeper_skill_activation_recorder.bound_context_of_yojson json with
          | Ok context -> context | Error error -> refuse (Keeper_skill_activation_recorder.error_to_string error))
            (field "activation" fields) in
-       Named {tool_name=string (field "tool_name" fields);skill_reference;activation}
+       let origin = named_origin_of_json ~activation (field "origin" fields) in
+       Named {tool_name=string (field "tool_name" fields);skill_reference;activation;origin}
      | _ -> refuse "unknown composition producer")
   | _ -> refuse "composition producer is not an object"
 
@@ -195,11 +246,27 @@ let validate_source source =
   Option.iter (fun task -> require (exact_name task) "invalid source task identity") source.source_task_id;
   (match source.producer with
    | Prepared -> ()
-   | Named {tool_name;skill_reference=_;activation=_} ->
+   | Named {tool_name;skill_reference;activation;origin} ->
      (* The SDK provider/client ordinal is not the admitted Keeper cycle.
         Both original coordinates are sealed in the source; request ownership
         checks the SDK ordinal and the recorder retains its physical frame. *)
-     require (exact_name tool_name) "invalid named producer tool");
+     require (exact_name tool_name) "invalid named producer tool";
+     (match origin with
+      | Standalone -> ()
+      | Nested origin ->
+        let bound = match activation with Some bound -> bound | None -> refuse "nested producer has no bound frame" in
+        require (exact_name origin.parent_occurrence_tool_use_id) "invalid original parent occurrence";
+        require (String.equal source.parent_tool_use_id origin.activation.skill_tool_use_id
+          && source.source_turn = origin.activation.agent_core_turn
+          && Skill_reference.equal_identity skill_reference.identity origin.activation.identity
+          && skill_reference.content_revision = origin.activation.content_revision
+          && Ids.Turn_ref.equal (Keeper_skill_activation_recorder.bound_turn_ref bound) origin.activation.turn_ref)
+          "nested producer differs from original child activation";
+        (match origin.activation.invocation with
+         | Keeper_skill_activation_ledger.Nested_composition_invocation {scope;_} ->
+           require (String.equal scope.composition_run_id (Plan.Composition_run_id.to_string origin.parent_run_id))
+             "nested producer belongs to another parent run"
+         | Instruction_invocation _ | Composition_invocation _ -> refuse "producer has no nested admission")));
   match Plan.Composition_run_id.of_string (Plan.Composition_run_id.to_string source.composition_run_id) with
   | Ok _ -> ()
   | Error _ -> refuse "invalid UUIDv7 composition run identity"
@@ -322,17 +389,26 @@ type node_record =
   | Attempting of occurrence
   | Settled of occurrence * completed * Tool_result.failure_effect_disposition option
       * Dependency.t option
+type child_link =
+  { occurrence : occurrence
+  ; result_node_id : Plan.Node_id.t
+  ; child_source : source
+  ; accepted : Dependency.composition option
+  }
 type state =
   { source : source; source_sha : string; owner : binding option
-  ; prior_owners : (binding * node_record Nodes.t) list; nodes : node_record Nodes.t }
+  ; prior_owners : (binding * node_record Nodes.t) list; nodes : node_record Nodes.t
+  ; children : child_link Nodes.t }
 type t = {base_path : string; root : string; path : string; immutable_source : source; source_sha : string}
 type worker = {journal : t; binding : binding}
 type attempt = {worker : worker; occurrence : occurrence}
+type child_submission = {attempt : attempt; link : child_link}
 type continuation =
   { journal : t; expected_owner : binding
   ; terminal_entry : Async.entry
   ; predecessor_terminals : Async.entry list
   ; suspended_nodes : node_record Nodes.t
+  ; suspended_children : child_link Nodes.t
   ; dependencies : Dependency.t list }
 type readiness = Waiting_for_results | Results_ready
 
@@ -377,6 +453,44 @@ let same_node_identity occurrence ~node_id ~tool_name ~input =
   Plan.Node_id.equal occurrence.node_id node_id && String.equal occurrence.tool_name tool_name
   && occurrence.input = input && String.equal occurrence.input_sha (json_sha input)
 
+let child_link_json (link : child_link) = `Assoc
+  ["occurrence",occurrence_json link.occurrence;
+   "result_node_id",`String (Plan.Node_id.to_string link.result_node_id);
+   "child_source",source_json link.child_source;
+   "accepted",option_json Dependency.composition_to_json link.accepted]
+
+let same_children left right =
+  (* Sealed contexts reconstruct runtime closures; their persisted immutable
+     coordinates, not OCaml function identity, are the ownership authority. *)
+  Nodes.equal (fun left right -> canonical_equal (child_link_json left) (child_link_json right)) left right
+
+let child_binding_matches (link : child_link) (binding : Dependency.composition) =
+  let source = link.child_source in
+  Plan.Composition_run_id.equal source.composition_run_id binding.Dependency.composition_run_id
+  && String.equal source.parent_tool_use_id binding.parent_tool_use_id
+  && source.source_turn = binding.source_turn
+  && source.source_task_id = binding.source_task_id
+  && match source.producer with
+     | Prepared -> false
+     | Named {tool_name;skill_reference;activation=_;origin=_} ->
+       String.equal tool_name binding.composition_tool && Skill_reference.equal skill_reference binding.skill_reference
+
+let child_occurrence_matches (link : child_link) (occurrence : occurrence) =
+  Ids.Execution_id.equal link.occurrence.execution_id occurrence.execution_id
+  && String.equal link.occurrence.tool_use_id occurrence.tool_use_id
+  && same_node_identity link.occurrence ~node_id:occurrence.node_id
+      ~tool_name:occurrence.tool_name ~input:occurrence.input
+
+let child_intent_proven children (occurrence : occurrence) =
+  match Nodes.find_opt (Plan.Node_id.to_string occurrence.node_id) children with
+  | None -> false
+  | Some link -> child_occurrence_matches link occurrence
+
+let child_ack_proven children (occurrence : occurrence) =
+  match Nodes.find_opt (Plan.Node_id.to_string occurrence.node_id) children with
+  | None -> false
+  | Some link -> Option.is_some link.accepted && child_occurrence_matches link occurrence
+
 let completed_json (completed : completed) =
   `Assoc ["execution_id", Ids.Execution_id.to_yojson completed.execution_id;
     "tool_use_id", `String completed.tool_use_id; "result", result_json completed.result;
@@ -401,9 +515,14 @@ let dependency_wait_of_json = optional (fun json ->
   match Dependency.of_json json with
   | Ok dependency -> dependency | Error detail -> refuse detail)
 
-let result_read_dependency (occurrence : occurrence) =
+let result_read_dependency children (occurrence : occurrence) =
   if not occurrence.readonly then None
   else if String.equal occurrence.tool_name Tool_schemas_composition_control.result_schema.name then
+    match Nodes.bindings children |> List.find_map (fun (_,link) ->
+      if Plan.Node_id.equal link.result_node_id occurrence.node_id && occurrence.input = `Assoc []
+      then link.accepted else None) with
+    | Some binding -> Some (Dependency.Composition_result binding)
+    | None ->
     match Agent_core.Execution_json.object_fields ~context:"composition result journal input"
         ~required:["binding"] ~optional:[] occurrence.input with
     | Error _ -> None
@@ -423,8 +542,8 @@ let result_read_dependency (occurrence : occurrence) =
          | Ok job_id -> Some (Dependency.Owned_job job_id) | Error _ -> None)
       | _ -> None
 
-let valid_dependency_wait occurrence result phase dependency =
-  result_read_dependency occurrence = Some dependency
+let valid_dependency_wait children occurrence result phase dependency =
+  result_read_dependency children occurrence = Some dependency
   && phase = Some Tool_result.Proven_pre_effect
   && (match result with Tool_result.Deferred _ -> true | Completed _ | Failed _ -> false)
 
@@ -441,34 +560,54 @@ let recheck_launch_for occurrence = match occurrence.launch_invocation with
   | Some invocation -> Some {execution_id=occurrence.execution_id; tool_use_id=occurrence.tool_use_id; invocation}
   | None -> None
 
-let replay_for binding node_id = function
+let replay_for children binding node_id record =
+  let refuse () = Error (Replay_not_proven node_id) in
+  let recheck (occurrence : occurrence) =
+    Ok (Recheck_result
+      {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+  in
+  let recheck_or_dispatch (occurrence : occurrence) =
+    match result_read_dependency children occurrence with
+    | Some _ -> recheck occurrence
+    | None -> Ok Dispatch
+  in
+  match record with
   | None -> Ok Dispatch
-  | Some (Settled (_, ({result = Tool_result.Completed _; _} as completed), _, _)) -> Ok (Reuse_completed completed)
-  | Some (Settled (occurrence, completed, phase, Some job_id))
-      when valid_dependency_wait occurrence completed.result phase job_id ->
-      Ok (Recheck_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
-  | Some (Settled (occurrence, {result = Tool_result.Failed _; _}, Some Tool_result.Proven_pre_effect, _)) ->
-      (match result_read_dependency occurrence with
-       | Some _ -> Ok (Recheck_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
-       | None -> Ok Dispatch)
-  | Some (Attempting occurrence) when occurrence.readonly && not (same_binding occurrence.owner binding) ->
-      (match result_read_dependency occurrence with
-       | Some _ -> Ok (Recheck_result {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
-       | None -> Ok Dispatch)
-  | Some (Attempting occurrence) when owned_job_launch occurrence ->
+  | Some (Attempting occurrence) ->
+    if child_ack_proven children occurrence && not (same_binding occurrence.owner binding)
+    then Ok (Recheck_child_submission {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+    else if occurrence.readonly && not (same_binding occurrence.owner binding)
+    then recheck_or_dispatch occurrence
+    else if owned_job_launch occurrence then
       (match recheck_launch_for occurrence with
        | Some replay -> Ok (Recheck_launch replay)
-       | None -> Error (Replay_not_proven node_id))
-  | Some (Settled (occurrence, {result = Tool_result.Failed _; _}, Some Tool_result.Effect_outcome_unknown, _))
-      when owned_job_launch occurrence ->
-      (match recheck_launch_for occurrence with
-       | Some replay -> Ok (Recheck_launch replay)
-       | None -> Error (Replay_not_proven node_id))
-  | Some (Attempting _)
-  | Some (Settled (_, {result=(Tool_result.Deferred _ | Tool_result.Failed _);_},
-      (Some (Tool_result.Proven_pre_effect | Tool_result.Proven_post_effect
-        | Tool_result.Effect_outcome_unknown) | None), _)) ->
-      Error (Replay_not_proven node_id)
+       | None -> refuse ())
+    else refuse ()
+  | Some (Settled (occurrence, completed, phase, job)) ->
+    (match completed.result with
+     | Tool_result.Completed _ -> Ok (Reuse_completed completed)
+     | Tool_result.Deferred _ ->
+       if child_ack_proven children occurrence && not (same_binding occurrence.owner binding)
+       then Ok (Recheck_child_submission {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+       else
+       (match job with
+        | Some job_id when valid_dependency_wait children occurrence completed.result phase job_id ->
+          recheck occurrence
+        | None | Some _ -> refuse ())
+     | Tool_result.Failed _ ->
+       if child_ack_proven children occurrence && not (same_binding occurrence.owner binding)
+       then Ok (Recheck_child_submission {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+       else
+       (match phase with
+        | Some Tool_result.Proven_pre_effect ->
+          if child_intent_proven children occurrence then
+            Ok (Recheck_child_submission {execution_id=occurrence.execution_id;tool_use_id=occurrence.tool_use_id})
+          else recheck_or_dispatch occurrence
+        | Some Tool_result.Effect_outcome_unknown when owned_job_launch occurrence ->
+          (match recheck_launch_for occurrence with
+           | Some replay -> Ok (Recheck_launch replay)
+           | None -> refuse ())
+        | None | Some (Tool_result.Proven_post_effect | Effect_outcome_unknown) -> refuse ()))
 
 let decode_state bytes = decode (fun () ->
   require (bytes <> "" && bytes.[String.length bytes - 1] = '\n') "missing or incomplete journal identity";
@@ -489,10 +628,47 @@ let decode_state bytes = decode (fun () ->
       | "binding" -> ["expected_owner"; "owner"]
       | "attempting" -> ["occurrence"]
       | "settled" -> ["occurrence"; "completed"; "failure_effect_disposition"; "dependency_wait"]
+      | "child_intent" -> ["occurrence";"result_node_id";"child_source"]
+      | "child_accepted" -> ["node_id";"binding"]
       | _ -> refuse "unknown journal event" in
     let fields = object_fields (["schema"; "kind"; "source_sha"] @ extras) json in
     require (field "schema" fields = `Int 3 && field "source_sha" fields = `String source_sha) "event source/schema mismatch";
     match kind with
+    | "child_intent" ->
+      let occurrence = occurrence_of_json (field "occurrence" fields) in
+      let key = Plan.Node_id.to_string occurrence.node_id in
+      require (same_owner state.owner (Some occurrence.owner) && not occurrence.readonly) "child intent has no effectful current owner";
+      require (match Nodes.find_opt key state.nodes with
+        | Some (Attempting current) -> same_occurrence current occurrence
+        | None | Some (Settled _) -> false) "child intent has no exact parent attempt";
+      require (not (Nodes.mem key state.children)) "child intent already exists";
+      let result_node_id = match Plan.Node_id.make (string (field "result_node_id" fields)) with
+        | Ok id -> id | Error _ -> refuse "invalid child result node" in
+      let child_source = source_of_json (field "child_source" fields) in
+      let origin = match child_source.producer with
+        | Named {origin=Nested origin;_} -> origin
+        | Named {origin=Standalone;_} | Prepared -> refuse "child intent lacks original Nested origin" in
+      require (Plan.Composition_run_id.equal origin.parent_run_id state.source.composition_run_id
+        && Plan.Node_id.equal origin.parent_node_id occurrence.node_id
+        && Plan.Node_id.equal origin.result_node_id result_node_id
+        && Ids.Execution_id.equal origin.parent_execution_id occurrence.execution_id
+        && String.equal origin.parent_occurrence_tool_use_id occurrence.tool_use_id
+        && String.equal child_source.keeper_name state.source.keeper_name
+        && child_source.source_turn = state.source.source_turn
+        && child_source.source_task_id = state.source.source_task_id) "child intent differs from its original parent occurrence";
+      {state with children=Nodes.add key {occurrence;result_node_id;child_source;accepted=None} state.children}
+    | "child_accepted" ->
+      let key = string (field "node_id" fields) in
+      let link = match Nodes.find_opt key state.children with Some link -> link | None -> refuse "acceptance has no original child intent" in
+      require (link.accepted = None) "child acceptance is already committed";
+      require (match Nodes.find_opt key state.nodes with
+        | Some (Attempting current) -> same_owner state.owner (Some current.owner)
+            && child_occurrence_matches link current
+        | None | Some (Settled _) -> false) "child acceptance has no original parent attempt";
+      let binding = match Dependency.composition_of_json (field "binding" fields) with
+        | Ok binding -> binding | Error detail -> refuse detail in
+      require (child_binding_matches link binding) "child acceptance differs from its original source";
+      {state with children=Nodes.add key {link with accepted=Some binding} state.children}
     | "binding" ->
       let expected = optional binding_of_json (field "expected_owner" fields) in
       let owner = binding_of_json (field "owner" fields) in
@@ -511,7 +687,7 @@ let decode_state bytes = decode (fun () ->
         ~node_id:occurrence.node_id ~tool_name:occurrence.tool_name ~input:occurrence.input) "node identity changed") prior;
       let record = if kind = "attempting" then (
         require (occurrence.sequence = (match prior with None -> 1 | Some record -> (occurrence_of_record record).sequence + 1)) "attempt sequence mismatch";
-        require (match replay_for occurrence.owner occurrence.node_id prior with
+        require (match replay_for state.children occurrence.owner occurrence.node_id prior with
           | Ok Dispatch -> true
           | Ok (Recheck_result stored) -> occurrence.readonly
               && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
@@ -520,6 +696,9 @@ let decode_state bytes = decode (fun () ->
               && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
               && occurrence.tool_use_id = stored.tool_use_id
               && occurrence.launch_invocation = Some stored.invocation
+          | Ok (Recheck_child_submission stored) -> not occurrence.readonly
+              && Ids.Execution_id.equal occurrence.execution_id stored.execution_id
+              && occurrence.tool_use_id = stored.tool_use_id
           | Ok (Reuse_completed _) | Error _ -> false) "unproven replay event";
         Attempting occurrence)
       else (
@@ -530,12 +709,12 @@ let decode_state bytes = decode (fun () ->
           && String.equal (Tool_result.tool_name completed.result) occurrence.tool_name) "settlement identity mismatch";
         let phase = optional effect_of_json (field "failure_effect_disposition" fields) in
         let dependency_wait = dependency_wait_of_json (field "dependency_wait" fields) in
-        Option.iter (fun job_id -> require (valid_dependency_wait occurrence completed.result phase job_id)
+        Option.iter (fun job_id -> require (valid_dependency_wait state.children occurrence completed.result phase job_id)
           "dependency wait does not match the exact read-only result leaf") dependency_wait;
         Settled (occurrence, completed, phase, dependency_wait)) in
       {state with nodes = Nodes.add key record state.nodes}
     | _ -> refuse "unknown journal event")
-    {source; source_sha; owner = None; prior_owners = []; nodes = Nodes.empty} events)
+    {source; source_sha; owner = None; prior_owners = []; nodes = Nodes.empty;children=Nodes.empty} events)
 
 let source journal = journal.immutable_source
 let path_for ~base_path ~keeper_name ~composition_run_id =
@@ -711,7 +890,7 @@ let entry_matches_source source (entry : Async.entry) = decode (fun () ->
   (match source.producer with
    | Prepared -> require (unique "composition_tool" = `String Keeper_tool_composition_catalog.run_tool_name)
        "prepared producer tool mismatch"
-   | Named {tool_name;skill_reference;activation=_} ->
+   | Named {tool_name;skill_reference;activation=_;origin=_} ->
      require (unique "composition_tool" = `String tool_name
        && canonical_equal (unique "skill_reference") (Skill_reference.to_yojson skill_reference))
        "named producer identity mismatch");
@@ -806,282 +985,6 @@ let prepare_continuation_marker journal ~request_id = filesystem (fun () ->
     if continuation_marker_json found = continuation_marker_json marker then Ok ()
     else Error (Invalid_continuation_marker "marker changed request/run/owner identity"))
 
-let bind_expected_owner journal ~request_id ~(expected : binding option) ~expected_terminal ~expected_nodes =
-  let* () = match expected with
-    | None -> Ok ()
-    | Some prior when String.equal prior.request_id request_id -> Ok ()
-    | Some prior ->
-      (match Async.load_canonical_durable_terminal ~base_path:journal.base_path ~caller:journal.immutable_source.keeper_name prior.request_id with
-       | Error error -> Error (Prior_owner_not_terminal {request_id = prior.request_id; reason = Async.canonical_terminal_error_to_string error})
-       | Ok proof ->
-         let entry = Async.durable_terminal_entry proof in
-         if Option.fold ~none:false ~some:(fun expected -> not (Async.same_entry_record expected entry)) expected_terminal
-         then Error Ownership_changed
-         else Result.map_error (fun reason -> Prior_owner_not_terminal {request_id = prior.request_id; reason})
-           (entry_matches_source journal.immutable_source entry)) in
-  (* on_accepted holds the new request before its worker starts. Terminal
-     publication is immutable. Only run ownership needs a CAS under this lock. *)
-  let* () = canonical_queued journal request_id in
-  let* () = prepare_continuation_marker journal ~request_id in
-  update_existing journal (fun state ->
-    if not (same_owner state.owner expected)
-        || Option.fold ~none:false ~some:(fun nodes -> nodes <> state.nodes) expected_nodes
-    then None, Error Ownership_changed
-    else match state.owner with
-      | Some binding when binding.request_id = request_id -> None, Ok {journal; binding}
-      | prior ->
-        let binding = {request_id; generation = (match prior with None -> 1 | Some prior -> prior.generation + 1)} in
-        Some (row (event "binding" journal.source_sha ["expected_owner", option_json binding_json prior; "owner", binding_json binding])), Ok {journal; binding})
-
-let bind_request journal ~request_id =
-  let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
-  let* () = canonical_queued journal request_id in
-  let* expected = update_existing journal (fun state -> None, Ok state.owner) in
-  match journal.immutable_source.producer,expected with
-  | Named _,Some owner when not (String.equal owner.request_id request_id) ->
-    Error (Invalid_source "named successor requires its sealed original continuation")
-  | (Prepared | Named _),(None | Some _) ->
-    bind_expected_owner journal ~request_id ~expected ~expected_terminal:None ~expected_nodes:None
-
-let validate_predecessor_terminals (continuation : continuation) =
-  let journal = continuation.journal in
-  List.fold_left (fun prior (expected : Async.entry) ->
-    let* () = prior in
-    let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
-        ~caller:journal.immutable_source.keeper_name expected.request_id
-      |> Result.map_error (fun error -> Prior_owner_not_terminal
-          {request_id=expected.request_id;reason=Async.canonical_terminal_error_to_string error}) in
-    if Async.same_entry_record expected (Async.durable_terminal_entry proof) then Ok ()
-    else Error Ownership_changed) (Ok ()) continuation.predecessor_terminals
-
-let bind_continuation (continuation : continuation) ~request_id =
-  let journal = continuation.journal in
-  let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
-  let* () = validate_predecessor_terminals continuation in
-  let* () = canonical_queued journal request_id in
-  bind_expected_owner journal ~request_id ~expected:(Some continuation.expected_owner)
-    ~expected_terminal:(Some continuation.terminal_entry)
-    ~expected_nodes:(Some continuation.suspended_nodes)
-
-let continuation_base_path (continuation : continuation) = continuation.journal.base_path
-let continuation_source (continuation : continuation) = source continuation.journal
-let continuation_request_id (continuation : continuation) = continuation.expected_owner.request_id
-let continuation_dependencies (continuation : continuation) = continuation.dependencies
-
-type child_admission_history = Untouched_child | Admitted_child | Admission_unconfirmed
-
-let nodes_child_admission nodes ~node_ids =
-  List.fold_left (fun history id ->
-    let current = match Nodes.find_opt (Plan.Node_id.to_string id) nodes with
-      | None -> Untouched_child
-      | Some (Attempting _) -> Admission_unconfirmed
-      | Some (Settled (_,completed,effect_disposition,wait)) ->
-        (match completed.result,effect_disposition,wait with
-         | Tool_result.Completed _,_,_ | Tool_result.Deferred _,_,Some _
-         | Tool_result.Failed _,Some Tool_result.Proven_post_effect,_ -> Admitted_child
-         | Tool_result.Failed _,(None | Some Tool_result.Proven_pre_effect
-             | Some Tool_result.Effect_outcome_unknown),_
-         | Tool_result.Deferred _,_,None -> Admission_unconfirmed) in
-    match history,current with
-    | Admitted_child,_ | _,Admitted_child -> Admitted_child
-    | Admission_unconfirmed,_ | _,Admission_unconfirmed -> Admission_unconfirmed
-    | Untouched_child,Untouched_child -> Untouched_child) Untouched_child node_ids
-
-let continuation_child_admission continuation ~node_ids =
-  nodes_child_admission continuation.suspended_nodes ~node_ids
-
-let child_admission journal ~node_ids =
-  update_existing journal (fun state -> None, Ok (nodes_child_admission state.nodes ~node_ids))
-
-let normalize_dependencies = Dependency.normalize
-
-let exact_waiting_dependencies ~expected_owner nodes dependencies =
-  let* recorded = Nodes.fold (fun _ record prior ->
-    let* ids = prior in
-    match record with
-    | Attempting _ ->
-      Error (Invalid_result "waiting owner has an unsettled or non-result-wait journal node")
-    | Settled (occurrence, completed, phase, job) ->
-      let refuse () =
-        Error (Invalid_result "waiting owner has an unsettled or non-result-wait journal node")
-      in
-      (match completed.result with
-       | Tool_result.Completed _ ->
-         (match job with None -> Ok ids | Some _ -> refuse ())
-       | Tool_result.Failed _ -> refuse ()
-       | Tool_result.Deferred _ ->
-         (match job with
-          | Some job_id when same_binding occurrence.owner expected_owner
-              && valid_dependency_wait occurrence completed.result phase job_id -> Ok (job_id :: ids)
-          | None | Some _ -> refuse ()))) nodes (Ok []) in
-  let recorded = normalize_dependencies recorded in
-  if recorded = [] || recorded <> normalize_dependencies dependencies
-  then Error (Invalid_result "canonical waiting dependencies differ from the current journal occurrences")
-  else Ok recorded
-
-let prior_result_wait journal prior_owners =
-  let rec read terminals = function
-    | [] -> Ok None
-    | ((prior : binding), nodes) :: rest ->
-      let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
-          ~caller:journal.immutable_source.keeper_name prior.request_id
-        |> Result.map_error (fun error -> Prior_owner_not_terminal
-            {request_id=prior.request_id;reason=Async.canonical_terminal_error_to_string error}) in
-      let entry = Async.durable_terminal_entry proof in
-      let* () = entry_matches_source journal.immutable_source entry
-        |> Result.map_error (fun reason -> Prior_owner_not_terminal
-            {request_id=prior.request_id;reason}) in
-      match entry.status with
-      | Async.Waiting_for_dependencies {dependencies;_} ->
-        (match exact_waiting_dependencies ~expected_owner:prior nodes dependencies with
-         | Ok dependencies -> Ok (Some (dependencies,List.rev (entry :: terminals)))
-         | Error error ->
-           (* A no-dispatch successor may stop with the exact predecessor wait.
-              Binding snapshots prove that it changed no node ownership or
-              result; the canonical terminal proves the same waiting jobs. *)
-           match rest with
-           | (_,predecessor_nodes)::_ when nodes = predecessor_nodes ->
-             let* original = read (entry :: terminals) rest in
-             (match original with
-              | Some (original_jobs,_) when original_jobs = normalize_dependencies dependencies -> Ok original
-              | Some _ | None -> Error error)
-           | _ -> Error error)
-      | Lost _ -> read (entry :: terminals) rest
-      | Cancelled _ | Persistence_failed _ | Done _ -> Ok None
-      | Queued | Running | Cancelling _ ->
-        Error (Prior_owner_not_terminal {request_id=prior.request_id;
-          reason="predecessor terminal proof has an active status"})
-  in read [] prior_owners
-
-let launch_replay_proven occurrence =
-  owned_job_launch occurrence && Option.is_some occurrence.launch_invocation
-
-let recoverable_lost_nodes nodes dependencies =
-  let* recorded_jobs = Nodes.fold (fun _ record prior ->
-    let* jobs = prior in
-    let occurrence = occurrence_of_record record in
-    let job = result_read_dependency occurrence in
-    let replay_proven = match record with
-      | Settled (_, {result=Tool_result.Completed _;_}, _, None) -> true
-      | Settled (occurrence, completed, phase, Some job_id) ->
-        valid_dependency_wait occurrence completed.result phase job_id
-      | Attempting occurrence ->
-        occurrence.readonly || launch_replay_proven occurrence
-      | Settled (occurrence, {result=Tool_result.Failed _;_},
-          Some Tool_result.Proven_pre_effect, None) ->
-        occurrence.readonly || launch_replay_proven occurrence
-      | Settled (occurrence, {result=Tool_result.Failed _;_},
-          Some Tool_result.Effect_outcome_unknown, _) ->
-        launch_replay_proven occurrence
-      | Settled (_, {result=(Tool_result.Deferred _ | Tool_result.Failed _);_},
-          (Some (Tool_result.Proven_pre_effect | Tool_result.Proven_post_effect
-            | Tool_result.Effect_outcome_unknown) | None), None) -> false in
-    if not replay_proven then Error (Invalid_result
-        "lost continuation has a deferred or unproven node that cannot replay")
-    else Ok (Option.to_list job @ jobs)) nodes (Ok []) in
-  let recorded_jobs = normalize_dependencies recorded_jobs in
-  if List.for_all (fun job_id -> List.mem job_id recorded_jobs) dependencies then Ok ()
-  else Error (Invalid_result "original waiting dependencies are absent from the lost journal")
-
-let validate_lost_without_wait expected_owner nodes =
-  Nodes.fold (fun _ record prior ->
-    let* () = prior in
-    let occurrence = occurrence_of_record record in
-    match record with
-    | Attempting occurrence when occurrence.readonly -> Ok ()
-    | Attempting _ -> Error (Replay_not_proven occurrence.node_id)
-    | Settled _ -> replay_for expected_owner occurrence.node_id (Some record)
-        |> Result.map (fun _ -> ())) nodes (Ok ())
-
-let waiting_continuation journal = filesystem (fun () ->
-  let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
-  let* state = strict_read ~root:journal.root journal.path in
-  let* () = check_source journal state in
-  match state.owner with
-  | None -> Ok None
-  | Some expected_owner ->
-    match Async.load_canonical_durable_terminal ~base_path:journal.base_path
-        ~caller:journal.immutable_source.keeper_name expected_owner.request_id with
-    | Error (Async.Canonical_terminal_runtime_active _ | Canonical_terminal_nonterminal _) -> Ok None
-    | Error (Async.Canonical_terminal_absent | Async.Canonical_terminal_unreadable _
-        | Async.Canonical_terminal_access_rejected _
-        | Async.Canonical_terminal_publication_ambiguous _
-        | Async.Canonical_terminal_noncanonical_location _ as error) ->
-      Error (Prior_owner_not_terminal
-        {request_id=expected_owner.request_id;reason=Async.canonical_terminal_error_to_string error})
-    | Ok proof ->
-      let entry = Async.durable_terminal_entry proof in
-      let* () = entry_matches_source journal.immutable_source entry
-        |> Result.map_error (fun reason -> Prior_owner_not_terminal {request_id=expected_owner.request_id;reason}) in
-      match entry.status with
-      | Async.Waiting_for_dependencies {dependencies;_} ->
-        let* dependencies,predecessor_terminals =
-          match exact_waiting_dependencies ~expected_owner state.nodes dependencies with
-          | Ok jobs -> Ok (jobs,[])
-          | Error error ->
-            (match state.prior_owners with
-             | (_,predecessor_nodes)::_ when state.nodes = predecessor_nodes ->
-               let* original = prior_result_wait journal state.prior_owners in
-               (match original with
-                | Some (jobs,proofs) when jobs = normalize_dependencies dependencies ->
-                  let* () = recoverable_lost_nodes state.nodes jobs in
-                  Ok (jobs,proofs)
-                | Some _ | None -> Error error)
-             | _ -> Error error) in
-        Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals;
-          suspended_nodes=state.nodes;dependencies})
-      | Lost _ ->
-        let* original_wait = prior_result_wait journal state.prior_owners in
-        (match original_wait with
-         | None ->
-           (* No recorded wait is not proof of absent effects. Preserve the
-              unresolved first owner before discovery considers retirement or
-              a public resume falls back to ordinary request admission. *)
-           let* () = validate_lost_without_wait expected_owner state.nodes in
-           Ok None
-         | Some (dependencies,predecessor_terminals) ->
-           let* () = recoverable_lost_nodes state.nodes dependencies in
-           Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals;
-             suspended_nodes=state.nodes;dependencies}))
-      | Queued | Running | Cancelling _ | Cancelled _
-      | Persistence_failed _ | Done _ -> Ok None)
-
-type read_composition_result =
-  base_path:string -> keeper_name:string -> Dependency.composition -> (Dependency.readiness,string) result
-
-let continuation_readiness ~read_composition_result (continuation : continuation) = filesystem (fun () ->
-  let journal = continuation.journal in
-  let* state = strict_read ~root:journal.root journal.path in
-  let* () = check_source journal state in
-  if not (same_owner state.owner (Some continuation.expected_owner))
-      || state.nodes <> continuation.suspended_nodes then Error Ownership_changed
-  else
-  let* () = validate_predecessor_terminals continuation in
-  let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
-      ~caller:journal.immutable_source.keeper_name continuation.expected_owner.request_id
-    |> Result.map_error (fun error -> Prior_owner_not_terminal
-        {request_id=continuation.expected_owner.request_id;reason=Async.canonical_terminal_error_to_string error}) in
-  if not (Async.same_entry_record continuation.terminal_entry (Async.durable_terminal_entry proof))
-  then Error Ownership_changed
-  else List.fold_left (fun prior dependency ->
-    let* readiness = prior in
-    let* ready = match dependency with
-      | Dependency.Owned_job job_id ->
-        let* record = Keeper_owned_job_store.load ~base_path:journal.base_path
-            ~keeper_name:journal.immutable_source.keeper_name job_id
-          |> Result.map_error (fun error -> Invalid_result (Keeper_owned_job_store.error_to_string error)) in
-        Ok (Keeper_owned_job_store.result_ready record)
-      | Dependency.Composition_result binding ->
-        let* result = read_composition_result ~base_path:journal.base_path
-            ~keeper_name:journal.immutable_source.keeper_name binding
-          |> Result.map_error (fun detail -> Invalid_result detail) in
-        Ok (result = Dependency.Ready) in
-    match readiness, ready with
-    | Results_ready, true -> Ok Results_ready
-    | (Waiting_for_results | Results_ready), false
-    | Waiting_for_results, true -> Ok Waiting_for_results)
-      (Ok Results_ready) continuation.dependencies)
-
 let canonical_entry journal request_id =
   let* entry = match Async.load_canonical_request ~base_path:journal.base_path
       ~caller:journal.immutable_source.keeper_name request_id with
@@ -1125,6 +1028,394 @@ let named_binding journal =
   | Some binding -> Ok binding
   | None -> Error (Invalid_source "named run has no admitted original owner")
 
+let validate_nested_producer journal =
+  match journal.immutable_source.producer with
+  | Prepared | Named {origin=Standalone;_} -> Ok ()
+  | Named {origin=Nested origin;activation;skill_reference;tool_name=_} ->
+    let* bound = match activation with Some bound -> Ok bound
+      | None -> Error (Invalid_source "nested producer has no sealed original recorder") in
+    let* parent_tool_name,logical_parent,alias = match origin.activation.invocation with
+      | Keeper_skill_activation_ledger.Nested_composition_invocation {tool_name;scope;_} ->
+        Ok (tool_name,scope.parent_tool_use_id,scope.alias)
+      | Instruction_invocation _ | Composition_invocation _ -> Error (Invalid_source "nested producer lost its original invocation") in
+    let child : Keeper_skill_activation_recorder.result_child =
+      {alias;skill_reference;skill_tool_use_id=origin.activation.skill_tool_use_id;
+       activation_frame_sha256=Keeper_skill_activation_ledger.activation_frame_sha256 origin.activation} in
+    Keeper_skill_activation_recorder.find_bound_result_children
+      ~config:(Workspace.default_config journal.base_path) bound ~composition_run_id:origin.parent_run_id
+      ~logical_parent_tool_use_id:logical_parent ~source_turn:journal.immutable_source.source_turn
+      ~tool_name:parent_tool_name [child]
+    |> Result.map (fun _ -> ())
+    |> Result.map_error (fun error -> Invalid_source (Keeper_skill_activation_recorder.error_to_string error))
+
+type child_observation = Acceptance_recovery | Result_observation
+
+let accepted_child_binding ~observation ~base_path (link : child_link) =
+  let source = link.child_source in
+  let* child = load ~base_path ~keeper_name:source.keeper_name ~composition_run_id:source.composition_run_id in
+  let* () = if same_source source child.immutable_source then Ok () else Error Source_conflict in
+  let* () = validate_nested_producer child in
+  let* binding = named_binding child in
+  let* () = if child_binding_matches link binding then Ok () else Error Source_conflict in
+  let* original = canonical_entry child binding.request_id in
+  let* () = match observation,original.status with
+    | Acceptance_recovery,Async.Persistence_failed {attempted_status=Async.Acceptance_callback;_} ->
+      Error (Invalid_result "original child acceptance callback failed")
+    | Acceptance_recovery,Persistence_failed {attempted_status=State_transition _;_}
+    | Result_observation,Persistence_failed _
+    | (Acceptance_recovery | Result_observation),(Queued | Running | Cancelling _ | Waiting_for_dependencies _ | Done _ | Lost _ | Cancelled _) -> Ok () in
+  Ok binding
+
+let validate_child_links journal children nodes =
+  Nodes.fold (fun key link prior ->
+    let* () = prior in
+    match link.accepted with
+    | None -> Ok ()
+    | Some expected ->
+      let observation = match Nodes.find_opt key nodes with
+        | Some (Settled (_,completed,_,_)) -> (match completed.result with
+            | Tool_result.Completed _ -> Result_observation
+            | Failed _ | Deferred _ -> Acceptance_recovery)
+        | None | Some (Attempting _) -> Acceptance_recovery in
+      let* actual = accepted_child_binding ~observation ~base_path:journal.base_path link in
+      if canonical_equal (Dependency.composition_to_json expected) (Dependency.composition_to_json actual)
+      then Ok () else Error Source_conflict) children (Ok ())
+
+let nested_parent_accepted journal =
+  match journal.immutable_source.producer with
+  | Prepared | Named {origin=Standalone;_} -> Ok false
+  | Named {origin=Nested origin;_} ->
+    let* parent = load ~base_path:journal.base_path ~keeper_name:journal.immutable_source.keeper_name
+        ~composition_run_id:origin.parent_run_id in
+    let* state = strict_read ~root:parent.root parent.path in
+    let* () = check_source parent state in
+    match Nodes.find_opt (Plan.Node_id.to_string origin.parent_node_id) state.children with
+    | Some link when same_source link.child_source journal.immutable_source ->
+      (match link.accepted with
+       | None -> Error (Invalid_result "original parent has not committed child acceptance")
+       | Some expected ->
+         let* actual = named_binding journal in
+         if canonical_equal (Dependency.composition_to_json expected) (Dependency.composition_to_json actual)
+         then Ok true else Error Source_conflict)
+    | Some _ | None -> Error (Invalid_source "nested child has no original parent submission intent")
+
+let bind_expected_owner journal ~request_id ~(expected : binding option) ~expected_terminal ~expected_nodes ~expected_children =
+  let* () = match expected with
+    | None -> Ok ()
+    | Some prior when String.equal prior.request_id request_id -> Ok ()
+    | Some prior ->
+      (match Async.load_canonical_durable_terminal ~base_path:journal.base_path ~caller:journal.immutable_source.keeper_name prior.request_id with
+       | Error error -> Error (Prior_owner_not_terminal {request_id = prior.request_id; reason = Async.canonical_terminal_error_to_string error})
+       | Ok proof ->
+         let entry = Async.durable_terminal_entry proof in
+         if Option.fold ~none:false ~some:(fun expected -> not (Async.same_entry_record expected entry)) expected_terminal
+         then Error Ownership_changed
+         else Result.map_error (fun reason -> Prior_owner_not_terminal {request_id = prior.request_id; reason})
+           (entry_matches_source journal.immutable_source entry)) in
+  (* on_accepted holds the new request before its worker starts. Terminal
+     publication is immutable. Only run ownership needs a CAS under this lock. *)
+  let* () = canonical_queued journal request_id in
+  let* () = prepare_continuation_marker journal ~request_id in
+  update_existing journal (fun state ->
+    if not (same_owner state.owner expected)
+        || Option.fold ~none:false ~some:(fun nodes -> nodes <> state.nodes) expected_nodes
+        || Option.fold ~none:false ~some:(fun children -> not (same_children children state.children)) expected_children
+    then None, Error Ownership_changed
+    else match state.owner with
+      | Some binding when binding.request_id = request_id -> None, Ok {journal; binding}
+      | prior ->
+        let binding = {request_id; generation = (match prior with None -> 1 | Some prior -> prior.generation + 1)} in
+        Some (row (event "binding" journal.source_sha ["expected_owner", option_json binding_json prior; "owner", binding_json binding])), Ok {journal; binding})
+
+let bind_request journal ~request_id =
+  let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
+  let* () = validate_nested_producer journal in
+  let* () = canonical_queued journal request_id in
+  let* expected = update_existing journal (fun state -> None, Ok state.owner) in
+  match journal.immutable_source.producer,expected with
+  | Named _,Some owner when not (String.equal owner.request_id request_id) ->
+    Error (Invalid_source "named successor requires its sealed original continuation")
+  | (Prepared | Named _),(None | Some _) ->
+    bind_expected_owner journal ~request_id ~expected ~expected_terminal:None ~expected_nodes:None ~expected_children:None
+
+let validate_predecessor_terminals (continuation : continuation) =
+  let journal = continuation.journal in
+  List.fold_left (fun prior (expected : Async.entry) ->
+    let* () = prior in
+    let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
+        ~caller:journal.immutable_source.keeper_name expected.request_id
+      |> Result.map_error (fun error -> Prior_owner_not_terminal
+          {request_id=expected.request_id;reason=Async.canonical_terminal_error_to_string error}) in
+    if Async.same_entry_record expected (Async.durable_terminal_entry proof) then Ok ()
+    else Error Ownership_changed) (Ok ()) continuation.predecessor_terminals
+
+let bind_continuation (continuation : continuation) ~request_id =
+  let journal = continuation.journal in
+  let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
+  let* () = validate_nested_producer journal in
+  let* () = validate_child_links journal continuation.suspended_children continuation.suspended_nodes in
+  let* _ = nested_parent_accepted journal in
+  let* () = validate_predecessor_terminals continuation in
+  let* () = canonical_queued journal request_id in
+  bind_expected_owner journal ~request_id ~expected:(Some continuation.expected_owner)
+    ~expected_terminal:(Some continuation.terminal_entry)
+    ~expected_nodes:(Some continuation.suspended_nodes)
+    ~expected_children:(Some continuation.suspended_children)
+
+let continuation_base_path (continuation : continuation) = continuation.journal.base_path
+let continuation_source (continuation : continuation) = source continuation.journal
+let continuation_request_id (continuation : continuation) = continuation.expected_owner.request_id
+let continuation_dependencies (continuation : continuation) = continuation.dependencies
+
+type child_admission_history = Untouched_child | Admitted_child | Admission_unconfirmed
+
+let nodes_child_admission nodes ~node_ids =
+  List.fold_left (fun history id ->
+    let current = match Nodes.find_opt (Plan.Node_id.to_string id) nodes with
+      | None -> Untouched_child
+      | Some (Attempting _) -> Admission_unconfirmed
+      | Some (Settled (_,completed,effect_disposition,wait)) ->
+        (match completed.result,effect_disposition,wait with
+         | Tool_result.Completed _,_,_ | Tool_result.Deferred _,_,Some _
+         | Tool_result.Failed _,Some Tool_result.Proven_post_effect,_ -> Admitted_child
+         | Tool_result.Failed _,(None | Some Tool_result.Proven_pre_effect
+             | Some Tool_result.Effect_outcome_unknown),_
+         | Tool_result.Deferred _,_,None -> Admission_unconfirmed) in
+    match history,current with
+    | Admitted_child,_ | _,Admitted_child -> Admitted_child
+    | Admission_unconfirmed,_ | _,Admission_unconfirmed -> Admission_unconfirmed
+    | Untouched_child,Untouched_child -> Untouched_child) Untouched_child node_ids
+
+let continuation_child_admission continuation ~node_ids =
+  nodes_child_admission continuation.suspended_nodes ~node_ids
+
+let child_admission journal ~node_ids =
+  update_existing journal (fun state -> None, Ok (nodes_child_admission state.nodes ~node_ids))
+
+let normalize_dependencies = Dependency.normalize
+
+let exact_waiting_dependencies children ~expected_owner nodes dependencies =
+  let* recorded = Nodes.fold (fun _ record prior ->
+    let* ids = prior in
+    match record with
+    | Attempting _ ->
+      Error (Invalid_result "waiting owner has an unsettled or non-result-wait journal node")
+    | Settled (occurrence, completed, phase, job) ->
+      let refuse () =
+        Error (Invalid_result "waiting owner has an unsettled or non-result-wait journal node")
+      in
+      (match completed.result with
+       | Tool_result.Completed _ ->
+         (match job with None -> Ok ids | Some _ -> refuse ())
+       | Tool_result.Failed _ -> refuse ()
+       | Tool_result.Deferred _ ->
+         (match job with
+          | Some job_id when same_binding occurrence.owner expected_owner
+              && valid_dependency_wait children occurrence completed.result phase job_id -> Ok (job_id :: ids)
+          | None | Some _ -> refuse ()))) nodes (Ok []) in
+  let recorded = normalize_dependencies recorded in
+  if recorded = [] || recorded <> normalize_dependencies dependencies
+  then Error (Invalid_result "canonical waiting dependencies differ from the current journal occurrences")
+  else Ok recorded
+
+let prior_result_wait journal children prior_owners =
+  let rec read terminals = function
+    | [] -> Ok None
+    | ((prior : binding), nodes) :: rest ->
+      let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
+          ~caller:journal.immutable_source.keeper_name prior.request_id
+        |> Result.map_error (fun error -> Prior_owner_not_terminal
+            {request_id=prior.request_id;reason=Async.canonical_terminal_error_to_string error}) in
+      let entry = Async.durable_terminal_entry proof in
+      let* () = entry_matches_source journal.immutable_source entry
+        |> Result.map_error (fun reason -> Prior_owner_not_terminal
+            {request_id=prior.request_id;reason}) in
+      match entry.status with
+      | Async.Waiting_for_dependencies {dependencies;_} ->
+        (match exact_waiting_dependencies children ~expected_owner:prior nodes dependencies with
+         | Ok dependencies -> Ok (Some (dependencies,List.rev (entry :: terminals)))
+         | Error error ->
+           (* A no-dispatch successor may stop with the exact predecessor wait.
+              Binding snapshots prove that it changed no node ownership or
+              result; the canonical terminal proves the same waiting jobs. *)
+           match rest with
+           | (_,predecessor_nodes)::_ when nodes = predecessor_nodes ->
+             let* original = read (entry :: terminals) rest in
+             (match original with
+              | Some (original_jobs,_) when original_jobs = normalize_dependencies dependencies -> Ok original
+              | Some _ | None -> Error error)
+           | _ -> Error error)
+      | Lost _ -> read (entry :: terminals) rest
+      | Cancelled _ | Persistence_failed _ | Done _ -> Ok None
+      | Queued | Running | Cancelling _ ->
+        Error (Prior_owner_not_terminal {request_id=prior.request_id;
+          reason="predecessor terminal proof has an active status"})
+  in read [] prior_owners
+
+let launch_replay_proven occurrence =
+  owned_job_launch occurrence && Option.is_some occurrence.launch_invocation
+
+let recoverable_lost_nodes children nodes dependencies =
+  let* recorded_jobs = Nodes.fold (fun _ record prior ->
+    let* jobs = prior in
+    let occurrence = occurrence_of_record record in
+    let job = result_read_dependency children occurrence in
+    let replay_proven = child_ack_proven children occurrence || match record with
+      | Attempting occurrence -> occurrence.readonly || launch_replay_proven occurrence
+      | Settled (occurrence, completed, phase, job) ->
+        (match job with
+         | Some job_id -> valid_dependency_wait children occurrence completed.result phase job_id
+         | None ->
+           (match completed.result with
+            | Tool_result.Completed _ -> true
+            | Tool_result.Deferred _ -> false
+            | Tool_result.Failed _ ->
+              (match phase with
+               | Some Tool_result.Proven_pre_effect ->
+                 occurrence.readonly || child_intent_proven children occurrence || launch_replay_proven occurrence
+               | Some Tool_result.Effect_outcome_unknown -> launch_replay_proven occurrence
+               | None | Some Tool_result.Proven_post_effect -> false))) in
+    if not replay_proven then Error (Invalid_result
+        "lost continuation has a deferred or unproven node that cannot replay")
+    else Ok (Option.to_list job @ jobs)) nodes (Ok []) in
+  let recorded_jobs = normalize_dependencies recorded_jobs in
+  if List.for_all (fun job_id -> List.mem job_id recorded_jobs) dependencies then Ok ()
+  else Error (Invalid_result "original waiting dependencies are absent from the lost journal")
+
+let validate_lost_without_wait children expected_owner nodes =
+  Nodes.fold (fun _ record prior ->
+    let* () = prior in
+    let occurrence = occurrence_of_record record in
+    if child_ack_proven children occurrence then Ok () else match record with
+    | Attempting occurrence when occurrence.readonly -> Ok ()
+    | Attempting _ -> Error (Replay_not_proven occurrence.node_id)
+    | Settled _ -> replay_for children expected_owner occurrence.node_id (Some record)
+        |> Result.map (fun _ -> ())) nodes (Ok ())
+
+let waiting_continuation journal = filesystem (fun () ->
+  let* () = validate_artifacts ~base_path:journal.base_path journal.immutable_source in
+  let* state = strict_read ~root:journal.root journal.path in
+  let* () = check_source journal state in
+  let* () = validate_nested_producer journal in
+  match state.owner with
+  | None -> Ok None
+  | Some expected_owner ->
+    match Async.load_canonical_durable_terminal ~base_path:journal.base_path
+        ~caller:journal.immutable_source.keeper_name expected_owner.request_id with
+    | Error (Async.Canonical_terminal_runtime_active _ | Canonical_terminal_nonterminal _) -> Ok None
+    | Error ((Async.Canonical_terminal_absent | Canonical_terminal_unreadable _
+             | Canonical_terminal_access_rejected _ | Canonical_terminal_publication_ambiguous _
+             | Canonical_terminal_noncanonical_location _) as error) -> Error (Prior_owner_not_terminal
+        {request_id=expected_owner.request_id;reason=Async.canonical_terminal_error_to_string error})
+    | Ok proof ->
+      let entry = Async.durable_terminal_entry proof in
+      let* () = entry_matches_source journal.immutable_source entry
+        |> Result.map_error (fun reason -> Prior_owner_not_terminal {request_id=expected_owner.request_id;reason}) in
+      match entry.status with
+      | Async.Waiting_for_dependencies {dependencies;_} ->
+        let* () = validate_child_links journal state.children state.nodes in
+        let* dependencies,predecessor_terminals =
+          match exact_waiting_dependencies state.children ~expected_owner state.nodes dependencies with
+          | Ok jobs -> Ok (jobs,[])
+          | Error error ->
+            (match state.prior_owners with
+             | (_,predecessor_nodes)::_ when state.nodes = predecessor_nodes ->
+               let* original = prior_result_wait journal state.children state.prior_owners in
+               (match original with
+                | Some (jobs,proofs) when jobs = normalize_dependencies dependencies ->
+                  let* () = recoverable_lost_nodes state.children state.nodes jobs in
+                  Ok (jobs,proofs)
+                | Some _ | None -> Error error)
+             | _ -> Error error) in
+        Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals;
+          suspended_nodes=state.nodes;suspended_children=state.children;dependencies})
+      | Lost _ ->
+        let* () = validate_child_links journal state.children state.nodes in
+        let* original_wait = prior_result_wait journal state.children state.prior_owners in
+        (match original_wait with
+         | None ->
+           (* No recorded wait is not proof of absent effects. Preserve the
+              unresolved first owner before discovery considers retirement or
+              a public resume falls back to ordinary request admission. *)
+           let* () = validate_lost_without_wait state.children expected_owner state.nodes in
+           let* child_admitted = nested_parent_accepted journal in
+           let has_accepted_child = Nodes.exists (fun _ link -> Option.is_some link.accepted) state.children in
+           if child_admitted || has_accepted_child then
+             Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals=[];
+               suspended_nodes=state.nodes;suspended_children=state.children;dependencies=[]})
+           else Ok None
+         | Some (dependencies,predecessor_terminals) ->
+           let* () = recoverable_lost_nodes state.children state.nodes dependencies in
+           Ok (Some {journal;expected_owner;terminal_entry=entry;predecessor_terminals;
+             suspended_nodes=state.nodes;suspended_children=state.children;dependencies}))
+      | Queued | Running | Cancelling _ | Cancelled _
+      | Persistence_failed _ | Done _ -> Ok None)
+
+type read_composition_result =
+  base_path:string -> keeper_name:string -> Dependency.composition -> (Dependency.readiness,string) result
+
+let completion_pending ~base_path (entry : Async.entry) = filesystem (fun () ->
+  match entry.status with
+  | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
+  | Waiting_for_dependencies _ | Done _ -> Ok false
+  | Lost _ ->
+    match Option.bind entry.request_context (List.assoc_opt "composition_run_id") with
+    | None -> Ok false
+    | Some (`String identity) ->
+      let* composition_run_id = Plan.Composition_run_id.of_string identity
+        |> Result.map_error (fun _ -> Invalid_source "completion has an invalid run identity") in
+      let* journal = load ~base_path ~keeper_name:entry.keeper_name ~composition_run_id in
+      let rec observe () =
+        let* () = validate_request journal entry in
+        let* before = strict_read ~root:journal.root journal.path in
+        let* () = check_source journal before in
+        let* pending = match before.owner with
+          | Some owner when not (String.equal owner.request_id entry.request_id) -> Ok true
+          | Some _ -> waiting_continuation journal |> Result.map Option.is_some
+          | None -> Error Ownership_changed in
+        let* after = strict_read ~root:journal.root journal.path in
+        let* () = check_source journal after in
+        if same_owner before.owner after.owner then Ok pending else observe () in
+      observe ()
+    | Some _ -> Error (Invalid_source "completion has a malformed run identity"))
+
+let continuation_readiness ~read_composition_result (continuation : continuation) = filesystem (fun () ->
+  let journal = continuation.journal in
+  let* state = strict_read ~root:journal.root journal.path in
+  let* () = check_source journal state in
+  if not (same_owner state.owner (Some continuation.expected_owner))
+      || state.nodes <> continuation.suspended_nodes
+      || not (same_children state.children continuation.suspended_children) then Error Ownership_changed
+  else
+  let* () = validate_nested_producer journal in
+  let* () = validate_child_links journal state.children state.nodes in
+  let* _ = nested_parent_accepted journal in
+  let* () = validate_predecessor_terminals continuation in
+  let* proof = Async.load_canonical_durable_terminal ~base_path:journal.base_path
+      ~caller:journal.immutable_source.keeper_name continuation.expected_owner.request_id
+    |> Result.map_error (fun error -> Prior_owner_not_terminal
+        {request_id=continuation.expected_owner.request_id;reason=Async.canonical_terminal_error_to_string error}) in
+  if not (Async.same_entry_record continuation.terminal_entry (Async.durable_terminal_entry proof))
+  then Error Ownership_changed
+  else List.fold_left (fun prior dependency ->
+    let* readiness = prior in
+    let* ready = match dependency with
+      | Dependency.Owned_job job_id ->
+        let* record = Keeper_owned_job_store.load ~base_path:journal.base_path
+            ~keeper_name:journal.immutable_source.keeper_name job_id
+          |> Result.map_error (fun error -> Invalid_result (Keeper_owned_job_store.error_to_string error)) in
+        Ok (Keeper_owned_job_store.result_ready record)
+      | Dependency.Composition_result binding ->
+        let* result = read_composition_result ~base_path:journal.base_path
+            ~keeper_name:journal.immutable_source.keeper_name binding
+          |> Result.map_error (fun detail -> Invalid_result detail) in
+        Ok (result = Dependency.Ready) in
+    match readiness, ready with
+    | Results_ready, true -> Ok Results_ready
+    | (Waiting_for_results | Results_ready), false
+    | Waiting_for_results, true -> Ok Waiting_for_results)
+      (Ok Results_ready) continuation.dependencies)
+
 let named_result_owner journal binding = filesystem (fun () ->
   let* state = strict_read ~root:journal.root journal.path in
   let* () = check_source journal state in
@@ -1143,17 +1434,17 @@ let named_result_owner journal binding = filesystem (fun () ->
       |> Result.map_error (fun detail -> Invalid_source detail) in
     let* () = match entry.status with
     | Waiting_for_dependencies {dependencies;_} ->
-      (match exact_waiting_dependencies ~expected_owner:owner nodes dependencies with
+      (match exact_waiting_dependencies state.children ~expected_owner:owner nodes dependencies with
        | Ok _ -> Ok ()
        | Error error ->
          (* A successor that stops before dispatch can carry an unchanged
             predecessor's wait; its binding and canonical status stay explicit. *)
          match older with
          | (_,prior_nodes)::_ when nodes = prior_nodes ->
-           let* inherited = prior_result_wait journal older in
+           let* inherited = prior_result_wait journal state.children older in
            (match inherited with
             | Some (original,_) when original = normalize_dependencies dependencies ->
-              recoverable_lost_nodes nodes original
+              recoverable_lost_nodes state.children nodes original
             | Some _ | None -> Error error)
          | _ -> Error error)
     | Lost _ -> Ok ()
@@ -1328,18 +1619,180 @@ let checked_node (worker : worker) state ~node_id ~tool_name ~input =
   | Some record when not (same_node_identity (occurrence_of_record record) ~node_id ~tool_name ~input) -> Error (Node_identity_conflict node_id)
   | _ -> Ok record
 
+let check_attempt (attempt : attempt) state =
+  let* () = check_worker attempt.worker state in
+  match Nodes.find_opt (Plan.Node_id.to_string attempt.occurrence.node_id) state.nodes with
+  | Some (Attempting current) when same_occurrence current attempt.occurrence -> Ok ()
+  | None | Some (Attempting _ | Settled _) -> Error (Attempt_conflict attempt.occurrence.node_id)
+
+let submission_operand (attempt : attempt) plan =
+  match Plan.contract plan attempt.occurrence.node_id with
+  | Some {target=Plan.Child_submission child;_} when not attempt.occurrence.readonly
+      && String.equal attempt.occurrence.tool_name child.submission.tool_name
+      && canonical_equal attempt.occurrence.input (Plan.child_args child.child) -> Ok child
+  | Some {target=(Plan.Child_submission _ | Child_result _ | Descriptor_target _);_} | None ->
+    Error (Node_identity_conflict attempt.occurrence.node_id)
+
+let original_nested_context journal =
+  let* run = read_manifest ~base_path:journal.base_path journal.immutable_source.run_reference in
+  let* json = match run with
+    | `Assoc fields -> (match List.assoc_opt "nested_activation" fields with
+        | Some value -> Ok value | None -> Error (Invalid_source "original nested recorder is absent"))
+    | _ -> Error (Invalid_source "original nested run is not an object") in
+  Keeper_skill_activation_recorder.bound_context_of_yojson json
+  |> Result.map_error (fun error -> Invalid_source (Keeper_skill_activation_recorder.error_to_string error))
+
+let child_origin (attempt : attempt) ~plan ~activation =
+  let journal = attempt.worker.journal in
+  let* () = validate_plan attempt.worker ~plan in
+  let* child = submission_operand attempt plan in
+  let* () = update_existing journal (fun state -> None,check_attempt attempt state) in
+  let* bound = original_nested_context journal in
+  let source = journal.immutable_source in
+  let alias = Plan.child_alias child.child in
+  let expected_id = Plan.Composition_run_id.child_tool_use_id source.composition_run_id
+      ~parent_tool_use_id:source.parent_tool_use_id ~alias in
+  let* () = if String.equal activation.Keeper_skill_activation_ledger.skill_tool_use_id expected_id
+    then Ok () else Error (Invalid_source "child activation is not the original logical invocation") in
+  let parent_tool = match source.producer with
+    | Prepared -> Keeper_tool_composition_catalog.run_tool_name
+    | Named {tool_name;_} -> tool_name in
+  let expected : Keeper_skill_activation_recorder.result_child =
+    {alias=Plan.Node_id.to_string alias;skill_reference=Plan.child_reference child.child;
+     skill_tool_use_id=expected_id;
+     activation_frame_sha256=Keeper_skill_activation_ledger.activation_frame_sha256 activation} in
+  let* original = Keeper_skill_activation_recorder.find_bound_result_children
+      ~config:(Workspace.default_config journal.base_path) bound ~composition_run_id:source.composition_run_id
+      ~logical_parent_tool_use_id:(Plan.Composition_run_id.result_receipt_id source.composition_run_id)
+      ~source_turn:source.source_turn ~tool_name:parent_tool [expected]
+    |> Result.map_error (fun error -> Invalid_source (Keeper_skill_activation_recorder.error_to_string error)) in
+  let* activation = match original with [activation] -> Ok activation
+    | [] | _::_::_ -> Error (Invalid_source "original child activation is not unique") in
+  Ok (Nested {parent_run_id=source.composition_run_id;parent_node_id=attempt.occurrence.node_id;
+    parent_execution_id=attempt.occurrence.execution_id;
+    parent_occurrence_tool_use_id=attempt.occurrence.tool_use_id;
+    result_node_id=child.result.id;args=Plan.child_args child.child;activation})
+
+let record_child_submission (attempt : attempt) ~plan ~child_source =
+  let journal = attempt.worker.journal in
+  let* child = submission_operand attempt plan in
+  let* origin,context = match child_source.producer with
+    | Named {origin=Nested origin;activation=Some context;_} -> Ok (origin,context)
+    | Named {origin=Standalone;_} | Named {origin=Nested _;activation=None;_} | Prepared ->
+      Error (Invalid_source "child source has no original Nested admission") in
+  let* expected = child_origin attempt ~plan ~activation:origin.activation in
+  let* bound = original_nested_context journal in
+  let parent = journal.immutable_source in
+  let* () = if canonical_equal (named_origin_to_yojson expected) (named_origin_to_yojson (Nested origin))
+      && canonical_equal (Keeper_skill_activation_recorder.bound_context_to_yojson bound)
+        (Keeper_skill_activation_recorder.bound_context_to_yojson context)
+      && String.equal child_source.keeper_name parent.keeper_name
+      && child_source.source_turn = parent.source_turn && child_source.source_task_id = parent.source_task_id
+      && (match child_source.producer with
+          | Named {tool_name;skill_reference;_} ->
+            String.equal tool_name (Plan.child_tool_name child.child)
+            && Skill_reference.equal skill_reference (Plan.child_reference child.child)
+          | Prepared -> false)
+    then Ok () else Error Source_conflict in
+  let* child_journal = load ~base_path:journal.base_path ~keeper_name:child_source.keeper_name
+      ~composition_run_id:child_source.composition_run_id in
+  let* () = if same_source child_source child_journal.immutable_source then Ok () else Error Source_conflict in
+  let* () = validate_source_plan child_journal ~plan:(Plan.child_plan child.child) in
+  update_existing journal (fun state ->
+    match check_attempt attempt state with
+    | Error error -> None,Error error
+    | Ok () ->
+      let key = Plan.Node_id.to_string attempt.occurrence.node_id in
+      match Nodes.find_opt key state.children with
+      | Some link when same_source link.child_source child_source
+          && Plan.Node_id.equal link.result_node_id child.result.id
+          && Ids.Execution_id.equal link.occurrence.execution_id attempt.occurrence.execution_id
+          && String.equal link.occurrence.tool_use_id attempt.occurrence.tool_use_id ->
+        None,Ok {attempt;link}
+      | Some _ -> None,Error Source_conflict
+      | None ->
+        let link = {occurrence=attempt.occurrence;result_node_id=child.result.id;child_source;accepted=None} in
+        let event = event "child_intent" state.source_sha
+          ["occurrence",occurrence_json link.occurrence;
+           "result_node_id",`String (Plan.Node_id.to_string link.result_node_id);"child_source",source_json child_source] in
+        Some (row event),Ok {attempt;link})
+
+let accept_child_submission (submission : child_submission) ~request_id =
+  let attempt = submission.attempt in
+  let journal = attempt.worker.journal in
+  let* binding = accepted_child_binding ~observation:Acceptance_recovery ~base_path:journal.base_path submission.link in
+  let* () = if String.equal request_id binding.request_id then Ok () else Error Source_conflict in
+  let* _ = Async.load_canonical_durable_queued ~base_path:journal.base_path
+      ~caller:journal.immutable_source.keeper_name request_id
+    |> Result.map_error (fun error -> Queued_request_rejected (Async.canonical_queued_error_to_string error)) in
+  update_existing journal (fun state ->
+    match check_attempt attempt state with
+    | Error error -> None,Error error
+    | Ok () ->
+      let key = Plan.Node_id.to_string attempt.occurrence.node_id in
+      match Nodes.find_opt key state.children with
+      | Some current when same_source current.child_source submission.link.child_source ->
+        (match current.accepted with
+         | Some prior when canonical_equal (Dependency.composition_to_json prior) (Dependency.composition_to_json binding) -> None,Ok ()
+         | Some _ -> None,Error Source_conflict
+         | None when child_occurrence_matches current attempt.occurrence ->
+           Some (row (event "child_accepted" state.source_sha
+             ["node_id",`String key;"binding",Dependency.composition_to_json binding])),Ok ()
+         | None -> None,Error (Attempt_conflict attempt.occurrence.node_id))
+      | Some _ | None -> None,Error Source_conflict)
+
+let accepted_child_submission (submission : child_submission) =
+  let attempt = submission.attempt in
+  let journal = attempt.worker.journal in
+  let read () = update_existing journal (fun state -> None,
+    let* () = check_attempt attempt state in
+    match Nodes.find_opt (Plan.Node_id.to_string attempt.occurrence.node_id) state.children with
+    | Some link when same_source link.child_source submission.link.child_source ->
+      (match link.accepted with
+       | Some binding -> Ok binding
+       | None -> Error (Invalid_result "parent has no committed original child acceptance"))
+    | Some _ | None -> Error Source_conflict) in
+  let* expected = read () in
+  let* actual = accepted_child_binding ~observation:Acceptance_recovery
+      ~base_path:journal.base_path submission.link in
+  let* current = read () in
+  if canonical_equal (Dependency.composition_to_json expected) (Dependency.composition_to_json actual)
+      && canonical_equal (Dependency.composition_to_json expected) (Dependency.composition_to_json current)
+  then Ok actual else Error Ownership_changed
+
+let child_result_binding (attempt : attempt) ~plan =
+  let journal = attempt.worker.journal in
+  let* () = validate_plan attempt.worker ~plan in
+  let* child = match Plan.contract plan attempt.occurrence.node_id with
+    | Some {target=Plan.Child_result child;_} when attempt.occurrence.readonly
+        && attempt.occurrence.input = `Assoc [] -> Ok child
+    | Some {target=(Plan.Child_submission _ | Child_result _ | Descriptor_target _);_} | None ->
+      Error (Node_identity_conflict attempt.occurrence.node_id) in
+  let* link = update_existing journal (fun state -> None,
+    let* () = check_attempt attempt state in
+    match Nodes.find_opt (Plan.Node_id.to_string child.submission.id) state.children with
+    | Some link when Plan.Node_id.equal link.result_node_id child.result.id && Option.is_some link.accepted -> Ok link
+    | Some _ | None -> Error (Invalid_result "native result has no accepted original child")) in
+  let* binding = accepted_child_binding ~observation:Result_observation ~base_path:journal.base_path link in
+  let* () = update_existing journal (fun state -> None,
+    let* () = check_attempt attempt state in
+    match Nodes.find_opt (Plan.Node_id.to_string child.submission.id) state.children with
+    | Some current when child_link_json current = child_link_json link -> Ok ()
+    | Some _ | None -> Error Ownership_changed) in
+  Ok binding
+
 let lookup (worker : worker) ~node_id ~tool_name ~input =
   update_existing worker.journal (fun state -> None,
-    let* record = checked_node worker state ~node_id ~tool_name ~input in replay_for worker.binding node_id record)
+    let* record = checked_node worker state ~node_id ~tool_name ~input in replay_for state.children worker.binding node_id record)
 
 let begin_attempt (worker : worker) ~node_id ~tool_name ~input ~execution_id ~tool_use_id ~readonly ?launch_invocation () =
   update_existing worker.journal (fun state ->
     let decision =
       let* record = checked_node worker state ~node_id ~tool_name ~input in
-      let* replay = replay_for worker.binding node_id record in
+      let* replay = replay_for state.children worker.binding node_id record in
       match replay with
       | Reuse_completed _ -> Error (Attempt_conflict node_id)
-      | Dispatch | Recheck_result _ | Recheck_launch _ ->
+      | Dispatch | Recheck_result _ | Recheck_launch _ | Recheck_child_submission _ ->
         let* () = match replay with
           | Recheck_result stored when not readonly
               || not (Ids.Execution_id.equal execution_id stored.execution_id)
@@ -1348,7 +1801,11 @@ let begin_attempt (worker : worker) ~node_id ~tool_name ~input ~execution_id ~to
               || not (Ids.Execution_id.equal execution_id stored.execution_id)
               || tool_use_id <> stored.tool_use_id
               || launch_invocation <> Some stored.invocation -> Error (Attempt_conflict node_id)
-          | Dispatch | Reuse_completed _ | Recheck_result _ | Recheck_launch _ -> Ok () in
+          | Recheck_child_submission stored when readonly
+              || not (Ids.Execution_id.equal execution_id stored.execution_id)
+              || tool_use_id <> stored.tool_use_id -> Error (Attempt_conflict node_id)
+          | Dispatch | Reuse_completed _ | Recheck_result _
+          | Recheck_launch _ | Recheck_child_submission _ -> Ok () in
         if not (exact_name tool_use_id && exact_name (Ids.Execution_id.to_string execution_id)) then Error (Invalid_result "invalid execution occurrence") else
         let sequence = match record with None -> 1 | Some record -> (occurrence_of_record record).sequence + 1 in
         Ok {node_id; tool_name; input; input_sha = json_sha input; owner = worker.binding; sequence; execution_id; tool_use_id; readonly; launch_invocation} in
@@ -1367,8 +1824,6 @@ let settle_attempt ?failure_effect_disposition ?deferred_kind attempt ~result ~r
     | Some (Keeper_tool_execution.Composition_result_wait binding) -> Some (Dependency.Composition_result binding)
     | None | Some (Generic_deferred | External_effect_deferred _) -> None in
   let* encoded = Result.map_error (fun detail -> Invalid_result detail) (decode (fun () ->
-    Option.iter (fun job_id -> require (valid_dependency_wait attempt.occurrence result phase job_id)
-      "dependency wait does not match the exact read-only result leaf") dependency_wait;
     require (result_bytes >= 0 && Option.fold ~none:true ~some:(fun value -> value >= 0) truncated_to) "negative result size";
     require (String.equal (Tool_result.tool_name result) attempt.occurrence.tool_name) "result tool mismatch";
     let encoded = completed_json completed in valid_json encoded;
@@ -1376,7 +1831,13 @@ let settle_attempt ?failure_effect_disposition ?deferred_kind attempt ~result ~r
     require (decoded.result = result) "strict durable result codec did not preserve complete payload";
     encoded)) in
   update_existing attempt.worker.journal (fun state ->
-    match check_worker attempt.worker state with
+    let valid =
+      let* () = check_worker attempt.worker state in
+      decode (fun () -> Option.iter (fun job_id -> require
+        (valid_dependency_wait state.children attempt.occurrence result phase job_id)
+        "dependency wait does not match the exact read-only result leaf") dependency_wait)
+      |> Result.map_error (fun detail -> Invalid_result detail) in
+    match valid with
     | Error error -> None, Error error
     | Ok () ->
       let record = Nodes.find_opt (Plan.Node_id.to_string attempt.occurrence.node_id) state.nodes in

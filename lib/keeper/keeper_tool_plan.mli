@@ -40,6 +40,8 @@ module Json_pointer : sig
     | Expected_schema_container of string
 
   val root : t
+  val of_segments : string list -> t
+  (** Construct from already decoded object fields / array index segments. *)
   val of_string : string -> (t, syntax_error) result
   val to_string : t -> string
   (** Canonical RFC 6901 spelling. *)
@@ -120,6 +122,8 @@ module Composition_run_id : sig
   val of_string : string -> (t, error) result
   val to_string : t -> string
   val equal : t -> t -> bool
+  val result_receipt_id : t -> string
+  val child_tool_use_id : t -> parent_tool_use_id:string -> alias:Node_id.t -> string
 end
 
 type json_type =

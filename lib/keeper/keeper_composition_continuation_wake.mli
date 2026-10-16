@@ -17,6 +17,7 @@ type error =
 
 val error_to_string : error -> string
 val resume :
+  ?on_recovery_held:(request_id:string -> reason:string -> unit) ->
   context:'a Keeper_types_profile.context ->
   Keeper_tool_execution_journal.continuation -> (Tool_result.result, error) result
 (** Strictly resolve current declarations (including name/duplicate ownership),
@@ -31,6 +32,19 @@ val create :
     (Tool_result.result, error) result -> unit) -> unit -> 'a t
 val pulse : sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.error) result
 (** Schedule independent ready-run intake fibers and return without joining
-    them. The active set suppresses duplicate live intake only. Exact durable
-    owner/node CAS still admits the worker. Single-domain Eio caller. No timer,
-    timeout or retry cap. *)
+    them. Active intake and workers reporting held original authority suppress
+    repeated automatic attempts for that exact canonical request. Explicit
+    public resume or a new controller may retry after authority is repaired;
+    a changed request owner is re-admitted normally. Holds are process-local
+    scheduling hints, never durable effect authority. Exact durable owner/node
+    CAS still admits the worker. Single-domain Eio caller. No timer or timeout. *)
+
+module For_testing : sig
+  val pulse :
+    resume:(on_recovery_held:(request_id:string -> reason:string -> unit) ->
+      context:'a Keeper_types_profile.context ->
+      Keeper_tool_execution_journal.continuation -> (Tool_result.result, error) result) ->
+    sw:Eio.Switch.t -> 'a t -> (unit, Keeper_tool_execution_journal.error) result
+  (** Use canonical discovery and the production scheduler with a controlled
+      intake outcome. No journal, request or backend state is fabricated. *)
+end

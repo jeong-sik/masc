@@ -20,7 +20,7 @@ let canonical_descriptor name =
   | None -> failf "canonical descriptor is missing: %s" name
 ;;
 
-let fixture () =
+let fixture ?(branch_failure_policy=Plan.default_branch_failure_policy) () =
   let producer = canonical_descriptor "keeper_lane_status" in
   let parallel = canonical_descriptor "masc_board_stats" in
   let final = canonical_descriptor "keeper_tools_list" in
@@ -58,6 +58,7 @@ let fixture () =
   match
     Plan.create
       ~descriptors:[ producer; parallel; final ]
+      ~branch_failure_policy
       [ producer_node; left_node; right_node; final_node ]
   with
   | Ok plan -> plan
@@ -369,16 +370,16 @@ let test_deferred_effect_evidence_is_not_invented () =
     ; Some Tool_result.Proven_post_effect, "proven_post_effect" ]
 ;;
 
-let test_deferred_cause_does_not_mask_unknown_sibling () =
+let test_deferred_cause_does_not_mask_unknown_sibling ?(observation_failure=false) () =
   Eio_main.run @@ fun _env ->
-  let plan = fixture () in
+  let plan = fixture ~branch_failure_policy:Plan.Continue_independent () in
   let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
     match node_name node with
     | "left" ->
       Executor.dispatch_result
         ~deferred_kind:Masc.Keeper_tool_execution.Generic_deferred
         (Tool_result.make_deferred ~tool_name:"left" ~start_time:(Tool_timing.start ()) ())
-    | "right" ->
+    | "right" when not observation_failure ->
       Executor.dispatch_result
         ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
         (Tool_result.make_err
@@ -390,7 +391,10 @@ let test_deferred_cause_does_not_mask_unknown_sibling () =
       Executor.dispatch_result
         (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node))
   in
-  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  let observe_node_result node =
+    if observation_failure && Plan.Node_id.to_string node.Executor.node_id = "right"
+    then Error "actual higher sibling observation unavailable" else Ok () in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () with
   | Ok _ -> fail "deferred and failed siblings did not stop the plan"
   | Error failure ->
     (match failure.cause with
@@ -406,6 +410,20 @@ let test_deferred_cause_does_not_mask_unknown_sibling () =
      | Executor.Node_observation_failed _
      | Executor.Outer_completion_mismatch _ ->
        fail "deferred cause became a plan error");
+    (match Executor.failure_causes failure with
+     | [Executor.Tool_did_not_complete left;Executor.Tool_did_not_complete right]
+         when not observation_failure ->
+       check (list string) "all actual sibling causes retain planned order" ["left";"right"]
+         [Plan.Node_id.to_string left.node_id;Plan.Node_id.to_string right.node_id]
+     | [Executor.Tool_did_not_complete left;Executor.Node_observation_failed {node=right;detail}]
+         when observation_failure ->
+       check (list string) "higher observation failure survives the earlier wait" ["left";"right"]
+         [Plan.Node_id.to_string left.node_id;Plan.Node_id.to_string right.node_id];
+       check string "actual observation failure detail is retained"
+         "actual higher sibling observation unavailable" detail;
+       check bool "higher sibling tool actually completed before observation failed" true
+         (Tool_result.is_success right.result)
+     | _ -> fail "non-primary actual sibling cause was lost");
     check string
       "unknown sibling dominates deferred cause"
       "effect_outcome_unknown"
@@ -1762,7 +1780,11 @@ let () =
         ; Alcotest.test_case
             "deferred cause does not mask unknown sibling"
             `Quick
-            test_deferred_cause_does_not_mask_unknown_sibling
+            (test_deferred_cause_does_not_mask_unknown_sibling ~observation_failure:false)
+        ; Alcotest.test_case
+            "deferred cause retains a higher completed sibling observation failure"
+            `Quick
+            (test_deferred_cause_does_not_mask_unknown_sibling ~observation_failure:true)
         ; test_case
             "malformed producer stops consumers"
             `Quick

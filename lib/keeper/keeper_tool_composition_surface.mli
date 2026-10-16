@@ -77,7 +77,8 @@ val instruction_skill_schema_tool :
     description used by the executable tool. *)
 
 val resume_continuation
-  :  capability_surface:Keeper_capability_surface.t
+  :  ?on_recovery_held:(request_id:string -> reason:string -> unit)
+  -> capability_surface:Keeper_capability_surface.t
   -> continuation:Keeper_tool_execution_journal.continuation
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -94,6 +95,9 @@ val resume_continuation
     The existing journal owner/node CAS precedes all worker effects. Run, draft,
     source Task/turn/parent and completed sibling results stay original while
     physical execution observability uses the supplied context and schedule.
+    [on_recovery_held] tells the automatic controller to hold this exact
+    physical owner until explicit recovery advances it. It grants no effect
+    authority and does not convert an unknown outcome into failure.
     This entrypoint does not discover candidates or install a controller. *)
 
 val make_tools
@@ -220,6 +224,14 @@ end
     without an enclosing Keeper turn. *)
 
 module For_testing : sig
+  type recovery_decision =
+    | Complete_original_result
+    | Hold_original_authority of string
+  val continuation_recovery_of_result :
+    effect_disposition:Tool_result.failure_effect_disposition option ->
+    Tool_result.result -> recovery_decision
+  val combine_recovery : recovery_decision -> recovery_decision -> recovery_decision
+
   val async_worker_result :
     composition_execution:Keeper_tool_composition_catalog.execution_mode ->
     tool_kind:Keeper_tool_descriptor.tool_kind ->
@@ -227,6 +239,13 @@ module For_testing : sig
     ?nested_calls:Keeper_composition_nested.call list ->
     ?nested_activation:Keeper_skill_activation_recorder.bound_context ->
     ?continuation:Keeper_tool_execution_journal.continuation ->
+    ?on_recovery_held:(request_id:string -> reason:string -> unit) ->
+    ?after_child_submission:(Tool_result.result -> unit) ->
+    ?before_child_dispatch:(unit -> unit) ->
+    ?before_plan_execution:(unit -> unit) ->
+    ?after_node_observation:(Keeper_tool_plan_executor.node_result -> unit) ->
+    ?before_child_result_publication:(unit -> unit) ->
+    ?before_child_submission_publication:(unit -> unit) ->
     plan:Keeper_tool_plan.t ->
     ?journal:Keeper_tool_execution_journal.worker ->
     tool_name:string -> request_id:string ->

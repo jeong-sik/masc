@@ -3,12 +3,21 @@
     requires the previous owner's exact canonical terminal proof; every node
     operation checks the current durable binding under the run transaction. *)
 
+type nested_origin
+type named_origin = Standalone | Nested of nested_origin
+
+val named_origin_to_yojson : named_origin -> Yojson.Safe.t
+(** Immutable producer identity. Nested origins can only be constructed from
+    the actual parent attempt and its frozen child operand. Decoding an owned
+    source is evidence, not permission to enter a broker. *)
+
 type producer =
   | Prepared
   | Named of
       { tool_name : string
       ; skill_reference : Skill_reference.t
       ; activation : Keeper_skill_activation_recorder.bound_context option
+      ; origin : named_origin
       }
 
 type source =
@@ -27,11 +36,12 @@ type source =
 type t
 type worker
 type attempt
+type child_submission
 type continuation
 (** Exact suspended owner captured from its canonical terminal record and
-    matching journal nodes. A Lost successor additionally requires its exact
-    prior result dependency wait and replay-proven read-only nodes. It grants no
-    execution authority by itself. *)
+    matching node and child snapshots. A Lost successor requires replay proof;
+    an original accepted-child acknowledgement can be ready before the first
+    result wait. This snapshot grants no execution authority by itself. *)
 
 type completed =
   { execution_id : Ids.Execution_id.t
@@ -63,6 +73,7 @@ type replay =
   | Reuse_completed of completed
   | Recheck_result of recheck
   | Recheck_launch of recheck_launch
+  | Recheck_child_submission of recheck
 
 type error =
   | Invalid_source of string
@@ -133,21 +144,25 @@ val validate_request : t -> Keeper_msg_async.entry -> (unit, error) result
 val waiting_continuation : t -> (continuation option, error) result
 (** Read only canonical current-owner terminal proof and exact journal state.
     [None] means no bound request, an active worker, or a settled worker that
-    has no original result dependency wait. A current [Lost] owner may recover that
+    has no original result dependency wait or accepted-child recovery. A current [Lost] owner may recover that
     wait through the journal's exact predecessor bindings and canonical
     terminal records, including repeated Lost successors. Unfinished nodes
-    must prove replay: read-only nodes by the read-only replay rules, and an
-    owned launch leaf by its recorded exact invocation identity, which grants
-    a [Recheck_launch] replay. Cancellation and unknown effects without that
-    identity do not grant continuation. Unavailable or inconsistent evidence
-    is [Error]. A later owner change makes the captured value stale. A successor
-    that stops before dispatch may retain its predecessor's exact wait only
-    when every journal node is unchanged at the binding and the canonical
-    waiting dependencies match. Original occurrence identities and owners remain
-    intact. Other unfinished effectful attempts and unproven settled outcomes
-    of a [Lost] owner without a prior result wait remain [Replay_not_proven].
-    Such a run cannot become fresh work through the [None] fallback, and
-    discovery retains its pending marker without a replacement. *)
+    must prove replay: read-only nodes follow their read-only replay rules,
+    and owned launch leaves retain their recorded exact invocation identity
+    through [Recheck_launch]. Cancellation and other unknown effects do not
+    grant continuation. Unavailable or inconsistent evidence is [Error]. A later
+    owner change makes the captured value stale. A successor that stops before
+    dispatch may retain its predecessor's exact wait only when every journal
+    node is unchanged at the binding and the canonical waiting dependencies match.
+    Original occurrence identities and owners remain intact. A [Lost] owner
+    with committed original child acceptance can recover that acknowledgement
+    with its original occurrence IDs and an empty dependency list; a Nested
+    child may similarly resume replay-proven work only through its parent's
+    committed original acceptance. Neither case invents a prior result wait.
+    Other unfinished effectful attempts or unproven outcomes still return
+    [Replay_not_proven]. Such a run
+    cannot become fresh work through the [None] fallback, and discovery keeps
+    its pending marker without scheduling a replacement. *)
 
 val continuation_base_path : continuation -> string
 (** Canonical workspace where the sealed owner and node snapshot were read.
@@ -155,6 +170,12 @@ val continuation_base_path : continuation -> string
 val continuation_source : continuation -> source
 val continuation_request_id : continuation -> string
 val continuation_dependencies : continuation -> Keeper_composition_dependency.t list
+
+val completion_pending : base_path:string -> Keeper_msg_async.entry -> (bool, error) result
+(** A Lost physical request is not a logical completion when its exact owned
+    journal proves original continuation or a successor. Missing or inconsistent
+    owned authority is an error, not permission to announce completion. Ordinary
+    requests without a run identity retain their canonical terminal semantics. *)
 
 type child_admission_history = Untouched_child | Admitted_child | Admission_unconfirmed
 val continuation_child_admission : continuation ->
@@ -226,6 +247,32 @@ val bind_request : t -> request_id:string -> (worker, error) result
 val validate_plan : worker -> plan:Keeper_tool_plan.t -> (unit, error) result
 (** Integrity-read the original manifest and compare the exact frozen plan
     (including edges and exports), then check current durable ownership. *)
+
+val child_origin : attempt -> plan:Keeper_tool_plan.t ->
+  activation:Keeper_skill_activation_ledger.activation -> (named_origin, error) result
+(** Verify the exact native submission operand and its original canonical
+    Nested activation, retaining the parent occurrence independently of the
+    logical child Skill invocation ID. No activation or broker effect. *)
+
+val record_child_submission : attempt -> plan:Keeper_tool_plan.t ->
+  child_source:source -> (child_submission, error) result
+(** Persist the immutable original attempt-to-child source join before broker
+    entry. A changed or copied source cannot replace the original intent. *)
+
+val accept_child_submission : child_submission -> request_id:string -> (unit, error) result
+(** Last producer acceptance effect: validate real canonical Queued membership
+    and child journal ownership before retaining its binding in the parent.
+    Does not settle the parent node or claim the child's final result. *)
+
+val child_result_binding : attempt -> plan:Keeper_tool_plan.t ->
+  (Keeper_composition_dependency.composition, error) result
+(** Read only the exact accepted child associated with this native result
+    barrier. Empty model input cannot supply a different child binding. *)
+
+val accepted_child_submission : child_submission ->
+  (Keeper_composition_dependency.composition, error) result
+(** Recheck the original parent acceptance and its canonical child source.
+    Does not repair missing acceptance or admit a request. *)
 
 val lookup
   : worker

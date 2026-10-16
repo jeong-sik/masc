@@ -10,6 +10,12 @@
 
 (** {1 Types} *)
 
+type persistence_target =
+  | Acceptance_callback
+  | State_transition of string
+(** The state label is diagnostic only. Admission recovery branches on the
+    constructor, never on a status or reason string. *)
+
 type request_status =
   | Queued
   | Running
@@ -23,7 +29,7 @@ type request_status =
       ; cancelled_by : string
       }
   | Persistence_failed of
-      { attempted_status : string
+      { attempted_status : persistence_target
       ; reason : string
       }
   | Waiting_for_dependencies of
@@ -361,6 +367,10 @@ val submit
 type worker_outcome
 
 val worker_finished : Keeper_types_profile.tool_result -> worker_outcome
+val worker_interrupted : reason:string -> worker_outcome
+(** Settle this physical worker as canonical Lost without claiming logical
+    completion or inventing a result dependency. Continuation still requires
+    the owning producer's original journal and replay proof. *)
 val worker_waiting_for_dependencies :
   dependencies:Keeper_composition_dependency.t list ->
   Keeper_types_profile.tool_result -> (worker_outcome, string) result
@@ -542,6 +552,7 @@ val list_for_keeper
 
 (** {1 JSON output} *)
 
+val persistence_target_to_string : persistence_target -> string
 val status_to_string : request_status -> string
 val access_rejection_to_json : access_rejection -> Yojson.Safe.t
 val submit_error_to_json : submit_error -> Yojson.Safe.t

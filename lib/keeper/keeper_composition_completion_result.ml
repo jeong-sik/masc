@@ -4,6 +4,8 @@ type unavailable =
   | Canonical_unavailable of Async.canonical_terminal_error
   | Producer_mismatch
   | Terminal_mismatch
+  | Logical_result_pending
+  | Recovery_unavailable of Keeper_tool_execution_journal.error
 
 type t =
   { completion : Keeper_event_queue.composition_completion
@@ -19,7 +21,10 @@ let read ~base_path ~keeper_name completion =
       let producer = Option.bind entry.request_context (List.assoc_opt "composition_tool") in
       if not (String.equal entry.keeper_name keeper_name)
          || producer <> Some (`String completion.cc_tool) then Error Producer_mismatch
-      else match Keeper_composition_completion_wake.terminal_of_status entry.status with
+      else match Keeper_tool_execution_journal.completion_pending ~base_path entry with
+        | Error error -> Error (Recovery_unavailable error)
+        | Ok true -> Error Logical_result_pending
+        | Ok false -> match Keeper_composition_completion_wake.terminal_of_status entry.status with
         | Some terminal when terminal = completion.cc_terminal -> Ok entry
         | Some _ | None -> Error Terminal_mismatch in
   { completion; result }
@@ -31,6 +36,9 @@ let unavailable_to_json = function
            ; "detail", `String (Async.canonical_terminal_error_to_string error) ]
   | Producer_mismatch -> `Assoc [ "kind", `String "producer_mismatch" ]
   | Terminal_mismatch -> `Assoc [ "kind", `String "terminal_mismatch" ]
+  | Logical_result_pending -> `Assoc ["kind",`String "logical_result_pending"]
+  | Recovery_unavailable error -> `Assoc ["kind",`String "original_recovery_unavailable";
+      "error",Keeper_tool_execution_journal.error_to_json error]
 ;;
 
 let outcome = function

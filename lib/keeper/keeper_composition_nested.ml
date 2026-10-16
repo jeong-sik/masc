@@ -4,11 +4,15 @@ module Catalog = Keeper_tool_composition_catalog
 module Surface = Keeper_capability_surface
 module Inventory = Keeper_skill_inventory
 
+type scope =
+  | Inline of (Plan.Node_id.t * Plan.Node_id.t) list
+  | Async of { submission : Plan.Node_id.t; result : Plan.Node_id.t }
+
 type call =
   { alias : Plan.Node_id.t
   ; reference : Skill_reference.t
   ; args : Yojson.Safe.t
-  ; node_mapping : (Plan.Node_id.t * Plan.Node_id.t) list
+  ; scope : scope
   ; exports : Plan.export list
   }
 
@@ -47,7 +51,8 @@ type source_node = Ordinary of Plan.node | Nested of nested_node
 
 type expanded_node =
   | Leaf of Plan.node * Plan.Node_id.t
-  | Child of nested_node * Plan.t * call
+  | Inline_child of nested_node * Plan.t * call
+  | Async_child of nested_node * Plan.async_child * call
 
 let ( let* ) = Result.bind
 let plan compiled = compiled.plan
@@ -119,13 +124,15 @@ let source_node ~index = function
 
 let source_id = function Ordinary node -> node.Plan.id | Nested node -> node.alias
 
-let namespace path =
+let namespace_segments path =
   (* JSON arrays are injective over complete string paths, including quotes,
      delimiters, Unicode and ordinary IDs that resemble a child path. *)
-  match Plan.Node_id.make (Yojson.Safe.to_string (`List (List.map id_json path))) with
+  match Plan.Node_id.make (Yojson.Safe.to_string (`List (List.map (fun value -> `String value) path))) with
   | Ok id -> id
   | Error Plan.Node_id.Empty -> invalid_arg "nonempty encoded composition path"
 ;;
+
+let namespace path = namespace_segments (List.map Plan.Node_id.to_string path)
 
 let entry_for_call ~capability_surface (node : nested_node) =
   let row = Surface.skill_capabilities capability_surface |> List.find_opt (fun (row : Surface.skill_capability) ->
@@ -157,28 +164,47 @@ let entry_for_call ~capability_surface (node : nested_node) =
   | None -> Error (Reference_unavailable { alias = node.alias; reference = node.reference; availability = None })
 ;;
 
-let expand ~capability_surface ~policy = function
+let expand ~execution ~capability_surface ~policy = function
   | Ordinary node -> Ok (Leaf (node, namespace [ node.id ]))
   | Nested node ->
     let* entry = entry_for_call ~capability_surface node in
-    let* () = match entry.execution with
-      | Catalog.Inline -> Ok () | Catalog.Async -> Error (Async_child_requires_suspension node.alias) in
+    let* () = match entry.execution,execution with
+      | Catalog.Inline,(Catalog.Inline | Catalog.Async) | Catalog.Async,Catalog.Async -> Ok ()
+      | Catalog.Async,Catalog.Inline -> Error (Async_child_requires_suspension node.alias) in
     let* () = if Plan.branch_failure_policy entry.plan = policy then Ok () else Error (Child_policy_mismatch node.alias) in
     let* args = Tool_input_validation.validate ~schema:(Catalog.input_schema_of_params entry.params)
         ~name:(Catalog.tool_name entry) ~args:node.args ()
         |> Result.map_error (fun error -> Arguments_rejected (node.alias, error)) in
     let* plan = Catalog.instantiate ~descriptors:(Surface.descriptors capability_surface) ~args entry
         |> Result.map_error (fun error -> Binding_rejected (node.alias, error)) in
-    let node_mapping = List.map (fun (leaf : Plan.node) -> leaf.id, namespace [ node.alias; leaf.id ]) (Plan.nodes plan) in
-    let exports = List.map (fun (export : Plan.export) ->
-        Plan.export ~name:export.name ~node_id:(List.assoc export.node_id node_mapping)
-          ~pointer:export.pointer) (Plan.exports plan) in
-    let call = { alias = node.alias; reference = node.reference; args; node_mapping; exports } in
-    Ok (Child (node, plan, call))
+    match entry.execution with
+    | Catalog.Inline ->
+      let mapping = List.map (fun (leaf : Plan.node) -> leaf.id, namespace [ node.alias; leaf.id ]) (Plan.nodes plan) in
+      let exports = List.map (fun (export : Plan.export) ->
+          Plan.export ~name:export.name ~node_id:(List.assoc export.node_id mapping)
+            ~pointer:export.pointer) (Plan.exports plan) in
+      let call = {alias=node.alias;reference=node.reference;args;scope=Inline mapping;exports} in
+      Ok (Inline_child (node,plan,call))
+    | Catalog.Async ->
+      let alias = Plan.Node_id.to_string node.alias in
+      let submission = namespace_segments [alias;"submission"]
+      and result = namespace_segments [alias;"result"] in
+      let child = Plan.fixed_async_child ~alias:node.alias ~reference:node.reference
+          ~tool_name:(Catalog.tool_name entry) ~args ~input_schema:(Catalog.input_schema_of_params entry.params)
+          ~bound_plan:plan in
+      let exports = List.map (fun (export : Plan.export) ->
+        Plan.export ~name:export.name ~node_id:result ~pointer:(Plan.Json_pointer.of_segments [export.name])) (Plan.exports plan) in
+      let call = {alias=node.alias;reference=node.reference;args;scope=Async {submission;result};exports} in
+      Ok (Async_child (node,child,call))
 ;;
 
-let expanded_id = function Leaf (node, _) -> node.Plan.id | Child (node, _, _) -> node.alias
-let members = function Leaf (_, id) -> [ id ] | Child (_, _, call) -> List.map snd call.node_mapping
+let expanded_id = function
+  | Leaf (node,_) -> node.Plan.id
+  | Inline_child (node,_,_) | Async_child (node,_,_) -> node.alias
+let members = function
+  | Leaf (_,id) -> [id]
+  | Inline_child (_,plan,call) -> List.map (fun (leaf : Plan.node) -> namespace [call.alias;leaf.id]) (Plan.nodes plan)
+  | Async_child (_,_,call) -> (match call.scope with Async {result;_} -> [result] | Inline _ -> invalid_arg "async child scope")
 
 let find_expanded nodes id =
   match List.find_opt (fun node -> Plan.Node_id.equal (expanded_id node) id) nodes with
@@ -189,15 +215,14 @@ let resolve_outer_output nodes ~node_id ~pointer =
   let* producer = find_expanded nodes node_id in
   match producer with
   | Leaf (_, id) -> Ok (id, pointer)
-  | Child (_, plan, call) ->
+  | Inline_child (_,_,call) | Async_child (_,_,call) ->
     (match Plan.Json_pointer.uncons pointer with
      | None -> Error (Child_output_requires_export node_id)
      | Some (name, suffix) ->
-       (match List.find_opt (fun (export : Plan.export) -> String.equal export.name name) (Plan.exports plan) with
+       (match List.find_opt (fun (export : Plan.export) -> String.equal export.name name) call.exports with
         | None -> Error (Unknown_child_export { alias = node_id; name })
         | Some export ->
-          let id = List.assoc export.node_id call.node_mapping in
-          Ok (id, Plan.Json_pointer.append export.pointer suffix)))
+          Ok (export.node_id, Plan.Json_pointer.append export.pointer suffix)))
 ;;
 
 let rec map_template ~output = function
@@ -226,39 +251,48 @@ let outer_dependencies nodes ids =
 
 let flatten nodes =
   List.fold_left (fun acc expanded ->
-      let* flattened = acc in
+      let* flattened,compiled = acc in
       match expanded with
       | Leaf (node, id) ->
         let* input = map_template ~output:(resolve_outer_output nodes) node.input in
         (* An output reference to a child is a dependency on the child's whole
            invocation, not merely its chosen successful producer. *)
         let* after = outer_dependencies nodes (Plan.dependencies node) in
-        Ok (Plan.node ~id ~tool_name:node.tool_name ~input ~after () :: flattened)
-      | Child (node, child, call) ->
+        Ok (Plan.node ~id ~tool_name:node.tool_name ~input ~after () :: flattened,compiled)
+      | Inline_child (node, child, call) ->
         let* outer_after = outer_dependencies nodes node.after in
-        let local id = List.assoc id call.node_mapping in
+        let local id = namespace [call.alias;id] in
         let* children = List.fold_left (fun acc (leaf : Plan.node) ->
             let* children = acc in
             let* input = map_template ~output:(fun ~node_id ~pointer -> Ok (local node_id, pointer)) leaf.input in
             let after = outer_after @ List.map local leaf.after in
             Ok (Plan.node ~id:(local leaf.id) ~tool_name:leaf.tool_name ~input ~after () :: children)) (Ok []) (Plan.nodes child) in
-        Ok (children @ flattened)) (Ok []) nodes
-  |> Result.map List.rev
+        Ok (children @ flattened,compiled)
+      | Async_child (node,child,call) ->
+        let* after = outer_dependencies nodes node.after in
+        let submission_id,result_id = match call.scope with
+          | Async {submission;result} -> submission,result
+          | Inline _ -> invalid_arg "async child scope" in
+        let child = Plan.child_nodes ~child ~submission_id ~result_id ~after () in
+        Ok (child.result::child.submission::flattened,child::compiled)) (Ok ([],[])) nodes
+  |> Result.map (fun (nodes,children) -> List.rev nodes,List.rev children)
 ;;
 
-let validate_leaves plan =
+let rec validate_leaves plan =
   let* () = List.fold_left (fun acc (node : Plan.node) ->
       let* () = acc in
-      match Plan.descriptor plan node.id with
-      | Some descriptor -> (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
+      match Plan.contract plan node.id with
+      | Some {target=Plan.Descriptor_target descriptor;_} -> (match Keeper_tool_descriptor.prepared_leaf_admission descriptor with
           | Read_only_ordinary_leaf | Owned_job_launch_leaf -> Ok ()
           | Direct_only ->
             Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name }))
+      | Some {target=Plan.Child_submission child;_} -> validate_leaves (Plan.child_plan child.child)
+      | Some {target=Plan.Child_result _;_} -> Ok ()
       | None -> Error (Unsupported_leaf { node_id = node.id; tool_name = node.tool_name })) (Ok ()) (Plan.nodes plan) in
   Plan.prepare_inputs plan |> Result.map (fun _ -> ()) |> Result.map_error (fun (id, error) -> Inputs_rejected (id, error))
 ;;
 
-let compile ~capability_surface json =
+let compile ~execution ~capability_surface json =
   let* request = Request.shape_of_json json |> Result.map_error (fun error -> Request_rejected error) in
   let* source = List.fold_left (fun acc (index, json) ->
       let* nodes = acc in let* node = source_node ~index json in Ok (node :: nodes)) (Ok [])
@@ -274,17 +308,17 @@ let compile ~capability_surface json =
       Ok (plan, [])
     else
       let* expanded = List.fold_left (fun acc node -> let* nodes = acc in
-          let* node = expand ~capability_surface ~policy:request.branch_failure_policy node in Ok (node :: nodes)) (Ok []) source
+          let* node = expand ~execution ~capability_surface ~policy:request.branch_failure_policy node in Ok (node :: nodes)) (Ok []) source
           |> Result.map List.rev in
-      let* nodes = flatten expanded in
+      let* nodes,children = flatten expanded in
       let* exports = List.fold_left (fun acc (export : Plan.export) ->
           let* exports = acc in
           let* node_id, pointer = resolve_outer_output expanded ~node_id:export.node_id ~pointer:export.pointer in
           Ok (Plan.export ~name:export.name ~node_id ~pointer :: exports)) (Ok []) request.exports |> Result.map List.rev in
-      let* plan = Plan.create ~descriptors:(Surface.descriptors capability_surface)
+      let* plan = Plan.create_compiled ~children ~descriptors:(Surface.descriptors capability_surface)
           ~branch_failure_policy:request.branch_failure_policy ~exports nodes
           |> Result.map_error (fun error -> Expanded_plan_rejected error) in
-      let calls = List.filter_map (function Leaf _ -> None | Child (_, _, call) -> Some call) expanded in
+      let calls = List.filter_map (function Leaf _ -> None | Inline_child (_,_,call) | Async_child (_,_,call) -> Some call) expanded in
       Ok (plan, calls) in
   let* () = validate_leaves plan in
   Ok { plan; calls }
@@ -294,8 +328,10 @@ let call_to_json (call : call) = `Assoc
     [ "alias", id_json call.alias
     ; "reference", Skill_reference.to_yojson call.reference
     ; "args", call.args
-    ; "node_mapping", `List (List.map (fun (source, expanded) -> `Assoc
-        [ "source", id_json source; "expanded", id_json expanded ]) call.node_mapping)
+    ; "scope", (match call.scope with
+        | Inline mapping -> `Assoc ["kind",`String "inline";"node_mapping",`List (List.map (fun (source,expanded) ->
+            `Assoc ["source",id_json source;"expanded",id_json expanded]) mapping)]
+        | Async {submission;result} -> `Assoc ["kind",`String "async";"submission",id_json submission;"result",id_json result])
     ; "exports", `List (List.map (fun (export : Plan.export) -> `Assoc
         [ "name", `String export.name; "node", id_json export.node_id
         ; "pointer", `String (Plan.Json_pointer.to_string export.pointer) ]) call.exports) ]

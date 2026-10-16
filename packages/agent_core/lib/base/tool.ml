@@ -60,9 +60,9 @@ let ordinary_descriptor_concurrent_when proves_read_only =
     }
 ;;
 
-let ordinary_descriptor_scoped ~prepare =
+let ordinary_descriptor_scoped ~call_effect ~prepare =
   Ordinary_descriptor
-    { admission = Resource_scoped prepare; call_effect = (fun _ -> Effect_possible)
+    { admission = Resource_scoped prepare; call_effect
     ; prepared_for = None }
 ;;
 
@@ -201,7 +201,10 @@ let descriptor tool = tool.descriptor
 
 let call_effect tool input =
   match tool.descriptor with
-  | Some (Ordinary_descriptor { call_effect; _ }) -> call_effect input
+  | Some (Ordinary_descriptor { admission = Resource_scoped _; call_effect; _ }) ->
+    if has_scoped_admission tool then call_effect input else Effect_possible
+  | Some (Ordinary_descriptor { admission = (Static _ | Concurrent_when _); call_effect; _ }) ->
+    call_effect input
   | Some (Terminal_descriptor _) | None -> Effect_possible
 ;;
 
@@ -315,19 +318,25 @@ let with_defaults (defaults : (string * Yojson.Safe.t) list) (tool : t) : t =
   let handler execution_env input = tool.handler execution_env (inject_defaults input) in
   let descriptor =
     match tool.descriptor with
-    | Some (Ordinary_descriptor ({ admission = Resource_scoped prepare; _ } as ordinary))
-      when has_scoped_admission tool ->
-      let prepare ~sw input =
-        match prepare ~sw (inject_defaults input) with
-        | Ok (Some scoped) ->
-          Ok (Some { scoped with handler =
-            (fun env input -> scoped.handler env (inject_defaults input)) })
-        | Ok None -> Ok None
-        | Error error -> Error error
+    | Some (Ordinary_descriptor ordinary) ->
+      let call_effect input = ordinary.call_effect (inject_defaults input) in
+      let admission, prepared_for = match ordinary.admission with
+        | Static mode -> Static mode, ordinary.prepared_for
+        | Concurrent_when proves_read_only ->
+          Concurrent_when (fun input -> proves_read_only (inject_defaults input)), ordinary.prepared_for
+        | Resource_scoped prepare when has_scoped_admission tool ->
+          let prepare ~sw input =
+            match prepare ~sw (inject_defaults input) with
+            | Ok (Some scoped) ->
+              Ok (Some { scoped with handler =
+                (fun env input -> scoped.handler env (inject_defaults input)) })
+            | Ok None -> Ok None
+            | Error error -> Error error
+          in
+          Resource_scoped prepare, Some handler
+        | Resource_scoped _ -> ordinary.admission, ordinary.prepared_for
       in
-      Some (Ordinary_descriptor
-        { ordinary with admission = Resource_scoped prepare; prepared_for = Some handler })
-    | Some (Ordinary_descriptor { admission = (Static _ | Concurrent_when _ | Resource_scoped _); _ })
+      Some (Ordinary_descriptor { admission; prepared_for; call_effect })
     | Some (Terminal_descriptor _) | None -> tool.descriptor
   in
   { tool with handler; descriptor }

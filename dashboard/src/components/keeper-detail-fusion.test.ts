@@ -80,7 +80,7 @@ describe('KeeperFusionRuns', () => {
     expect(container.textContent ?? '').not.toContain('Fusion deliberations')
   })
 
-  it('renders a delayed registry result and releases the signal subscription on unmount', async () => {
+  it('renders a delayed registry result and stays unmounted after later signal updates', async () => {
     let resolveRecords: (records: FusionRunRecord[]) => void = () => {
       throw new Error('registry fixture was not initialized')
     }

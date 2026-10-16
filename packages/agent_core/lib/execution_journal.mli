@@ -465,6 +465,22 @@ val commit_durable_batch
   -> batch
   -> (Execution_event.t list, error) result
 
+module For_testing : sig
+  (** Hold the same state mutex used by journal publication. The callback does
+      not receive state or writer authority. *)
+  val with_state_lock : t -> (unit -> 'a) -> 'a
+
+  (** The production durable commit with one per-call scheduling barrier after
+      the store has durably appended and released its locks. The barrier runs
+      inside the existing cancellation-protected publication region, before
+      state-mutex acquisition, and must return normally. *)
+  val commit_durable_batch_after_append
+    :  after_durable_append:(unit -> unit)
+    -> durable_writer
+    -> batch
+    -> (Execution_event.t list, error) result
+end
+
 type durable_batch_reconciliation =
   | Applied of Execution_event.t list
   | Already_durable of Execution_event.t list

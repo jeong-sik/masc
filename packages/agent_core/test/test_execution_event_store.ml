@@ -8,6 +8,7 @@ module Journal = Internal.Execution_journal
 module Store = Internal.Execution_event_store
 
 exception Cancel_before_append
+exception Cancel_after_append
 exception Store_scope_failed
 
 let require_store = function
@@ -1028,6 +1029,119 @@ let test_journal_persists_before_publish_and_replays () =
       | _ -> fail "recovered scope admitted a second top-level run"))
 ;;
 
+let test_cancel_after_durable_append_preserves_live_writer_and_replay () =
+  Eio_main.run
+  @@ fun env ->
+  with_temp_dir env (fun codec dir ->
+    Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir;
+    let committed_events = ref [] in
+    Eio.Switch.run (fun sw ->
+      let writer, _initialization =
+        require_journal (Journal.create_durable_writer ~sw ~codec ~dir ())
+      in
+      let journal = Journal.durable_writer_journal writer in
+      let batch, (run, opened) =
+        require_journal
+          (Journal.stage
+             (Journal.begin_durable_batch writer)
+             (Journal.Transaction.start_run ~agent_name:"cancel-after-append" ()))
+      in
+      let appended, notify_appended = Eio.Promise.create () in
+      let state_locked, notify_state_locked = Eio.Promise.create () in
+      let release_state, release_state_lock = Eio.Promise.create () in
+      let publication_pending, notify_publication_pending = Eio.Promise.create () in
+      let cancellation, notify_cancellation = Eio.Promise.create () in
+      let committed, notify_committed = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.await appended;
+        Journal.For_testing.with_state_lock journal (fun () ->
+          Eio.Promise.resolve notify_state_locked ();
+          Eio.Promise.await release_state));
+      Eio.Fiber.fork ~sw (fun () ->
+        let outcome =
+          match
+            Eio.Cancel.sub (fun context ->
+              Eio.Promise.resolve notify_cancellation context;
+              let events =
+                Journal.For_testing.commit_durable_batch_after_append
+                  ~after_durable_append:(fun () ->
+                    Eio.Promise.resolve notify_appended ();
+                    Eio.Promise.await state_locked;
+                    Eio.Promise.resolve notify_publication_pending ())
+                  writer
+                  batch
+              in
+              let cancellation_pending =
+                match Eio.Fiber.check () with
+                | () -> false
+                | exception Eio.Cancel.Cancelled Cancel_after_append -> true
+              in
+              `Committed (events, cancellation_pending))
+          with
+          | outcome -> outcome
+          | exception Eio.Cancel.Cancelled Cancel_after_append ->
+            `Cancelled_before_publication
+        in
+        Eio.Promise.resolve notify_committed outcome);
+      let cancellation = Eio.Promise.await cancellation in
+      Eio.Promise.await publication_pending;
+      (* The barrier runs only after the actual append returns. The holder
+         owns journal.mu, so the publishing fiber must suspend acquiring it
+         before this controller can resume on the same Eio domain. *)
+      let durable_prefix = require_store (Store.read_only_snapshot ~codec ~dir ()) in
+      check int "append is authoritative before cancellation" 1 durable_prefix.last_seq;
+      check_events
+        "exact staged event is already durable"
+        [ opened ]
+        durable_prefix.appended_events;
+      Eio.Cancel.cancel cancellation Cancel_after_append;
+      check
+        bool
+        "publication waits for state lock"
+        false
+        (Eio.Promise.is_resolved committed);
+      Eio.Promise.resolve release_state_lock ();
+      (match Eio.Promise.await committed with
+       | `Committed (events, cancellation_pending) ->
+         check_events
+           "protected commit publishes its durable event"
+           [ opened ]
+           (require_journal events);
+         check bool "caller cancellation remains observable" true cancellation_pending
+       | `Cancelled_before_publication ->
+         fail "cancellation interrupted publication after its durable append");
+      check int "live handle catches up to durable prefix" 1 (Journal.last_seq journal);
+      let finish_batch, finished =
+        require_journal
+          (Journal.stage
+             (Journal.begin_durable_batch writer)
+             (Journal.Transaction.finish_run ~run Event.Succeeded))
+      in
+      check_events
+        "same writer commits the following sequence"
+        [ finished ]
+        (require_journal (Journal.commit_durable_batch writer finish_batch));
+      check
+        int
+        "same live handle reaches following sequence"
+        2
+        (Journal.last_seq journal);
+      committed_events := [ opened; finished ]);
+    Eio.Switch.run (fun sw ->
+      let writer, recovery =
+        require_journal (Journal.open_durable_writer ~sw ~codec ~dir)
+      in
+      (match recovery with
+       | Store.Clean -> ()
+       | _ -> fail "cancelled publisher left a store requiring recovery");
+      let replayed = Journal.events (Journal.durable_writer_journal writer) in
+      check_events "reopen replays the exact committed sequence" !committed_events replayed;
+      List.iteri
+        (fun index event ->
+           check int "replayed sequence is contiguous" (index + 1) (Event.seq event))
+        replayed))
+;;
+
 let test_durable_journal_batch_commits_one_exact_authority_step () =
   Eio_main.run
   @@ fun env ->
@@ -1713,6 +1827,10 @@ let () =
             "journal persists before publish and replays"
             `Quick
             test_journal_persists_before_publish_and_replays
+        ; test_case
+            "cancel after durable append preserves live writer and replay"
+            `Quick
+            test_cancel_after_durable_append_preserves_live_writer_and_replay
         ; test_case
             "durable journal batch commits one exact authority step"
             `Quick

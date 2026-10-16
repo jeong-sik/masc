@@ -1,6 +1,6 @@
 ---
 name: prior-art
-description: "Looks one phrase up in your durable memory facts, the wiki and board posts in one call, before diagnosing or building something another Keeper or an earlier turn may already have met. Use it when a failure, a tool name or a piece of work is new to this turn. All three match the phrase as a case-insensitive substring, so pass a short fragment exactly as it appeared, such as an error code, a tool name or a file name, not a sentence or a guessed cause. Returns up to 5 memory facts, the titles of matching wiki pages, and up to 10 board posts, newest first, one line each; board comments are not searched. Read a document with keeper_wiki_read and a post with masc_board_post_get. No match in all three is an answer too: the problem is new here and worth recording. If one search fails, the call fails and names that action, and searches scheduled after it do not run."
+description: "Looks one observed phrase up in your durable memory facts, wiki and board posts when the current task needs prior findings. Skip repeated lookup when the relevant finding is already available. Memory prioritizes whole-query matches, then term/BM25 candidates; 1-2 character ASCII alphanumeric terms require word boundaries. Wiki and board use case-insensitive substring matching. Pass a short observed error code, tool name or file name. Returns up to 5 memory facts, matching wiki titles and up to 10 compact board posts; board comments are not searched. Open needed details with keeper_wiki_read or masc_board_post_get. Empty results do not prove source verification completed or that the problem is new; Memory may succeed with source_verification.status=incomplete and no matches. Independent searches finish despite a failed node. Use available results and name failed or incomplete sources before retrying."
 ---
 
 # prior-art
@@ -20,20 +20,27 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 과 params 설�
 
 - 노드 입력에 개수와 모양을 적어 두는 이유: 입력을 비워 두면 도구 기본값이 그대로 나오고,
   기본값이 바뀌면 이 합성의 응답 크기도 말없이 바뀐다.
-- `keeper_memory_search` 는 descriptor 가 `Serial` 이라 따로 돈다. `keeper_wiki_search`
-  와 `masc_board_search` 는 `Concurrent` 라 같은 batch 에서 함께 돈다. 한 batch 가 실패하면
-  그 뒤 batch 는 돌지 않는다.
-- 세 도구 모두 대소문자를 가리지 않는 부분 문자열 일치로 찾는다. 긴 문장이나 짐작한 원인은
-  거의 걸리지 않는다. 보드는 글의 제목·본문·작성자와, 글에 hearth(주제 이름)가 있으면
-  그것까지 보고 댓글은 보지 않는다 (`lib/board/board_dispatch.ml` `search`).
-- 세 도구 모두 결과가 없을 때 오류가 아니라 성공 결과를 돌려준다. `keeper_memory_search` 는
-  기억 저장소를 못 읽으면 실패하고, 그러면 이 호출 전체가 실패한다.
+- 세 descriptor 모두 `Concurrent`이고 출력 의존성이 없으므로 함께 실행할 수 있다.
+  `continue_independent`로 한 저장소 조회가 실패해도 다른 조회를 마친다.
+- Memory는 전체 query 일치를 저장 순서로 먼저 보여 주고, 나머지에서 공백으로 나눈 term
+  후보를 BM25 순위로 더한다. 짧은 ASCII 영숫자 term(1–2글자)은 ASCII 단어 경계를 확인한다.
+  검색어는 관측한 짧은 오류 코드·도구 이름·파일 이름을 그대로 쓴다
+  (`keeper_tool_memory_runtime.ml` `answering`, `keeper_memory_search.toml`).
+- wiki와 보드는 대소문자를 가리지 않는 부분 문자열 일치다. wiki는 문서 내용에서 찾고
+  제목·파일 이름을 돌려준다. 보드는 제목·본문·작성자·hearth(주제 이름)를 보고 댓글은
+  보지 않는다 (`tool_wiki.ml` `handle_search`, `board_dispatch.ml` `search`).
+- 빈 결과도 성공일 수 있다. 특히 Memory는 검증하지 못한 query 후보를 숨기고
+  `source_verification.status = "incomplete"`와 빈 matches를 성공 결과로 돌려줄 수 있다.
+  wiki도 읽지 못한 파일을 건너뛴다. 성공 여부만으로 전체 source 조회·검증이 끝났다고
+  판단하지 않는다. 사용 가능한 결과와 실패·불완전한 source를 함께 보고하고, 검색이
+  안 됐다는 사실만으로 새 문제라고 기록하지 않는다.
 
 ```toml composition
 [[compositions]]
 name = "prior-art"
-description = "Looks one phrase up in your durable memory facts, the wiki and board posts in one call, before diagnosing or building something another Keeper or an earlier turn may already have met. Use it when a failure, a tool name or a piece of work is new to this turn. All three match the phrase as a case-insensitive substring, so pass a short fragment exactly as it appeared, such as an error code, a tool name or a file name, not a sentence or a guessed cause. Returns up to 5 memory facts, the titles of matching wiki pages, and up to 10 board posts, newest first, one line each; board comments are not searched. Read a document with keeper_wiki_read and a post with masc_board_post_get. No match in all three is an answer too: the problem is new here and worth recording. If one search fails, the call fails and names that action, and searches scheduled after it do not run."
+description = "Looks one observed phrase up in your durable memory facts, wiki and board posts when the current task needs prior findings. Skip repeated lookup when the relevant finding is already available. Memory prioritizes whole-query matches, then term/BM25 candidates; 1-2 character ASCII alphanumeric terms require word boundaries. Wiki and board use case-insensitive substring matching. Pass a short observed error code, tool name or file name. Returns up to 5 memory facts, matching wiki titles and up to 10 compact board posts; board comments are not searched. Open needed details with keeper_wiki_read or masc_board_post_get. Empty results do not prove source verification completed or that the problem is new; Memory may succeed with source_verification.status=incomplete and no matches. Independent searches finish despite a failed node. Use available results and name failed or incomplete sources before retrying."
 execution = "inline"
+branch_failure_policy = "continue_independent"
 
 [[compositions.params]]
 name = "query"

@@ -18,8 +18,9 @@ description: "Decides whether recurring work belongs in a Tool, a composition Sk
 A Skill that works around a defect turns the defect into the documented way of working,
 and the next author copies it. Fix the tool instead.
 
-A composition with one node is the same as calling that tool directly, so it is not
-worth a Skill.
+Prefer the direct tool for one call. A one-node composition can be useful when it
+defines a reusable parameter or selected-output contract; make that contract
+explicit instead of adding a wrapper with the same inputs and full result.
 
 ## 2. Instruction or composition
 
@@ -60,16 +61,32 @@ YAML description that contains `:`, `#`, or a leading backtick.
   params is checked before any node runs; an input that reads another node's output
   is checked when its node runs, after the nodes before it.
 - `kind = "output"` reads a field of an earlier node only when that tool declares a JSON
-  output schema (`keeper_spawn` declares `/handle`). Most tools do not; their output
-  cannot feed another node.
+  output schema (`keeper_spawn` declares `/handle`, `Read` declares `/path`). An opaque
+  result cannot feed another node. The same rule applies to `[[compositions.exports]]`:
+  give each export a unique `name`, a producer `node` and an RFC 6901 `pointer` into
+  its declared output. For example, `name = "profile"`, `node = "lane"`,
+  `pointer = "/profile"` selects the profile from a `keeper_lane_status` node.
 - Params are scalar (`string`, `integer`, `number`, `boolean`) and all required. Every
   declared param is referenced by some node and every reference is declared; either
   mismatch rejects the composition.
 - `execution = "async"` needs every node to be statically read-only.
-- In one dependency layer, only tools marked `Concurrent` run together; a `Serial` tool
-  runs alone. When a node fails, the call fails with that node as `cause` and the
-  batches after it do not run. A successful call returns `actions`, one per node, keyed
-  by `node_id`.
+- Ready independent nodes marked `Concurrent` can run together. A `Serial` node is
+  exclusive and preserves the serial schedule's order. `branch_failure_policy`
+  defaults to `"fail_fast"`: a failure stops work that has not committed to run;
+  already active nodes still settle. `"continue_independent"` lets independent
+  branches finish, while failed producers' descendants and stopped serial chains
+  stay blocked. The overall failure, cause and effect disposition remain visible.
+- Without exports, a successful call returns `actions` keyed by `node_id`. With
+  exports, it returns named selected fields, per-node availability and settlement,
+  and an `execution_artifact` containing the complete original result. Use available
+  fields before opening that artifact for missing details. JSON null is a value;
+  an unavailable producer or missing field is reported separately.
+- An async call returns a request receipt and completion notification. Continue
+  independent work while it runs. The completion carries selected results and the
+  original task/run references when they fit; use its exact `result_reference` for
+  omitted details or an unavailable canonical result. Ordinary completion does not
+  require repeated status polling. Failed, cancelled and unknown-effect results
+  remain visible; do not replay a plan merely to recover its result.
 
 ## 5. Spell out node inputs
 
@@ -106,6 +123,12 @@ equivalent explicitly on every node that has one.
   `artifact` object and proposed directory name `package_id` to `keeper_skill_validate`.
   This checks document and composition-plan rules; it does not execute or publish.
   Writing the draft does not update the catalog.
+- **Task-specific composition:** use `keeper_composition_prepare` with a concrete
+  structured plan, inspect the returned preview, then call `keeper_composition_run`
+  with that exact draft reference. This freezes the caller, plan and authorized
+  tool contracts without publishing a Skill. It currently admits fixed-input,
+  statically read-only ordinary tools. Preparation is useful for a new combination;
+  it is not required before calling an existing composition or direct tool.
 - **Keeper publish:** `keeper_skill_publish` takes `package_id`, the whole `SKILL.md`
   as `source_text`, and a non-empty `evidence` list (Memory fact ids, turn or tool
   call references). It creates the package in the `project-agents` source and

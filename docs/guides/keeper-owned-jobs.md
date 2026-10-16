@@ -125,6 +125,16 @@ admission retains the wait.
 Separate runs have independent intake fibers; the reservation set does not
 authorize execution. A missing hint is recovered by the existing maintenance
 pulse, with no new timer or retry limit.
+The completion-hint feature scenario starts the job and prepared DAG through
+public handlers, observes its canonical wait, changes the current Task, then
+lets the owned-job maintenance worker collect full output and enqueue its
+notification. Only that durable completion observer pulses the continuation
+supervisor. Its receipt separates backend work needed to finish the original
+job from backend calls after result readiness, and times completion pulse to
+original DAG completion. The independent-job scenario also raises an observer
+exception while another backend stays blocked, then waits for the new result's
+durable ACK. These are synthetic CLI scenarios; execution and timing claims
+require the selected run's completed artifact.
 If a resumed request durably owns the journal but its worker is canonically
 `Lost`, recovery follows the journal's exact predecessor bindings to the
 original `waiting_for_owned_jobs` record. Its saved node snapshot must match

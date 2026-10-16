@@ -1272,6 +1272,26 @@ type named_admission =
       ; context : Keeper_skill_activation_recorder.bound_context
       }
 
+type continuation_recovery =
+  | Complete_original_result
+  | Hold_original_authority of string
+
+let node_continuation_recovery (node : Executor.node_result) =
+  let hold () = Hold_original_authority (Tool_result.message node.result) in
+  match node.result with
+  | Tool_result.Completed _ -> Complete_original_result
+  | Tool_result.Deferred _ -> hold ()
+  | Tool_result.Failed failure ->
+    match failure.class_ with
+    | Tool_result.Policy_rejection | Tool_result.Workflow_rejection ->
+      (match node.failure_effect_disposition with
+       | Some Tool_result.Proven_pre_effect -> Complete_original_result
+       | Some (Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown)
+       | None -> hold ())
+    | Tool_result.Dependency_unavailable | Tool_result.Runtime_failure
+    | Tool_result.Operator_cancelled -> hold ()
+;;
+
 let rec async_worker_result
       ~composition_execution
       ~tool_kind
@@ -1321,9 +1341,9 @@ let rec async_worker_result
         | Some worker -> Journal.worker_child_admission worker ~node_ids
         | None -> Error Journal.Missing_journal) in
   match admission,continuation with
-  | Error rejection,Some continuation when Journal.continuation_dependencies continuation = [] ->
+  | Keeper_composition_nested_run.Original_authority_held rejection,Some continuation when Journal.continuation_dependencies continuation = [] ->
     Keeper_msg_async.worker_interrupted ~reason:rejection.detail
-  | Error rejection,Some continuation ->
+  | Keeper_composition_nested_run.Original_authority_held rejection,Some continuation ->
     let result = Tool_result.make_deferred ~tool_name ~start_time
         ~data:(`Assoc ["kind",`String "waiting_for_original_child_activation";"cause",rejection.data]) () in
     (match Keeper_msg_async.worker_waiting_for_dependencies
@@ -1331,9 +1351,9 @@ let rec async_worker_result
      | Ok outcome -> outcome
      | Error _ -> Keeper_msg_async.worker_finished (Tool_result.make_err ~tool_name ~start_time
          ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect rejection.detail))
-  | Error rejection,None -> Keeper_msg_async.worker_finished (Tool_result.make_err ~tool_name ~start_time
+  | Keeper_composition_nested_run.Original_authority_held rejection,None -> Keeper_msg_async.worker_finished (Tool_result.make_err ~tool_name ~start_time
       ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect rejection.detail)
-  | Ok (),_ ->
+  | Keeper_composition_nested_run.Original_admitted,_ ->
   (* These worker-local joins come only from the protected acceptance factory
      and the canonical reader's typed unavailable branch, never tool text. *)
   let accepted_children = ref [] in
@@ -1343,7 +1363,7 @@ let rec async_worker_result
     let refuse detail = Executor.dispatch_result
         ~failure_effect_disposition:Tool_result.Proven_pre_effect
         (Tool_result.make_err ~tool_name:node.Plan.tool_name ~start_time
-          ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect detail) in
+          ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect detail) in
     match target with
     | Plan.Descriptor_target _ -> refuse "ordinary tools do not enter the native child producer"
     | Plan.Child_submission child ->
@@ -1526,34 +1546,38 @@ let rec async_worker_result
        | Executor.Run_journal_rejected _ | Plan_execution_failed _
        | Node_observation_failed _ | Outer_completion_mismatch _ -> None)
   in
-  let interrupted = match execution with
+  let recovery = match execution with
+    | Ok _ -> Complete_original_result
     | Error failure ->
-      List.find_map (function
-       | Executor.Tool_did_not_complete node ->
-         (match node.execution_origin with
-          | Executor.Dispatch_refused -> Some (Tool_result.message node.result)
-          | Executor.Fresh_dispatch | Executor.Retained_completion ->
-          if List.exists (Plan.Node_id.equal node.node_id) !unavailable_results
-              || List.exists (Plan.Node_id.equal node.node_id) !accepted_children
-          then Some (Tool_result.message node.result) else
-          match continuation with
-          | None -> None
-          | Some _ ->
-          match Plan.contract plan node.node_id with
-          | None | Some {target=(Plan.Descriptor_target _ | Plan.Child_result _);_} -> None
-          | Some {target=Plan.Child_submission _;_} ->
-            (match node.result with
-             | Tool_result.Failed _ -> Some (Tool_result.message node.result)
-             | Tool_result.Completed _ | Tool_result.Deferred _ -> None))
-       | Run_journal_rejected error -> Some (Journal.error_to_string error)
-       | Node_observation_failed {detail;_} -> Some detail
-       | Plan_execution_failed _ | Outer_completion_mismatch _ -> None)
-        (Executor.failure_causes failure)
-    | Ok _ -> None in
-  match interrupted,waiting_dependencies with
-  | Some reason,_ -> Keeper_msg_async.worker_interrupted ~reason
-  | None,None -> Keeper_msg_async.worker_finished result
-  | None,Some dependencies ->
+      let cause_recovery = function
+        | Executor.Tool_did_not_complete node ->
+          (match node.execution_origin with
+           | Executor.Dispatch_refused -> node_continuation_recovery node
+           | Executor.Fresh_dispatch | Executor.Retained_completion ->
+             if List.exists (Plan.Node_id.equal node.node_id) !unavailable_results
+                 || List.exists (Plan.Node_id.equal node.node_id) !accepted_children
+             then Hold_original_authority (Tool_result.message node.result)
+             else match continuation with
+               | None -> Complete_original_result
+               | Some _ ->
+                 match Plan.contract plan node.node_id with
+                 | None | Some {target=(Plan.Descriptor_target _ | Plan.Child_result _);_} ->
+                   Complete_original_result
+                 | Some {target=Plan.Child_submission _;_} -> node_continuation_recovery node)
+        | Executor.Run_journal_rejected error ->
+          Hold_original_authority (Journal.error_to_string error)
+        | Executor.Node_observation_failed {detail;_} -> Hold_original_authority detail
+        | Executor.Plan_execution_failed _ | Executor.Outer_completion_mismatch _ ->
+          Complete_original_result in
+      List.fold_left (fun recovery cause ->
+        match recovery with
+        | Hold_original_authority _ -> recovery
+        | Complete_original_result -> cause_recovery cause)
+        Complete_original_result (Executor.failure_causes failure) in
+  match recovery,waiting_dependencies with
+  | Hold_original_authority reason,_ -> Keeper_msg_async.worker_interrupted ~reason
+  | Complete_original_result,None -> Keeper_msg_async.worker_finished result
+  | Complete_original_result,Some dependencies ->
     (match Keeper_msg_async.worker_waiting_for_dependencies ~dependencies result with
      | Ok outcome -> outcome
      | Error _ -> Keeper_msg_async.worker_finished result)
@@ -1938,9 +1962,18 @@ and named_async_submission_result ~skill_reference ~plan ~tool_name ~tool_kind
         | Ok None ->
           (match Draft.load ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name
               ~sha256:source.draft_reference.sha256 with
-           | Error error -> Error (Tool_result.make_err ~tool_name ~start_time
-               ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
-               (Yojson.Safe.to_string (Draft.error_to_json error)))
+           | Error error ->
+             let class_ = match admission,error with
+               | Fresh_named _,error -> Draft.failure_class error
+               | Original_child _,(Draft.Capability_changed | Inputs_rejected _ | Unsupported_node _) ->
+                 Tool_result.Policy_rejection
+               | Original_child _,(Draft.Storage_failed _ | Draft_read_failed _ | Draft_not_found
+                   | Malformed_draft _ | Plan_rejected _ | Nested_rejected _
+                   | Different_keeper | Different_package | Publication_rejected _
+                   | Skill_not_prepared | Nested_publication_requires_catalog) -> Tool_result.Runtime_failure in
+             Error (Tool_result.make_err ~tool_name ~start_time
+               ~class_ ~effect_disposition:Tool_result.Proven_pre_effect
+               ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error)))
            | Ok _ ->
              match Submission.begin_submit intent with
              | Ok ticket -> Atomic.set permit (Some ticket); Ok ()
@@ -2103,10 +2136,10 @@ let resume_continuation ~capability_surface ~continuation ~(config : Workspace.c
             Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
         (match Keeper_composition_nested_run.check_original_admissions original_nested
           ~child_history:(fun ~node_ids -> Ok (Journal.continuation_child_admission continuation ~node_ids)) with
-         | Error rejection -> Tool_result.make_err ~tool_name ~start_time
+         | Keeper_composition_nested_run.Original_authority_held rejection -> Tool_result.make_err ~tool_name ~start_time
              ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
              ~data:rejection.data rejection.detail
-         | Ok () -> async_submission_result ?skill_reference ~journal ~continuation
+         | Keeper_composition_nested_run.Original_admitted -> async_submission_result ?skill_reference ~journal ~continuation
           ~nested_calls:(Draft.nested_calls draft) ?nested_activation
           ~draft_reference:source.draft_reference ~run_reference:source.run_reference
           ~composition_run_id:source.composition_run_id ~plan:(Draft.plan draft)
@@ -2731,10 +2764,10 @@ let make_tools_with_authority
                                 Keeper_skill_activation_recorder.find_bound_nested ~config bound ~invocation ~tool_name ~scope ~reference)) nested_activation;
                             match Keeper_composition_nested_run.check_original_admissions original_nested
                                 ~child_history:(Journal.child_admission journal) with
-                            | Error error -> Tool_result.make_err ~tool_name:Draft.run_tool_name ~start_time
+                            | Keeper_composition_nested_run.Original_authority_held error -> Tool_result.make_err ~tool_name:Draft.run_tool_name ~start_time
                                 ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
                                 ~data:error.data error.detail
-                            | Ok () -> execute_run ~journal ?continuation ~nested_activation ~composition_run_id ~run_reference:source.run_reference
+                            | Keeper_composition_nested_run.Original_admitted -> execute_run ~journal ?continuation ~nested_activation ~composition_run_id ~run_reference:source.run_reference
                                 ~parent_invocation ~turn_context ()))
               | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _), Catalog.Async ->
                 rejection ~tool_name:Draft.run_tool_name ~start_time

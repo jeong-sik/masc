@@ -368,3 +368,18 @@ retained discovery and the production detail projection. Its elapsed read and
 projection time is a separate measurement from prepare/run latency or an HTTP
 network request. Source and an actual run/head establish this data path; installed
 UI display and matched whole-task performance still require separate evidence.
+
+## Continuation failure classification
+
+Original child activation checks return either admitted authority or held
+original authority. Missing, unreadable or conflicting receipts cannot prove
+that the logical run failed or that a new child may start. Journal ownership
+changes, unproven replay and failed observation commits retain the original
+run rather than finalizing a competing owner or discarding unknown effects.
+
+A producer-proven pre-effect policy or workflow rejection is different: the
+worker publishes its failed result instead of turning that rejection into a
+new Lost attempt. All parallel failure causes participate; one unavailable
+accepted child or uncertain authority still holds the run. Original child
+source reads remain runtime failures when the immutable evidence cannot be
+read, rather than being relabeled as permanent policy decisions.

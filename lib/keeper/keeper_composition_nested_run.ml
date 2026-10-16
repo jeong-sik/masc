@@ -124,6 +124,10 @@ let restore_admissions run ~find_activation =
           ~detail:(Recorder.error_to_string error) (Recorder.error_to_yojson error))) run.children
 ;;
 
+type original_admission =
+  | Original_admitted
+  | Original_authority_held of Executor.admission_rejection
+
 let check_original_admissions run ~child_history =
   List.fold_left (fun result child -> Result.bind result (fun () ->
     Result.bind (child_history ~node_ids:(Node_set.elements child.members)
@@ -141,6 +145,9 @@ let check_original_admissions run ~child_history =
           ~kind:"nested_original_activation_missing"
           ~detail:"Original child evidence requires its exact retained activation before result reuse."
           (Nested.call_to_json child.call))))) (Ok ()) run.children
+  |> function
+  | Ok () -> Original_admitted
+  | Error rejection -> Original_authority_held rejection
 ;;
 
 let contains child node_id = Node_set.mem node_id child.members

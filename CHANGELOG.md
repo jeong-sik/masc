@@ -2,14 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Keep a prepared composition's recovery marker when its first worker is lost
-  before any result wait and the journal still contains unproven effects.
-  Maintenance reports the unresolved node, and manual resume refuses before
-  accepting a replacement request. Declared read-only unfinished work retains
-  its existing manual resume. No runtime setting or durable format changes.
-
 ## [0.56.0] - 2026-10-14
 
 ### Upgrade notes
@@ -11339,4 +11331,3 @@ had the full Phase 2 release to migrate.
 - Board votes now use stable post content hash instead of monotonic counter (#5817)
 - K2K preset routing refined with forbidden_tools and improved score penalty (#5819)
 - Deterministic read-only boundary enforcement for shell/gh tools (#5822)
- 

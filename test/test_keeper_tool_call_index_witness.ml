@@ -64,15 +64,19 @@ let line_starts contents =
 let boundaries_to_try contents ~from =
   let size = String.length contents in
   List.concat_map (fun start -> [ start - 1; start; start + 1 ]) (line_starts contents)
-  @ [ size + 5 ]
+  @ [ size + 5; from ]
   |> List.filter (fun until -> until >= 0)
   |> List.sort_uniq compare
   |> List.filter (fun until -> until >= from - 1)
 
-(* From the start of the file, and from one line start inside it. *)
+(* From the start of the file, from one line start inside it, from the byte
+   after that start, and from past the end of the file. A stored boundary is
+   always a line start, but the reader takes any offset, so the others are
+   compared too. *)
 let starts_to_try state contents =
   let starts = Array.of_list (line_starts contents) in
-  List.sort_uniq compare [ 0; starts.(Random.State.int state (Array.length starts)) ]
+  let line_start = starts.(Random.State.int state (Array.length starts)) in
+  List.sort_uniq compare [ 0; line_start; line_start + 1; String.length contents + 2 ]
 
 let compare_on state contents =
   with_file contents (fun path ->

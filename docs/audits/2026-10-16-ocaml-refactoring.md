@@ -133,9 +133,13 @@ executed in this coding session.
   declarations unchanged apart from module qualification, plus the equivalent
   strict-field predicate. Independent source review found no P0/P1/P2 in
   `1d7548873c54e410b53515c7c7a7cdc82e23e1eb`.
-- Successor source review: pending final integrated commit review.
-- `git diff --check` and local documentation link checks are run before the
-  final handoff. They do not establish type correctness or behavior.
+- Independent successor code/test source review found no P0/P1/P2 in
+  `07ce914351bf1259433c35ea71c2a261c924dea9`, including duplicate rewrite
+  evidence, frontier ordering, mixed binding outcomes and moved type identity.
+  That reviewer authored the initial audit prose; this is not an independent
+  formal approval of the whole layer.
+- `git diff --check` passed over the complete stack; all 31 local documentation
+  links resolved. These checks do not establish type correctness or behavior.
 - Type checking, compilation, focused test execution, CI, formal GitHub approval,
   merge, installation and runtime/UI behavior are **not verified** by this work.
   The external coding-session protocol excludes local Dune builds and CI polling.

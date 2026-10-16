@@ -1,12 +1,31 @@
 # Live PR identity and release evidence shared by approval and merge.
 # Ordinary stacks are reviewed from source; only release/v* heads require CI.
+# Collection endpoints (statuses, workflow runs): --paginate runs --jq once per
+# page, so the expression must be safe to repeat per page.
 ci_gh_json() {
   "$GH" api --paginate "$1" --jq "$2"
 }
 
+# Single-object endpoints (one PR, one commit, one compare). GitHub pages the
+# embedded file/commit lists of a large commit, and --paginate would then run
+# --jq and print the scalar once per page (two newline-separated shas for the
+# 183-file backport 159809c803cb). The scalars read here live on the first
+# page, so ask for exactly one page.
+ci_gh_object() {
+  "$GH" api "$1" --jq "$2"
+}
+
+# Newest row of a paginated oldest-first collection: the last non-empty line
+# across pages, not one line per page.
+ci_gh_last_row() {
+  local out
+  out=$(ci_gh_json "$1" "$2") || return 1
+  printf '%s\n' "$out" | awk '$0 != "" { row = $0 } END { if (row != "") print row }'
+}
+
 read_current_pr() {
   local row
-  row=$(ci_gh_json "repos/$repo/pulls/$pr" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref, .user.login, .base.sha, ((.stack // null)|tojson)] | @tsv') || return 1
+  row=$(ci_gh_object "repos/$repo/pulls/$pr" '[.state, (.draft|tostring), .base.ref, .head.sha, (.merged|tostring), .head.ref, .user.login, .base.sha, ((.stack // null)|tojson)] | @tsv') || return 1
   IFS=$'\t' read -r pr_state pr_draft pr_base pr_current pr_branch_merged pr_branch pr_author pr_base_sha pr_stack <<<"$row"
   if [ "$pr_state" != open ] || [ "$pr_draft" != false ] || [ "$pr_branch_merged" != false ] ||
      [ "$pr_current" != "$head" ] || [ -z "$pr_base" ] || [ -z "$pr_branch" ] || [ -z "$pr_author" ]; then
@@ -37,7 +56,7 @@ read_current_pr() {
 # into fail-close).
 check_leader_selected_ci() {
   local rows status context target_url
-  rows=$(ci_gh_json "repos/$repo/commits/$head/status" '[.statuses[] | select(.context == "leader-selected-ci") | [.state, .target_url, .description] | @tsv] | last // empty') || return 1
+  rows=$(ci_gh_last_row "repos/$repo/commits/$head/status" '[.statuses[] | select(.context == "leader-selected-ci") | [.state, .target_url, .description] | @tsv] | last // empty') || return 1
   [ -n "$rows" ] || return 0
   IFS=$'\t' read -r status context target_url <<<"$rows"
   case "$status" in
@@ -68,10 +87,14 @@ check_leader_selected_ci() {
 # returns 0 unless MASC_MERGE_COMPILE_ENFORCE=1, which fail-closes.
 check_merge_compile() {
   local rows status target_url base_tip behind verdict
-  base_tip=$(ci_gh_json "repos/$repo/commits/$target" '.sha') || return 1
-  [[ "$base_tip" =~ ^[0-9a-f]{40}$ ]] || return 1
-  behind=$(ci_gh_json "repos/$repo/compare/${base_tip}...${selected_head}" '.behind_by') || return 1
-  [[ "$behind" =~ ^[0-9]+$ ]] || return 1
+  base_tip=$(ci_gh_object "repos/$repo/commits/$target" '.sha') ||
+    { echo "merge-compile check failed: cannot read the tip of $target" >&2; return 1; }
+  [[ "$base_tip" =~ ^[0-9a-f]{40}$ ]] ||
+    { echo "merge-compile check failed: tip of $target is not one 40-hex sha: '$base_tip'" >&2; return 1; }
+  behind=$(ci_gh_object "repos/$repo/compare/${base_tip}...${selected_head}" '.behind_by') ||
+    { echo "merge-compile check failed: cannot compare $selected_head with $target" >&2; return 1; }
+  [[ "$behind" =~ ^[0-9]+$ ]] ||
+    { echo "merge-compile check failed: behind_by is not a number: '$behind'" >&2; return 1; }
   if [ "$behind" != 0 ]; then
     verdict="head is $behind behind $target ($base_tip) — restack onto the current $target tip, dispatch merge-compile.yml on the new head, and merge after it succeeds"
     merge_compile_verdict refused "$verdict"
@@ -80,7 +103,7 @@ check_merge_compile() {
   # Take the LAST merge-compile status: the API returns them oldest-first, so
   # `last` is the current verdict. A head whose verdict was overwritten keeps
   # the newest one, which is exactly what the merge decision must read.
-  rows=$(ci_gh_json "repos/$repo/commits/$selected_head/status" '[.statuses[] | select(.context == "merge-compile") | [.state, .target_url] | @tsv] | last // empty') || return 1
+  rows=$(ci_gh_last_row "repos/$repo/commits/$selected_head/status" '[.statuses[] | select(.context == "merge-compile") | [.state, .target_url] | @tsv] | last // empty') || return 1
   [ -n "$rows" ] || { merge_compile_verdict refused "no merge-compile record for exact head $selected_head — dispatch merge-compile.yml on this head (gh workflow run merge-compile.yml --ref main -f sha=$selected_head -f pr=$selected_pr) and merge after it succeeds"; return $?; }
   IFS=$'\t' read -r status target_url <<<"$rows"
   case "$status" in

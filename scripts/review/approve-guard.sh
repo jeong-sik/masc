@@ -90,7 +90,7 @@ fi
 # the caller identity for self-approval and owned change-request rules.
 me=""
 if [ "$merge_check" -eq 0 ]; then
-  me=$(ci_gh_json user '.login')
+  me=$(ci_gh_object user '.login')
   [ -n "$me" ] || exit 1
 fi
 # Neither GitHub commit_id nor a footer alone supplies immutable head binding.
@@ -115,7 +115,7 @@ check_reviews() {
       else refuse "open CHANGES_REQUESTED from $who (review $rid)"; fi
     fi
     if [ "$state" = APPROVED ] && [ "$who" != "$pr_author" ]; then
-      review_json=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.') || return 1
+      review_json=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$rid" '.') || return 1
       admit_status=0
       bound=$(admit_review "$review_json") || admit_status=$?
       [ "$admit_status" -le 1 ] || return 1
@@ -226,7 +226,7 @@ if [ "$check_only" -eq 1 ]; then echo "WOULD APPROVE #$pr head $head policy $rev
 scope=$(compute_scope)
 footer=$(printf '\n\n---\nreview-scope: %s\napprove-guard: head `%s` · %s review' "$scope" "$head" "$review_policy")
 if [ -n "$own_approval" ]; then
-  previous_scope=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$own_approval" '.body | split("\n") | map(select(startswith("review-scope: "))) | if length == 1 then .[0] else "" end')
+  previous_scope=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$own_approval" '.body | split("\n") | map(select(startswith("review-scope: "))) | if length == 1 then .[0] else "" end')
   if [ "$previous_scope" = "review-scope: $scope" ]; then
     echo "SKIP #$pr: $me already APPROVED this head and scope (review $own_approval)"
     exit 0
@@ -237,7 +237,7 @@ fi
 footer="$footer$(printf ' · reviewed base `%s` · diff sha256 `%s`' "$review_base" "$review_diff")"
 response=$( { printf '%s' "$review_body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/$repo/pulls/$pr/reviews" -f event=APPROVE -f "commit_id=$head" -F body=@- --jq '[(.id|tostring), .state, .commit_id] | @tsv')
 IFS=$'\t' read -r rid state commit <<<"$response"
-back_json=$(ci_gh_json "repos/$repo/pulls/$pr/reviews/$rid" '.')
+back_json=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$rid" '.')
 admit_review "$back_json" >/dev/null || { echo "approval readback is not admitted for this head" >&2; exit 1; }
 back=$(printf '%s' "$back_json" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["state"]+"\t"+r["commit_id"])')
 [ "$back" = "$(printf 'APPROVED\t%s' "$head")" ] || { echo "approval readback differs from submitted head" >&2; exit 1; }

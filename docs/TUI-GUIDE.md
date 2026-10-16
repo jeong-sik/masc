@@ -2583,3 +2583,9 @@ includes scope, observed usage,
 reset times and freshness; scrolling reaches rows below the viewport. `p`
 opens the separate Telemetry reading, as do `/metrics` and `/telemetry`.
 A missing report is not a zero balance.
+
+Usage starts its independent source reads together, including transport, fleet,
+runtime quota, Keeper usage, provider history and account identity. The complete
+bundle still waits for the requested sources and the final workspace check;
+one slow source can keep that refresh pending. A source's reported failure
+remains separate from a successfully read zero value.

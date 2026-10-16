@@ -572,6 +572,90 @@ let test_read_page_path_matches_page_of_rows () =
            starts
        done)
 
+(* The events routes read a page inside a pool job, and a pool worker is
+   another domain with its own Eio loop, so the read takes its lock and file
+   transaction from there. Walking a journal a page at a time in pool jobs
+   must serve what the same walk on the calling fiber serves. The guard is
+   enabled as the server enables it, so a guarded lock taken from the wrong
+   context raises here as it would there. The blank rows make pages read a
+   second window. *)
+let pool_walk_events = 9
+
+let test_read_page_path_in_a_pool_job () =
+  let base_dir = temp_base_path "keeper-chat-event-log-pool" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "pool-keeper" in
+       let operation_id = "op-pool" in
+       let journal = L.open_journal ~base_dir ~keeper_name ~operation_id () in
+       let path = L.journal_path ~base_dir ~keeper_name ~operation_id in
+       let append_raw bytes =
+         let oc = open_out_gen [ Open_append; Open_wronly; Open_binary ] 0o600 path in
+         output_string oc bytes;
+         close_out oc
+       in
+       for seq = 0 to pool_walk_events - 1 do
+         L.append journal ~seq ~ts:(1_762_300_000.0 +. float_of_int seq)
+           (E.Text_delta { text = "row"; response = Unobserved_scope None });
+         if seq mod 3 = 0 then append_raw "\n"
+       done;
+       append_raw "{\"v\":1,\"seq\":999,\"ts\":1";
+       (* Every answer of a walk from the first row that follows the cursors
+          each page hands back. *)
+       let walk read =
+         let rec go ~since_seq ~start answers =
+           if List.length answers > pool_walk_events
+           then Alcotest.fail "the walk did not end"
+           else (
+             let answer = read ~since_seq ~start in
+             let answers = answer :: answers in
+             match answer with
+             | Ok (Ok { L.has_more = true; events; next_offset }) ->
+               let held =
+                 match List.rev events with
+                 | (last : L.journaled_event) :: _ -> L.replay_position_of_wire (Some last.seq)
+                 | [] -> None
+               in
+               (match held, L.page_start_of_wire (Some next_offset) with
+                | Some since_seq, Some start -> go ~since_seq ~start answers
+                | None, _ | _, None -> Alcotest.fail "a page handed back no cursor")
+             | Ok (Ok { L.has_more = false; _ }) | Ok (Error _) | Error _ ->
+               List.rev answers)
+         in
+         go ~since_seq:L.Whole_turn ~start:L.first_row []
+       in
+       let read_page ~since_seq ~start = L.read_page_path ~path ~since_seq ~start ~limit:2 in
+       Eio_main.run @@ fun env ->
+       Eio_guard.enable ();
+       Fun.protect ~finally:Eio_guard.disable @@ fun () ->
+       let inline = walk read_page in
+       Alcotest.(check (list int))
+         "the walk on the fiber serves every row once, in order"
+         (List.init pool_walk_events Fun.id)
+         (List.concat_map
+            (function
+              | Ok (Ok (page : L.page)) ->
+                List.map (fun (entry : L.journaled_event) -> entry.seq) page.events
+              | Ok (Error failure) -> Alcotest.fail (L.page_failure_to_string failure)
+              | Error _ -> Alcotest.fail "the journal did not read")
+            inline);
+       Eio.Switch.run @@ fun sw ->
+       Domain_pool_ref.set
+         (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+       Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+       let caller = (Domain.self () :> int) in
+       let pooled =
+         walk (fun ~since_seq ~start ->
+           let worker, answer =
+             Domain_pool_ref.submit_cpu_or_inline (fun () ->
+               (Domain.self () :> int), read_page ~since_seq ~start)
+           in
+           if worker = caller then Alcotest.fail "the page was read on the calling domain";
+           answer)
+       in
+       Alcotest.(check bool) "pool jobs serve the pages the fiber serves" true (pooled = inline))
+
 let test_journal_path_sanitizes_segments () =
   let path =
     L.journal_path ~base_dir:"/tmp/base" ~keeper_name:"keeper/x" ~operation_id:"op/../../escape"
@@ -1448,6 +1532,10 @@ let () =
             "a page read from windows matches the whole journal"
             `Quick
             test_read_page_path_matches_page_of_rows
+        ; Alcotest.test_case
+            "a pool job reads the pages the calling fiber reads"
+            `Quick
+            test_read_page_path_in_a_pool_job
         ; Alcotest.test_case
             "path sanitizes both segments"
             `Quick

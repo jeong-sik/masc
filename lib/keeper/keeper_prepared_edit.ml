@@ -119,6 +119,7 @@ end = struct
   type t =
     { inner : Eio.Switch.t
     ; finish : unit Eio.Promise.u
+    ; finished : bool Atomic.t
     ; closed : unit Eio.Promise.t
     }
 
@@ -134,15 +135,20 @@ end = struct
         Eio.Promise.resolve resolve_ready inner;
         Eio.Promise.await finish_signal);
       `Stop_daemon);
-    { inner = Eio.Promise.await ready; finish; closed }
+    (* [Fiber.fork_daemon] runs the daemon up to its first suspension before it
+       returns, so [ready] is already resolved here and the await returns at
+       once. When [sw] is already cancelled it starts nothing, [ready] stays
+       unresolved, and the await raises [Cancelled]: the caller runs under
+       [sw], so its cancel context is cancelled too. *)
+    { inner = Eio.Promise.await ready; finish; finished = Atomic.make false; closed }
   ;;
 
   let switch held = held.inner
 
-  (* Callers pass the single-use guard of the preparation, so [finish] is
-     resolved at most once. *)
+  (* A second call only waits for [closed], so [finish] is resolved once even
+     when the caller's own guard is missing. *)
   let release held =
-    Eio.Promise.resolve held.finish ();
+    if not (Atomic.exchange held.finished true) then Eio.Promise.resolve held.finish ();
     Eio.Promise.await held.closed
   ;;
 end

@@ -741,7 +741,9 @@ let test_untransferred_preparation_releases_without_effect () =
 ;;
 
 (* Open descriptors of this process, listed from /dev/fd. The listing holds one
-   descriptor for the directory it reads, in every count alike. *)
+   descriptor for the directory it reads, in every count alike. The counts only
+   compare when nothing else in the process opens or closes a descriptor
+   between them, so the test runs alone in a serial suite. *)
 let open_descriptor_count () = Array.length (Sys.readdir "/dev/fd")
 
 let test_release_closes_the_pinned_directories () =

@@ -225,6 +225,34 @@ type record_kind =
   | Composition_run
   | Lifecycle_event
 
+type committed_call = private
+  { record_kind : record_kind
+  ; keeper_name : string
+  ; tool_name : string
+  ; execution_id : Ids.Execution_id.t option
+  ; tool_use_id : string option
+  ; trace_id : string option
+  ; task_id : string option
+  ; keeper_turn_id : int option
+  ; composition_node_id : string option
+  ; parent_tool_use_id : string option
+  }
+(** Original producer identities after a durable append. Missing identities
+    remain [None]; this metadata carries no Tool input/output or model text. *)
+
+type commit_observer
+val make_commit_observer : (committed_call -> unit) -> commit_observer
+val with_commit_observer : commit_observer -> (unit -> 'a) -> 'a
+(** Eio-fiber scope inherited by its children, isolated from sibling scopes.
+    Opting into durable observation requires synchronous appends in this scope,
+    including direct SDK calls and native composition leaves. No event is
+    delivered for an unavailable store or failed append. This changes observer
+    I/O cost; matched timing comparisons must use the same observer mode. *)
+val failed_commit_deliveries : commit_observer -> int
+(** Non-cancellation sink failures are counted and do not turn a committed Tool
+    effect into failure/retry. A consumer with failures must retain a coverage
+    gap. Cancellation propagates; committed rows retain their original truth. *)
+
 val log_call :
   keeper_name:string ->
   tool_name:string ->

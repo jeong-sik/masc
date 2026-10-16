@@ -252,6 +252,38 @@ type record_kind =
   | Composition_run
   | Lifecycle_event
 
+type committed_call =
+  { record_kind : record_kind
+  ; keeper_name : string
+  ; tool_name : string
+  ; execution_id : Ids.Execution_id.t option
+  ; tool_use_id : string option
+  ; trace_id : string option
+  ; task_id : string option
+  ; keeper_turn_id : int option
+  ; composition_node_id : string option
+  ; parent_tool_use_id : string option
+  }
+
+type commit_observer =
+  { notify : committed_call -> unit
+  ; failed_deliveries : int Atomic.t
+  }
+
+let commit_observer_key : commit_observer Eio.Fiber.key = Eio.Fiber.create_key ()
+let make_commit_observer notify = {notify; failed_deliveries = Atomic.make 0}
+let with_commit_observer observer operation = Eio.Fiber.with_binding commit_observer_key observer operation
+let failed_commit_deliveries observer = Atomic.get observer.failed_deliveries
+
+let notify_commit observer receipt =
+  match observer.notify receipt with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as error) -> raise error
+  | exception error ->
+    ignore (Atomic.fetch_and_add observer.failed_deliveries 1);
+    Log.Misc.warn "keeper Tool commit observer delivery failed: %s" (Printexc.to_string error)
+;;
+
 let record_kind_to_string = function
   | Tool_call -> "tool_call"
   | Composition_run -> "composition_run"
@@ -754,8 +786,11 @@ let log_call
       ?on_committed
       ()
   =
+  let commit_observer = match Fs_compat.execution_context () with
+    | Fs_compat.Non_eio -> None
+    | Fs_compat.Eio_fiber -> Eio.Fiber.get commit_observer_key in
   let requires_commit =
-    Option.is_some on_committed || artifact_refs <> []
+    Option.is_some commit_observer || Option.is_some on_committed || artifact_refs <> []
     || Option.exists (fun result -> Tool_result.retained_artifacts result <> []) typed_result
   in
   match (Atomic.get store_state).store with
@@ -1145,7 +1180,12 @@ let log_call
       let entry = { store; keeper_name; tool_name; trace_id; json = safe_json } in
       if requires_commit then
         (match append_to_store_result ~committed:(ref false) entry with
-         | Ok () -> Option.iter (fun notify -> notify ()) on_committed
+         | Ok () ->
+           Option.iter (fun observer -> notify_commit observer
+             {record_kind; keeper_name; tool_name; execution_id; tool_use_id;
+              trace_id; task_id; keeper_turn_id; composition_node_id; parent_tool_use_id})
+             commit_observer;
+           Option.iter (fun notify -> notify ()) on_committed
          | Error exn -> raise exn)
       else append_or_enqueue entry
 ;;

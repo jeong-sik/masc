@@ -711,6 +711,41 @@ let test_engine_identity_parsing_has_no_default () =
     (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"/root"}|}
      = Ok (Lifecycle.Apple_app_root "/root"))
 
+(* A container with a blank label would otherwise reach the Slot_foreign record
+   as [Some ""], which the record's own decoder refuses: the failure could be
+   written and then not read back. *)
+let test_a_blank_label_reads_as_no_label () =
+  let module Engine = Masc.Lane_addon_engine in
+  let module Lifecycle = Masc.Lane_addon_lifecycle in
+  let module Slot = Masc.Lane_addon_slot in
+  let id = String.make 64 'a' in
+  let docker labels = Printf.sprintf
+    {|[{"Id":"%s","Name":"/slot","State":{"Status":"exited"},"Config":{"Labels":%s}}]|} id labels in
+  let apple labels = Printf.sprintf
+    {|[{"id":"slot","status":"stopped","configuration":{"id":"slot","labels":%s}}]|} labels in
+  let held runtime raw = match Engine.held_of_inspect runtime raw with
+    | Ok held -> held
+    | Error detail -> failf "inspection did not read: %s" detail in
+  let blank = {|{"masc.lane.instance":"","masc.lane.state.owner":"  "}|} in
+  let named = {|{"masc.lane.instance":"incarnation","masc.lane.state.owner":"owner"}|} in
+  List.iter (fun (label, held) ->
+    check bool (label ^ ": blank labels read as absent") true
+      (held.Engine.instance = None && held.Engine.state_owner = None))
+    [ "docker", held Types.Docker (docker blank); "apple", held Types.Apple_container (apple blank) ];
+  List.iter (fun (label, held) ->
+    check bool (label ^ ": real labels are kept") true
+      (held.Engine.instance = Some "incarnation" && held.Engine.state_owner = Some "owner"))
+    [ "docker", held Types.Docker (docker named); "apple", held Types.Apple_container (apple named) ];
+  check bool "a label that is not text is still refused" true
+    (Result.is_error (Engine.held_of_inspect Types.Docker (docker {|{"masc.lane.instance":7}|})));
+  (match Slot.classify ~instance_id:"new" ~mine:(Some "owner") ~is_live_instance:(fun _ -> false)
+           (held Types.Docker (docker blank)) with
+   | Slot.Foreign holder ->
+       check bool "the holder's record reads back" true
+         (Lifecycle.failure_of_json (Lifecycle.failure_to_json (Lifecycle.Slot_foreign holder))
+          = Ok (Lifecycle.Slot_foreign holder))
+   | Slot.Mine | Slot.Predecessor _ -> fail "a container with blank labels belongs to nobody")
+
 let test_start_is_refused_before_create_when_the_engine_is_unreachable () =
   with_fixture (fun env sw dir docker ->
     (* Only the identity command fails. Every other control command would
@@ -2445,6 +2480,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "engine identity comes from the info command" `Quick test_engine_identity_comes_from_the_info_command;
   test_case "Apple engine identity is the service root" `Quick test_apple_engine_identity_is_the_service_app_root;
   test_case "engine identity parsing has no default" `Quick test_engine_identity_parsing_has_no_default;
+  test_case "a blank label reads as no label" `Quick test_a_blank_label_reads_as_no_label;
   test_case "start is refused before create when the engine is unreachable" `Quick
     test_start_is_refused_before_create_when_the_engine_is_unreachable;
   test_case "a different engine cannot confirm a release" `Quick

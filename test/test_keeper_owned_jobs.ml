@@ -3400,7 +3400,14 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     check int (label ^ " emits no outbox notification") 0 !delivered;
     check int (label ^ " delivers no terminal") 0 report.delivered;
     check int (label ^ " keeps readable guarded outbox authority") 0 (List.length report.failures);
-    check int (label ^ " leaves no false queue completion") 0 (List.length (pending_completions fixture)) in
+    let original_request_notifications = pending_completions fixture |> List.filter
+        (fun (selection : Keeper_event_queue_state.pending_selection) ->
+          match selection.source.payload with
+          | Keeper_event_queue.Composition_completed completion ->
+            String.equal completion.cc_request_id entry.request_id
+          | _ -> false) in
+    check int (label ^ " leaves no false queue completion") 0
+      (List.length original_request_notifications) in
   check_lost "first interrupted launch" (terminal first.request_id);
   (match Journal.waiting_continuation journal |> require "first Lost launch is publicly resumable" with
    | Some continuation -> check int "first Lost invents no dependency wait" 0

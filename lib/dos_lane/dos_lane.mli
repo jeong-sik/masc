@@ -101,7 +101,11 @@ type autosave_consent =
 type error =
   | Activity_disabled
   | Activity_unobserved
-  | No_machine  (** nothing loaded — [masc_dos_load] first *)
+  | No_machine
+      (** nothing is loaded. With no machine the lane holds no checkpoint
+          directory, so it cannot say whether an autosave could be restored;
+          the tool layer looks that up ({!lookup_autosave}) and leads with
+          [masc_dos_restore] when one exists. *)
   | Invalid_request of string  (** the caller's arguments *)
   | Unreadable of string
       (** a file that is there and will not read. A path that does not exist

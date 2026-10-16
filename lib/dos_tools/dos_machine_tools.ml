@@ -152,26 +152,49 @@ let reject_data_of_fields = function
   | fields -> `Assoc fields
 ;;
 
+(* What a caller needs next when it asks for a machine and none is loaded. The
+   lane cannot say: with no machine it holds no checkpoint directory, so the
+   autosave is looked up here, where [base_path] is known. Restoring is the
+   first answer whenever an autosave exists, because [masc_dos_restore] works
+   with no machine loaded while [masc_dos_load] is refused over that file
+   unless the call consents to moving it. *)
+type no_machine_guidance =
+  | Restore_autosave of Dos_lane.autosave_status
+  | Replace_unreadable_autosave of string
+  | Load_a_program
+
+let no_machine_guidance = function
+  | Dos_lane.Autosave status -> Restore_autosave status
+  | Dos_lane.Autosave_unreadable reason -> Replace_unreadable_autosave reason
+  | Dos_lane.No_autosave -> Load_a_program
+;;
+
+let no_machine_message guidance =
+  let slot = Machine_checkpoint.slot_to_string in
+  let resume = slot Dos_lane.autosave_slot and prev = slot Dos_lane.autosave_prev_slot in
+  let refusal = Dos_lane.error_to_string Dos_lane.No_machine in
+  match guidance with
+  | Load_a_program -> refusal ^ ": call masc_dos_load first"
+  | Restore_autosave s ->
+    Printf.sprintf
+      "%s. An autosave is waiting: %s, %d steps, saved by %s at %s. Resume it with \
+       masc_dos_restore slot=%s. masc_dos_load starts a different program instead and \
+       needs replace_autosave=true, which moves the autosave to %s."
+      refusal s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
+      (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at) resume prev
+  | Replace_unreadable_autosave reason ->
+    Printf.sprintf
+      "%s. An autosave file is there but this server cannot read it: %s. masc_dos_load \
+       needs replace_autosave=true to move it to %s."
+      refusal reason prev
+;;
+
 (* The answer to a call that needs a machine when none is loaded. It is the
    answer a caller gets right after a restart, so it says what the autosave
    slot holds and how to resume it. Every other refusal is unaffected. *)
 let no_machine ~base_path ~tool_name ~start_time =
-  let refusal = Dos_lane.error_to_string Dos_lane.No_machine in
   let found = lookup_autosave ~base_path in
-  let message =
-    match found with
-    | Dos_lane.No_autosave -> refusal
-    | Dos_lane.Autosave s ->
-      Printf.sprintf
-        "%s (an autosave is waiting: %s, %d steps, saved by %s at %s -- resume with \
-         masc_dos_restore slot=%s)"
-        refusal s.Dos_lane.program s.Dos_lane.steps s.Dos_lane.saved_by
-        (Time_codec.rfc3339_of_unix s.Dos_lane.saved_at)
-        (Machine_checkpoint.slot_to_string Dos_lane.autosave_slot)
-    | Dos_lane.Autosave_unreadable reason ->
-      Printf.sprintf "%s (an autosave file is there but this server cannot read it: %s)" refusal
-        reason
-  in
+  let message = no_machine_message (no_machine_guidance found) in
   Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
     ~effect_disposition:Tool_result.Proven_pre_effect
     ~data:(reject_data_of_fields (autosave_lookup_fields found)) message

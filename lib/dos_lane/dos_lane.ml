@@ -56,7 +56,7 @@ type error =
 let error_to_string = function
   | Activity_disabled -> "machines.dos is off; enable it before new machine work"
   | Activity_unobserved -> "Machine activity configuration is unavailable"
-  | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
+  | No_machine -> "no DOS machine is loaded"
   | Invalid_request message -> message
   | Unreadable message -> message
   | Held_by holder ->

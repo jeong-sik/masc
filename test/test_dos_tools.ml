@@ -2036,6 +2036,45 @@ let test_no_machine_names_the_autosave_after_an_eject () =
     names_it "peek" (dispatch ~base_path "masc_dos_peek" [ ("address", `String "0") ]))
 ;;
 
+(* After a restart the autosave is the way back: [masc_dos_restore] works with
+   no machine loaded, while [masc_dos_load] is refused over that same file.
+   The guidance is a value first and a sentence second, so the order the
+   sentence gives is the order of the constructor, not of some string edit. *)
+let test_no_machine_guidance_leads_with_the_autosave () =
+  let status =
+    { Dos_lane.program = "echo.com"; steps = 120; saved_by = "liu-bei"; saved_at = 1.0 }
+  in
+  (match Dos_tools.no_machine_guidance (Dos_lane.Autosave status) with
+   | Dos_tools.Restore_autosave found ->
+     check string "restore names the program" "echo.com" found.Dos_lane.program;
+     check int "and its steps" 120 found.Dos_lane.steps
+   | Dos_tools.Replace_unreadable_autosave _ | Dos_tools.Load_a_program ->
+     fail "a readable autosave must lead with a restore");
+  (match Dos_tools.no_machine_guidance (Dos_lane.Autosave_unreadable "damaged") with
+   | Dos_tools.Replace_unreadable_autosave "damaged" -> ()
+   | Dos_tools.Restore_autosave _ | Dos_tools.Replace_unreadable_autosave _
+   | Dos_tools.Load_a_program -> fail "an unreadable autosave cannot be restored");
+  match Dos_tools.no_machine_guidance Dos_lane.No_autosave with
+  | Dos_tools.Load_a_program -> ()
+  | Dos_tools.Restore_autosave _ | Dos_tools.Replace_unreadable_autosave _ ->
+    fail "with nothing saved, loading is the only way forward"
+;;
+
+let test_a_refusal_with_no_machine_carries_the_restore_command () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "echo.com" echo_com;
+    boot ~base_path "echo.com";
+    eject ();
+    let refused = dispatch ~base_path "masc_dos_screen" [] in
+    refused_before_any_effect "a screen with no machine" refused;
+    check bool "the data names the restore command" true
+      (member "resume" (autosave_field refused)
+       = Some (`String "masc_dos_restore slot=autosave"));
+    (* The command the refusal names works with no machine loaded. *)
+    check bool "and that command restores" true
+      (is_completed (restore_as ~base_path "autosave")))
+;;
+
 let test_inventory_names_the_autosave () =
   with_workspace (fun base_path ->
     install_program ~base_path "echo.com" echo_com;
@@ -2308,6 +2347,10 @@ let () =
             test_a_failed_autosave_does_not_fail_the_call
         ; test_case "no machine names the autosave" `Quick
             test_no_machine_names_the_autosave_after_an_eject
+        ; test_case "no-machine guidance leads with the autosave" `Quick
+            test_no_machine_guidance_leads_with_the_autosave
+        ; test_case "a no-machine refusal carries the restore command" `Quick
+            test_a_refusal_with_no_machine_carries_the_restore_command
         ; test_case "inventory names the autosave" `Quick test_inventory_names_the_autosave
         ; test_case "restore stages before admission and cleans refusal" `Quick
             test_restore_stages_before_admission_and_cleans_refusal

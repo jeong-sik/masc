@@ -225,15 +225,6 @@ type write_error =
 
 val write_error_to_string : write_error -> string
 
-val update_state :
-  Workspace_utils.config -> (state -> state) -> (state, write_error) result
-(** Atomic read-modify-write under the goals file lock. [f] receives the
-    current state ({!Uninitialized} reads as an empty first state) and
-    returns the next state. When [f] returns the state it was given
-    (physically the same value) nothing is written, so a refused first write
-    leaves an {!Uninitialized} store without a file. Never {!Goal_not_found}
-    or {!Rejected}. *)
-
 (** {1 Single-goal operations} *)
 
 val transact_goal :
@@ -315,7 +306,9 @@ val upsert_goal :
     internally), updates the matched row otherwise. Returns the resolved goal
     paired with [`created], or [`updated previous] carrying the row as it was
     before this write, read inside the write lock. The caller records what
-    changed. An edit to the title, [metric] or [target_value] moves a
+    changed. Every accepted upsert commits a new store version, including an
+    update whose editable fields are unchanged. An edit to the title,
+    [metric] or [target_value] moves a
     [Verifying], [Awaiting_confirmation] or [Completed] goal back to
     [Executing]. Suspended Goals stay suspended with restore target [Executing].
     An edit to [due_date] or [priority] moves no phase.

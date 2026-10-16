@@ -313,7 +313,7 @@ Source: [lib/goal/goal_store.ml:681](https://github.com/jeong-sik/masc/blob/aea8
 
 Problem: upsert_goal_internal communicates created/updated action, refusal, and pending audit events through three refs. update_state uses physical identity (next_state == state) to mean do not write, including a rejected first creation. A future record-copy refactor can accidentally turn refusal into an empty-store write, and the three independent refs permit combinations that are impossible in the domain but require fallback failed-to-save handling.
 
-Change: Compute a private decision such as Rejected of write_error | Unchanged of result | Changed of {state; result; pending_events}, using explicit supplied timestamps and generated identities. Have the existing lock-owning transaction execute only Changed and return the result/effects directly. Start with the upsert path and preserve public wrappers; avoid redesigning all Goal operations at once.
+Change: Compute an explicit result containing either a write error or an accepted immutable commit with the next state and returned value. Have a private lock-owning transaction persist only accepted commits and return the value directly. Keep row transformation separate from clock, identity and storage effects, and preserve the public upsert wrappers. The focused source audit found that every accepted existing upsert writes even when supplied fields are unchanged; there is no upsert no-op decision to add. `transact_goal` has its own equality-based no-op contract and remains separate.
 
 Preserve:
 
@@ -321,7 +321,7 @@ Preserve:
 - Creation/update is decided inside the write lock from authoritative state.
 - Criterion edits invalidate proof progress using Goal_phase.criterion_changed and keep suspension semantics.
 - Returned updated action contains the previous goal, and the revision witness belongs to that exact commit.
-- Audit intents remain in the same state write as the goal change; no-op/refusal must not mint events.
+- Audit intents remain in the same state write as the goal change; refusal must not mint events. An accepted unchanged-field upsert still advances the store revision and, with an actor, emits `Updated`.
 
 Consumers: [lib/workspace_goals.ml](../../../lib/workspace_goals.ml), [lib/goal/goal_measurement.ml](../../../lib/goal/goal_measurement.ml), [lib/goal/goal_verification.ml](../../../lib/goal/goal_verification.ml).
 

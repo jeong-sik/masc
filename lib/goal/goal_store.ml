@@ -678,7 +678,14 @@ let with_existing_goals config ~goal_ids f =
      | Ok result -> result
      | Error error -> Error (Goal_lock_failed error))
 
-let update_state config f : (state, write_error) result =
+type 'a state_commit = {
+  next_state : state;
+  value : 'a;
+}
+
+(* Rejection leaves an uninitialized store without a file. An accepted plan
+   always commits, including upserts that preserve every editable field. *)
+let commit_state config prepare =
   Workspace_utils.with_file_lock config (goals_path config) (fun () ->
       let current : (state, write_error) result =
         match load_source config with
@@ -689,15 +696,10 @@ let update_state config f : (state, write_error) result =
         | Available state -> Ok state
       in
       let* state = current in
-      let next_state = f state in
-      (* A closure that hands back the very state it received has nothing to
-         commit: on an [Uninitialized] store this is what keeps a refused
-         first upsert from pre-writing an empty goals.json. *)
-      if next_state == state then Ok state
-      else
-        match write_state_result config next_state with
-        | Ok () -> Ok next_state
-        | Error detail -> Error (Persist_failed detail))
+      let* { next_state; value } = prepare state in
+      match write_state_result config next_state with
+      | Ok () -> Ok value
+      | Error detail -> Error (Persist_failed detail))
 
 let transact_goal ?effects config ~goal_id f =
   Workspace_utils.with_file_lock config (goals_path config) (fun () ->
@@ -1015,6 +1017,38 @@ let append_audit_event_after_pending config json =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 
+let goal_with_fields ~now ?title ?metric ?target_value ?due_date ?priority
+    (existing : goal) =
+  let updated =
+    { existing with
+      title = Option.value title ~default:existing.title;
+      metric = (match metric with Some _ -> metric | None -> existing.metric);
+      target_value =
+        (match target_value with Some _ -> target_value | None -> existing.target_value);
+      due_date = (match due_date with Some _ -> due_date | None -> existing.due_date);
+      priority = clamp_priority (Option.value priority ~default:existing.priority);
+      updated_at = now;
+    }
+  in
+  let criterion_changed =
+    not (String.equal existing.title updated.title)
+    || not (Option.equal String.equal existing.metric updated.metric)
+    || not (Option.equal String.equal existing.target_value updated.target_value)
+  in
+  updated, criterion_changed
+
+let goal_with_new_criterion ~criterion_revision (goal : goal) =
+  { goal with criterion_revision; phase = Goal_phase.criterion_changed goal.phase;
+    last_review_note = None; last_review_at = None }
+
+let new_goal ~now ~id ~criterion_revision ~title ~metric ~target_value ~due_date
+    ~priority : goal =
+  { id; criterion_revision; title; metric; target_value; due_date;
+    priority = clamp_priority (Option.value priority ~default:3);
+    phase = Goal_phase.Executing;
+    last_review_note = None; last_review_at = None;
+    created_at = now; updated_at = now }
+
 let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_date
     ?priority () =
   let is_new_goal = id = None in
@@ -1025,147 +1059,68 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
     | Some message -> Error (Rejected message)
     | None ->
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
-        let upserted = ref None in
-        let refusal = ref None in
-        let pending = ref [] in
-        let state_result =
-          update_state config (fun state ->
-              let now = Masc_domain.now_iso () in
-              let next = match find_goal_in state.goals resolved_id with
-              | Some existing ->
-                  let next_goal =
-                      {
-                        existing with
-                        title = Option.value title ~default:existing.title;
-                        metric = (match metric with Some _ -> metric | None -> existing.metric);
-                        target_value =
-                          (match target_value with
-                          | Some _ -> target_value
-                          | None -> existing.target_value);
-                        due_date =
-                          (match due_date with
-                          | Some _ -> due_date
-                          | None -> existing.due_date);
-                        priority =
-                          clamp_priority
-                            (Option.value priority ~default:existing.priority);
-                        updated_at = now;
-                      }
-                  in
-                  let criterion_changed =
-                    not (String.equal existing.title next_goal.title)
-                    || not (Option.equal String.equal existing.metric next_goal.metric)
-                    || not (Option.equal String.equal existing.target_value next_goal.target_value)
-                  in
-                  upserted := Some (`updated existing);
-                  let next_goal =
-                    if not criterion_changed then next_goal
-                    else
-                      let phase = Goal_phase.criterion_changed next_goal.phase in
-                      { next_goal with criterion_revision = Random_id.hex ~bytes:16;
-                        phase; last_review_note = None; last_review_at = None }
-                  in
-                  {
-                    state with version = state.version + 1;
-                    updated_at = now;
-                    goals = replace_goal state.goals next_goal;
-                  }
-              | None ->
-                  (* RFC-0387 B1: a goal is created only with a declared
-                     measurable success condition — both [metric] and
-                     [target_value], non-blank. Updates (the arm above) are
-                     not gated: the obligation is declared at creation. The
-                     create/update split is decided HERE, inside the write
-                     lock on the freshly decoded state: an undecodable store
-                     is rejected by [update_state]'s fail-closed path before
-                     this closure runs, so the B1 refusal below can only ever
-                     fire against a store that was actually read and found
-                     not to hold the row. On refusal the closure returns the
-                     state it received and [update_state] writes nothing; the
-                     error is carried out via [refusal]. *)
-                  (* Creation input check, not just a shape check. A goal born
-                     without a name states no
-                     condition to hold it to — the [id = None] path is
-                     refused before the lock, while an explicit unknown id
-                     reaches this arm and used to default to "Untitled
-                     goal". And a goal born past its due date is overdue
-                     before its first observation: unreachable by
-                     construction. Updates stay ungated: an existing goal's
-                     due date passing is ordinary life, and backdating a
-                     stored date is a correction, not a birth. *)
-                  let b2_refusal =
-                    if blank_opt title then
-                      Some
+        commit_state config (fun state ->
+          let now = Masc_domain.now_iso () in
+          let* goal, action =
+            match find_goal_in state.goals resolved_id with
+            | Some existing ->
+                let updated, criterion_changed =
+                  goal_with_fields ~now ?title ?metric ?target_value ?due_date
+                    ?priority existing in
+                let updated =
+                  if criterion_changed then
+                    let criterion_revision = Random_id.hex ~bytes:16 in
+                    goal_with_new_criterion ~criterion_revision updated
+                  else updated in
+                Ok (updated, `updated existing)
+            | None ->
+                (* Creation gates run after the authoritative read under the
+                   write lock. Existing rows may be backdated or edited without
+                   re-declaring their creation-time success condition. *)
+                let* title =
+                  match title with
+                  | Some title when String.trim title <> "" -> Ok title
+                  | None | Some _ ->
+                      Error (Rejected
                         "a non-blank title is required for a new goal \
                          (a goal without a name states no success condition \
-                         to hold it to)"
-                    else (
-                      match due_date with
-                      | None -> None
-                      | Some raw ->
-                        (match Ptime.of_float_s (Time_compat.now ()) with
-                         | None -> None
-                         | Some now ->
-                           if Goal_due.is_overdue ~now (Goal_due.read (Some raw))
-                           then
-                             Some
-                               (Printf.sprintf
-                                  "due_date %S is already past: a goal born \
-                                   overdue is unreachable"
-                                  raw)
-                           else None))
-                  in
-                  (match b2_refusal with
-                   | Some message ->
-                     refusal := Some message;
-                     state
-                   | None ->
-                     if blank_opt metric || blank_opt target_value then (
-                       refusal :=
-                         Some
-                           "metric and target_value are required for a new goal \
-                            (RFC-0387 B1: a goal must declare a measurable \
-                            success condition)";
-                       state)
-                     else (
-                  let new_goal =
-                      {
-                        id = resolved_id;
-                        criterion_revision = Random_id.hex ~bytes:16;
-                        title = Option.value title ~default:"Untitled goal";
-                        metric;
-                        target_value;
-                        due_date;
-                        priority = clamp_priority (Option.value priority ~default:3);
-                        phase = Goal_phase.Executing;
-                        last_review_note = None;
-                        last_review_at = None;
-                        created_at = now;
-                        updated_at = now;
-                      }
-                  in
-                  upserted := Some `created;
-                  {
-                    state with version = state.version + 1;
-                    updated_at = now;
-                    goals = state.goals @ [ new_goal ];
-                  })) in
-              match actor, !upserted, find_goal_in next.goals resolved_id with
-              | Some actor, Some action, Some goal ->
-                  pending := upsert_event_intents ~actor ~revision:next.version goal action;
-                  { next with pending_events = next.pending_events @ !pending }
-              | _ -> next)
-        in
-        (match state_result with
-        | Error error -> Error error
-        | Ok state ->
-          (match !refusal with
-           | Some msg -> Error (Rejected msg)
-           | None ->
-          (match find_goal_in state.goals resolved_id, !upserted with
-          | Some goal, Some upserted -> Ok (goal, upserted, state.version, !pending)
-          | Some _, None | None, (Some _ | None) ->
-              Error (Rejected "failed to save goal"))))
+                         to hold it to)") in
+                let* () =
+                  match due_date with
+                  | None -> Ok ()
+                  | Some raw ->
+                      (match Ptime.of_float_s (Time_compat.now ()) with
+                       | None -> Ok ()
+                       | Some now ->
+                           if Goal_due.is_overdue ~now (Goal_due.read (Some raw)) then
+                             Error (Rejected (Printf.sprintf
+                               "due_date %S is already past: a goal born \
+                                overdue is unreachable" raw))
+                           else Ok ()) in
+                if blank_opt metric || blank_opt target_value then
+                  Error (Rejected
+                    "metric and target_value are required for a new goal \
+                     (RFC-0387 B1: a goal must declare a measurable \
+                     success condition)")
+                else
+                  let criterion_revision = Random_id.hex ~bytes:16 in
+                  let goal = new_goal ~now ~id:resolved_id ~criterion_revision
+                      ~title ~metric ~target_value ~due_date ~priority in
+                  Ok (goal, `created)
+          in
+          let revision = state.version + 1 in
+          let goals = match action with
+            | `created -> state.goals @ [goal]
+            | `updated _ -> replace_goal state.goals goal in
+          let pending = match actor with
+            | None -> []
+            | Some actor -> upsert_event_intents ~actor ~revision goal action in
+          Ok {
+            next_state =
+              { state with version = revision; updated_at = now; goals;
+                pending_events = state.pending_events @ pending };
+            value = goal, action, revision, pending;
+          })
 
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date ?priority () =
   upsert_goal_internal config ?id ?title ?metric ?target_value ?due_date ?priority ()

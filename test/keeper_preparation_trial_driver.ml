@@ -469,6 +469,7 @@ let execution_nodes ~base run =
 
 let execution_run_id ~fixture ~turn ~parent ~reply rows =
   let value = match field "composition_run_id" reply,field "composition_tool" reply with
+    | `String id,`String name when field "tool" parent=`String name -> id
     | `String id,`Null -> id
     | `Null,`String name when field "tool" parent=`String name ->
       (* Named Tools expose their canonical node artifact, while the original

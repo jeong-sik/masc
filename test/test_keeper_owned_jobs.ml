@@ -5384,7 +5384,7 @@ let test_shared_held_presence_round ~different_endpoint () = with_fixture @@ fun
   Printf.printf "owned_job_shared_presence_round=%s\n%!"
     (Yojson.Safe.to_string (`Assoc ["scope",`String "synthetic CLI actual maintenance supervisor";
       "held_original_jobs",`Int 2;"distinct_frozen_backend_routes",`Int routes;
-      "before_per_job_presence_calls",`Int 2;"after_shared_presence_calls",`Int (List.length batch_calls);
+      "as_is_expected_per_job_presence_calls",`Int 2;"after_observed_shared_presence_calls",`Int (List.length batch_calls);
       "borrows_job_private_cli",`Bool false;"original_owner_bytes_unchanged_on_absence",`Bool true]))
 
 let test_changed_cancel_intent_bypasses_held_presence () = with_fixture @@ fun _env _initialize fixture ->

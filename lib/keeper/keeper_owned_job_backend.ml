@@ -678,12 +678,12 @@ let remove_container ~target prepared =
     let* _ = success ~operation result in
     confirm_removed ~container_id prepared in
   match inspect prepared, target with
-  | Absent, (Never_created | Before_start _ | After_exit _) -> confirm_removed ~container_id prepared
+  | Absent, (Never_created | Absent_after_launch _ | Before_start _ | After_exit _) -> confirm_removed ~container_id prepared
   | Created id, Before_start expected when id=expected -> remove id
   | Stopped (id,code), After_exit {container_id=expected;exit_code} when id=expected && code=exit_code -> remove id
-  | Unconfirmed detail, (Never_created | Before_start _ | After_exit _) -> Error (Response_rejected {operation;detail})
-  | Running _, (Never_created | Before_start _ | After_exit _) -> Error (Response_rejected {operation;detail="cleanup never removes a running container"})
-  | (Created _ | Stopped _), (Never_created | Before_start _ | After_exit _) ->
+  | Unconfirmed detail, (Never_created | Absent_after_launch _ | Before_start _ | After_exit _) -> Error (Response_rejected {operation;detail})
+  | Running _, (Never_created | Absent_after_launch _ | Before_start _ | After_exit _) -> Error (Response_rejected {operation;detail="cleanup never removes a running container"})
+  | (Created _ | Stopped _), (Never_created | Absent_after_launch _ | Before_start _ | After_exit _) ->
     Error (Response_rejected {operation;detail="saved terminal phase or container identity differs; cleanup cannot remove a replacement"})
 
 let remove_data prepared =

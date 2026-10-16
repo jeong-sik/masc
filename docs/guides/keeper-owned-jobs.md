@@ -57,6 +57,46 @@ Once start was requested, reconciliation observes that same job and does not
 retry start. Directory identity, owner and permissions are rechecked before
 backend operations; unreadable or replaced authority is a refusal.
 
+## Recovery while the original container is absent
+
+The maintenance supervisor retains process-local typed evidence only after a
+full reconciliation holds an original job with `Backend_absent`. Each later
+round first recovers the authoritative journal. If the entire original record
+is unchanged, it checks the original private-directory/empty-CLI authority and
+exact label inventory as a presence hint. No matching container leaves the
+original job held; it does not append a phase, publish a result or authorize
+another create/start.
+
+A visible container goes through full daemon, ownership and isolation checks
+before reconciliation can advance. A changed journal, including cancellation,
+bypasses the hint. A failed hint clears reusable evidence, and a new supervisor
+starts with full inspection. Late original containers therefore remain
+discoverable without repeated daemon probes for unchanged absent jobs. Private
+CLI authority is never borrowed from another job. Manual status and structured
+one-round recovery keep their full-inspection behavior.
+
+| Boundary | Before | After |
+|---|---|---|
+| Unchanged previously absent owner | Daemon identity plus exact inventory every round | One exact inventory hint, retaining the held owner |
+| Container appears | Full inspection | Presence hint followed by full inspection |
+| Owner changes or supervisor restarts | Full inspection | Full inspection |
+| Hint fails | No separate hint | Explicit held failure; reusable evidence cleared |
+
+The unchanged-absence path removes one backend CLI call per job per round. A
+positive hint adds an inventory call before full inspection. This is a source
+path comparison until the actual maintenance feature scenario executes, not a
+real Docker or end-to-end task speedup. The scenario retains the original
+uncertain create, repeated absence, fresh supervisor, changed private CLI,
+foreign daemon, late original result and changed cancellation intent.
+
+The existing Keeper debug logger emits `owned_job_recovery` with the original
+job ID and typed observation (`presence_not_seen`,
+`presence_seen_full_inspection` or `presence_unavailable`). These describe
+recovery work, not program completion. No polling timer, expiration or retry
+limit is introduced.
+
+## Result and reconciliation
+
 Job replies separate the original `phase`, `result_ready`, and `reconciliation`.
 `result_ready` marks a settled result, including cancellation and explicitly
 unavailable outputs. The `status`, phase and artifact references describe that

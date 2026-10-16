@@ -17,6 +17,19 @@ val reconcile : Keeper_owned_job_store.record ->
 (** Uses only the original frozen backend and durable intents. A completion
     recovery pulse has no authority to prepare a replacement or replay launch. *)
 
+type held_absent
+(** Process-local evidence returned only by a full recovery that held the
+    exact original record with [Backend_absent]. Not execution authority. *)
+
+val reconcile_for_recovery :
+  ?previous:held_absent -> Keeper_owned_job_store.record ->
+  (Keeper_owned_job_store.record * held_absent option, Keeper_owned_job_store.error) result
+(** Reuse the held observation only when the entire freshly recovered owner
+    record is unchanged. A missing-container hint leaves that record held;
+    a positive hint or changed record requires full canonical reconciliation.
+    Hint failures clear reusable evidence. Fresh supervisors and manual status
+    reads retain full inspection. No timer, retry limit or relaunch is added. *)
+
 val cleanup : Keeper_owned_job_store.record ->
   (Keeper_owned_job_store.record, Keeper_owned_job_store.error) result
 (** Continue the original acknowledged terminal owner's resource cleanup.

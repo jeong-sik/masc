@@ -568,6 +568,20 @@ let inventory prepared =
     |> List.map (fun line -> let id = string (Yojson.Safe.from_string line) in
       require (valid_container_id id) "invalid full container identity"; id))
 
+type presence_hint =
+  | No_owned_container_seen
+  | Owned_container_seen
+  | Presence_unavailable of error
+
+let presence_hint prepared =
+  let result =
+    let* () = isolation_guard () in
+    let* () = directories_unchanged prepared in
+    let* ids = inventory prepared in
+    Ok (match ids with [] -> No_owned_container_seen | _ :: _ -> Owned_container_seen)
+  in
+  match result with Ok hint -> hint | Error error -> Presence_unavailable error
+
 let inspect prepared =
   let result =
     let* () = isolation_guard () in

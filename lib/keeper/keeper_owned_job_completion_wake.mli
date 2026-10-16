@@ -11,7 +11,10 @@ val pulse : sw:Eio.Switch.t -> t -> (unit, Keeper_owned_job_store.error) result
 (** Server startup/maintenance entrypoint. Reserve independent lifecycle fibers
     for pending jobs; the pulse does not wait for backend I/O. A live worker is
     reserved once until it settles or is cancelled. No timer or timeout is added.
-    Single-domain Eio caller; the reservation set is not effect authority. *)
+    Unchanged previously absent owners use an exact-label presence hint until
+    a positive observation requires full reconciliation. A changed owner or a
+    new supervisor cannot reuse that process-local held evidence.
+    Single-domain Eio caller; reservations and hints are not effect authority. *)
 
 type report =
   { inspected : int; waiting : int; delivered : int; retired : int

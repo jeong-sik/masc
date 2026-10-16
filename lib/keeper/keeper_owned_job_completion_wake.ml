@@ -4,7 +4,7 @@ let ( let* ) = Result.bind
 type report =
   { inspected : int; waiting : int; delivered : int; retired : int
   ; failures : (string * Store.error) list }
-type outcome = Waiting | Delivered | Retired
+type outcome = Waiting of Keeper_owned_job_runtime.held_absent option | Delivered | Retired
 
 let wake_hint (record : Store.record) =
   (* The exact notification is already durable. A wake is only a lifecycle hint. *)
@@ -45,7 +45,7 @@ let deliver ~on_result_ready (record : Store.record) =
      a later maintenance fiber settles the same acknowledged terminal owner. *)
   Ok Delivered
 
-let recover ~on_result_ready ~base_path (marker : Store.pending_delivery) =
+let recover ?held_absent ~on_result_ready ~base_path (marker : Store.pending_delivery) =
   try
     let* record = Store.recover ~base_path ~keeper_name:marker.keeper_name marker.job_id in
     if record.completion_delivered then
@@ -53,8 +53,9 @@ let recover ~on_result_ready ~base_path (marker : Store.pending_delivery) =
       let* () = Store.retire_delivery_marker record in Ok Retired
     else if Store.result_ready record then deliver ~on_result_ready record
     else
-      let* record = Keeper_owned_job_runtime.reconcile record in
-      if Store.result_ready record then deliver ~on_result_ready record else Ok Waiting
+      let* (record, held_absent) = Keeper_owned_job_runtime.reconcile_for_recovery
+          ?previous:held_absent record in
+      if Store.result_ready record then deliver ~on_result_ready record else Ok (Waiting held_absent)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Store.Io_failed (Printexc.to_string exn))
@@ -75,26 +76,34 @@ let reconcile ~config =
   let report = List.fold_left (fun report (job_id,outcome) ->
     let report = {report with inspected=report.inspected+1} in
     match outcome with
-    | Ok Waiting -> {report with waiting=report.waiting+1}
+    | Ok (Waiting _) -> {report with waiting=report.waiting+1}
     | Ok Delivered -> {report with delivered=report.delivered+1}
     | Ok Retired -> {report with retired=report.retired+1}
     | Error error -> {report with failures=(Store.Job_id.to_string job_id,error) :: report.failures})
       empty outcomes in
   Ok {report with failures=List.rev report.failures}
 
-module Job_set = Set.Make (struct
+module Job_key = struct
   type t = Store.Job_id.t
   let compare left right = String.compare (Store.Job_id.to_string left) (Store.Job_id.to_string right)
-end)
+end
+module Job_set = Set.Make (Job_key)
+module Job_map = Map.Make (Job_key)
 type t =
   { config : Workspace.config
   ; on_result_ready : Store.record -> unit
-  ; mutable active : Job_set.t }
-let create ~config ?(on_result_ready=ignore) () = {config;on_result_ready;active=Job_set.empty}
+  ; mutable active : Job_set.t
+  ; mutable held_absent : Keeper_owned_job_runtime.held_absent Job_map.t }
+let create ~config ?(on_result_ready=ignore) () =
+  {config;on_result_ready;active=Job_set.empty;held_absent=Job_map.empty}
 
 let pulse ~sw supervisor =
   let base_path = supervisor.config.Workspace.base_path in
   let* pending = Store.pending_deliveries ~base_path in
+  let pending_ids = List.fold_left (fun ids (marker : Store.pending_delivery) ->
+      Job_set.add marker.job_id ids) Job_set.empty pending.entries in
+  supervisor.held_absent <- Job_map.filter (fun job_id _ -> Job_set.mem job_id pending_ids)
+      supervisor.held_absent;
   List.iter (fun (identity,error) ->
     Log.Server.warn "owned job completion discovery retained job=%s error=%s"
       identity (Store.error_to_string error)) pending.failures;
@@ -103,14 +112,18 @@ let pulse ~sw supervisor =
       (* Single-domain Eio reservations do not yield. This set suppresses
          duplicate live workers; only the durable journal can authorize effects. *)
       supervisor.active <- Job_set.add marker.job_id supervisor.active;
+      let held_absent = Job_map.find_opt marker.job_id supervisor.held_absent in
+      supervisor.held_absent <- Job_map.remove marker.job_id supervisor.held_absent;
       try Eio.Fiber.fork ~sw (fun () ->
         Fun.protect
           ~finally:(fun () -> supervisor.active <- Job_set.remove marker.job_id supervisor.active)
           (fun () ->
-            match recover ~on_result_ready:supervisor.on_result_ready ~base_path marker with
+            match recover ?held_absent ~on_result_ready:supervisor.on_result_ready ~base_path marker with
             | Error error -> Log.Server.warn "owned job completion retained job=%s error=%s"
                 (Store.Job_id.to_string marker.job_id) (Store.error_to_string error)
-            | Ok Waiting -> ()
+            | Ok (Waiting None) -> ()
+            | Ok (Waiting (Some held)) ->
+                supervisor.held_absent <- Job_map.add marker.job_id held supervisor.held_absent
             | Ok Delivered | Ok Retired -> Log.Server.info "owned job completion recovered job=%s"
                 (Store.Job_id.to_string marker.job_id)))
       with exn ->

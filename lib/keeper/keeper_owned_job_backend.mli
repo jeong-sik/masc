@@ -64,6 +64,19 @@ val inspect : preparation -> observation
     argv, mount and isolation contract.
     CLI prose never establishes absence, ownership or an effect outcome. *)
 
+type presence_hint =
+  | No_owned_container_seen
+  | Owned_container_seen
+  | Presence_unavailable of error
+
+val presence_hint : preparation -> presence_hint
+(** Non-authoritative reactivation hint for a previously held absent job.
+    Check the original private-directory/CLI authority and exact owner-label
+    inventory, without observing daemon identity or accepting a container.
+    Absence cannot settle a phase, authorize cleanup or permit another launch.
+    A positive hint must go through full [inspect] before any state change or
+    effect. Errors remain explicit; cancellation propagates. *)
+
 val create : preparation -> (observation, error) result
 val start : container_id:string -> preparation -> (observation, error) result
 val cancel : container_id:string -> preparation -> (observation, error) result

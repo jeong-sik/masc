@@ -78,8 +78,9 @@ let observe (record : Store.record) observation =
            Created phase cannot appear ready after this refusal. No journal
            schema change is needed. Explicit cancellation closes via
            Cancelled_unconfirmed_launch above.
-         Known residual: until someone cancels, the marker stays and each pulse
-         re-inspects. *)
+         Maintenance retains this typed hold in its process-local supervisor.
+         An unchanged owner needs only a presence hint before deciding whether
+         a new full inspection is necessary. *)
       preserve Store.Backend_absent "saved backend job is absent; launch intent is retained, no relaunch"
   | (Store.Prepared | Store.Create_requested | Store.Created _ | Store.Start_requested _
     | Store.Running _ | Store.Exited _ | Store.Cancelled_before_start _),
@@ -153,6 +154,35 @@ let reconcile_settlement (record : Store.record) =
 
 let reconcile record =
   Result.map record_of_settlement (reconcile_settlement record)
+
+type held_absent = Store.record
+
+let reconcile_for_recovery ?previous (record : Store.record) =
+  let result = match previous with
+    | Some held when held = record ->
+        (match Backend.presence_hint record.preparation with
+         | Backend.No_owned_container_seen ->
+             Log.Keeper.debug "owned_job_recovery job_id=%s observation=presence_not_seen"
+               (Store.Job_id.to_string record.job_id);
+             Ok (Unconfirmed (record, Store.Backend_absent))
+         | Backend.Owned_container_seen ->
+             Log.Keeper.debug "owned_job_recovery job_id=%s observation=presence_seen_full_inspection"
+               (Store.Job_id.to_string record.job_id);
+             reconcile_settlement record
+         | Backend.Presence_unavailable error ->
+             Log.Keeper.debug "owned_job_recovery job_id=%s observation=presence_unavailable"
+               (Store.Job_id.to_string record.job_id);
+             backend_result record (Error error))
+    | Some _ | None -> reconcile_settlement record
+  in
+  Result.map (fun settlement ->
+    let held = match settlement with
+      | Unconfirmed (record, Store.Backend_absent) -> Some record
+      | Confirmed _
+      | Unconfirmed (_, (Store.Backend_unconfirmed | Store.Backend_mismatch
+          | Store.Cancelled_job_orphan | Store.Backend_error)) -> None
+    in
+    record_of_settlement settlement, held) result
 
 let rec cleanup (record : Store.record) =
   let next state = let* record = Store.advance_cleanup record state in cleanup record in

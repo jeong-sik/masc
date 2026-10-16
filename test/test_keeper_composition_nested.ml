@@ -478,7 +478,7 @@ value = { file_path = "report.txt", content = "original bytes\n" }
        check string "durable catalog keeps the same original refusal" "Write" tool_name
    | Error _ -> fail "async Write catalog refused for an unrelated reason"
    | Ok _ -> fail "async catalog admitted an ordinary file write");
-  let source = "---\nname: nested-write\ndescription: Save the original file bytes.\n---\n```toml composition\n"
+  let source = "---\nname: nested-read\ndescription: Save the original file bytes.\n---\n```toml composition\n"
       ^ declaration "inline" ^ "```\n" in
   let surface, reference = fixture ~source () in
   let parent = request [nested ~args:(`Assoc []) "child" reference] in

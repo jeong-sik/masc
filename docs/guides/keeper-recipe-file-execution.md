@@ -45,9 +45,11 @@ earlier input targets a different file. Once identities are known, only actual
 conflicts await predecessor settlement. A failed or skipped conflicting owner
 prevents its successors from dispatching; independent branches follow the plan's
 existing failure policy. Pure child argument validation has no file footprint.
-Plans containing Write, other tools or async child submission/result targets
-retain ordinary scheduling. Write admission grants no resource claim or extra
-concurrency. Named calls without whole-plan scoped admission and transient
+Read/Edit/Write plans retain supported Read/Edit capabilities while Write binds
+its original ordinary handler as an exclusive file barrier. Write admission
+grants no resource claim or extra concurrency. Plans containing other tools or
+async child submission/result targets retain ordinary scheduling. Named calls
+without whole-plan scoped admission and transient
 run calls retain their outer descriptor; only their inner ready file leaves overlap.
 
 Supply the existing one-call grammar when the plan is ready:

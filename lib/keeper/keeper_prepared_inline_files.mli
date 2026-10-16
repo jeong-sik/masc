@@ -59,10 +59,12 @@ module Ready : sig
     -> source:Keeper_tool_call_log_context.turn_context option
     -> Keeper_tool_plan.t
     -> t option
-  (** Original source-bound inline Read/Edit plans, including pure compiled
-      child argument validation. Inputs may depend on upstream results. No
-      file is opened until its node has a resolved, validated input. Other
-      effects and async child submission/result targets are ineligible. *)
+  (** Original source-bound inline Read/Edit/Write plans, including pure
+      compiled child argument validation. Inputs may depend on upstream
+      results. No file is opened until its node has a resolved, validated
+      input. Write always binds its original exclusive ordinary handler;
+      supported Read/Edit siblings retain their own prepared capabilities.
+      Other effects and async child submission/result targets are ineligible. *)
 
   val plan : t -> Keeper_tool_plan.t
   val bind : t -> node:Keeper_tool_plan.node -> input:Yojson.Safe.t -> binding

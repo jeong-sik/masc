@@ -64,12 +64,16 @@ let finalize_trajectory_acc
   : unit
   =
   try
-    let trajectory = Trajectory.finalize trajectory_acc outcome in
-    Log.Keeper.debug
+    match Trajectory.finalize trajectory_acc outcome with
+    | Trajectory.Finalized trajectory -> Log.Keeper.debug
       "%s: trajectory finalized outcome=%s total_tool_calls=%d"
       keeper_name
       (Trajectory.outcome_to_string trajectory.outcome)
       trajectory.total_tool_calls
+    | Trajectory.Finalization_pending pending ->
+      report_keeper_cycle_side_effect_issue
+        ~config ~keeper_name ~side_effect:"trajectory finalize" ~severity:`Error
+        ("trajectory persistence remains pending: " ^ Trajectory_buffer.outcome_label pending)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

@@ -1552,15 +1552,23 @@ let test_agent_core_interleaving_matches_masc_receipt_and_progress_facts () =
            Keeper_agent_run_thinking_trajectory.persist_response_content
              ~keeper_name ~trajectory_acc:(Some acc) ~turn
              [ thinking_before_read ];
-           Trajectory.record_entry acc
-             (trajectory_entry_of_provider_call ~ts:1.1 ~turn ~round:1 first);
-           Trajectory.flush_pending acc;
+           check bool "first entry accepted" true
+             (Trajectory.record_entry acc
+                (trajectory_entry_of_provider_call ~ts:1.1 ~turn ~round:1 first) = Trajectory.Recorded);
+           (match Trajectory.flush_pending acc with
+            | Trajectory_buffer.Flushed {rows=1; cleanup_failure=None} -> ()
+            | state -> failf "interleaved tool append not acknowledged: %s"
+                (Trajectory_buffer.outcome_label state));
            Keeper_agent_run_thinking_trajectory.persist_response_content
              ~keeper_name ~trajectory_acc:(Some acc) ~turn
              [ thinking_before_done ];
-           Trajectory.record_entry acc
-             (trajectory_entry_of_provider_call ~ts:1.3 ~turn ~round:2 second);
-           Trajectory.flush_pending acc;
+           check bool "second entry accepted" true
+             (Trajectory.record_entry acc
+                (trajectory_entry_of_provider_call ~ts:1.3 ~turn ~round:2 second) = Trajectory.Recorded);
+           (match Trajectory.flush_pending acc with
+            | Trajectory_buffer.Flushed {rows=1; cleanup_failure=None} -> ()
+            | state -> failf "interleaved tool append not acknowledged: %s"
+                (Trajectory_buffer.outcome_label state));
            check (list string) "MASC trajectory JSONL keeps interleaved facts"
              [ "thinking:[withheld]"
              ; "tool:masc_board_list"

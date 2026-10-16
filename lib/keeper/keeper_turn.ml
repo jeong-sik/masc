@@ -948,12 +948,9 @@ let run_keeper_invocation_turn_admitted_inner
                 | Ok (Some cause) ->
                   let summary = Keeper_request_failure.summary { Keeper_request_failure.cause } in
                   Log.Keeper.warn "direct Gate continuation ended: %s" summary;
-                  (try
-                     let _ = Trajectory.finalize trajectory_acc
-                       (Trajectory.Failed summary) in
-                     ()
-                   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
-                     ~label:"trajectory finalize (gate session full)" exn);
+                  Keeper_turn_helpers.finalize_trajectory_acc
+                    ~config:ctx.config ~keeper_name:meta.name trajectory_acc
+                    (Trajectory.Failed summary);
                   commit_ended_turn ();
                   restart_keepalive_after_message_turn ctx meta;
                   Progress.stop_tracking turn_task_id;
@@ -1030,23 +1027,17 @@ let run_keeper_invocation_turn_admitted_inner
               let { Keeper_request_failure.cause } =
                 Keeper_request_failure.of_core_error err
               in
-              (try
-                 let _ = Trajectory.finalize trajectory_acc
-                   (Trajectory.Failed e_str) in
-                 ()
-               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
-                 ~label:"trajectory finalize (agent_run error)" exn);
+              Keeper_turn_helpers.finalize_trajectory_acc
+                ~config:ctx.config ~keeper_name:meta.name trajectory_acc
+                (Trajectory.Failed e_str);
               commit_ended_turn ();
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
               dispatch_failed ~class_:Tool_result.Runtime_failure cause
             | Ok result ->
-              (try
-                 let _ = Trajectory.finalize trajectory_acc
-                   Trajectory.Completed in
-                 ()
-               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
-                 ~label:"trajectory finalize (agent_run ok)" exn);
+              Keeper_turn_helpers.finalize_trajectory_acc
+                ~config:ctx.config ~keeper_name:meta.name trajectory_acc
+                Trajectory.Completed;
               let execution_outcome =
                 Keeper_execution_outcome.create
                   ~lane:Keeper_execution_outcome.Direct

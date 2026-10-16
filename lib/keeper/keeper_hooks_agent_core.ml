@@ -933,10 +933,7 @@ let make_hooks
                  Some (Ids.Execution_id.to_string execution_id);
              }
            in
-           Trajectory.record_entry
-             ~runtime_contract
-             ~action_radius
-             ~on_persist_error:(fun exn ->
+           let report_persist_error exn =
                Telemetry_coverage_gap.record
                  ~masc_root:acc.Trajectory.masc_root
                  ~source:"trajectory_tool_call"
@@ -949,9 +946,13 @@ let make_hooks
                  ~keeper_name
                  ~trace_id
                  ~exn
-                 ())
-             acc
-             entry);
+                 ()
+           in
+           (match Trajectory.record_entry ~runtime_contract ~action_radius
+                    ~on_persist_error:report_persist_error acc entry with
+            | Trajectory.Recorded -> ()
+            | Trajectory.Recorder_closed ->
+              report_persist_error (Invalid_argument "trajectory accumulator already finalized")));
         (try
            on_tool_executed
              ~tool_name

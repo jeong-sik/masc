@@ -456,22 +456,53 @@ let http_listener_json ?now () =
 
 (** {1 Environment-derived Transport Config} *)
 
-let grpc_runtime_listening : bool Atomic.t = Atomic.make false
+type grpc_listener_failure =
+  | Initialization_failed
+  | Address_in_use
+  | Bind_failed
+  | Serve_failed
+
+type grpc_listener_state =
+  | Not_started
+  | Disabled
+  | Binding
+  | Listening
+  | Failed of grpc_listener_failure
+  | Stopped
+
+let grpc_listener_state = Atomic.make Not_started
+let set_grpc_listener_state state = Atomic.set grpc_listener_state state
+let grpc_listener_snapshot () = Atomic.get grpc_listener_state
+
+let grpc_listener_is_listening = function
+  | Listening -> true
+  | Not_started | Disabled | Binding | Failed _ | Stopped -> false
+
+let grpc_listener_fields state =
+  let status, failure =
+    match state with
+    | Not_started -> "not_started", None
+    | Disabled -> "disabled", None
+    | Binding -> "binding", None
+    | Listening -> "listening", None
+    | Stopped -> "stopped", None
+    | Failed Address_in_use -> "bind_failed", Some "address_in_use"
+    | Failed Bind_failed -> "bind_failed", Some "bind_failed"
+    | Failed Initialization_failed -> "failed", Some "initialization_failed"
+    | Failed Serve_failed -> "failed", Some "serve_failed"
+  in
+  [ "listening", `Bool (grpc_listener_is_listening state)
+  ; "listen_status", `String status
+  ; "listen_failure", Json_util.string_opt_to_json failure
+  ]
+
 let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
-
-(** Explanatory status for why a transport is or is not listening.
-    Valid values: ["not_started"], ["disabled"], ["listening"],
-    ["bind_failed"], ["stopped"]. *)
-let grpc_listen_status : string Atomic.t = Atomic.make "not_started"
-
-let set_grpc_runtime_listening listening = Atomic.set grpc_runtime_listening listening
 let set_ws_same_origin_runtime_ready ready =
   Atomic.set ws_same_origin_runtime_ready ready
 
-let set_grpc_listen_status status = Atomic.set grpc_listen_status status
 let grpc_enabled () = Env_config.Transport.grpc_enabled ()
 let grpc_port () = Env_config.Transport.grpc_port
-let grpc_listening () = grpc_enabled () && Atomic.get grpc_runtime_listening
+let grpc_listening () = grpc_listener_is_listening (grpc_listener_snapshot ())
 
 (** {1 Agent Health Metrics} *)
 
@@ -646,7 +677,7 @@ let transport_health_json () =
   in
   let ws_sessions = int_of_float (v Otel_metric_store.metric_ws_sessions ()) in
   let grpc_configured = grpc_enabled () in
-  let grpc_live = grpc_listening () in
+  let grpc_state = grpc_listener_snapshot () in
   let ws_configured = ws_enabled () in
   let ws_live = ws_same_origin_ready () in
   let listener_mode = http_listener_mode () in
@@ -700,15 +731,15 @@ let transport_health_json () =
           ] )
     ; ( "grpc"
       , `Assoc
-          [ "configured", `Bool grpc_configured
-          ; "listening", `Bool grpc_live
-          ; "port", `Int (grpc_port ())
-          ; "active_streams", `Int (int_of_float grpc_streams)
-          ; "subscribers", `Int grpc_subscribers_i
-          ; "heartbeat_avg_seconds", `Float grpc_heartbeat_avg
-          ; "events_delivered", `Int (int_of_float grpc_events)
-          ; "events_dropped", `Int (int_of_float grpc_events_dropped)
-          ] )
+          (grpc_listener_fields grpc_state
+           @ [ "configured", `Bool grpc_configured
+             ; "port", `Int (grpc_port ())
+             ; "active_streams", `Int (int_of_float grpc_streams)
+             ; "subscribers", `Int grpc_subscribers_i
+             ; "heartbeat_avg_seconds", `Float grpc_heartbeat_avg
+             ; "events_delivered", `Int (int_of_float grpc_events)
+             ; "events_dropped", `Int (int_of_float grpc_events_dropped)
+             ]) )
     ; ( "websocket"
       , `Assoc
           [ "configured", `Bool ws_configured

@@ -1762,6 +1762,7 @@
   test_build_identity
   test_lifecycle
   test_grpc_workspace
+  test_grpc_listener
   test_grpc_client
   test_http_protocol_detect
   test_prompt_registry_defaults
@@ -1910,6 +1911,7 @@
   test_build_identity
   test_lifecycle
   test_grpc_workspace
+  test_grpc_listener
   test_grpc_client
   test_http_protocol_detect
   test_prompt_registry_defaults

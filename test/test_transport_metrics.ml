@@ -181,24 +181,13 @@ let test_grpc_events_dropped () =
     3.0 (after -. before)
 
 let test_grpc_runtime_listening_cache () =
-  (* [grpc_listening] is [grpc_enabled () && runtime_listening], and the flag
-     is off by default, so the runtime half only shows with the config half
-     named. The test used to rely on the default being on, which made it a
-     test of two things while reading as a test of one. *)
-  let previous = Sys.getenv_opt "MASC_GRPC_ENABLED" in
-  Unix.putenv "MASC_GRPC_ENABLED" "1";
-  Fun.protect
-    ~finally:(fun () ->
-      Unix.putenv "MASC_GRPC_ENABLED" (Option.value previous ~default:"0"))
-    (fun () ->
-      TM.set_grpc_runtime_listening true;
-      check bool "grpc listening uses runtime cache" true (TM.grpc_listening ());
-      TM.set_grpc_runtime_listening false;
-      check bool "grpc listening resets" false (TM.grpc_listening ()));
-  (* And the config half alone is not enough either. *)
-  TM.set_grpc_runtime_listening true;
-  check bool "a disabled flag keeps it not listening" false (TM.grpc_listening ());
-  TM.set_grpc_runtime_listening false
+  let previous = TM.grpc_listener_snapshot () in
+  Fun.protect ~finally:(fun () -> TM.set_grpc_listener_state previous)
+  @@ fun () ->
+  TM.set_grpc_listener_state Listening;
+  check bool "bound resource is listening" true (TM.grpc_listening ());
+  TM.set_grpc_listener_state Binding;
+  check bool "configuration alone is not readiness" false (TM.grpc_listening ())
 
 let test_ws_sessions () =
   TM.set_ws_sessions 4;
@@ -625,38 +614,36 @@ let test_transport_health_json () =
    Listen Status (#3408)
    ============================================================ *)
 
+let check_grpc_state state ~status ~listening ~failure =
+  TM.set_grpc_listener_state state;
+  let json = `Assoc (TM.grpc_listener_fields (TM.grpc_listener_snapshot ())) in
+  check string "public lifecycle" status
+    Yojson.Safe.Util.(json |> member "listen_status" |> to_string);
+  check bool "readiness from same observation" listening
+    Yojson.Safe.Util.(json |> member "listening" |> to_bool);
+  check bool "runtime predicate agrees" listening (TM.grpc_listening ());
+  check bool "closed failure class" true
+    (Yojson.Safe.Util.member "listen_failure" json =
+     match failure with None -> `Null | Some value -> `String value)
+
 let test_grpc_listen_status_lifecycle () =
-  (* The status string is independent of the flag; [grpc_listening] is not, so
-     the enabling half is named here rather than inherited from a default. *)
-  let previous = Sys.getenv_opt "MASC_GRPC_ENABLED" in
-  Unix.putenv "MASC_GRPC_ENABLED" "1";
-  Fun.protect ~finally:(fun () ->
-    Unix.putenv "MASC_GRPC_ENABLED" (Option.value previous ~default:"0"))
-  @@ fun () ->
-  check string "grpc status after init" "not_started"
-    (Atomic.get TM.grpc_listen_status);
-  TM.set_grpc_listen_status "listening";
-  TM.set_grpc_runtime_listening true;
-  check string "grpc status after listening" "listening"
-    (Atomic.get TM.grpc_listen_status);
-  check bool "grpc listening returns true" true (TM.grpc_listening ());
-  TM.set_grpc_listen_status "stopped";
-  TM.set_grpc_runtime_listening false;
-  check string "grpc status after stopped" "stopped"
-    (Atomic.get TM.grpc_listen_status);
-  check bool "grpc listening returns false" false (TM.grpc_listening ())
+  check_grpc_state Not_started ~status:"not_started" ~listening:false ~failure:None;
+  check_grpc_state Binding ~status:"binding" ~listening:false ~failure:None;
+  check_grpc_state Listening ~status:"listening" ~listening:true ~failure:None;
+  check_grpc_state Stopped ~status:"stopped" ~listening:false ~failure:None
 
 let test_listen_status_bind_failed () =
-  TM.set_grpc_listen_status "bind_failed";
-  TM.set_grpc_runtime_listening false;
-  check bool "grpc not listening on bind_failed" false (TM.grpc_listening ());
-  check string "grpc status is bind_failed" "bind_failed"
-    (Atomic.get TM.grpc_listen_status)
+  check_grpc_state (Failed Address_in_use) ~status:"bind_failed" ~listening:false
+    ~failure:(Some "address_in_use");
+  check_grpc_state (Failed Bind_failed) ~status:"bind_failed" ~listening:false
+    ~failure:(Some "bind_failed");
+  check_grpc_state (Failed Initialization_failed) ~status:"failed" ~listening:false
+    ~failure:(Some "initialization_failed");
+  check_grpc_state (Failed Serve_failed) ~status:"failed" ~listening:false
+    ~failure:(Some "serve_failed")
 
 let test_listen_status_disabled () =
-  TM.set_grpc_listen_status "disabled";
-  check string "grpc status disabled" "disabled"
-    (Atomic.get TM.grpc_listen_status)
+  check_grpc_state Disabled ~status:"disabled" ~listening:false ~failure:None
 
 (* ============================================================
    Test Runner

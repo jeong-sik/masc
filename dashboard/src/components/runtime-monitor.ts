@@ -426,7 +426,6 @@ function runtimeParameterDetailRows(
     detailRow('request', 'response format', runtimeRequestFormatText(provider)),
     detailRow('request', 'output schema', boolText(request?.has_output_schema)),
     detailRow('request', 'cache system prompt', boolText(request?.cache_system_prompt)),
-    detailRow('request', 'schema override', onOffText(request?.supports_structured_output_override)),
     detailRow('request', 'capability override', boolText(request?.has_model_capabilities_override)),
     detailRow('request', 'seed', settingText(request?.seed)),
     detailRow('request', 'rotation count', countText(request?.internal_model_rotation_count)),

@@ -98,20 +98,6 @@ type t =
   ; response_format : Types.response_format
   ; cache_system_prompt : bool
   ; cache_extended_ttl : bool
-  ; supports_structured_output_override : bool option
-    (** Override whether this concrete OpenAI-compatible endpoint supports
-        provider-native JSON-schema output requests. This is intentionally an
-        endpoint declaration, not a model capability override:
-        {!validate_output_schema_request} still requires the resolved model
-        capability to advertise [supports_structured_output].
-
-        [None] keeps the built-in endpoint policy.
-        [Some true] allows verified self-hosted/OpenAI-compatible endpoints
-        such as RunPod/vLLM/SGLang gateways.
-        [Some false] fail-closes even when the host would otherwise be
-        accepted.
-
-        @since 0.207.0 *)
   ; model_capabilities_override : Capabilities.capabilities option
     (** Explicit capability declaration for this concrete provider endpoint.
         This is projected from provider catalog entries that have verified the
@@ -251,7 +237,6 @@ val make
   -> ?response_format:Types.response_format
   -> ?cache_system_prompt:bool
   -> ?cache_extended_ttl:bool
-  -> ?supports_structured_output_override:bool
   -> ?model_capabilities_override:Capabilities.capabilities
   -> ?keep_alive:string
   -> ?return_progress:bool

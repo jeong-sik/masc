@@ -82,7 +82,6 @@ type t =
   ; response_format : Types.response_format
   ; cache_system_prompt : bool
   ; cache_extended_ttl : bool
-  ; supports_structured_output_override : bool option
   ; model_capabilities_override : Capabilities.capabilities option
   ; request_policy_snapshot : request_policy_snapshot option
   ; keep_alive : string option
@@ -127,7 +126,6 @@ let make
       ?(response_format = Types.Off)
       ?(cache_system_prompt = false)
       ?(cache_extended_ttl = false)
-      ?supports_structured_output_override
       ?model_capabilities_override
       ?keep_alive
       ?(return_progress = false)
@@ -189,7 +187,6 @@ let make
   ; response_format
   ; cache_system_prompt
   ; cache_extended_ttl
-  ; supports_structured_output_override
   ; model_capabilities_override
   ; request_policy_snapshot = None
   ; keep_alive

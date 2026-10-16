@@ -1649,7 +1649,6 @@ describe('SettingsSurface', () => {
             response_format: { kind: 'json_schema', has_schema: true },
             has_output_schema: true,
             cache_system_prompt: true,
-            supports_structured_output_override: true,
             has_model_capabilities_override: true,
             keep_alive: '30m',
             internal_model_rotation_count: 2,

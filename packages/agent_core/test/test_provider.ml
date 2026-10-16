@@ -169,7 +169,6 @@ let test_provider_config_rebinds_model_specific_context () =
         model_id = "claude-sonnet-5"
       ; max_context = None
       ; model_capabilities_override = None
-      ; supports_structured_output_override = None
       }
     in
     Option.bind

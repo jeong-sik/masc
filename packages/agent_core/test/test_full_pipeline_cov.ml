@@ -580,7 +580,6 @@ let test_structured_extract () =
         ~api_key:""
         ~headers:[ "Content-Type", "application/json" ]
         ~request_path:"/v1/chat/completions"
-        ~supports_structured_output_override:true
         ~model_capabilities_override:provider_capabilities
         ()
     in

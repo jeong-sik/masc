@@ -208,7 +208,6 @@ let test_make_with_all_options () =
       ~disable_parallel_tool_use:true
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
       ~cache_system_prompt:true
-      ~supports_structured_output_override:true
       ()
   in
   check_string "api_key" "sk-test" (cfg.api_key :> string);
@@ -229,11 +228,7 @@ let test_make_with_all_options () =
     "json schema mode"
     true
     (cfg.response_format = Types.JsonSchema expected_schema);
-  check_bool "cache prompt" true cfg.cache_system_prompt;
-  check_bool
-    "structured output override"
-    true
-    (cfg.supports_structured_output_override = Some true)
+  check_bool "cache prompt" true cfg.cache_system_prompt
 ;;
 
 let test_make_json_mode () =
@@ -372,7 +367,6 @@ let test_validate_output_schema_openai_compat_declared_endpoint_accepted () =
       ~model_id:"qwen/qwen3.6-35b-a3b"
       ~base_url:"https://ma8xbr1kgbclkl-64411be1.proxy.runpod.net/v1"
       ~response_format:(Types.JsonSchema (`Assoc [ "type", `String "object" ]))
-      ~supports_structured_output_override:true
       ~model_capabilities_override:Capabilities.openai_compat_chat_capabilities
       ()
   in

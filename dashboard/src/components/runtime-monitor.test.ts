@@ -122,7 +122,6 @@ describe('RuntimeMonitor', () => {
             response_format: { kind: 'json_schema', has_schema: true },
             has_output_schema: true,
             cache_system_prompt: true,
-            supports_structured_output_override: false,
             has_model_capabilities_override: true,
             keep_alive: '30m',
             internal_model_rotation_count: 2,
@@ -383,7 +382,7 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('preserve:off')
     expect(container.textContent).toContain('glm:replay')
     expect(container.textContent).toContain('tool-stream:on')
-    expect(container.textContent).toContain('schema-override:off')
+    expect(container.textContent).toContain('cap-override')
     expect(container.textContent).toContain('rotation:2')
     expect(container.textContent).toContain('declared · api:chat-completions')
     expect(container.textContent).toContain('auth:env:RUNPOD_API_KEY')

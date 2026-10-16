@@ -53,7 +53,6 @@ export interface DashboardRuntimeRequestConfig {
   response_format?: DashboardRuntimeResponseFormat | null
   has_output_schema?: boolean
   cache_system_prompt?: boolean
-  supports_structured_output_override?: boolean | null
   has_model_capabilities_override?: boolean
   keep_alive?: string | null
   internal_model_rotation_count?: number | null
@@ -501,7 +500,6 @@ function decodeRuntimeRequestConfig(raw: unknown): DashboardRuntimeRequestConfig
     response_format: decodeRuntimeResponseFormat(raw.response_format),
     has_output_schema: asBoolean(raw.has_output_schema),
     cache_system_prompt: asBoolean(raw.cache_system_prompt),
-    supports_structured_output_override: asBoolean(raw.supports_structured_output_override) ?? null,
     has_model_capabilities_override: asBoolean(raw.has_model_capabilities_override),
     keep_alive: asNullableString(raw.keep_alive),
     internal_model_rotation_count: asNumber(raw.internal_model_rotation_count) ?? null,

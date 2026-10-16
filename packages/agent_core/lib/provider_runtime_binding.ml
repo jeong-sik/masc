@@ -289,18 +289,11 @@ let to_provider_config ?model binding =
          | Some _ -> None
          | None -> Some binding.capabilities
        in
-       let supports_structured_output_override =
-         Option.map
-           (fun (caps : Llm_provider.Capabilities.capabilities) ->
-              caps.supports_structured_output)
-           provider_capabilities_override
-       in
        PConfig.make
          ~kind:binding.kind
          ~provider_id:binding.id
          ~model_id
          ~base_url:binding.base_url
-         ?supports_structured_output_override
          ?model_capabilities_override:provider_capabilities_override
          ?request_path
          ?max_context

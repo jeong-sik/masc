@@ -1628,8 +1628,7 @@ let check_attempt (attempt : attempt) state =
 let submission_operand (attempt : attempt) plan =
   match Plan.contract plan attempt.occurrence.node_id with
   | Some {target=Plan.Child_submission child;_} when not attempt.occurrence.readonly
-      && String.equal attempt.occurrence.tool_name child.submission.tool_name
-      && canonical_equal attempt.occurrence.input (Plan.child_args child.child) -> Ok child
+      && String.equal attempt.occurrence.tool_name child.submission.tool_name -> Ok child
   | Some {target=(Plan.Child_submission _ | Child_result _ | Descriptor_target _);_} | None ->
     Error (Node_identity_conflict attempt.occurrence.node_id)
 
@@ -1647,6 +1646,8 @@ let child_origin (attempt : attempt) ~plan ~activation =
   let* () = validate_plan attempt.worker ~plan in
   let* child = submission_operand attempt plan in
   let* () = update_existing journal (fun state -> None,check_attempt attempt state) in
+  let* bound_plan = Plan.bind_child_plan ~input:attempt.occurrence.input child.child
+    |> Result.map_error (fun error -> Invalid_source (Plan.child_binding_error_to_string error)) in
   let* bound = original_nested_context journal in
   let source = journal.immutable_source in
   let alias = Plan.child_alias child.child in
@@ -1671,7 +1672,7 @@ let child_origin (attempt : attempt) ~plan ~activation =
   Ok (Nested {parent_run_id=source.composition_run_id;parent_node_id=attempt.occurrence.node_id;
     parent_execution_id=attempt.occurrence.execution_id;
     parent_occurrence_tool_use_id=attempt.occurrence.tool_use_id;
-    result_node_id=child.result.id;args=Plan.child_args child.child;activation})
+    result_node_id=child.result.id;args=attempt.occurrence.input;activation},bound_plan)
 
 let record_child_submission (attempt : attempt) ~plan ~child_source =
   let journal = attempt.worker.journal in
@@ -1680,7 +1681,7 @@ let record_child_submission (attempt : attempt) ~plan ~child_source =
     | Named {origin=Nested origin;activation=Some context;_} -> Ok (origin,context)
     | Named {origin=Standalone;_} | Named {origin=Nested _;activation=None;_} | Prepared ->
       Error (Invalid_source "child source has no original Nested admission") in
-  let* expected = child_origin attempt ~plan ~activation:origin.activation in
+  let* expected,bound_plan = child_origin attempt ~plan ~activation:origin.activation in
   let* bound = original_nested_context journal in
   let parent = journal.immutable_source in
   let* () = if canonical_equal (named_origin_to_yojson expected) (named_origin_to_yojson (Nested origin))
@@ -1697,7 +1698,7 @@ let record_child_submission (attempt : attempt) ~plan ~child_source =
   let* child_journal = load ~base_path:journal.base_path ~keeper_name:child_source.keeper_name
       ~composition_run_id:child_source.composition_run_id in
   let* () = if same_source child_source child_journal.immutable_source then Ok () else Error Source_conflict in
-  let* () = validate_source_plan child_journal ~plan:(Plan.child_plan child.child) in
+  let* () = validate_source_plan child_journal ~plan:bound_plan in
   update_existing journal (fun state ->
     match check_attempt attempt state with
     | Error error -> None,Error error

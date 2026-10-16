@@ -1,7 +1,8 @@
-(** Compile exact frozen Skill calls into one typed DAG.
-    No Skill source is reread and no Tool is dispatched. This first compiler
-    binds fixed arguments; output-dependent child arguments require a runtime
-    parameter-contract barrier and are outside this grammar. *)
+(** Compile exact frozen Skill calls into one typed DAG without dispatch.
+    Async children may bind explicit upstream argument templates; the native
+    submission contract validates resolved arguments before activation. *)
+
+type arguments = Fixed of Yojson.Safe.t | Upstream of Keeper_tool_plan.Json_template.t
 
 type scope =
   | Inline of (Keeper_tool_plan.Node_id.t * Keeper_tool_plan.Node_id.t) list
@@ -13,7 +14,7 @@ type scope =
 type call = private
   { alias : Keeper_tool_plan.Node_id.t
   ; reference : Skill_reference.t
-  ; args : Yojson.Safe.t
+  ; arguments : arguments
   ; scope : scope
   ; exports : Keeper_tool_plan.export list
   }
@@ -31,6 +32,7 @@ type error =
       }
   | Instruction_reference of Keeper_tool_plan.Node_id.t
   | Async_child_requires_suspension of Keeper_tool_plan.Node_id.t
+  | Dynamic_inline_arguments of Keeper_tool_plan.Node_id.t
   | Child_policy_mismatch of Keeper_tool_plan.Node_id.t
   | Arguments_rejected of Keeper_tool_plan.Node_id.t * Tool_input_validation.rejection
   | Binding_rejected of Keeper_tool_plan.Node_id.t * Keeper_tool_composition_catalog.instantiation_error
@@ -43,9 +45,10 @@ type error =
   | Expanded_plan_rejected of Keeper_tool_plan.error
 
 val input_schema : Yojson.Safe.t
-(** Ordinary request nodes or [{id; skill_reference; args; after?}].
+(** Ordinary request nodes or [{id; skill_reference; args|input; after?}].
     [skill_reference] is the strict pinned identity JSON from Skill inventory;
-    [args] is the fixed argument object. Child outputs are named exports,
+    Exactly one of literal [args] or an explicit [input] template is required.
+    [input] is supported for async children. Child outputs are named exports,
     addressed by [/export-name/subpath]. *)
 
 val compile :
@@ -66,6 +69,6 @@ val plan : t -> Keeper_tool_plan.t
 val calls : t -> call list
 val call_to_json : call -> Yojson.Safe.t
 val calls_to_json : t -> Yojson.Safe.t
-(** Exact references, bound arguments and explicit leaf mappings for durable
+(** Exact references, fixed arguments or explicit upstream templates and leaf mappings for durable
     draft/run evidence. Preparation does not constitute Skill activation. *)
 val error_to_json : error -> Yojson.Safe.t

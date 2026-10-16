@@ -1000,9 +1000,9 @@ and async_child =
   { alias : Node_id.t
   ; reference : Skill_reference.t
   ; tool_name : string
-  ; args : Yojson.Safe.t
+  ; input : Json_template.t
   ; input_schema : Yojson.Safe.t
-  ; bound_plan : t
+  ; declared_plan : t
   }
 and child_nodes =
   { child : async_child
@@ -1024,13 +1024,15 @@ type contract =
   }
 
 let fixed_async_child ~alias ~reference ~tool_name ~args ~input_schema ~bound_plan =
-  {alias;reference;tool_name;args;input_schema;bound_plan}
+  {alias;reference;tool_name;input=Json_template.literal args;input_schema;declared_plan=bound_plan}
+let dynamic_async_child ~alias ~reference ~tool_name ~input ~input_schema ~declared_plan =
+  {alias;reference;tool_name;input;input_schema;declared_plan}
 let child_alias child = child.alias
 let child_reference child = child.reference
 let child_tool_name child = child.tool_name
-let child_args child = child.args
+let child_input (child : async_child) = child.input
 let child_input_schema (child : async_child) = child.input_schema
-let child_plan child = child.bound_plan
+let child_plan child = child.declared_plan
 let compiled_children plan = plan.children
 
 let next_plan_identity = Atomic.make 0
@@ -1210,10 +1212,10 @@ let child_exports_schema plan =
 let child_nodes ~child ~submission_id ~result_id ?(after=[]) () =
   { child
   ; submission = node ~id:submission_id ~tool_name:child.tool_name ~after
-      ~input:(Json_template.literal child.args) ()
+      ~input:child.input ()
   ; result = node ~id:result_id ~tool_name:Tool_schemas_composition_control.result_schema.name
       ~after:[submission_id] ~input:(Json_template.literal (`Assoc [])) ()
-  ; output_schema = child_exports_schema child.bound_plan
+  ; output_schema = child_exports_schema child.declared_plan
   }
 
 let contract plan node_id =
@@ -1469,6 +1471,54 @@ let create ~descriptors ?branch_failure_policy ?exports nodes =
   create_compiled ~descriptors ~children:[] ?branch_failure_policy ?exports nodes
 ;;
 
+type parameter_binding_error =
+  | Missing_argument of string
+  | Instantiated_plan_rejected of error
+
+let instantiate_params ~descriptors ~args plan =
+  let lookup name = match args with
+    | `Assoc fields -> List.assoc_opt name fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
+    | `Tuple _ | `Variant _ -> None in
+  let rec rebuild rebuilt = function
+    | [] -> create_compiled ~descriptors ~children:plan.children
+        ~branch_failure_policy:plan.branch_failure_policy ~exports:plan.exports (List.rev rebuilt)
+      |> Result.map_error (fun error -> Instantiated_plan_rejected error)
+    | (node : node) :: rest ->
+      match Json_template.substitute_params ~lookup node.input with
+      | Error (Json_template.Missing_param name) -> Error (Missing_argument name)
+      | Ok input -> rebuild ({node with input} :: rebuilt) rest in
+  rebuild [] plan.nodes
+;;
+
+type child_binding_error =
+  | Child_arguments_rejected of Tool_input_validation.rejection
+  | Fixed_child_input_mismatch
+  | Child_plan_rejected of parameter_binding_error
+
+let child_binding_error_to_string = function
+  | Child_arguments_rejected rejection -> rejection.Tool_input_validation.message
+  | Fixed_child_input_mismatch -> "child arguments differ from the original fixed input"
+  | Child_plan_rejected (Missing_argument name) -> Printf.sprintf "missing child argument %S" name
+  | Child_plan_rejected (Instantiated_plan_rejected error) -> error_to_string error
+;;
+
+let bind_child_plan ~input (child : async_child) =
+  let ( let* ) = Result.bind in
+  let* args = Tool_input_validation.validate ~schema:child.input_schema ~name:child.tool_name ~args:input ()
+    |> Result.map_error (fun error -> Child_arguments_rejected error) in
+  let* () = match Json_template.dependencies child.input with
+    | _::_ -> Ok ()
+    | [] ->
+      (match Json_template.resolve ~lookup:(fun _ -> None) child.input with
+       | Ok original when Yojson.Safe.equal (Yojson.Safe.sort original) (Yojson.Safe.sort args) -> Ok ()
+       | Ok _ | Error _ -> Error Fixed_child_input_mismatch) in
+  let descriptors = List.map snd child.declared_plan.descriptors
+    |> List.sort_uniq (fun (left : Keeper_tool_descriptor.t) (right : Keeper_tool_descriptor.t) -> String.compare left.id right.id) in
+  instantiate_params ~descriptors ~args child.declared_plan
+  |> Result.map_error (fun error -> Child_plan_rejected error)
+;;
+
 let dependency_layers plan =
   let rec build completed remaining acc =
     match remaining with
@@ -1617,10 +1667,12 @@ type prepared_input =
   | Checked_before_run of Yojson.Safe.t
   | Checked_when_node_runs
 
-let prepare_inputs plan =
+let prepare_inputs_with_params ~allow_params plan =
   let no_output _ = None in
   let rec prepare prepared : node list -> _ = function
     | [] -> Ok (List.rev prepared)
+    | node :: rest when allow_params && Json_template.param_names node.input <> [] ->
+      prepare ((node.id, Checked_when_node_runs) :: prepared) rest
     | node :: rest ->
       (match Json_template.dependencies node.input with
        | _ :: _ -> prepare ((node.id, Checked_when_node_runs) :: prepared) rest
@@ -1635,3 +1687,8 @@ let prepare_inputs plan =
   in
   prepare [] plan.nodes
 ;;
+
+let prepare_inputs = prepare_inputs_with_params ~allow_params:false
+
+let validate_parameterized_inputs plan =
+  prepare_inputs_with_params ~allow_params:true plan |> Result.map (fun _ -> ())

@@ -275,7 +275,7 @@ let composable_tool_names ~descriptors =
 
 let ( let* ) = Result.bind
 
-let rec template_to_yojson = function
+let rec template_to_yojson_with_params ~allow_params = function
   | Plan.Json_template.Literal value ->
     Ok (`Assoc [ "kind", `String "literal"; "value", value ])
   | Plan.Json_template.Output { node_id; pointer } ->
@@ -285,13 +285,15 @@ let rec template_to_yojson = function
         ; "node", `String (Plan.Node_id.to_string node_id)
         ; "pointer", `String (Plan.Json_pointer.to_string pointer)
         ])
-  | Plan.Json_template.Param { name } -> Error (Unsubstituted_param { name })
+  | Plan.Json_template.Param { name } ->
+    if allow_params then Ok (`Assoc ["kind",`String "param";"name",`String name])
+    else Error (Unsubstituted_param { name })
   | Plan.Json_template.Object fields ->
     let* fields =
       List.fold_left
         (fun encoded (name, value) ->
            let* encoded = encoded in
-           let* value = template_to_yojson value in
+           let* value = template_to_yojson_with_params ~allow_params value in
            Ok (`Assoc [ "name", `String name; "value", value ] :: encoded))
         (Ok [])
         fields
@@ -304,7 +306,7 @@ let rec template_to_yojson = function
       List.fold_left
         (fun encoded item ->
            let* encoded = encoded in
-           let* item = template_to_yojson item in
+           let* item = template_to_yojson_with_params ~allow_params item in
            Ok (item :: encoded))
         (Ok [])
         items
@@ -313,8 +315,10 @@ let rec template_to_yojson = function
       (`Assoc [ "kind", `String "array"; "items", `List (List.rev items) ])
 ;;
 
-let node_to_yojson (node : Plan.node) =
-  let* input = template_to_yojson node.input in
+let template_to_yojson = template_to_yojson_with_params ~allow_params:false
+
+let node_to_yojson ~allow_params (node : Plan.node) =
+  let* input = template_to_yojson_with_params ~allow_params node.input in
   let after =
     match node.after with
     | [] -> []
@@ -339,12 +343,12 @@ let contract_exn plan id = match Plan.contract plan id with
   | Some contract -> contract
   | None -> invalid_arg "validated plan lost its node contract"
 
-let rec to_yojson plan =
+let rec plan_to_yojson ~allow_params plan =
   let* nodes =
     List.fold_left
       (fun encoded node ->
          let* encoded = encoded in
-         let* json = node_to_yojson node in
+         let* json = node_to_yojson ~allow_params node in
          let* json = match (contract_exn plan node.Plan.id).target with
            | Plan.Descriptor_target _ -> Ok json
            | (Plan.Child_submission _ | Plan.Child_result _) as target ->
@@ -377,20 +381,21 @@ and compiled_operand_to_yojson = function
   | Plan.Descriptor_target _ -> invalid_arg "ordinary descriptor is not a compiled child operand"
   | (Plan.Child_submission nodes | Plan.Child_result nodes) as target ->
     let child = nodes.Plan.child in
-    let* bound_plan = to_yojson (Plan.child_plan child) in
-    let* bound_contracts = contracts_to_yojson (Plan.child_plan child) in
+    let* declared_plan = plan_to_yojson ~allow_params:true (Plan.child_plan child) in
+    let* declared_contracts = contracts_to_yojson (Plan.child_plan child) in
+    let* input = template_to_yojson (Plan.child_input child) in
     let kind = match target with
       | Plan.Child_submission _ -> "submission"
       | Plan.Child_result _ -> "result"
       | Plan.Descriptor_target _ -> invalid_arg "compiled target changed during encoding" in
     Ok (`Assoc ["kind",`String kind;"alias",`String (Plan.Node_id.to_string (Plan.child_alias child));
       "reference",Skill_reference.to_yojson (Plan.child_reference child);
-      "tool_name",`String (Plan.child_tool_name child);"args",Plan.child_args child;
+      "tool_name",`String (Plan.child_tool_name child);"input",input;
       "input_schema_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort (Plan.child_input_schema child)));
       "submission_node",`String (Plan.Node_id.to_string nodes.submission.id);
       "result_node",`String (Plan.Node_id.to_string nodes.result.id);
-      "bound_plan",bound_plan;
-      "bound_contracts_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort bound_contracts))])
+      "declared_plan",declared_plan;
+      "declared_contracts_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort declared_contracts))])
 and contracts_to_yojson plan =
   let* contracts = List.fold_left (fun prior (node : Plan.node) ->
     let* contracts = prior in
@@ -407,6 +412,8 @@ and contracts_to_yojson plan =
     (Ok []) (Plan.nodes plan) in
   Ok (`List (List.rev contracts))
 ;;
+
+let to_yojson = plan_to_yojson ~allow_params:false
 
 let first_duplicate fields =
   let rec loop seen = function

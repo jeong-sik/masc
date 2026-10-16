@@ -135,7 +135,8 @@ let test_repeated_child_identity_bindings_and_output_mapping () =
   check int "no namespace collision" 6 (List.length (List.sort_uniq String.compare ids));
   let call = List.hd (Nested.calls compiled) in
   check bool "exact revision retained" true (Skill_reference.equal reference call.reference);
-  check bool "canonical fixed bindings retained" true (Yojson.Safe.equal call.args (`Assoc [ "query", `String "docker" ]));
+  let args = match call.arguments with Nested.Fixed args -> args | Upstream _ -> fail "expected fixed arguments" in
+  check bool "canonical fixed bindings retained" true (Yojson.Safe.equal args (`Assoc [ "query", `String "docker" ]));
   let mapping = match call.scope with Nested.Inline mapping -> mapping | Nested.Async _ -> fail "inline scope" in
   let good_id = List.find (fun (id, _) -> Plan.Node_id.to_string id = "lane/~profile") mapping |> snd in
   let downstream = Plan.nodes plan |> List.find (fun (node : Plan.node) -> node.tool_name = "keeper_memory_search"
@@ -151,7 +152,7 @@ let test_repeated_child_identity_bindings_and_output_mapping () =
   check bool "durable evidence preserves exact pinned reference" true
     (Yojson.Safe.equal (Yojson.Safe.Util.member "reference" evidence) (Skill_reference.to_yojson reference));
   check bool "durable evidence preserves bound args" true
-    (Yojson.Safe.equal (Yojson.Safe.Util.member "args" evidence) call.args)
+    (Yojson.Safe.equal Yojson.Safe.Util.(evidence |> member "arguments" |> member "value") args)
 ;;
 
 let test_child_failure_blocks_whole_child_consumers_but_keeps_exports () =
@@ -203,7 +204,9 @@ let test_fixed_async_child_compiles_exact_result_barrier () =
        (Skill_reference.equal reference (Plan.child_reference child.child)
         && Skill_reference.equal reference (Plan.child_reference result_child.child));
      check bool "canonical fixed args remain bound" true
-       (Yojson.Safe.equal (Plan.child_args child.child) (`Assoc ["query",`String "docker"]));
+       (match Plan.child_input child.child with
+        | Plan.Json_template.Literal value -> Yojson.Safe.equal value (`Assoc ["query",`String "docker"])
+        | Output _ | Param _ | Object _ | Array _ -> false);
      check bool "result observes only after original submission" true
        (List.mem submission (Plan.dependencies result_child.result))
    | _ -> fail "async compiler did not retain native execution targets");
@@ -212,6 +215,55 @@ let test_fixed_async_child_compiles_exact_result_barrier () =
   check string "escaped named export stays one exact pointer segment" pointer
     (Plan.Json_pointer.to_string export.pointer);
   check bool "native result never routes through an ordinary descriptor name" true (Plan.descriptor plan result = None)
+;;
+
+let test_upstream_child_arguments_bind_exact_declared_plan () =
+  let surface,reference = fixture ~source:(document ~execution:"async" ()) () in
+  let child alias source = `Assoc ["id",`String alias;"skill_reference",Skill_reference.to_yojson reference;
+    "input",`Assoc ["kind",`String "object";"fields",`List
+      [`Assoc ["name",`String "query";"value",`Assoc
+        ["kind",`String "output";"node",`String source;"pointer",`String "/profile"]]]]] in
+  let recipe = request [leaf "first";leaf "second";child "a" "first";child "b" "second"] in
+  let compiled = Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async
+      ~capability_surface:surface recipe |> require "upstream exact async compiler" in
+  let plan = Nested.plan compiled and run_id = Plan.Run_id.fresh () in
+  let id name = Plan.Node_id.make (Yojson.Safe.to_string (`List [`String name])) |> require "encoded parent ID" in
+  let producer name query =
+    Plan.validate_output plan ~run_id ~node_id:(id name)
+      (`Assoc ["profile",`String query;"lane",`Null;"endpoint",`Null;"operator_action",`Null])
+      |> require "real producer contract" in
+  let first = producer "first" "docker" and second = producer "second" "host" in
+  List.iter2 (fun (call : Nested.call) expected ->
+    let submission = match call.scope with Nested.Async {submission;_} -> submission
+      | Inline _ -> fail "dynamic async child became inline" in
+    let input = Plan.resolve_input plan ~run_id ~node_id:submission ~lookup:(fun node ->
+        if Plan.Node_id.equal node (id "first") then Some first
+        else if Plan.Node_id.equal node (id "second") then Some second else None)
+      |> require "upstream arguments resolved before dispatch" in
+    check bool "two uses of one exact Skill keep distinct argument values" true
+      (Yojson.Safe.equal input (`Assoc ["query",`String expected]));
+    let child = match Plan.contract plan submission with Some {target=Plan.Child_submission child;_} -> child.child
+      | _ -> fail "exact child operand missing" in
+    let bound = Plan.bind_child_plan ~input child |> require "frozen child argument binding" in
+    let query = List.find (fun (node : Plan.node) -> node.tool_name = "keeper_memory_search") (Plan.nodes bound) in
+    let resolved = Plan.Json_template.resolve ~lookup:(fun _ -> None) query.input |> require "bound query" in
+    check bool "declared parameter reaches the correct leaf" true (Yojson.Safe.equal resolved input);
+    List.iter (fun input -> match Plan.bind_child_plan ~input child with
+      | Error (Plan.Child_arguments_rejected _) -> ()
+      | Error _ | Ok _ -> fail "invalid dynamic arguments bypassed exact Skill schema")
+      [`Assoc ["query",`String "invalid"];`Assoc ["query",`Int 1];
+       `Assoc ["query",`String "docker";"extra",`Bool true]]) (Nested.calls compiled) ["docker";"host"];
+  let module Request = Masc.Keeper_tool_plan_request in
+  let encoded = Request.to_yojson plan |> require "owned parameterized child encoding" in
+  (match Request.plan_of_json ~descriptors:(Surface.descriptors surface) encoded with
+   | Error _ -> () | Ok _ -> fail "private parameterized operand became public authority");
+  (match Request.template_of_json (`Assoc ["kind",`String "param";"name",`String "query"]) with
+   | Error _ -> () | Ok _ -> fail "public input grammar admitted an unbound parameter");
+  let both = match child "bad" "first" with `Assoc fields -> `Assoc (("args",`Assoc [])::fields)
+    | _ -> fail "fixture call" in
+  (match Nested.compile ~execution:Masc.Keeper_tool_composition_catalog.Async ~capability_surface:surface
+      (request [both;leaf "first"]) with
+   | Error (Nested.Invalid_call_field _) -> () | Error _ | Ok _ -> fail "ambiguous child input accepted")
 ;;
 
 let test_refusals_preserve_frozen_authority_and_contracts () =
@@ -290,6 +342,12 @@ let test_nested_draft_freezes_and_revalidates_recipe () =
   with_base @@ fun base_path ->
   let surface, reference = fixture () in
   let recipe = request ~exports:[ exported "answer" "child" pointer ] [ nested "child" reference ] in
+  let dynamic_inline = request [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;
+    "input",`Assoc ["kind",`String "literal";"value",`Assoc ["query",`String "docker"]]]] in
+  (match Draft.prepare ~base_path ~capability_surface:surface ~keeper_name:"fixture"
+      ~execution:Masc.Keeper_tool_composition_catalog.Inline dynamic_inline with
+   | Error (Draft.Nested_rejected (Nested.Dynamic_inline_arguments _)) -> ()
+   | Error _ | Ok _ -> fail "unsupported inline input lost its typed draft refusal");
   let draft = prepare ~base_path surface recipe in
   let stored = read_document ~base_path (Draft.reference draft) in
   let open Yojson.Safe.Util in
@@ -672,6 +730,7 @@ let () = run "exact inline composition compiler"
     [ "composition", [ test_case "repeat exact child, bind params, namespace and map outputs" `Quick test_repeated_child_identity_bindings_and_output_mapping
         ; test_case "whole-child failure barrier with useful independent results" `Quick test_child_failure_blocks_whole_child_consumers_but_keeps_exports
         ; test_case "fixed async child compiles exact canonical result barrier" `Quick test_fixed_async_child_compiles_exact_result_barrier
+        ; test_case "upstream arguments bind repeated exact async Skills independently" `Quick test_upstream_child_arguments_bind_exact_declared_plan
         ; test_case "authority, arguments, cycles and semantic refusals" `Quick test_refusals_preserve_frozen_authority_and_contracts
         ; test_case "frozen nested draft recipe and exact provenance" `Quick test_nested_draft_freezes_and_revalidates_recipe
         ; test_case "public prepare/run admits exact children once and delivers through parent" `Quick

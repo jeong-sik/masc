@@ -152,7 +152,7 @@ let validate_plan ~execution ~capability_surface json =
     | Nested.Inputs_rejected (node_id, error) -> Inputs_rejected (node_id, error)
     | ( Nested.Invalid_call_field _ | Nested.Invalid_reference _
       | Nested.Reference_unavailable _ | Nested.Instruction_reference _
-      | Nested.Async_child_requires_suspension _ | Nested.Child_policy_mismatch _
+      | Nested.Async_child_requires_suspension _ | Nested.Dynamic_inline_arguments _ | Nested.Child_policy_mismatch _
       | Nested.Arguments_rejected _ | Nested.Binding_rejected _
       | Nested.Duplicate_alias _ | Nested.Unknown_alias _
       | Nested.Child_output_requires_export _ | Nested.Unknown_child_export _
@@ -459,7 +459,7 @@ let load_nested_result_children ~base_path source ~result =
       let frozen = List.assoc "scope" fields in
       let* () = if List.exists (Yojson.Safe.equal frozen) calls && not (List.exists (Yojson.Safe.equal frozen) seen)
         then Ok () else malformed "result child scope differs or repeats the original frozen run" in
-      let* call = exact_fields ~names:["alias";"reference";"args";"scope";"exports"] frozen in
+      let* call = exact_fields ~names:["alias";"reference";"arguments";"scope";"exports"] frozen in
       let* alias = match List.assoc "alias" call with `String alias -> Ok alias | _ -> malformed "invalid original child alias" in
       let* reference = Skill_reference.of_yojson (List.assoc "reference" call)
         |> Result.map_error (fun _ -> Malformed_draft "invalid original child reference") in

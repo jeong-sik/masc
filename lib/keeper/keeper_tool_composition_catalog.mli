@@ -239,7 +239,7 @@ val input_schema_of_params : param list -> Yojson.Safe.t
     [Enum_param] property is a string with its members under [enum]. The
     empty list yields the zero-param object schema. *)
 
-type instantiation_error =
+type instantiation_error = Keeper_tool_plan.parameter_binding_error =
   | Missing_argument of string
   | Instantiated_plan_rejected of Keeper_tool_plan.error
 

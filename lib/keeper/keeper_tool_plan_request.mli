@@ -68,6 +68,10 @@ type error =
 
 type encode_error = Unsubstituted_param of { name : string }
 
+val template_of_json : Yojson.Safe.t -> (Keeper_tool_plan.Json_template.t, template_error) result
+val template_to_yojson : Keeper_tool_plan.Json_template.t -> (Yojson.Safe.t, encode_error) result
+(** The public template grammar. [Param] remains rejected in both directions. *)
+
 val input_schema : Yojson.Safe.t
 (** Canonical model-visible schema for the JSON grammar parsed by
     {!plan_of_json}. The nested template shapes are advertised here; semantic
@@ -83,7 +87,8 @@ val to_yojson
   -> (Yojson.Safe.t, encode_error) result
 (** Encode a validated, parameter-free plan. Ordinary nodes round-trip through
     the public grammar. Native compiled nodes additionally preserve their exact
-    operand and child plan; the public parser rejects this private metadata.
+    operand and declared child plan (including its private parameter leaves);
+    the public parser rejects this private metadata.
     Owned drafts recompile the original recipe and compare this evidence;
     decoding metadata never grants a compiler or execution capability. *)
 

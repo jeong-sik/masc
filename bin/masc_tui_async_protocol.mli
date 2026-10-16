@@ -28,9 +28,7 @@ type http_scoped_surface_results = {
   http_fleet_safety: (Masc.Tui_decode.fleet_safety_reading, string) result option;
   (* [None] on surfaces that do not read the roster or its Candle summary;
      leaving it out keeps the observation until a relevant refresh. *)
-  http_keeper_roster:
-    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result,
-     Masc_tui_keeper_control.roster_failure) result option;
+  http_keeper_roster: keeper_roster_observation option;
   (* [None] off Dashboard and Usage. One fetch, two readings: the runtime
      rows and the provider usage windows. *)
   http_runtime_quota:
@@ -193,6 +191,8 @@ type async_msg =
   | Http_overview_loaded of overview_preview
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
+  (** A workspace-bound roster can settle before unrelated readers. *)
+  | Http_keeper_roster_loaded of early_keeper_roster_observation
   (** Diagnostic reader status; it grants no data or action authority. *)
   | Http_progress_observed of http_progress_observation
   | Http_refresh_done of http_refresh_outcome

@@ -31,6 +31,21 @@ size/SHA256. Verify those against the run identity, requested candidate and
 downloaded bytes before using the executable. An uploaded artifact or a supplied
 source SHA alone does not establish a successful build.
 
+The artifact verifier reads only the downloaded files. Supply identities read
+independently from the actual completed GitHub run and its selected candidate:
+
+```sh
+python3 scripts/ci/verify-preparation-driver-artifact.py \
+  --directory "$PRIVATE_ARTIFACT_DIRECTORY" --source "$CANDIDATE_SHA" \
+  --workflow-head "$ACTUAL_WORKFLOW_HEAD" \
+  --run-id "$COMPLETED_RUN_ID" --attempt "$ACTUAL_RUN_ATTEMPT"
+```
+
+It rejects missing, extra, changed or nonregular payload entries and identity
+mismatches, and prints the verified executable and receipt digests. It does not
+query GitHub or certify completion, behavior, dependency compatibility or a model
+trial. Keep its output outside the immutable artifact directory.
+
 The executable is a native probe, with dependencies recorded by `otool -L`, opam
 and Homebrew. This target does not establish a relocatable installed runtime;
 verify that the local host provides the recorded native dependencies. Artifact

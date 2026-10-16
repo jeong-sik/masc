@@ -2737,7 +2737,8 @@ let make_tools_with_authority
               Ok (Some (Agent_core.Tool.scoped_call ~scope ~additional_scopes prepared.handler))
       in
       Agent_core.Tool.of_schema
-        ~descriptor:(Agent_core.Tool.ordinary_descriptor_scoped ~prepare)
+        ~descriptor:(Agent_core.Tool.ordinary_descriptor_scoped
+          ~call_effect:(Agent_core.Tool.call_effect ordinary) ~prepare)
         ordinary.schema ordinary.handler
     in
     ( tool

@@ -176,6 +176,12 @@ exact-source ledger reader. It performs no answer append, enqueue, wake hint or
 registry repair. The wire includes canonical answer time, source identity,
 positive turn-entry/turn-boundary/queue-settlement/cancellation clocks and
 evidence completeness. Question text, answers and responder data are excluded.
+The shared exact-source reader previously held a native mutex while scanning
+native files in the calling Eio fiber. Its native file scan and mutex wait now
+run through the existing context-aware system-thread guard; non-Eio callers
+keep direct execution. This affects every consumer of that exact-source reader,
+including the existing scheduler/native-task observations. It changes neither
+cache ownership nor evidence semantics, and has no measured latency result yet.
 
 | Fact | Receipt alone | Source implementation |
 |---|---|---|

@@ -141,6 +141,12 @@ for the exact-run final response. The fixture also checks the ordinary
 autonomous inspector's exact turn/run projection; an unavailable run remains
 unverified. Strategy
 compliance is recorded separately; noncompliance stays in the assigned arm.
+An outer plan with no selected exports is also valid. Its sealed canonical
+reply retains full `actions`; a plan selecting exports instead retains the
+complete node evidence through `execution_artifact`. Physical ownership and
+resolved upstream arguments join the corresponding node facts in either
+representation. Neither representation substitutes for the original SDK
+reply, manifest hash, execution ID, Task/trace/turn or exact Skill activation.
 `Completed` alone is insufficient. Exact Skill compliance joins the activation
 to the original SDK parent reply, immutable prepared manifest, resolved child
 argument and physical stdout execution. Model-generated tool-use IDs and child
@@ -209,7 +215,8 @@ credential binding, and retains both refusals as explicit failures. That server
 is synthetic and does not exercise a paid provider. Native HTTP size/hash and
 dispatch/header counts are compared with independently received peer bytes for
 both normal and refused requests. A malformed-final pair
-verifies that already completed physical work, source ACKs, clocks and usage
+uses a valid no-outer-exports Skill run and verifies that already completed
+physical work, source ACKs, clocks and usage
 remain available when the final response violates the JSON contract; both
 attempts remain explicit failures in the denominator.
 It is not a no-argument invocation of the parameterized driver. Authoring this

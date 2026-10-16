@@ -225,15 +225,24 @@ let test_a_cancelled_wait_leaves_nothing_behind () =
 module Mode = Masc.Keeper_tool_approval_mode
 
 let test_mode_defaults_to_auto_and_yolo_is_an_override () =
+  (* [Mode.set] persists beside the other gate state before it moves the
+     in-memory stance, so it needs a workspace and answers with a result. *)
+  let base_path = Filename.temp_file "approval-mode-registry" "" in
+  Sys.remove base_path;
+  Sys.mkdir base_path 0o700;
+  let set modes mode =
+    match Mode.set modes ~base_path ~actor:"registry-test" ~keeper_name:"alpha" mode with
+    | Ok (Mode.Applied | Mode.Applied_audit_failed _) -> ()
+    | Error detail -> Alcotest.failf "setting the stance failed: %s" detail in
   let modes = Mode.create () in
   check bool "unspoken keeper is auto" true
     (Mode.resolve modes ~keeper_name:"alpha" = Mode.Auto);
-  Mode.set modes ~keeper_name:"alpha" Mode.Yolo;
+  set modes Mode.Yolo;
   check bool "set stance resolves" true
     (Mode.resolve modes ~keeper_name:"alpha" = Mode.Yolo);
   check (list string) "only moved keepers are listed" [ "alpha" ]
     (List.map fst (Mode.overrides modes));
-  Mode.set modes ~keeper_name:"alpha" Mode.Auto;
+  set modes Mode.Auto;
   check bool "auto removes the override" true (Mode.overrides modes = []);
   check bool "and resolves as the default again" true
     (Mode.resolve modes ~keeper_name:"alpha" = Mode.Auto)

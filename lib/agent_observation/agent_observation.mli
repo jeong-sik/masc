@@ -92,7 +92,7 @@ type addressed =
   ; checkout : string option
         (** Measured checkout root, including the operator checkout. Never
             part of the join key. [None] means the producer has no measured
-            checkout, such as a directly addressed human annotation. *)
+            checkout. *)
   }
 
 type unaddressed =

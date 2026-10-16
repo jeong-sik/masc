@@ -4,10 +4,6 @@ let ( let* ) = Result.bind
 
 let root_prefix root = if String.equal root "/" then root else root ^ "/"
 
-let under_root ~root path =
-  String.equal root path || String.starts_with ~prefix:(root_prefix root) path
-;;
-
 let inspect budget ~unavailable read =
   match Repo_git.Inspection_budget.remaining_timeout budget with
   | Error _ -> Error Reason.Origin_lookup_timed_out
@@ -70,11 +66,12 @@ let local_matches ~base_dir ~budget ~origin repositories =
       let* root = catalog_root ~base_dir repo in
       (match root with
        | None -> collect matches rest
-       | Some root when not (under_root ~root origin) -> collect matches rest
        | Some root ->
-         (* Prefixes only select candidates. Git common-directory equality
-            proves the local origin belongs to that registered repository;
-            a nested foreign clone must not inherit its outer repository. *)
+         (* A linked worktree may live anywhere. Compare every available
+            registered checkout's physical Git identity: path ancestry is
+            neither required nor sufficient for local-origin ownership.
+            An unreadable candidate leaves identity unknown, even if an
+            earlier candidate matched, so the inspection failure propagates. *)
          let* identity =
            inspect budget ~unavailable:Reason.Checkout_unavailable
              (fun timeout_sec -> Repo_git.checkout_identity ~timeout_sec ~local_path:root ())

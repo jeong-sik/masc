@@ -170,6 +170,36 @@ let test_local_origin_nested_foreign () =
     check_reason "unregistered_origin" file (resolve base file))
 ;;
 
+let test_local_origin_outside_linked_worktree () =
+  with_base (fun base ->
+    let operator = setup base in
+    let linked = Filename.concat base "outside/linked" in
+    mkdir_p (Filename.dirname linked);
+    git operator [ "worktree"; "add"; "-b"; "local-origin"; linked ];
+    let clone = Filename.concat base "copy" in
+    init ~origin:linked clone;
+    ignore (check_address ~slug:"github.com_owner_repo" ~path:"lib/foo.ml"
+              (resolve base (Filename.concat clone "lib/foo.ml")));
+    save base [ repo "one" operator; repo ~remote:other_url "two" linked ];
+    let file = Filename.concat clone "lib/foo.ml" in
+    check_reason "ambiguous_origin" file (resolve base file))
+;;
+
+let test_local_origin_unavailable_catalog_checkout () =
+  with_base (fun base ->
+    let operator = setup base in
+    let unavailable = Filename.concat base "unavailable" in
+    mkdir_p unavailable;
+    let clone = Filename.concat base "copy" in
+    init ~origin:operator clone;
+    let file = Filename.concat clone "lib/foo.ml" in
+    List.iter (fun repositories ->
+      save base repositories;
+      check_reason "checkout_unavailable" file (resolve base file))
+      [ [ repo "known" operator; repo ~remote:other_url "unknown" unavailable ]
+      ; [ repo ~remote:other_url "unknown" unavailable; repo "known" operator ] ])
+;;
+
 let test_worktrees () =
   with_base (fun base ->
     let operator = setup base in
@@ -252,6 +282,8 @@ let () =
       ; test_case "unregistered nested foreign repository" `Quick (test_nested_foreign ~registered:false)
       ; test_case "registered nested foreign repository" `Quick (test_nested_foreign ~registered:true)
       ; test_case "local nested foreign origin cannot inherit outer repo" `Quick test_local_origin_nested_foreign
+      ; test_case "local outside linked-worktree origin and conflicting identity" `Quick test_local_origin_outside_linked_worktree
+      ; test_case "unavailable local candidate never grants known identity" `Quick test_local_origin_unavailable_catalog_checkout
       ; test_case "worktrees fold without naming convention" `Quick test_worktrees
       ; test_case "conflicting local catalog identities" `Quick test_conflicting_catalog
       ; test_case "duplicate catalog rows retain one identity" `Quick test_duplicate_identity

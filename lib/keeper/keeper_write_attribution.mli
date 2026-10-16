@@ -6,7 +6,8 @@ val resolve :
 (** Inspect the actual checkout afresh using one shared Git inspection budget.
     A remote origin must match a registered canonical URL. A local origin is
     resolved from the measured checkout root and must share Git identity with
-    an ancestor registered local checkout. Conflicting catalog identities and
-    unavailable observations remain typed [Unaddressed] facts. The path is
+    a registered local checkout, including its linked worktrees. Conflicting
+    catalog identities and unavailable observations remain typed [Unaddressed]
+    facts. The path is
     relative to the actual checkout; every measured checkout carries its root
     as projection metadata. Eio cancellation propagates. *)

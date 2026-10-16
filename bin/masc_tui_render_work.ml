@@ -566,6 +566,30 @@ let planning_updated_age ~now (goal : planning_goal) =
 (** Render the Planning surface (list view). *)
 
 
+(* This is snapshot provenance, not fresh Goal/proof authority. Keep the
+   warning outside the scrollable proof body so proof presentation indices
+   still refer to the same body rows. Header and viewport use the same rows. *)
+let planning_stale_notice_rows (state : state) ~cols =
+  let notice = match state.workspace_identity, state.planning_error with
+    | Workspace_identity_match_unconfirmed detail, _ -> Some ("Workspace unconfirmed", detail)
+    | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _), Some error ->
+        Some ("Refresh failed", error)
+    | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _), None -> None
+  in
+  match state.planning, notice with
+  | Some snapshot, Some (status, error) ->
+      let width = max 1 (framed_inner_width cols - 2) in
+      let rows text = Message_layout.wrap_words ~max_cells:width text
+        |> List.map (fun line -> Theme.warn () ^ "  " ^ line ^ Ansi.reset) in
+      rows (status ^ " · showing snapshot "
+        ^ Terminal_text.single_line snapshot.pl_generated_at)
+      @ (match Terminal_text.optional_single_line (Some error) with
+         | None -> []
+         (* Keep verbose diagnostics on the existing error row; a long
+            transport reason must not consume the Goal/proof viewport. *)
+         | Some detail -> [data_unreliable_row ~cols detail])
+  | None, (None | Some _) | Some _, None -> []
+
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -615,6 +639,7 @@ let render_planning_list (state : state) =
   (* Show the modes once, but do not hide them behind a clipped title. *)
   if not modes_fit_header then
     box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ modes);
+  List.iter (box_line buf cols) (planning_stale_notice_rows state ~cols);
   (* The list below can only show goals the store still holds. A goal that
      completed and left goals.json left every planning surface with it, so
      "what did we finish" had no answer here at all. These two lines are what
@@ -734,7 +759,7 @@ let render_planning_list (state : state) =
                not the time this TUI received them or the process age. *)
             pack_summary stamps_summary ~style:(Theme.recede ())
               [ "Baseline snapshot: " ^ Terminal_text.single_line first.pl_generated_at
-              ; "Current snapshot: " ^ Terminal_text.single_line p.pl_generated_at
+              ; "Displayed snapshot: " ^ Terminal_text.single_line p.pl_generated_at
               ]);
        pack_summary change_summary ~style:(Theme.info ())
          (planning_change_clauses ~baseline:state.planning_baseline p);
@@ -1099,13 +1124,16 @@ let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
   let tail = phase ^ " " ^ identity in
   let header = planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
     ~after:tail ^ tail in
-  if Message_layout.display_width header <= framed_inner_width cols then [header]
-  else
-    (planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
-       ~after:phase ^ phase)
-    :: (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2))
-          ("Goal: " ^ identity)
-        |> List.map (fun line -> "  " ^ line))
+  let headers =
+    if Message_layout.display_width header <= framed_inner_width cols then [header]
+    else
+      (planning_workspace_title state ~cols ~tab:Planning_goals ~window:""
+         ~after:phase ^ phase)
+      :: (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols - 2))
+            ("Goal: " ^ identity)
+          |> List.map (fun line -> "  " ^ line))
+  in
+  headers @ planning_stale_notice_rows state ~cols
 
 let planning_detail_height ~rows ~header_rows ~action_rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + max 0 (header_rows - 1) + action_rows)

@@ -11530,9 +11530,15 @@ let apply_planning_load state = function
            state.planning_mode <- Planning_detail goal_id)
   | Error err ->
       state.goal_action_pending <- None;
-      state.planning <- None;
-      state.planning_mode <- Planning_list;
-      state.planning_scroll <- 0;
+      (* A failed observation supplies no replacement goal list. Keep the
+         snapshot, selected goal and viewport until a successful replacement
+         reconciles them; workspace source replacement still clears it. *)
+      Log.Transport.info "tui_planning_refresh_failed=%s"
+        (Yojson.Safe.to_string (`Assoc
+          [ "retained", `Bool (Option.is_some state.planning)
+          ; "snapshot_generated_at", (match state.planning with
+              | None -> `Null | Some snapshot -> `String snapshot.pl_generated_at)
+          ; "observed_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ())) ]));
       remember_surface_error state ~surface:"planning"
         ~current_error:state.planning_error
         ~set_error:(fun value -> state.planning_error <- value)
@@ -12099,6 +12105,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.goal_action_error <- None;
   state.planning <- None;
   state.planning_baseline <- None;
+  state.planning_error <- None;
   state.planning_mode <- Planning_list;
   state.goal_confirmation <- Goal_confirmation.Inspecting Goal_confirmation_read.initial;
   state.goals_to_confirm <- Masc_tui_agenda.Not_read;

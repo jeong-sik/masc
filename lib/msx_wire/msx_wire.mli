@@ -31,3 +31,26 @@ val decode : Yojson.Safe.t -> (refusal, string) result
     [message] are ignored; a repeated field, a [code] this type does not name,
     or a [code] or [message] that is not a string is an [Error], never a
     default. *)
+
+(** {1 Tick request}
+
+    The body of [POST /api/v1/msx/tick] and the arguments of
+    [masc_msx_step] with [include_frame]: the route and the worker read the
+    same fields with this one decoder. Bounding [frames] is each caller's
+    own decision, since the route clamps what the terminal sends and the
+    worker refuses a count the lane rejects. *)
+
+type pixel_reference = { revision : string; width : int; height : int }
+(** Pixels the client already holds: their SHA-256 and dimensions. *)
+
+type pixel_response =
+  | Full_frame  (** every tick carries the whole picture *)
+  | Retained_pixels of pixel_reference option
+      (** send the picture only when it differs from the one named, if any *)
+
+type tick = { frames : int option; pixel_response : pixel_response }
+
+val decode_tick : Yojson.Safe.t -> (tick, string) result
+(** An object with only [frames] (an integer), [pixel_response] (["retained"])
+    and [known_pixels]. [known_pixels] requires [pixel_response]. A repeated or
+    unknown field, or a field of the wrong type, is an [Error] naming it. *)

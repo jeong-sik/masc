@@ -466,6 +466,7 @@ let test_inline_write_keeps_original_effect_and_durable_refusal () =
   let declaration execution = Printf.sprintf {|[[compositions]]
 name = "nested-read"
 execution = %S
+branch_failure_policy = "continue_independent"
 [[compositions.nodes]]
 id = "save"
 tool = "Write"
@@ -891,6 +892,14 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
      let original_request = accepted |> member "request_id" |> to_string in
      let original_terminal = Async.load_canonical_durable_terminal ~base_path ~caller:"fixture" original_request
        |> require "original completed request before authority fault" |> Async.durable_terminal_entry in
+     (* Canonical publication precedes the worker wrapper's switch cleanup.
+        Let the original worker finish before faulting its ledger and comparing
+        worker counts; its normal departure must not masquerade as a resume
+        admission change. This isolated scenario owns the async workers. *)
+     let rec await_worker_cleanup () =
+       if Async.For_testing.active_switch_count () = 0 then ()
+       else (Eio.Fiber.yield (); await_worker_cleanup ()) in
+     await_worker_cleanup ();
      let resume_input = `Assoc ["sha256",`String draft_reference.sha256;"resume_run_id",`String run_id] in
      List.iter (fun corrupt ->
        Unix.rename events saved;

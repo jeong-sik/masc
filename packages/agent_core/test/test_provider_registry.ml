@@ -287,6 +287,7 @@ let expected_default_provider_names =
   ; "nous"
   ; "ollama"
   ; "ollama_cloud"
+  ; "openai"
   ; "openai-image"
   ; "openai-responses"
   ; "openai-speech"

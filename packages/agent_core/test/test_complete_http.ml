@@ -1863,6 +1863,108 @@ let start_sse_server
   Printf.sprintf "http://127.0.0.1:%d" port
 ;;
 
+let test_complete_stream_refused_frame_diagnostics () =
+  Eio_main.run @@ fun env ->
+  List.iter (fun format ->
+    let dir = Filename.temp_dir "stream-diagnostic" "" in
+    let path = Filename.concat dir "frames" in
+    let previous_setting = Sys.getenv_opt "MASC_WIRE_PARSE_DUMP" in
+    let set_destination = function
+      | None -> Unix.unsetenv "MASC_WIRE_PARSE_DUMP"
+      | Some destination -> Unix.putenv "MASC_WIRE_PARSE_DUMP" destination in
+    let read_dump () =
+      if Sys.file_exists path then In_channel.with_open_bin path In_channel.input_all
+      else "" in
+    Fun.protect
+      ~finally:(fun () ->
+        set_destination previous_setting;
+        if Sys.file_exists path then Sys.remove path;
+        Unix.rmdir dir)
+      (fun () ->
+        let run ~destination ~writes ~raw ~redacted ~verbatim =
+          set_destination destination;
+          let before = read_dump () in
+          try
+            Eio.Switch.run @@ fun sw ->
+            let content_type, body, config = match format with
+              | Http_client.Sse ->
+                  "text/event-stream", "data: " ^ raw ^ "\n\n", (fun url -> make_config url)
+              | Http_client.Ndjson ->
+                  "application/x-ndjson", raw ^ "\n",
+                  make_config ~kind:Provider_config.Ollama ~request_path:"/api/chat" in
+            let url = start_sse_server ~sw ~net:env#net ~content_type body in
+            let failures = ref [] in
+            let summaries = ref [] in
+            let on_event = function
+              | Types.SSEParseFailed { reason; raw } ->
+                  failures := (Http_client.Sse, reason, raw, read_dump ()) :: !failures
+              | Types.NDJSONParseFailed { reason; raw } ->
+                  failures := (Http_client.Ndjson, reason, raw, read_dump ()) :: !failures
+              | _ -> () in
+            let on_telemetry = function
+              | Telemetry_event.Streaming_summary { terminal; _ } ->
+                  summaries := (terminal, read_dump ()) :: !summaries
+              | _ -> () in
+            let message = match
+              Complete.complete_stream ~sw ~net:env#net ~config:(config url)
+                ~messages ~on_event ~on_telemetry ()
+            with
+              | Error (Http_client.ProviderFailure
+                  { kind = Http_client.Provider_wire_error
+                      { format = actual; kind = Http_client.Malformed_payload }; message }) ->
+                  check bool "diagnostic preserves the returned wire format" true (actual = format);
+                  message
+              | Error _ -> fail "diagnostic changed the typed malformed-frame error"
+              | Ok _ -> fail "malformed frame unexpectedly completed" in
+            let reason = match !failures with
+              | [(actual_format, reason, actual_raw, at_failure)] ->
+                  check bool "failure event preserves wire format" true (actual_format = format);
+                  check string "failure event retains the full raw frame" raw actual_raw;
+                  check string "failure event precedes diagnostic append" before at_failure;
+                  reason
+              | _ -> fail "expected exactly one malformed-frame event" in
+            let label = Http_client.provider_wire_format_to_string format in
+            let excerpt =
+              if String.length redacted <= 256 then redacted
+              else String.sub redacted 0 256 ^ "...(truncated)" in
+            check string "returned message keeps its redacted bounded excerpt"
+              (Printf.sprintf "%s parse failed: %s raw=%S"
+                (String.uppercase_ascii label) reason excerpt) message;
+            let expected =
+              if writes then
+                before ^ Printf.sprintf "%s\t%s\t%d\tverbatim=%b\t%s\n"
+                  (String.uppercase_ascii label) reason (String.length raw)
+                  verbatim (String.escaped redacted)
+              else before in
+            check string "one full diagnostic append, or no write when disabled/unavailable"
+              expected (read_dump ());
+            (match !summaries with
+             | [(terminal, at_summary)] ->
+                 check bool "terminal summary preserves the wire failure" true
+                   (terminal = Telemetry_event.Terminal_error (label ^ "_wire_error"));
+                 check string "terminal summary follows diagnostic append" expected at_summary
+             | _ -> fail "expected exactly one terminal summary");
+            Eio.Switch.fail sw Exit
+          with Exit -> ()
+        in
+        let raw = "{\"pad\":\"" ^ String.make 900 'x' in
+        run ~destination:None ~writes:false ~raw ~redacted:raw ~verbatim:true;
+        run ~destination:(Some "") ~writes:false ~raw ~redacted:raw ~verbatim:true;
+        check bool "disabled sink creates no diagnostic file" false (Sys.file_exists path);
+        run ~destination:(Some path) ~writes:true ~raw ~redacted:raw ~verbatim:true;
+        check int "new diagnostic file grants no group or other permissions" 0
+          ((Unix.stat path).st_perm land 0o077);
+        let raw =
+          "{\"authorization\":\"Bearer sk-live-abcdefghijklmnopqrstuvwxyz\",\"pad\":\""
+          ^ String.make 900 'x' in
+        let redacted =
+          "{\"authorization\":\"Bearer [REDACTED]\",\"pad\":\"" ^ String.make 900 'x' in
+        run ~destination:(Some path) ~writes:true ~raw ~redacted ~verbatim:false;
+        (* A directory fails even when tests run with elevated filesystem privileges. *)
+        run ~destination:(Some dir) ~writes:false ~raw ~redacted ~verbatim:false))
+    [Http_client.Sse; Http_client.Ndjson]
+;;
+
 let test_complete_injected_http_transport_preserves_stream_status_metrics () =
   Eio_main.run
   @@ fun env ->
@@ -4692,6 +4794,10 @@ let () =
             "a declared provider condition is that HttpError"
             `Quick
             test_complete_declared_provider_condition_is_that_http_error
+        ; test_case
+            "refused frames preserve optional diagnostics and terminal ordering"
+            `Quick
+            test_complete_stream_refused_frame_diagnostics
         ; test_case
             "malformed Ollama NDJSON preserves its wire format"
             `Quick

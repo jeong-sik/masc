@@ -1153,11 +1153,12 @@ let complete_stream_http
                     then (
                       failure_emitted := true;
                       emit_stream_event on_event (stream_error_event serr));
-                    let err =
-                      Complete_stream_error.http_error_of_stream_error
+                    let { Complete_stream_error.error = err; diagnostic } =
+                      Complete_stream_error.project_stream_error
                         ~wire_format:active_wire_format
                         serr
                     in
+                    Option.iter Complete_stream_diagnostic.dump_refused_frame diagnostic;
                     (match !terminal_state with
                      | Telemetry_event.Terminal_done ->
                        terminal_state

@@ -29,7 +29,30 @@ val http_error_of_oversized_payload
   -> limit_bytes:int
   -> Http_client.http_error
 
-(** The typed error a stream failure is returned as. A provider envelope that
+(** A full refused frame for the optional diagnostic sink. [raw] is kept
+    intact here; the sink redacts it before writing and records whether its
+    bytes changed. This value does not read the environment or write a file. *)
+type refused_frame =
+  { wire_format : Http_client.provider_wire_format
+  ; reason : string
+  ; raw : string
+  }
+
+type projection =
+  { error : Http_client.http_error
+  ; diagnostic : refused_frame option
+      (** [None] unless the stream failure is a malformed SSE/NDJSON frame. *)
+  }
+
+(** Pure projection of a stream failure and its optional diagnostic intent.
+    The streaming finalizer owns executing the diagnostic after its failure
+    event and before its terminal summary. *)
+val project_stream_error
+  :  ?wire_format:Http_client.provider_wire_format
+  -> Types.stream_error
+  -> projection
+
+(** Pure error-only projection. A provider envelope that
     declares a provider condition ([Types.provider_status]: 429 or 5xx) is
     [HttpError] with that status and only the error object as its body, so it
     is classified as the same status line before the stream would be; any other

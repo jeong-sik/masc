@@ -200,6 +200,33 @@ let test_an_unreadable_autosave_stops_a_load_until_consent () =
       (In_channel.with_open_bin (prev_path fixture) In_channel.input_all))
 ;;
 
+(* lea ax,ax: the core does not implement it, so the boot faults at once. *)
+let faulting_program = "\x8d\xc0"
+
+let test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave () =
+  with_fixture (fun fixture ->
+    let campaign_steps = play_a_campaign fixture in
+    let before = Digest.file (autosave_path fixture) in
+    let faulting =
+      Dos_lane.load ~who ~ledger_dir:fixture.directory ~saves_dir:fixture.saves
+        ~checkpoint_dir:fixture.checkpoints ~autosave:Dos_lane.Replace_autosave
+        ~program_name:"fault.com" ~program_bytes:faulting_program ~files:[] ~announce:ignore
+    in
+    (match faulting with
+     | Ok (_, Dos_lane.Boot_faulted fault) ->
+       check bool "the fault is named" true (fault <> "")
+     | Ok (_, Dos_lane.Booted _) -> fail "the program should have faulted"
+     | Error error -> fail (Dos_lane.error_to_string error));
+    let screen = require (Dos_lane.screen ()) in
+    check (option string) "the machine is installed and the loader holds it" (Some "fault.com")
+      screen.Dos_lane.program;
+    check (option string) "controller" (Some who) screen.Dos_lane.controller;
+    check string "no autosave was written for a machine that faults again" before
+      (Digest.file (autosave_path fixture));
+    check bool "so nothing was displaced to autosave-prev" false (Sys.file_exists (prev_path fixture));
+    check int "and the campaign is the autosave" campaign_steps (steps_in fixture "autosave"))
+;;
+
 let () =
   run "DOS autosave guard"
     [ ( "load"
@@ -215,6 +242,8 @@ let () =
             test_a_load_with_no_autosave_needs_no_consent
         ; test_case "an unreadable autosave stops a load until consent" `Quick
             test_an_unreadable_autosave_stops_a_load_until_consent
+        ; test_case "a faulted boot installs the machine and keeps the autosave" `Quick
+            test_a_faulted_boot_installs_the_machine_and_keeps_the_autosave
         ] )
     ]
 ;;

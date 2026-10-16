@@ -210,6 +210,15 @@ type ran = {
           machine they leave is not one worth resuming. *)
 }
 
+type boot =
+  | Booted of ran
+  | Boot_faulted of string
+      (** the program ran something the core does not implement while it
+          booted, with the core's message. The machine is installed, stopped
+          at that instruction, and the loader holds the controller; the
+          screen shows how far it got. No autosave was written, so the
+          previous one stays. *)
+
 val settle_chunk : int
 (** Instructions between two screen readings while waiting for {!ran.settled}. *)
 
@@ -247,7 +256,7 @@ val prepare_load :
   (prepared_load, error) result
 val commit_load :
   who:string -> prepared_load -> announce:(unit -> unit) ->
-  (observation * ran, error) result
+  (observation * boot, error) result
 (** Rechecks activity, current controller and the save snapshot's lane counter
     under the lane lock before changing the ledger or installing the guest. *)
 
@@ -261,7 +270,7 @@ val load :
   program_bytes:string ->
   files:(string * string) list ->
   announce:(unit -> unit) ->
-  (observation * ran, error) result
+  (observation * boot, error) result
 (** Creates the workspace machine, replacing any previous one. An autosave
     file in [checkpoint_dir] is never moved or overwritten unless [autosave]
     is {!Replace_autosave}; otherwise the load is {!Autosave_exists} and

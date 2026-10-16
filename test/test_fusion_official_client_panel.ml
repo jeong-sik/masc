@@ -1511,8 +1511,11 @@ import sys
 
 root = Path(__file__).parent
 account_dir = Path(os.environ["HOME"])
-assert account_dir.is_relative_to((root / ".masc").resolve() / "official-clients/antigravity")
-assert account_dir.parent.name.startswith("fusion-")
+# A one-shot call owns a HOME that lives with it: below a temporary root of its
+# own, never below the runtime state directory.
+assert not account_dir.is_relative_to((root / ".masc").resolve())
+assert any(part.startswith("masc-antigravity-panelist-") for part in account_dir.parts)
+assert account_dir.parent.name == "panelist"
 assert account_dir.stat().st_mode & 0o777 == 0o700
 workspace = Path.cwd()
 assert workspace == account_dir / "native-workspace"
@@ -1528,7 +1531,8 @@ assert "XDG_CONFIG_HOME" not in os.environ
 credential = account_dir / ".gemini/antigravity-cli/antigravity-oauth-token"
 assert credential.stat().st_mode & 0o777 == 0o600
 document = json.loads(credential.read_text())
-before = document["token"]["access_token"].removesuffix(":initial")
+# The seed carries a revision after the colon; a call sees the seed it was given.
+before = document["token"]["access_token"].split(":")[0]
 assert before in ["SELECTED_A", "SELECTED_A_REFRESHED", "SELECTED_B", "SELECTED_C", "SELECTED_C_REFRESHED"]
 document["token"]["access_token"] = before if before.endswith("_REFRESHED") else before + "_REFRESHED"
 credential.write_text(json.dumps(document))
@@ -1555,6 +1559,11 @@ let test_antigravity_panel_selected_account_and_refresh ?(linked_root = false) (
       let physical_root = Filename.concat base_dir "physical-masc" in
       Unix.mkdir physical_root 0o700;
       Unix.symlink physical_root (Filename.concat base_dir ".masc"));
+    let panel_tmp = Filename.concat base_dir "panel-tmp" in
+    Unix.mkdir panel_tmp 0o700;
+    let saved_tmp = Filename.get_temp_dir_name () in
+    Filename.set_temp_dir_name panel_tmp;
+    Fun.protect ~finally:(fun () -> Filename.set_temp_dir_name saved_tmp) @@ fun () ->
     let ambient = Filename.concat base_dir "ambient" in
     Fs_compat.mkdir_p (Filename.concat ambient ".gemini/antigravity-cli");
     let ambient_oauth = Filename.concat ambient ".gemini/antigravity-cli/antigravity-oauth-token" in
@@ -1580,24 +1589,24 @@ let test_antigravity_panel_selected_account_and_refresh ?(linked_root = false) (
             ~system_prompt:"Return the fixture answer." ~prompt:"Selected account." () with
         | Ok response -> check string "selected account and native refresh observed" expected response.text
         | Error error -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:agy_runtime error))
-        [account_a, "SELECTED_A"; account_b, "SELECTED_B"; account_a, "SELECTED_A_REFRESHED"];
+        [account_a, "SELECTED_A"; account_b, "SELECTED_B"; account_a, "SELECTED_A"];
       check string "selected source A untouched" (Masc_test_deps.antigravity_oauth_fixture "SELECTED_A") (Fs_compat.load_file account_a);
       write_file ~path:account_a ~perm:0o600
         (Masc_test_deps.antigravity_oauth_fixture ~revision:"source-refresh" "SELECTED_A");
       let runtime = Runtime.get_runtime_by_id agy_runtime |> Option.get in
       (match Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
           ~system_prompt:"" ~prompt:"Retain this account across source refresh." () with
-       | Ok response -> check string "source OAuth refresh retains native account state"
-           "SELECTED_A_REFRESHED" response.text
+       | Ok response -> check string "a call starts from the selected source, not from an earlier call's refresh"
+           "SELECTED_A" response.text
        | Error error -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:agy_runtime error));
       write_file ~path:account_a ~perm:0o600 (Masc_test_deps.antigravity_oauth_fixture "SELECTED_C");
       List.iter (fun expected ->
         let runtime = Runtime.get_runtime_by_id agy_runtime |> Option.get in
         match Masc.Fusion_official_client.run_with_images ~images:[] ~base_dir ~runtime
             ~system_prompt:"" ~prompt:"Externally re-logged account." () with
-        | Ok response -> check string "same-path re-login and refresh selected" expected response.text
+        | Ok response -> check string "same-path re-login is selected" expected response.text
         | Error error -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:agy_runtime error))
-        ["SELECTED_C"; "SELECTED_C_REFRESHED"];
+        ["SELECTED_C"; "SELECTED_C"];
       Unix.unlink account_a;
       check bool "missing selected source refuses instead of ambient fallback" true
         (Result.is_error (Masc.Fusion_official_client.run_panelist ~base_dir ~runtime_id:agy_runtime
@@ -1609,16 +1618,16 @@ let test_antigravity_panel_selected_account_and_refresh ?(linked_root = false) (
       |> List.map Yojson.Safe.from_string in
     let homes = List.map (fun row -> Yojson.Safe.Util.(row |> member "home" |> to_string)) rows in
     match homes with
-    | [first; second; third; source_refreshed; fourth; fifth] ->
-      check bool "different selected accounts have distinct state" true (first <> second);
-      check string "same account reuses refreshed state" first third;
-      check string "ordinary source refresh retains the actual child HOME" first source_refreshed;
-      check bool "same-path external login creates a new generation" true (first <> fourth);
-      check string "new generation preserves its own refresh" fourth fifth;
-      check string "old generation remains intact" "SELECTED_A_REFRESHED"
-        (Yojson.Safe.Util.(Fs_compat.load_file
-          (Filename.concat first ".gemini/antigravity-cli/antigravity-oauth-token")
-          |> Yojson.Safe.from_string |> member "token" |> member "access_token" |> to_string))
+    | [_; _; _; _; _; _] ->
+      check int "every call has a HOME of its own" 6
+        (List.length (List.sort_uniq String.compare homes));
+      List.iter
+        (fun home -> check bool "the HOME is removed with its call" false (Sys.file_exists home))
+        homes;
+      check bool "no per-account state is kept under the runtime state directory" false
+        (Sys.file_exists (Filename.concat base_dir ".masc/official-clients"));
+      check (list string) "no temporary root outlives its call, refused ones included" []
+        (Array.to_list (Sys.readdir panel_tmp))
     | _ -> fail "only six admitted model turns should spawn")
 ;;
 

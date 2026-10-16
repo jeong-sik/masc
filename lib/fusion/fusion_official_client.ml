@@ -357,25 +357,42 @@ let remove_muse_panel_root root =
       (Printexc.to_string exn)
 ;;
 
-(* One persistent login state per configured account, independent of model
-   and call. Separate from keeper owners: no turn-scoped MCP capability or
-   mutable Keeper workspace can be inherited by a panel. *)
-let prepare_antigravity_panel_home ~base_dir ~oauth_source =
+(* An Antigravity one-shot call runs in a HOME of its own that is removed with
+   the call. A HOME kept per account also kept the project each call creates
+   ([--new-project]), and agy opens every project file when it starts: 23,987
+   files after nine days, tens of thousands of descriptors in one process
+   (#43256). The usage read and the context observation already work this way:
+   the account's OAuth file seeds a disposable HOME. A token the call refreshes
+   is not kept, so each call refreshes from the seed. *)
+let create_antigravity_panel_root () =
+  match Filename.temp_dir ~perms:0o700 "masc-antigravity-panelist-" "" |> Unix.realpath with
+  | root -> Ok root
+  | exception Sys_error detail ->
+    Error (Setup_failure ("cannot create the Antigravity panelist HOME: " ^ detail))
+  | exception Unix.Unix_error (error, _, path) ->
+    Error
+      (Setup_failure
+         (Printf.sprintf
+            "cannot resolve the Antigravity panelist HOME %s: %s"
+            path
+            (Unix.error_message error)))
+;;
+
+(* The root holds a copy of the account's OAuth file, so a removal that fails
+   is said out loud. *)
+let remove_antigravity_panel_root root =
+  try Fs_compat.remove_tree root with
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    Log.Runtime_agent.warn
+      "Antigravity panelist left its disposable HOME %s behind: %s"
+      root
+      (Printexc.to_string exn)
+;;
+
+let prepare_antigravity_panel_home ~runtime_root ~oauth_source =
   let ( let* ) = Result.bind in
-  let* runtime_root = Eio_guard.run_in_systhread ~label:"fusion-antigravity-root" (fun () ->
-    try
-      let root = Common.masc_dir_from_base_path ~base_path:(Unix.realpath base_dir) in
-      Fs_compat.mkdir_p root;
-      (* A workspace may link .masc to another owned volume. The native HOME
-         verifier requires a physical root, including this last component. *)
-      Ok (Unix.realpath root)
-    with
-    | Sys_error detail -> Error (Setup_failure detail)
-    | Unix.Unix_error (error, _, _) -> Error (Setup_failure (Unix.error_message error))) in
-  let owner_leaf = "fusion-" ^
-    (Digestif.SHA256.digest_string oauth_source |> Digestif.SHA256.to_hex) in
   let* home, cwd = Runtime_antigravity_home.prepare_native
-      ~runtime_root ~owner_leaf ~oauth_source
+      ~runtime_root ~owner_leaf:"panelist" ~oauth_source
       ~posture:Runtime_native_tools.Native_read
       ~workspace:Runtime_antigravity_home.Private_workspace
       ~additional_workspaces:[]
@@ -542,8 +559,19 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
     in
-    let* home, native_cwd = prepare_antigravity_panel_home
-        ~base_dir ~oauth_source:execution.oauth_source in
+    Eio.Switch.run
+    @@ fun sw ->
+    (* Enter the cancellation scope before acquiring the directory, then
+       register its cleanup before cancellation can discard the acquisition. *)
+    let* panel_root = Eio.Cancel.protect (fun () ->
+      let* root = create_antigravity_panel_root () in
+      Eio.Switch.on_release sw (fun () -> remove_antigravity_panel_root root);
+      Ok root) in
+    (* Wait for the preparation to finish before cancellation can run the
+       registered cleanup; the worker must not outlive the tree it fills. *)
+    let* home, native_cwd = Eio.Cancel.protect (fun () ->
+      prepare_antigravity_panel_home
+        ~runtime_root:panel_root ~oauth_source:execution.oauth_source) in
     let config = { config with Runtime_antigravity.cwd = native_cwd } in
     (match Runtime_antigravity.run_turn
        ~on_stream_event:(function

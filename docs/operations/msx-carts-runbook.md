@@ -5,16 +5,24 @@ The operator runbook for the game images the workspace MSX machine
 
 ## Where they live
 
-`<base-path>/.masc/msx/carts/` is the inventory. `masc_msx_load` without a
-`cart` lists it as `carts_available`, and a Keeper then passes one of those
-names (with or without `.rom`) as `cart`. The TUI's MSX screen opens with a
-load menu over the same directory. The directory starts empty; nothing in the
-install or the server fills it.
+The MSX Add-on worker owns the inventory. Its named volume is mounted at
+`/state`, and the images sit in `/state/.masc/msx/carts/`. `masc_msx_meta` with
+`include_inventory=true` lists them as `inventory.carts`. A Keeper passes one
+of those names (with or without `.rom`) as `cart` to `masc_msx_load`; a path is
+refused. The TUI's MSX screen opens with a load menu over the same list.
 
-The C-BIOS ROMs the machine boots from are separate: `MSX_ROMS` names their
-directory, or `.masc/msx/bios/` when it holds `cbios_main_msx2.rom`. The
-directory must hold all three (`cbios_main_msx2.rom`, `cbios_logo_msx2.rom`,
-`cbios_sub.rom`); a load names the first one missing and refuses.
+The volume starts empty and nothing in the install or the server fills it. An
+operator places the files in the Add-on's volume, following "Provision or
+transfer state" in [MSX and DOS Add-on state](../guides/machine-addon-state.md).
+The load menu says "no cartridges yet" for an empty volume, and "cartridge list
+unavailable" with the reason when the Add-on cannot be reached. Those are
+different faults: the first needs files, the second needs the Add-on looked at.
+
+The C-BIOS ROMs the machine boots from are separate. The worker takes them from
+the `roms_dir` argument, else from `MSX_ROMS`, else from
+`/state/.masc/msx/bios/` when it holds `cbios_main_msx2.rom`. The directory must
+hold all three (`cbios_main_msx2.rom`, `cbios_logo_msx2.rom`, `cbios_sub.rom`);
+a load names the first one missing and refuses.
 
 ## What the machine accepts
 
@@ -35,15 +43,15 @@ The observation names the image under `disk`;
 `cartridge` reads null while a disk runs.
 
 There is no fetch script for disks: a commercial `.dsk` is the operator's
-own image, the same responsibility line as any file placed in `carts/`
+own image, the same responsibility line as any file placed in the inventory
 beyond the pinned table below.
 
 ## Open-source cartridges
 
-`scripts/msx-fetch-homebrew-carts.sh` fills the inventory with games whose
-authors publish them under a licence that permits redistribution. Each entry
-is pinned to one release and one SHA-256; the script downloads from the
-author's release page, verifies the digest, and refuses a file that differs.
+`scripts/msx-fetch-homebrew-carts.sh` downloads games whose authors publish
+them under a licence that permits redistribution. Each entry is pinned to one
+release and one SHA-256; the script downloads from the author's release page,
+verifies the digest, and refuses a file that differs.
 
 | Cartridge | Version | Licence | Author |
 |---|---|---|---|
@@ -52,15 +60,20 @@ author's release page, verifies the digest, and refuses a file that differs.
 | `transball.rom` | 1.3.2 | GPL-3.0 | Santiago Ontañón, [santiontanon/transballmsx](https://github.com/santiontanon/transballmsx) |
 | `noborunoca.rom` | 1.0.2 | MIT | h1romas4, [h1romas4/noborunoca](https://github.com/h1romas4/noborunoca) |
 
+The script writes into a staging directory laid out the way the volume is, so
+`--base-path` names a scratch directory and the images land in
+`<scratch>/.masc/msx/carts/`. Copy that `carts/` directory into the Add-on's
+volume as the state guide describes.
+
 ```bash
-scripts/msx-fetch-homebrew-carts.sh --base-path /path/to/project
+scripts/msx-fetch-homebrew-carts.sh --base-path /path/to/scratch
 scripts/msx-fetch-homebrew-carts.sh --list      # the pinned table
-scripts/msx-fetch-homebrew-carts.sh --base-path /path/to/project --dry-run   # what would be fetched
+scripts/msx-fetch-homebrew-carts.sh --base-path /path/to/scratch --dry-run   # what would be fetched
 ```
 
 A file already present with the pinned digest is left alone, so the script
 is safe to rerun. It never fetches a commercial ROM image. Anything else an
-operator places in `carts/` is the operator's own responsibility.
+operator places in the inventory is the operator's own responsibility.
 
 XRacing (GPL-3.0) and Westen House (Apache-2.0) by the same author are
 not in the pinned, verified inventory. Their compatibility is unverified.
@@ -126,15 +139,18 @@ Use named checkpoints for persistence; the input ledger alone is not a save.
 ## Checkpoints
 
 In the TUI game view, **F6** saves the `quick` checkpoint and **F7** restores
-it. The result remains visible above the game image. Keepers can use
+it. The result remains visible above the game image. F7 on a volume where
+**F6** has not saved yet is refused with the reason, and the terminal stays
+usable. Keepers can use
 `masc_msx_save {"slot":"campaign"}` and
 `masc_msx_restore {"slot":"campaign"}` for named checkpoints. Names contain
 1–64 letters, digits, underscores or hyphens; the default is `quick`.
 
-Checkpoints live in `<base-path>/.masc/msx/saves/`. They include CPU, RAM,
-VRAM, mounted media, cartridge SRAM, open disk-file positions and input
-history. Saving does not advance the game. Restore resumes the saved frame
-without rebooting, including after server restart. Invalid checkpoints leave
+Checkpoints live in `/state/.masc/msx/saves/` in the Add-on volume. They
+include CPU, RAM, VRAM, mounted media, cartridge SRAM, open disk-file positions
+and input history. Saving does not advance the game. Restore resumes the saved
+frame without rebooting, including after the worker restarts (a restarted
+worker holds no machine until a restore or a load). Invalid checkpoints leave
 the current machine intact. Saving again replaces that named checkpoint.
 
 These are emulator checkpoints, separate from a game's own disk-save menu.

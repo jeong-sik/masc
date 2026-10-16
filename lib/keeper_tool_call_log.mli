@@ -251,6 +251,9 @@ val with_commit_observer : commit_observer -> (unit -> 'a) -> 'a
     of its own fails its Tool call. No event is
     delivered for an unavailable store or failed append. This changes observer
     I/O cost; matched timing comparisons must use the same observer mode. *)
+val capture_commit_observer : (unit -> 'a) -> unit -> 'a
+(** Capture this exact observer scope for an actor/owner handoff. An absent
+    source observer stays absent even when another scope invokes the closure. *)
 val failed_commit_deliveries : commit_observer -> int
 (** Non-cancellation sink failures are counted and do not turn a committed Tool
     effect into failure/retry. A consumer with failures must retain a coverage

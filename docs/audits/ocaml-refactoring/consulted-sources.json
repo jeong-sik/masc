@@ -1,10 +1,9 @@
 {
   "baseline": "aea8424926ea79f110315eec5ab429ac51043598",
-  "meaning": "Files consulted for named boundaries and caller/scenario discovery, not complete semantic audits. baseline identifies the initial inventory; a focused reading baseline overrides it. Historical paths remain recorded even after removal by later refactors.",
+  "meaning": "Files directly read for named boundaries, callers and scenarios, not complete semantic audits. baseline identifies the initial inventory; a focused reading baseline overrides it. Historical paths remain recorded even after removal by later refactors. Symbol-search-only records remain in discovery_only_sources and are excluded from files and focused_reading_scopes.",
   "files": [
     "bin/masc_tui.ml",
     "bin/masc_tui_async_protocol.ml",
-    "bin/masc_tui_async_protocol.mli",
     "bin/masc_tui_async_read.ml",
     "bin/masc_tui_board_requests.ml",
     "bin/masc_tui_board_updates.ml",
@@ -15,7 +14,6 @@
     "bin/masc_tui_kept_reads.ml",
     "bin/masc_tui_lane_application.ml",
     "bin/masc_tui_lane_subscriptions.ml",
-    "bin/masc_tui_loader.ml",
     "bin/masc_tui_machine_live.ml",
     "bin/masc_tui_render_schedule.ml",
     "bin/masc_tui_runtime_account_form.ml",
@@ -153,7 +151,6 @@
     "test/test_server_slack_trigger_policy.ml",
     "test/test_task_transition_broadcast.ml",
     "test/test_tui_board_attachments.ml",
-    "test/test_tui_board_composer.ml",
     "test/test_tui_credential.ml",
     "test/test_tui_decode.ml",
     "test/test_tui_io_domain.ml",
@@ -363,11 +360,6 @@
     },
     {
       "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
-      "path": "bin/masc_tui_async_protocol.mli",
-      "scope": "Board completion occurrence census only"
-    },
-    {
-      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
       "path": "bin/masc_tui_board_requests.ml",
       "scope": "full file"
     },
@@ -385,11 +377,6 @@
       "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
       "path": "bin/masc_tui_kept_reads.ml",
       "scope": "full file"
-    },
-    {
-      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
-      "path": "bin/masc_tui_loader.ml",
-      "scope": "top-level symbol inventory only"
     },
     {
       "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
@@ -440,11 +427,6 @@
       "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
       "path": "test/test_tui_board_attachments.ml",
       "scope": "lines 290-397"
-    },
-    {
-      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
-      "path": "test/test_tui_board_composer.ml",
-      "scope": "test function inventory and draft-related lines"
     },
     {
       "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
@@ -590,6 +572,34 @@
       ],
       "scope": "Reply/command arrival at timeout boundary scenarios",
       "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e"
+    }
+  ],
+  "discovery_only_sources": [
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_async_protocol.mli",
+      "scope": "Board completion occurrence census only"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "bin/masc_tui_loader.ml",
+      "scope": "top-level symbol inventory only"
+    },
+    {
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "path": "test/test_tui_board_composer.ml",
+      "scope": "test function inventory and draft-related lines"
+    }
+  ],
+  "audit_history": [
+    {
+      "round": 5,
+      "area": "TUI",
+      "baseline": "857c8647ce7cc7305d6aa081d1aa24ac5b93f05e",
+      "raw_record_count": 29,
+      "direct_reading_records": 26,
+      "discovery_only_records": 3,
+      "meaning": "The original 29 records and their scopes remain split between focused_reading_scopes and discovery_only_sources. This accounting correction adds no retrospective source-reading claim."
     }
   ]
 }

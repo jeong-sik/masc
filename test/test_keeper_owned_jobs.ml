@@ -240,6 +240,25 @@ let frozen_surface ~base_path ~sandbox_profile =
   frozen_surface_with ~tool_deny:[] ~tool_descriptors:(Descriptor.all_descriptors ())
     ~base_path ~sandbox_profile
 
+(* The surface a restarted owner sees: the snapshot published from the Skill
+   files on disk now, not the empty frozen one. *)
+let published_surface fixture =
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:fixture.base_path in
+  let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
+    |> require "published surface workspace" in
+  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
+      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
+   | Published _ | Unchanged _ -> ()
+   | Workspace_retired -> fail "published surface workspace retired");
+  let snapshot = match Skill_catalog_snapshot_service.current ~workspace with
+    | Some value -> value | None -> fail "published surface snapshot missing" in
+  let descriptors = Descriptor.all_descriptors () in
+  let catalog,diagnostics = Masc.Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
+  check int "published skill catalog has no diagnostics" 0 (List.length diagnostics);
+  Masc.Keeper_capability_surface.create_with_descriptors ~tool_descriptors:descriptors ~tool_deny:[]
+    ~sandbox_profile:fixture.meta.sandbox_profile ~skill_names:None ~global_skill_catalog:catalog
+    ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot) ~task_skills:[]
+
 let with_environment values f =
   let rec loop = function
     | [] -> f ()
@@ -1555,18 +1574,7 @@ let test_named_producer_switched_to_inline_settles_run_and_ends_parent () =
   let workspace = Skill_catalog_snapshot_service.workspace_of_base_path ~base_path:fixture.base_path
       |> require "refusal fixture workspace" in
   Fun.protect ~finally:(fun () -> Skill_catalog_snapshot_service.retire ~workspace) @@ fun () ->
-  (match Skill_catalog_snapshot_service.refresh ~workspace ~user_home:None
-      ~read_config:(fun () -> {path=runtime_path;source_text=read runtime_path}) with
-   | Published _ | Unchanged _ -> () | Workspace_retired -> fail "changed producer snapshot retired");
-  let snapshot = Skill_catalog_snapshot_service.current ~workspace
-      |> function Some snapshot -> snapshot | None -> fail "changed producer snapshot missing" in
-  let descriptors = Descriptor.all_descriptors () in
-  let catalog,diagnostics = Masc.Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
-  check int "changed producer document has no catalog diagnostics" 0 (List.length diagnostics);
-  let inline_surface = Masc.Keeper_capability_surface.create_with_descriptors
-      ~tool_descriptors:descriptors ~tool_deny:[] ~sandbox_profile:fixture.meta.sandbox_profile
-      ~skill_names:None ~global_skill_catalog:catalog
-      ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot) ~task_skills:[] in
+  let inline_surface = published_surface fixture in
   check bool "a new producer revision does not prove producer absence" false
     (Masc.Keeper_capability_surface.exact_skill_absence_proven inline_surface parked.reference);
   check bool "changed producer revision is proven from the published identity" true

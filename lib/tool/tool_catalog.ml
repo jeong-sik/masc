@@ -526,6 +526,14 @@ let explicit_metadata : (string * metadata) list =
        permission authority here; descriptor policy remains the SSOT for
        execution axes such as readonly/idempotent. *)
     ("keeper_lane_status", keeper_shard_read);
+    (* Owned isolated jobs. [keeper_job_result] and [keeper_composition_result]
+       only read stored records; start and cancel create or change a job, and
+       status persists reconciled evidence, so those three are writes. *)
+    ("keeper_job_result", keeper_shard_read);
+    ("keeper_composition_result", keeper_shard_read);
+    ("keeper_job_start", keeper_shard_write);
+    ("keeper_job_status", keeper_shard_write);
+    ("keeper_job_cancel", keeper_shard_write);
     ("keeper_context_status", keeper_shard_read);
     ("keeper_artifact_read", keeper_shard_read);
     ("keeper_skill_validate", keeper_shard_read);

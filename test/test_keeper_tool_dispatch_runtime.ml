@@ -9314,6 +9314,16 @@ let composable_output_probes =
 let scenario_output_probes =
   [ "keeper_composition_result"
     (* test_async_composition_binds_params_into_durable_status *)
+  ; "keeper_job_start"
+  ; "keeper_job_status"
+  ; "keeper_job_result"
+  ; "keeper_job_cancel"
+    (* The job tools read or move a durable job that keeper_job_start made,
+       and start needs a Docker backend. test/test_keeper_owned_jobs.ml runs
+       all four through the public handler against its fixture Docker peer and
+       validates every answer with [Plan.validate_output]
+       ([validate_job_output]), so a one-call probe here could only call
+       status, result and cancel with a made-up id and see a refusal. *)
   ]
 
 let test_every_composable_tool_has_an_output_probe () =

@@ -563,6 +563,16 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
                     ] );
               ] );
         ]
+  | "keeper_job_start" ->
+      (* An empty argv breaks the schema's min_items, so the case refuses the
+         same way on every host. A well-formed argv would reach the Docker
+         backend: it starts a real job where Docker exists and fails as a
+         runtime failure, neither success nor refusal, where it does not. *)
+      `Assoc [ ("argv", `List []) ]
+  | "keeper_job_status" | "keeper_job_result" | "keeper_job_cancel" ->
+      (* A job id that was never issued: the reader has to look it up and
+         refuse, which says more than an argument-parse rejection would. *)
+      `Assoc [ ("job_id", `String "matrix-no-such-job") ]
   | "keeper_spawn_read" ->
       `Assoc [ ("handle", `String "matrix-no-such-handle") ]
   | "keeper_spawn_stop" ->
@@ -640,7 +650,8 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
    still have to refuse: their cases exist to prove argument validation runs. *)
 let keeper_expectation_for_name name =
   match name with
-  | "keeper_analyze_image" | "keeper_skill_validate" | "keeper_skill_publish" ->
+  | "keeper_analyze_image" | "keeper_skill_validate" | "keeper_skill_publish"
+  | "keeper_job_start" ->
     Expect_refusal
   | "keeper_voice_listen" -> Expect_no_audio
   | "keeper_artifact_transfer" | "keeper_constitution_write" | "keeper_constitution_remove"

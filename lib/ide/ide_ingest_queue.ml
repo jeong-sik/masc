@@ -9,7 +9,6 @@ let active = Atomic.make false
 type queue_state =
   { mu : Stdlib.Mutex.t
   ; cond : Eio.Condition.t
-  ; space_available : Eio.Condition.t
   ; items : job Queue.t
   }
 
@@ -22,7 +21,6 @@ let capacity = Atomic.make default_capacity
 let queue =
   { mu = Stdlib.Mutex.create ()
   ; cond = Eio.Condition.create ()
-  ; space_available = Eio.Condition.create ()
   ; items = Queue.create ()
   }
 
@@ -40,13 +38,7 @@ let run_job label job =
     Log.Ide.error "ingest_queue %s: job failed: %s" label (Printexc.to_string exn)
 ;;
 
-let take_nonblocking () =
-  let job = with_queue (fun () -> Queue.take_opt queue.items) in
-  (match job with
-   | None -> ()
-   | Some _ -> Eio.Condition.broadcast queue.space_available);
-  job
-;;
+let take_nonblocking () = with_queue (fun () -> Queue.take_opt queue.items)
 
 let drain_pending () =
   let rec loop () =
@@ -59,41 +51,30 @@ let drain_pending () =
   loop ()
 ;;
 
-type admission = Enqueued | Inline
+type admission = Enqueued | Inline | At_capacity
+type submit_result = Accepted | Capacity_refused
 
 let try_admit job =
   (* No callback, I/O or suspension under this lock: inactive callers can also
      arrive outside Eio. Capacity and writer state are checked with insertion. *)
   with_queue (fun () ->
-    if not (Atomic.get active) then Some Inline
+    if not (Atomic.get active) then Inline
     else if Queue.length queue.items < Atomic.get capacity then (
       Queue.add job queue.items;
-      Some Enqueued)
-    else None)
+      Enqueued)
+    else At_capacity)
 ;;
 
-let submit (job : job) : unit =
-  let admission =
-    if Atomic.get active then
-      Eio.Condition.loop_no_mutex queue.space_available (fun () ->
-        (* A space broadcast may win the condition's cancellation race. Check
-           again before insertion so a cancelled waiter cannot leave a job. *)
-        Eio.Fiber.check ();
-        try_admit job)
-    else
-      (* Recheck under the queue lock in case the writer started meanwhile. *)
-      match try_admit job with
-      | Some admission -> admission
-      | None ->
-        Eio.Condition.loop_no_mutex queue.space_available (fun () ->
-          Eio.Fiber.check ();
-          try_admit job)
-  in
-  match admission with
-  | Enqueued -> Eio.Condition.broadcast queue.cond
+let submit (job : job) : submit_result =
+  match try_admit job with
+  | At_capacity -> Capacity_refused
+  | Enqueued ->
+    Eio.Condition.broadcast queue.cond;
+    Accepted
   | Inline ->
     drain_pending ();
-    run_job "inline" job
+    run_job "inline" job;
+    Accepted
 ;;
 
 let run_writer () =
@@ -112,8 +93,7 @@ let run_writer () =
   in
   Fun.protect
     ~finally:(fun () ->
-      with_queue (fun () -> Atomic.set active false);
-      Eio.Condition.broadcast queue.space_available)
+      with_queue (fun () -> Atomic.set active false))
     loop
 ;;
 
@@ -124,11 +104,9 @@ module For_testing = struct
       Queue.clear queue.items;
       Atomic.set capacity capacity_override;
       Atomic.set active false);
-    Eio.Condition.broadcast queue.cond;
-    Eio.Condition.broadcast queue.space_available
+    Eio.Condition.broadcast queue.cond
   ;;
 
   let set_active b =
-    with_queue (fun () -> Atomic.set active b);
-    Eio.Condition.broadcast queue.space_available
+    with_queue (fun () -> Atomic.set active b)
 end

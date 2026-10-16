@@ -539,10 +539,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "metrics_flush")
     (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
-  (* IDE observation ingestion writer: drains the bounded ring buffer that the
-     tool/pr/turn sinks enqueue into, running Yojson parse + JSONL append off
-     the keeper turn fiber (main Eio domain). Shutdown drains any queued jobs
-     before exit. *)
+  (* IDE observation ingestion writer: drains accepted addressed tool facts
+     from the bounded FIFO on a separate fiber in the main Eio domain. A full
+     queue refuses new observations with metrics instead of blocking Keeper
+     turns or evicting accepted jobs. Shutdown drains queued jobs before exit. *)
   fork_logged_fiber
     ~sw
     ~on_error:(log_server_fiber_crash "ide_ingest_writer")

@@ -404,7 +404,11 @@ let test_sink_filters_before_queue_admission () =
           Ide_ingest_queue.For_testing.reset ~capacity_override:1 ();
           Ide_ingest_queue.For_testing.set_active true;
           let predecessor_ran = ref false in
-          Ide_ingest_queue.submit (fun () -> predecessor_ran := true);
+          (match Ide_ingest_queue.submit (fun () -> predecessor_ran := true) with
+           | Accepted -> ()
+           | Capacity_refused -> fail "empty fixture queue refused predecessor");
+          let counter = Otel_transport_metric_names.metric_ide_ingest_capacity_refused in
+          let counter_before = Otel_metric_store_core.metric_value_or_zero counter () in
           let emit attribution =
             Agent_observation.emit_tool_event
               { base_path = base_dir; attribution; tool_name = "edit_file"
@@ -414,27 +418,32 @@ let test_sink_filters_before_queue_admission () =
           in
           emit Agent_observation.Pathless;
           emit (unattributed_file "/outside/tree.ml");
-          check int "non-stored facts do not wait or consume capacity" 1
-            (Ide_ingest_queue.depth ());
-          Eio.Switch.run (fun sw ->
-            let admitted = ref false in
-            Eio.Fiber.fork ~sw (fun () ->
-              emit (addressed_file ~codebase:"github.com_x_y" ~path:"lib/saved.ml");
-              admitted := true);
-            Eio.Fiber.yield ();
-            check bool "addressed fact waits for space" false !admitted;
-            Ide_ingest_queue.drain_pending ();
-            check bool "accepted predecessor survives" true !predecessor_ran;
-            Eio.Fiber.yield ());
+          check (float 0.) "non-stored facts never count as capacity refusals"
+            counter_before (Otel_metric_store_core.metric_value_or_zero counter ());
+          let before_refusal = Unix.gettimeofday () in
+          emit (addressed_file ~codebase:"github.com_x_y" ~path:"lib/refused.ml");
+          check int "refusal preserves accepted buffer" 1 (Ide_ingest_queue.depth ());
+          check (float 0.) "one actual refusal is public" (counter_before +. 1.)
+            (Otel_metric_store_core.metric_value_or_zero counter ());
+          (match Otel_metric_store_core.get_metric_value
+                   Otel_transport_metric_names.metric_ide_ingest_last_capacity_refusal () with
+           | Some at -> check bool "actual refusal timestamp" true
+                          (at >= before_refusal && at <= Unix.gettimeofday ())
+           | None -> fail "capacity refusal timestamp absent");
+          Ide_ingest_queue.drain_pending ();
+          check bool "accepted predecessor survives" true !predecessor_ran;
+          check (list string) "refused event was never persisted" []
+            (List.map (json_string "file_path")
+              (Ide_bridge.list_events ~base_path:base_dir ~codebase:"github.com_x_y"
+                 ~kind:Ide_bridge.Tool ()));
+          emit (addressed_file ~codebase:"github.com_x_y" ~path:"lib/saved.ml");
           Ide_ingest_queue.drain_pending ();
           match Ide_bridge.list_events ~base_path:base_dir ~codebase:"github.com_x_y"
                   ~kind:Ide_bridge.Tool () with
-          | [ event ] -> check string "addressed fact persisted" "lib/saved.ml"
+          | [ event ] -> check string "accepted fact persisted" "lib/saved.ml"
                            (json_string "file_path" event)
-          | events -> failf "expected one addressed row, got %d" (List.length events)))))
+          | events -> failf "expected one accepted row, got %d" (List.length events)))))
 ;;
-
-
 
 let test_hook_no_file_path () =
   with_temp_dir (fun base_dir ->

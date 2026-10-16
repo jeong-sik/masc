@@ -862,6 +862,64 @@ let test_prepared_read_rejects_changed_authority_and_keeps_line_window () =
   consume meta input |> failed
 ;;
 
+let test_mixed_missing_or_nonregular_read_keeps_ordinary_admission () =
+  fixture @@ fun env sw config meta recovery root ->
+  let snapshot = publish_edit_skills ~read_path_param:"read_path" sw config in
+  public_bundle ~snapshot ~with_read:true env sw config meta recovery
+  @@ fun _meta _task _cell _causal bundle ->
+  let edit_path = Filename.concat root "read-fallback/edit" in
+  let valid_path = Filename.concat root "read-fallback/valid" in
+  let missing_path = Filename.concat root "read-fallback/missing" in
+  let directory = Filename.concat root "read-fallback/directory" in
+  write edit_path "before"; write valid_path "readable"; Fs_compat.mkdir_p directory;
+  List.iter (fun (read_path, scoped) ->
+    let input = match public_args edit_path "before" "after" with
+      | `Assoc fields -> `Assoc (fields @ ["read_path", `String read_path])
+      | _ -> fail "patch arguments are not an object" in
+    let name = match inline_calls bundle [input] with
+      | [Agent_core.Types.ToolUse call] -> call.name
+      | _ -> fail "one Skill did not produce one call" in
+    let tool = List.find (fun tool -> String.equal tool.Agent_core.Tool.schema.name name) bundle.tools in
+    check bool "the actual mixed producer opts into resource preparation" true
+      (Agent_core.Tool.has_scoped_admission tool);
+    let ordinary_calls = ref 0 in
+    (* Observe fallback selection without starting its sandbox process. Actual
+       file preparation and all partial-capability cleanup remain real. *)
+    let tool = Agent_core.Tool.map_handler (fun _handler _env _input ->
+        incr ordinary_calls;
+        Ok {Agent_core.Types.content = "ordinary fallback"; content_blocks = None; _meta = None}) tool in
+    Eio.Switch.run (fun preparation_sw ->
+      let prepared = Agent_core.Tool.prepare_call ~sw:preparation_sw tool ~input in
+      check bool "only existing regular resources transfer scoped admission" scoped
+        (Option.is_some (Agent_core.Tool.prepared_call_scopes prepared));
+      if not scoped then begin
+        (match Agent_core.Tool.execute_prepared prepared with
+         | Ok _ -> ()
+         | Error error -> fail error.message);
+        check int "unsupported Read selects the ordinary handler" 1 !ordinary_calls
+      end);
+    check string "preparation/fallback selection has not executed the Edit" "before" (read edit_path))
+    [valid_path, true; missing_path, false; directory, false]
+;;
+
+let test_prepared_read_skips_a_long_line_and_stops_at_eof () =
+  fixture @@ fun _env sw config meta _recovery root ->
+  let path = Filename.concat root "read-window/long-line" in
+  write path (String.make (Tool_shard_limits.read_file_max_max_bytes + 1) 'x' ^ "\nwanted\n");
+  List.iter (fun (offset, expected) ->
+    let input = `Assoc ["path", `String path; "offset", `Int offset; "limit", `Int 1] in
+    let prepared = match FS.prepare_read ~sw ~config ~meta ~args:input with
+      | Ok (Some value) -> value
+      | Ok None -> fail "long-line regular Read was not prepared"
+      | Error detail -> fail detail in
+    let result = FS.handle_prepared_read_file_with_outcome ~prepared_read:prepared ~config ~meta ~args:input in
+    completed result;
+    check string "line skipping streams past the buffer bound and terminates at EOF" expected
+      Yojson.Safe.Util.(Yojson.Safe.from_string result.raw_output |> member "content" |> to_string);
+    FS.release_prepared_read prepared)
+    [2, "wanted\n"; max_int, ""]
+;;
+
 let () = run "prepared actual file resources"
   ["actual filesystem and SDK", [
     test_case "disjoint actual Edits overlap" `Quick test_disjoint_actual_edits_overlap;
@@ -907,6 +965,10 @@ let () = run "prepared actual file resources"
       test_case "outer claims include a conflict on the later leaf" `Quick
         test_published_inline_claims_include_later_leaves];
     "mixed Read and Edit", [
+      test_case "missing and nonregular Read cleanly retain ordinary admission" `Quick
+        test_mixed_missing_or_nonregular_read_keeps_ordinary_admission;
+      test_case "prepared Read streams a long line and terminates large offsets at EOF" `Quick
+        test_prepared_read_skips_a_long_line_and_stops_at_eof;
       test_case "mixed Skills share real reads while disjoint writes overlap" `Quick
         test_mixed_skills_share_read_claims_while_writes_overlap;
       test_case "Read observes the preceding regular-file Edit" `Quick

@@ -25,8 +25,9 @@ let invocation tool_use_id =
     ~completion:Tool_contract.Continue_after_success
 ;;
 
-let context_messages = function
-  | Ok messages -> messages
+let context_messages ~original = function
+  | Ok Agent_turn.No_injection -> original
+  | Ok (Agent_turn.Injected messages) -> messages
   | Error error -> Alcotest.fail error.Agent_turn.detail
 ;;
 
@@ -478,7 +479,7 @@ let test_context_injection_sets_values () =
   in
   let _new_messages =
     Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
-    |> context_messages
+    |> context_messages ~original:messages
   in
   Alcotest.(check (option string))
     "key1 set"
@@ -520,7 +521,7 @@ let test_context_injection_none () =
   in
   let new_messages =
     Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
-    |> context_messages
+    |> context_messages ~original:messages
   in
   (* No extra messages appended *)
   Alcotest.(check int) "messages unchanged" 1 (List.length new_messages)
@@ -570,7 +571,7 @@ let test_context_injection_extra_messages () =
   in
   let new_messages =
     Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
-    |> context_messages
+    |> context_messages ~original:messages
   in
   (* Original 2 + injected 1 *)
   Alcotest.(check int) "messages with injection" 3 (List.length new_messages)
@@ -608,7 +609,7 @@ let test_context_injection_error_result () =
   in
   let _new_messages =
     Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
-    |> context_messages
+    |> context_messages ~original:messages
   in
   match !received_output with
   | Some (Error { message; recoverable; _ }) ->

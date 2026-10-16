@@ -508,7 +508,7 @@ let stage_execute
          (match agent.options.context_injector with
           | None -> finish After_tool_results_appended
           | Some injector ->
-            let* messages =
+            let* injection =
               Agent_turn.apply_context_injection
                 ~context:agent.context
                 ~messages:agent.state.messages
@@ -523,6 +523,11 @@ let stage_execute
                       | Some name -> " for tool " ^ name
                       | None -> "")
                      error.detail))
+            in
+            let messages =
+              match injection with
+              | Agent_turn.No_injection -> agent.state.messages
+              | Agent_turn.Injected messages -> messages
             in
             let injected_state = { agent.state with messages } in
             set_state agent injected_state;

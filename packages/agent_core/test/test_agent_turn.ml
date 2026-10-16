@@ -26,8 +26,9 @@ let invocation tool_use_id =
     ~completion:Tool_contract.Continue_after_success
 ;;
 
-let context_messages = function
-  | Ok messages -> messages
+let context_messages ~original = function
+  | Ok Agent_turn.No_injection -> original
+  | Ok (Agent_turn.Injected messages) -> messages
   | Error error -> Alcotest.fail error.Agent_turn.detail
 ;;
 
@@ -614,12 +615,16 @@ let test_apply_context_injection_no_injector () =
       }
     ]
   in
-  let injector ~tool_name:_ ~input:_ ~output:_ = None in
-  let new_msgs =
-    Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
-    |> context_messages
-  in
-  Alcotest.(check int) "unchanged" 1 (List.length new_msgs)
+  List.iter
+    (fun injection ->
+      let injector ~tool_name:_ ~input:_ ~output:_ = injection in
+      match
+        Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
+      with
+      | Ok Agent_turn.No_injection -> ()
+      | Ok (Agent_turn.Injected _) -> Alcotest.fail "an empty injection was reported as a change"
+      | Error error -> Alcotest.fail error.Agent_turn.detail)
+    [ None; Some { Hooks.context_updates = []; extra_messages = [] } ]
 ;;
 
 let test_apply_context_injection_with_context_update () =
@@ -650,10 +655,15 @@ let test_apply_context_injection_with_context_update () =
       ; extra_messages = []
       }
   in
-  let _new_msgs =
+  let outcome =
     Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
-    |> context_messages
   in
+  (match outcome with
+   | Ok (Agent_turn.Injected observed) ->
+     Alcotest.(check bool) "context-only update retains the message list" true
+       (observed == messages)
+   | Ok Agent_turn.No_injection -> Alcotest.fail "context-only update was lost"
+   | Error error -> Alcotest.fail error.Agent_turn.detail);
   (* Check context was updated *)
   match Context.get context "last_result" with
   | Some (`String "found it") -> ()
@@ -697,7 +707,7 @@ let test_apply_context_injection_with_extra_messages () =
   in
   let new_msgs =
     Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
-    |> context_messages
+    |> context_messages ~original:messages
   in
   Alcotest.(check int) "same-role message preserved" 2 (List.length new_msgs)
 ;;
@@ -770,7 +780,7 @@ let test_apply_context_injection_preserves_non_retryable_error () =
   in
   let _new_msgs =
     Agent_turn.apply_context_injection ~context ~messages ~injector ~tool_uses ~results
-    |> context_messages
+    |> context_messages ~original:messages
   in
   match !received_output with
   | Some (Error { message; recoverable; error_class }) ->

@@ -613,7 +613,13 @@ let export_of_json ~index = function
   | value -> Error (Export_invalid_field { index; field = "export"; found = kind_name value })
 ;;
 
-let plan_of_json ~descriptors json =
+type request_shape =
+  { node_jsons : Yojson.Safe.t list
+  ; exports : Plan.export list
+  ; branch_failure_policy : Plan.branch_failure_policy
+  }
+
+let shape_of_json json =
   match json with
   | `Assoc fields ->
     let* () =
@@ -653,19 +659,18 @@ let plan_of_json ~descriptors json =
     in
     (match List.assoc_opt "nodes" fields with
      | None -> Error Missing_nodes
-     | Some (`List node_jsons) ->
-       let* nodes =
-         List.fold_left
-           (fun acc (index, node_json) ->
-              let* acc = acc in
-              let* node = node_of_json ~index node_json in
-              Ok (node :: acc))
-           (Ok [])
-           (List.mapi (fun index node_json -> index, node_json) node_jsons)
-       in
-       (match Plan.create ~descriptors ~branch_failure_policy ~exports (List.rev nodes) with
-        | Ok plan -> Ok plan
-        | Error error -> Error (Plan_rejected error))
+     | Some (`List node_jsons) -> Ok { node_jsons; exports; branch_failure_policy }
      | Some other -> Error (Nodes_not_an_array { found = kind_name other }))
   | other -> Error (Request_not_an_object { found = kind_name other })
+;;
+
+let plan_of_json ~descriptors json =
+  let* request = shape_of_json json in
+  let* nodes = List.fold_left (fun acc (index, json) ->
+      let* nodes = acc in
+      let* node = node_of_json ~index json in
+      Ok (node :: nodes)) (Ok []) (List.mapi (fun index json -> index, json) request.node_jsons) in
+  Plan.create ~descriptors ~branch_failure_policy:request.branch_failure_policy
+    ~exports:request.exports (List.rev nodes)
+  |> Result.map_error (fun error -> Plan_rejected error)
 ;;

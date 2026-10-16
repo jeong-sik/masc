@@ -118,6 +118,12 @@ module For_testing : sig
     -> hitl_resolution:Keeper_event_queue.hitl_resolution option
     -> Keeper_tooling.Response.completion_policy
 
+  val with_completion_clause
+    :  input_speaker:Keeper_input_speaker.t
+    -> response_policy:Keeper_tooling.Response.completion_policy
+    -> string
+    -> string
+
   val normalize_final_response_text
     :  response_policy:Keeper_tooling.Response.completion_policy
     -> keeper_name:string

@@ -287,6 +287,14 @@ let keeper_world_autonomous_trigger_since_last =
   "keeper.world.autonomous_trigger.since_last"
 ;;
 
+let keeper_wake_completion_quiet_final_allowed =
+  "keeper.wake.completion.quiet_final_allowed"
+;;
+
+let keeper_wake_completion_progress_required =
+  "keeper.wake.completion.progress_required"
+;;
+
 let keeper_world_scheduled_automation_heading =
   "keeper.world.scheduled_automation.heading"
 ;;

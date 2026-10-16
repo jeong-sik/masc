@@ -230,6 +230,11 @@ val keeper_world_autonomous_trigger_scheduler_scheduled : string
 val keeper_world_autonomous_trigger_scheduler_reactive : string
 val keeper_world_autonomous_trigger_reasons : string
 val keeper_world_autonomous_trigger_since_last : string
+
+(** The line closing an autonomous wake input that states whether this turn
+    may end with an empty final answer. *)
+val keeper_wake_completion_quiet_final_allowed : string
+val keeper_wake_completion_progress_required : string
 val keeper_world_scheduled_automation_heading : string
 val keeper_world_scheduled_automation_counts : string
 val keeper_world_scheduled_automation_next_due : string

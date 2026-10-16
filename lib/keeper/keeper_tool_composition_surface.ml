@@ -1462,29 +1462,12 @@ let rec async_worker_result
                ~class_ ~effect_disposition:observed.failure_effect_disposition
                ~data ?metadata:observed.metadata observed.raw_output
            | Tool_result.Completed () ->
-             let selected =
-               let* fields = match data with `Assoc fields -> Ok fields
-                 | _ -> Error "canonical child result is not a structured object" in
-               let* exports = match List.assoc_opt "result" fields with
-                 | Some (`Assoc fields) -> (match List.assoc_opt "exports" fields with
-                     | Some (`Assoc exports) -> Ok exports
-                     | None when Plan.exports (Plan.child_plan child.child) = [] -> Ok []
-                     | Some _ | None -> Error "canonical child result has no export projection")
-                 | Some _ | None -> Error "canonical child result is absent" in
-               List.fold_left (fun acc (export : Plan.export) ->
-                 let* values = acc in
-                 match List.assoc_opt export.name exports with
-                 | Some (`Assoc fields) when List.assoc_opt "available" fields = Some (`Bool true) ->
-                   (match List.assoc_opt "value" fields with
-                    | Some value -> Ok ((export.name,value)::values)
-                    | None -> Error ("canonical child export has no value: " ^ export.name))
-                 | Some _ | None -> Error ("canonical child export is unavailable: " ^ export.name))
-                 (Ok []) (Plan.exports (Plan.child_plan child.child))
-               |> Result.map (fun values -> `Assoc (List.rev values)) in
-             (match selected with
-              | Ok data -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time ~data ()
-              | Error detail -> Tool_result.make_err ~tool_name:node.tool_name ~start_time
-                  ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect detail) in
+             (match Keeper_composition_child_exports.select
+                      ~exports:(Plan.exports (Plan.child_plan child.child)) data with
+              | Ok values -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time ~data:(`Assoc values) ()
+              | Error error -> Tool_result.make_err ~tool_name:node.tool_name ~start_time
+                  ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
+                  (Keeper_composition_child_exports.error_to_string error)) in
          Executor.dispatch_result ~failure_effect_disposition:observed.failure_effect_disposition
            ?deferred_kind:observed.deferred_kind
            (Tool_result.with_retained_artifacts observed.retained_artifacts result)) in

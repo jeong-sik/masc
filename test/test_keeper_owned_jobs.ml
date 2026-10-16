@@ -3671,6 +3671,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
 
 let with_nested_job_skill ?fixture_base_path ?(wait_only=false)
     ?(parameterized=false)
+    ?(exports=["stdout","consume","/content"])
     ?(branch_failure_policy=Masc.Keeper_tool_plan.default_branch_failure_policy) ~execution operation =
   with_fixture ?fixture_base_path @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
@@ -3688,6 +3689,9 @@ let with_nested_job_skill ?fixture_base_path ?(wait_only=false)
     write path id; Some id) in
   let skill_dir = Filename.concat fixture.base_path ".agents/skills/nested-owned-job" in
   Fs_compat.mkdir_p skill_dir;
+  let export_source = exports |> List.map (fun (name,node,pointer) ->
+      Printf.sprintf "[[compositions.exports]]\nname = %S\nnode = %S\npointer = %S\n" name node pointer)
+    |> String.concat "" in
   let launch_source = Printf.sprintf {|---
 name: nested-owned-job
 description: Launch one owned job and consume its original complete stdout.
@@ -3726,13 +3730,10 @@ name = "sha256"
 kind = "output"
 node = "await"
 pointer = "/artifacts/0/_blob/sha256"
-[[compositions.exports]]
-name = "stdout"
-node = "consume"
-pointer = "/content"
+%s
 ```
 |} (match execution with Masc.Keeper_tool_composition_catalog.Inline -> "inline" | Async -> "async")
-    (Masc.Keeper_tool_plan.branch_failure_policy_to_string branch_failure_policy) in
+    (Masc.Keeper_tool_plan.branch_failure_policy_to_string branch_failure_policy) export_source in
   let parameters,job_input = match original_job,parameterized with
     | Some id,true -> Printf.sprintf {|[[compositions.params]]
 name = "job_id"
@@ -3770,13 +3771,10 @@ name = "sha256"
 kind = "output"
 node = "await"
 pointer = "/artifacts/0/_blob/sha256"
-[[compositions.exports]]
-name = "stdout"
-node = "consume"
-pointer = "/content"
+%s
 ```
 |} (match execution with Masc.Keeper_tool_composition_catalog.Inline -> "inline" | Async -> "async")
-    (Masc.Keeper_tool_plan.branch_failure_policy_to_string branch_failure_policy) parameters job_input in
+    (Masc.Keeper_tool_plan.branch_failure_policy_to_string branch_failure_policy) parameters job_input export_source in
   write (Filename.concat skill_dir "SKILL.md") source;
   let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:fixture.base_path keeper in
   Fs_compat.mkdir_p (Filename.dirname declaration);
@@ -3822,8 +3820,18 @@ pointer = "/content"
   operation ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
     ~publication_recovery ~physical_turn_ref ~delivery ~recorder ~snapshot
 
-let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=false) ?(launch_in_child=false) ?(parent_tool_denied=false) () =
-  with_nested_job_skill ~wait_only:(not launch_in_child) ~parameterized:dynamic_arguments ~execution:Masc.Keeper_tool_composition_catalog.Async
+type child_export_selection = Stdout_only | Ordered_aliases | Without_exports
+
+let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=false) ?(launch_in_child=false)
+    ?(parent_tool_denied=false) ?(export_selection=Stdout_only) () =
+  let exports = match export_selection with
+    | Stdout_only -> ["stdout","consume","/content"]
+    | Ordered_aliases ->
+      ["z/stdout~","consume","/content";"a/bytes","consume","/total_bytes";
+       "m/sha256","consume","/sha256"]
+    | Without_exports -> [] in
+  with_nested_job_skill ~wait_only:(not launch_in_child) ~parameterized:dynamic_arguments ~exports
+    ~execution:Masc.Keeper_tool_composition_catalog.Async
   @@ fun ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
       ~publication_recovery ~physical_turn_ref:_ ~delivery:_ ~recorder:_ ~snapshot ->
   let module Async = Masc.Keeper_msg_async in
@@ -3844,11 +3852,24 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
   let denial_probe = if parent_tool_denied then
       [`Assoc ["id",`String "denial-probe";"tool",`String "keeper_lane_status";
         "input",`Assoc ["kind",`String "literal";"value",`Assoc []]]] else [] in
+  let dependent,export_node,export_pointer,expected_stdout = match export_selection with
+    | Stdout_only -> [],"child","/stdout",stdout_bytes
+    | Ordered_aliases ->
+      [`Assoc ["id",`String "after-child";"tool",`String "keeper_artifact_read";
+        "input",`Assoc ["kind",`String "object";"fields",`List
+          [`Assoc ["name",`String "sha256";"value",`Assoc ["kind",`String "output";
+            "node",`String "child";"pointer",`String "/m~1sha256"]]]]]],
+      "child","/z~1stdout~0",stdout_bytes
+    | Without_exports ->
+      [`Assoc ["id",`String "after-child";"tool",`String "keeper_artifact_read";
+        "after",`List [`String "child"];
+        "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String sibling.sha256]]]],
+      "after-child","/content",independent_bytes in
   let recipe = `Assoc ["execution",`String "async";"nodes",`List (
       [`Assoc ["id",`String "sibling";"tool",`String "keeper_artifact_read";
           "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String sibling.sha256]]];
-       `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;child_arguments]] @ denial_probe);
-      "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
+       `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;child_arguments]] @ dependent @ denial_probe);
+      "exports",`List [`Assoc ["name",`String "stdout";"node",`String export_node;"pointer",`String export_pointer]]] in
   let started = Mtime_clock.counter () in
   let backend_calls () = if Sys.file_exists fixture.daemon_path then List.length (calls fixture) else 0 in
   let backend_before_prepare = backend_calls () in
@@ -3891,6 +3912,11 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
   let nodes = composition_nodes fixture waiting in
   check_json "independent parent work settles while child is pending" (`String "completed")
     (composition_node "[\"sibling\"]" nodes |> member "result" |> member "disposition");
+  (match export_selection with
+   | Stdout_only -> ()
+   | Ordered_aliases | Without_exports ->
+     check bool "dependent work does not start while canonical child result is pending" false
+       (List.exists (fun node -> member "node_id" node = `String "[\"after-child\"]") nodes));
   let prepare_to_wait_ms = Mtime.Span.to_float_ns (Mtime_clock.count started) /. 1_000_000. in
   let candidate journal = Journal.waiting_continuation journal |> require "original async continuation"
       |> function Some value -> value | None -> fail "original async result wait disappeared" in
@@ -3937,12 +3963,18 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
         (Tool_result.data resumed_child |> member "result_wait");
       await_composition env fixture (Tool_result.data resumed_child)) in
   check bool "actual canonical child outcome is preserved" (not child_failure) child_ok;
-  let child_nodes = composition_nodes fixture child_completed in
+  let child_nodes = match export_selection with
+    | Stdout_only | Ordered_aliases -> composition_nodes fixture child_completed
+    | Without_exports ->
+      check_json "canonical no-export child omits the export projection" `Null (member "exports" child_completed);
+      child_completed |> member "actions" |> to_list in
   if launch_in_child then (
     check_json "completed child launch is retained on fresh continuation" (`String "retained_completion")
       (composition_node "launch" child_nodes |> member "execution_origin");
     check (option string) "child's own job keeps the original Task" (Some "task-A") (load fixture id).source.task_id);
-  let previous_child_nodes = composition_nodes fixture child_wait in
+  let previous_child_nodes = match export_selection with
+    | Stdout_only | Ordered_aliases -> composition_nodes fixture child_wait
+    | Without_exports -> child_wait |> member "settled" |> to_list in
   List.iter (fun field -> check_json ("original child job occurrence " ^ field)
       (composition_node "await" previous_child_nodes |> member field)
       (composition_node "await" child_nodes |> member field)) ["execution_id";"tool_use_id"];
@@ -4002,11 +4034,32 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
     check_json "failed canonical child provides no successful parent export" (`Bool false)
       (completed |> member "exports" |> member "stdout" |> member "available")
   else
-    check_json "parent consumes exact complete child export" (`String stdout_bytes)
+    check_json "parent consumes exact completed dependency output" (`String expected_stdout)
       (completed |> member "exports" |> member "stdout" |> member "value");
   let completed_nodes = composition_nodes fixture completed in
   let scope = prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" in
   let submission_id = scope |> member "submission" |> to_string in
+  (match export_selection with
+   | Stdout_only -> ()
+   | Ordered_aliases | Without_exports ->
+     let selected = composition_node (scope |> member "result" |> to_string) completed_nodes
+         |> member "result" |> member "data" in
+     (match export_selection with
+      | Stdout_only -> fail "expected an explicit export scenario"
+      | Ordered_aliases ->
+        check (list string) "native result preserves declared export order and exact escaped names"
+          ["z/stdout~";"a/bytes";"m/sha256"] (selected |> to_assoc |> List.map fst);
+        check_json "selected string value remains complete" (`String stdout_bytes) (member "z/stdout~" selected);
+        check_json "selected integer value keeps its type" (`Int (String.length stdout_bytes)) (member "a/bytes" selected);
+        let consumed = composition_node "consume" child_nodes |> member "result" |> member "data" in
+        check_json "selected artifact identity belongs to the completed child"
+          (member "sha256" consumed) (member "m/sha256" selected)
+      | Without_exports -> check_json "native no-export result is an empty object" (`Assoc []) selected);
+     let dependent = composition_node "[\"after-child\"]" completed_nodes in
+     check_json "canonical result releases the actual dependent handler" (`String "completed")
+       (dependent |> member "result" |> member "disposition");
+     check_json "dependent handler reads the selected original artifact" (`String expected_stdout)
+       (dependent |> member "result" |> member "data" |> member "content"));
   List.iter (fun field -> check_json ("original parent submission occurrence " ^ field)
       (composition_node submission_id nodes |> member field)
       (composition_node submission_id completed_nodes |> member field)) ["execution_id";"tool_use_id"];
@@ -5513,6 +5566,10 @@ let () = match Array.to_list Sys.argv with
           (test_interrupted_prepared_launch_resumes_the_same_job None)
       ; test_case "fixed async Skill child submits once and resumes its canonical whole result" `Quick (test_fixed_async_skill_child ~child_failure:false)
       ; test_case "fixed async Skill child preserves an actual canonical whole-child failure" `Quick (test_fixed_async_skill_child ~child_failure:true)
+      ; test_case "native child exports preserve order, escaped names and dependent artifact reads" `Quick
+          (test_fixed_async_skill_child ~export_selection:Ordered_aliases)
+      ; test_case "native child without exports releases its dependent after canonical completion" `Quick
+          (test_fixed_async_skill_child ~export_selection:Without_exports)
       ; test_case "typed recovery terminates proven refusal and holds uncertain effects" `Quick test_typed_continuation_recovery
       ; test_case "nested parent distinguishes a denied Tool from unavailable original child authority" `Quick
           (test_fixed_async_skill_child ~parent_tool_denied:true)

@@ -182,5 +182,208 @@ let test_stdio_controller () =
               let observed = raw "lane_observe" (`Assoc ["binding", `Assoc []; "sources", `List []]) in
               check bool "eject removes context" true (Yojson.Safe.Util.(live_observation observed |> member "state") = `String "no_machine"))))))
 
+(* The machine is process-global: a test must not hand its machine to the next. *)
+let eject_whoever_holds ~default =
+  let holder =
+    match Dos_lane.screen () with
+    | Ok {Dos_lane.controller = Some holder; _} -> holder
+    | Ok _ | Error _ -> default in
+  ignore (Dos_lane.eject ~who:holder ~announce:ignore () : (unit, Dos_lane.error) result)
+
+(* ---------- exceptions the lane does not type ----------
+
+   An exception the lane does not type -- one the core raises while a call
+   runs the guest -- reaches the worker edge. On its way out a call must give
+   back the controller it took and release the machine's lock, or the caller
+   told "that failed" still holds the pad and the next player is refused. At
+   the edge the worker answers with an error result and keeps serving.
+
+   The trigger is real: a guest that EXECs a companion file which is an MZ
+   image with a header longer than the file makes the pinned core raise
+   Invalid_argument from inside the run (Dos_dos.load_exe, child path). If a
+   pin bump makes the core answer that EXEC with a DOS error instead, the
+   tests say so and need another trigger. *)
+
+let owner = "owner"
+
+(* Polls the BIOS key read until a key arrives, then EXECs BAD.EXE.
+   org 0x100: wait: mov ah,0 / int 16h / or ax,ax / jz wait
+              mov ax,cs / mov ds,ax / mov es,ax
+              mov dx,name / mov bx,epb / mov ax,4B00h / int 21h / int 20h
+   name: "BAD.EXE",0 at 0x11B; epb: 14 zero bytes at 0x123 *)
+let exec_after_a_key_com =
+  "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x8c\xc8\x8e\xd8\x8e\xc0\xba\x1b\x01\xbb\x23\x01\
+   \xb8\x00\x4b\xcd\x21\xcd\x20BAD.EXE\000"
+  ^ String.make 14 '\000'
+;;
+
+(* "MZ", a header of 0x1000 paragraphs, and a file of 28 bytes. *)
+let malformed_child =
+  let image = Bytes.make 28 '\000' in
+  Bytes.blit_string "MZ" 0 image 0 2;
+  Bytes.set image 9 '\x10';
+  Bytes.to_string image
+;;
+
+let with_lane run =
+  let directory = Filename.temp_dir "masc-dos-fault-" "" in
+  Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+  Fun.protect
+    ~finally:(fun () ->
+      eject_whoever_holds ~default:owner;
+      Dos_lane.install_activity_observer None;
+      remove_owned_tree directory)
+    (fun () -> run directory)
+;;
+
+let require = function
+  | Ok value -> value
+  | Error error -> fail (Dos_lane.error_to_string error)
+;;
+
+let controller () = (require (Dos_lane.screen ())).Dos_lane.controller
+
+let test_a_raising_call_gives_the_pad_back () =
+  with_lane (fun directory ->
+    ignore
+      (require
+         (Dos_lane.load ~who:owner ~ledger_dir:directory
+            ~saves_dir:(Filename.concat directory "saves")
+            ~checkpoint_dir:(Filename.concat directory "checkpoints")
+            ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com"
+            ~program_bytes:exec_after_a_key_com
+            ~files:[ "BAD.EXE", malformed_child ]
+            ~announce:ignore));
+    ignore (require (Dos_lane.pass ~who:owner ~to_:None ~announce:ignore));
+    check (option string) "the pad is free before the call" None (controller ());
+    (match Dos_lane.press ~who:"alice" ~keys:[ "a" ] ~steps:100_000 ~until_ready:true with
+     | exception Invalid_argument _ -> ()
+     | Ok _ | Error _ ->
+       fail
+         "the core no longer raises on a malformed EXEC child: this test needs another \
+          trigger for an exception inside a run");
+    check (option string) "the caller told it failed does not hold the pad" None (controller ());
+    (* The lock was released and nobody holds the pad, so another player moves
+       the machine instead of being refused for alice. *)
+    match Dos_lane.step ~who:"bob" ~steps:1_000 ~until_ready:false with
+    | Ok _ -> check (option string) "bob took the free pad" (Some "bob") (controller ())
+    | Error error -> fail (Dos_lane.error_to_string error))
+;;
+
+let test_a_typed_outcome_still_keeps_the_pad () =
+  (* The restore applies to exceptions only. A typed fault means the call ran,
+     and the existing contract keeps the caller as the holder. *)
+  with_lane (fun directory ->
+    ignore
+      (require
+         (Dos_lane.load ~who:owner ~ledger_dir:directory
+            ~saves_dir:(Filename.concat directory "saves")
+            ~checkpoint_dir:(Filename.concat directory "checkpoints")
+            ~autosave:Dos_lane.Keep_autosave ~program_name:"game.com"
+            ~program_bytes:"\xb4\x00\xcd\x16\x09\xc0\x74\xf8\x8d\xc0" ~files:[]
+            ~announce:ignore));
+    ignore (require (Dos_lane.pass ~who:owner ~to_:None ~announce:ignore));
+    (match Dos_lane.press ~who:"alice" ~keys:[ "a" ] ~steps:100_000 ~until_ready:true with
+     | Error (Dos_lane.Guest_fault _) -> ()
+     | Error error -> fail (Dos_lane.error_to_string error)
+     | Ok _ -> fail "the program should have faulted on lea ax,ax");
+    check (option string) "alice ran the guest, so she holds the pad" (Some "alice") (controller ()))
+;;
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path) then begin
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o700
+  end
+
+let write_file path contents =
+  Out_channel.with_open_bin path (fun channel -> output_string channel contents)
+
+(* The worker over in-process pipes, as the host sees it. *)
+let with_worker ~base_path run_client =
+  Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+  Fun.protect ~finally:(fun () ->
+    eject_whoever_holds ~default:"fixture";
+    Dos_lane.install_activity_observer None;
+    remove_owned_tree base_path) (fun () ->
+    Eio_main.run (fun env ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30. (fun () ->
+        Eio.Switch.run (fun sw ->
+          let request_source, request_sink = Eio_unix.pipe sw in
+          let response_source, response_sink = Eio_unix.pipe sw in
+          Eio.Fiber.first
+            (fun () -> Mcp_protocol_eio.Server.run (Dos_addon_worker.create ~base_path ())
+              ~stdin:request_source ~stdout:response_sink ~clock:(Eio.Stdenv.clock env) ())
+            (fun () ->
+              let transport = Transport.create ~stdin:response_source ~stdout:request_sink
+                ~max_size:4194304 () in
+              let client = Client.create ~transport ~clock:(Eio.Stdenv.clock env) () in
+              ignore (unwrap (Client.initialize client ~client_name:"worker-fixture"
+                ~client_version:"1"));
+              run_client client)))))
+
+let test_contained_turns_an_exception_into_an_error_result () =
+  let result = Dos_addon_worker.contained ~tool_name:"masc_dos_step"
+    (fun () -> failwith "injected") in
+  (match result with
+   | Ok answer ->
+       check bool "the answer is an error" true (answer.S.is_error = Some true);
+       check bool "the exception is in the structured content" true
+         (Yojson.Safe.Util.member "exception" (data answer) = `String "Failure(\"injected\")");
+       check bool "typed as a runtime failure whose effect is unknown" true
+         (Lane_addon_tool_result.failure answer =
+           (Tool_result.Runtime_failure, Tool_result.Effect_outcome_unknown))
+   | Error message -> fail message);
+  let passes = Dos_addon_worker.contained ~tool_name:"masc_dos_step" (fun () ->
+    Error "a handler's own error stays its own") in
+  check bool "an error the handler returns is not rewritten" true
+    (passes = Error "a handler's own error stays its own");
+  check_raises "cancellation keeps unwinding" (Eio.Cancel.Cancelled Exit) (fun () ->
+    ignore (Dos_addon_worker.contained ~tool_name:"masc_dos_step"
+      (fun () -> raise (Eio.Cancel.Cancelled Exit))))
+
+let test_a_handler_exception_does_not_end_the_worker () =
+  let base_path = Filename.temp_dir "dos-addon-worker-fault-" "" in
+  let game = Filename.concat (Filename.concat (Filename.concat
+    (Common.masc_dir_from_base_path ~base_path) "dos") "programs") "bad-child" in
+  mkdir_p game;
+  write_file (Filename.concat game "GAME.COM") exec_after_a_key_com;
+  write_file (Filename.concat game "BAD.EXE") malformed_child;
+  with_worker ~base_path (fun client ->
+    let raw name arguments = unwrap (Client.call_tool client ~name ~arguments ()) in
+    let call ?controller name arguments =
+      raw Lane_addon_call_context.tool_name
+        (Lane_addon_call_context.to_json_with_controller ~controller
+           ~principal:(Lane_addon_call_context.Keeper "fixture") ~tool:name ~arguments) in
+    let admission observed_holder = {C.observed_holder; release=None; handoff_target=None} in
+    let snapshot () = member "holder" (raw C.snapshot_tool (`Assoc [])) in
+    let loaded = call ~controller:(admission None) "masc_dos_load"
+      (`Assoc ["program", `String "bad-child"; "boot", `String "GAME.COM"]) in
+    check bool "the game loads" false (loaded.is_error = Some true);
+    let pressed = call ~controller:(admission (Some "fixture")) "masc_dos_press"
+      (`Assoc ["keys", `List [`String "a"]]) in
+    check bool "the press that raised inside the core is an error result" true
+      (pressed.is_error = Some true);
+    check bool "typed as a runtime failure whose effect is unknown" true
+      (Lane_addon_tool_result.failure pressed =
+        (Tool_result.Runtime_failure, Tool_result.Effect_outcome_unknown));
+    check bool "the exception rides in the result" true
+      (Yojson.Safe.Util.member "exception" (data pressed) <> `Null);
+    (* The worker answers the next call: its process did not end. *)
+    check bool "the controller is where it was" true (snapshot () = `String "fixture");
+    let screen = call "masc_dos_screen" (`Assoc []) in
+    check bool "the next call works" false (screen.is_error = Some true);
+    let stepped = call ~controller:(admission (Some "fixture")) "masc_dos_step"
+      (`Assoc ["steps", `Int 10]) in
+    check bool "and so does a call that moves the machine" false (stepped.is_error = Some true))
+
 let () = run "DOS standalone Add-on worker"
-  ["stdio", [test_case "host admission, handoff, recovery and PNG" `Quick test_stdio_controller]]
+  ["stdio", [test_case "host admission, handoff, recovery and PNG" `Quick test_stdio_controller;
+             test_case "a handler exception does not end the worker" `Quick
+               test_a_handler_exception_does_not_end_the_worker];
+   "edge", [test_case "contained turns an exception into an error result" `Quick
+              test_contained_turns_an_exception_into_an_error_result];
+   "lane exceptions", [test_case "a raising call gives the pad back" `Quick
+                         test_a_raising_call_gives_the_pad_back;
+                       test_case "a typed fault still keeps the pad" `Quick
+                         test_a_typed_outcome_still_keeps_the_pad]]

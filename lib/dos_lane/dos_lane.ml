@@ -306,7 +306,17 @@ let with_control ~who f =
          holder, and given back if the call is refused. *)
       let before = st.controller in
       st.controller <- Some who;
-      let result = running (fun () -> f st) in
+      let result =
+        match running (fun () -> f st) with
+        | result -> result
+        | exception exn ->
+          (* Not one of the outcomes [running] types, so nothing says the call
+             ran. The caller is about to be told it failed, and must not be
+             left holding the pad for a call it was told did nothing. *)
+          let backtrace = Printexc.get_raw_backtrace () in
+          st.controller <- before;
+          Printexc.raise_with_backtrace exn backtrace
+      in
       (match result with
        | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
          (* the call ran: the machine may have moved *)

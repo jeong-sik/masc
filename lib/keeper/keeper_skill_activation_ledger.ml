@@ -1508,9 +1508,9 @@ let of_projection_yojson json =
    ledger with the file cursor it was read to, and the next read under the
    session lock takes only the rows written after that cursor.
    [events_schema] stays "masc.skill-activation-events/v1" so upgraded readers
-   keep decoding existing v1 session logs; once [Async_result_delivered] rows
-   are appended, rollback to earlier binaries is unsupported (see Upgrade notes
-   in changelog.d/43179.md). *)
+   keep decoding existing v1 session logs; once [Async_result_delivered] or
+   [Async_action_observed] rows are appended, rollback to earlier binaries is
+   unsupported (see Upgrade notes in changelog.d/43188.md). *)
 
 let events_schema = "masc.skill-activation-events/v1"
 let events_filename = "skill-activation-events.jsonl"

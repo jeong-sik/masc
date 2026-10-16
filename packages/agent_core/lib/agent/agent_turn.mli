@@ -134,14 +134,22 @@ type context_injection_error =
   ; detail : string
   }
 
-(** Apply context injector after tool execution, updating context and messages. *)
+type context_injection_outcome =
+  | No_injection
+  | Injected of Types.message list
+(** [No_injection] means every injector reported no context updates or extra
+    messages. [Injected messages] includes context-only updates; its message
+    list may therefore be the original list. *)
+
+(** Apply context injector after tool execution, updating context and messages.
+    No updates are applied until every injector has succeeded. *)
 val apply_context_injection
   :  context:Context.t
   -> messages:Types.message list
   -> injector:Hooks.context_injector
   -> tool_uses:Types.content_block list
   -> results:Agent_tools.tool_execution_result list
-  -> (Types.message list, context_injection_error) result
+  -> (context_injection_outcome, context_injection_error) result
 
 (** {1 Tool result construction} *)
 

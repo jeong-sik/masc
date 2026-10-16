@@ -270,6 +270,10 @@ type context_injection_error =
   ; detail : string
   }
 
+type context_injection_outcome =
+  | No_injection
+  | Injected of Types.message list
+
 let apply_context_injection ~context ~messages ~injector ~tool_uses ~results =
   let rec collect updates_rev messages_rev tool_uses results =
     match tool_uses, results with
@@ -312,9 +316,15 @@ let apply_context_injection ~context ~messages ~injector ~tool_uses ~results =
   in
   match collect [] [] tool_uses results with
   | Error _ as error -> error
+  | Ok ([], []) -> Ok No_injection
   | Ok (updates, extra_messages) ->
     List.iter (fun (key, value) -> Context.set context key value) updates;
-    Ok (Util.snoc_list messages extra_messages)
+    let messages =
+      match extra_messages with
+      | [] -> messages
+      | _ :: _ -> Util.snoc_list messages extra_messages
+    in
+    Ok (Injected messages)
 ;;
 
 (** Process tool results into ToolResult content blocks.

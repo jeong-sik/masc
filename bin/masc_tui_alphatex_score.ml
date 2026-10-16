@@ -10,6 +10,9 @@ type unclosed =
 
 type directive_argument =
   | Title_text
+  | Artist_text
+  | Section_text
+  | Key_signature_name
   | Tempo_number
   | Time_signature_numbers
   | Tuning_notes
@@ -24,7 +27,17 @@ type failure =
   | Missing_argument of directive_argument
   | Second_tuning
   | Tuning_after_music
-  | Quoted_without_title
+  | Invalid_tuning_group of string
+  | Additional_track
+  | Additional_staff
+  | Unsupported_track_properties of string
+  | Unsupported_staff_properties of string
+  | Unsupported_instrument of string
+  | Instrument_without_tuning
+  | Invalid_key_signature of string
+  | Key_signature_after_note
+  | Section_after_note
+  | Quoted_without_metadata
   | Duration_outside_subset of string
   | Chord_dot_without_duration
   | Empty_chord
@@ -116,6 +129,9 @@ let failure_text = function
   | Unknown_directive name ->
       Printf.sprintf "the \\%s directive is not in the subset" (quoted name)
   | Missing_argument Title_text -> "\\title expects a quoted string"
+  | Missing_argument Artist_text -> "\\artist expects a quoted string"
+  | Missing_argument Section_text -> "\\section expects a quoted string"
+  | Missing_argument Key_signature_name -> "\\ks expects a key signature"
   | Missing_argument Tempo_number -> "\\tempo expects a number"
   | Missing_argument Time_signature_numbers -> "\\ts expects two numbers"
   | Missing_argument Tuning_notes -> "\\tuning expects note names"
@@ -123,7 +139,22 @@ let failure_text = function
   | Missing_argument Alternate_ending_numbers -> "\\ae expects numbers"
   | Second_tuning -> "a second \\tuning directive"
   | Tuning_after_music -> "a \\tuning after the first note"
-  | Quoted_without_title -> "a quoted string with no \\title before it"
+  | Invalid_tuning_group text ->
+      Printf.sprintf "\\tuning expects only note names in (%s)" (quoted text)
+  | Additional_track -> "only one initial \\track can be drawn"
+  | Additional_staff -> "only one initial \\staff can be drawn"
+  | Unsupported_track_properties text ->
+      Printf.sprintf "track properties {%s} are outside the subset" (quoted text)
+  | Unsupported_staff_properties text ->
+      Printf.sprintf "staff properties {%s} do not select supported tablature" (quoted text)
+  | Unsupported_instrument name ->
+      Printf.sprintf "instrument \"%s\" is not a supported guitar or bass" (quoted name)
+  | Instrument_without_tuning -> "an instrument requires explicit \\tuning before the music"
+  | Invalid_key_signature name ->
+      Printf.sprintf "\"%s\" is not a key signature" (quoted name)
+  | Key_signature_after_note -> "\\ks requires a bar line before it after notes"
+  | Section_after_note -> "\\section requires a bar line before it after notes"
+  | Quoted_without_metadata -> "a quoted string with no metadata directive before it"
   | Duration_outside_subset what ->
       Printf.sprintf "a duration \"%s\" outside :1 :2 :4 :8 :16" (quoted what)
   | Chord_dot_without_duration -> "a '.' after a chord with no duration"
@@ -173,6 +204,11 @@ let is_letter char = (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z'
 
 type directive =
   | Title
+  | Artist
+  | Track
+  | Staff
+  | Key_signature
+  | Section
   | Tempo
   | Time_signature
   | Tuning
@@ -183,7 +219,7 @@ type directive =
 type token =
   | Tk_directive of directive
   | Tk_unknown_directive of string
-  | Tk_quoted of string  (* the title text, escapes resolved *)
+  | Tk_quoted of string  (* metadata text, escapes resolved *)
   | Tk_effect of string  (* a [{…}] group, its text between the braces *)
   | Tk_chord of string * int option  (* the bracketed members, [.dur] in units *)
   | Tk_bar
@@ -191,6 +227,11 @@ type token =
 
 let directive_of_word = function
   | "title" -> Some Title
+  | "artist" -> Some Artist
+  | "track" -> Some Track
+  | "staff" -> Some Staff
+  | "ks" -> Some Key_signature
+  | "section" -> Some Section
   | "tempo" -> Some Tempo
   | "ts" -> Some Time_signature
   | "tuning" -> Some Tuning
@@ -235,7 +276,7 @@ let tokenize source =
         else Error Backslash_without_name
       else if char = '"' then begin
         (* A backslash keeps the character after it, so an escaped quote does
-           not end the string. The text is the title's, kept on the score. *)
+           not end a metadata string. *)
         let rec quoted i =
           if i >= limit then None
           else if source.[i] = '\\' then quoted (i + 2)
@@ -321,11 +362,10 @@ let tokenize source =
    The parse is strict: a token outside the subset fails the score rather than
    being given a meaning. A word that is not a duration, a note or a rest is
    not skipped -- skipped, it would take its beat with it and every note after
-   it would sit on the wrong count. The one thing passed over is technique
-   markup in braces: the note it rides on still sounds, so it keeps its count,
-   its string and its fret, and is marked. Markup that changes how long a beat
-   lasts (a dot, a tuplet, a grace note) cannot be passed over the same way
-   and fails the score. *)
+   it would sit on the wrong count. Recognized presentation metadata is read
+   with its own argument shape. Technique markup in braces keeps the note's
+   count, string and fret and marks it. Rhythm markup must have a supported
+   duration interpretation; otherwise the score fails. *)
 
 let default_tuning = [ "e"; "B"; "G"; "D"; "A"; "E" ]
 
@@ -513,6 +553,9 @@ let marks_pending marks =
    bar line it is on. A closed measure keeps the signs its bar carried. *)
 type builder = {
   b_tuning : string list option;
+  b_track_declared : bool;
+  b_staff_declared : bool;
+  b_instrument_declared : bool;
   b_default : int;
   b_measures : (marks * sounding list) list;  (* newest measure first, each newest beat first *)
   b_beats : sounding list;  (* the open measure, newest beat first *)
@@ -527,6 +570,9 @@ type builder = {
    span is the unit's ticks, found now so a length the ticks cannot hold
    fails here, before another beat reads it as the new default. *)
 let push_beat ?said notes state =
+  if state.b_instrument_declared && Option.is_none state.b_tuning then
+    Error Instrument_without_tuning
+  else
   let unit = Option.value said ~default:state.b_default in
   let dur = Plain unit in
   match span_of_duration dur with
@@ -642,6 +688,71 @@ let number_argument missing tokens =
   | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
     Error (Missing_argument missing)
 
+let text_argument missing = function
+  | Tk_quoted text :: rest -> Ok (text, rest)
+  | []
+  | (Tk_directive _ | Tk_unknown_directive _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
+      Error (Missing_argument missing)
+
+(* These signatures change standard notation, not the string/fret coordinates
+   of tablature. Validate alphaTab's finite signature vocabulary before leaving
+   that presentation metadata out of this projection. *)
+let valid_key_signature name =
+  match String.lowercase_ascii name with
+  | "cb" | "gb" | "db" | "ab" | "eb" | "bb" | "f" | "c"
+  | "g" | "d" | "a" | "e" | "b" | "f#" | "c#"
+  | "cbmajor" | "gbmajor" | "dbmajor" | "abmajor" | "ebmajor" | "bbmajor"
+  | "fmajor" | "cmajor" | "gmajor" | "dmajor" | "amajor" | "emajor"
+  | "bmajor" | "f#major" | "c#major"
+  | "abminor" | "ebminor" | "bbminor" | "fminor" | "cminor" | "gminor"
+  | "dminor" | "aminor" | "eminor" | "bminor" | "f#minor" | "c#minor"
+  | "g#minor" | "d#minor" | "a#minor" -> true
+  | _ -> false
+
+(* General MIDI programs 24--39 are guitars and basses. Their timbres do not
+   alter explicit fret coordinates, but their default string sets differ, so
+   accepting one below also requires an explicit tuning before any beat. *)
+let fretted_instrument name =
+  match String.lowercase_ascii name with
+  | "acoustic guitar nylon" | "acoustic guitar steel" | "electric guitar jazz"
+  | "electric guitar clean" | "electric guitar muted" | "overdriven guitar"
+  | "distortion guitar" | "guitar harmonics" | "acoustic bass"
+  | "electric bass finger" | "electric bass pick" | "fretless bass"
+  | "slap bass 1" | "slap bass 2" | "synth bass 1" | "synth bass 2" -> true
+  | _ ->
+      String.length name > 0 && String.for_all is_digit name
+      && (match int_of_string_opt name with
+          | Some program -> program >= 24 && program <= 39
+          | None -> false)
+
+let track_properties text =
+  let ( let* ) = Result.bind in
+  let* tokens = tokenize text in
+  match tokens with
+  | [] -> Ok false
+  | [ Tk_word "instrument"; (Tk_quoted name | Tk_word name) ] ->
+      if fretted_instrument name then Ok true
+      else Error (Unsupported_instrument name)
+  | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
+      Error (Unsupported_track_properties text)
+
+let staff_properties text =
+  let ( let* ) = Result.bind in
+  let* tokens = tokenize text in
+  match tokens with
+  | [] | [ Tk_word "tabs" ]
+  | [ Tk_word "score"; Tk_word "tabs" ]
+  | [ Tk_word "tabs"; Tk_word "score" ] -> Ok ()
+  | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
+      Error (Unsupported_staff_properties text)
+
+(* A track's two optional quoted arguments are its name and short name. They
+   label one part; they are never music and do not change its timing. *)
+let after_track_names = function
+  | Tk_quoted _ :: Tk_quoted _ :: rest | Tk_quoted _ :: rest -> rest
+  | ([] | (Tk_directive _ | Tk_unknown_directive _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _) as tokens ->
+      tokens
+
 (* A tuning's note names, highest string first, as written: [E4] names its
    line [E]. The collection stops at the first token that is not a note name,
    which is where the music resumes. *)
@@ -677,7 +788,17 @@ let collect_tuning tokens =
     | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
       List.rev names, tokens
   in
-  collect [] tokens
+  match tokens with
+  | Tk_chord (inner, None) :: rest ->
+      let ( let* ) = Result.bind in
+      let* members = tokenize inner in
+      (match collect [] members with
+       | names, [] -> Ok (names, rest)
+       | _, _ :: _ -> Error (Invalid_tuning_group inner))
+  | Tk_chord (inner, Some _) :: _ -> Error (Invalid_tuning_group inner)
+  | []
+  | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_bar | Tk_word _) :: _ ->
+      Ok (collect [] tokens)
 
 (* A repeat count is drawn, so unlike a tempo its size is this module's to
    refuse: all digits, fitting in an int, and a count that plays. A word
@@ -844,13 +965,63 @@ let read source =
                  ; time_signature = state.b_ts
                  })
     | Tk_directive Title :: rest ->
+        let* text, after = text_argument Title_text rest in
+        (* The latest title wins, the way the latest tempo does. *)
+        step { state with b_title = Some text } after
+    | Tk_directive Artist :: rest ->
+        let* _, after = text_argument Artist_text rest in
+        step state after
+    | Tk_directive Section :: rest ->
+        if not (List.is_empty state.b_beats) then Error Section_after_note
+        else
+        let* _, after = text_argument Section_text rest in
+        (* The two-string form adds a section marker before its name. Neither
+           label changes fret coordinates or starts another timeline. *)
+        let after =
+          match after with
+          | Tk_quoted _ :: rest -> rest
+          | ([] | (Tk_directive _ | Tk_unknown_directive _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _) as tokens ->
+              tokens
+        in
+        step state after
+    | Tk_directive Key_signature :: rest ->
+        if not (List.is_empty state.b_beats) then Error Key_signature_after_note
+        else
         (match rest with
-         | Tk_quoted text :: after ->
-             (* The latest title wins, the way the latest tempo does. *)
-             step { state with b_title = Some text } after
-         | [] -> Error (Missing_argument Title_text)
-         | (Tk_directive _ | Tk_unknown_directive _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
-           Error (Missing_argument Title_text))
+         | Tk_word name :: after ->
+             if valid_key_signature name then step state after
+             else Error (Invalid_key_signature name)
+         | []
+         | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
+             Error (Missing_argument Key_signature_name))
+    | Tk_directive Track :: rest ->
+        if state.b_track_declared || state.b_staff_declared || started state then
+          Error Additional_track
+        else
+          let rest = after_track_names rest in
+          let* has_instrument, after =
+            match rest with
+            | Tk_effect text :: after ->
+                let* has_instrument = track_properties text in
+                Ok (has_instrument, after)
+            | []
+            | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
+                Ok (false, rest)
+          in
+          step { state with b_track_declared = true; b_instrument_declared = has_instrument } after
+    | Tk_directive Staff :: rest ->
+        if state.b_staff_declared || started state then Error Additional_staff
+        else
+          let* after =
+            match rest with
+            | Tk_effect text :: after ->
+                let* () = staff_properties text in
+                Ok after
+            | []
+            | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_chord _ | Tk_bar | Tk_word _) :: _ ->
+                Ok rest
+          in
+          step { state with b_staff_declared = true } after
     | Tk_directive Tempo :: rest ->
         let* value, after = number_argument Tempo_number rest in
         step { state with b_tempo = value } after
@@ -870,7 +1041,7 @@ let read source =
             read included. *)
          | None when started state -> Error Tuning_after_music
          | None ->
-             let names, after = collect_tuning rest in
+             let* names, after = collect_tuning rest in
              (match List.length names with
               | 0 -> Error (Missing_argument Tuning_notes)
               | strings when strings > max_strings -> Error (Too_many_strings strings)
@@ -903,7 +1074,7 @@ let read source =
               }
               after)
     | Tk_unknown_directive name :: _ -> Error (Unknown_directive name)
-    | Tk_quoted _ :: _ -> Error Quoted_without_title
+    | Tk_quoted _ :: _ -> Error Quoted_without_metadata
     | Tk_effect text :: rest -> (
         match effect_rhythm text with
         | Some make_dur ->
@@ -949,6 +1120,9 @@ let read source =
   in
   step
     { b_tuning = None
+    ; b_track_declared = false
+    ; b_staff_declared = false
+    ; b_instrument_declared = false
     ; b_default = quarter
     ; b_measures = []
     ; b_beats = []

@@ -9,6 +9,21 @@
     ahead of the tab. A tempo or signature whose digits do not fit an int is
     kept as [None] and the header omits it, the way an absent one is.
 
+    Tuning accepts either bare note names or a parenthesized list, with every
+    member checked. A single initial [\track] and [\staff] may describe the
+    part. Track names and short names, [\artist], [\ks] and [\section] are
+    checked presentation metadata; this fret-and-string projection does not
+    draw them. Key signatures do not change explicit fret numbers. Track
+    properties support a guitar or bass MIDI [instrument] (programs 24--39,
+    or their standard names). Its playback timbre is not drawn, and an
+    explicit [\tuning] before music is required rather than guessing the
+    instrument's strings. Staff properties may select [tabs] or [score tabs];
+    a staff with no properties uses the default that includes tabs. Additional
+    tracks/staves, structure after music, percussion, unknown properties and
+    staff modes without tabs fail instead of flattening independent parts.
+    [\ks] and [\section] require the start of a bar (initially or after [|]);
+    their implicit bar-boundary form after notes is outside this subset.
+
     Repeat signs stand in the bar they mark: [\ro] opens the repeat, [\rc N]
     closes it with the count of total plays, and [\ae n …] names the ending
     passes the bar plays on. [\ae] also takes alphaTab's own parenthesized
@@ -39,6 +54,9 @@ type unclosed =
 
 type directive_argument =
   | Title_text
+  | Artist_text
+  | Section_text
+  | Key_signature_name
   | Tempo_number
   | Time_signature_numbers
   | Tuning_notes
@@ -54,7 +72,17 @@ type failure =
   | Missing_argument of directive_argument
   | Second_tuning
   | Tuning_after_music
-  | Quoted_without_title
+  | Invalid_tuning_group of string
+  | Additional_track
+  | Additional_staff
+  | Unsupported_track_properties of string
+  | Unsupported_staff_properties of string
+  | Unsupported_instrument of string
+  | Instrument_without_tuning
+  | Invalid_key_signature of string
+  | Key_signature_after_note
+  | Section_after_note
+  | Quoted_without_metadata
   | Duration_outside_subset of string  (** the duration as written *)
   | Chord_dot_without_duration
   | Empty_chord

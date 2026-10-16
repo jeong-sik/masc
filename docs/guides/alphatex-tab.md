@@ -3,14 +3,14 @@
 > **상태: 실험 기능** — 하위 호환 약속이 없습니다. 문법·화면·동작은 v0.56.0
 > 이후에도 바뀔 수 있습니다.
 
-TUI 어디에서든 ```alphatex 코드 펜스가 들어간 텍스트(Board 글·댓글, Keeper
+TUI 어디에서든 ```alphatex 또는 ```atex 코드 펜스가 들어간 텍스트(Board 글·댓글, Keeper
 직접 채팅)를 만나면 ASCII 타브라튜어(tablature)로 그립니다. 기타를 치는
 사람이 Board에서 코드 리프나 릭(riff)을 주고받을 때, 텍스트로는 읽을 수
 없는 운지를 화면에서 바로 보려는 기능입니다.
 
 ## 무엇을 그리는가
 
-```alphatex 펜스 안에서 지원하는 문법은 다음 일곱 지시자와 노트 토큰뿐입니다
+악보 펜스 안에서 지원하는 기본 문법은 다음 지시자와 노트 토큰입니다
 (masc_tui_alphatex_score.ml `directive_of_word` 직독):
 
 | 지시자 | 인자 | 화면 효과 |
@@ -18,14 +18,22 @@ TUI 어디에서든 ```alphatex 코드 펜스가 들어간 텍스트(Board 글·
 | `\title "…"` | 따옴표 문자열 | 헤더에 제목(`"Riff"`) |
 | `\tempo 96` | 숫자(BPM) | 헤더에 `♩=96` |
 | `\ts 4 4` | 숫자 둘 | 헤더에 `4/4` |
-| `\tuning E A D G B e` | 여섯 음이름 | 줄 튜닝 표기 |
+| `\tuning (G2 D2 A1 E1)` | 고음 줄부터 음이름 목록, 괄호 생략 가능 | 베이스 4줄 등 지정한 튜닝 표기 |
 | `\ro` | 없음 | 도돌이표 시작 `|:` |
 | `\rc 2` | 반복 횟수 | 도돌이표 끝 `:|x2|` |
 | `\ae (1 2)` | 괄호 숫자 목록 | 대체 엔딩 브래킷 `1,2|` |
 
-노트는 `프렛.줄` 한 쌍입니다. 줄 번호는 **1 = 고음 e 줄, 6 = 저음 E 줄**이고
+`\artist "…"`, `\ks C#minor`, `\section "…"`도 읽습니다. 이 메타데이터는
+프렛·줄·길이를 바꾸지 않으며 ASCII 탭에는 따로 표시하지 않습니다.
+`\ks`와 `\section`은 첫 음표 앞이나 명시적인 마디선 `|` 다음에 적습니다.
+음표 앞의 단일 `\track "Bass" { instrument "Electric Bass Finger" }`와
+`\staff { tabs }`도 읽습니다. 악기를 지정하면 `\tuning`을 명시해야 합니다.
+두 번째 트랙·보표, 음표 뒤의 트랙·보표 선언, 지원하지 않는 속성은 원문과 이유를
+보여 줍니다. 여러 악기의 독립적인 마디를 하나로 이어 그리지 않습니다.
+
+노트는 `프렛.줄` 한 쌍입니다. 기본 기타 튜닝의 줄 번호는 **1 = 고음 e 줄, 6 = 저음 E 줄**이고
 표준 alphaTex와 같습니다. `:4 0.1 3.2 5.3 0.4`는 "4분음표 4개: e줄 0프렛,
-B줄 3프렛, G줄 5프렛, e줄 0프렛"입니다. 띄어쓰기로 여러 노트를 이어 쓰고
+B줄 3프렛, G줄 5프렛, D줄 0프렛"입니다. 띄어쓰기로 여러 노트를 이어 쓰고
 `|`로 마디를 나눕니다.
 
 악보 상단에는 지시자가 말한 것을 한 줄로 적습니다 — `\tempo` BPM, `\ts` 박자,
@@ -35,10 +43,10 @@ B줄 3프렛, G줄 5프렛, e줄 0프렛"입니다. 띄어쓰기로 여러 노�
 
 ## 켜는 법과 켜지는 조건
 
-별도 설정이 없습니다. 펜스 태그 줄의 첫 단어가 `alphatex`이면 켜집니다
+별도 설정이 없습니다. 펜스 태그 줄의 첫 단어가 `alphatex` 또는 `atex`이면 켜집니다
 (`bin/masc_tui_markdown.ml` `is_alphatex_tag` 직독):
 
-- 첫 단어가 `alphatex` — 펜스 태그 줄에서 앞뒤 공백을 떼고 소문자로
+- 첫 단어가 `alphatex` 또는 `atex` — 펜스 태그 줄에서 앞뒤 공백을 떼고 소문자로
   비교합니다. ```AlphaTex 나 들여쓰기된 태그도 인정됩니다.
 - 선택 옵션 `rhythm` — 태그 줄에서 `alphatex` 뒤에 `rhythm` 단어를 함께 적으면
   (예: ```alphatex rhythm) 리듬 줄을 더 그리고 상단 머리글을
@@ -123,14 +131,13 @@ E|8---7---5---3---:|x2|
 
 | 화면 문구 | 뜻과 처방 |
 |---|---|
-| `alphatex: the \<지시자\> directive is not in the subset` | 지원하는 일곱 지시자 밖의 지시자를 썼습니다. 지시자를 빼거나 일곱 개 안에서 고르세요. 렌더링 자체는 이유와 함께 fallback 상자로 살아 있습니다. |
+| `alphatex: the \<지시자\> directive is not in the subset` | 지원 범위 밖의 지시자를 썼습니다. 지원하는 지시자를 사용하세요. 원문과 이유는 계속 표시됩니다. |
 | `alphatex: one measure needs N cells and this pane has M` | 한 마디가 화면 폭보다 깁니다. 마디를 더 잘게 `|`로 나누거나 창을 더 넓히세요. |
-| 펜스가 그냥 텍스트로 보임 | 태그 첫 단어가 `alphatex`가 아닙니다(예: `alpha`, `tab`). 첫 단어를 고치세요. |
+| 펜스가 그냥 텍스트로 보임 | 태그 첫 단어가 `alphatex` 또는 `atex`가 아닙니다(예: `alpha`, `tab`). 첫 단어를 고치세요. |
 
 ## 끄는 법
 
-스위치가 없습니다. 태그를 지우면 됩니다. 태그의 첫 단어가 `alphatex`가
-아니게 고치면(예: `text`) 해당 펜스는 평범한 코드 펜스로 돌아갑니다.
+스위치가 없습니다. 태그를 지우거나 `text`로 바꾸면 해당 펜스는 평범한 코드 펜스로 돌아갑니다.
 렌더링은 읽기 전용 동작이라 화면 표시 외에 아무 상태도 바꾸지 않습니다.
 
 ## 참고
@@ -139,3 +146,6 @@ E|8---7---5---3---:|x2|
 - 용어: `docs/spec/00-glossary.md` "alphatex" 항목(#43108)
 - 렌더러: `bin/masc_tui_alphatex.ml`, `bin/masc_tui_alphatex_score.ml`,
   `bin/masc_tui_markdown.ml`(fence 분류)
+- 공식 문법: [트랙·보표](https://alphatab.net/docs/alphatex/structural-metadata),
+  [튜닝](https://alphatab.net/docs/alphatex/staff-metadata),
+  [조표·섹션](https://alphatab.net/docs/alphatex/bar-metadata)

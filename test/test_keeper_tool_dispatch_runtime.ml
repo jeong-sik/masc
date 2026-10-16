@@ -8708,7 +8708,8 @@ let test_named_submission_crash_before_broker_entry_stays_fail_closed () =
            ; source_turn = Agent_core.Tool_contract.Invocation.turn parent_invocation
            ; source_task_id = None
            ; producer = Masc.Keeper_tool_execution_journal.Named
-               { tool_name; skill_reference; activation = Some activation }
+               { tool_name; skill_reference; activation = Some activation
+               ; origin = Masc.Keeper_tool_execution_journal.Standalone }
            }
          in
          Masc.Keeper_tool_execution_journal.prepare ~base_path:config.base_path source
@@ -8719,6 +8720,7 @@ let test_named_submission_crash_before_broker_entry_stays_fail_closed () =
            Submission.request ~keeper_name:meta.name ~trace_id:meta.runtime.trace_id
              ~physical_turn_ref:(Masc.Keeper_skill_activation_recorder.physical_turn_ref skill_activation_context)
              ~invocation:parent_invocation ~source_task_id:None
+             ~origin:Masc.Keeper_tool_execution_journal.Standalone
              ~skill_reference ~tool_name ~plan
          with
          | Ok request -> request

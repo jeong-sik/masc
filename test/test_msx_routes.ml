@@ -6,6 +6,12 @@
 open Alcotest
 module Lane = Msx_lane
 module Route = Server_routes_http_routes_msx
+module Tick = Masc_tui_msx_tick
+
+(* What the terminal's tick client concludes from a 409 body. *)
+let terminal_reads_409 body =
+  Tick.fetch (Tick.create ()) ~host:"localhost" ~port:1 ~headers:[]
+    ~request:(fun ~body:_ -> Ok (409, body))
 
 let unwatched_config =
   lazy (Masc.Workspace.default_config (Filename.temp_dir "msx-press-route-" ""))
@@ -930,6 +936,12 @@ let test_activity_read_and_route_refusals () =
         check bool "known activity refusal is HTTP 409" true (status=`Conflict);
         check bool "closed refusal code" true
           (member "ok" body = Some (`Bool false) && member "code" body = Some (`String code));
+        (* The body the route really sent, read by the decoder the terminal
+           really runs. *)
+        check bool "the terminal reads the route's 409 as a known refusal" true
+          (terminal_reads_409 body
+           = Ok (Tick.Not_started (if code = "activity_disabled" then Tick.Off
+                                   else Tick.Activity_unobserved)));
         let press_status,press_body = Route.press_response ~config ~who:"unit-presser"
           ~body:{|{"keys":["space"]}|} in
         check bool "press answers the same activity refusal as tick" true
@@ -1094,14 +1106,19 @@ let test_msx_routes_bind_workspace_before_effects () =
              this body; a malformed binding is a 400 that names no code. *)
           let bound_tick expected_workspace = Route.tick_response ~config:config_b
             ~body:(Yojson.Safe.to_string (`Assoc ["expected_workspace", expected_workspace])) in
+          let refusal_of (status, body) =
+            status, Result.get_ok (Msx_wire.decode body) in
           check bool "a failed precondition names its code beside the message" true
-            (bound_tick (expected config_a)
-             = (`Conflict, `Assoc ["code", `String "workspace_precondition_failed";
-                  "ok", `Bool false; "message", `String "workspace precondition failed"]));
+            (refusal_of (bound_tick (expected config_a))
+             = (`Conflict, {Msx_wire.code = Some Msx_wire.Workspace_precondition_failed;
+                  message = Some "workspace precondition failed"}));
+          check bool "the terminal reads the failed precondition as a changed workspace" true
+            (terminal_reads_409 (snd (bound_tick (expected config_a)))
+             = Ok (Tick.Not_started Tick.Workspace_changed));
           check bool "a malformed binding names no code" true
-            (bound_tick `Null
-             = (`Bad_request, `Assoc ["ok", `Bool false;
-                  "message", `String "invalid expected_workspace precondition"]));
+            (refusal_of (bound_tick `Null)
+             = (`Bad_request, {Msx_wire.code = None;
+                  message = Some "invalid expected_workspace precondition"}));
           assert_no_effect ();
           let accepted = dispatch_press ~state ~authorization:(Some token)
             ~body:(Yojson.Safe.to_string (`Assoc

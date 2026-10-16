@@ -15,14 +15,10 @@
 open Server_auth
 module Http = Http_server_eio
 
-(* The body of a refused MSX write: [{ok:false, message}], with [code] first
-   when the caller names one. The caller names it, not the HTTP status: 409 is
-   also the activity gate's answer, under its own codes. *)
-let write_error_json ?code message : Yojson.Safe.t =
-  let fields = ["ok", `Bool false; "message", `String message] in
-  `Assoc (match code with
-    | Some code -> ("code", `String code) :: fields
-    | None -> fields)
+(* The body of a refused MSX write, from the codec the terminal decodes with.
+   The caller names the code, not the HTTP status: 409 is also the activity
+   gate's answer, under its own codes. *)
+let write_error_json ?code message : Yojson.Safe.t = Msx_wire.encode ?code message
 ;;
 
 (* Request-owned workspace admission precedes every MSX effect. The shared
@@ -41,7 +37,7 @@ let decode_write_body ~config ~body =
           Error (`Bad_request, write_error_json "invalid expected_workspace precondition")
       | Error Workspace.Workspace_precondition_failed ->
           Error (`Conflict,
-                 write_error_json ~code:"workspace_precondition_failed"
+                 write_error_json ~code:Msx_wire.Workspace_precondition_failed
                    "workspace precondition failed")
 ;;
 
@@ -72,7 +68,7 @@ type worker_response = {
   outcome : outcome;
   message : string;
   data : Yojson.Safe.t;
-  code : string option;
+  code : Msx_wire.code option;
   machine_absent : bool;
       (** The worker answered that no machine is loaded. Typed: read from the
           worker's [errorCode] metadata, never from the message text. *)
@@ -94,9 +90,9 @@ let worker_response ~config ~principal ~(schema : Masc_domain.tool_schema) ~argu
       | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message)) ->
           failed `Bad_request message
       | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_disabled message)) ->
-          {(failed `Conflict message) with code=Some "activity_disabled"}
+          {(failed `Conflict message) with code=Some Msx_wire.Activity_disabled}
       | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Activity_unobserved message)) ->
-          {(failed `Conflict message) with code=Some "activity_unobserved"}
+          {(failed `Conflict message) with code=Some Msx_wire.Activity_unobserved}
       | Error (Lane_addon_runtime.Outcome_unknown message) ->
           failed ~disposition:Tool_result.Effect_outcome_unknown `Service_unavailable
             (message ^ "; inspect the current machine before retrying")
@@ -108,7 +104,8 @@ let worker_response ~config ~principal ~(schema : Masc_domain.tool_schema) ~argu
             if ok then Succeeded
             else Failed (snd (Lane_addon_tool_result.failure result)) in
           let code = match field "io.github.jeong-sik/masc.machine.errorCode" with
-            | Some (`String ("activity_disabled" | "activity_unobserved" as code)) -> Some code
+            | Some (`String "activity_disabled") -> Some Msx_wire.Activity_disabled
+            | Some (`String "activity_unobserved") -> Some Msx_wire.Activity_unobserved
             | _ -> None in
           let machine_absent =
             (not ok) && field "io.github.jeong-sik/masc.machine.errorCode" = Some (`String "no_machine") in
@@ -135,7 +132,9 @@ let press_response ~config ~who ~body =
       let result = worker_response ~config ~principal:(Lane_addon_call_context.Host_actor who)
         ~schema:(Tool_schemas_misc_toml.msx_schema Msx_tool.Press) ~arguments:(`Assoc fields) in
       let fields = ["ok", `Bool (succeeded result); "message", `String result.message] in
-      let fields = match result.code with None -> fields | Some code -> ("code", `String code)::fields in
+      let fields = match result.code with
+        | None -> fields
+        | Some code -> ("code", `String (Msx_wire.code_to_wire code))::fields in
       let observation = if succeeded result then match result.data with
         | `Assoc data -> List.filter (fun (name,_) -> List.mem name ["frame";"mode";"cartridge";"disk"]) data
         | _ -> [] else [] in
@@ -251,8 +250,7 @@ let tick_response ~config ~body =
         (* The spectator polls before anything is loaded: an absent machine is
            an empty observation the poller can draw, not a failed request. *)
         `OK, `Assoc ["loaded", `Bool false]
-      else result.status, `Assoc (["ok", `Bool false; "message", `String result.message]
-        @ match result.code with None -> [] | Some code -> ["code", `String code])
+      else result.status, Msx_wire.encode ?code:result.code result.message
 ;;
 
 (* The realtime driver (RFC-0439 §2, poll-cadence tick). The spectating TUI

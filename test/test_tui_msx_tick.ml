@@ -149,6 +149,30 @@ let test_activity_refusal_and_recovery () =
   check bool "even observed on cannot retry an unknown mutation" true
     (Client.policy_after_activity unknown (Ok Client.Enabled)=Client.Outcome_unknown)
 
+(* The route answers {code, ok, message}; the terminal used to match exactly
+   {code, ok} for the activity codes, so a real activity refusal became an
+   unknown outcome and stopped the tick. The server's own encoder produces the
+   body here, with a field the terminal has never heard of beside it. *)
+let test_refusal_body_is_not_matched_by_field_set () =
+  List.iter (fun (code, refusal) ->
+    let body = match Msx_wire.encode ~code "refused before execution" with
+      | `Assoc fields -> `Assoc (fields @ ["added_later", `Bool true])
+      | other -> other in
+    let result = Client.fetch (Client.create ()) ~host:"localhost" ~port:8935 ~headers:[]
+      ~request:(fun ~body:_ -> Ok (409, body)) in
+    check bool "a refusal with a message and an extra field is still known" true
+      (result = Ok (Client.Not_started refusal));
+    check bool "and does not stop the tick" true
+      (Client.policy_after_tick result = Client.Observing refusal))
+    [Msx_wire.Activity_disabled, Client.Off;
+     Msx_wire.Activity_unobserved, Client.Activity_unobserved;
+     Msx_wire.Workspace_precondition_failed, Client.Workspace_changed];
+  List.iter (fun code ->
+    let result = Client.fetch (Client.create ()) ~host:"localhost" ~port:8935 ~headers:[]
+      ~request:(fun ~body:_ -> Ok (409, Msx_wire.encode ~code "not a start refusal")) in
+    failure result)
+    [Msx_wire.Worker_unavailable; Msx_wire.Outcome_unknown]
+
 let test_workspace_refusal_is_unstarted_and_cannot_rearm () =
   let cache = Client.create () in
   let tag = revision 'a' in
@@ -185,7 +209,8 @@ let test_malformed_activity_is_not_permission () =
 let () =
   run "retained MSX tick"
     ["response protocol",
-      [test_case "workspace refusal never executes or rearms from activity" `Quick test_workspace_refusal_is_unstarted_and_cannot_rearm;
+      [test_case "a refusal is read by code, not by field set" `Quick test_refusal_body_is_not_matched_by_field_set;
+       test_case "workspace refusal never executes or rearms from activity" `Quick test_workspace_refusal_is_unstarted_and_cannot_rearm;
        test_case "typed activity refusal preserves pixels and resumes only from observation" `Quick test_activity_refusal_and_recovery;
        test_case "malformed activity cannot authorize execution" `Quick test_malformed_activity_is_not_permission;
        test_case "fresh metadata with retained and replaced pixels" `Quick test_retained_metadata;

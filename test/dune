@@ -5121,7 +5121,12 @@
 (test
  (name test_tui_msx_tick)
  (modules test_tui_msx_tick)
- (libraries masc_test_deps masc_tui_machine_live))
+ (libraries masc_test_deps masc_tui_machine_live masc.msx_wire))
+
+(test
+ (name test_msx_wire)
+ (modules test_msx_wire)
+ (libraries masc.msx_wire alcotest yojson))
 
 (test
  (name test_tui_msx_graphics)

@@ -233,12 +233,12 @@ let test_navigation_settles_while_a_full_reader_is_pending () =
   let module Order = Types.Surface_read_order in
   let full_ticket = Types.Http_refresh_order.dispatch Types.Http_refresh_order.initial in
   let navigation_ticket = Types.Http_refresh_order.for_navigation
-    ~full_refresh_inflight:true full_ticket in
+    ~collection_inflight:true full_ticket in
   check bool "foreground collection keeps the current enclosing interval" true
     (Types.Http_refresh_order.is_current full_ticket navigation_ticket);
-  let reads, full = Order.dispatch ~needs:(needs Types.Metrics)
+  let reads, full = Order.dispatch ~kind:Order.Full ~needs:(needs Types.Metrics)
     ~started_ns:1L Order.initial in
-  let reads, navigation = Order.dispatch ~needs:(needs Types.Board)
+  let reads, navigation = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
     ~started_ns:2L reads in
   let reads, accepted = Order.take reads navigation in
   check bool "Board can be admitted before the unrelated full read finishes" true
@@ -249,15 +249,15 @@ let test_navigation_settles_while_a_full_reader_is_pending () =
   check bool "the full read retains its independent provider result" true
     (List.mem Order.Provider_history accepted);
   let successor = Types.Http_refresh_order.for_navigation
-    ~full_refresh_inflight:false full_ticket in
+    ~collection_inflight:false full_ticket in
   check bool "navigation without a full pass starts a new interval" false
     (Types.Http_refresh_order.is_current full_ticket successor)
 
 let test_navigation_owns_overlapping_data_and_cleanup () =
   let module Order = Types.Surface_read_order in
-  let reads, full = Order.dispatch ~needs:(needs Types.Metrics)
+  let reads, full = Order.dispatch ~kind:Order.Full ~needs:(needs Types.Metrics)
     ~started_ns:1L Order.initial in
-  let reads, navigation = Order.dispatch ~needs:(needs Types.Config)
+  let reads, navigation = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Config)
     ~started_ns:2L reads in
   let reads, accepted = Order.take reads full in
   check bool "late full accounts do not replace the newer request" false
@@ -273,10 +273,10 @@ let test_navigation_owns_overlapping_data_and_cleanup () =
 
 let test_withdrawn_surface_source_cannot_settle_its_successor () =
   let module Order = Types.Surface_read_order in
-  let reads, old = Order.dispatch ~needs:(needs Types.Board)
+  let reads, old = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
     ~started_ns:1L Order.initial in
   let reads = Order.invalidate reads in
-  let reads, current = Order.dispatch ~needs:(needs Types.Board)
+  let reads, current = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
     ~started_ns:2L reads in
   let reads, stale = Order.take reads old in
   check bool "withdrawn result has no publication ownership" true (stale = []);
@@ -284,6 +284,101 @@ let test_withdrawn_surface_source_cannot_settle_its_successor () =
   let _, accepted = Order.take reads current in
   check bool "old completion and cleanup leave the successor intact" true
     (List.mem Order.Board accepted)
+
+let test_navigation_collectors_settle_independently_and_revalidate_once () =
+  let module Order = Types.Surface_read_order in
+  let reads, work = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Planning)
+    ~started_ns:1L Order.initial in
+  let root = Types.Http_refresh_order.dispatch Types.Http_refresh_order.initial in
+  let next_root = Types.Http_refresh_order.for_navigation
+    ~collection_inflight:(Order.navigation_in_flight reads) root in
+  check bool "a second collector retains its sibling's generation" true
+    (Types.Http_refresh_order.is_current root next_root);
+  let reads, board = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
+    ~started_ns:2L reads in
+  check int "both collectors are tracked" 2 (Order.navigation_count reads);
+  let reads, accepted = Order.take reads board in
+  check bool "the destination can apply before the old collector finishes" true
+    (List.mem Order.Board accepted);
+  check bool "application alone does not complete its collector" true
+    (Order.navigation_active reads board);
+  let reads = Order.finish reads board in
+  let reads = Order.finish reads board in
+  check bool "duplicate completion leaves the first collector active" true
+    (Order.navigation_active reads work);
+  let followup, launch = Types.take_scoped_refresh_followup
+    ~full_refresh_inflight:false ~scoped_refresh_inflight:(Order.navigation_in_flight reads)
+    Types.Revalidate_after_scoped in
+  check bool "a retained revalidation still sees the real remaining collector" false launch;
+  let reads, accepted = Order.take reads work in
+  check bool "the first collector retains its independent source" true
+    (List.mem Order.Planning accepted);
+  let reads = Order.finish reads work in
+  let followup, launch = Types.take_scoped_refresh_followup
+    ~full_refresh_inflight:false ~scoped_refresh_inflight:(Order.navigation_in_flight reads)
+    followup in
+  check bool "the last completion permits the retained revalidation" true launch;
+  let _, duplicate = Types.take_scoped_refresh_followup
+    ~full_refresh_inflight:false ~scoped_refresh_inflight:false followup in
+  check bool "the retained full revalidation starts once" false duplicate
+
+let test_completed_newer_navigation_does_not_restore_old_identity_authority () =
+  let module Order = Types.Surface_read_order in
+  let reads, usage = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Metrics)
+    ~started_ns:1L Order.initial in
+  let reads, board = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
+    ~started_ns:2L reads in
+  check bool "the new navigation owns identity observation" true
+    (Order.latest_navigation reads board);
+  let reads = Order.finish reads board in
+  check bool "an older failure cannot regain identity authority" false
+    (Order.latest_navigation reads usage);
+  let reads, config = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Config)
+    ~started_ns:3L reads in
+  let reads, accepted = Order.take reads usage in
+  check bool "the old collector cannot overwrite newer shared accounts" false
+    (List.mem Order.Account_emails accepted);
+  check bool "the old collector keeps independent history" true
+    (List.mem Order.Provider_history accepted);
+  let reads = Order.finish reads usage in
+  check bool "old cleanup leaves the current collector active" true
+    (Order.navigation_active reads config);
+  check bool "the current collector keeps identity authority" true
+    (Order.latest_navigation reads config)
+
+let test_withdrawal_retires_authority_without_losing_live_collectors () =
+  let module Order = Types.Surface_read_order in
+  let reads, old = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
+    ~started_ns:1L Order.initial in
+  let reads = Order.invalidate reads in
+  check bool "withdrawal revokes the old identity observation" false
+    (Order.latest_navigation reads old);
+  check bool "the actual old collector remains tracked" true
+    (Order.navigation_active reads old);
+  let reads, current = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
+    ~started_ns:2L reads in
+  let reads, old_sources = Order.take reads old in
+  check bool "the old reply owns no successor data" true (old_sources = []);
+  let reads = Order.finish reads old in
+  check bool "old completion preserves the current collector" true
+    (Order.navigation_active reads current);
+  check int "only the current collector remains" 1 (Order.navigation_count reads)
+
+let test_asks_and_approvals_collectors_have_independent_lifetimes () =
+  let module Order = Types.Surface_read_order in
+  let reads, asks = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Approvals)
+    ~started_ns:1L Order.initial in
+  (* These payloads have their own Snapshot_read/Listing_order owners rather
+     than dataset claims. Their enclosing verified collection is still live. *)
+  let reads, accepted = Order.take reads asks in
+  check bool "no unrelated dataset claim is fabricated" true (accepted = []);
+  check bool "the collection remains tracked after source handling" true
+    (Order.navigation_active reads asks);
+  let reads, board = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
+    ~started_ns:2L reads in
+  let reads = Order.finish reads asks in
+  check bool "its completion cannot clear another collection" true
+    (Order.navigation_active reads board)
 
 let () =
   run "tui_surface_needs"
@@ -314,6 +409,14 @@ let () =
             test_navigation_owns_overlapping_data_and_cleanup
         ; test_case "withdrawn source cannot settle its successor" `Quick
             test_withdrawn_surface_source_cannot_settle_its_successor
+        ; test_case "navigation collectors settle independently and revalidate once" `Quick
+            test_navigation_collectors_settle_independently_and_revalidate_once
+        ; test_case "new completion never restores old identity authority" `Quick
+            test_completed_newer_navigation_does_not_restore_old_identity_authority
+        ; test_case "withdrawal retains live collector tracking" `Quick
+            test_withdrawal_retires_authority_without_losing_live_collectors
+        ; test_case "Ask and approval collectors keep independent lifetimes" `Quick
+            test_asks_and_approvals_collectors_have_independent_lifetimes
         ] )
     ]
 ;;

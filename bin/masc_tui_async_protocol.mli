@@ -251,6 +251,7 @@ type async_msg =
       workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
       * (Masc.Tui_decode.server_identity, string) result option
         (* The last identity its probes read, if any. *)
+      * Surface_read_order.request
   | Board_post_refresh_done of
       Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of

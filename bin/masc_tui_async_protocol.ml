@@ -247,6 +247,7 @@ type async_msg =
       workspace_authority * string * Masc_tui_operator_projection.Listing_order.ticket option * Http_refresh_order.ticket
       * (Masc.Tui_decode.server_identity, string) result option
         (* The last identity its probes read, if any. *)
+      * Surface_read_order.request
   | Board_post_refresh_done of
       Masc_tui_board_detail.request * (board_post * board_comment list * string option, string) result
   | Approval_decision_done of
@@ -940,7 +941,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Http_refresh_failed (_, _, _) | Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _) | Surface_composer_released
     | Http_scoped_refresh_done (_, _, _)
-    | Http_scoped_refresh_failed (_, _, _, _, _)
+    | Http_scoped_refresh_failed (_, _, _, _, _, _)
     | Board_post_refresh_done (_, _) | Approval_decision_done (_, _, _, _, _)
     | Ask_answer_done (_, _, _) | Keeper_chat_dispatch_started (_, _, _)
     | Keeper_chat_done (_, _, _, _) | Keeper_chat_stream_deltas (_, _)
@@ -1076,7 +1077,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Http_keeper_roster_loaded _ | Http_progress_observed _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_observed _ | Ask_followup_loaded _ | Http_refresh_done _ | Http_refresh_failed (_, _, _)
   | Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _)
   | Surface_composer_released | Http_scoped_refresh_done (_, _, _)
-  | Http_scoped_refresh_failed (_, _, _, _, _) | Board_post_refresh_done (_, _)
+  | Http_scoped_refresh_failed (_, _, _, _, _, _) | Board_post_refresh_done (_, _)
   | Keeper_chat_dispatch_started (_, _, _) | Keeper_chat_done (_, _, _, _)
   | Keeper_chat_stream_deltas (_, _) | Keeper_chat_stream_unavailable (_, _)
   | Keeper_run_next_done (_, _) | Keeper_observed_interrupt_done (_, _, _, _)

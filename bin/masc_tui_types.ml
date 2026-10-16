@@ -3566,12 +3566,13 @@ let surface_needs_any needs = needs <> nothing
    producer, so a late full bundle cannot overwrite a newer navigation read.
    Questions, approvals and roster already have independent source owners. *)
 module Surface_read_order : sig
+  type kind = Full | Navigation
   type source = Transport | Board | Planning | System_logs | Fleet_safety
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
   type t
   type request
   val initial : t
-  val dispatch : needs:surface_needs -> started_ns:int64 -> t -> t * request
+  val dispatch : kind:kind -> needs:surface_needs -> started_ns:int64 -> t -> t * request
   val take : t -> request -> t * source list
   val finish : t -> request -> t
   val invalidate : t -> t
@@ -3579,12 +3580,23 @@ module Surface_read_order : sig
   val source_name : source -> string
   val request_id : request -> int
   val started_ns : request -> int64
+  val request_kind : request -> kind
+  val navigation_in_flight : t -> bool
+  val navigation_count : t -> int
+  val navigation_active : t -> request -> bool
+  val latest_navigation : t -> request -> bool
 end = struct
+  type kind = Full | Navigation
   type source = Transport | Board | Planning | System_logs | Fleet_safety
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
-  type request = { id: int; started_ns: int64; sources: source list; owner: unit ref }
-  type t = { next: int; owners: (source * request) list }
-  let initial = {next=0; owners=[]}
+  type request = { id: int; kind: kind; started_ns: int64; sources: source list; owner: unit ref }
+  type t = {
+    next: int;
+    owners: (source * request) list;
+    active_navigation: request list;
+    latest_navigation: request option;
+  }
+  let initial = {next=0; owners=[]; active_navigation=[]; latest_navigation=None}
   let sources needs =
     [Transport, needs.needs_transport; Board, needs.needs_board;
      Planning, needs.needs_planning; System_logs, needs.needs_system_logs;
@@ -3592,19 +3604,31 @@ end = struct
      Keeper_usage, needs.needs_keeper_usage; Provider_history, needs.needs_provider_history;
      Overview_goals, needs.needs_overview_goals; Account_emails, needs.needs_account_emails]
     |> List.filter_map (fun (source, wanted) -> if wanted then Some source else None)
-  let dispatch ~needs ~started_ns current =
-    let request = {id=current.next; started_ns; sources=sources needs; owner=ref ()} in
+  let dispatch ~kind ~needs ~started_ns current =
+    let request = {id=current.next; kind; started_ns; sources=sources needs; owner=ref ()} in
     let retained = List.filter (fun (source, _) -> not (List.mem source request.sources)) current.owners in
-    {next=current.next+1; owners=List.map (fun source -> source,request) request.sources @ retained}, request
+    let active_navigation, latest_navigation = match kind with
+      | Full -> current.active_navigation, current.latest_navigation
+      | Navigation -> request :: current.active_navigation, Some request in
+    {next=current.next+1; owners=List.map (fun source -> source,request) request.sources @ retained;
+     active_navigation; latest_navigation}, request
   let owned current request =
     List.filter (fun source ->
       match List.assoc_opt source current.owners with
       | Some latest -> latest.owner == request.owner
       | None -> false) request.sources
-  let finish current request =
+  let release_sources current request =
     {current with owners=List.filter (fun (_, latest) -> latest.owner != request.owner) current.owners}
-  let take current request = finish current request, owned current request
-  let invalidate current = {current with owners=[]}
+  let finish current request =
+    let current = release_sources current request in
+    {current with active_navigation=List.filter
+      (fun active -> active.owner != request.owner) current.active_navigation}
+  (* Taking data is distinct from settling its collector. Result application
+     can schedule followups before the owning mailbox item finishes. *)
+  let take current request = release_sources current request, owned current request
+  (* Withdrawal retires publication and identity authority. Actual collectors
+     remain tracked until their own completion; they block no navigation. *)
+  let invalidate current = {current with owners=[]; latest_navigation=None}
   let pending ~needs current =
     List.filter (fun source -> List.mem_assoc source current.owners) (sources needs)
   let source_name = function
@@ -3615,6 +3639,15 @@ end = struct
     | Account_emails -> "accounts"
   let request_id request = request.id
   let started_ns request = request.started_ns
+  let request_kind request = request.kind
+  let navigation_in_flight current = current.active_navigation <> []
+  let navigation_count current = List.length current.active_navigation
+  let navigation_active current request =
+    List.exists (fun active -> active.owner == request.owner) current.active_navigation
+  let latest_navigation current request =
+    navigation_active current request && match current.latest_navigation with
+    | Some latest -> latest.owner == request.owner
+    | None -> false
 end
 
 type full_refresh_intent = Cadence | Revalidate
@@ -3626,10 +3659,10 @@ module Http_refresh_order = struct
   let initial = Ticket 0
   let dispatch (Ticket generation) = Ticket (generation + 1)
   let is_current latest ticket = latest = ticket
-  (* A foreground read uses the running full pass's interval authority.
-     Dataset ownership, rather than another global dispatch, orders its data. *)
-  let for_navigation ~full_refresh_inflight latest =
-    if full_refresh_inflight then latest else dispatch latest
+  (* Overlapping collectors share an interval generation. Dataset ownership
+     orders their data; the latest navigation owns its identity update. *)
+  let for_navigation ~collection_inflight latest =
+    if collection_inflight then latest else dispatch latest
 end
 
 (** Display-only result from a refresh whose other reads are still running.

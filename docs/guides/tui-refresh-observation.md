@@ -76,9 +76,10 @@ reads are outside this ledger.
 ## Navigate while an unrelated full refresh is still running
 
 A ready, admitted workspace can start its existing navigation-delta read while
-the full refresh is collecting unrelated data. One scoped collector still runs
-at a time. Navigation during booting or unread authority keeps its existing wait;
-this change introduces neither a timer nor another collector for each row.
+full or earlier navigation collectors are reading unrelated data. Navigation
+during booting or unread authority keeps its existing wait; this introduces
+neither a timer nor another collector for each row. Unchanged navigation needs
+still request no new delta.
 
 | Boundary | Before | Source implementation |
 |---|---|---|
@@ -87,6 +88,7 @@ this change introduces neither a timer nor another collector for each row.
 | Unrelated datasets in the original full pass | Retained with that full pass | Still apply independently; navigation does not retire the full interval |
 | Failed or refused collection settles | Collector-specific completion | One mailbox item delivers the result and releases only its own dataset owners |
 | Current surface is waiting | A coarse full-refresh reader label | Name its pending dataset first; retained full-reader failures remain visible |
+| Navigate again while an earlier scoped collector is pending | Wait for that collector's shared inflight flag | Start the new delta; collectors retain independent completion owners |
 
 Questions, approvals and roster retain their existing independent source
 requests. The other datasets use `Surface_read_order`; Board listing and hearth
@@ -98,17 +100,42 @@ cannot take a successor's slot. Query inputs are captured before either worker
 yields. The synchronous path retains terminal application and performs no
 mailbox acknowledgement.
 
-`tui_surface_read_started` identifies navigation request id, monotonic start and
-whether a full pass was running. `tui_surface_read_applied` records the same
+Overlapping navigation collectors keep the current global generation, with
+each collection retaining its own before/after identity probes. Only the latest
+active navigation request may apply its identity observation or withdraw
+workspace authority on failure. An older successful collection may still apply
+independent datasets if its dispatch authority and generation remain current,
+its verified identity matches the current workspace, and it owns those datasets.
+Finishing a newer collector does not restore identity authority to an older one.
+The full pass retains its existing final interval authority.
+
+Dataset application and collector completion are separate. Taking a source does
+not release its active collector. One mailbox item applies its result, releases
+only that collector, recomputes the aggregate inflight state and then considers a
+retained full revalidation. Duplicate navigation completion cannot reapply an
+identity or release another request. Workspace withdrawal revokes publication
+and latest-navigation authority while actual collectors remain tracked until
+their own completion. Ask/approval-only collectors are tracked even when they
+have no generic dataset claims.
+
+`tui_surface_read_started` identifies navigation request id, monotonic start,
+whether a full pass was running and the admitted navigation collector count.
+`tui_surface_read_applied` records the same
 dataset request id and start clock, monotonic application clock, and each applied
 source's received/failed outcome. A source whose owner was retired is excluded.
 These are UI state application observations, not physical request counts,
 successful operator actions or first paint. Empty source lists grant no usable
-screen claim. Existing full refresh clocks continue to describe the entire pass.
+screen claim. `tui_surface_read_finished` records the matching start and UI
+settlement clocks and remaining navigation count. `tui_surface_read_refused`
+separately records current workspace/generation and latest-navigation eligibility;
+it contains no response text. Counts describe UI-owned collectors rather than
+physical HTTP requests or running Keeper actions. Existing full refresh clocks
+continue to describe the entire pass.
 
-The baseline for this unit is
-`b8b0f860f988ec99db3ff1c13bac96083b5b8655`. No native candidate comparison or
-performance result has been measured for this change. For a matched Before/After:
+The initial full-refresh navigation layer has source baseline
+`b8b0f860f988ec99db3ff1c13bac96083b5b8655`; the concurrent-navigation follow-up
+uses `6fd8db534a02f602d8f75177b022ef09cf4167d8`. No native candidate comparison or
+performance result has been measured for either change. For a matched Before/After:
 
 1. Fix binary/backend identities, workspace, viewport and navigation inputs.
    Keep an unrelated full reader pending and navigate to Board or Work.
@@ -121,12 +148,22 @@ performance result has been measured for this change. For a matched Before/After
 4. Retain failed reads, workspace replacement, cancellation, superseded results
    and unfinished attempts. Inspect actual frames separately at normal and
    narrow widths. No screen wording, layout or row-order assertion test is added.
+5. For the concurrent-navigation follow-up, first finish the full refresh, then
+   keep a Work navigation read pending while opening Board. Record actual Board
+   GET and UI application before releasing Work. Complete/fail the older read
+   after the newer read and confirm it neither replaces newer identity nor
+   releases another collector. Keep a full revalidation requested during both
+   and distinguish its retained intent from its actual dispatch.
 
-The authored source scenarios cover overlapping owners, independent completion,
-duplicate completion and withdrawal. They have not been executed for this head.
-Waiting behind another scoped collector, per-reader admission within that
-collector, actual native responsiveness and the rest of the preparation and
-composition objective remain separate work.
+The initial three authored source scenarios cover overlapping owners, independent
+completion, duplicate completion and withdrawal. Four additional scenarios cover
+concurrent collector settlement and one retained revalidation, latest identity
+authority after newer completion, withdrawal with live collectors, and collectors
+whose Ask/approval data have independent owners. They have not been executed for
+these heads. Per-reader admission within one collector, exact-input reuse when
+returning to an already pending dataset, preserving prior successful snapshots
+after failed reads, actual native responsiveness and the rest of the preparation
+and composition objective remain separate work.
 
 ## Admit the first matching workspace before the collection joins
 

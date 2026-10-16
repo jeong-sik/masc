@@ -147,6 +147,55 @@ let test_list () =
        | _ -> fail "three rows"))
 ;;
 
+(* Bytes the listing allocates are the proof it read the front of the file and
+   not the file: the fixture is a valid header followed by a 256 MiB sparse
+   body, which a whole-file read would allocate and a header read never
+   touches. Allocation, not time, so a slow machine cannot fake a pass. *)
+let test_list_reads_only_the_header () =
+  with_dir (fun dir ->
+    write_ok dir "small" (header ~core:"small-core" ());
+    let big = file dir "big" in
+    let encoded = read_file (file dir "small") in
+    let body_bytes = 256 * 1024 * 1024 in
+    Out_channel.with_open_bin big (fun oc -> output_string oc encoded);
+    let fd = Unix.openfile big [ Unix.O_WRONLY ] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.ftruncate fd body_bytes);
+    let allocated_before = Gc.allocated_bytes () in
+    let listed = match C.list ~dir with Ok l -> l | Error message -> fail message in
+    let allocated = Gc.allocated_bytes () -. allocated_before in
+    check bool "the listing allocated far less than the body" true
+      (allocated < float_of_int (1024 * 1024));
+    match listed with
+    | [ big_row; small_row ] ->
+      check int "the size is the file's, not what was read" body_bytes big_row.size;
+      check bool "the big file's header reads" true
+        (match big_row.header with Ok { C.core = "small-core"; _ } -> true | _ -> false);
+      check bool "and so does the small one's" true (Result.is_ok small_row.header)
+    | _ -> fail "two rows")
+;;
+
+(* The header's own lengths are not trusted past the end of the file: a length
+   no file can honour is a truncation, never an allocation. *)
+let test_list_refuses_a_header_that_outgrows_its_file () =
+  with_dir (fun dir ->
+    let int64_bytes n =
+      let b = Bytes.create 8 in
+      Bytes.set_int64_be b 0 (Int64.of_int n);
+      Bytes.to_string b
+    in
+    write_file (file dir "liar")
+      ("MASC-MACHINE-CHECKPOINT\000" ^ int64_bytes (1 lsl 40) ^ "dos");
+    let allocated_before = Gc.allocated_bytes () in
+    let listed = match C.list ~dir with Ok l -> l | Error message -> fail message in
+    check bool "nothing near the claimed length was allocated" true
+      (Gc.allocated_bytes () -. allocated_before < float_of_int (1024 * 1024));
+    match listed with
+    | [ row ] ->
+      check bool "the row says the file is corrupt" true
+        (match row.header with Error (C.Corrupt _) -> true | _ -> false)
+    | _ -> fail "one row")
+;;
+
 let read_meta dir s = C.read_meta ~dir (slot s) ~machine:C.Dos ~format:1
 
 (* What [read_meta] gives up to stay cheap: the machine bytes never come
@@ -202,6 +251,9 @@ let () =
         ; test_case "refusals" `Quick test_refusals
         ; test_case "atomic replace" `Quick test_replace_is_atomic
         ; test_case "list" `Quick test_list
+        ; test_case "list reads only the header" `Quick test_list_reads_only_the_header
+        ; test_case "list refuses a header that outgrows its file" `Quick
+            test_list_refuses_a_header_that_outgrows_its_file
         ; test_case "read_meta matches read" `Quick
             test_read_meta_matches_read_without_the_machine_bytes
         ; test_case "read_meta refusals match read" `Quick test_read_meta_refusals_match_read

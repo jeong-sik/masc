@@ -253,7 +253,8 @@ let handle ~config ~meta ~owned_job_replay ~source_context ~continuation_channel
                              ~invocation ~source ~argv ~inputs |> Result.map Option.some
                        | Ok true, None | Ok false, _ -> Error missing
                        | Error cause, _ -> Error {job_id=None;cause})
-                  | Error error -> Error error)
+                  | Error ({cause=(Store.Invalid_authority _ | Store.Corrupt _ | Store.Conflict
+                      | Store.Io_failed _ | Store.Commit_unconfirmed _);_} as error) -> Error error)
              | None ->
                  (match invocation with
                   | None -> Ok None

@@ -1,13 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
+import { act } from 'preact/test-utils'
 
 import type { Keeper } from '../types'
 import type { RouteState } from '../types'
 import { keepers } from '../store'
 
 const mocks = vi.hoisted(() => ({
-  fetchKeeperTransitions: vi.fn(async () => ({ transitions: [] })),
+  fetchKeeperTransitions: vi.fn(async (
+    _keeperName: string,
+    _limit: number,
+    _options?: { signal?: AbortSignal },
+  ) => ({ transitions: [] })),
   loadKeeperConfig: vi.fn(async () => {}),
   resetKeeperConfig: vi.fn(),
   selectKeeper: vi.fn(),
@@ -413,6 +418,80 @@ describe('KeeperDetailPage', () => {
     fireEvent.click(screen.getByTestId('kw-config-close'))
 
     expect(container.querySelector('[data-testid="kw-config-overlay"]')).toBeNull()
+  })
+
+  it('mounts lazy detail while transitions are pending and releases subscriptions on unmount', async () => {
+    keepers.value = [{ name: 'analyst', status: 'active', phase: 'Running' }] as Keeper[]
+    let settleTransitions: (value: { transitions: [] }) => void = () => {
+      throw new Error('transition fixture was not initialized')
+    }
+    const pendingTransitions = new Promise<{ transitions: [] }>(resolve => {
+      settleTransitions = resolve
+    })
+    mocks.fetchKeeperTransitions.mockImplementationOnce(() => pendingTransitions)
+
+    // Use actual EventTarget subscriptions with a controlled media reading.
+    // The page must both react to the reading and release every registration.
+    const mediaByQuery = new Map<string, ReturnType<typeof makeMedia>>()
+    function makeMedia(query: string) {
+      const media = Object.assign(new EventTarget(), { matches: false, media: query })
+      return {
+        media,
+        add: vi.spyOn(media, 'addEventListener'),
+        remove: vi.spyOn(media, 'removeEventListener'),
+      }
+    }
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => {
+      let fixture = mediaByQuery.get(query)
+      if (!fixture) {
+        fixture = makeMedia(query)
+        mediaByQuery.set(query, fixture)
+      }
+      return fixture.media
+    }))
+
+    const { container, unmount } = render(html`<${KeeperDetailPage} />`)
+    await waitFor(() => expect(mocks.fetchKeeperTransitions).toHaveBeenCalledTimes(1))
+    const signal = mocks.fetchKeeperTransitions.mock.calls[0]?.[2]?.signal
+    expect(signal).toBeInstanceOf(AbortSignal)
+    expect(signal?.aborted).toBe(false)
+    fireEvent.click(screen.getByTestId('kw-chat-command-menu-toggle'))
+    fireEvent.click(screen.getByTestId('kw-chat-command-detail'))
+    const status = await screen.findByRole('tab', { name: '상태' })
+    fireEvent.click(status)
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '상태' }).getAttribute('aria-selected')).toBe('true')
+      expect(screen.getByText('운영 상태 개요')).toBeTruthy()
+    })
+    expect(signal?.aborted).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: '← 대화로' }))
+    await screen.findByTestId('kw-chat-command-menu-toggle')
+    expect(screen.queryByTestId('kw-chat-mobile-context')).toBeNull()
+
+    const mobile = mediaByQuery.get('(max-width: 860px)')
+    expect(mobile?.add).toHaveBeenCalledWith('change', expect.any(Function))
+    await act(async () => {
+      if (!mobile) throw new Error('mobile subscription was not installed')
+      mobile.media.matches = true
+      mobile.media.dispatchEvent(new Event('change'))
+    })
+    expect(screen.getByTestId('kw-chat-mobile-context')).toBeTruthy()
+
+    unmount()
+    expect(signal?.aborted).toBe(true)
+    expect(selectedKeeper.peek()).toBeNull()
+    for (const fixture of mediaByQuery.values()) {
+      expect(fixture.remove.mock.calls).toEqual(fixture.add.mock.calls)
+    }
+    await act(async () => {
+      settleTransitions({ transitions: [] })
+      await pendingTransitions
+      mobile?.media.dispatchEvent(new Event('change'))
+      keepers.value = [{ name: 'later', status: 'active' }] as Keeper[]
+    })
+    expect(container.childElementCount).toBe(0)
+    expect(selectedKeeper.peek()).toBeNull()
   })
 
   // Removed test 'surfaces and clears keeper route focus...' (2026-05-19):

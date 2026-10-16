@@ -333,8 +333,6 @@ let telemetry_of_openai_json json =
     }
 ;;
 
-let unknown_api_error = "Unknown API error"
-
 let provider_error (envelope : Openai_error_envelope.t) =
   Provider_error
     { message = envelope.message
@@ -388,7 +386,6 @@ let parse_openai_response_result_json_raw
         Error
           (provider_error
              (Openai_error_envelope.of_errored_choice
-                ~fallback_message:unknown_api_error
                 choice))
       else Ok ()
     in
@@ -442,7 +439,7 @@ let parse_openai_response_result_json_raw
       ; telemetry = telemetry_of_openai_json json
       }
   | err ->
-    (match Openai_error_envelope.of_error_value ~fallback_message:unknown_api_error err with
+    (match Openai_error_envelope.of_error_value err with
      | Some envelope -> Error (provider_error envelope)
      | None -> Error (unreadable_response "malformed_openai_response:error_not_object_or_string"))
 ;;

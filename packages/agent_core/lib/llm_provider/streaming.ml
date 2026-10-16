@@ -171,7 +171,7 @@ let parse_sse_event event_type data_str =
          let message =
            match err |> member "message" |> to_string_option with
            | Some m -> m
-           | None -> data_str
+           | None -> Openai_error_envelope.missing_message
          in
          let error_type = err |> member "type" |> to_string_option in
          Some
@@ -646,7 +646,7 @@ let openai_provider_error_of_json ~raw json =
     (openai_provider_error_of_envelope ~raw)
     (Option.bind
        (assoc_field_opt "error" json)
-       (Openai_error_envelope.of_error_value ~fallback_message:raw))
+       Openai_error_envelope.of_error_value)
 ;;
 
 let choice_finished_with_provider_error choice =
@@ -664,7 +664,7 @@ let choice_finished_with_provider_error choice =
 let openai_choice_provider_error ~raw choice =
   openai_provider_error_of_envelope
     ~raw
-    (Openai_error_envelope.of_errored_choice ~fallback_message:raw choice)
+    (Openai_error_envelope.of_errored_choice choice)
 ;;
 
 let openai_parse_failed ~raw reason = Openai_parse_failed { reason; raw }

@@ -293,6 +293,54 @@ let parse_openai data =
     data
 ;;
 
+let test_missing_provider_message_does_not_promote_raw () =
+  let module Backend = Agent_core.Llm_provider.Backend_openai_parse in
+  let expected_message = "Unknown API error" in
+  let private_detail = "opaque-exact-secret-sentinel/" ^ String.make (64 * 1024) 'x' in
+  let check_diagnostic message error_type provider_status report =
+    Alcotest.(check string) "message is independent of raw payload"
+      expected_message message;
+    Alcotest.(check (option string)) "provider discriminator is preserved"
+      (Some "provider_owned_kind") error_type;
+    Alcotest.(check (option int)) "provider condition is preserved"
+      (Some 429) (Option.map (fun (s : provider_status) -> s.status) provider_status);
+    Alcotest.(check bool) "provider still owns the failure" true
+      (report = Provider_stated)
+  in
+  List.iter
+    (fun (message_fields, generic_should_parse) ->
+       let error = `Assoc
+         ([ "type", `String "provider_owned_kind"; "code", `Int 429
+          ; "private_detail", `String private_detail ] @ message_fields) in
+       let choice = `Assoc
+         [ "index", `Int 0; "finish_reason", `String "error"; "error", error ] in
+       List.iter
+         (fun json ->
+            let raw = Yojson.Safe.to_string json in
+            (match parse_openai raw with
+             | Agent_core.Llm_provider.Streaming.Openai_provider_error
+                 { message; error_type; provider_status; report; raw = evidence } ->
+               check_diagnostic message error_type provider_status report;
+               Alcotest.(check string) "raw evidence remains separate and exact" raw evidence
+             | _ -> Alcotest.fail "missing message lost its typed provider failure");
+            match Backend.parse_openai_response_result_json json with
+            | Error (Backend.Provider_error { message; error_type; provider_status; report }) ->
+              check_diagnostic message error_type provider_status report
+            | _ -> Alcotest.fail "non-streaming response disagrees with streaming error")
+         [ `Assoc [ "error", error ]; `Assoc [ "choices", `List [ choice ] ] ];
+       let raw = Yojson.Safe.to_string (`Assoc [ "type", `String "error"; "error", error ]) in
+       match Agent_core.Llm_provider.Streaming.parse_sse_event None raw with
+       | Some (SSEError { message; error_type; raw = evidence; _ }) when generic_should_parse ->
+         Alcotest.(check string) "generic SSE uses a payload-independent message"
+           expected_message message;
+         Alcotest.(check (option string)) "generic SSE keeps provider type"
+           (Some "provider_owned_kind") error_type;
+         Alcotest.(check string) "generic SSE keeps separate raw evidence" raw evidence
+       | Some (SSEParseFailed _) when not generic_should_parse -> ()
+       | _ -> Alcotest.fail "generic SSE lost the error event")
+    [ [], true; [ "message", `Null ], true; [ "message", `Int 7 ], false ]
+;;
+
 let require_provider_error label = function
   | Agent_core.Llm_provider.Streaming.Openai_provider_error { message; provider_status; _ }
     -> message, provider_status
@@ -793,6 +841,10 @@ let () =
         ] )
     ; ( "openai_provider_error_finish"
       , [ test_case
+            "missing provider message keeps raw evidence separate"
+            `Quick
+            test_missing_provider_message_does_not_promote_raw
+        ; test_case
             "mid-stream error declares its status"
             `Quick
             test_openai_mid_stream_error_declares_status

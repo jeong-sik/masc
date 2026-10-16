@@ -45,14 +45,18 @@ type t =
         [error_type], which an object without a [type] also produces. *)
   }
 
+(** A payload-independent diagnostic when the provider supplied no message.
+    Raw response evidence must remain in its separate diagnostic field. *)
+val missing_message : string
+
 (** An [error] member's value: an object, or a bare message string
-    (Ollama / llama.cpp), which declares no status. [fallback_message] is the
-    message when an object has no string [message]. [None] for any other JSON
-    value. *)
-val of_error_value : fallback_message:string -> Yojson.Safe.t -> t option
+    (Ollama / llama.cpp), which declares no status. An object without a string
+    [message] uses {!missing_message}; callers cannot promote raw response bytes
+    into that message. [None] for any other JSON value. *)
+val of_error_value : Yojson.Safe.t -> t option
 
 (** The error a choice that finished with [error] reports: its [error] member
     when {!of_error_value} reads one, otherwise a message saying the choice
     carried none. A choice may carry neither -- the finish reason alone still
     says the provider failed. *)
-val of_errored_choice : fallback_message:string -> Yojson.Safe.t -> t
+val of_errored_choice : Yojson.Safe.t -> t

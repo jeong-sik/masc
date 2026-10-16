@@ -1,6 +1,6 @@
 (** Durable, nonblocking HITL queue state and exact Always Allowed rules.
 
-    This module does not classify an settlement, interpret an operation name, or
+    This module does not classify an effect, interpret an operation name, or
     own a Keeper lane. *)
 
 (** Types, conversions, and JSON serialization extracted to

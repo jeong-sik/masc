@@ -5348,12 +5348,13 @@ let test_persisted_delivery_replays_before_origin_wake () =
          (`Assoc
              [ "version", `Int 12
             ; "generation", `Int 1
-            ; "next_sequence", `Int 2
+            ; "next_sequence", `Int 3
             ; "pending", `List []
             ; ( "deliveries"
               , `List
                   [ `Assoc
                       [ "entry", pending_entry
+                      ; "resolution_sequence", `Int 2
                       ; "decision", `Assoc [ "kind", `String "approve" ]
                       ; "source", `String "human_operator"
                       ; "remember_rule", `Bool false

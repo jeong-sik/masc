@@ -784,7 +784,7 @@ export function BuildIdentityBadge() {
   const hoverTitle = composeBuildBadgeTitle(build, status?.version)
 
   return html`
-    <div class="v2-shell-panel relative">
+    <div class="v2-shell-panel relative build-identity-control">
       <button type="button"
         class=${`v2-shell-action cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-[5px] text-2xs text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
         aria-expanded=${buildIdentityOpen.value}

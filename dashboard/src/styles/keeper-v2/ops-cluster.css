@@ -75,6 +75,7 @@
 /* The interactive chip itself — the action button (Auth/Build/Error) or a direct
    button (EmergencyStop). Shape only; the component keeps its own state colors. */
 .v2-top-ops .v2-shell-action,
+.v2-top-ops .emergency-stop-control button,
 .v2-top-ops > .v2-shell-panel > button {
   padding: 5px 10px;
   gap: 6px;
@@ -85,7 +86,7 @@
 }
 
 .v2-top-ops > .emergency-stop-control {
-  display: inline-flex;
+  display: inline-grid;
   flex: none;
   align-items: center;
   justify-content: center;
@@ -136,6 +137,12 @@
 }
 
 @media (min-width: 901px) and (max-width: 1120px) {
+  /* Keep pause, connection, console and auth visible above the mobile cutoff.
+     Build details yield space to the stable operator control footprint. */
+  .v2-top-ops > .build-identity-control {
+    display: none;
+  }
+
   .v2-app[data-keeper-detail-mode="true"] .v2-top-ops,
   .v2-app[data-keeper-detail-mode="true"] .v2-top > .v2-shell-panel,
   .v2-app[data-keeper-detail-mode="true"] .v2-top > [data-testid="tweaks-panel-toggle"] {

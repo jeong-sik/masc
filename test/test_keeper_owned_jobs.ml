@@ -2497,7 +2497,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job () = with_fixture @@ f
   Printf.printf "OWNED_INTERRUPTED_LAUNCH_RESUME job=%s phase=%s\n%!" id
     (match job.phase with Store.Running _ -> "running" | _ -> "other")
 
-let test_nested_skill_job_continuation () = with_fixture @@ fun env _initialize fixture ->
+let test_nested_skill_job_continuation ?(fault_after_acceptance=false) () = with_fixture @@ fun env _initialize fixture ->
   with_environment ["MASC_CONFIG_DIR",None] @@ fun () ->
   let module Async = Masc.Keeper_msg_async in
   let module Wake = Masc.Keeper_composition_continuation_wake in
@@ -2640,25 +2640,78 @@ pointer = "/content"
   let refused,notify_refused = Eio.Promise.create () in
   let refusals = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify_refused outcome) () in
   let backend_at_ready = ref None in
+  let ready,notify_ready = Eio.Promise.create () in
   let jobs = Completion_wake.create ~config ~on_result_ready:(fun (record : Store.record) ->
       check bool "nested completion hint follows actual durable output" true (Store.result_ready record);
       backend_at_ready := Some (List.length (calls fixture));
-      Wake.pulse ~sw:context.sw refusals |> require "nested original completion hint intake") () in
+      if not fault_after_acceptance then
+        Wake.pulse ~sw:context.sw refusals |> require "nested original completion hint intake";
+      Eio.Promise.resolve notify_ready ()) () in
   let events = Filename.concat
       (Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id))
       "skill-activation-events.jsonl" in
   let original_events = read events in
   let backend_before_completion = List.length (calls fixture) in
-  Fun.protect ~finally:(fun () -> write events original_events) (fun () ->
-    write events "invalid-original-child-activation\n";
+  let accepted_worker_calls = ref 0 in
+  let retained_wait_request = Fun.protect ~finally:(fun () -> write events original_events) (fun () ->
+    if not fault_after_acceptance then write events "invalid-original-child-activation\n";
     control fixture (`Assoc ["state",`String "exited";"exit_code",`Int 7]);
     Completion_wake.pulse ~sw:context.sw jobs |> store_value "nested full result completion pulse";
-    (match Eio.Promise.await refused with
-     | Ok (Tool_result.Failed failure) -> check bool "refused original child has no new exports" true
-         (Tool_result.data (Tool_result.Failed failure) |> member "exports" = `Null)
-     | Ok _ | Error _ -> fail "corrupt original activation reached successor acceptance");
-    check string "activation refusal keeps original wait owner" waiting_entry.request_id
-      (Journal.continuation_request_id (candidate ())));
+    Eio.Promise.await ready;
+    let expected_request = if not fault_after_acceptance then (
+      (match Eio.Promise.await refused with
+       | Ok (Tool_result.Failed failure) -> check bool "refused original child has no new exports" true
+           (Tool_result.data (Tool_result.Failed failure) |> member "exports" = `Null)
+       | Ok _ | Error _ -> fail "corrupt original activation reached successor acceptance");
+      waiting_entry.request_id)
+    else (
+      let module Draft = Masc.Keeper_composition_draft in
+      let prior = candidate () in
+      let source = Journal.continuation_source prior in
+      let draft = Draft.load_continuation ~base_path:fixture.base_path ~capability_surface:surface prior
+        |> require "actual original draft before accepted activation fault" in
+      let bound = Draft.load_nested_activation ~base_path:fixture.base_path source
+        |> require "original bound authority before accepted fault" |> function
+        | Some bound -> bound | None -> fail "nested worker has no original bound context" in
+      check string "original ledger is intact before successor acceptance" original_events (read events);
+      let original_invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:source.parent_tool_use_id
+          ~turn:source.source_turn ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Serial}
+          ~completion:Agent_core.Tool_contract.Continue_after_success in
+      let physical = Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell:fixture.cell () in
+      let worker = Atomic.make None in
+      let successor = Async.submit_worker_with_request_id ?request_context:waiting_entry.request_context
+          ~background_sw:context.sw ~base_path:fixture.base_path ~caller:keeper ~keeper_name:keeper
+          ~on_accepted:(fun request_id ->
+            Journal.bind_continuation prior ~request_id |> Result.map (fun accepted ->
+              Atomic.set worker (Some accepted);
+              write events "invalid-child-authority-after-durable-acceptance\n")
+            |> Result.map_error Journal.error_to_string)
+          ~f:(fun ~request_id request_sw ->
+            incr accepted_worker_calls;
+            let worker = match Atomic.get worker with Some worker -> worker
+              | None -> fail "worker started without actual durable binding" in
+            Masc.Keeper_tool_composition_surface.For_testing.async_worker_result
+              ~composition_execution:Masc.Keeper_tool_composition_catalog.Async
+              ~tool_kind:Descriptor.Async_composition_tool ~nested_calls:(Draft.nested_calls draft)
+              ~nested_activation:bound ~continuation:prior ~plan:(Draft.plan draft) ~journal:worker
+              ~tool_name:Draft.run_tool_name ~request_id ~composition_run_id:source.composition_run_id
+              ~source_invocation:original_invocation ~request_sw ~config ~meta:fixture.meta
+              ~capability_authority:(Masc.Keeper_tool_runtime.Frozen_surface surface) ~publication_recovery
+              ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"accepted child authority fault")
+              ~turn_context:(Some {physical with task_id=source.source_task_id}) ~clock:(Eio.Stdenv.clock env) ()) ()
+        |> require "actual broker acceptance before worker activation fault" in
+      let ok,data,entry = await_composition env fixture (`Assoc ["request_id",`String successor.request_id]) in
+      check bool "accepted worker stops with the original wait" false ok;
+      (match entry.status with
+       | Async.Waiting_for_owned_jobs {job_ids;_} -> check (list string) "accepted fault retains exact original job" [id]
+           (List.map Store.Job_id.to_string job_ids)
+       | _ -> fail "accepted activation fault retired original job work");
+      check bool "accepted authority fault returns no original child exports" true (member "exports" data = `Null);
+      check int "production worker actually rechecks original authority" 1 !accepted_worker_calls;
+      successor.request_id) in
+    check string "activation fault retains exact canonical wait owner" expected_request
+      (Journal.continuation_request_id (candidate ()));
+    expected_request) in
   let ready_backend = match !backend_at_ready with Some count -> count | None -> fail "nested result hint never fired" in
   let detached = Filename.concat fixture.base_path "detached-original-child-activation.jsonl" in
   Unix.rename events detached;
@@ -2668,7 +2721,7 @@ pointer = "/content"
     Wake.pulse ~sw:context.sw wake |> require "fresh nested intake with absent original activation";
     (match Eio.Promise.await refused with
      | Ok (Tool_result.Failed _) -> () | Ok _ | Error _ -> fail "missing original activation was invented");
-    check string "missing activation keeps exact original owner" waiting_entry.request_id
+    check string "missing activation keeps exact original owner" retained_wait_request
       (Journal.continuation_request_id (candidate ())));
   let resumed,notify = Eio.Promise.create () in
   let fresh = Wake.create ~context ~on_result:(fun _ outcome -> Eio.Promise.resolve notify outcome) () in
@@ -2714,6 +2767,8 @@ pointer = "/content"
      "backend_calls_to_complete_original_job",`Int (ready_backend-backend_before_completion);
      "backend_calls_after_result_ready",`Int (List.length (calls fixture)-ready_backend);
      "original_activation_count",`Int 1;"activation_fault_refusals",`Int 2;
+     "fault_after_durable_acceptance",`Bool fault_after_acceptance;
+     "accepted_fault_worker_calls",`Int !accepted_worker_calls;
      "program_creates",`Int (effect_count fixture "create");"program_starts",`Int (effect_count fixture "start")]))
 
 exception Fixture_result_observer_failed
@@ -2837,6 +2892,9 @@ let () =
       ; test_case "durable completion hint resumes original DAG without a provider turn" `Quick test_completion_hint_resumes_original_dag
       ; test_case "prepared DAG launches an owned job and resumes its original result" `Quick test_prepared_job_launch_and_continuation
       ; test_case "interrupted prepared launch resumes the same job without recreating it" `Quick test_interrupted_prepared_launch_resumes_the_same_job
-      ; test_case "fresh supervisor retains nested child authority through owned-job waits" `Quick test_nested_skill_job_continuation
+      ; test_case "fresh supervisor retains nested child authority through owned-job waits" `Quick
+          (test_nested_skill_job_continuation ~fault_after_acceptance:false)
+      ; test_case "accepted worker activation fault keeps original child wait recoverable" `Quick
+          (test_nested_skill_job_continuation ~fault_after_acceptance:true)
       ; test_case "maintenance admits new job recovery while another backend is blocked" `Quick test_completion_pulse_does_not_join_blocked_backend
       ; test_case "recovery keeps refused foreign and corrupt owner bytes intact" `Quick test_completion_recovery_preserves_refused_owner_bytes ]]

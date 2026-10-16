@@ -104,6 +104,11 @@ prepare-through-saved-wait, fresh recovery pulse, backend calls before/after
 durable output and the original activation/create/start counts. The Docker CLI
 is synthetic; executing this scenario does not prove real Docker, a physical
 server restart, actual model delivery or a preparation-latency improvement.
+An additional scenario replaces activation authority inside actual durable
+broker acceptance, then runs the production worker. The worker must return the
+original job wait without exports; restoring that authority must let a fresh
+supervisor resume the same child and occurrences. This tests the accepted worker
+boundary separately from pre-acceptance refusal.
 
 ## Nested invocation and delivery evidence
 

@@ -52,6 +52,9 @@ if [ "$scope" != "$current_scope" ]; then
   echo "REFUSED: stack membership, PR head, base or identity moved during admission" >&2
   exit 2
 fi
+# Reviews certify source, not compilation. Require the exact merge head's
+# four-executable build record on the frozen scope.
+check_merge_compile || exit $?
 members=$(printf '%s' "$scope" | jq -r '[.scope[] | select(.identity.state == "open") | "#" + (.number|tostring)] | join(", ")')
 if [ "$check" -eq 1 ]; then
   if [ "$scope_json" -eq 1 ]; then printf '%s\n' "$scope"

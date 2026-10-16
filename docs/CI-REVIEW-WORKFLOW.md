@@ -20,6 +20,17 @@ repeated work. Builds are serialized without cancelling the active build.
 Scheduling may be delayed; this does not guarantee a build within 30 minutes.
 This observation does not approve a PR or replace full Release/Tag checks.
 
+Every merge additionally needs a merge-compile record for the exact merge
+head (top head for stacks, PR head for singles): `merge-compile.yml`,
+dispatched explicitly on main right after review with the head SHA, builds
+the same four executables in one Dune invocation and settles a
+`merge-compile` commit status on that SHA. `merge-guard.sh` refuses a merge
+whose head lacks a success status. Non-documentation inputs identical to an
+already built SHA settle instantly by input identity (docs-only heads build
+nothing); anything else builds asynchronously — dispatch fire-and-forget and
+merge once the status reads success. The gate itself reads one status, so
+merging stays a seconds-long manual step. A new head invalidates the record.
+
 For an explicitly selected
 approved combination, use [the selection commands](../scripts/review/APPROVED-CI-SELECTION.md)
 to prepare the candidate and receipt. Dispatch `leader-ci.yml` from main with the

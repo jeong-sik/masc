@@ -26,6 +26,12 @@ read_current_pr() {
 # The status lives on the member PR head commit, so it moves with the head
 # and disappears from stale heads on its own. Missing status means no
 # leader-selected run is currently pinning this head.
+#
+# merge-compile is stricter: every merge needs a successful four-executable
+# build record for the exact merge head (top head for stacks, PR head for
+# singles). Reviews certify source, not compilation, and restacked code
+# predating a lint rule broke main twice in two days (#43137, #43146).
+# Missing record means the merged result was never compiled — refuse.
 check_leader_selected_ci() {
   local rows status context target_url
   rows=$(ci_gh_json "repos/$repo/commits/$head/status" '[.statuses[] | select(.context == "leader-selected-ci") | [.state, .target_url, .description] | @tsv] | last // empty') || return 1
@@ -42,6 +48,33 @@ check_leader_selected_ci() {
       return 0;;
     *)
       echo "REFUSED #$pr: leader-selected CI has unknown state '$status'" >&2
+      return 2;;
+  esac
+}
+
+# Merge admission requires a successful merge-compile record for the exact
+# merge head (top head for stacks, PR head for singles): the four operator
+# executables built from these exact inputs. Unlike leader-selected CI, a
+# missing record refuses — the merged result was never compiled. Dispatch
+# merge-compile.yml on the head right after review (fire-and-forget, never
+# watch); merge once this status reads success. A new head invalidates the
+# record; docs-only heads settle instantly by input identity.
+check_merge_compile() {
+  local rows status target_url
+  rows=$(ci_gh_json "repos/$repo/commits/$selected_head/status" '[.statuses[] | select(.context == "merge-compile") | [.state, .target_url] | @tsv] | last // empty') || return 1
+  [ -n "$rows" ] || { echo "REFUSED #$selected_pr: no merge-compile record for exact head $selected_head — dispatch merge-compile.yml on this head (gh workflow run merge-compile.yml --ref main -f sha=$selected_head -f pr=$selected_pr) and merge after it succeeds" >&2; return 2; }
+  IFS=$'\t' read -r status target_url <<<"$rows"
+  case "$status" in
+    success)
+      return 0;;
+    pending)
+      echo "MERGE ON HOLD #$selected_pr: merge-compile is building $selected_head ($target_url) — merge after it succeeds" >&2
+      return 2;;
+    failure|error)
+      echo "REFUSED #$selected_pr: merge-compile failed for $selected_head ($target_url) — repair the head and dispatch again" >&2
+      return 2;;
+    *)
+      echo "REFUSED #$selected_pr: merge-compile has unknown state '$status'" >&2
       return 2;;
   esac
 }

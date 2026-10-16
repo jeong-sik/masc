@@ -1,0 +1,220 @@
+name: Merge compile
+
+run-name: Merge compile on ${{ inputs.sha }} for PR #${{ inputs.pr }} by ${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact merge-head SHA to compile (top head for stacks)
+        required: true
+        type: string
+      pr:
+        description: PR number the head belongs to (naming only)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    # Cold compiler/dependency installation can take much longer than a warm
+    # build. This is a stalled-job backstop, not the expected build duration.
+    timeout-minutes: 90
+    env:
+      DUNE_JOBS: '4'
+      # Keep user-written rules (including generated build identity) live.
+      DUNE_CACHE: enabled-except-user-rules
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+
+      - name: Validate dispatch and pin pending status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ inputs.sha }}
+          PR: ${{ inputs.pr }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          if os.environ['GITHUB_REF'] != 'refs/heads/main':
+              raise SystemExit('Dispatch merge-compile on main')
+          sha = os.environ['SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', sha):
+              raise SystemExit('sha must be an exact 40-hex head')
+          if not re.fullmatch(r'[1-9][0-9]*', os.environ['PR']):
+              raise SystemExit('pr must be a PR number')
+          # Pin pending BEFORE building, so a failing build still leaves the
+          # guard holding until the always()-settle resolves it. An invalid
+          # dispatch never pins: no status is written for a bogus SHA.
+          body = json.dumps({
+              'state': 'pending', 'context': 'merge-compile',
+              'description': 'Merge compile is running',
+              'target_url': os.environ['RUN_URL'],
+          }).encode()
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/{os.environ["REPOSITORY"]}/commits/{sha}/statuses',
+              data=body, method='POST',
+              headers={'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+                       'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request) as response:
+              if response.status != 201:
+                  raise SystemExit(f'status pin failed for {sha}: {response.status}')
+              print(f'pinned merge-compile pending on {sha[:12]}')
+          PY
+
+      - name: Identify build inputs
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Identical to main-minimal-build: conservatively include every
+          # tracked file except documentation and changelog. The receipt key
+          # shares that workflow's namespace on purpose, so a main build
+          # warms merge checks and vice versa: identical inputs mean an
+          # identical compile result, whichever SHA was actually built.
+          digest=$(python3 - <<'PY'
+          import hashlib, subprocess
+          entries = subprocess.check_output(['git', 'ls-tree', '-r', '-z', 'HEAD']).split(b'\0')
+          inputs = []
+          for entry in entries:
+              if not entry:
+                  continue
+              path = entry.split(b'\t', 1)[1]
+              if path.startswith((b'docs/', b'docs-site/', b'changelog.d/')) or path == b'CHANGELOG.md':
+                  continue
+              inputs.append(entry + b'\0')
+          print(hashlib.sha256(b''.join(inputs)).hexdigest())
+          PY
+          )
+          echo "receipt=main-build-receipt-v1-${ImageOS}-${ImageVersion}-${digest}" >> "$GITHUB_OUTPUT"
+          echo "dune=main-dune-v1-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+          echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache" >> "$GITHUB_ENV"
+
+      - name: Look for a successful build of these inputs
+        id: receipt
+        uses: actions/cache/restore@v6
+        with:
+          path: .ci-main-build-receipt
+          key: ${{ steps.inputs.outputs.receipt }}
+
+      - uses: ./.github/actions/setup-ocaml-toolchain
+        if: steps.receipt.outputs.cache-hit != 'true'
+      - uses: ./.github/actions/pin-ocaml-deps
+        if: steps.receipt.outputs.cache-hit != 'true'
+      - uses: ./.github/actions/install-ocaml-deps
+        if: steps.receipt.outputs.cache-hit != 'true'
+
+      - name: Reuse Dune build artifacts
+        if: steps.receipt.outputs.cache-hit != 'true'
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/masc-dune-cache
+          key: ${{ steps.inputs.outputs.dune }}-${{ inputs.sha }}
+          restore-keys: |
+            ${{ steps.inputs.outputs.dune }}-
+
+      - name: Build the operator executables
+        if: steps.receipt.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          opam exec -- dune build --root . \
+            bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
+            bin/deployment_preflight_helper.exe
+          # Record the SHA that was actually built: GITHUB_SHA is main's
+          # (the dispatch ref), not the checked-out head.
+          printf '%s\n' "${{ inputs.sha }}" > .ci-main-build-receipt
+
+      # Only a completed successful build creates a receipt. A failed build
+      # settles the head red; the author repairs the head and dispatches again.
+      - name: Remember successful build inputs
+        if: success() && steps.receipt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: .ci-main-build-receipt
+          key: ${{ steps.inputs.outputs.receipt }}
+
+      - name: Record checked scope
+        if: always()
+        env:
+          RECEIPT_HIT: ${{ steps.receipt.outputs.cache-hit }}
+          BUILD_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "Checked merge-head SHA: ${{ inputs.sha }} (PR #${{ inputs.pr }})"
+            if [ "$RECEIPT_HIT" = true ]; then
+              echo 'Build skipped: non-documentation inputs already built successfully.'
+              echo "Previously built SHA: $(cat .ci-main-build-receipt)"
+              echo 'Identical inputs mean an identical compile result, so this skip IS compilation evidence for the checked SHA.'
+            else
+              echo "Build job status: $BUILD_STATUS"
+              echo 'Scope: server, TUI, browser host, deployment preflight; no tests.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  settle:
+    name: Settle the merge-compile status
+    needs: [compile]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Write verdict and settle the head status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ inputs.sha }}
+          PR: ${{ inputs.pr }}
+          COMPILE_RESULT: ${{ needs.compile.result }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          from pathlib import Path
+          sha = os.environ['SHA']
+          if not re.fullmatch(r'[0-9a-f]{40}', sha):
+              raise SystemExit('refusing to settle a malformed SHA')
+          # Fail closed: anything but a successful compile job settles red,
+          # including cancellation and infra failure. Re-dispatch replaces it.
+          passed = os.environ['COMPILE_RESULT'] == 'success'
+          receipt = {'schema_version': 1, 'sha': sha, 'pr': os.environ['PR'],
+                     'actor': os.environ['GITHUB_ACTOR'], 'compile': os.environ['COMPILE_RESULT'],
+                     'checks_passed': passed, 'run_id': os.environ['GITHUB_RUN_ID'],
+                     'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']}
+          Path('merge-compile-results.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          state = 'success' if passed else 'failure'
+          body = json.dumps({
+              'state': state, 'context': 'merge-compile',
+              'description': ('Four executables built' if passed else 'Merge compile failed'),
+              'target_url': os.environ['RUN_URL'],
+          }).encode()
+          request = urllib.request.Request(
+              f'https://api.github.com/repos/{os.environ["REPOSITORY"]}/commits/{sha}/statuses',
+              data=body, method='POST',
+              headers={'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+                       'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(request) as response:
+              if response.status != 201:
+                  raise SystemExit(f'status settle failed for {sha}: {response.status}')
+              print(f'settled merge-compile on {sha[:12]} -> {state}')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(f'merge-compile {sha[:12]} (PR #{os.environ["PR"]}): {state}\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: merge-compile-results-${{ inputs.sha }}-${{ github.run_attempt }}
+          path: merge-compile-results.json
+          if-no-files-found: error
+      - name: Require the compile to pass
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          raise SystemExit(0 if json.loads(Path('merge-compile-results.json').read_text())['checks_passed'] else 1)
+          PY

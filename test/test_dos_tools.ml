@@ -168,6 +168,26 @@ let test_click_without_a_machine_is_refused () =
       (contains "masc_dos_load" (Tool_result.message result)))
 ;;
 
+(* The inventory directory is there and will not read (permissions, a vanished
+   mount). Listing it used to raise Sys_error out of the tool. Root reads any
+   directory, so the case does not exist there. *)
+let test_an_unreadable_inventory_is_a_failure_not_an_exception () =
+  if Unix.getuid () = 0 then skip ();
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    let dir = programs_dir ~base_path in
+    Unix.chmod dir 0o000;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod dir 0o755)
+      (fun () ->
+        match dispatch ~base_path "masc_dos_load" [] with
+        | Tool_result.Failed { Tool_result.class_ = Tool_result.Runtime_failure; message; _ } ->
+          check bool "and the host path stays out of the message" false
+            (contains base_path message)
+        | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ ->
+          fail "an unreadable inventory should fail with a runtime failure"))
+;;
+
 let test_inventory_when_unnamed () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -2249,6 +2269,8 @@ let () =
     [ ( "tools"
       , [ test_case "no machine" `Quick test_no_machine
         ; test_case "click no machine" `Quick test_click_without_a_machine_is_refused
+        ; test_case "unreadable inventory is a failure" `Quick
+            test_an_unreadable_inventory_is_a_failure_not_an_exception
         ; test_case "inventory" `Quick test_inventory_when_unnamed
         ; test_case "inventory describes assets" `Quick
             test_inventory_describes_mountable_assets_without_a_machine

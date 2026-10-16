@@ -12,6 +12,8 @@ import {
   dashboardWsLastEventAt,
   dashboardWsLastPongAt,
   dashboardWsLastPongLatencyMs,
+  dashboardWsLastDisconnectedAt,
+  dashboardWsReconnectCount,
   dashboardWsReady,
 } from '../dashboard-ws-state'
 import {
@@ -46,13 +48,13 @@ export function computeBeaconView(args: {
     if (args.connected && !args.ready) {
       return {
         state: 'yellow',
-        label: 'Client WS · handshaking',
+        label: '연결 확인 중',
         title: 'Client WS socket is open; waiting for dashboard/hello before route events resume.',
       }
     }
     return {
       state: 'red',
-      label: 'Client WS · disconnected',
+      label: '재연결 중',
       title: 'Client WS is closed. Events will pause until reconnect. Server transport truth is in Diagnostics > Transport.',
     }
   }
@@ -68,28 +70,28 @@ export function computeBeaconView(args: {
         : `${args.lastPongLatencyMs}ms`
       return {
         state: 'green',
-        label: `Client WS · heartbeat · ${latency}`,
-        title: `Client WS is active. No route events, but heartbeat pong arrived ${Math.floor(pongAgeMs / 1000)}s ago.`,
+        label: '연결됨',
+        title: `Client WS is active. No route events, but heartbeat pong arrived ${Math.floor(pongAgeMs / 1000)}s ago; latency ${latency}. ${args.eventCount60s} deltas / 60s.`,
       }
     }
     if (!hasRouteEvent) {
       return {
         state: 'yellow',
-        label: 'Client WS · silent',
+        label: '연결 확인 필요',
         title:
           'Client WS is ready but has not received route events yet, and no fresh heartbeat pong is available. The workload may be idle or WS fan-out may be stuck.',
       }
     }
     return {
       state: 'yellow',
-      label: 'Client WS · silent',
+      label: '연결 확인 필요',
       title: `Client WS has received no events for ${Math.floor(silentMs / 1000)}s and no fresh heartbeat pong. The workload may be idle or WS fan-out may be stuck.`,
     }
   }
   return {
     state: 'green',
-    label: `Client WS · open · ${args.eventCount60s} deltas / 60s`,
-    title: `Client WS is active. Last applied route delta ${Math.floor(silentMs / 1000)}s ago. Heartbeats are shown separately when route deltas are idle.`,
+    label: '연결됨',
+    title: `Client WS is active. ${args.eventCount60s} deltas / 60s. Last applied route delta ${Math.floor(silentMs / 1000)}s ago. Heartbeats are shown separately when route deltas are idle.`,
   }
 }
 
@@ -114,10 +116,14 @@ const beaconView = computed<BeaconView>(() => computeBeaconView({
 
 export function TransportBeacon() {
   const view = beaconView.value
+  const details = [view.title, `Reconnect attempts ${dashboardWsReconnectCount.value}`]
+  if (dashboardWsLastDisconnectedAt.value > 0) {
+    details.push(`Last disconnected ${new Date(dashboardWsLastDisconnectedAt.value).toLocaleTimeString()}`)
+  }
   return html`
     <div
       class="v2-shell-panel flex items-center gap-1.5 whitespace-nowrap rounded-[var(--r-1)] border border-solid px-2 py-0.5 text-xs ${STATE_CLASS[view.state]}"
-      title=${view.title}
+      title=${details.join(' · ')}
       role="status"
       data-beacon-state=${view.state}
     >

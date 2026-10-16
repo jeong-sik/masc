@@ -5,7 +5,7 @@
 // stale connectors). The Copilot button reuses the existing dock controller.
 
 import { html } from 'htm/preact'
-import { useState, useEffect } from 'preact/hooks'
+import { useState, useEffect, useId, useLayoutEffect, useRef } from 'preact/hooks'
 import { navigate, route } from '../../router'
 import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution } from '../../store'
 import { activeKeeperName } from '../../keeper-state'
@@ -21,20 +21,19 @@ import {
   type DashboardCompositeHealthVerdict,
 } from '../../lib/dashboard-composite-health'
 // Operational/safety chrome the v2 prototype omits but operators rely on
-// (connection state, transport telemetry, emergency stop, error inbox, auth,
+// (connection state, transport telemetry, emergency stop, error console, auth,
 // build identity). Re-mounted into the v2 top bar so the reskin does not drop
 // live operational visibility (PR #22081 review P1). These are zero-prop
 // components that read their own signals.
-import { ConnectionStatus, ErrorCounterBadge, BuildIdentityBadge } from '../dashboard-shell'
+import { ErrorCounterBadge, BuildIdentityBadge } from '../dashboard-shell'
 import { AuthStatus } from '../auth-status'
 import { EmergencyStopControl } from '../emergency-stop-control'
 import { TransportBeacon } from '../transport-beacon'
+import { FLEET_KEEPER_FILTERS } from '../../lib/fleet-keeper-filter'
 import {
   dashboardFullHealth,
   subscribeDashboardFullHealthRefresh,
 } from '../dashboard-full-health-state'
-
-const FAILURE_PHASES = new Set(['Crashed'])
 
 type TopBarKeeperCount =
   | { kind: 'executable'; count: number }
@@ -94,8 +93,8 @@ function computeAttention(): AttentionAgg {
     approvalQueueState?.state === 'ready'
       ? gateData.value?.approval_queue?.length ?? null
       : null
-  const attKeepers = ks.filter((k) => k.needs_attention === true).length
-  const failures = ks.filter((k) => !!k.lifecycle_phase && FAILURE_PHASES.has(k.lifecycle_phase)).length
+  const attKeepers = ks.filter(FLEET_KEEPER_FILTERS.attention.matches).length
+  const failures = ks.filter(FLEET_KEEPER_FILTERS.failures.matches).length
   const health = projectDashboardCompositeHealth(dashboardFullHealth.value)
   return {
     approvals,
@@ -119,7 +118,13 @@ interface AttentionRow {
 
 export function AttentionIndicatorV2() {
   const [open, setOpen] = useState(false)
+  const menuId = useId()
+  const trigger = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
   useEffect(() => subscribeDashboardFullHealthRefresh(), [])
+  useLayoutEffect(() => {
+    if (open) menu.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+  }, [open])
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
@@ -174,8 +179,8 @@ export function AttentionIndicatorV2() {
     })
   }
   if (a.approvals !== null && a.approvals > 0) rows.push({ k: 'approvals', n: a.approvals, lbl: '승인 대기', sev: 'bad', nav: 'approvals' })
-  if (a.keepers > 0) rows.push({ k: 'keepers', n: a.keepers, lbl: '주의 keeper', sev: 'warn', nav: 'monitoring' })
-  if (a.failures > 0) rows.push({ k: 'failures', n: a.failures, lbl: '충돌·넘침', sev: 'bad', nav: 'monitoring' })
+  if (a.keepers > 0) rows.push({ k: 'keepers', n: a.keepers, lbl: FLEET_KEEPER_FILTERS.attention.label, sev: 'warn', nav: 'monitoring', params: { section: 'agents', view: 'keepers', filter: 'attention' } })
+  if (a.failures > 0) rows.push({ k: 'failures', n: a.failures, lbl: FLEET_KEEPER_FILTERS.failures.label, sev: 'bad', nav: 'monitoring', params: { section: 'agents', view: 'keepers', filter: 'failures' } })
   if (a.health.state === 'attention') {
     rows.push(...a.health.issues.map(issue => ({
       k: issue.kind,
@@ -217,18 +222,39 @@ export function AttentionIndicatorV2() {
     ? a.total > 0 ? `${a.total}+?` : '?'
     : String(a.total)
   return html`
-    <div class="attn-wrap" onClick=${(e: Event) => e.stopPropagation()}>
-      <button class=${`v2-statchip attn ${tone}`} onClick=${() => setOpen((o) => !o)} title="지금 나를 필요로 하는 것">
-        ${'⚑'} 주의 <b>${totalLabel}</b>
+    <div class="attn-wrap" onClick=${(e: Event) => e.stopPropagation()} onKeyDown=${(event: KeyboardEvent) => {
+      if (event.key === 'Escape' && open) {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+        trigger.current?.focus()
+      }
+      if (!open && event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); return }
+      if (event.key === 'Tab') setOpen(false)
+      if (!open || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+      event.preventDefault()
+      const items = Array.from(menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
+      if (items.length === 0) return
+      const current = items.indexOf(document.activeElement as HTMLButtonElement)
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+      items[next]?.focus()
+    }}>
+      <button ref=${trigger} type="button" class=${`v2-statchip attn ${tone}`} onClick=${() => setOpen((o) => !o)} title="지금 나를 필요로 하는 것"
+        aria-expanded=${open} aria-haspopup="menu" aria-controls=${menuId}>
+        ${'⚑'} 주의 <b>${totalLabel}</b> <span aria-hidden="true">⌄</span>
       </button>
       ${open
         ? html`
-            <div class="attn-menu">
+            <div ref=${menu} id=${menuId} class="attn-menu" role="menu" aria-label="주의 항목">
               <div class="attn-menu-h">지금 나를 필요로 하는 것</div>
               ${rows.map(
                 (r) => html`
                   <button
                     key=${r.k}
+                    type="button"
+                    role="menuitem"
+                    tabIndex=${-1}
                     class="attn-row"
                     title=${r.detail}
                     onClick=${() => { setOpen(false); navigate(r.nav, r.params) }}
@@ -303,25 +329,25 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
           ? html`<span>/</span><span class="on">${crumbKeeper}</span>`
           : null}
       </div>
-      <div class="v2-top-spacer"></div>
-      <span class="v2-statchip live" title=${countTitle}>
-        <${StatusDot} status=${keeperCount.kind === 'unavailable' ? 'idle' : 'run'} pulse=${countPresentation.pulse} />${countPresentation.value} ${countPresentation.label}
-      </span>
-      <${AttentionIndicatorV2} />
-      <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">
-        ${'◷'} 예약
-      </button>
+      <div class="v2-top-fleet" role="group" aria-label="Fleet 상태와 작업">
+        <span class="v2-statchip live" title=${countTitle}>
+          <${StatusDot} status=${keeperCount.kind === 'unavailable' ? 'idle' : 'run'} pulse=${countPresentation.pulse} />${countPresentation.value} ${countPresentation.label}
+        </span>
+        <${AttentionIndicatorV2} />
+        <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">
+          ${'◷'} 예약
+        </button>
+        <${CopilotDockTopBarButton} dock=${dock} />
+      </div>
       ${/* Operational/safety status cluster (review P1: keep operator chrome). */ ''}
-      <div class="v2-top-ops">
-        <${ConnectionStatus} />
+      <div class="v2-top-ops" role="group" aria-label="연결과 운영 도구">
         <${TransportBeacon} />
         <${EmergencyStopControl} />
         <${ErrorCounterBadge} />
         <${AuthStatus} />
+        <${BuildIdentityBadge} />
+        <${TweaksPanelToggle} />
       </div>
-      <${CopilotDockTopBarButton} dock=${dock} />
-      <${BuildIdentityBadge} />
-      <${TweaksPanelToggle} />
     </div>
   `
 }

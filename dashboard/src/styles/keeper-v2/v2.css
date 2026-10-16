@@ -217,7 +217,6 @@
 }
 .v2-top .crumb > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .v2-top .crumb .on { color: var(--text-mid); }
-.v2-top-spacer { flex: 1 1 auto; min-width: 8px; }
 
 /* desktop mid-band (between the phone breakpoint and the ctx-fold): the full
    chip set + crumb can crowd. Tighten gaps and let the passive run-count drop

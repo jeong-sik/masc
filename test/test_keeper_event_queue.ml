@@ -710,7 +710,7 @@ let () =
      Alcotest.fail ("operator rejection codec failed: " ^ msg));
   let rejection_event =
     match
-      Masc.Keeper_world_observation.pending_board_event_of_stimulus
+      Masc.Keeper_world_observation.pending_board_event_of_stimulus ~base_path:(Filename.get_temp_dir_name ())
         ~meta:(event_queue_test_meta "producer" "trace-producer")
         rejection_stimulus
     with
@@ -792,7 +792,7 @@ let () =
    | Error msg -> Alcotest.fail ("task outcome codec failed: " ^ msg));
   let outcome_event =
     match
-      Masc.Keeper_world_observation.pending_board_event_of_stimulus
+      Masc.Keeper_world_observation.pending_board_event_of_stimulus ~base_path:(Filename.get_temp_dir_name ())
         ~meta:(event_queue_test_meta "producer" "trace-producer")
         outcome_stimulus
     with

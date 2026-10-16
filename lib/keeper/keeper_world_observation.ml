@@ -730,45 +730,26 @@ let delegate_reply_preview_max_len = 480
    submitter is mid-cycle and reads its pending events, not a request store.
    The Keeper is its own author here -- it submitted the work.
 
-   A success carries no preview. The result lives in the async request record
-   and [keeper_composition_status] reads it by the request id in the title;
-   putting the body here would duplicate a durable store into the prompt.
-   A failure or cancellation carries its detail, which exists nowhere the
-   Keeper can otherwise act on. *)
+   Resolve the exact canonical request when assembling the observation.
+   Selected results and their source reach the next prompt without copying
+   full intermediate node bodies into the durable queue. *)
 let pending_board_event_of_composition_completion
+      ~base_path
       ~(keeper_name : string)
       ~(arrived_at : float)
       (cc : Keeper_event_queue.composition_completion)
   : pending_board_event
   =
-  let outcome, message =
+  let outcome =
     match cc.cc_terminal with
-    | Keeper_event_queue.Composition_succeeded -> "succeeded", ""
-    | Keeper_event_queue.Composition_failed detail -> "failed", detail
-    | Keeper_event_queue.Composition_cancelled reason -> "cancelled", reason
+    | Keeper_event_queue.Composition_succeeded -> "succeeded"
+    | Keeper_event_queue.Composition_failed _ -> "failed"
+    | Keeper_event_queue.Composition_cancelled _ -> "cancelled"
   in
-  (* Same silent-cut gap as the delegate reply above: a failed or cancelled
-     composition's detail exists nowhere else, so a cut here is never silent
-     either -- the row appends the request id the title already carries. *)
   let preview =
-    (* [short_preview] measures after [String.trim], so the cut test must
-       measure the same trimmed bytes: a space-padded short answer must not
-       read as cut. Trim once here and share it with the preview. *)
-    let message = String.trim message in
-    let cut = short_preview ~max_len:delegate_reply_preview_max_len message in
-    if String.length message > delegate_reply_preview_max_len then
-      let note =
-        event_row_text
-          Prompt_names.keeper_world_event_rows_composition_detail_lookup
-          [ "request_id", cc.cc_request_id ]
-          ~fallback:(Yojson.Safe.to_string
-            (`Assoc
-               [ "tool", `String "keeper_composition_status"
-               ; "arguments", `Assoc [ "request_id", `String cc.cc_request_id ]
-               ]))
-      in
-      if String.equal note "" then cut else cut ^ "\n" ^ note
-    else cut
+    Keeper_composition_completion_result.read ~base_path ~keeper_name cc
+    |> Keeper_composition_completion_result.to_json
+    |> Yojson.Safe.to_string
   in
   { event_kind = Composition_completed
   ; post_id = Keeper_event_queue.composition_completion_post_id cc
@@ -1160,6 +1141,7 @@ let pending_board_event_of_task_outcome
 ;;
 
 let pending_board_event_of_stimulus
+      ~base_path
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
   : (pending_board_event option, Board_signal.board_unavailable) result
@@ -1215,6 +1197,7 @@ let pending_board_event_of_stimulus
     Ok
       (Some
          (pending_board_event_of_composition_completion
+            ~base_path
             ~keeper_name:meta.name
             ~arrived_at:stimulus.arrived_at
             cc))

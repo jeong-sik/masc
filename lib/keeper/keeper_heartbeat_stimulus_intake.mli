@@ -16,7 +16,8 @@ open Keeper_execution
     continuity summary. [Error unavailable] reports a Board read that answered
     no row; [pending_board_events_of_stimulus_result] consumes it. *)
 val pending_board_event_of_stimulus
-  :  meta_after_triage:keeper_meta
+  :  base_path:string
+  -> meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
   -> (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
 
@@ -40,7 +41,8 @@ val classify_pending_board_event_result
     [stim] into zero-or-one pending board events. On [Error unavailable] it
     logs and counts the read and returns [Stimulus_consumed []]. *)
 val pending_board_events_of_stimulus_result
-  :  meta_after_triage:keeper_meta
+  :  base_path:string
+  -> meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
   -> stimulus_intake_result
 

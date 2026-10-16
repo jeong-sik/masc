@@ -438,6 +438,7 @@ val pending_board_event_of_external_attention :
     [Board_attention] answered no row: the post was swept or the queued id
     does not parse. Reading again gives the same answer. *)
 val pending_board_event_of_stimulus :
+  base_path:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
   (pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result

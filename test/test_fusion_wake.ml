@@ -308,7 +308,7 @@ let test_fusion_completion_is_actionable () =
     (ev.post_kind = Board.System_post);
   (* the stimulus path yields Some (not None like Bootstrap) *)
   match
-    Keeper_world_observation.pending_board_event_of_stimulus
+    Keeper_world_observation.pending_board_event_of_stimulus ~base_path:(Filename.get_temp_dir_name ())
       ~meta
       (fusion_stimulus ~resolved_answer:"ANSWER-TOKEN-xyz" ())
   with
@@ -340,7 +340,7 @@ let test_fusion_cancellation_is_typed_and_actionable () =
        } -> ()
    | Ok _ -> fail "fusion cancellation codec lost its typed terminal"
    | Error detail -> fail ("fusion cancellation codec failed: " ^ detail));
-  match Keeper_world_observation.pending_board_event_of_stimulus ~meta stimulus with
+  match Keeper_world_observation.pending_board_event_of_stimulus ~base_path:(Filename.get_temp_dir_name ()) ~meta stimulus with
   | Ok (Some event) ->
     check bool "cancellation is explicit in title" true
       (contains ~needle:"cancelled" event.title);
@@ -399,7 +399,7 @@ let test_scheduled_wake_is_actionable () =
   check bool "post kind remains context" true
     (ev.post_kind = Board.System_post);
   match
-    Keeper_world_observation.pending_board_event_of_stimulus
+    Keeper_world_observation.pending_board_event_of_stimulus ~base_path:(Filename.get_temp_dir_name ())
       ~meta
       (schedule_stimulus ~message:"SCHEDULE-ANSWER-TOKEN" ())
   with

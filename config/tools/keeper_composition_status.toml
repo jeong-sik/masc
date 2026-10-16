@@ -2,7 +2,10 @@ name = "keeper_composition_status"
 description = """
 Read the status and structured result of one async Keeper composition.
 
-Both are exact and durable, addressed by the request's own id."""
+Use the exact request id when a completion references its result or when more
+detail is needed. A completion that already carries usable selected exports
+does not require another status read. Submission and cancellation requests are
+distinct from completed and cancelled states."""
 additional_properties = false
 
 

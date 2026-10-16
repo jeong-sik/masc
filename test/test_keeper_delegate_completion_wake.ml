@@ -187,7 +187,7 @@ let the_turn_can_read_the_answer () =
         | Ok None -> fail "the asker has no meta"
         | Error err -> fail ("meta load failed: " ^ err)
       in
-      (match WO.pending_board_event_of_stimulus ~meta stimulus with
+      (match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
        | Error _ -> fail "the answer must project without a Board read"
        | Ok None -> fail "the answer projects to nothing the turn can read"
        | Ok (Some event) ->
@@ -245,7 +245,7 @@ let a_cut_reply_names_the_read_path () =
     let rows =
       queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker
       |> List.map (fun (stimulus, _) ->
-             match WO.pending_board_event_of_stimulus ~meta stimulus with
+             match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
              | Error _ ->
                fail "the answer must project without a Board read"
              | Ok None -> fail "the answer projects to nothing the turn can read"
@@ -342,7 +342,7 @@ let the_full_reply_rides_lossless_through_the_projection () =
       match hit with
       | None -> fail ("no queued answer for " ^ op)
       | Some (stimulus, _) ->
-        (match WO.pending_board_event_of_stimulus ~meta stimulus with
+        (match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
          | Ok (Some event) ->
            Masc.Keeper_unified_prompt.For_testing.board_event_fields event
          | _ -> fail ("the answer for " ^ op ^ " must project to a row"))
@@ -423,7 +423,7 @@ let a_padded_short_reply_is_not_cut () =
       match
         queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker
         |> List.map (fun (stimulus, _) ->
-               match WO.pending_board_event_of_stimulus ~meta stimulus with
+               match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
                | Error _ -> fail "the answer must project without a Board read"
                | Ok None -> fail "the answer projects to nothing the turn can read"
                | Ok (Some event) -> event)

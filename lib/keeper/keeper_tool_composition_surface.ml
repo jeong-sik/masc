@@ -794,14 +794,15 @@ let async_submission_result
             :: tool_kind_field tool_kind
             :: [ "execution", `String "async"
               ; "request_id", `String request_id
-           (* Says the wake exists. Without it the only way to learn the
-              result is to poll keeper_composition_status, which is the habit
-              that left results sitting a median of 21.9s. *)
-           ; ( "delivery"
-             , `String
-                 "async: you will be woken with the result when this \
-                  composition settles. Read it with keeper_composition_status \
-                  and this request_id; there is no need to poll for it." )
+              ; ( "delivery"
+                , `Assoc
+                    [ "completion_notification", `Bool true
+                    ; ( "result_reference"
+                      , `Assoc
+                          [ "tool", `String Catalog.status_tool_name
+                          ; "arguments", `Assoc [ "request_id", `String request_id ]
+                          ] )
+                    ] )
               ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
               ])
        in

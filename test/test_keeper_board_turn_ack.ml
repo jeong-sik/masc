@@ -324,7 +324,7 @@ data: [DONE]
     "two actual persisted edits must carry distinct content update times";
   let pending = Keeper_event_queue.to_list (queue config keeper_name) in
   require (List.length pending = 4) "distinct comments/edits were lost before intake";
-  let replay = Keeper_world_observation.pending_board_event_of_stimulus
+  let replay = Keeper_world_observation.pending_board_event_of_stimulus ~base_path:config.base_path
       ~meta:second.meta (List.hd pending) |> get
         Keeper_world_observation_board_signal.unavailable_to_string in
   let replay = match replay with Some event -> event | None -> failwith "comment replay missing" in

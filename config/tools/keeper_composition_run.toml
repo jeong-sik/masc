@@ -3,9 +3,10 @@ description = """
 Run the exact read-only draft returned by keeper_composition_prepare. Rechecks \
 the preparing Keeper and frozen contracts before effects. Inline drafts return \
 execution results; async drafts return a durable request id and deliver completion \
-later. Read keeper_composition_status when explicitly retrieving the result; \
-do not repeatedly poll while other useful work is available. Shared Skill \
-publication is optional and separate."""
+later. Use valid selected exports from the completion projection. When results \
+are referenced or required detail is missing, read keeper_composition_status \
+with the exact request_id in result_reference. Do not repeatedly poll while \
+other useful work is available. Shared Skill publication is optional and separate."""
 additional_properties = false
 defer_loading = true
 

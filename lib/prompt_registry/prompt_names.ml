@@ -404,10 +404,6 @@ let keeper_world_event_rows_delegate_reply_lookup =
   "keeper.world.event_rows.delegate_reply_lookup"
 ;;
 
-let keeper_world_event_rows_composition_detail_lookup =
-  "keeper.world.event_rows.composition_detail_lookup"
-;;
-
 let keeper_world_event_rows_completion_authority_title =
   "keeper.world.event_rows.completion_authority_title"
 ;;

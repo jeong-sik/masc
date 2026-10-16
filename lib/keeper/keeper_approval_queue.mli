@@ -163,6 +163,11 @@ module For_testing : sig
     base_path:string ->
     after_load:(unit -> unit) ->
     (install_report, install_error) result
+  val install_persistence_with_after_pending_publish_hook :
+    base_path:string ->
+    after_pending_publish:(unit -> unit) ->
+    (install_report, install_error) result
+  (** Pause the production two-map publication while its authority lock is held. *)
   val pending_store_path : base_path:string -> string
   val pending_log_path : base_path:string -> string
   val replay_results_store_path : base_path:string -> string
@@ -274,7 +279,10 @@ val resolve_error_to_string : resolve_error -> string
 
     [base_path] is the authenticated caller workspace. The pending or
     in-progress delivery entry must belong to it exactly before any resolution
-    claim or journal mutation is attempted.
+    claim or journal mutation is attempted. Store readiness, workspace ownership
+    and pending/delivery selection are observed under the queue authority lock;
+    the target is revalidated there when journaling. Audit and delivery effects
+    run after that lock is released.
 
     A delivery that {!install_persistence} retired as spent is gone from the
     queue, so deciding it again returns [Not_found] and writes nothing; the

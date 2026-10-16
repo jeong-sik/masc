@@ -34,13 +34,16 @@ val stop_containers :
   Keeper_sandbox_runtime.stop_result
 
 val repository_checkouts_json :
+  include_repository_checkouts:bool ->
   config:Workspace.config ->
   meta:keeper_meta ->
   Yojson.Safe.t
 (** Inspect Keeper-visible repository checkouts. Repository identity comes
     from the repository catalog; execution availability comes from the
     checkout directory; freshness is measured against the local tracking ref.
-    Missing or ambiguous evidence is returned as an explicit typed state. *)
+    Missing or ambiguous evidence is returned as an explicit typed state.
+    [include_repository_checkouts=false] returns [not_inspected] without
+    inspecting directories, entering a sandbox or running Git. *)
 
 (** Where a checkout's HEAD stands relative to the locally known
     [origin/<default_branch>] of its catalog repository. [Current] requires a

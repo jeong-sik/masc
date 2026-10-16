@@ -751,11 +751,14 @@ let repository_checkouts_json_with_budget ~inspection_budget_sec ~config ~meta =
     ~meta
 ;;
 
-let repository_checkouts_json ~config ~meta =
-  repository_checkouts_json_with_budget
-    ~inspection_budget_sec:Repo_git.inspection_timeout_sec
-    ~config
-    ~meta
+let repository_checkouts_json ~include_repository_checkouts ~config ~meta =
+  if include_repository_checkouts then
+    repository_checkouts_json_with_budget
+      ~inspection_budget_sec:Repo_git.inspection_timeout_sec
+      ~config
+      ~meta
+  else
+    `Assoc [ "state", `String "not_inspected"; "entries", `List [] ]
 ;;
 
 let checkout_freshness_rows
@@ -1053,10 +1056,7 @@ let live_status_json ?(include_preflight = true)
       ("container_error", Json_util.string_opt_to_json container_error);
       ("why_no_container", Json_util.string_opt_to_json why_no_container);
       ( "repository_checkouts",
-        if include_repository_checkouts then
-          repository_checkouts_json ~config ~meta
-        else
-          `Assoc [ "state", `String "not_inspected"; "entries", `List [] ] );
+        repository_checkouts_json ~include_repository_checkouts ~config ~meta );
     ]
 
 type sandbox_log_backend =

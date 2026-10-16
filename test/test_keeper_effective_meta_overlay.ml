@@ -1026,6 +1026,34 @@ let test_status_reports_normalized_options () =
     (Some 8_000)
     (json_int_field "tail_bytes" second_options)
 
+let test_status_repository_inspection_selection () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-repository-selection" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"docker"
+    ~instructions:"select repository inspection explicitly";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let status ~fast selection =
+    status_json_with_args config (`Assoc
+      ([ "name", `String name; "fast", `Bool fast
+       ; "include_context", `Bool false; "include_metrics_overview", `Bool false
+       ; "include_history_tail", `Bool false ]
+       @ Option.to_list (Option.map (fun value -> "include_repository_checkouts", `Bool value) selection))) in
+  let projection json = json_assoc_field "execution_context" json
+      |> json_assoc_field "repository_checkouts" in
+  let skipped label json =
+    Alcotest.(check (option string)) (label ^ " remains explicitly uninspected")
+      (Some "not_inspected") (json_string_field "state" (projection json));
+    Alcotest.(check (option bool)) (label ^ " reports the selected section")
+      (Some false) (json_assoc_field "status_options" json |> json_bool_field "include_repository_checkouts") in
+  skipped "default fast read" (status ~fast:true None);
+  skipped "explicit opt-out of full status" (status ~fast:false (Some false));
+  let selected = status ~fast:true (Some true) in
+  Alcotest.(check (option bool)) "explicit fast opt-in is retained"
+    (Some true) (json_assoc_field "status_options" selected |> json_bool_field "include_repository_checkouts");
+  Alcotest.(check bool) "requested inspection is distinct from not inspecting"
+    false (json_string_field "state" (projection selected) = Some "not_inspected")
+
 let test_status_rejects_tail_order_outside_schema () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "status-tail-order" in
@@ -1109,6 +1137,10 @@ let test_status_rejects_malformed_options () =
     "integer fast flag"
     (`Assoc [ "name", `String name; "fast", `Int 1 ])
     "fast\" must be a boolean";
+  check_rejected
+    "non-boolean repository inspection"
+    (`Assoc [ "name", `String name; "include_repository_checkouts", `String "false" ])
+    "include_repository_checkouts\" must be a boolean";
   check_rejected
     "non-string tail order"
     (`Assoc [ "name", `String name; "tail_order", `Bool true ])
@@ -1801,6 +1833,8 @@ let () =
             test_status_tracks_toml_overlay_changes;
           Alcotest.test_case "status reports normalized options"
             `Quick test_status_reports_normalized_options;
+          Alcotest.test_case "fast status selects repository inspection explicitly"
+            `Quick test_status_repository_inspection_selection;
           Alcotest.test_case "status rejects tail order outside schema" `Quick
             test_status_rejects_tail_order_outside_schema;
           Alcotest.test_case "status rejects malformed options" `Quick

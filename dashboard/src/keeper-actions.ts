@@ -339,6 +339,7 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
       include_context: false,
       include_metrics_overview: false,
       include_history_tail: false,
+      include_repository_checkouts: true,
       tail_turns: 0,
       tail_messages: 0,
     })

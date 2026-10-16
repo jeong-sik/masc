@@ -52,6 +52,7 @@ import { stableAttachmentId } from './chat/attachments'
 import { ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, type ChatComposerCommand, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
+import { isRecord } from './common/normalize'
 import { shellAuthSummary } from '../store'
 import {
   toolCallOutputHydrationContract,
@@ -523,8 +524,25 @@ function KeeperQueueControlPanel({
                   disabled=${busy}
                   class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
                   onClick=${() => {
-                    const content = window.prompt('Queued operation을 수정합니다.', operation.input?.message ?? '')
-                    if (content === null) return
+                    const rawBlocks = operation.input?.wire.user_blocks
+                    const texts = Array.isArray(rawBlocks)
+                      ? rawBlocks.filter(block => isRecord(block) && block.type === 'text')
+                        .map(block => typeof block.text === 'string' ? block.text : '')
+                      : []
+                    let content: string | string[]
+                    if (texts.length > 1) {
+                      const edits: string[] = []
+                      for (const [index, text] of texts.entries()) {
+                        const edited = window.prompt(`대기 메시지 텍스트 ${index + 1}/${texts.length}`, text)
+                        if (edited === null) return
+                        edits.push(edited)
+                      }
+                      content = edits
+                    } else {
+                      const edited = window.prompt('대기 메시지를 수정합니다.', texts[0] ?? operation.input?.message ?? '')
+                      if (edited === null) return
+                      content = edited
+                    }
                     void mutateChat(
                       operation.operationId,
                       () => editQueuedKeeperChatOperation(keeperName, operation, content),

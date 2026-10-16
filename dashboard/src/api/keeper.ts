@@ -814,17 +814,35 @@ async function mutateQueuedKeeperChatOperation(
 export async function editQueuedKeeperChatOperation(
   keeperName: string,
   operation: KeeperChatOperation,
-  message: string,
+  text: string | readonly string[],
 ): Promise<KeeperChatOperation> {
   if (operation.state.kind !== 'queued' || !operation.input) {
     throw new Error('Only a queued Keeper chat operation can be edited')
   }
-  if (!message.trim()) throw new Error('Keeper chat operation message must not be blank')
-  const wire: Record<string, unknown> = { ...operation.input.wire, message }
+  const wire: Record<string, unknown> = { ...operation.input.wire }
   const rawBlocks = wire.user_blocks
   if (!Array.isArray(rawBlocks)) throw new Error('Keeper chat operation user_blocks are invalid')
-  const nonText = rawBlocks.filter(block => !isRecord(block) || block.type !== 'text')
-  wire.user_blocks = [...nonText, { type: 'text', text: message }]
+  const textBlocks = rawBlocks.filter(block => isRecord(block) && block.type === 'text')
+  if (typeof text === 'string' && textBlocks.length > 1) {
+    throw new Error('Keeper chat operation requires a separate edit for each text block')
+  }
+  const edits = typeof text === 'string' ? [text] : text
+  if (edits.length !== Math.max(1, textBlocks.length)) {
+    throw new Error('Keeper chat operation text block count must be preserved')
+  }
+  if (edits.some(value => !value.trim())) {
+    throw new Error('Keeper chat operation message must not be blank')
+  }
+  let textIndex = 0
+  // Text belongs to its authored position around images, documents and audio.
+  // Separate text blocks are edited explicitly rather than repartitioning a
+  // flat message across them. Media and attachment payloads remain untouched.
+  wire.user_blocks = textBlocks.length === 0
+    ? [{ type: 'text', text: edits[0] }, ...rawBlocks]
+    : rawBlocks.map(block => isRecord(block) && block.type === 'text'
+      ? { ...block, text: edits[textIndex++] }
+      : block)
+  wire.message = edits.join('\n\n')
   return mutateQueuedKeeperChatOperation(keeperName, operation.operationId, 'edit', { input: wire })
 }
 

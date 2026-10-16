@@ -214,7 +214,9 @@ TERM을 보내 Dune의 정상 취소 전파를 허용하며, `CI_TEST_TIMEOUT_GR
 기존 2초 관찰 구간을 사용한다. 식별자 획득·검사·신호 실패나 미정리 상태는
 `cleanup_unconfirmed`로 기록한다. 경계는 `owned_session`이며, 의도적인 `setsid` 또는
 daemon 이탈 전체를 격리하는 계약은 아니다. 이미 관찰한 자식의 세션 이탈도 불확실성으로
-보고한다. macOS에서는 공개 `proc_signal_with_audittoken` API, Linux에서는 Python의
+보고한다. 관찰 구간 뒤에도 루트가 살아 있으면 모든 신호 전송을 끝내고 `root_unsettled`로
+보고하며, 무한 `waitpid`나 자식 회수 완료를 주장하지 않는다. macOS에서는 공개
+`proc_signal_with_audittoken` API, Linux에서는 Python의
 `os.pidfd_open`과 `signal.pidfd_send_signal`을 사용할 수 있어야 한다.
 
 ### 6.2 실행 흐름

@@ -2,6 +2,7 @@
 
 import ctypes
 import errno
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -248,6 +249,85 @@ class ProcessOwnership(unittest.TestCase):
                 time.sleep(0.01)
             self.assert_dead(pids["worker"])
 
+    def test_diagnostic_failure_preserves_known_command_and_timeout_status(self):
+        previous = {
+            number: signal.getsignal(number)
+            for number in (signal.SIGINT, signal.SIGTERM)
+        }
+        try:
+            for command, timeout, expected in (
+                ("exit 23", "0", 23),
+                (self.command("cooperative"), "1", 124),
+            ):
+                with self.subTest(expected=expected):
+                    env = dict(self.env, CI_TEST_TIMEOUT_SEC=timeout)
+                    with (
+                        patch.dict(os.environ, env),
+                        patch.object(sys, "argv", ["command_observer.py", command, ""]),
+                        patch.object(
+                            command_observer.subprocess,
+                            "run",
+                            side_effect=OSError("fixture diagnostics unavailable"),
+                        ),
+                    ):
+                        self.assertEqual(command_observer.main(), expected)
+        finally:
+            for number, handler in previous.items():
+                signal.signal(number, handler)
+
+    def test_group_denial_returns_unconfirmed_before_live_root_natural_exit(self):
+        root_marker = self.root / "live-root"
+        script = self.root / "live-root.py"
+        script.write_text(
+            f'import time\nopen({str(root_marker)!r},"w").close()\ntime.sleep(8)\n'
+        )
+        command = "exec " + shlex.join([sys.executable, str(script)])
+        owners, handles = [], []
+        real_owner = owned.OwnedSession
+
+        def factory(command, output):
+            owner = real_owner(command, output)
+            owners.append(owner)
+            await_file(root_marker)
+            handles.append(self.capture(owner.pid))
+            return owner
+
+        env = dict(self.env, CI_TEST_TIMEOUT_SEC="1", CI_TEST_TIMEOUT_GRACE_SEC="0")
+        try:
+            with (
+                patch.dict(os.environ, env),
+                patch.object(command_observer, "OwnedSession", factory),
+                patch.object(
+                    owned.os,
+                    "killpg",
+                    side_effect=PermissionError(
+                        errno.EPERM, "fixture group signal denied"
+                    ),
+                ),
+            ):
+                observer = command_observer.Observer()
+                try:
+                    with patch.object(observer, "diagnostics"):
+                        self.assertEqual(observer.run(command), 124)
+                finally:
+                    observer.close()
+            owner = owners[0]
+            self.assertIsNone(owner.terminal_status())
+            self.assertFalse(owner.reaped)
+            self.assertTrue(owner.signaling_ended)
+            self.assertIn("root_unsettled", owner.uncertainty)
+            with self.assertRaises(RuntimeError):
+                owner.group_signal(signal.SIGTERM)
+        finally:
+            for handle in handles:
+                try:
+                    handle.send(signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                handle.close()
+            for owner in owners:
+                owner.root.wait(timeout=10)
+
     def test_observed_session_escape_is_explicit_and_still_uses_retained_handle(self):
         with open(self.root / "fixture.log", "wb") as output:
             owner = owned.OwnedSession(self.command("escape"), output)
@@ -287,6 +367,29 @@ class ProcessOwnership(unittest.TestCase):
             peer.wait(timeout=5)
             handle.close()
             peer_handle.close()
+
+    def test_liveness_poll_supports_fd_above_select_boundary(self):
+        # This exercises the real high-fd event primitive, not Linux pidfd
+        # syscalls: those still require a Linux execution receipt.
+        read, write = os.pipe()
+        try:
+            high = fcntl.fcntl(read, fcntl.F_DUPFD_CLOEXEC, 1024)
+        except OSError as error:
+            os.close(read)
+            os.close(write)
+            if error.errno in (errno.EMFILE, errno.EINVAL):
+                self.skipTest("process fd limit prevents exercising select boundary")
+            raise
+        os.close(read)
+        handle = object.__new__(owned.PidfdHandle)
+        handle.fd = high
+        try:
+            self.assertTrue(handle.same_process())
+            os.write(write, b"ready")
+            self.assertFalse(handle.same_process())
+        finally:
+            handle.close()
+            os.close(write)
 
     def test_acquisition_denial_reports_unconfirmed_instead_of_numeric_fallback(self):
         captured = {}

@@ -30,7 +30,14 @@ class PidfdHandle:
         self.fd = getattr(os, "pidfd_open")(pid)
 
     def same_process(self):
-        return not select.select([self.fd], [], [], 0)[0]
+        # pidfds become readable at exit. poll also supports descriptors above
+        # select's FD_SETSIZE when many action workers are held concurrently.
+        poller = select.poll()
+        poller.register(self.fd, select.POLLIN)
+        events = poller.poll(0)
+        if any(flags & select.POLLNVAL for _, flags in events):
+            raise OSError(errno.EBADF, "invalid owned pidfd")
+        return not events
 
     def send(self, signum):
         getattr(signal, "pidfd_send_signal")(self.fd, signum)
@@ -145,6 +152,7 @@ class OwnedSession:
         self.handles = {}
         self.uncertainty = set()
         self.reaped = False
+        self.signaling_ended = False
 
     def terminal_status(self):
         # Never Popen.poll(): observing exit must not release the root PID.
@@ -161,8 +169,8 @@ class OwnedSession:
         return self.terminal_status() is not None
 
     def group_signal(self, signum):
-        if self.reaped:
-            raise RuntimeError("session ownership ended at waitpid")
+        if self.signaling_ended:
+            raise RuntimeError("session signaling ended before ownership release")
         if self.exited():
             # An exited root cannot propagate cancellation. Reconcile its
             # remaining workers through their captured handles instead. On
@@ -236,11 +244,12 @@ class OwnedSession:
                 self.uncertainty.add(f"owned_handle_signal: {error}")
 
     def finish(self, grace, tick=lambda: None):
-        """Signal only while root ownership remains retained; reap exactly once.
+        """Retain root ownership through signaling; reap only a terminal root.
 
         The existing observer has a configured TERM grace and a two-second
         post-KILL observation allowance. Preserve both rather than invent a
         new retry/TTL policy. Cancellation handlers must not raise in this phase.
+        An unsettled root ends signaling and reports uncertainty without wait.
         """
         sent_term, sent_kill = set(), set()
         try:
@@ -286,9 +295,16 @@ class OwnedSession:
                     self.uncertainty.add("final_sweep_members_not_reconciled")
             finally:
                 try:
-                    self.root.wait()
+                    # End all numeric group signaling before releasing root
+                    # ownership. A failed KILL must not turn the configured
+                    # settlement allowance into an unbounded waitpid.
+                    self.signaling_ended = True
+                    if self.exited():
+                        self.root.wait()
+                        self.reaped = True
+                    else:
+                        self.uncertainty.add("root_unsettled")
                 finally:
-                    self.reaped = True
                     for handle in self.handles.values():
                         handle.close()
                     self.handles.clear()

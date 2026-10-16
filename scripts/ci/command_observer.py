@@ -57,9 +57,15 @@ class Observer:
             CI_DIAG_ACTIVE_PID=str(self.owner.pid) if self.owner else "",
         )
         runner = Path(__file__).resolve().parents[1] / "ci-run-tests.sh"
-        subprocess.run(
-            ["bash", str(runner), "--ci-run-diagnostics", reason], env=env, check=True
-        )
+        try:
+            subprocess.run(
+                ["bash", str(runner), "--ci-run-diagnostics", reason],
+                env=env,
+                check=True,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            # Observability cannot replace a known command/timeout status.
+            self.log(f"[ci-diag] unavailable reason={reason} error={error}")
 
     def monitor(self):
         self.pump()

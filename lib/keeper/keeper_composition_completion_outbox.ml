@@ -90,7 +90,8 @@ let prepare ~base_path ~keeper_name ~request_id ~composition_tool:tool =
   | Async.Found
       ({ status =
            ( Async.Queued | Async.Running | Async.Cancelling _ | Async.Lost _
-           | Async.Cancelled _ | Async.Persistence_failed _ | Async.Done _ )
+           | Async.Cancelled _ | Async.Persistence_failed _ | Async.Done _
+           | Async.Waiting_for_owned_jobs _ )
        ; _
        } as entry) ->
     Error (Request_unavailable (Async.Found entry))

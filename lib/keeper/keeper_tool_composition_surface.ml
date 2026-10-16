@@ -1531,6 +1531,69 @@ let failure_returns_to_model ~plan ~committed (failure : Executor.failure) =
      | Executor.Outer_completion_mismatch _ -> false
 ;;
 
+let bind_prepared_result ~composition_run_id ~run_reference ~draft_reference result =
+  let binding =
+    ["composition_run_id", `String (Keeper_tool_plan.Composition_run_id.to_string composition_run_id);
+     "run_artifact", Tool_output.normalized_artifact_ref_to_json run_reference;
+     "draft", Tool_output.normalized_artifact_ref_to_json draft_reference] in
+  let data = match Tool_result.data result with
+    | `Assoc fields -> `Assoc (binding @ List.remove_assoc "composition_run_id" fields)
+    | data -> `Assoc (binding @ ["result",data]) in
+  let result = match result with
+    | Tool_result.Completed payload -> Tool_result.Completed {payload with data}
+    | Tool_result.Deferred payload -> Tool_result.Deferred {payload with data}
+    | Tool_result.Failed payload -> Tool_result.Failed
+      {payload with data_source=Tool_result.Explicit_data data;message=Yojson.Safe.to_string data} in
+  Tool_result.with_retained_artifacts
+    (run_reference :: draft_reference :: Tool_result.retained_artifacts result) result
+;;
+
+let resume_continuation ~capability_surface ~continuation ~(config : Workspace.config)
+    ~(meta : Keeper_meta_contract.keeper_meta) ~publication_recovery ~ctx_snapshot
+    ~(turn_context : Keeper_tool_call_log_context.turn_context) ~invocation ?clock () =
+  let module Draft = Keeper_composition_draft in
+  let source = Journal.continuation_source continuation in
+  let start_time = Tool_timing.start () in
+  let refuse_journal error = Tool_result.make_err ~tool_name:Draft.run_tool_name
+      ~class_:(Journal.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
+      ~start_time ~data:(Journal.error_to_json error) (Journal.error_to_string error) in
+  if meta.name <> source.keeper_name
+      || publication_recovery.Keeper_publication_recovery_availability.keeper_name <> source.keeper_name
+  then refuse_journal Journal.Source_conflict else
+  match Draft.load_continuation ~base_path:config.base_path ~capability_surface continuation with
+  | Error error -> Tool_result.make_err ~tool_name:Draft.run_tool_name
+      ~class_:(Draft.failure_class error) ~effect_disposition:Tool_result.Proven_pre_effect
+      ~start_time ~data:(Draft.error_to_json error) (Yojson.Safe.to_string (Draft.error_to_json error))
+  | Ok draft ->
+    match Journal.continuation_readiness continuation with
+    | Error error -> refuse_journal error
+    | Ok Journal.Waiting_for_results ->
+      Tool_result.make_deferred ~tool_name:Draft.run_tool_name ~start_time
+        ~data:(`Assoc ["kind",`String "waiting_for_original_job_results";
+          "composition_run_id",`String (Keeper_tool_plan.Composition_run_id.to_string source.composition_run_id);
+          "job_ids",`List (List.map (fun id -> `String (Keeper_owned_job_identity.Job_id.to_string id))
+            (Journal.continuation_job_ids continuation))]) ()
+    | Ok Journal.Results_ready ->
+      match Journal.load ~base_path:config.base_path ~keeper_name:source.keeper_name
+          ~composition_run_id:source.composition_run_id with
+      | Error error -> refuse_journal error
+      | Ok journal ->
+        let parent_invocation = Agent_core.Tool_contract.Invocation.create
+            ~tool_use_id:source.parent_tool_use_id ~turn:source.source_turn
+            ~schedule:(Agent_core.Tool_contract.Invocation.schedule invocation)
+            ~completion:Agent_core.Tool_contract.Continue_after_success in
+        let turn_context = Some {turn_context with task_id=source.source_task_id} in
+        async_submission_result ~journal ~continuation
+          ~draft_reference:source.draft_reference ~run_reference:source.run_reference
+          ~composition_run_id:source.composition_run_id ~plan:(Draft.plan draft)
+          ~tool_name:Draft.run_tool_name ~tool_kind:Keeper_tool_descriptor.Async_composition_tool
+          ~parent_invocation ~config ~meta
+          ~capability_authority:(Keeper_tool_runtime.Frozen_surface capability_surface)
+          ~publication_recovery ~ctx_snapshot ~turn_context ?clock ()
+        |> bind_prepared_result ~composition_run_id:source.composition_run_id
+            ~run_reference:source.run_reference ~draft_reference:source.draft_reference
+;;
+
 let make_tools_with_authority
       ?(instruction_skills : instruction_skill list = [])
       ?(skill_compositions : composition_skill list = [])
@@ -2082,21 +2145,8 @@ let make_tools_with_authority
               let turn_context = Option.map (fun cell ->
                 Keeper_tool_call_log_context.get_turn_context_record ~cell ()) turn_ctx_cell in
               let bind_result ~composition_run_id ~run_reference result =
-                let binding =
-                  [ "composition_run_id", `String (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
-                  ; "run_artifact", Tool_output.normalized_artifact_ref_to_json run_reference
-                  ; "draft", Tool_output.normalized_artifact_ref_to_json (Draft.reference draft) ] in
-                let data = match Tool_result.data result with
-                  | `Assoc fields -> `Assoc (binding @ List.remove_assoc "composition_run_id" fields)
-                  | data -> `Assoc (binding @ [ "result", data ]) in
-                let result = match result with
-                  | Tool_result.Completed payload -> Tool_result.Completed { payload with data }
-                  | Tool_result.Deferred payload -> Tool_result.Deferred { payload with data }
-                  | Tool_result.Failed payload -> Tool_result.Failed
-                      { payload with data_source = Tool_result.Explicit_data data; message = Yojson.Safe.to_string data } in
-                Tool_result.with_retained_artifacts
-                  (run_reference :: Draft.reference draft :: Tool_result.retained_artifacts result) result
-              in
+                bind_prepared_result ~composition_run_id ~run_reference
+                  ~draft_reference:(Draft.reference draft) result in
               let execute_run ?journal ?continuation ~composition_run_id ~run_reference ~parent_invocation ~turn_context () =
                 let result = match Draft.execution draft with
                   | Catalog.Async ->

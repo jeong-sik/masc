@@ -58,6 +58,19 @@ val load
     and inputs before effects. A changed owner/surface/schema is a rejection,
     not a rebind of the old preview. *)
 
+val load_continuation
+  :  base_path:string
+  -> capability_surface:Keeper_capability_surface.t
+  -> Keeper_tool_execution_journal.continuation
+  -> (t, error) result
+(** Load only the original artifact sealed into an owned waiting continuation.
+    Recompile the exact original recipe against current admission and compare
+    every frozen node route/input/output contract and fixed input. Unrelated
+    current surface changes do not replace the preparing surface evidence or
+    invalidate unchanged admitted nodes. Ordinary [load] and publication still
+    require the exact whole surface. This does not reserve a worker; the caller
+    must bind this same sealed continuation before effects. *)
+
 val plan : t -> Keeper_tool_plan.t
 val nested_calls : t -> Keeper_composition_nested.call list
 (** Exact frozen child references, fixed arguments, leaf and export mappings.

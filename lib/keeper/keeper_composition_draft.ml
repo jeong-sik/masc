@@ -163,8 +163,8 @@ let validate_plan ~capability_surface json =
       | Nested.Expanded_plan_rejected _ ) as error -> Nested_rejected error)
 ;;
 
-let contracts ~capability_surface plan =
-  let tools = List.map (fun (node : Plan.node) ->
+let node_contracts plan =
+  List.map (fun (node : Plan.node) ->
     match Plan.descriptor plan node.id with
     | None -> `Null
     | Some descriptor ->
@@ -181,9 +181,12 @@ let contracts ~capability_surface plan =
          recipe/plan input references still use the strict manifest codec. *)
       `Assoc [ "node_id", `String (Plan.Node_id.to_string node.id)
              ; "contract_json", `String
-                 (Yojson.Safe.to_string (Yojson.Safe.sort contract)) ]) (Plan.nodes plan) in
+                 (Yojson.Safe.to_string (Yojson.Safe.sort contract)) ]) (Plan.nodes plan)
+;;
+
+let contracts ~capability_surface plan =
   `Assoc [ "surface_digest", `String (Keeper_capability_surface.digest capability_surface)
-         ; "tools", `List tools ]
+         ; "tools", `List (node_contracts plan) ]
 ;;
 
 let put_document ~base_path json =
@@ -292,7 +295,9 @@ let required_string fields name =
   | Some _ | None -> Error (Malformed_draft ("expected string " ^ name))
 ;;
 
-let load ~base_path ~capability_surface ~keeper_name ~sha256 =
+type admission_check = Exact_surface | Sealed_continuation
+
+let load_with ~admission_check ~base_path ~capability_surface ~keeper_name ~sha256 =
   let* bytes = Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256
       |> Result.map_error (fun error -> Draft_read_failed error) in
   let* bytes = match bytes with Some bytes -> Ok bytes | None -> Error Draft_not_found in
@@ -309,10 +314,18 @@ let load ~base_path ~capability_surface ~keeper_name ~sha256 =
   let* execution = match raw_execution with
     | "inline" -> Ok Catalog.Inline | "async" -> Ok Catalog.Async
     | _ -> Error (Malformed_draft "execution must be inline or async") in
-  let* () = match List.assoc_opt "contracts" fields with
-    | Some (`Assoc contracts) when List.assoc_opt "surface_digest" contracts =
-        Some (`String (Keeper_capability_surface.digest capability_surface)) -> Ok ()
-    | Some _ | None -> Error Capability_changed in
+  let* contract_fields = match List.assoc_opt "contracts" fields with
+    | Some json -> exact_fields ~names:["surface_digest";"tools"] json
+    | None -> Error Capability_changed in
+  let* recorded_surface = required_string contract_fields "surface_digest" in
+  let* () = match admission_check with
+    | Exact_surface ->
+      if String.equal recorded_surface (Keeper_capability_surface.digest capability_surface)
+      then Ok () else Error Capability_changed
+    | Sealed_continuation ->
+      if String.length recorded_surface = 64
+          && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) recorded_surface
+      then Ok () else Error Capability_changed in
   let* compiled = match List.assoc_opt "recipe" fields with
     | Some json -> validate_plan ~capability_surface json
     | None -> Error (Malformed_draft "missing recipe") in
@@ -327,8 +340,8 @@ let load ~base_path ~capability_surface ~keeper_name ~sha256 =
     | [], _, _ | _ :: _, Catalog.Inline, Some `Null -> Ok ()
     | _ :: _, Catalog.Async, _ -> Error Nested_async_requires_worker_binding
     | _ :: _, Catalog.Inline, _ -> Error Nested_publication_requires_catalog in
-  let* () = match List.assoc_opt "contracts" fields with
-    | Some recorded when Yojson.Safe.equal (Yojson.Safe.sort recorded) (Yojson.Safe.sort (contracts ~capability_surface plan)) -> Ok ()
+  let* () = match List.assoc_opt "tools" contract_fields with
+    | Some recorded when same recorded (`List (node_contracts plan)) -> Ok ()
     | Some _ | None -> Error Capability_changed in
   let* authored_source = match List.assoc_opt "skill" fields with
     | Some `Null -> Ok None
@@ -343,6 +356,27 @@ let load ~base_path ~capability_surface ~keeper_name ~sha256 =
       ~preview:"" ~mime:Tool_output.artifact_manifest_mime
       |> Result.map_error (fun error -> Malformed_draft (Tool_output.make_error_to_string error)) in
   Ok { plan; compiled; execution; reference; authored_source }
+;;
+
+let load ~base_path ~capability_surface ~keeper_name ~sha256 =
+  load_with ~admission_check:Exact_surface ~base_path ~capability_surface ~keeper_name ~sha256
+;;
+
+let load_continuation ~base_path ~capability_surface continuation =
+  let* canonical_base =
+    try Ok (Fs_compat.realpath base_path) with
+    | Sys_error detail -> Error (Storage_failed detail)
+    | Unix.Unix_error (code, operation, path) ->
+      Error (Storage_failed (Printf.sprintf "%s(%s): %s" operation path (Unix.error_message code))) in
+  let* () = if String.equal canonical_base (Keeper_tool_execution_journal.continuation_base_path continuation)
+    then Ok () else Error (Malformed_draft "continuation belongs to another workspace") in
+  let source = Keeper_tool_execution_journal.continuation_source continuation in
+  let* draft = load_with ~admission_check:Sealed_continuation ~base_path ~capability_surface
+      ~keeper_name:source.keeper_name ~sha256:source.draft_reference.sha256 in
+  match draft.execution, Nested.calls draft.compiled with
+  | Catalog.Async, [] -> Ok draft
+  | Catalog.Inline, _ -> Error (Malformed_draft "owned continuation requires an original async draft")
+  | Catalog.Async, _ :: _ -> Error Nested_async_requires_worker_binding
 ;;
 
 let load_authored ~base_path ~capability_surface ~keeper_name ~package_id ~sha256 =

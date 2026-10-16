@@ -72,6 +72,9 @@ val waiting_continuation : t -> (continuation option, error) result
     is not waiting for owned jobs. Unavailable or inconsistent evidence is
     [Error]. A later owner change makes the captured value stale. *)
 
+val continuation_base_path : continuation -> string
+(** Canonical workspace where the sealed owner and node snapshot were read.
+    This path is filesystem authority, never a provider-facing identity. *)
 val continuation_source : continuation -> source
 val continuation_request_id : continuation -> string
 val continuation_job_ids : continuation -> Keeper_owned_job_identity.Job_id.t list

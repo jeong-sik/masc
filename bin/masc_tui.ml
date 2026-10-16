@@ -30674,6 +30674,7 @@ let run_with_eio_context f =
             Eio_context.set_net (Eio.Stdenv.net env);
             Eio_context.set_clock (Eio.Stdenv.clock env);
             Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
+            Masc_tui_http.start_io_domain ~sw ~env;
             f ()))
   with
   | Break -> ()

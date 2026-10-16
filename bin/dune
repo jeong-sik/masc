@@ -1407,7 +1407,7 @@
  (name masc_tui_board_upload)
  (wrapped false)
  (modules masc_tui_board_upload)
- (libraries masc.masc_tool_blob_store masc.http_client masc_tui_types yojson eio unix))
+ (libraries masc.masc_tool_blob_store masc_tui_types yojson eio unix))
 
 (library
  (name masc_tui_magnitude)
@@ -2086,6 +2086,12 @@
  (wrapped false)
  (modules masc_tui_kept_reads))
 
+(library
+ (name masc_tui_io_domain)
+ (wrapped false)
+ (modules masc_tui_io_domain)
+ (libraries masc.masc_core masc.http_client eio eio.unix))
+
 (executable
  (name masc_tui)
  (modules
@@ -2115,6 +2121,7 @@
   masc_cli_keeper_create
   masc_tui_voice_wizard_session
   masc_tui_kept_reads
+  masc_tui_io_domain
   masc_tui_features
   masc_tui_account_login
   masc_tui_play_card
@@ -2565,6 +2572,7 @@
  (libraries
   masc.http_client
   masc.masc_eio_context
+  masc_tui_io_domain
   cstruct
   eio
   eio.unix

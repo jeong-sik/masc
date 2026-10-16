@@ -1,11 +1,10 @@
-(** Bounded, drop-oldest ingestion queue for IDE observation events.
+(** Bounded ingestion queue for IDE observation events.
     See ide_ingest_queue.mli for the rationale. *)
 
 type job = unit -> unit
 
 let default_capacity = 1024
 let active = Atomic.make false
-let dropped = Atomic.make 0
 
 type queue_state =
   { mu : Stdlib.Mutex.t
@@ -30,7 +29,6 @@ let with_queue f =
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock queue.mu) f
 ;;
 
-let dropped_count () = Atomic.get dropped
 let depth () = with_queue (fun () -> Queue.length queue.items)
 
 let run_job label job =
@@ -40,30 +38,7 @@ let run_job label job =
     Log.Ide.error "ingest_queue %s: job failed: %s" label (Printexc.to_string exn)
 ;;
 
-let submit (job : job) : unit =
-  if Atomic.get active
-  then (
-    with_queue (fun () ->
-      (* Keep the bound and the enqueue in one short critical section. This is
-         intentionally a Stdlib.Mutex rather than Eio.Mutex because submit can
-         be reached from pre-Eio/test contexts, and the protected work never
-         performs I/O or suspends. *)
-      if Queue.length queue.items >= Atomic.get capacity
-      then (
-        (* See [dropped]: eviction is intentional for the bounded newest-job queue. *)
-        ignore (Queue.take_opt queue.items : job option);
-        Atomic.incr dropped);
-      Queue.add job queue.items);
-    Eio.Condition.broadcast queue.cond)
-  else
-    (* No writer installed (tests, pre-bootstrap): preserve the previous
-       synchronous behavior by running the job inline. *)
-    run_job "inline" job
-;;
-
-let take_nonblocking () =
-  with_queue (fun () -> Queue.take_opt queue.items)
-;;
+let take_nonblocking () = with_queue (fun () -> Queue.take_opt queue.items)
 
 let drain_pending () =
   let rec loop () =
@@ -76,26 +51,62 @@ let drain_pending () =
   loop ()
 ;;
 
+type admission = Enqueued | Inline | At_capacity
+type submit_result = Accepted | Capacity_refused
+
+let try_admit job =
+  (* No callback, I/O or suspension under this lock: inactive callers can also
+     arrive outside Eio. Capacity and writer state are checked with insertion. *)
+  with_queue (fun () ->
+    if not (Atomic.get active) then Inline
+    else if Queue.length queue.items < Atomic.get capacity then (
+      Queue.add job queue.items;
+      Enqueued)
+    else At_capacity)
+;;
+
+let submit (job : job) : submit_result =
+  match try_admit job with
+  | At_capacity -> Capacity_refused
+  | Enqueued ->
+    Eio.Condition.broadcast queue.cond;
+    Accepted
+  | Inline ->
+    drain_pending ();
+    run_job "inline" job;
+    Accepted
+;;
+
 let run_writer () =
-  Atomic.set active true;
+  with_queue (fun () ->
+    if Atomic.get active then invalid_arg "IDE ingestion writer already running";
+    Atomic.set active true);
   let rec loop () =
-    let job = Eio.Condition.loop_no_mutex queue.cond take_nonblocking in
+    let job =
+      Eio.Condition.loop_no_mutex queue.cond (fun () ->
+        Eio.Fiber.check ();
+        take_nonblocking ())
+    in
     run_job "writer" job;
     Eio.Fiber.yield ();
     loop ()
   in
-  loop ()
+  Fun.protect
+    ~finally:(fun () ->
+      with_queue (fun () -> Atomic.set active false))
+    loop
 ;;
 
 module For_testing = struct
   let reset ?(capacity_override = default_capacity) () =
+    if capacity_override <= 0 then invalid_arg "IDE ingestion capacity must be positive";
     with_queue (fun () ->
-      Queue.clear queue.items);
-    Atomic.set capacity capacity_override;
-    Atomic.set active false;
-    Atomic.set dropped 0;
+      Queue.clear queue.items;
+      Atomic.set capacity capacity_override;
+      Atomic.set active false);
     Eio.Condition.broadcast queue.cond
   ;;
 
-  let set_active b = Atomic.set active b
+  let set_active b =
+    with_queue (fun () -> Atomic.set active b)
 end

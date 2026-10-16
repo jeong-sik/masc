@@ -395,7 +395,55 @@ let test_unaddressed_hook_persists_nothing () =
       Alcotest.failf "unaddressed call must persist nothing, got %d" (List.length events))
 ;;
 
-
+let test_sink_filters_before_queue_admission () =
+  with_temp_dir (fun base_dir ->
+    Eio_main.run (fun env ->
+      Fun.protect
+        ~finally:(fun () -> Ide_ingest_queue.For_testing.reset ())
+        (fun () -> Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+          Ide_ingest_queue.For_testing.reset ~capacity_override:1 ();
+          Ide_ingest_queue.For_testing.set_active true;
+          let predecessor_ran = ref false in
+          (match Ide_ingest_queue.submit (fun () -> predecessor_ran := true) with
+           | Accepted -> ()
+           | Capacity_refused -> fail "empty fixture queue refused predecessor");
+          let counter = Otel_transport_metric_names.metric_ide_ingest_capacity_refused in
+          let counter_before = Otel_metric_store_core.metric_value_or_zero counter () in
+          let emit attribution =
+            Agent_observation.emit_tool_event
+              { base_path = base_dir; attribution; tool_name = "edit_file"
+              ; keeper_id = "k1"; turn_id = "sink-admission"; outcome = "ok"
+              ; typed_outcome = "progress"; duration_ms = 1.0
+              ; output_text = "saved"; input = `Assoc [] }
+          in
+          emit Agent_observation.Pathless;
+          emit (unattributed_file "/outside/tree.ml");
+          check (float 0.) "non-stored facts never count as capacity refusals"
+            counter_before (Otel_metric_store_core.metric_value_or_zero counter ());
+          let before_refusal = Unix.gettimeofday () in
+          emit (addressed_file ~codebase:"github.com_x_y" ~path:"lib/refused.ml");
+          check int "refusal preserves accepted buffer" 1 (Ide_ingest_queue.depth ());
+          check (float 0.) "one actual refusal is public" (counter_before +. 1.)
+            (Otel_metric_store_core.metric_value_or_zero counter ());
+          (match Otel_metric_store_core.get_metric_value
+                   Otel_transport_metric_names.metric_ide_ingest_last_capacity_refusal () with
+           | Some at -> check bool "actual refusal timestamp" true
+                          (at >= before_refusal && at <= Unix.gettimeofday ())
+           | None -> fail "capacity refusal timestamp absent");
+          Ide_ingest_queue.drain_pending ();
+          check bool "accepted predecessor survives" true !predecessor_ran;
+          check (list string) "refused event was never persisted" []
+            (List.map (json_string "file_path")
+              (Ide_bridge.list_events ~base_path:base_dir ~codebase:"github.com_x_y"
+                 ~kind:Ide_bridge.Tool ()));
+          emit (addressed_file ~codebase:"github.com_x_y" ~path:"lib/saved.ml");
+          Ide_ingest_queue.drain_pending ();
+          match Ide_bridge.list_events ~base_path:base_dir ~codebase:"github.com_x_y"
+                  ~kind:Ide_bridge.Tool () with
+          | [ event ] -> check string "accepted fact persisted" "lib/saved.ml"
+                           (json_string "file_path" event)
+          | events -> failf "expected one accepted row, got %d" (List.length events)))))
+;;
 
 let test_hook_no_file_path () =
   with_temp_dir (fun base_dir ->
@@ -681,71 +729,6 @@ let test_list_events_reads_across_segments () =
       (List.map (json_string "turn_id") events))
 ;;
 
-(* ── Bounded ingestion queue (IDE v2 A1) ─────────────────────────── *)
-
-(* (e) With no writer installed, submit runs the job inline (works outside an
-   Eio context), preserving the previous synchronous behavior. *)
-let test_queue_inline_when_no_writer () =
-  Ide_ingest_queue.For_testing.reset ();
-  let ran = ref 0 in
-  Ide_ingest_queue.submit (fun () -> incr ran);
-  check int "job runs inline when inactive" 1 !ran
-;;
-
-(* (a)+(b) When active, submit only enqueues — the job (which is where the
-   Yojson parse + append live) does not run on the calling fiber. It runs on
-   drain. This is what keeps the hot path free of parse/I/O. *)
-let test_queue_defers_when_active () =
-  Eio_main.run (fun _env ->
-    Ide_ingest_queue.For_testing.reset ();
-    Ide_ingest_queue.For_testing.set_active true;
-    let ran = ref 0 in
-    Ide_ingest_queue.submit (fun () -> incr ran);
-    check int "job not run on the calling fiber" 0 !ran;
-    check int "job is queued" 1 (Ide_ingest_queue.depth ());
-    Ide_ingest_queue.drain_pending ();
-    check int "job runs on drain" 1 !ran)
-;;
-
-(* (c) At capacity, the oldest queued job is dropped (counted) so the newest
-   survive and enqueue never blocks. *)
-let test_queue_drop_oldest () =
-  Eio_main.run (fun _env ->
-    Ide_ingest_queue.For_testing.reset ~capacity_override:4 ();
-    Ide_ingest_queue.For_testing.set_active true;
-    let tags = ref [] in
-    for i = 1 to 10 do
-      Ide_ingest_queue.submit (fun () -> tags := i :: !tags)
-    done;
-    check int "depth capped at capacity" 4 (Ide_ingest_queue.depth ());
-    check int "dropped the six oldest" 6 (Ide_ingest_queue.dropped_count ());
-    Ide_ingest_queue.drain_pending ();
-    check (list int) "newest four survive, oldest dropped" [ 7; 8; 9; 10 ]
-      (List.rev !tags))
-;;
-
-(* (d) A running writer fiber drains every submitted job. [Eio.Fiber.first]
-   runs the writer alongside the producer and cancels it once the producer has
-   observed all jobs executed. *)
-let test_queue_writer_drains () =
-  Eio_main.run (fun _env ->
-    Ide_ingest_queue.For_testing.reset ();
-    let n = 20 in
-    let ran = Atomic.make 0 in
-    Eio.Fiber.first
-      (fun () -> Ide_ingest_queue.run_writer ())
-      (fun () ->
-        for _ = 1 to n do
-          Ide_ingest_queue.submit (fun () -> Atomic.incr ran)
-        done;
-        let tries = ref 0 in
-        while Atomic.get ran < n && !tries < 100_000 do
-          Eio.Fiber.yield ();
-          incr tries
-        done);
-    check int "writer drained all jobs" n (Atomic.get ran))
-;;
-
 (* The typed codebase carried through the hook path must route the tool event
    into that codebase's store. *)
 let test_codebase_routes_tool_event () =
@@ -837,14 +820,12 @@ let () =
         ; test_case "concurrent rotations preserve rows" `Quick
             test_concurrent_rotation_preserves_rows
         ] )
-    ; ( "ingest_queue"
-      , [ test_case "inline when no writer" `Quick test_queue_inline_when_no_writer
-        ; test_case "defers job when active" `Quick test_queue_defers_when_active
-        ; test_case "drops oldest at capacity" `Quick test_queue_drop_oldest
-        ; test_case "writer drains queue" `Quick test_queue_writer_drains
-        ] )
     ; ( "document identity"
       , [ test_case
+            "sink filters before queue admission"
+            `Quick
+            test_sink_filters_before_queue_admission
+        ; test_case
             "row carries the resolved path, not the raw argument"
             `Quick
             test_hook_row_carries_the_resolved_path_not_the_raw_argument

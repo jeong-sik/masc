@@ -20,5 +20,6 @@
   fs_compat
   masc.dated_jsonl
   masc.agent_observation
+  masc.otel_metric_store
   masc_core
   masc_log))

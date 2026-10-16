@@ -90,6 +90,14 @@ let test_stdio_machine_lifecycle () =
               let loaded = call "masc_msx_load" (`Assoc ["roms_dir", `String ""]) in
               check bool "load succeeds without external media" false (loaded.is_error = Some true);
               let before = frame loaded in
+              let overflow = call "masc_msx_peek" (`Assoc ["address", `String "3fffffffffffffff";
+                "length", `Int 16]) in
+              check bool "an address beyond 16 bits is refused" true (overflow.is_error = Some true);
+              check int "the worker still answers after the refusal" before
+                (frame (call "masc_msx_screen" (`Assoc [])));
+              let digits = call "masc_msx_peek" (`Assoc ["address", `String "4096"; "length", `Int 4]) in
+              check int "bare digits are a hex address" 0x4096
+                Yojson.Safe.Util.(data digits |> member "address" |> to_int);
               check bool "loaded observation retains screen pixels in its artifact" true
                 (Yojson.Safe.Util.(live_observation (observe ()) |> member "screen" |> member "rgb_base64" |> to_string |> String.length) > 0);
               let invalid = call "masc_msx_step" (`Assoc ["frames", `Int 301]) in
@@ -173,5 +181,25 @@ let test_stdio_machine_lifecycle () =
               check bool "eject removes screen context" true
                 (Yojson.Safe.Util.(live_observation (observe ()) |> member "state") = `String "no_machine"))))))
 
+(* The exception boundary every machine call passes through. *)
+let test_exception_boundary () =
+  let tool_name = "masc_msx_screen" in
+  let contain run = Msx_addon_worker.contain ~tool_name ~start_time:(Tool_timing.start ()) run in
+  let completed = {S.content = []; is_error = Some false; structured_content = None; _meta = None} in
+  check bool "a completed call passes through unchanged" true (contain (fun () -> completed) == completed);
+  List.iter (fun (label, raise_it) ->
+    let result = contain raise_it in
+    check bool (label ^ " becomes an error result") true (result.S.is_error = Some true);
+    check bool (label ^ " is an unknown-effect runtime failure") true
+      (Lane_addon_tool_result.failure result
+       = (Tool_result.Runtime_failure, Tool_result.Effect_outcome_unknown)))
+    ["Sys_error", (fun () -> raise (Sys_error "disk full"));
+     "Invalid_argument", (fun () -> raise (Invalid_argument "index out of bounds"));
+     "Not_found", (fun () -> raise Not_found);
+     "Failure", (fun () -> failwith "defect")];
+  check_raises "cancellation is not a failure" (Eio.Cancel.Cancelled Exit)
+    (fun () -> ignore (contain (fun () -> raise (Eio.Cancel.Cancelled Exit))))
+
 let () = run "MSX standalone Add-on worker"
-  ["stdio", [test_case "tool validation, screen and checkpoint lifecycle" `Quick test_stdio_machine_lifecycle]]
+  ["stdio", [test_case "tool validation, screen and checkpoint lifecycle" `Quick test_stdio_machine_lifecycle];
+   "boundary", [test_case "an escaped exception becomes a result" `Quick test_exception_boundary]]

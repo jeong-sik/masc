@@ -935,9 +935,11 @@ let test_press_that_raises_releases_its_keys () =
            Msx_lane.press ~who:"msx-test" ~keys:[ Msx.Space; Msx.Return ]
              ~hold_frames:2 ~step_frames:4 ~sequence
          with
-         | exception Sys_error _ -> ()
-         | Ok _ | Error _ ->
-           fail (Printf.sprintf "a press over %s must raise" ledger));
+         | Error (Msx_lane.Effect_unknown _) -> ()
+         | Error e ->
+           fail (Printf.sprintf "a press over %s must be an unknown effect, got %s" ledger
+                   (Msx_lane.error_to_string e))
+         | Ok _ -> fail (Printf.sprintf "a press over %s must not complete" ledger));
         check string
           (Printf.sprintf "%s, sequence=%b: no key stays held and no frame ran"
              ledger sequence)
@@ -946,7 +948,15 @@ let test_press_that_raises_releases_its_keys () =
           (Printf.sprintf "%s, sequence=%b: the unwritten edge is not in the ledger"
              ledger sequence)
           edges_before (List.length (Msx_lane.ledger ())))
-      [ false; true ]
+      [ false; true ];
+    (* The tool reports the same call as a runtime failure that is not a
+       pre-effect refusal, and the worker is still there to answer. *)
+    let r = dispatch ~base_path "masc_msx_press" [ ("keys", `List [ `String "space" ]) ] in
+    check bool (ledger ^ ": the tool call fails") true (not (is_completed r));
+    check bool (ledger ^ ": a failed ledger write is not a pre-effect refusal") false
+      (took_no_effect r);
+    check bool (ledger ^ ": the machine can still be read") true
+      (is_completed (dispatch ~base_path "masc_msx_screen" []))
   in
   (* A directory refuses the open. *)
   Sys.remove ledger_path;
@@ -1306,6 +1316,138 @@ let test_peek_and_ram_diff () =
   check bool "a peek past the address space is refused" true (rejected r)
 ;;
 
+(* A logical address is 16 bits and is always hex, as the DOS lane reads it: an
+   optional "0x" and hex digits, so "4096" is 0x4096 and "65535" is 0x65535,
+   which is out of range. The value is bounded while it is read, so no spelling
+   can wrap an int. *)
+let test_address_grammar () =
+  let value text =
+    match Msx_lane.Address.parse text with
+    | Ok address -> Some (Msx_lane.Address.to_int address)
+    | Error _ -> None
+  in
+  List.iter
+    (fun (text, expected) -> check (option int) ("reads " ^ text) (Some expected) (value text))
+    [ "e000", 0xe000
+    ; "0xE000", 0xe000
+    ; "4096", 0x4096
+    ; "0x4096", 0x4096
+    ; "255", 0x255
+    ; "  0XfF  ", 0xff
+    ; "ffff", 0xffff
+    ; "0", 0
+    ; "0000e000", 0xe000
+    ; "0b11", 0xb11 (* there is no binary notation *)
+    ];
+  List.iter
+    (fun text -> check (option int) ("refuses " ^ String.escaped text) None (value text))
+    [ ""
+    ; "0x"
+    ; "zz"
+    ; "-1"
+    ; "1_000"
+    ; "0xg1"
+    ; "0x10000"
+    ; "10000"
+    ; "65535" (* 0x65535 is above 0xFFFF *)
+    ; "0x0x10"
+    ; "3fffffffffffffff"
+    ; "4611686018427387903"
+    ; "99999999999999999999999999"
+    ]
+;;
+
+let test_peek_address_bounds () =
+  with_workspace @@ fun base_path ->
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "load completes" true (is_completed r);
+  let before = frame_of (dispatch ~base_path "masc_msx_screen" []) in
+  (* 0x3fffffffffffffff plus the length wrapped negative, passed the range
+     check and indexed the snapshot out of bounds. *)
+  let r =
+    dispatch ~base_path "masc_msx_peek"
+      [ ("address", `String "3fffffffffffffff"); ("length", `Int 16) ]
+  in
+  check bool "an address beyond 16 bits is refused, not raised" true (rejected r);
+  let r =
+    dispatch ~base_path "masc_msx_peek" [ ("address", `String "ffff"); ("length", `Int 2) ]
+  in
+  check bool "a range that ends past the address space is refused" true (rejected r);
+  check int "refusals leave the machine at its frame" before
+    (frame_of (dispatch ~base_path "masc_msx_screen" []));
+  let address_of r =
+    match member "address" (Tool_result.data r) with Some (`Int a) -> a | _ -> -1
+  in
+  check int "bare digits are hex, as in the DOS lane" 0x4096
+    (address_of (dispatch ~base_path "masc_msx_peek" [ ("address", `String "4096"); ("length", `Int 4) ]));
+  check int "a 0x prefix is optional" 0x4096
+    (address_of (dispatch ~base_path "masc_msx_peek" [ ("address", `String "0x4096"); ("length", `Int 4) ]));
+  check bool "bare digits that read above 0xFFFF are refused: 65535" true
+    (rejected (dispatch ~base_path "masc_msx_peek" [ ("address", `String "65535"); ("length", `Int 1) ]))
+;;
+
+(* Files the lane reads or creates can fail at the open. Each failure is a
+   typed refusal that leaves the loaded machine and its ledger as they were;
+   it used to raise out of the worker. *)
+let test_load_file_failures_are_typed () =
+  with_workspace @@ fun base_path ->
+  let ledger_dir = Filename.concat base_path "ledger" in
+  let load ?(ledger_dir = ledger_dir) ~cart_path ~disk_path () =
+    Msx_lane.load ~ledger_dir ~roms_dir:None ~cart_path ~disk_path
+  in
+  (match load ~cart_path:None ~disk_path:None () with
+   | Ok _ -> ()
+   | Error e -> fail (Msx_lane.error_to_string e));
+  let loaded = incarnation () in
+  let ledger_before = Msx_lane.ledger () in
+  let unreadable label = function
+    | Error (Msx_lane.Unreadable _) -> ()
+    | Error e -> fail (label ^ ": wrong refusal " ^ Msx_lane.error_to_string e)
+    | Ok _ -> fail (label ^ ": must not load")
+  in
+  let directory = Filename.concat base_path "a-directory" in
+  Sys.mkdir directory 0o755;
+  unreadable "a directory as the cartridge" (load ~cart_path:(Some directory) ~disk_path:None ());
+  unreadable "a directory as the disk" (load ~cart_path:None ~disk_path:(Some directory) ());
+  let blocked = Filename.concat base_path "ledger-is-a-file" in
+  Out_channel.with_open_bin blocked (fun oc -> output_string oc "not a directory");
+  unreadable "a ledger directory that is a file"
+    (load ~ledger_dir:blocked ~cart_path:None ~disk_path:None ());
+  check string "the loaded machine is still installed" loaded (incarnation ());
+  check bool "its ledger is unchanged" true (ledger_before = Msx_lane.ledger ())
+;;
+
+(* The inventory lists regular files only. An entry that cannot be inspected
+   is not a cartridge, and a directory that will not list is an error the
+   caller can tell from an empty one; neither raises. *)
+let test_inventory_with_hostile_entries () =
+  with_workspace @@ fun base_path ->
+  let carts = Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "carts" in
+  let meta () = dispatch ~base_path "masc_msx_meta" [ ("include_inventory", `Bool true) ] in
+  let names r =
+    match member "inventory" (Tool_result.data r) with
+    | Some inventory ->
+      (match member "carts" inventory with
+       | Some (`List l) -> List.filter_map (function `String s -> Some s | _ -> None) l
+       | _ -> fail "inventory has no carts")
+    | None -> fail "no inventory"
+  in
+  check (list string) "a volume with no carts directory has an empty inventory" []
+    (names (meta ()));
+  Fs_compat.mkdir_p carts;
+  write_cart carts "good.rom" "x";
+  Unix.symlink "/nonexistent-target" (Filename.concat carts "dangling.rom");
+  Sys.mkdir (Filename.concat carts "sub.rom") 0o755;
+  check (list string) "only the regular file is a cartridge" [ "good.rom" ] (names (meta ()));
+  Unix.chmod carts 0o000;
+  Fun.protect ~finally:(fun () -> Unix.chmod carts 0o755) (fun () ->
+    let r = meta () in
+    check bool "an inventory that will not list is a failure, not an empty list" true
+      (not (is_completed r));
+    check bool "the failure is a runtime failure" true
+      (Tool_result.failure_class r = Some Tool_result.Runtime_failure))
+;;
+
 (* RFC-0439 §5.3, through the tool path: with a BIOS and XSpelunker on this
    host, two Space presses take the game from "BRAIN GAMES PRESENTS" to the
    LEVEL 1-1 card, and each press changes what the name table shows. CI has
@@ -1457,6 +1599,10 @@ let () =
             test_incomplete_bios_triple_is_refused
         ; test_case "registration" `Quick test_registration
         ; test_case "peek and ram_diff" `Quick test_peek_and_ram_diff
+        ; test_case "address grammar is bounded and explicit" `Quick test_address_grammar
+        ; test_case "peek address bounds" `Quick test_peek_address_bounds
+        ; test_case "load file failures are typed" `Quick test_load_file_failures_are_typed
+        ; test_case "inventory with hostile entries" `Quick test_inventory_with_hostile_entries
         ; test_case "core identity matches the pin" `Quick test_core_identity_matches_pin
         ; test_case "pin table names the same core commit" `Quick test_pin_table_names_the_same_core
         ; test_case "checkpoint info reads without restoring" `Quick

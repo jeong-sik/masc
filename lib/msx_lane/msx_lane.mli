@@ -76,7 +76,7 @@ val entry_json : entry -> Yojson.Safe.t
     failures before replacement are refusable; [Effect_unknown] means a
     checkpoint/ledger replacement occurred but its durability is unconfirmed.
     It must never be reported as proven pre-effect or retried automatically.
-    An exception may also follow an effect, such as a mid-press ledger append. *)
+    A press whose ledger write fails after it began is also [Effect_unknown]. *)
 type error =
   | Activity_disabled
   | Activity_unobserved
@@ -146,6 +146,9 @@ val load :
     file, never a machine with an empty ROM in it. [None] means no BIOS and
     the bus reads 0xFF. The ledger is
     [ledger_dir/ledger.jsonl], truncated: a new machine starts a new ledger.
+    A media file or the ledger that cannot be read or created (a directory in
+    place of a file, a permission) is [Unreadable]; the previous machine and
+    ledger are untouched.
 
     [disk_path] plugs a raw .dsk floppy image into drive A and boots it
     through the warm-up replay: {!disk_boot_frames} of C-BIOS, then
@@ -195,12 +198,13 @@ val press :
     has no place for is refused before anything is pressed.
 
     A press puts keys down only inside its own call. If recording an edge
-    raises -- the ledger file will not open or will not take the write -- the
-    keys the call put down are released before the exception leaves, and the
-    edge that was not written is not in {!ledger}. Frames the call already ran
-    stay run, and edges it wrote before the failure stay written: the ledger
-    can then hold a key-down with no key-up after it while the machine has
-    that key up, so replaying that ledger no longer reproduces the machine. *)
+    fails -- the ledger file will not open or will not take the write -- the
+    keys the call put down are released and the result is
+    [Error (Effect_unknown _)]; the edge that was not written is not in
+    {!ledger}. Frames the call already ran stay run, and edges it wrote before
+    the failure stay written: the ledger can then hold a key-down with no
+    key-up after it while the machine has that key up, so replaying that
+    ledger no longer reproduces the machine. *)
 
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)
@@ -314,11 +318,30 @@ type ram_diff = {
 val peek_max_bytes : int
 val ram_diff_max_runs : int
 
-val peek : address:int -> length:int -> (string, error) result
-(** Reads [length] (1..{!peek_max_bytes}) bytes at a logical address
-    (0x0000-0xFFFF) as hex pairs, and takes a full 64K snapshot of the
-    machine for the next {!ram_diff}. Read-only: writing is the cheat the
-    lane refuses (RFC-0439). *)
+(** A logical address: 0x0000-0xFFFF and nothing else. *)
+module Address : sig
+  type t
+
+  val max_value : int
+  (** 0xFFFF *)
+
+  val of_int : int -> t option
+  (** [None] outside 0..{!max_value}. *)
+
+  val to_int : t -> int
+
+  val parse : string -> (t, string) result
+  (** Hex digits with an optional ["0x"] prefix ([e000], [0xE000]); digits
+      alone are hex too, so [4096] is 0x4096. Case and surrounding blanks are
+      ignored. A character that is not a hex digit, an empty digit string, or
+      a value above {!max_value} is [Error] naming the input. *)
+end
+
+val peek : address:Address.t -> length:int -> (string, error) result
+(** Reads [length] (1..{!peek_max_bytes}) bytes starting at [address] as hex
+    pairs, and takes a full 64K snapshot of the machine for the next
+    {!ram_diff}. The range must end inside the address space. Read-only:
+    writing is the cheat the lane refuses (RFC-0439). *)
 
 val ram_diff : unit -> (ram_diff, error) result
 (** Changes since the last {!peek}: consecutive differing bytes as runs with

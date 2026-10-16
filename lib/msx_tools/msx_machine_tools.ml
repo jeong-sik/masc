@@ -102,16 +102,27 @@ let msx_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_p
 let carts_dir ~base_path = Filename.concat (msx_dir ~base_path) "carts"
 let bios_dir ~base_path = Filename.concat (msx_dir ~base_path) "bios"
 
+(* The names of the regular files in carts/. A missing directory is an empty
+   inventory (a fresh volume has none); a directory that exists and will not
+   list is an error, so a caller never reads "unreadable" as "nothing there".
+   An entry that cannot be inspected, such as a dangling symlink, is not a
+   cartridge and is skipped. *)
 let carts_available ~base_path =
   let dir = carts_dir ~base_path in
-  if Sys.file_exists dir && Sys.is_directory dir then
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun f ->
-         (not (String.starts_with ~prefix:"." f))
-         && not (Sys.is_directory (Filename.concat dir f)))
-    |> List.sort String.compare
-  else []
+  let is_regular name =
+    match Unix.stat (Filename.concat dir name) with
+    | stats -> stats.Unix.st_kind = Unix.S_REG
+    | exception Unix.Unix_error _ -> false
+  in
+  if not (Sys.file_exists dir) then Ok []
+  else
+    match Sys.readdir dir with
+    | exception Sys_error message -> Error message
+    | entries ->
+      Ok
+        (Array.to_list entries
+         |> List.filter (fun name -> (not (String.starts_with ~prefix:"." name)) && is_regular name)
+         |> List.sort String.compare)
 ;;
 
 (* Where the C-BIOS directory came from, so the load and the report both
@@ -169,14 +180,17 @@ let resolve_cart ~base_path name =
     | None ->
       Error
         (match carts_available ~base_path with
-         | [] ->
+         | Ok [] ->
            Printf.sprintf
              "unknown cartridge %S and the inventory %s is empty: put ROM or .dsk images \
               there or pass a path"
              trimmed dir
-         | names ->
+         | Ok names ->
            Printf.sprintf "unknown cartridge %S; available: %s" trimmed
-             (String.concat ", " names))
+             (String.concat ", " names)
+         | Error message ->
+           Printf.sprintf "unknown cartridge %S and the inventory %s cannot be listed: %s"
+             trimmed dir message)
   end
 ;;
 
@@ -248,15 +262,19 @@ let handle_load ?(after_load = fun () -> ()) ~relay ~tool_name
             ~cart_path:(Some path) ~disk_path:None))
   | None ->
     (* BIOS only, and the inventory so the next call can name a game. *)
-    of_lane ~tool_name ~start_time
-      ~extra:
-        [ ( "carts_available"
-          , `List (List.map (fun n -> `String n) (carts_available ~base_path)) )
-        ; ("bios", `Bool (bios_of_source bios_source))
-        ]
-      (relayed
-         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-            ~cart_path:None ~disk_path:None))
+    (match carts_available ~base_path with
+     | Error message ->
+       refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
+         ("cartridge inventory cannot be listed: " ^ message)
+     | Ok carts ->
+       of_lane ~tool_name ~start_time
+         ~extra:
+           [ ("carts_available", `List (List.map (fun n -> `String n) carts))
+           ; ("bios", `Bool (bios_of_source bios_source))
+           ]
+         (relayed
+            (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+               ~cart_path:None ~disk_path:None)))
 ;;
 
 let handle_eject ~relay ~tool_name ~start_time ~agent_name _args =
@@ -271,26 +289,19 @@ let handle_eject ~relay ~tool_name ~start_time ~agent_name _args =
 (* RAM introspection handlers. Read-only, so no board relay and no agent
    identity: anyone may look, nobody may write (RFC-0439's cheat line).
    Addresses arrive as hex strings ("e000", "0xE000") because that is how
-   memory is talked about; decimal parses too. *)
-let parse_address s =
-  let s = String.lowercase_ascii (String.trim s) in
-  let s =
-    if String.starts_with ~prefix:"0x" s then String.sub s 2 (String.length s - 2) else s
-  in
-  int_of_string_opt ("0x" ^ s)
-;;
-
+   memory is talked about; digits alone are hex too ({!Msx_lane.Address}). *)
 let handle_peek ~tool_name ~start_time args =
-  let address =
-    match parse_address (get_string args "address" "") with
-    | Some a -> a
-    | None -> -1
-  in
-  match Msx_lane.peek ~address ~length:(get_int args "length" 16) with
-  | Ok hex ->
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:(`Assoc [ ("address", `Int address); ("hex", `String hex) ]) ()
-  | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e)
+  match Msx_lane.Address.parse (get_string args "address" "") with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok address ->
+    (match Msx_lane.peek ~address ~length:(get_int args "length" 16) with
+     | Ok hex ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:
+           (`Assoc
+             [ ("address", `Int (Msx_lane.Address.to_int address)); ("hex", `String hex) ])
+         ()
+     | Error e -> reject ~tool_name ~start_time (Msx_lane.error_to_string e))
 ;;
 
 let handle_ram_diff ~tool_name ~start_time () =
@@ -416,19 +427,26 @@ let handle_checkpoint ~restore ~tool_name ~start_time ~base_path args =
    it. Read-only: reads one module constant, moves nothing. *)
 let handle_meta ?inventory_base_path ~tool_name ~start_time () =
   let inventory = match inventory_base_path with
-    | None -> []
+    | None -> Ok []
     | Some base_path ->
-        let loaded, cartridge, disk = match Msx_lane.frame () with
-          | None -> false, `Null, `Null
-          | Some frame -> true,
-              (match frame.Msx_lane.cartridge with None -> `Null | Some name -> `String name),
-              (match frame.disk with None -> `Null | Some name -> `String name) in
-        ["inventory", `Assoc [
-          "carts", `List (List.map (fun name -> `String name) (carts_available ~base_path));
-          "loaded", `Bool loaded; "cartridge", cartridge; "disk", disk]] in
-  Tool_result.make_ok ~tool_name ~start_time
-    ~data:(`Assoc (["core", Msx_lane.core_to_yojson Msx_lane.core] @ inventory))
-    ()
+        Result.map (fun carts ->
+          let loaded, cartridge, disk = match Msx_lane.frame () with
+            | None -> false, `Null, `Null
+            | Some frame -> true,
+                (match frame.Msx_lane.cartridge with None -> `Null | Some name -> `String name),
+                (match frame.disk with None -> `Null | Some name -> `String name) in
+          ["inventory", `Assoc [
+            "carts", `List (List.map (fun name -> `String name) carts);
+            "loaded", `Bool loaded; "cartridge", cartridge; "disk", disk]])
+          (carts_available ~base_path) in
+  match inventory with
+  | Error message ->
+      refuse ~class_:Tool_result.Runtime_failure ~tool_name ~start_time
+        ("cartridge inventory cannot be listed: " ^ message)
+  | Ok inventory ->
+      Tool_result.make_ok ~tool_name ~start_time
+        ~data:(`Assoc (["core", Msx_lane.core_to_yojson Msx_lane.core] @ inventory))
+        ()
 ;;
 
 (* masc_msx_checkpoint_info — what a saved slot holds, without restoring it.

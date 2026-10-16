@@ -6,8 +6,11 @@ DOS inventory, not an OCaml variant or a special path in MASC.
 
 ## Inventory and identity
 
-DOS program assets live under `<base-path>/.masc/dos/programs/`. The directory
-is never filled by installation and MASC does not download commercial games.
+DOS program assets live in the DOS add-on's state volume, at
+`/state/.masc/dos/programs/` inside the worker container (the worker runs with
+`--base-path /state`). The directory is never filled by installation and MASC
+does not download commercial games. To put a game there, follow "Provision or
+transfer state" in [machine-addon-state.md](../guides/machine-addon-state.md).
 Use the read-only `masc_dos_inventory` Tool before loading a program. It lists
 standalone files and directories, and for a directory lists each direct file
 with its kind, byte length and SHA-256. It reads files only to calculate those
@@ -57,7 +60,17 @@ time and is handed off with `masc_dos_pass`.
 `masc_dos_restore` lists or restores one. A checkpoint is emulator continuity,
 separate from a game's own save menu. Keep a named checkpoint before a battle,
 disk-like asset transition, or restart test. The Tool result reports whether
-the autosave and game-written files reached durable storage.
+the autosave and game-written files reached durable storage. A save under a
+name that already holds a checkpoint replaces it and reports what it held in
+`replaced`. The names `autosave` and `autosave-prev` belong to the lane and a
+save to either is refused.
+
+After a worker restart nothing is loaded. `masc_dos_screen` and
+`masc_dos_load` with no program say whether an autosave exists. Resume it with
+`masc_dos_restore` and `slot` set to `autosave`. `masc_dos_load` with a program
+name is refused while an autosave file exists and names it in the refusal.
+Passing `replace_autosave` as `true` starts a new machine: the autosave moves
+to `autosave-prev` and replaces whatever `autosave-prev` held.
 
 ## What counts as complete
 

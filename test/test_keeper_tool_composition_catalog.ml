@@ -864,7 +864,7 @@ let with_draft_base f =
 ;;
 
 let draft_request = `Assoc
-  [ "nodes", `List [ `Assoc [ "id", `String "lane"; "tool", `String "keeper_lane_status" ] ]
+  [ "nodes", `List [ `Assoc [ "id", `String "lane"; "tool", `String "keeper_lane_status";"args",`Assoc [] ] ]
   ; "exports", `List [ `Assoc [ "name", `String "profile"; "node", `String "lane"; "pointer", `String "/profile" ] ] ]
 ;;
 
@@ -1263,8 +1263,9 @@ let test_frozen_plan_json_preserves_values_and_rejects_mixed_forms () =
      inputs for a runtime call. Input preflight remains a separate boundary. *)
   let request = `Assoc
     [ "nodes", `List [ `Assoc [ "id", `String "lane"; "tool", `String "keeper_lane_status"
-        ; "input", `Assoc [ "kind", `String "literal"; "value", `Assoc
-            [ "nullable", `Null; "mixed", `List [ `String "검사\n\"quoted\""; `Int 2; `Bool true ] ] ] ] ]
+        ; "args", `Assoc
+            [ "kind",`String "output";"node",`String "literal argument, not a dependency"
+            ; "nullable", `Null; "mixed", `List [ `String "검사\n\"quoted\""; `Int 2; `Bool true ] ] ] ]
     ; "exports", `List [ `Assoc [ "name", `String "profile"; "node", `String "lane"; "pointer", `String "/profile" ] ]
     ; "branch_failure_policy", `String "continue_independent" ] in
   let plan = Masc.Keeper_tool_plan_request.plan_of_json ~descriptors request |> Result.get_ok in

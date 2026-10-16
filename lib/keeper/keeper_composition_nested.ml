@@ -82,9 +82,13 @@ let input_schema =
     let nodes = match List.assoc "nodes" properties with
       | `Assoc fields -> fields | _ -> invalid_arg "plan schema nodes" in
     let ordinary = List.assoc "items" nodes in
-    let nodes = `Assoc (("items", `Assoc [ "oneOf", `List
-        [ordinary;nested "args" (`Assoc ["type",`String "object"]);
-         nested "input" (`Assoc ["$ref",`String "#/$defs/template"])] ]) :: List.remove_assoc "items" nodes) in
+    let ordinary = match ordinary with
+      | `Assoc ["oneOf",`List alternatives] -> alternatives
+      | _ -> invalid_arg "ordinary plan node alternatives" in
+    let alternatives = ordinary @ [nested "args" (`Assoc ["type",`String "object"]);
+        nested "input" (`Assoc ["$ref",`String "#/$defs/template"])] in
+    let nodes = `Assoc (("items", `Assoc ["oneOf",`List alternatives])
+        :: List.remove_assoc "items" nodes) in
     `Assoc (("properties", `Assoc (("nodes", nodes) :: List.remove_assoc "nodes" properties))
       :: List.remove_assoc "properties" fields)
   | _ -> invalid_arg "plan schema object"

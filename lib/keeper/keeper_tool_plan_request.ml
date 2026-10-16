@@ -112,8 +112,7 @@ let input_schema =
             ] )
       ]
   in
-  let node_schema =
-    closed_object
+  let node_properties =
       [ "id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
       ; "tool", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
       ; ( "after"
@@ -121,9 +120,13 @@ let input_schema =
             [ "type", `String "array"
             ; "items", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
             ] )
-      ; "input", template_ref
       ]
-      [ "id"; "tool" ]
+  in
+  let node_schema =
+    `Assoc ["oneOf", `List
+      [ closed_object (node_properties @ ["input",template_ref]) ["id";"tool"]
+      ; closed_object (node_properties @ ["args",`Assoc ["type",`String "object"]])
+          ["id";"tool";"args"] ]]
   in
   `Assoc
     [ "$id", `String "urn:masc:schema:keeper-tool-plan-request:v1"
@@ -592,7 +595,7 @@ let node_of_json ~index json =
         (fun acc (field, _) ->
            let* () = acc in
            match field with
-           | "id" | "tool" | "after" | "input" -> Ok ()
+           | "id" | "tool" | "after" | "input" | "args" -> Ok ()
            | other ->
              Error (Node_invalid_field { index; field = other; found = "unexpected" }))
         (Ok ())
@@ -637,9 +640,14 @@ let node_of_json ~index json =
         Error (Node_invalid_field { index; field = "after"; found = kind_name other })
     in
     let* input =
-      match List.assoc_opt "input" fields with
-      | None -> Ok (Plan.Json_template.literal (`Assoc []))
-      | Some template_json ->
+      match List.assoc_opt "input" fields, List.assoc_opt "args" fields with
+      | None, None -> Ok (Plan.Json_template.literal (`Assoc []))
+      | None, Some (`Assoc _ as args) -> Ok (Plan.Json_template.literal args)
+      | None, Some other ->
+        Error (Node_invalid_field {index;field="args";found=kind_name other})
+      | Some _, Some _ ->
+        Error (Node_invalid_field {index;field="input";found="conflicts with args; choose exactly one"})
+      | Some template_json, None ->
         (match template_of_json template_json with
          | Ok template -> Ok template
          | Error error -> Error (Node_template_error { index; error }))

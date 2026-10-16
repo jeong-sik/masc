@@ -3,7 +3,7 @@
 
     The JSON grammar mirrors the composition fence grammar in [SKILL.md]: a
     plan is a list of nodes, each naming a canonical tool, optional [after]
-    edges, and an input template whose values are literals, typed references
+    edges, and either fixed [args] as an object or an [input] template whose values are literals, typed references
     into an earlier node's declared composable output, objects, or arrays.
     Everything semantic (unknown tools, unbound references, cycles,
     opaque-output references, pointer/schema mismatches) is rejected by
@@ -114,6 +114,9 @@ val shape_of_json : Yojson.Safe.t -> (request_shape, error) result
     it must still validate the final expanded graph through [Plan.create]. *)
 
 val node_of_json : index:int -> Yojson.Safe.t -> (Keeper_tool_plan.node, error) result
+(** Fixed [args] objects normalize to the existing literal input AST. An
+    ordinary node may omit both forms for empty arguments, but supplying both
+    is rejected. Encoding always emits the canonical tagged [input] form. *)
 
 val plan_of_json
   :  descriptors:Keeper_tool_descriptor.t list

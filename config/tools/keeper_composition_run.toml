@@ -3,9 +3,9 @@ description = """
 Execute a composition from recipe or an exact prepared sha256. Use recipe with \
 the same execution/nodes/exports grammar as keeper_composition_prepare to validate, \
 freeze and run in one call. Use prepare first when you need to inspect the plan. \
-Ordinary Tool nodes use tool and tagged input, for example \
-{"id":"lane","tool":"keeper_lane_status","input":{"kind":"literal","value":{}}}; \
-args belongs only to Skill children. \
+Ordinary Tool nodes use tool with fixed args as an object, for example \
+{"id":"lane","tool":"keeper_lane_status","args":{}}, or tagged input \
+for output-dependent arguments. Supply only one of args or input. \
 Omit optional after or pass an array such as []; never null. \
 Skill nodes use exact skill_reference, not the Skill's callable tool name in tool. \
 Their args or resolved tagged input must match the child's parameter object schema. \

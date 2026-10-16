@@ -1148,10 +1148,7 @@ let test_quarantine_is_keeper_local () =
     (healthy_summary |> member "reaction_count" |> to_int)
 ;;
 
-let with_consumed_delivery_source f =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "strict-delivery-keeper" in
-  let source = board_stimulus ~post_id:"consumed-exact-source" () in
+let consume_delivery_source ~base_path ~keeper_name source =
   Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name source;
   ignore (Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
     ~base_path ~keeper_name source |> require_ok "enqueue exact source");
@@ -1173,7 +1170,14 @@ let with_consumed_delivery_source f =
     ~expected_transition_id:receipt.transition_id |> require_ok "project exact ACK evidence";
   let pending = Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
     |> require_ok "read consumed queue" in
-  check int "exact source is durably consumed" 0 (List.length pending);
+  check int "exact source is durably consumed" 0 (List.length pending)
+;;
+
+let with_consumed_delivery_source f =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "strict-delivery-keeper" in
+  let source = board_stimulus ~post_id:"consumed-exact-source" () in
+  consume_delivery_source ~base_path ~keeper_name source;
   f ~base_path ~keeper_name ~source
 ;;
 
@@ -1402,6 +1406,98 @@ let test_delivery_window_excludes_corruption_before_the_answer () =
   Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
     ~post_id:unknown.post_id ~stimulus_kind:Keeper_reaction_ledger.Board_signal
   |> require_strict_delivery "bounded snapshot proves absence across its window" false
+;;
+
+let ledger_day_files ~base_path ~keeper_name =
+  match Dated_jsonl.range_day_file_paths_result
+          (reaction_ledger_store ~base_path ~keeper_name)
+          ~since:"1970-01-01" ~until:"9999-12-31" with
+  | Ok paths -> paths
+  | Error error -> fail (Dated_jsonl.read_error_to_string error)
+;;
+
+let ledger_bytes ~base_path ~keeper_name =
+  List.fold_left
+    (fun total path -> total + (Unix.stat path).Unix.st_size)
+    0 (ledger_day_files ~base_path ~keeper_name)
+;;
+
+let append_to_file path text =
+  Out_channel.with_open_gen [ Open_append; Open_wronly ] 0o644 path (fun channel ->
+    output_string channel text)
+;;
+
+let delivery_scanned_bytes () =
+  Otel_metric_store_core.metric_value_or_zero
+    Otel_builtin_metric_names.metric_telemetry_scanned_bytes
+    ~labels:[ ("store", "reaction_ledger_delivery") ]
+    ()
+;;
+
+(* The ask answer recovery pass asks about every answered ask in turn
+   (#43299). Each answer used to read the keeper's whole ledger again, so a
+   pass cost the ledger's size times the number of asks. The ledger is read
+   once, whatever the number of sources asked about. *)
+let test_delivery_evidence_is_read_once_for_many_sources () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let since = Unix.gettimeofday () -. 86400. in
+  let seen source = delivery_seen_strict ~not_before:since ~base_path ~keeper_name source in
+  let before = delivery_scanned_bytes () in
+  seen source |> require_strict_delivery "consumed source is proven" true;
+  let first_read = delivery_scanned_bytes () -. before in
+  check (float 0.) "the first question reads the ledger's day files"
+    (float_of_int (ledger_bytes ~base_path ~keeper_name)) first_read;
+  for n = 1 to 20 do
+    seen (board_stimulus ~post_id:(Printf.sprintf "unknown-source-%d" n) ())
+    |> require_strict_delivery "an unknown source is absent" false
+  done;
+  seen source |> require_strict_delivery "consumed source is still proven" true;
+  check (float 0.) "twenty-one more questions read no bytes"
+    first_read (delivery_scanned_bytes () -. before)
+;;
+
+(* A delivery recorded after the evidence was read is seen on the next
+   question, and only the bytes written since are read. *)
+let test_delivery_evidence_reads_only_the_appended_bytes () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let since = Unix.gettimeofday () -. 86400. in
+  let seen source = delivery_seen_strict ~not_before:since ~base_path ~keeper_name source in
+  let second = board_stimulus ~post_id:"consumed-after-the-first-read" () in
+  seen source |> require_strict_delivery "first source is proven" true;
+  seen second |> require_strict_delivery "second source is not delivered yet" false;
+  let size_before = ledger_bytes ~base_path ~keeper_name in
+  consume_delivery_source ~base_path ~keeper_name second;
+  let appended = ledger_bytes ~base_path ~keeper_name - size_before in
+  check bool "consuming the second source wrote to the ledger" true (appended > 0);
+  let before = delivery_scanned_bytes () in
+  seen second |> require_strict_delivery "second source is proven once recorded" true;
+  check (float 0.) "only the appended bytes were read"
+    (float_of_int appended) (delivery_scanned_bytes () -. before);
+  seen source |> require_strict_delivery "first source is still proven" true
+;;
+
+(* The evidence kept for a file never outlives its rows or hides damage that
+   arrives later. *)
+let test_delivery_evidence_follows_the_ledger_after_it_was_read () =
+  with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
+  let since = Unix.gettimeofday () -. 86400. in
+  let seen source = delivery_seen_strict ~not_before:since ~base_path ~keeper_name source in
+  let unknown = board_stimulus ~post_id:"never-delivered-source" () in
+  seen source |> require_strict_delivery "proven before the change" true;
+  seen unknown |> require_strict_delivery "absent before the change" false;
+  let paths = ledger_day_files ~base_path ~keeper_name in
+  let last_path = List.nth paths (List.length paths - 1) in
+  append_to_file last_path "not-json\n";
+  (match seen unknown with
+   | Error (Keeper_reaction_ledger.Evidence_incomplete { malformed_row_count; _ }) ->
+     check int "a damaged row appended later forbids absence" 1 malformed_row_count
+   | Error (Keeper_reaction_ledger.Delivery_evidence_unavailable error) ->
+     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+   | Ok _ -> fail "damage appended after the read was ignored");
+  seen source |> require_strict_delivery "a proof survives unrelated damage" true;
+  List.iter (fun path -> write_file path "") paths;
+  seen source |> require_strict_delivery "the proof does not outlive the emptied ledger" false;
+  seen unknown |> require_strict_delivery "an emptied ledger holds no damage" false
 ;;
 
 let test_syntax_error_does_not_claim_an_occurrence_identity () =
@@ -1779,6 +1875,12 @@ let () =
         ; test_case
             "delivery window excludes corruption before the answer"
             `Quick test_delivery_window_excludes_corruption_before_the_answer
+        ; test_case "delivery evidence is read once for many sources"
+            `Quick test_delivery_evidence_is_read_once_for_many_sources
+        ; test_case "delivery evidence reads only the appended bytes"
+            `Quick test_delivery_evidence_reads_only_the_appended_bytes
+        ; test_case "delivery evidence follows the ledger after it was read"
+            `Quick test_delivery_evidence_follows_the_ledger_after_it_was_read
         ; test_case
             "syntax error cannot claim an occurrence identity"
             `Quick

@@ -1017,63 +1017,217 @@ let strict_delivery_evidence_error_to_string = function
       malformed_row_count semantic_invalid_row_count (row_quarantine_reason_to_string first_reason)
 ;;
 
+(* What the rows of some day files say about delivery. [proven] holds the
+   [(post_id, stimulus_kind)] of every row that proves a delivery; the other
+   fields count the rows that could not be read as evidence, with the reason
+   of the first one. The value is a pure function of the rows and
+   [keeper_name], which lets a day file's part be kept while the file only
+   grows. *)
+module Delivery_proof_set = Set.Make (struct
+  type t = string * string
+
+  let compare = Stdlib.compare
+end)
+
+type delivery_evidence =
+  { proven : Delivery_proof_set.t
+  ; malformed_rows : int
+  ; semantic_invalid_rows : int
+  ; first_invalid : row_quarantine_reason option
+  }
+
+let no_delivery_evidence =
+  { proven = Delivery_proof_set.empty
+  ; malformed_rows = 0
+  ; semantic_invalid_rows = 0
+  ; first_invalid = None
+  }
+;;
+
+let note_first_invalid evidence reason =
+  match evidence.first_invalid with
+  | None -> Some reason
+  | Some _ as first -> first
+;;
+
+let add_delivery_evidence ~keeper_name evidence = function
+  | Dated_jsonl.Malformed_json _ ->
+    { evidence with
+      malformed_rows = evidence.malformed_rows + 1
+    ; first_invalid = note_first_invalid evidence Malformed_json_row
+    }
+  | Dated_jsonl.Parsed row ->
+    (match decode_current_row ~keeper_name row with
+     | Error reason ->
+       { evidence with
+         semantic_invalid_rows = evidence.semantic_invalid_rows + 1
+       ; first_invalid = note_first_invalid evidence reason
+       }
+     | Ok (Current_stimulus _) -> evidence
+     | Ok (Current_reaction { metadata; reaction_kind; transition_receipt }) ->
+       if not (delivery_reaction_matches reaction_kind transition_receipt)
+       then evidence
+       else
+         (match assoc_field "reaction" metadata.raw with
+          | None -> evidence
+          | Some reaction ->
+            (match string_field "post_id" reaction, string_field "stimulus_kind" reaction with
+             | Some post_id, Some stimulus_kind ->
+               { evidence with
+                 proven = Delivery_proof_set.add (post_id, stimulus_kind) evidence.proven
+               }
+             | Some _, None | None, Some _ | None, None -> evidence)))
+;;
+
+(* [later] holds the rows of files after the ones [earlier] holds, so the
+   first invalid row of the pair is the earlier one's when it has any. *)
+let append_delivery_evidence earlier later =
+  { proven = Delivery_proof_set.union earlier.proven later.proven
+  ; malformed_rows = earlier.malformed_rows + later.malformed_rows
+  ; semantic_invalid_rows = earlier.semantic_invalid_rows + later.semantic_invalid_rows
+  ; first_invalid =
+      (match earlier.first_invalid with
+       | Some _ as first -> first
+       | None -> later.first_invalid)
+  }
+;;
+
+(* One pass over [store] from the day of [not_before] on. [0.] means no
+   floor: the whole ledger, as before. *)
+let read_delivery_evidence_uncached ~keeper_name store ~not_before =
+  let evidence = ref no_delivery_evidence in
+  let visit entry = evidence := add_delivery_evidence ~keeper_name !evidence entry in
+  let read_result =
+    if not_before <= 0.
+    then Dated_jsonl.iter_all_entries_result store visit
+    else
+      Dated_jsonl.iter_range_entries_result store
+        ~since:(Jsonl_writer.day_key ~ts:not_before) ~until:"9999-12-31"
+        visit
+  in
+  Result.map (fun () -> !evidence) read_result
+;;
+
+(* A day file is append-only and a day behind the clock gets no more rows, so
+   the evidence a file gave stays right and only the rows it gained since are
+   read. Without this every ask the wake pass inspects read the whole ledger
+   again, and the pass held the server for over a minute (#43299).
+
+   Each entry keeps the cursor [Dated_jsonl] issued for that file with the
+   evidence read up to it. Rotation, shrinkage and same-size edits invalidate
+   the cursor and the file is read again from its start. A file that cannot be
+   read incrementally (a torn trailing row, say) is read by
+   [read_delivery_evidence_uncached] instead, which judges it as before.
+   Keyed by file path, so two base paths never share an entry. *)
+type delivery_evidence_file =
+  { cursor : Dated_jsonl.append_cursor
+  ; read_through_bytes : int
+  ; file_evidence : delivery_evidence
+  }
+
+let delivery_evidence_files : (string, delivery_evidence_file) Hashtbl.t = Hashtbl.create 64
+let delivery_evidence_files_mu = Stdlib.Mutex.create ()
+
+let delivery_evidence_scan_store_label = "reaction_ledger_delivery"
+
+let file_size path =
+  match Unix.stat path with
+  | stats -> stats.Unix.st_size
+  | exception Unix.Unix_error _ -> 0
+;;
+
+(* Called with [delivery_evidence_files_mu] held. *)
+let read_delivery_evidence_file ~keeper_name path =
+  let read ~cursor ~init =
+    Dated_jsonl.fold_file_appended_entries_result path ~cursor ~init
+      ~f:(add_delivery_evidence ~keeper_name)
+  in
+  let keep ~scanned_from (file_evidence, cursor) =
+    let read_through_bytes = file_size path in
+    Otel_metric_store_core.inc_counter
+      Otel_builtin_metric_names.metric_telemetry_scanned_bytes
+      ~labels:[ ("store", delivery_evidence_scan_store_label) ]
+      ~delta:(Float.of_int (max 0 (read_through_bytes - scanned_from)))
+      ();
+    Hashtbl.replace delivery_evidence_files path { cursor; read_through_bytes; file_evidence };
+    Ok file_evidence
+  in
+  let from_start () =
+    match read ~cursor:None ~init:no_delivery_evidence with
+    | Error _ as error -> error
+    | Ok (Dated_jsonl.Appended (evidence, cursor)) -> keep ~scanned_from:0 (evidence, cursor)
+    | Ok Dated_jsonl.Cursor_invalidated ->
+      Error
+        (Dated_jsonl.Io_error
+           { operation = Dated_jsonl.Read_file
+           ; path
+           ; detail = "a delivery evidence read without a cursor was invalidated"
+           })
+  in
+  match Hashtbl.find_opt delivery_evidence_files path with
+  | None -> from_start ()
+  | Some previous ->
+    (match read ~cursor:(Some previous.cursor) ~init:previous.file_evidence with
+     | Error _ as error -> error
+     | Ok (Dated_jsonl.Appended (evidence, cursor)) ->
+       keep ~scanned_from:previous.read_through_bytes (evidence, cursor)
+     | Ok Dated_jsonl.Cursor_invalidated ->
+       Hashtbl.remove delivery_evidence_files path;
+       from_start ())
+;;
+
+let read_delivery_evidence_cached ~keeper_name store ~not_before =
+  let ( let* ) = Result.bind in
+  let* paths =
+    Dated_jsonl.range_day_file_paths_result store
+      ~since:(Jsonl_writer.day_key ~ts:not_before) ~until:"9999-12-31"
+  in
+  Stdlib.Mutex.protect delivery_evidence_files_mu (fun () ->
+    List.fold_left
+      (fun acc path ->
+         let* acc = acc in
+         let* file_evidence = read_delivery_evidence_file ~keeper_name path in
+         Ok (append_delivery_evidence acc file_evidence))
+      (Ok no_delivery_evidence)
+      paths)
+;;
+
+let read_delivery_evidence ~keeper_name store ~not_before =
+  if not_before <= 0.
+  then read_delivery_evidence_uncached ~keeper_name store ~not_before
+  else
+    match read_delivery_evidence_cached ~keeper_name store ~not_before with
+    | Ok _ as evidence -> evidence
+    | Error _ -> read_delivery_evidence_uncached ~keeper_name store ~not_before
+;;
+
 let event_queue_delivery_seen_for_source_strict_result
       ~not_before
       ~base_path ~keeper_name ~post_id ~stimulus_kind =
   if String.equal post_id ""
   then Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
   else
-    let reaction_seen = ref false in
-    let malformed_row_count = ref 0 in
-    let semantic_invalid_row_count = ref 0 in
-    let first_reason = ref None in
-    let note_reason reason =
-      match !first_reason with
-      | None -> first_reason := Some reason
-      | Some _ -> ()
-    in
     let expected_stimulus_kind = stimulus_kind_to_string stimulus_kind in
     let store = store_for_base_path ~base_path ~keeper_name in
-    let visit_entry = function
-      | Dated_jsonl.Malformed_json _ ->
-        incr malformed_row_count;
-        note_reason Malformed_json_row
-      | Dated_jsonl.Parsed row ->
-        (match decode_current_row ~keeper_name row with
-         | Error reason ->
-           incr semantic_invalid_row_count;
-           note_reason reason
-         | Ok row ->
-           if current_row_matches_source_reaction
-                ~reaction_matches:delivery_reaction_matches ~post_id ~expected_stimulus_kind row
-           then reaction_seen := true)
-    in
     (* Evidence for this source can only exist from the day its request was
        submitted onward: a row for it cannot be older than the request that
-       produced it. [not_before] narrows the scan to day partitions at or after
+       produced it. [not_before] narrows the read to day partitions at or after
        that submission time's UTC day, so a torn write in an unrelated older
        partition no longer turns this source's absence into
-       [Evidence_incomplete], and the scan reads far fewer rows while the queue
-       owner lock is held. [0.] means no floor: the whole ledger, as before. *)
-    let read_result =
-      if not_before <= 0.
-      then Dated_jsonl.iter_all_entries_result store visit_entry
-      else
-        Dated_jsonl.iter_range_entries_result store
-          ~since:(Jsonl_writer.day_key ~ts:not_before) ~until:"9999-12-31"
-          visit_entry
-    in
-    match read_result with
+       [Evidence_incomplete], and the read covers far fewer rows while the queue
+       owner lock is held. *)
+    match read_delivery_evidence ~keeper_name store ~not_before with
     | Error error -> Error (Delivery_evidence_unavailable (Evidence_read_error error))
-    | Ok () when !reaction_seen -> Ok true
-    | Ok () ->
-      match !first_reason with
-      | None -> Ok false
-      | Some first_reason ->
-        Error (Evidence_incomplete
-          { malformed_row_count = !malformed_row_count
-          ; semantic_invalid_row_count = !semantic_invalid_row_count
-          ; first_reason })
+    | Ok evidence when Delivery_proof_set.mem (post_id, expected_stimulus_kind) evidence.proven ->
+      Ok true
+    | Ok { first_invalid = None; _ } -> Ok false
+    | Ok { first_invalid = Some first_reason; malformed_rows; semantic_invalid_rows; _ } ->
+      Error
+        (Evidence_incomplete
+           { malformed_row_count = malformed_rows
+           ; semantic_invalid_row_count = semantic_invalid_rows
+           ; first_reason
+           })
 ;;
 
 module Delivery_source_set = Set.Make (struct

@@ -111,24 +111,24 @@ let resume ?on_recovery_held ~context continuation =
   let addons = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:source.keeper_name in
   let descriptors = Keeper_tool_descriptor.all_descriptors ()
     @ List.map Keeper_lane_addon_descriptor.create addons.exports in
-  let catalog,diagnostics = Keeper_skill_catalog.of_snapshot ~descriptors snapshot in
-  List.iter (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
-    Log.Keeper.warn ~keeper_name:source.keeper_name "continuation Skill projection unavailable: %s"
-      (Keeper_skill_catalog.error_to_string diagnostic.error)) diagnostics;
   let original_activation = match source.producer with
     | Journal.Prepared -> nested_activation
     | Journal.Named {activation;tool_name=_;skill_reference=_;origin=_} -> activation in
   let* task_selection = match original_activation with
     | None -> Ok Keeper_task_skill_turn.empty
-    | Some bound -> Keeper_task_skill_turn.resolve ~snapshot
+    | Some bound -> Keeper_task_skill_turn.resolve ~descriptors ~snapshot
         (Keeper_skill_activation_recorder.bound_task_references bound)
         |> Result.map_error (fun error -> hold_original (Original_task_skills_unavailable error)) in
   let* task_selection = Keeper_task_skill_turn.with_descriptors ~descriptors ~snapshot task_selection
     |> Result.map_error (fun error -> hold_original (Original_task_skills_unavailable error)) in
+  let preparation = Keeper_task_skill_turn.prepare_surface ~descriptors ~snapshot task_selection in
+  List.iter (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+    Log.Keeper.warn ~keeper_name:source.keeper_name "continuation Skill projection unavailable: %s"
+      (Keeper_skill_catalog.error_to_string diagnostic.error)) preparation.diagnostics;
   let capability_surface = Keeper_capability_surface.create_with_descriptors
       ~tool_descriptors:descriptors ~tool_deny:defaults.tool_deny ~sandbox_profile:meta.sandbox_profile
-      ~skill_names:defaults.skill_names ~global_skill_catalog:catalog
-      ~skill_inventory:(Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
+      ~skill_names:defaults.skill_names ~global_skill_catalog:preparation.catalog
+      ~skill_inventory:preparation.inventory
       ~task_skills:(Keeper_task_skill_turn.skills task_selection) in
   let cell = Keeper_tool_call_log_context.create_cell () in
   Keeper_tool_call_log_context.set_turn_context ~cell ~agent_name:source.keeper_name

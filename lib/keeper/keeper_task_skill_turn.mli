@@ -53,14 +53,23 @@ type unprojectable = private
     shown unavailable with [reason], and the Task's other Skills and the
     Keeper's other Tasks are unaffected. *)
 
+type preparation = private
+  { projection : Keeper_skill_catalog.prepared
+  ; catalog : Keeper_skill_catalog.t
+  ; diagnostics : Keeper_skill_catalog.projection_diagnostic list
+  ; inventory : Keeper_skill_inventory.t
+  }
+(** One immutable preparation shared by Task prompt, inventory and executable
+    setup for its original frozen source and Tool descriptor objects. *)
+
 type t = private
   { selected : selected list
   ; unprojectable : unprojectable list
   ; descriptor_authority : Keeper_tool_descriptor.t list option
-  ; projection_snapshot : Skill_catalog_snapshot.t option
+  ; preparation : preparation option
   }
-(** [projection_snapshot] identifies the immutable input used by this
-    projection. [None] means there is no single reusable input, including
+(** [preparation] retains the immutable input and derived catalog/inventory.
+    [None] means there is no single reusable input, including
     selections merged from different snapshots or mixed bound/unbound Tool
     projections. It grants no execution right. *)
 
@@ -70,11 +79,13 @@ type partition = private
   }
 
 val resolve :
+  ?descriptors:Keeper_tool_descriptor.t list ->
   snapshot:Skill_catalog_snapshot.t -> Skill_reference.t list -> (t, error) result
 (** Resolve every Task reference against the already captured immutable
     snapshot. Exact lookup includes shadowed entries. *)
 
 val resolve_for_task :
+  ?descriptors:Keeper_tool_descriptor.t list ->
   snapshot:Skill_catalog_snapshot.t ->
   task_id:string ->
   Skill_reference.t list ->
@@ -100,6 +111,12 @@ val with_descriptors : descriptors:Keeper_tool_descriptor.t list ->
     reproject; no revision string, current Task or wall clock is a cache key. *)
 val descriptors : t -> Keeper_tool_descriptor.t list option
 (** [None] means no runtime Tool authority has been captured yet. *)
+val prepare_surface :
+  snapshot:Skill_catalog_snapshot.t ->
+  descriptors:Keeper_tool_descriptor.t list -> t -> preparation
+(** Reuse the caller-owned preparation for matching frozen inputs. Mismatched
+    or unknown input derives a fresh observation; this does not rebind Task
+    references or authorize execution. Use [with_descriptors] for binding. *)
 val resolve_live_observations :
   config:Workspace.config -> keeper_name:string ->
   snapshot:Skill_catalog_snapshot.t ->

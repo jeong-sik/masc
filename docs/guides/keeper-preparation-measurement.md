@@ -20,6 +20,26 @@ records the source call-count scope and changed-input behavior. Measure setup
 time separately from first-request bytes, model roundtrips and first useful Tool
 latency; a source lookup reduction does not establish those timing results.
 
+The selection also retains an immutable catalog preparation and its derived
+catalog, diagnostics and inventory. Prompt surfaces, executable setup, effective
+Tool projection and continuation setup consume that product under matching frozen
+snapshot and Tool objects. Another Keeper replacing the existing one-slot global
+projection cache cannot evict this turn-owned value. Inventory derives rows by a
+direct fold over prepared entries, including shadowed entries and independent
+snapshot rejections, rather than searching the whole projection/effective lists
+again for every item.
+
+Compared with `6633d8223ca8ffe5eff597f3592f518c0cac322a`, `K` consumers of one bound
+selection assemble the catalog/inventory once instead of `K` times. This is a
+source-path expectation, not an executed count or latency result. Cold catalog
+projection still has its existing effective-entry lookup; the entire preparation
+path is not claimed to be linear. Changed source or Tool objects and mixed
+preparations derive a coherent new product, preserving exact Task provenance and
+the existing unreadable-source failure semantics. Feature scenarios for
+interleaving, source/Tool changes and shadowed/invalid entries are authored but
+unexecuted in this unit. Measure cold and interleaved preparations separately from
+same-binding reuse when collecting native/model Before/After evidence.
+
 ## Recorded queue admission
 
 `Keeper_event_queue_state.pending_selection.first_admitted_at` records the epoch
